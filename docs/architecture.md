@@ -1,405 +1,250 @@
-# HandBox 技术架构文档
+HandBox 架构设计
+------
 
-## 1. 架构概览
+## 1. 架构总览
 
-HandBox 采用基于 Tauri 的桌面应用架构，结合 Svelte 前端框架和 Rust 后端，提供高性能的原生化AI工具体验。
+基于 Tauri 2 + SvelteKit 5 + TypeScript 的本地优先桌面应用。整体采用前后端同仓的双运行时模型：
+- 前端运行在系统 WebView 中（SvelteKit，SPA 模式，`ssr = false`），负责 UI、交互与轻量状态管理。
+- 后端运行在 Tauri 原生进程中（Rust），负责安全能力封装、模型与系统资源访问、数据持久化、性能关键路径与隐私保护。
+- 前后端通过 Tauri IPC 调用进行通信（`@tauri-apps/api` ↔ Rust `#[tauri::command]`）。
 
-### 1.1 整体架构图
+目标对齐 PRD：
+- 多模型工作台（模型与供应商管理、探活检测、模型列表获取与过滤）。
+- 会话与配置持久化（会话、系统提示词、模型参数、MCP 绑定等）。
+- Artifact 复用配置（可落盘、预览、复用）。
+- MCP 集成（本地 JSON 配置驱动、可启停）与过程可视化。
+- 本地搜索（消息/提示词检索与跳转）。
+- 隐私安全（Key 本地加密、数据默认不出本地）。
 
+## 2. 技术栈与运行时
+
+- UI：Svelte 5 + SvelteKit 2（`@sveltejs/adapter-static`，SPA 模式）
+- 构建：Vite 6
+- 原生容器：Tauri 2
+- 语言：TypeScript（前端）、Rust（后端）
+- 依赖基线：见 `package.json` 与 `src-tauri/Cargo.toml`
+  - 已启用插件：`tauri-plugin-opener`
+  - 建议后续引入：`tauri-plugin-shell`（子进程/MCP 启动）、`keyring`（安全凭据存储）、`serde`/`serde_json`（配置与数据序列化）、`rusqlite` 或 `sqlx`（SQLite/FTS）、`tokio`（异步）
+
+运行模式：
+- 开发：`tauri dev`，前端 HMR 端口 1420/1421，原生进程热重载。
+- 生产：Tauri 打包（Windows/MSI、macOS/DMG、Linux/AppImage 等）。
+
+## 3. 模块划分
+
+### 3.1 前端（SvelteKit）
+- 路由与页面：
+  - `routes/+page.svelte`：示例页（将演进为“聊天首页”）。
+  - 规划新增：`routes/chat/`、`routes/settings/`、`routes/artifacts/`、`routes/search/`。
+- UI 组件：Markdown 渲染、消息卡片（类型可扩展：思考过程、工具调用、代码执行）、模型选择弹窗、设置面板、搜索面板、Artifact 卡片。
+- 状态管理：Svelte stores（会话、设置、供应商/模型列表、MCP 选择）。
+- 前端服务封装：
+  - IPC 客户端：`@tauri-apps/api` 的 `invoke`/事件流封装。
+  - 本地缓存（必要时）：轻量持久化/快照（不过度堆积隐私数据）。
+
+### 3.2 后端（Tauri/Rust）
+- 命令层（Commands）：`#[tauri::command]` 暴露给前端的 IPC API。
+- 服务层（Services）：业务逻辑（模型供应商检测、模型列表获取、消息发送/流式聚合、MCP 生命周期、搜索索引构建与查询、数据快照/导入导出）。
+- 资源/系统层：
+  - 存储：SQLite + FTS5（或首期 JSON+索引文件），位于应用数据目录（`app_data_dir`）。
+  - 凭据：优先 OS Keychain（建议 Rust `keyring`），次选本地加密（密钥来源 OS 安全能力）。
+  - 子进程/MCP：通过 `tauri-plugin-shell` 或等价能力进行受控启动、管道通信与超时清理。
+
+### 3.3 前后端通信（IPC）
+- 调用模式：
+  - 请求-响应：前端 `invoke('command', payload)`，后端同步/异步返回。
+  - 流式输出：后端在处理生成式对话时，以事件/分片流（Server-Sent Events 风格）推送，前端订阅并渲染；或使用 Tauri 事件总线进行分段消息 `emit`。
+- 错误协议：统一错误结构（错误码、可读消息、建议操作），区分网络/鉴权/速率/用户输入/内部错误。
+
+## 4. 数据与存储设计
+
+存储位置：平台对应的应用数据目录下，例如：
+- macOS: `~/Library/Application Support/com.gumpw.handbox/`
+- Windows: `%APPDATA%/com.gumpw.handbox/`
+- Linux: `~/.config/com.gumpw.handbox/`
+
+推荐采用 SQLite（含 FTS5）统一管理结构化数据与全文索引，示意表：
+- `sessions`：会话元数据（id、名称、创建/更新时间、关联模型/ArtifactId 等）
+- `messages`：消息体（id、session_id、role、content、images、tokens、elapsed_ms、metadata json、ts）
+- `artifacts`：Artifact（id、name、desc、prompt、model、params json、enabled_mcp[]、created_at、last_used_at）
+- `providers`：供应商配置（id、name、type、base_url、status、updated_at）仅非敏感字段
+- `settings`：通用设置（主题、语言、自动下滑等）
+- FTS：对 `messages(content, prompt)` 建 FTS 虚表与触发器实现增量索引
+
+凭据与机密：
+- API Key 不入库，使用 OS Keychain（`service = com.gumpw.handbox`, `account = <provider-id>`）按供应商维度保存。
+- 导入导出时，Key 不随数据导出；导入后由用户补充凭据。
+
+导入/导出：
+- 会话级 JSON：包含 `session + messages + config`（不含 Key）。
+- 全量备份：SQLite 文件 + 配置 JSON 快照（不含 Key）。
+
+MCP 配置 JSON：
+```json
+{
+  "servers": [
+    { "name": "local-tools", "command": "node", "args": ["mcp-server.js"], "enabled": true }
+  ]
+}
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        用户界面层 (UI Layer)                     │
-├─────────────────────────────────────────────────────────────┤
-│                 Svelte + TypeScript 前端                     │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
-│  │   对话组件    │ │  Prompt管理  │ │  Agent管理   │            │
-│  └─────────────┘ └─────────────┘ └─────────────┘            │
-├─────────────────────────────────────────────────────────────┤
-│                      桥接层 (Bridge Layer)                    │
-│                        Tauri API                           │
-├─────────────────────────────────────────────────────────────┤
-│                   业务逻辑层 (Business Logic)                 │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
-│  │   LLM管理    │ │   记忆系统    │ │   工具集成    │            │
-│  └─────────────┘ └─────────────┘ └─────────────┘            │
-├─────────────────────────────────────────────────────────────┤
-│                     数据持久层 (Data Layer)                   │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
-│  │   SQLite    │ │   向量数据库   │ │   文件系统    │            │
-│  └─────────────┘ └─────────────┘ └─────────────┘            │
-├─────────────────────────────────────────────────────────────┤
-│                     外部服务层 (External Layer)               │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
-│  │  OpenAI API │ │  Claude API  │ │   其他LLM    │            │
-│  └─────────────┘ └─────────────┘ └─────────────┘            │
-└─────────────────────────────────────────────────────────────┘
-```
+文件放置在应用数据目录，UI 提供内置 JSON 编辑器与校验（字段必填、数组非空、示例指引）。
 
-## 2. 技术栈选型
+## 5. 关键用例与流程
 
-### 2.1 前端技术栈
+### 5.1 发送文字与图片（含流式）
+1) 前端构建消息（文本、最多 10 张图片 meta）。
+2) 通过 IPC `chat_send` 触发后端：
+   - 参数：`session_id | artifact_id | inline_config`、`messages[]`、`attachments[]`、`stream=true`。
+3) 后端：
+   - 解析会话配置（模型、参数、系统提示词、MCP 绑定）。
+   - 从 Keychain 取密钥，构造供应商 HTTP/SDK 客户端。
+   - 流式聚合分片，实时 `emit` 渲染事件；完成后写入 `messages` 与度量（耗时、tokens）。
+4) 前端订阅流，增量渲染；失败时提供重试与替换。
 
-#### 2.1.1 Svelte 5 + TypeScript
-**选择理由**:
-- **性能优势**: 编译时优化，运行时开销小
-- **开发体验**: 简洁的语法，较少的样板代码
-- **体积优势**: 打包后体积小，适合桌面应用
-- **类型安全**: TypeScript提供完整的类型检查
+### 5.2 模型选择/探活/获取模型列表
+- `provider_probe`：使用最小请求验证 Base URL 与 Key；失败返回明确错误。
+- `provider_list_models`：拉取模型列表并缓存，支持搜索与禁用过滤。
+- 切换模型后将元数据写入会话配置与消息元数据。
 
-#### 2.1.2 Svelte Kit
-**选择理由**:
-- **路由管理**: 文件系统路由，结构清晰
-- **状态管理**: 内置stores，简单高效
-- **构建工具**: 集成Vite，开发体验好
-- **SSG支持**: 静态生成，适合Tauri打包
+### 5.3 聊天配置与 Artifact
+- 在聊天设置中编辑系统提示词、参数、启用的 MCP。
+- `artifact_save`：将当前配置落盘/入库；`artifact_use`：基于 Artifact 新建会话。
+- Artifact 列表支持预览、重命名、删除、二次确认。
 
-#### 2.1.3 UI组件库和样式
-- **Tailwind CSS**: 实用优先的CSS框架
-- **Lucide Icons**: 轻量级图标库
-- **Monaco Editor**: 代码编辑器（Prompt编辑）
-- **Chart.js**: 数据可视化图表
+### 5.4 历史消息搜索
+- 前端输入关键词 → IPC `search_messages`。
+- 后端使用 FTS 查询，按时间与相关性排序，返回片段预览与定位信息。
 
-### 2.2 后端技术栈
+### 5.5 MCP 启停与执行过程展示
+- 设置页切换 `enabled` → 写回 `mcp.json`。
+- 聊天设置勾选启用的 MCP → 与会话绑定。
+- 执行过程：将 MCP 调用步骤与日志以卡片/时间线形式增量展示。
 
-#### 2.2.1 Tauri + Rust
-**选择理由**:
-- **性能**: Rust的零成本抽象和内存安全
-- **体积**: 相比Electron更小的应用体积
-- **安全**: Rust的内存安全特性
-- **跨平台**: 一次编写，多平台运行
+## 6. 对外集成设计
 
-#### 2.2.2 核心依赖库
-```toml
-[dependencies]
-tauri = { version = "2.0", features = ["api-all"] }
-serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.0", features = ["full"] }
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls"] }
-reqwest = { version = "0.11", features = ["json"] }
-uuid = { version = "1.0", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
-anyhow = "1.0"
-thiserror = "1.0"
-```
+### 6.1 模型供应商（OpenAI/Anthropic/Google/DeepSeek/OpenRouter/自定义）
+- 类型 1（特定主流）：字段为 `api_key`, `base_url`（可选）。
+- 类型 2（自定义，兼容 OpenAI/Anthropic API）：字段为 `name`, `type`, `base_url`, `api_key`。
+- 统一 Provider 接口：`probe()`、`listModels()`、`chatCompletion(stream)`。
+- 速率/错误处理：暴露错误码与建议（等待、降速、检查 Key、重试）。
 
-### 2.3 数据存储
+### 6.2 MCP（Model Context Protocol）
+- 存量通过 JSON 注册；原生启动子进程并管理生命周期（超时、日志、退出码）。
+- 与 LLM 对话流程集成：按需调用 MCP 以获取/处理上下文数据；UI 展示执行过程。
 
-#### 2.3.1 SQLite 数据库
-**用途**: 结构化数据存储
-- 用户配置信息
-- 对话历史记录
-- Prompt模板
-- Agent定义
+## 7. 安全与隐私
 
-#### 2.3.2 向量数据库
-**选择**: Qdrant (embedded mode) 或 自实现
-**用途**: 语义搜索和记忆系统
-- 文档向量化存储
-- 相似度检索
-- 长期记忆管理
+- 本地优先：用户数据默认不出本地；所有第三方调用需用户显式配置。
+- API Key 存储：优先 OS Keychain（Rust `keyring`）。
+- 代码执行/MCP：沙箱隔离、超时控制、内存上限；禁用危险系统调用。
+- CSP：生产环境启用严格 CSP（当前 `tauri.conf.json` 为 `null`，建议上线前收紧）。
+- 备份与恢复：仅手动导入/导出，本地存储加校验。
 
-#### 2.3.3 文件系统
-**用途**: 非结构化数据存储
-- 上传的文档文件
-- 导出的数据备份
-- 插件和扩展文件
+## 8. 性能与可靠性
 
-## 3. 模块化设计
+- 启动：冷启动 < 3s（首次 < 5s），懒加载非关键模块与页面。
+- 对话：发起到首包 < 2s（不含 LLM 响应），采用流式渲染与增量写入。
+- 并发：≥ 10 会话并行稳定；后端异步化（Tokio）。
+- 内存：空闲 < 500MB；长会话分页与虚拟列表；消息归档/快照。
+- 重试与幂等：模型列表拉取、消息发送、索引构建具备重试与断点续建。
+- 崩溃恢复：关键状态落盘；异常退出后重启可恢复。
 
-### 3.1 前端模块结构
+## 9. 可扩展性与扩展点
 
+- UI 卡片类型可扩展（思考过程、工具调用、代码执行）。
+- Provider 可插拔（新增实现 `Provider` 接口并注册）。
+- MCP 通过 JSON 扩展（无需改代码即可上/下线）。
+- 数据 schema 版本化与迁移脚本（SQLite `PRAGMA user_version` + 迁移程序）。
+
+## 10. 配置与环境
+
+- 应用配置：`tauri.conf.json`（窗口、打包、CSP、构建前后命令）。
+- 前端构建：`svelte.config.js`（static adapter，fallback `index.html`）。
+- DevServer：`vite.config.js`（端口 1420/1421，忽略 `src-tauri` 监听）。
+- 运行时变量：`TAURI_DEV_HOST`（HMR 场景）。
+
+## 11. 目录结构与演进计划
+
+当前：
+- 前端：`src/routes/+page.svelte` 示例应用。
+- 后端：`src-tauri/src/lib.rs` 提供示例命令 `greet`。
+
+目标重构（逐步落地）：
 ```
 src/
-├── lib/                          # 共享组件和工具
-│   ├── components/               # UI组件
-│   │   ├── Chat/                # 对话相关组件
-│   │   ├── Prompt/              # Prompt管理组件
-│   │   ├── Agent/               # Agent管理组件
-│   │   └── Common/              # 通用组件
-│   ├── stores/                   # Svelte状态管理
-│   │   ├── chat.ts              # 对话状态
-│   │   ├── prompt.ts            # Prompt状态
-│   │   ├── agent.ts             # Agent状态
-│   │   └── settings.ts          # 设置状态
-│   ├── types/                    # TypeScript类型定义
-│   ├── utils/                    # 工具函数
-│   └── api/                      # API调用封装
-├── routes/                       # 页面路由
-│   ├── chat/                     # 对话页面
-│   ├── prompts/                  # Prompt管理页面
-│   ├── agents/                   # Agent管理页面
-│   └── settings/                 # 设置页面
-└── app.html                      # 应用入口
-```
+  lib/
+    components/{ui,chat,prompt,agent}/
+    stores/
+    api/
+    types/
+    utils/
+  routes/
+    +layout.svelte
+    chat/
+    settings/
+    artifacts/
+    search/
 
-### 3.2 后端模块结构
-
-```
 src-tauri/src/
-├── main.rs                       # 应用入口
-├── lib.rs                        # 库入口
-├── commands/                     # Tauri命令处理
-│   ├── chat.rs                   # 对话相关命令
-│   ├── prompt.rs                 # Prompt管理命令
-│   ├── agent.rs                  # Agent管理命令
-│   └── llm.rs                    # LLM API命令
-├── services/                     # 业务服务层
-│   ├── llm_service.rs            # LLM集成服务
-│   ├── memory_service.rs         # 记忆系统服务
-│   ├── tool_service.rs           # 工具集成服务
-│   └── database_service.rs       # 数据库服务
-├── models/                       # 数据模型
-│   ├── chat.rs                   # 对话模型
-│   ├── prompt.rs                 # Prompt模型
-│   └── agent.rs                  # Agent模型
-├── utils/                        # 工具函数
-└── config/                       # 配置管理
+  commands/{chat.rs,provider.rs,artifact.rs,search.rs,settings.rs,mcp.rs}
+  services/{llm_service.rs,provider_service.rs,mcp_service.rs,search_service.rs,storage_service.rs}
+  models/{chat.rs,artifact.rs,provider.rs,settings.rs}
+  utils/{crypto.rs,validation.rs,logger.rs}
+  config/{app_config.rs}
+  lib.rs
+  main.rs
 ```
 
-## 4. 数据流架构
+迁移分期：
+- M1 基础框架：页面骨架、会话基本模型、Provider 探活、消息发送（非流式）。
+- M2 流式与渲染：消息流式、度量、错误处理与重试。
+- M3 存储与搜索：SQLite/FTS、导入导出、历史搜索页。
+- M4 Artifact 与 MCP：Artifact 全流程、MCP 配置与执行过程可视化。
+- M5 设置与本地化：主题、语言、快捷键、关于页与更新检查。
 
-### 4.1 请求-响应流程
+## 12. API 与类型（示例）
 
-```mermaid
-sequenceDiagram
-    participant U as 用户界面
-    participant S as Svelte Store
-    participant T as Tauri API
-    participant B as 后端服务
-    participant D as 数据库
-    participant L as LLM API
+前端调用示例：
+```ts
+import { invoke } from '@tauri-apps/api/core';
 
-    U->>S: 用户操作
-    S->>T: 调用Tauri命令
-    T->>B: 业务逻辑处理
-    B->>D: 数据读写
-    B->>L: LLM API调用
-    L-->>B: 返回结果
-    B-->>T: 处理结果
-    T-->>S: 更新状态
-    S-->>U: 界面更新
+type ChatParams = {
+  sessionId?: string;
+  artifactId?: string;
+  inlineConfig?: {
+    systemPrompt?: string;
+    model: string;
+    temperature?: number;
+    topP?: number;
+    maxTokens?: number;
+    stream?: boolean;
+    mcpServers?: string[];
+  };
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+  attachments?: Array<{ name: string; mime: string; path: string }>;
+};
+
+await invoke('chat_send', params satisfies ChatParams);
 ```
 
-### 4.2 状态管理流程
-
-#### 4.2.1 Svelte Stores 设计
-```typescript
-// 对话状态管理
-export interface ChatState {
-  sessions: ChatSession[];
-  activeSessionId: string | null;
-  isLoading: boolean;
-  selectedModel: string;
-  parameters: ModelParameters;
-}
-
-// Prompt状态管理
-export interface PromptState {
-  prompts: PromptTemplate[];
-  categories: Category[];
-  activePrompt: PromptTemplate | null;
-  searchQuery: string;
-}
-
-// Agent状态管理
-export interface AgentState {
-  agents: Agent[];
-  activeAgent: Agent | null;
-  availableTools: Tool[];
-  memoryStats: MemoryStats;
-}
+错误返回（统一结构）：
+```json
+{ "code": "RATE_LIMIT", "message": "请求过于频繁，请稍后重试", "hint": "降低并发或更换模型" }
 ```
 
-## 5. LLM集成架构
+## 13. 测试与度量
 
-### 5.1 统一API抽象
+- 前端：Vitest/Testing Library，Playwright E2E（关键流程：新建会话、发送消息、切换模型、保存 Artifact、搜索跳转）。
+- 后端：Rust 单元/集成测试，Mock Provider，离线样例回放。
+- 性能日志：本地开关，默认关闭；不上传云端。
 
-```rust
-#[async_trait]
-pub trait LLMProvider {
-    async fn chat_completion(&self, request: ChatRequest) -> Result<ChatResponse>;
-    async fn stream_chat(&self, request: ChatRequest) -> Result<ChatStream>;
-    fn supports_feature(&self, feature: LLMFeature) -> bool;
-    fn get_models(&self) -> Vec<ModelInfo>;
-}
+## 14. 风险与决策
 
-// 具体实现
-pub struct OpenAIProvider;
-pub struct ClaudeProvider;
-pub struct GeminiProvider;
-```
+- 供应商差异与速率限制：通过抽象 Provider 接口与重试/退避策略降低耦合。
+- MCP 执行安全：默认禁用危险指令；仅显式启用的 MCP 可用；提供可视化与可中断能力。
+- 凭据管理：优先 OS Keychain；若不可用则提示降级并给出风险提示。
+- 数据迁移：版本化 schema，提供迁移脚本与回滚策略。
 
-### 5.2 模型管理系统
+—— 本文档将随实现演进持续更新，确保与 PRD 与代码保持一致。
 
-```rust
-pub struct ModelManager {
-    providers: HashMap<String, Box<dyn LLMProvider>>,
-    model_configs: HashMap<String, ModelConfig>,
-}
 
-impl ModelManager {
-    pub async fn send_message(&self, model: &str, message: ChatMessage) -> Result<String>;
-    pub fn get_available_models(&self) -> Vec<ModelInfo>;
-    pub fn update_model_config(&mut self, model: &str, config: ModelConfig);
-}
-```
-
-## 6. 记忆系统架构
-
-### 6.1 多层记忆结构
-
-```rust
-pub struct MemorySystem {
-    short_term: ShortTermMemory,    // 会话级记忆
-    long_term: LongTermMemory,      // 持久化记忆
-    vector_store: VectorStore,      // 向量检索
-}
-
-// 短期记忆 - 会话内容
-pub struct ShortTermMemory {
-    conversation_history: Vec<ChatMessage>,
-    context_window: usize,
-}
-
-// 长期记忆 - 跨会话知识
-pub struct LongTermMemory {
-    knowledge_base: Vec<MemoryChunk>,
-    user_preferences: UserPreferences,
-    learned_patterns: Vec<Pattern>,
-}
-
-// 向量存储 - 语义检索
-pub struct VectorStore {
-    embeddings: Vec<(String, Vec<f32>)>,
-    index: VectorIndex,
-}
-```
-
-### 6.2 记忆检索策略
-
-1. **相关性检索**: 基于向量相似度的语义检索
-2. **时间衰减**: 根据时间权重调整记忆重要性
-3. **频率统计**: 高频访问的记忆优先级提升
-4. **用户反馈**: 根据用户标记调整记忆权重
-
-## 7. 工具集成架构
-
-### 7.1 工具抽象接口
-
-```rust
-#[async_trait]
-pub trait Tool {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn parameters(&self) -> &[Parameter];
-    async fn execute(&self, params: Value) -> Result<ToolResult>;
-}
-
-// 内置工具实现
-pub struct FileOperationTool;
-pub struct WebSearchTool;
-pub struct CodeExecutorTool;
-pub struct CalculatorTool;
-```
-
-### 7.2 代码执行环境
-
-```rust
-pub struct CodeExecutor {
-    sandbox: SandboxEnvironment,
-    timeout: Duration,
-    memory_limit: usize,
-}
-
-impl CodeExecutor {
-    pub async fn execute_python(&self, code: &str) -> Result<ExecutionResult>;
-    pub async fn execute_javascript(&self, code: &str) -> Result<ExecutionResult>;
-    pub fn validate_code(&self, code: &str, language: &str) -> Result<()>;
-}
-```
-
-## 8. 安全架构
-
-### 8.1 数据安全
-- **加密存储**: API密钥使用AES-256加密
-- **本地存储**: 所有数据存储在本地，不上传云端
-- **权限控制**: 最小权限原则，按需申请系统权限
-
-### 8.2 执行安全
-- **沙箱隔离**: 代码执行在隔离环境中
-- **资源限制**: CPU、内存、网络访问限制
-- **输入验证**: 严格的输入参数验证
-
-### 8.3 网络安全
-- **HTTPS**: 所有外部API调用使用HTTPS
-- **证书验证**: 验证SSL证书有效性
-- **请求限制**: API调用频率限制和超时控制
-
-## 9. 性能优化
-
-### 9.1 前端优化
-- **懒加载**: 组件和路由按需加载
-- **虚拟滚动**: 大列表虚拟化渲染
-- **缓存策略**: 合理的数据缓存机制
-- **代码分割**: 按功能模块分割代码
-
-### 9.2 后端优化
-- **连接池**: 数据库连接复用
-- **异步处理**: 非阻塞I/O操作
-- **缓存机制**: 热数据内存缓存
-- **批处理**: 批量数据库操作
-
-### 9.3 系统优化
-- **资源管理**: 及时释放不用的资源
-- **内存监控**: 内存使用量监控和优化
-- **启动优化**: 应用启动时间优化
-
-## 10. 扩展性设计
-
-### 10.1 插件系统
-```rust
-pub trait Plugin {
-    fn name(&self) -> &str;
-    fn version(&self) -> &str;
-    fn init(&mut self) -> Result<()>;
-    fn shutdown(&mut self) -> Result<()>;
-}
-
-pub struct PluginManager {
-    plugins: Vec<Box<dyn Plugin>>,
-}
-```
-
-### 10.2 主题系统
-- **CSS变量**: 使用CSS自定义属性
-- **动态切换**: 运行时主题切换
-- **用户自定义**: 支持用户自定义主题
-
-### 10.3 国际化支持
-- **多语言**: 支持中英文等多种语言
-- **动态切换**: 运行时语言切换
-- **本地化**: 时间、日期、数字格式本地化
-
-## 11. 监控和日志
-
-### 11.1 应用监控
-- **性能指标**: CPU、内存、响应时间
-- **错误追踪**: 异常和错误日志
-- **用户行为**: 功能使用统计
-
-### 11.2 日志系统
-```rust
-use tracing::{info, warn, error, debug};
-
-// 结构化日志
-#[derive(Debug, Serialize)]
-struct LogEvent {
-    timestamp: DateTime<Utc>,
-    level: String,
-    message: String,
-    module: String,
-    user_id: Option<String>,
-}
-```
-
-这个技术架构文档将指导整个开发过程，确保系统的可扩展性、可维护性和性能表现。
