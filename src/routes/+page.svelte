@@ -5,7 +5,7 @@ import { browser } from '$app/environment';
 onMount(() => {
   if (browser) {
     // 自动重定向到聊天页面
-    window.location.href = '/chat';
+    window.location.href = '/main';
   }
 });
 </script>
