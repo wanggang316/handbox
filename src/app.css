@@ -1,1 +1,9 @@
 @import "tailwindcss";
+
+/* 禁用桌面应用的全局滚动，但保留内部组件滚动 */
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* 禁用页面级别的滚动条 */
+}

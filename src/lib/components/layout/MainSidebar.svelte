@@ -40,6 +40,33 @@
       title: "小猫照片编辑生成", 
       isActive: false
     },
+    { 
+      id: "2", 
+      title: "Claude Code 使用指南", 
+      isActive: false
+    },
+    { 
+      id: "3", 
+      title: "经典贪食蛇网页游戏", 
+      isActive: false
+    },
+    { id: "4", title: "Python npx 命令行工具介绍", isActive: false },
+    { id: "5", title: "今日 AI 新闻热点汇总", isActive: true },
+    { 
+      id: "6", 
+      title: "推荐股票学习资料", 
+      isActive: false
+    },
+    { 
+      id: "7", 
+      title: "Go 语言学习资料推荐", 
+      isActive: false
+    },
+    { 
+      id: "8", 
+      title: "小猫照片编辑生成", 
+      isActive: false
+    },
   ];
 
   function go(page: "chat" | "artifact") {
@@ -57,7 +84,7 @@
   $: active = $currentPage as "chat" | "artifact";
 </script>
 
-<div class="h-full bg-[#f8f8f8] p-4 flex flex-col">
+<div class="h-full bg-[#f8f8f8] p-4 pt-10 flex flex-col">
   <!-- 顶部操作 -->
   <div class="flex gap-2 mb-4">
     <button
