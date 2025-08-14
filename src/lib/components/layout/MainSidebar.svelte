@@ -3,13 +3,17 @@
   import { get } from "svelte/store";
   import Menu from "$lib/components/ui/Menu.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
+  import RoundButton from "$lib/components/ui/RoundButton.svelte";
+  import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import { 
     Box, 
     Code, 
     Gamepad2, 
     TrendingUp, 
     Image,
-    BookOpen
+    BookOpen,
+    Plus,
+    Search
   } from '@lucide/svelte';
 
   const sessions = [
@@ -81,48 +85,37 @@
     console.log('Clicked artifact menu');
   }
 
+  function handleNewChatClick() {
+    console.log('Clicked new chat');
+    // 这里可以添加新建聊天的逻辑
+  }
+
+  function handleSearchClick() {
+    console.log('Clicked search');
+    // 这里可以添加搜索的逻辑
+  }
+
   $: active = $currentPage as "chat" | "artifact";
 </script>
 
-<div class="h-full bg-[#f8f8f8] p-4 pt-10 flex flex-col">
+<div class="h-full bg-[#f8f8f8] p-4 pt-15 flex flex-col">
   <!-- 顶部操作 -->
   <div class="flex gap-2 mb-4">
-    <button
-      class="flex-1 h-9 bg-[#5661f6] hover:opacity-90 text-white rounded-full text-[16px] flex items-center justify-center gap-1.5 transition-colors"
-    >
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <path d="M12 5v14m-7-7h14" />
-      </svg>
-      New chat
-    </button>
-    <button
-      class="w-9 h-9 bg-black hover:bg-black/80 text-white rounded-full flex items-center justify-center transition-colors"
-      aria-label="搜索"
-    >
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <circle cx="11" cy="11" r="8" />
-        <path d="m21 21-4.35-4.35" />
-      </svg>
-    </button>
+    <RoundButton
+      label="New chat"
+      icon={Plus}
+      on:click={handleNewChatClick}
+    />
+    <CircleButton
+      icon={Search}
+      ariaLabel="搜索"
+      on:click={handleSearchClick}
+    />
   </div>
   
   <MenuButton
     buttonClass="my-6"
-    title="Artifact"
+    title="Artifacts"
     icon={Box}
     iconSize={16}
     onClick={() => handleArtifactClick("Artifact")}
