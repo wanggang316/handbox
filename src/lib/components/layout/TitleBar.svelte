@@ -1,0 +1,77 @@
+<script lang="ts">
+  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import { PanelLeftOpen, PanelLeftClose } from '@lucide/svelte';
+  import { createEventDispatcher } from 'svelte';
+
+  export let sidebarOpen: boolean = true;
+
+  const dispatch = createEventDispatcher();
+  function handleToggle() {
+    dispatch('toggle');
+  }
+</script>
+
+<div class="drag-region" data-tauri-drag-region>
+  <div class="sidebar-toggle-button">
+    <CircleButton
+      icon={sidebarOpen ? PanelLeftClose : PanelLeftOpen}
+      iconSize={16}
+      ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
+      bgColor="bg-gray-50/90"
+      hoverColor="hover:bg-gray-100/90"
+      textColor="text-gray-700"
+      size="w-7 h-7"
+      customClass="backdrop-blur-sm border border-gray-200/50 shadow-sm"
+      on:click={handleToggle}
+    />
+  </div>
+  <slot />
+  <!-- 如果未来还需要在标题栏放入其他控件，可通过 slot 注入 -->
+  
+</div>
+
+<style>
+  /* 拖拽区域 - 在 titleBarStyle: "Overlay" 模式下使用 */
+  .drag-region {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    z-index: 9999;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: auto;
+  }
+
+  /* 侧边栏切换按钮 */
+  .sidebar-toggle-button {
+    position: absolute;
+    top: 16px;
+    left: 85px; /* 位于系统按钮右边 */
+    pointer-events: auto;
+    z-index: 10000;
+    transition: opacity 0.2s ease-in-out;
+  }
+
+  .sidebar-toggle-button:hover {
+    opacity: 0.8;
+  }
+
+  /* 响应式设计：调整标题栏按钮位置 */
+  @media (max-width: 768px) {
+    .sidebar-toggle-button {
+      left: 20px;
+      top: 12px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .sidebar-toggle-button {
+      left: 15px;
+      top: 10px;
+    }
+  }
+</style>
+
+

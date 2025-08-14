@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Icon as IconType } from '@lucide/svelte';
+  import { createEventDispatcher } from 'svelte';
 
   export let label: string;
   export let icon: typeof IconType | undefined = undefined;
@@ -12,12 +13,12 @@
   export let fontSize: string = 'text-[16px]';
   export let disabled: boolean = false;
   export let customClass: string = '';
+  
+  const dispatch = createEventDispatcher();
 
   function handleClick(event: MouseEvent) {
     if (!disabled) {
-      // 触发父组件的点击事件
-      const clickEvent = new CustomEvent('click', { detail: event });
-      event.currentTarget?.dispatchEvent(clickEvent);
+      dispatch('click', event);
     }
   }
 </script>
