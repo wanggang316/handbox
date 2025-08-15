@@ -54,7 +54,7 @@
 
   <!-- 用户信息 -->
   <div class="leading-[1.4] flex-1">
-    <div class="text-[14px] font-medium text-[#757575]">{displayName}</div>
+    <div class="text-[14px] text-[#757575]">{displayName}</div>
     <div class="text-[12px] {user.isLoggedIn ? 'text-[#b3b3b3]' : 'text-blue-500'}">{planText}</div>
   </div>
 </div>

@@ -111,7 +111,7 @@
   const currentUser = {
     isLoggedIn: true,
     username: "Alex",
-    avatar: undefined, // 使用默认头像
+    avatar: "https://lh3.googleusercontent.com/a/ACg8ocKdKLfYXuyg3WFnA4HGTrga_E2YtSw_r9x3079cyaNFsHSwsYAh=s96-c", // 使用默认头像
     isPro: true
   };
 
