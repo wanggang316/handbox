@@ -8,7 +8,7 @@
   export let bgColor: string = 'bg-[#5661f6]';
   export let hoverColor: string = 'hover:opacity-90';
   export let textColor: string = 'text-white';
-  export let size: string = 'h-9';
+  export let size: string = 'h-10';
   export let rounded: string = 'rounded-full';
   export let fontSize: string = 'text-[16px]';
   export let disabled: boolean = false;

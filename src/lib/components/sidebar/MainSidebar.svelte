@@ -98,38 +98,46 @@
   $: active = $currentPage as "chat" | "artifact";
 </script>
 
-<div class="h-full bg-[#f8f8f8] p-4 pt-15 flex flex-col">
-  <!-- 顶部操作 -->
-  <div class="flex gap-2 mb-4">
-    <RoundButton
-      label="New chat"
-      icon={Plus}
-      on:click={handleNewChatClick}
+<div class="h-full flex flex-col bg-[#f8f8f8] p-0 pt-15">
+  <!-- 顶部固定区域 -->
+  <div class="flex-shrink-0 space-y-6 mb-6">
+    <!-- 顶部操作 -->
+    <div class="flex gap-2 px-4">
+      <RoundButton
+        label="New chat"
+        icon={Plus}
+        on:click={handleNewChatClick}
+      />
+      <CircleButton
+        icon={Search}
+        ariaLabel="搜索"
+        on:click={handleSearchClick}
+      />
+    </div>
+    
+    <div class="flex px-2">
+      <MenuButton
+      title="Artifacts"
+      icon={Box}
+      iconSize={16}
+      onClick={() => handleArtifactClick("Artifact")}
     />
-    <CircleButton
-      icon={Search}
-      ariaLabel="搜索"
-      on:click={handleSearchClick}
+    </div>
+    
+  </div>
+
+  <!-- 中间可滚动区域 -->
+  <div class="flex-1 min-h-0">
+    <Menu 
+      title="聊天"
+      items={sessions} 
+      onItemClick={handleSessionClick}
+      containerClass="h-full"
     />
   </div>
-  
-  <MenuButton
-    buttonClass="my-6"
-    title="Artifacts"
-    icon={Box}
-    iconSize={16}
-    onClick={() => handleArtifactClick("Artifact")}
-  />
-  
-
-  <Menu 
-    title="聊天"
-    items={sessions} 
-    onItemClick={handleSessionClick}
-  />
 
   <!-- 用户信息 -->
-  <div class="pt-3 mt-3 border-t border-[#e7e7e7] flex items-center gap-3">
+  <div class="flex-shrink-0 pt-3 mt-3 border-t border-[#e7e7e7] flex items-center gap-3 p-4">
     <img
       src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%236B7280'/%3E%3Ctext x='16' y='20' text-anchor='middle' fill='white' font-size='12' font-family='Arial'%3EAlex%3C/text%3E%3C/svg%3E"
       alt="Alex"

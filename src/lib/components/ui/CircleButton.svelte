@@ -8,7 +8,7 @@
   export let bgColor: string = 'bg-black';
   export let hoverColor: string = 'hover:bg-black/80';
   export let textColor: string = 'text-white';
-  export let size: string = 'w-9 h-9';
+  export let size: string = 'w-10 h-10';
   export let rounded: string = 'rounded-full';
   export let disabled: boolean = false;
   export let customClass: string = '';

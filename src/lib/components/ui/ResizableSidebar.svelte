@@ -101,7 +101,7 @@
 <div bind:this={container} class={`relative flex-shrink-0 ${containerClass}`} style={`width:${width}px; height:100%`}>
   <slot />
   <div
-    class="absolute right-0 top-0 h-full w-1.5 cursor-col-resize bg-transparent hover:bg-gray-200 active:bg-gray-300 z-[10001]"
+    class="absolute right-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-gray-100 active:bg-gray-200 z-[10001]"
     role="separator"
     aria-orientation="vertical"
     aria-valuenow={width}

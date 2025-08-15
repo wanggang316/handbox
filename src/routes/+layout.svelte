@@ -3,11 +3,10 @@
   import { page } from "$app/stores";
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
-  import Sidebar from "$lib/components/ui/Sidebar.svelte";
-  import MainSidebar from "$lib/components/layout/MainSidebar.svelte";
-  import TitleBar from "$lib/components/layout/TitleBar.svelte";
+  import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
+  import TitleBar from "$lib/components/ui/TitleBar.svelte";
   import { currentPage } from "$lib/stores/ui";
-  import { PanelLeftOpen, PanelLeftClose } from '@lucide/svelte';
+  import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏导航配置
   const navigation = [
@@ -95,7 +94,7 @@
   <TitleBar {sidebarOpen} on:toggle={toggleSidebar} />
   
   <div class="sidebar-wrapper m-2 rounded-2xl overflow-hidden" class:dragging={isDragging} style={`width:${sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!sidebarOpen}>
-    <Sidebar
+    <ResizableSidebar
       on:resizeStart={() => { isDragging = true; }}
       on:resizing={(e) => { sidebarWidth = e.detail.width; }}
       on:resizeEnd={(e) => { isDragging = false; sidebarWidth = e.detail.width; }}
@@ -107,7 +106,7 @@
       containerClass=""
     >
       <MainSidebar />
-    </Sidebar>
+    </ResizableSidebar>
   </div>
 
   <main

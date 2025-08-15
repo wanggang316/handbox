@@ -21,18 +21,25 @@
   export let activeItemClass = "";
 </script>
 
-<div class="flex-1 overflow-y-auto space-y-1 {containerClass}">
-  <div class="text-sm text-gray-600 pb-2 pl-2">{title}</div>
-  {#each items as item}
-    <MenuButton
-      title={item.title}
-      isActive={item.isActive || false}
-      icon={item.icon}
-      iconPosition={item.iconPosition || "left"}
-      iconSize={item.iconSize || 16}
-      onClick={() => onItemClick(item)}
-      buttonClass={itemClass}
-      activeClass={activeItemClass}
-    />
-  {/each}
+<div class="flex flex-col {containerClass}">
+  <!-- 固定标题 -->
+  {#if title}
+    <div class="text-sm text-gray-600 pb-2 pl-4 flex-shrink-0">{title}</div>
+  {/if}
+  
+  <!-- 可滚动的菜单项 -->
+  <div class="flex-1 overflow-y-auto space-y-1 px-2">
+    {#each items as item}
+      <MenuButton
+        title={item.title}
+        isActive={item.isActive || false}
+        icon={item.icon}
+        iconPosition={item.iconPosition || "left"}
+        iconSize={item.iconSize || 16}
+        onClick={() => onItemClick(item)}
+        buttonClass={itemClass}
+        activeClass={activeItemClass}
+      />
+    {/each}
+  </div>
 </div>

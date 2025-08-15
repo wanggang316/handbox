@@ -1,6 +1,6 @@
 <script lang="ts">
   import IconButton from "$lib/components/ui/IconButton.svelte";
-  import { PanelLeftOpen, PanelLeftClose } from '@lucide/svelte';
+  import { PanelLeft } from '@lucide/svelte';
   import { createEventDispatcher } from 'svelte';
 
   export let sidebarOpen: boolean = true;
@@ -14,7 +14,7 @@
 <div class="drag-region" data-tauri-drag-region>
   <div class="sidebar-toggle-button">
     <IconButton
-      icon={sidebarOpen ? PanelLeftClose : PanelLeftOpen}
+      icon={PanelLeft}
       ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
       on:click={handleToggle}
     />
