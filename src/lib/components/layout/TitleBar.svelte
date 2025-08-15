@@ -1,5 +1,5 @@
 <script lang="ts">
-  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
   import { PanelLeftOpen, PanelLeftClose } from '@lucide/svelte';
   import { createEventDispatcher } from 'svelte';
 
@@ -13,15 +13,9 @@
 
 <div class="drag-region" data-tauri-drag-region>
   <div class="sidebar-toggle-button">
-    <CircleButton
+    <IconButton
       icon={sidebarOpen ? PanelLeftClose : PanelLeftOpen}
-      iconSize={16}
       ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
-      bgColor="bg-gray-50/90"
-      hoverColor="hover:bg-gray-100/90"
-      textColor="text-gray-700"
-      size="w-7 h-7"
-      customClass="backdrop-blur-sm border border-gray-200/50 shadow-sm"
       on:click={handleToggle}
     />
   </div>
@@ -47,15 +41,15 @@
   /* 侧边栏切换按钮 */
   .sidebar-toggle-button {
     position: absolute;
-    top: 16px;
-    left: 85px; /* 位于系统按钮右边 */
+    top: 8px;
+    left: 100px; /* 位于系统按钮右边 */
     pointer-events: auto;
     z-index: 10000;
     transition: opacity 0.2s ease-in-out;
   }
 
   .sidebar-toggle-button:hover {
-    opacity: 0.8;
+    opacity: 1.0;
   }
 
   /* 响应式设计：调整标题栏按钮位置 */
