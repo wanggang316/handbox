@@ -1,5 +1,6 @@
 <script lang="ts">
   import SearchPage from '$lib/components/search/SearchPage.svelte';
+  import { goto } from '$app/navigation';
 
 let searchQuery = $state('');
 let selectedFilter = $state('all');
@@ -44,7 +45,7 @@ function handleKeydown(event: KeyboardEvent) {
 // 跳转到会话
 function goToSession(sessionId: string) {
   chatActions.switchToSession(sessionId);
-  window.location.href = '/chat';
+  goto(`/chat?id=${sessionId}`);
 }
 
 // 获取搜索结果图标

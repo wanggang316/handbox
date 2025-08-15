@@ -1,6 +1,9 @@
 <script lang="ts">
   import { currentPage } from "$lib/stores/ui";
   import { get } from "svelte/store";
+  import { browser } from "$app/environment";
+  import { page } from "$app/stores";
+  import { goto } from "$app/navigation";
   import Menu from "$lib/components/ui/Menu.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
@@ -17,62 +20,46 @@
     Search
   } from '@lucide/svelte';
 
-  const sessions = [
+  // 基础会话数据（不包含 isActive，这将动态计算）
+  const baseSessions = [
     { 
       id: "2", 
-      title: "Claude Code 使用指南", 
-      isActive: false
+      title: "Claude Code 使用指南"
     },
     { 
       id: "3", 
-      title: "经典贪食蛇网页游戏", 
-      isActive: false
+      title: "经典贪食蛇网页游戏"
     },
-    { id: "4", title: "Python npx 命令行工具介绍", isActive: false },
-    { id: "5", title: "今日 AI 新闻热点汇总", isActive: true },
+    { 
+      id: "4", 
+      title: "Python npx 命令行工具介绍"
+    },
+    { 
+      id: "5", 
+      title: "今日 AI 新闻热点汇总"
+    },
     { 
       id: "6", 
-      title: "推荐股票学习资料", 
-      isActive: false
+      title: "推荐股票学习资料"
     },
     { 
       id: "7", 
-      title: "Go 语言学习资料推荐", 
-      isActive: false
+      title: "Go 语言学习资料推荐"
     },
     { 
       id: "8", 
-      title: "小猫照片编辑生成", 
-      isActive: false
-    },
-    { 
-      id: "2", 
-      title: "Claude Code 使用指南", 
-      isActive: false
-    },
-    { 
-      id: "3", 
-      title: "经典贪食蛇网页游戏", 
-      isActive: false
-    },
-    { id: "4", title: "Python npx 命令行工具介绍", isActive: false },
-    { id: "5", title: "今日 AI 新闻热点汇总", isActive: true },
-    { 
-      id: "6", 
-      title: "推荐股票学习资料", 
-      isActive: false
-    },
-    { 
-      id: "7", 
-      title: "Go 语言学习资料推荐", 
-      isActive: false
-    },
-    { 
-      id: "8", 
-      title: "小猫照片编辑生成", 
-      isActive: false
-    },
+      title: "小猫照片编辑生成"
+    }
   ];
+
+  // 获取当前选中的会话 ID
+  $: currentSessionId = browser && $page.url ? $page.url.searchParams.get('id') || '' : '';
+
+  // 动态生成包含 isActive 状态的会话数据
+  $: sessions = baseSessions.map(session => ({
+    ...session,
+    isActive: session.id === currentSessionId
+  }));
 
   function go(page: "chat" | "artifact") {
     currentPage.set(page);
@@ -80,20 +67,25 @@
 
   function handleSessionClick(session: any) {
     console.log('Clicked session:', session);
+    // 使用 SvelteKit 的客户端路由导航，避免页面重新加载
+    goto(`/chat?id=${session.id}`);
   }
 
   function handleArtifactClick(title: string) {
     console.log('Clicked artifact menu');
+    goto(`/artifacts`);
   }
 
   function handleNewChatClick() {
     console.log('Clicked new chat');
-    // 这里可以添加新建聊天的逻辑
+    // 导航到聊天页面，不带 id 参数（表示新建聊天）
+    goto('/chat');
   }
 
   function handleSearchClick() {
     console.log('Clicked search');
-    // 这里可以添加搜索的逻辑
+    // 导航到搜索页面
+    goto('/search');
   }
 
   function handleUserClick() {
