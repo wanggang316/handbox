@@ -135,7 +135,7 @@
   /* 侧边栏容器动画 */
   .sidebar-wrapper {
     flex-shrink: 0;
-    height: 100%;
+    /* height: 100%; */
     min-width: 0;
     transition: width 0.0s linear; /* 拖拽时无过渡，避免卡顿 */
     overflow: hidden;

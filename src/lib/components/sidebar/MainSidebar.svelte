@@ -5,6 +5,7 @@
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import UserProfile from "$lib/components/ui/UserProfile.svelte";
   import { 
     Box, 
     Code, 
@@ -95,6 +96,30 @@
     // 这里可以添加搜索的逻辑
   }
 
+  function handleUserClick() {
+    if (currentUser.isLoggedIn) {
+      console.log('打开用户设置');
+      // 这里可以添加打开用户设置页面的逻辑
+    } else {
+      console.log('跳转到登录页面');
+      // 这里可以添加跳转到登录页面的逻辑
+    }
+  }
+
+  // 模拟用户状态，实际应该从 store 或 API 获取
+  // 可以切换这两个状态来测试不同的显示效果
+  const currentUser = {
+    isLoggedIn: true,
+    username: "Alex",
+    avatar: undefined, // 使用默认头像
+    isPro: true
+  };
+
+  // 未登录状态示例：
+  // const currentUser = {
+  //   isLoggedIn: false
+  // };
+
   $: active = $currentPage as "chat" | "artifact";
 </script>
 
@@ -119,7 +144,7 @@
       <MenuButton
       title="Artifacts"
       icon={Box}
-      iconSize={16}
+      iconSize={20}
       onClick={() => handleArtifactClick("Artifact")}
     />
     </div>
@@ -137,15 +162,8 @@
   </div>
 
   <!-- 用户信息 -->
-  <div class="flex-shrink-0 pt-3 mt-3 border-t border-[#e7e7e7] flex items-center gap-3 p-4">
-    <img
-      src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%236B7280'/%3E%3Ctext x='16' y='20' text-anchor='middle' fill='white' font-size='12' font-family='Arial'%3EAlex%3C/text%3E%3C/svg%3E"
-      alt="Alex"
-      class="w-8 h-8 rounded-full"
-    />
-    <div class="leading-[1.4]">
-      <div class="text-[16px] font-semibold text-[#757575]">Alex</div>
-      <div class="text-[16px] text-[#b3b3b3]">Pro Plan</div>
-    </div>
-  </div>
+   <div class="flex-shrink-0 p-2">
+    <UserProfile user={currentUser} onUserClick={handleUserClick} />
+   </div>
+  
 </div>
