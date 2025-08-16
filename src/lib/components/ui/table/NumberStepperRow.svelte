@@ -1,5 +1,6 @@
 <script lang="ts">
-  import NumberStepper from './NumberStepper.svelte';
+  import NumberStepper from '../NumberStepper.svelte';
+  import TableBaseRow from './TableBaseRow.svelte';
 
   interface Props {
     label: string;
@@ -22,9 +23,8 @@
   }: Props = $props();
 </script>
 
-<div class="flex items-center justify-between w-full">
-  <div class="text-sm font-medium text-gray-700">{label}</div>
-  <div class="flex-1 max-w-24 ml-4">
+<TableBaseRow {label}>
+  <div class="flex-1 max-w-24">
     <NumberStepper 
       bind:value
       {min}
@@ -34,4 +34,4 @@
       {disabled}
     />
   </div>
-</div>
+</TableBaseRow>

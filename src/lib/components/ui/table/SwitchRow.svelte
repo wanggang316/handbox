@@ -1,5 +1,6 @@
 <script lang="ts">
-  import Toggle from './Toggle.svelte';
+  import Toggle from '../Toggle.svelte';
+  import TableBaseRow from './TableBaseRow.svelte';
 
   interface Props {
     label: string;
@@ -16,14 +17,13 @@
   }: Props = $props();
 </script>
 
-<div class="flex items-center justify-between">
-  <div>
-    <label for="switch-{label}" class="text-sm font-medium text-gray-700">{label}</label>
+<TableBaseRow {label}>
+  <div class="flex flex-col items-end">
     {#if description}
-      <div class="text-xs text-gray-500 mt-1">
+      <div class="text-xs text-gray-500 mb-1 text-right">
         {description}
       </div>
     {/if}
+    <Toggle bind:checked {disabled} />
   </div>
-  <Toggle id="switch-{label}" bind:checked {disabled} />
-</div>
+</TableBaseRow>

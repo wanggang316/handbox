@@ -5,7 +5,6 @@
   }
 
   interface Props {
-    label?: string;
     value: number;
     min?: number;
     max?: number;
@@ -14,11 +13,11 @@
     rightLabel?: string;
     scaleMarks?: ScaleMark[];
     description?: string;
+    showValue?: boolean;
     disabled?: boolean;
   }
 
   let { 
-    label = '',
     value = $bindable(),
     min = 0,
     max = 100,
@@ -27,6 +26,7 @@
     rightLabel = '',
     scaleMarks = [],
     description = '',
+    showValue = true,
     disabled = false
   }: Props = $props();
 
@@ -40,9 +40,9 @@
 </script>
 
 <div class="space-y-3">
-  {#if label}
-    <div class="flex items-center justify-between">
-      <label for="labeled-slider-{label}" class="text-sm font-medium text-gray-700">{label}</label>
+  <!-- 数值显示 -->
+  {#if showValue}
+    <div class="flex justify-end">
       <span class="text-sm font-mono text-gray-600 bg-gray-100 px-2 py-1 rounded">
         {formatValue(value)}
       </span>
@@ -83,7 +83,6 @@
     
     <!-- 隐藏的原生滑杆用于交互 -->
     <input
-      id="labeled-slider-{label}"
       type="range"
       bind:value
       {min}
