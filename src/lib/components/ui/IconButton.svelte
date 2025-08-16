@@ -19,7 +19,6 @@
 
   function handleClick(event: MouseEvent) {
     if (!disabled) {
-        console.log('click');
       dispatch('click', event);
     }
   }

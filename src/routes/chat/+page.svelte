@@ -4,6 +4,7 @@
   import ChatInputView from '$lib/components/chat/ChatInputView.svelte';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { sidebarOpen } from '$lib/stores/ui';
 
   let sessionId = $state('');
   let messageInput = $state('');
@@ -96,17 +97,20 @@
 <div class="flex-1 flex flex-col">
   <ChatHeaderView 
     {sessionId} 
-    title={currentSession ? currentSession.title : 'HandBox - AI 助手'} 
+    title={currentSession ? currentSession.title : 'HandBox - AI 助手'}
+    sidebarOpen={$sidebarOpen}
   />
   
   <ChatContentView 
     message={currentMessage} 
   />
   
-  <ChatInputView 
-    bind:messageInput={messageInput}
-    bind:selectedModel={selectedModel}
-    onSendMessage={handleSendMessage}
-    onModelChange={handleModelChange}
-  />
+  <div class="px-4 pb-4">
+    <ChatInputView 
+      bind:messageInput={messageInput}
+      bind:selectedModel={selectedModel}
+      onSendMessage={handleSendMessage}
+      onModelChange={handleModelChange}
+    />
+  </div>
 </div>

@@ -68,7 +68,7 @@
   }
 </script>
 
-<div class="flex flex-col bg-[#f7f7f7] rounded-xl border border-[#ebeaea] max-h-[300px]">
+<div class="flex flex-col bg-[#f7f7f7] rounded-xl border border-[#ebeaea] max-h-[300px] mx-auto w-full max-w-[800px]">
   <textarea
     bind:this={textareaRef}
     bind:value={messageInput}

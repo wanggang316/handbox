@@ -18,8 +18,8 @@
 
 <!-- 消息内容 -->
 <div class="flex-1 overflow-y-auto">
-  <div class="max-w-3xl mx-auto p-4">
-    <div class="text-[20px] leading-[1.73] text-black mb-4 whitespace-pre-line">
+  <div class="w-full max-w-[800px] mx-auto p-4">
+    <div class="text-[16px] leading-[1.73] text-black mb-4 whitespace-pre-line">
       {message.content}
     </div>
     <div class="flex gap-2">

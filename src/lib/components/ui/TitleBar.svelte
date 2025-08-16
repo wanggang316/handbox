@@ -41,7 +41,7 @@
   /* 侧边栏切换按钮 */
   .sidebar-toggle-button {
     position: absolute;
-    top: 8px;
+    top: 11px;
     left: 100px; /* 位于系统按钮右边 */
     pointer-events: auto;
     z-index: 10000;
@@ -53,19 +53,19 @@
   }
 
   /* 响应式设计：调整标题栏按钮位置 */
-  @media (max-width: 768px) {
+  /* @media (max-width: 500px) {
     .sidebar-toggle-button {
       left: 20px;
       top: 12px;
     }
-  }
+  } */
 
-  @media (max-width: 480px) {
+  /* @media (max-width: 480px) {
     .sidebar-toggle-button {
       left: 15px;
       top: 10px;
     }
-  }
+  } */
 </style>
 
 

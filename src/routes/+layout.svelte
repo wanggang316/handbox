@@ -5,7 +5,7 @@
   import { browser } from "$app/environment";
   import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
-  import { currentPage } from "$lib/stores/ui";
+  import { currentPage, sidebarOpen } from "$lib/stores/ui";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏导航配置
@@ -32,16 +32,66 @@
     },
   ];
 
-  let sidebarOpen = $state(true);
-  let sidebarWidth = $state(347);
+  // 侧边栏配置常量
+  const SIDEBAR_AUTO_HIDE_WIDTH = 600;  // 自动隐藏侧边栏的最小窗口宽度阈值
+  const SIDEBAR_INITIAL_WIDTH = 240;    // 侧边栏初始宽度
+  const SIDEBAR_MIN_WIDTH = 200;        // 侧边栏最小宽度
+  const SIDEBAR_MAX_WIDTH = 300;        // 侧边栏最大宽度
+
+  let sidebarWidth = $state(SIDEBAR_INITIAL_WIDTH);
   let isDragging = $state(false);
+  let windowWidth = $state(0);
+  let autoHidden = $state(false); // 标记是否是自动隐藏
+  let userOverrideInNarrowMode = $state(false); // 标记用户在窄屏模式下手动打开了侧边栏
 
   // 切换侧边栏显示状态
   function toggleSidebar() {
-    sidebarOpen = !sidebarOpen;
+    sidebarOpen.update(open => !open);
+    autoHidden = false; // 手动操作时清除自动隐藏标记
+    
+    // 如果在窄屏模式下手动打开侧边栏，标记用户覆盖行为
+    if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH && $sidebarOpen) {
+      userOverrideInNarrowMode = true;
+    } 
+    // 如果在宽屏模式下或手动关闭，清除覆盖标记
+    else if (windowWidth >= SIDEBAR_AUTO_HIDE_WIDTH || !$sidebarOpen) {
+      userOverrideInNarrowMode = false;
+    }
+    
     // 保存状态到 localStorage
     if (browser) {
-      localStorage.setItem('sidebar.open', JSON.stringify(sidebarOpen));
+      localStorage.setItem('sidebar.open', JSON.stringify($sidebarOpen));
+    }
+  }
+
+  // 监听窗口大小变化
+  function handleResize() {
+    if (browser) {
+      const prevWindowWidth = windowWidth;
+      windowWidth = window.innerWidth;
+      
+      // 当窗口宽度小于阈值时的处理
+      if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH) {
+        // 只有在以下情况下才自动隐藏侧边栏：
+        // 1. 侧边栏当前是打开的
+        // 2. 不是已经自动隐藏的状态
+        // 3. 用户没有在窄屏模式下手动覆盖（强制打开）
+        if ($sidebarOpen && !autoHidden && !userOverrideInNarrowMode) {
+          sidebarOpen.set(false);
+          autoHidden = true;
+        }
+      } 
+      // 当窗口宽度从小于阈值变为大于等于阈值时
+      else if (prevWindowWidth < SIDEBAR_AUTO_HIDE_WIDTH) {
+        // 清除窄屏模式下的用户覆盖标记
+        userOverrideInNarrowMode = false;
+        
+        // 如果之前是自动隐藏状态，恢复侧边栏
+        if (autoHidden) {
+          sidebarOpen.set(true);
+          autoHidden = false;
+        }
+      }
     }
   }
 
@@ -59,7 +109,7 @@
     if (browser) {
       const saved = localStorage.getItem('sidebar.open');
       if (saved !== null) {
-        sidebarOpen = JSON.parse(saved);
+        sidebarOpen.set(JSON.parse(saved));
       }
     }
   }
@@ -79,29 +129,35 @@
     // 恢复侧边栏状态
     restoreSidebarState();
     
-    // 添加键盘快捷键监听
+    // 添加键盘快捷键监听和窗口大小监听
     if (browser) {
+      // 初始化窗口宽度
+      windowWidth = window.innerWidth;
+      handleResize(); // 初始检查
+      
       window.addEventListener('keydown', handleKeydown);
+      window.addEventListener('resize', handleResize);
       
       return () => {
         window.removeEventListener('keydown', handleKeydown);
+        window.removeEventListener('resize', handleResize);
       };
     }
   });
 </script>
 
   <div class="app">
-  <TitleBar {sidebarOpen} on:toggle={toggleSidebar} />
+  <TitleBar sidebarOpen={$sidebarOpen} on:toggle={toggleSidebar} />
   
-  <div class="sidebar-wrapper m-2 rounded-2xl overflow-hidden" class:dragging={isDragging} style={`width:${sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!sidebarOpen}>
+  <div class="sidebar-wrapper m-2 rounded-2xl overflow-hidden" class:dragging={isDragging} style={`width:${$sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!$sidebarOpen}>
     <ResizableSidebar
       on:resizeStart={() => { isDragging = true; }}
       on:resizing={(e) => { sidebarWidth = e.detail.width; }}
       on:resizeEnd={(e) => { isDragging = false; sidebarWidth = e.detail.width; }}
       bind:width={sidebarWidth}
-      initialWidth={347}
-      minWidth={240}
-      maxWidth={560}
+      initialWidth={SIDEBAR_INITIAL_WIDTH}
+      minWidth={SIDEBAR_MIN_WIDTH}
+      maxWidth={SIDEBAR_MAX_WIDTH}
       storageKey="main.sidebar.width"
       containerClass=""
     >
@@ -111,7 +167,7 @@
 
   <main
     class="main-content"
-    class:sidebar-hidden={!sidebarOpen}
+    class:sidebar-hidden={!$sidebarOpen}
     style={$page.url.pathname.startsWith("/chat") ? "margin-left:0" : ""}
   >
     <slot />
@@ -156,20 +212,8 @@
 
   /* 响应式设计 */
   @media (max-width: 768px) {
-    .sidebar-toggle-button {
-      left: 20px;
-      top: 12px;
-    }
-    
     .main-content {
       margin-left: 0;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .sidebar-toggle-button {
-      left: 15px;
-      top: 10px;
     }
   }
 
