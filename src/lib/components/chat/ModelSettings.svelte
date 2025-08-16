@@ -1,8 +1,12 @@
 <script lang="ts">
-  import Select from '../ui/Select.svelte';
-  import Toggle from '../ui/Toggle.svelte';
+  import LabeledSlider from '../ui/LabeledSlider.svelte';
+  import SwitchRow from '../ui/SwitchRow.svelte';
+  import NumberStepperRow from '../ui/NumberStepperRow.svelte';
   import Button from '../ui/Button.svelte';
-  import { Settings, Save, RotateCcw, Info } from '@lucide/svelte';
+  import TableGroup from '../ui/TableGroup.svelte';
+  import TableRow from '../ui/TableRow.svelte';
+  import { Save, RotateCcw, Info } from '@lucide/svelte';
+    import RoundButton from '../ui/RoundButton.svelte';
 
   interface Props {
     temperature?: string;
@@ -31,49 +35,37 @@
   }: Props = $props();
 
   let currentSettings = $state({
-    temperature,
-    topP,
+    temperature: parseFloat(temperature),
+    topP: parseFloat(topP),
     streamResponse,
-    maxTokens,
-    contextLength
+    maxTokens: parseInt(maxTokens),
+    contextLength: parseInt(contextLength)
   });
 
   const originalSettings = {
-    temperature,
-    topP,
+    temperature: parseFloat(temperature),
+    topP: parseFloat(topP),
     streamResponse,
-    maxTokens,
-    contextLength
+    maxTokens: parseInt(maxTokens),
+    contextLength: parseInt(contextLength)
   };
 
   let hasChanges = $derived(
     JSON.stringify(currentSettings) !== JSON.stringify(originalSettings)
   );
 
-  const temperatureOptions = [
-    { value: '0.1', label: '0.1 (保守)' },
-    { value: '0.3', label: '0.3 (平衡)' },
-    { value: '0.7', label: '0.7 (创意)' },
-    { value: '1.0', label: '1.0 (随机)' }
-  ];
 
-  const topPOptions = [
-    { value: '0.1', label: '0.1' },
-    { value: '0.5', label: '0.5' },
-    { value: '0.9', label: '0.9' },
-    { value: '1.0', label: '1.0' }
-  ];
-
-  const contextLengthOptions = [
-    { value: '2048', label: '2K tokens' },
-    { value: '4096', label: '4K tokens' },
-    { value: '8192', label: '8K tokens' },
-    { value: '16384', label: '16K tokens' },
-    { value: '32768', label: '32K tokens' }
-  ];
 
   function handleSave() {
-    onSave?.(currentSettings);
+    // 转换回字符串格式，保持与原接口兼容
+    const settingsToSave = {
+      temperature: currentSettings.temperature.toString(),
+      topP: currentSettings.topP.toString(),
+      streamResponse: currentSettings.streamResponse,
+      maxTokens: currentSettings.maxTokens.toString(),
+      contextLength: currentSettings.contextLength.toString()
+    };
+    onSave?.(settingsToSave);
   }
 
   function handleReset() {
@@ -82,21 +74,16 @@
 
   function handleDefault() {
     currentSettings = {
-      temperature: '0.7',
-      topP: '0.9',
+      temperature: 0.7,
+      topP: 0.9,
       streamResponse: true,
-      maxTokens: '2048',
-      contextLength: '4096'
+      maxTokens: 2048,
+      contextLength: 4096
     };
   }
 </script>
 
-<div class="flex-1 p-6 space-y-6">
-  <!-- 标题 -->
-  <div class="flex items-center gap-3">
-    <Settings size={20} />
-    <h3 class="text-lg font-medium text-gray-900">模型参数</h3>
-  </div>
+<div class="flex-1 p-0 space-y-6">
 
   <!-- 说明 -->
   <div class="text-sm text-gray-600 bg-yellow-50 p-4 rounded-lg">
@@ -110,103 +97,109 @@
   </div>
 
   <!-- 参数设置 -->
-  <div class="space-y-6">
-    <!-- Temperature -->
-    <div class="space-y-3">
-      <div>
-        <Select 
-          label="创造性 (Temperature)"
-          bind:value={currentSettings.temperature} 
-          options={temperatureOptions}
-        />
+  <TableGroup>
+    <!-- Temperature 和 Top-P 横向排列 -->
+    <TableRow>
+      <div class="flex flex-row gap-6 w-full">
+        <div class="flex-1">
+          <LabeledSlider 
+            label="Temperature"
+            bind:value={currentSettings.temperature}
+            min={0.1}
+            max={2.0}
+            step={0.1}
+            leftLabel="精确"
+            rightLabel="创意"
+            scaleMarks={[
+              { value: 0, position: 0 },
+              { value: 1, position: 47.37 },
+              { value: 2, position: 100 }
+            ]}
+            description=""
+          />
+        </div>
+        <div class="flex-1">
+          <LabeledSlider 
+            label="Top-p"
+            bind:value={currentSettings.topP}
+            min={0.1}
+            max={1.0}
+            step={0.1}
+            leftLabel="聚焦"
+            rightLabel="多样"
+            scaleMarks={[
+              { value: 0.1, position: 0 },
+              { value: 0.5, position: 44.44 },
+              { value: 1.0, position: 100 }
+            ]}
+            description=""
+          />
+        </div>
       </div>
-      <div class="text-xs text-gray-500 ml-1">
-        控制输出的随机性。较低值产生更确定的结果，较高值增加创造性。
-      </div>
-    </div>
-
-    <!-- Top-P -->
-    <div class="space-y-3">
-      <div>
-        <Select 
-          label="核采样 (Top-p)"
-          bind:value={currentSettings.topP} 
-          options={topPOptions}
-        />
-      </div>
-      <div class="text-xs text-gray-500 ml-1">
-        控制词汇选择的多样性。较低值聚焦于最可能的词汇，较高值允许更多选择。
-      </div>
-    </div>
+    </TableRow>
 
     <!-- 流式输出 -->
-    <div class="space-y-3">
-      <div class="flex items-center justify-between">
-        <div>
-          <label class="text-sm font-medium text-gray-700">流式输出</label>
-          <div class="text-xs text-gray-500 mt-1">
-            开启后，模型回答会逐字显示，提供更好的实时体验。
-          </div>
-        </div>
-        <Toggle bind:checked={currentSettings.streamResponse} />
-      </div>
-    </div>
-
-    <!-- 最大 Token 数 -->
-    <div class="space-y-3">
-      <label class="block text-sm font-medium text-gray-700">最大输出令牌</label>
-      <input 
-        type="number" 
-        bind:value={currentSettings.maxTokens}
-        min="256" 
-        max="8192" 
-        step="256"
-        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    <TableRow>
+      <SwitchRow 
+        label="流式输出"
+        bind:checked={currentSettings.streamResponse}
       />
-      <div class="text-xs text-gray-500">
-        限制模型单次回答的最大长度。1 token 约等于 0.75 个英文单词。
-      </div>
-    </div>
+    </TableRow>
+
+    
+  </TableGroup>
+
+  <TableGroup>
+    <!-- 最大 Token 数 -->
+    <TableRow>
+      <NumberStepperRow 
+        label="最大输出长度"
+        bind:value={currentSettings.maxTokens}
+        min={256}
+        max={8192}
+        step={256}
+      />
+    </TableRow>
 
     <!-- 上下文长度 -->
-    <div class="space-y-3">
-      <div>
-        <Select 
-          label="上下文长度"
-          bind:value={currentSettings.contextLength} 
-          options={contextLengthOptions}
-        />
-      </div>
-      <div class="text-xs text-gray-500 ml-1">
-        模型能够记住的对话历史长度。更长的上下文需要更多计算资源。
-      </div>
-    </div>
-  </div>
+    <TableRow>
+      <NumberStepperRow 
+        label="上下文长度"
+        bind:value={currentSettings.contextLength}
+        min={2048}
+        max={32768}
+        step={2048}
+      />
+    </TableRow>
+  </TableGroup>
 
   <!-- 操作按钮 -->
-  <div class="flex gap-3 pt-4 border-t border-gray-200">
-    <Button
-      on:click={handleDefault}
-      variant="secondary"
-      size="sm"
-    >
-      恢复默认
-    </Button>
-    <Button
-      on:click={handleReset}
-      variant="secondary"
+  <div class="flex gap-3 pt-4 justify-end">
+
+    <RoundButton 
+      customClass="w-24"
+      label="恢复默认" 
+      bgColor="bg-gray-200"
+      textColor="text-gray-600"
+      hoverColor="hover:text-gray-800"
+      on:click={handleDefault} 
+    ></RoundButton>
+
+    <RoundButton 
+      customClass="w-18"
+      label="重置" 
+      bgColor="bg-gray-200"
+      textColor="text-gray-600"
+      hoverColor="hover:text-gray-800"
+      on:click={handleReset} 
       disabled={!hasChanges}
-    >
-      <RotateCcw size={14} />
-      重置
-    </Button>
-    <Button
-      on:click={handleSave}
-      variant="primary"
+    ></RoundButton>
+
+    <RoundButton 
+      customClass="w-18"
+      label="保存" 
+      on:click={handleSave} 
       disabled={!hasChanges}
-    >
-      <Save size={14} />
-      保存
-    </Button>
+    ></RoundButton>
   </div>
 </div>

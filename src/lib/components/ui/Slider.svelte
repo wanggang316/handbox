@@ -1,0 +1,106 @@
+<script lang="ts">
+  interface Props {
+    label?: string;
+    value: number;
+    min?: number;
+    max?: number;
+    step?: number;
+    formatValue?: (value: number) => string;
+    description?: string;
+    disabled?: boolean;
+  }
+
+  let { 
+    label = '',
+    value = $bindable(),
+    min = 0,
+    max = 100,
+    step = 1,
+    formatValue = (val: number) => val.toString(),
+    description = '',
+    disabled = false
+  }: Props = $props();
+
+  // 计算滑杆位置百分比
+  let percentage = $derived(((value - min) / (max - min)) * 100);
+</script>
+
+<div class="space-y-2">
+  {#if label}
+    <div class="flex items-center justify-between">
+      <label for="slider-{label}" class="text-sm font-medium text-gray-700">{label}</label>
+      <span class="text-sm font-mono text-gray-600 bg-gray-100 px-2 py-1 rounded">
+        {formatValue(value)}
+      </span>
+    </div>
+  {/if}
+  
+  <div class="relative">
+    <input
+      id="slider-{label}"
+      type="range"
+      bind:value
+      {min}
+      {max}
+      {step}
+      {disabled}
+      class="slider w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      style="background: linear-gradient(to right, #3b82f6 0%, #3b82f6 {percentage}%, #e5e7eb {percentage}%, #e5e7eb 100%)"
+    />
+  </div>
+  
+  {#if description}
+    <div class="text-xs text-gray-500">
+      {description}
+    </div>
+  {/if}
+</div>
+
+<style>
+  .slider::-webkit-slider-thumb {
+    appearance: none;
+    height: 20px;
+    width: 20px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+  }
+
+  .slider::-webkit-slider-thumb:hover {
+    background: #2563eb;
+    transform: scale(1.1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .slider::-moz-range-thumb {
+    height: 20px;
+    width: 20px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+  }
+
+  .slider::-moz-range-thumb:hover {
+    background: #2563eb;
+    transform: scale(1.1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .slider:disabled::-webkit-slider-thumb {
+    background: #9ca3af;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .slider:disabled::-moz-range-thumb {
+    background: #9ca3af;
+    cursor: not-allowed;
+    transform: none;
+  }
+</style>

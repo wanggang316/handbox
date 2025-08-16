@@ -1,0 +1,101 @@
+<script lang="ts">
+  import { ChevronUp, ChevronDown } from '@lucide/svelte';
+
+  interface Props {
+    value: number;
+    min?: number;
+    max?: number;
+    step?: number;
+    formatValue?: (value: number) => string;
+    placeholder?: string;
+    disabled?: boolean;
+  }
+
+  let { 
+    value = $bindable(),
+    min = 0,
+    max = Infinity,
+    step = 1,
+    formatValue = (val: number) => val.toString(),
+    placeholder = '',
+    disabled = false
+  }: Props = $props();
+
+  function increment() {
+    if (disabled || value + step > max) return;
+    value = Math.min(value + step, max);
+  }
+
+  function decrement() {
+    if (disabled || value - step < min) return;
+    value = Math.max(value - step, min);
+  }
+
+  function handleInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const newValue = parseInt(target.value);
+    if (!isNaN(newValue)) {
+      value = Math.max(min, Math.min(max, newValue));
+    }
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      increment();
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      decrement();
+    }
+  }
+</script>
+
+<div class="relative flex items-center">
+  <input
+    type="number"
+    {value}
+    {min}
+    {max}
+    {step}
+    {placeholder}
+    {disabled}
+    oninput={handleInput}
+    onkeydown={handleKeydown}
+    class="flex-1 px-3 py-2 pr-12 text-right bg-transparent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+  />
+  
+  <div class="absolute right-1 flex flex-col">
+    <button
+      type="button"
+      onclick={increment}
+      disabled={disabled || value >= max}
+      class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      aria-label="增加"
+    >
+      <ChevronUp size={14} />
+    </button>
+    <button
+      type="button"
+      onclick={decrement}
+      disabled={disabled || value <= min}
+      class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      aria-label="减少"
+    >
+      <ChevronDown size={14} />
+    </button>
+  </div>
+</div>
+
+<style>
+  /* 隐藏默认的数字输入框步进按钮 */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  
+  input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+</style>

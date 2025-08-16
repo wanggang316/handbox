@@ -123,7 +123,7 @@
     />
     
     <!-- 右侧内容区域 -->
-    <div class="flex-1 flex flex-col">
+    <div class="flex-1 flex flex-col my-6 ml-2 mr-4">
       <!-- 内容区域 -->
       <div class="flex-1 overflow-y-auto">
         {#if activeTab === 'prompt'}
