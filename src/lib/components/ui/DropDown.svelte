@@ -99,7 +99,7 @@
   }
 
   // 组合样式类
-  const defaultButtonClass = "h-8 px-3 rounded-md text-[14px] leading-[1.2] text-black flex items-center gap-1 hover:bg-gray-50 transition-colors";
+  const defaultButtonClass = "h-8 px-3 rounded-md text-[14px] leading-[1.2] text-black flex items-center gap-1 hover:bg-bg-hover transition-colors";
   const finalButtonClass = `${defaultButtonClass} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${buttonClass}`;
 
   const positionClass = position === 'top' ? 'bottom-full mb-1' : 'top-full mt-1';

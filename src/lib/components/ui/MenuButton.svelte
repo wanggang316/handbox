@@ -14,8 +14,8 @@
   export let iconClass: string = "";
   
   // 默认样式
-  const defaultButtonClass = "w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-gray-700 hover:bg-[#EDEDED] transition-colors truncate";
-  const defaultActiveClass = "bg-[#EDEDED]";
+  const defaultButtonClass = "w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-gray-700 hover:bg-bg-hover transition-colors truncate";
+  const defaultActiveClass = "bg-bg-hover";
   const defaultIconClass = "flex-shrink-0";
   
   $: finalButtonClass = `${defaultButtonClass} ${isActive ? defaultActiveClass + ' ' + activeClass : ''} ${buttonClass}`;
