@@ -5,7 +5,7 @@
   import { browser } from "$app/environment";
   import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
-  import { currentPage, sidebarOpen } from "$lib/stores/ui";
+  import { currentPage, sidebarOpen, theme, uiActions } from "$lib/stores/ui";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏导航配置
@@ -129,6 +129,27 @@
     // 恢复侧边栏状态
     restoreSidebarState();
     
+    // 初始化主题
+    if (browser) {
+      // 从 localStorage 恢复主题设置
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
+        uiActions.setTheme(savedTheme as 'light' | 'dark' | 'system');
+      } else {
+        // 默认跟随系统主题
+        uiActions.setTheme('system');
+      }
+      
+      // 监听系统主题变化
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleSystemThemeChange = () => {
+        if ($theme === 'system') {
+          uiActions.setTheme('system'); // 重新应用系统主题
+        }
+      };
+      mediaQuery.addEventListener('change', handleSystemThemeChange);
+    }
+    
     // 添加键盘快捷键监听和窗口大小监听
     if (browser) {
       // 初始化窗口宽度
@@ -149,7 +170,7 @@
   <div class="app">
   <TitleBar sidebarOpen={$sidebarOpen} on:toggle={toggleSidebar} />
   
-  <div class="sidebar-wrapper m-2 rounded-2xl overflow-hidden" class:dragging={isDragging} style={`width:${$sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!$sidebarOpen}>
+  <div class="sidebar-wrapper m-2" class:dragging={isDragging} style={`width:${$sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!$sidebarOpen}>
     <ResizableSidebar
       on:resizeStart={() => { isDragging = true; }}
       on:resizing={(e) => { sidebarWidth = e.detail.width; }}
@@ -217,28 +238,7 @@
     }
   }
 
-  /* CSS 变量定义 */
-  :global(:root) {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f8fafc;
-    --bg-hover: #f1f5f9;
-    --bg-accent: #3b82f6;
-    --text-primary: #1e293b;
-    --text-secondary: #64748b;
-    --text-accent: #ffffff;
-    --border-color: #e2e8f0;
-  }
-
-  :global([data-theme="dark"]) {
-    --bg-primary: #0f172a;
-    --bg-secondary: #1e293b;
-    --bg-hover: #334155;
-    --bg-accent: #3b82f6;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-accent: #ffffff;
-    --border-color: #334155;
-  }
+  /* 主题变量现在在 app.css 中使用 @theme 指令定义 */
 
   /* 全局样式重置 */
   :global(*, *::before, *::after) {

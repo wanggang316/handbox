@@ -1,9 +1,56 @@
 @import "tailwindcss";
 
+/* 使用 Tailwind @theme 指令定义主题变量 */
+@theme {
+  /* 浅色主题 */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f8f8;
+  --color-bg-hover: #ededed;
+  --color-bg-accent: #5661f6;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-text-accent: #ffffff;
+  --color-border: #ebeaea;
+  
+  /* 深色主题变量 */
+  --color-bg-primary-dark: #0f172a;
+  --color-bg-secondary-dark: #1e293b;
+  --color-bg-hover-dark: #334155;
+  --color-bg-accent-dark: #3b82f6;
+  --color-text-primary-dark: #f8fafc;
+  --color-text-secondary-dark: #94a3b8;
+  --color-text-accent-dark: #ffffff;
+  --color-border-dark: #334155;
+}
+
 /* 禁用桌面应用的全局滚动，但保留内部组件滚动 */
 html, body {
   height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden; /* 禁用页面级别的滚动条 */
+}
+
+/* 浅色主题（默认） */
+:root {
+  --bg-primary: var(--color-bg-primary);
+  --bg-secondary: var(--color-bg-secondary);
+  --bg-hover: var(--color-bg-hover);
+  --bg-accent: var(--color-bg-accent);
+  --text-primary: var(--color-text-primary);
+  --text-secondary: var(--color-text-secondary);
+  --text-accent: var(--color-text-accent);
+  --border-color: var(--color-border);
+}
+
+/* 深色主题 */
+[data-theme="dark"] {
+  --bg-primary: var(--color-bg-primary-dark);
+  --bg-secondary: var(--color-bg-secondary-dark);
+  --bg-hover: var(--color-bg-hover-dark);
+  --bg-accent: var(--color-bg-accent-dark);
+  --text-primary: var(--color-text-primary-dark);
+  --text-secondary: var(--color-text-secondary-dark);
+  --text-accent: var(--color-text-accent-dark);
+  --border-color: var(--color-border-dark);
 }

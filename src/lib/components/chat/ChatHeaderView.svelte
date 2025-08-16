@@ -1,6 +1,8 @@
 <script lang="ts">
     import { Ellipsis } from "@lucide/svelte";
     import IconButton from "../ui/IconButton.svelte";
+    import ChatSettings from "./ChatSettings.svelte";
+    import { modals, uiActions } from "../../stores/ui";
 
   interface Props {
     sessionId?: string;
@@ -14,9 +16,14 @@
     sidebarOpen = true 
   }: Props = $props();
 
+  const CHAT_SETTINGS_MODAL = 'chat-settings';
+
   function handleChatSettings() {
-    console.log('设置按钮被点击');
-    // 这里可以添加设置功能的逻辑
+    uiActions.openModal(CHAT_SETTINGS_MODAL);
+  }
+
+  function handleCloseChatSettings() {
+    uiActions.closeModal(CHAT_SETTINGS_MODAL);
   }
 </script>
 
@@ -39,3 +46,9 @@
     />
   </div>
 </header>
+
+<!-- 聊天设置模态框 -->
+<ChatSettings 
+  open={$modals[CHAT_SETTINGS_MODAL] || false}
+  onClose={handleCloseChatSettings}
+/>

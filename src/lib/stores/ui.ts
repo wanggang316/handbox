@@ -43,8 +43,11 @@ export const isDarkMode = derived(
     if ($theme === 'dark') return true;
     if ($theme === 'light') return false;
     
-    // 跟随系统
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    // 跟随系统 - 需要检查浏览器环境
+    if (typeof window !== 'undefined') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
   }
 );
 
@@ -133,10 +136,21 @@ export const uiActions = {
   setTheme(newTheme: Theme): void {
     theme.set(newTheme);
     
-    // 更新 HTML 类名
-    document.documentElement.className = newTheme === 'system' 
-      ? '' 
-      : newTheme;
+    // 保存到 localStorage
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('theme', newTheme);
+    }
+    
+    // 更新 HTML data-theme 属性以匹配 CSS 选择器
+    if (typeof document !== 'undefined') {
+      if (newTheme === 'system') {
+        // 跟随系统主题
+        const systemIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', systemIsDark ? 'dark' : 'light');
+      } else {
+        document.documentElement.setAttribute('data-theme', newTheme);
+      }
+    }
   },
 
   /**

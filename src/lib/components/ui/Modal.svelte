@@ -1,32 +1,35 @@
 <script lang="ts">
+  import TrafficLightsRedButton from './TrafficLightsRedButton.svelte';
+
   export let open = false;
   export let title = '';
   export let onClose: () => void = () => {};
 </script>
 
 {#if open}
-  <div class="modal-overlay" role="dialog" aria-modal="true" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div class="modal">
-      <div class="modal-header">
-        <h3>{title}</h3>
-        <button class="close-btn" aria-label="Close" onclick={onClose}>
-          ✕
-        </button>
+  <div 
+    class="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]" 
+    role="dialog" 
+    aria-modal="true"
+    tabindex="-1"
+    onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
+  >
+    <div class="bg-white w-[650px] max-w-4xl shadow-2xl overflow-hidden relative" style="border-radius: 20px;">
+      <!-- Overlay 标题视图 -->
+      <div class="absolute top-0 left-0 right-0 z-20 flex items-center px-5 py-4">
+        <TrafficLightsRedButton onClick={onClose} />
+        {#if title}
+          <h3 class="text-base font-medium text-gray-600 ml-4">{title}</h3>
+        {/if}
       </div>
-      <div class="modal-content">
+      
+      <!-- 内容区域 -->
+      <div class="px-0 py-0">
         <slot />
       </div>
     </div>
   </div>
 {/if}
-
-<style>
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal { background: var(--bg-primary); border-radius: 8px; width: 90%; max-width: 560px; box-shadow: 0 10px 25px rgba(0,0,0,.15); overflow: hidden; }
-.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-color); }
-.modal-content { padding: 1rem 1.25rem; }
-.close-btn { background: none; border: 1px solid var(--border-color); border-radius: 6px; padding: .25rem .5rem; cursor: pointer; color: var(--text-secondary); }
-.close-btn:hover { background: var(--bg-hover); }
-</style>
 
 

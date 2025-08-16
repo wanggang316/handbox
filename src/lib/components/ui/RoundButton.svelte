@@ -24,7 +24,7 @@
 </script>
 
 <button
-  class="flex-1 {size} {bgColor} {hoverColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 transition-colors {customClass}"
+  class="{size} {bgColor} {hoverColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 transition-colors {customClass}"
   class:opacity-50={disabled}
   class:cursor-not-allowed={disabled}
   on:click={handleClick}
