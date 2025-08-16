@@ -9,7 +9,7 @@
 
   let { activeTab, onTabChange }: Props = $props();
 
-  const menuItems = [
+  const menuItems = $derived([
     {
       id: 'prompt',
       title: '提示词',
@@ -28,7 +28,7 @@
       icon: Server,
       isActive: activeTab === 'mcp'
     }
-  ];
+  ]);
 
   function handleItemClick(item: any) {
     onTabChange(item.id);

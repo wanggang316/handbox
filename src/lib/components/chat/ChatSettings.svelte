@@ -27,6 +27,7 @@
   let enabledMcpServers = $state<string[]>([]);
 
   function handleTabChange(tab: string) {
+    console.log('切换到:', tab);
     activeTab = tab;
   }
 
