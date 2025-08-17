@@ -8,6 +8,7 @@
     step?: number;
     formatValue?: (value: number) => string;
     placeholder?: string;
+    defaultValue?: number;
     disabled?: boolean;
   }
 
@@ -18,8 +19,13 @@
     step = 1,
     formatValue = (val: number) => val.toString(),
     placeholder = '',
+    defaultValue,
     disabled = false
   }: Props = $props();
+
+  // 当当前值等于默认值时，显示 placeholder 而不是实际值
+  const shouldShowPlaceholder = $derived(defaultValue !== undefined && value === defaultValue);
+  const displayValue = $derived(shouldShowPlaceholder ? '' : value);
 
   function increment() {
     if (disabled || value + step > max) return;
@@ -53,7 +59,7 @@
 <div class="relative flex items-center">
   <input
     type="number"
-    {value}
+    value={displayValue}
     {min}
     {max}
     {step}
