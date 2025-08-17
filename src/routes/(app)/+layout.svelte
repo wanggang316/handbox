@@ -112,7 +112,7 @@
     }
   });
 
-  export let children;
+  let { children } = $props();
 </script>
 
 <div class="app">

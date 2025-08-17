@@ -1,20 +1,12 @@
 <script lang="ts">
   import "../../app.css";
-  export let children;
+  import SettingsSidebar from "$lib/components/settings/SettingsSidebar.svelte";
+  let { children } = $props();
 </script>
 
-<div class="settings-root">
-  {@render children()}
+<div class="flex h-screen bg-[color:var(--bg-primary)]">
+  <SettingsSidebar />
+  <main class="flex-1 overflow-auto">
+    {@render children()}
+  </main>
 </div>
-
-<style>
-  .settings-root {
-    height: 100vh;
-    width: 100vw;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-</style>
