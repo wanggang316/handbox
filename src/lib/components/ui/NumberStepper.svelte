@@ -67,7 +67,7 @@
     {disabled}
     oninput={handleInput}
     onkeydown={handleKeydown}
-    class="flex-1 px-3 py-2 pr-12 text-right bg-transparent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+    class="flex-1 px-3 py-1 pr-7 text-sm text-right bg-transparent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
   />
   
   <div class="absolute right-1 flex flex-col">
@@ -78,7 +78,7 @@
       class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       aria-label="增加"
     >
-      <ChevronUp size={14} />
+      <ChevronUp size={12} />
     </button>
     <button
       type="button"
@@ -87,7 +87,7 @@
       class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       aria-label="减少"
     >
-      <ChevronDown size={14} />
+      <ChevronDown size={12} />
     </button>
   </div>
 </div>

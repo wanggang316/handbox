@@ -75,35 +75,24 @@
     JSON.stringify(originalEnabledServers.sort())
   );
 
-
-
-  function handleSave() {
-    const enabledServerIds = currentServers.filter(s => s.enabled).map(s => s.id);
-    onSave?.(enabledServerIds);
-  }
-
   function handleRefresh() {
     onRefresh?.();
   }
 
-
-
-
 </script>
 
-<div class="flex-1 p-0 space-y-6">
-  <!-- 标题 -->
+<div class="flex-1 mt-1 p-0 space-y-2">
+
   <div class="flex items-center justify-end">
     <Button
       on:click={handleRefresh}
-      variant="secondary"
+      variant="clear"
       size="sm"
     >
       <RefreshCw size={14} />
       刷新状态
     </Button>
   </div>
-
 
   <!-- 服务器列表 -->
   {#if currentServers.length > 0}
@@ -122,5 +111,4 @@
       <p class="text-sm">请在应用设置中配置 MCP 服务器</p>
     </div>
   {/if}
-
 </div>

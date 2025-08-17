@@ -27,7 +27,7 @@
     temperature = '0.7',
     topP = '0.9',
     streamResponse = true,
-    maxTokens = '2048',
+    maxTokens = '0',
     contextLength = '10',
     onSave
   }: Props = $props();
@@ -75,7 +75,7 @@
       temperature: 0.7,
       topP: 0.9,
       streamResponse: true,
-      maxTokens: 2048,
+      maxTokens: 0,
       contextLength: 10
     };
   }

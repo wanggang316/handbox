@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let variant: 'primary' | 'secondary' | 'danger' | 'ghost' = 'primary';
+  export let variant: 'primary' | 'secondary' | 'danger' | 'ghost' | 'clear' = 'primary';
   export let size: 'sm' | 'md' = 'md';
   export let disabled = false;
   export let type: 'button' | 'submit' | 'reset' = 'button';
@@ -16,7 +16,7 @@
       display: inline-flex;
       align-items: center;
       gap: 0.5rem;
-      transition: opacity 0.2s;
+      /* transition: opacity 0.2s, background-color 0.2s; */
     }
     .btn:disabled {
       opacity: 0.6;
@@ -28,6 +28,8 @@
     .secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); }
     .danger { background: #ef4444; color: #fff; }
     .ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }
+    .clear { background: transparent; color: var(--text-primary); border: none; }
+    .btn.clear:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); opacity: 1; }
     .btn:hover:not(:disabled) { opacity: 0.9; }
   </style>
 </button>
