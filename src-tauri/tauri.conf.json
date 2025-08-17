@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "handbox",
         "width": 1200,
         "height": 800,
@@ -20,6 +21,25 @@
         "transparent": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 15,
+          "y": 27
+        }
+      },
+      {
+        "label": "settings",
+        "title": "Settings - handbox",
+        "url": "/settings",
+        "width": 800,
+        "height": 600,
+        "minWidth": 600,
+        "minHeight": 400,
+        "decorations": true,
+        "transparent": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "visible": false,
+        "resizable": true,
         "trafficLightPosition": {
           "x": 15,
           "y": 27

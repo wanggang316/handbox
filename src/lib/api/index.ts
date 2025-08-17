@@ -57,3 +57,4 @@ export * from './provider';
 export * from './artifact';
 export * from './settings';
 export * from './search';
+export * from './window';

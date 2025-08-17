@@ -5,6 +5,7 @@ pub mod chat;
 pub mod provider;
 pub mod search;
 pub mod settings;
+pub mod window;
 
 // 重新导出所有命令
 pub use artifact::*;
@@ -12,3 +13,4 @@ pub use chat::*;
 pub use provider::*;
 pub use search::*;
 pub use settings::*;
+pub use window::*;

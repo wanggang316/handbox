@@ -3,6 +3,7 @@
 // 声明模块
 pub mod commands;
 pub mod config;
+pub mod menu;
 pub mod models;
 pub mod services;
 pub mod utils;
@@ -73,6 +74,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // 创建菜单
+            let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
+            app.set_menu(menu).expect("Failed to set menu");
+
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -83,6 +88,9 @@ pub fn run() {
             });
 
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            crate::menu::handle_menu_event(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
             // 测试命令
@@ -98,6 +106,10 @@ pub fn run() {
             chat_update_message,
             chat_delete_message,
             chat_regenerate_message,
+            // 窗口管理命令
+            open_settings_window,
+            close_settings_window,
+            toggle_settings_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

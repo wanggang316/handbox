@@ -1,314 +1,343 @@
 <script lang="ts">
-  import SettingsPanel from '$lib/components/settings/SettingsPanel.svelte';
+  import { onMount } from 'svelte';
+  import { 
+    User, 
+    Palette, 
+    Brain, 
+    Zap, 
+    Keyboard, 
+    Info 
+  } from '@lucide/svelte';
+  
+  // 设置页面状态
+  let activeSection = $state('account');
+  
+  // 设置菜单项
+  const settingsMenu = [
+    { 
+      id: 'account', 
+      title: '账户', 
+      icon: User,
+      description: '登录状态、用户资料管理'
+    },
+    { 
+      id: 'general', 
+      title: '通用', 
+      icon: Palette,
+      description: '外观、语言、主题等基础设置'
+    },
+    { 
+      id: 'models', 
+      title: '模型', 
+      icon: Brain,
+      description: '管理AI模型供应商和模型配置'
+    },
+    { 
+      id: 'mcp', 
+      title: 'MCP', 
+      icon: Zap,
+      description: 'Model Context Protocol 服务器管理'
+    },
+    { 
+      id: 'shortcuts', 
+      title: '快捷键', 
+      icon: Keyboard,
+      description: '自定义键盘快捷键'
+    },
+    { 
+      id: 'about', 
+      title: '关于', 
+      icon: Info,
+      description: '版本信息、更新、官网链接'
+    }
+  ];
+
+  function handleMenuClick(sectionId: string) {
+    activeSection = sectionId;
+  }
 </script>
 
-<SettingsPanel />
+<div class="settings-layout">
+  <!-- 设置侧边栏 -->
+  <div class="settings-sidebar">
+    <div class="sidebar-header">
+      <h2>设置</h2>
+    </div>
+    
+    <div class="sidebar-content">
+      <nav class="settings-nav">
+        {#each settingsMenu as item (item.id)}
+          {@const IconComponent = item.icon}
+          <button 
+            class="nav-item"
+            class:active={activeSection === item.id}
+            onclick={() => handleMenuClick(item.id)}
+          >
+            <div class="nav-icon">
+              <IconComponent size={18} />
+            </div>
+            <div class="nav-content">
+              <div class="nav-title">{item.title}</div>
+              <div class="nav-desc">{item.description}</div>
+            </div>
+          </button>
+        {/each}
+      </nav>
+    </div>
+  </div>
+
+  <!-- 设置内容区域 -->
+  <div class="settings-main">
+    <div class="content-container">
+      {#if activeSection === 'account'}
+        <div class="content-section">
+          <h3>账户设置</h3>
+          <div class="section-content">
+            <p>用户登录、资料管理等功能将在这里实现</p>
+          </div>
+        </div>
+      {:else if activeSection === 'general'}
+        <div class="content-section">
+          <h3>通用设置</h3>
+          <div class="section-content">
+            <p>外观主题、语言、界面等设置将在这里实现</p>
+          </div>
+        </div>
+      {:else if activeSection === 'models'}
+        <div class="content-section">
+          <h3>模型管理</h3>
+          <div class="section-content">
+            <p>AI模型供应商和模型配置将在这里实现</p>
+          </div>
+        </div>
+      {:else if activeSection === 'mcp'}
+        <div class="content-section">
+          <h3>MCP 设置</h3>
+          <div class="section-content">
+            <p>Model Context Protocol 服务器管理将在这里实现</p>
+          </div>
+        </div>
+      {:else if activeSection === 'shortcuts'}
+        <div class="content-section">
+          <h3>快捷键设置</h3>
+          <div class="section-content">
+            <p>键盘快捷键自定义将在这里实现</p>
+          </div>
+        </div>
+      {:else if activeSection === 'about'}
+        <div class="content-section">
+          <h3>关于 HandBox</h3>
+          <div class="section-content">
+            <p>版本信息、更新检查、官网链接等将在这里实现</p>
+          </div>
+        </div>
+      {/if}
+    </div>
+  </div>
+</div>
 
 <style>
-.settings-container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.settings-header {
-  margin-bottom: 2rem;
-}
-
-.settings-header h1 {
-  margin: 0 0 0.5rem 0;
-  font-size: 2rem;
-  font-weight: 700;
-}
-
-.settings-header p {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
-/* 标签页样式 */
-.tabs {
+/* 设置页面布局 */
+.settings-layout {
   display: flex;
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 2rem;
+  height: 100vh;
+  background: var(--bg-primary);
 }
 
-.tab {
-  padding: 0.75rem 1.5rem;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  font-weight: 500;
-  color: var(--text-secondary);
-  transition: all 0.2s;
-}
-
-.tab:hover {
-  color: var(--text-primary);
-}
-
-.tab.active {
-  color: var(--bg-accent);
-  border-bottom-color: var(--bg-accent);
-}
-
-/* 内容区域样式 */
-.section {
-  margin-bottom: 2rem;
-}
-
-.section-header {
+/* 设置侧边栏 - 参考 MainSidebar 样式 */
+.settings-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  background: #f8f8f8;
+  border-radius: 0 16px 16px 0;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
-.section h2 {
+.sidebar-header {
+  padding: 24px 20px 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+}
+
+.sidebar-header h2 {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 600;
-}
-
-/* 按钮样式 */
-.btn-primary {
-  background: var(--bg-accent);
-  color: var(--text-accent);
-  border: none;
-  border-radius: 6px;
-  padding: 0.5rem 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.btn-primary:hover {
-  opacity: 0.9;
-}
-
-.btn-secondary {
-  background: var(--bg-secondary);
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 0.5rem 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
-.btn-secondary:hover {
-  background: var(--bg-hover);
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
 }
 
-.btn-secondary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-danger {
-  background: #ef4444;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  padding: 0.5rem 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.btn-danger:hover {
-  opacity: 0.9;
-}
-
-/* 供应商列表样式 */
-.providers-list {
+/* 导航菜单样式 */
+.settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 2px;
 }
 
-.provider-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-}
-
-.provider-info h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-}
-
-.provider-type {
-  margin: 0 0 0.25rem 0;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.provider-model {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  opacity: 0.7;
-}
-
-.provider-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.empty-state {
-  text-align: center;
-  padding: 3rem 1rem;
-  color: var(--text-secondary);
-}
-
-.empty-description {
-  font-size: 0.875rem;
-  opacity: 0.7;
-  margin-top: 0.5rem;
-}
-
-/* 设置组样式 */
-.setting-group {
-  margin-bottom: 1.5rem;
-}
-
-.setting-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-}
-
-.setting-label {
+.nav-item {
   display: flex;
   align-items: center;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
   cursor: pointer;
-}
-
-.setting-label input[type="checkbox"] {
-  margin-right: 0.5rem;
-}
-
-.number-input,
-.select-input {
-  width: 200px;
-  padding: 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-primary);
+  text-align: left;
+  transition: all 0.2s ease;
   color: var(--text-primary);
 }
 
-/* 模态框样式 */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+.nav-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.nav-item.active {
+  background: var(--bg-accent);
+  color: white;
+}
+
+.nav-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  margin-right: 12px;
+  flex-shrink: 0;
 }
 
-.modal {
-  background: var(--bg-primary);
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-  max-width: 500px;
-  width: 90%;
-  max-height: 90vh;
-  overflow-y: auto;
+.nav-content {
+  flex: 1;
+  min-width: 0;
 }
 
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-secondary);
-  padding: 0.25rem;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-}
-
-.close-btn:hover {
-  background: var(--bg-hover);
-}
-
-.modal-content {
-  padding: 1.5rem;
-}
-
-.form-group {
-  margin-bottom: 1.5rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-}
-
-.form-group input,
-.form-group select {
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+.nav-title {
   font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 2px;
+  line-height: 1.4;
 }
 
-.form-group input:focus,
-.form-group select:focus {
-  outline: none;
-  border-color: var(--bg-accent);
+.nav-desc {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.modal-actions {
+.nav-item.active .nav-desc {
+  opacity: 0.9;
+}
+
+/* 主内容区域 */
+.settings-main {
+  flex: 1;
+  background: var(--bg-primary);
+  overflow: hidden;
   display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 2rem;
+  flex-direction: column;
+}
+
+.content-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 40px;
+  max-width: 800px;
+}
+
+.content-section {
+  margin-bottom: 2rem;
+}
+
+.content-section h3 {
+  margin: 0 0 24px 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.section-content {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.section-content p {
+  margin: 0 0 1rem 0;
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
-  .settings-container {
-    padding: 1rem;
-  }
-  
-  .provider-card {
+  .settings-layout {
     flex-direction: column;
-    align-items: flex-start;
-    gap: 1rem;
+    height: auto;
+    min-height: 100vh;
   }
   
-  .provider-actions {
+  .settings-sidebar {
     width: 100%;
-    justify-content: flex-end;
+    border-radius: 0;
+    height: auto;
+    max-height: 40vh;
+  }
+  
+  .sidebar-content {
+    overflow-y: visible;
+    max-height: none;
+  }
+  
+  .settings-nav {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
+  
+  .nav-item {
+    flex-direction: column;
+    text-align: center;
+    padding: 16px 8px;
+  }
+  
+  .nav-icon {
+    margin-right: 0;
+    margin-bottom: 8px;
+  }
+  
+  .nav-desc {
+    white-space: normal;
+    text-align: center;
+  }
+  
+  .content-container {
+    padding: 24px 16px;
+  }
+  
+  .content-section h3 {
+    font-size: 1.5rem;
+    margin-bottom: 16px;
+  }
+}
+
+/* 暗色主题适配 */
+@media (prefers-color-scheme: dark) {
+  .settings-sidebar {
+    background: #2a2a2a;
+  }
+  
+  .nav-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  
+  .sidebar-header {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
   }
 }
 </style>

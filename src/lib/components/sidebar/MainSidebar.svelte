@@ -19,6 +19,7 @@
     Plus,
     Search
   } from '@lucide/svelte';
+  import { openSettingsWindow } from '$lib/api/window';
 
   // 基础会话数据（不包含 isActive，这将动态计算）
   const baseSessions = [
@@ -91,7 +92,10 @@
   function handleUserClick() {
     if (currentUser.isLoggedIn) {
       console.log('打开用户设置');
-      // 这里可以添加打开用户设置页面的逻辑
+      // 打开独立的设置窗口
+      openSettingsWindow().catch(err => {
+        console.error('Failed to open settings window:', err);
+      });
     } else {
       console.log('跳转到登录页面');
       // 这里可以添加跳转到登录页面的逻辑
