@@ -4,6 +4,7 @@
   import { createEventDispatcher } from 'svelte';
 
   export let sidebarOpen: boolean = true;
+  export let showToggleButton: boolean = true;
 
   const dispatch = createEventDispatcher();
   function handleToggle() {
@@ -12,13 +13,15 @@
 </script>
 
 <div class="drag-region" data-tauri-drag-region>
-  <div class="sidebar-toggle-button">
-    <IconButton
-      icon={PanelLeft}
-      ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
-      on:click={handleToggle}
-    />
-  </div>
+  {#if showToggleButton}
+    <div class="sidebar-toggle-button">
+      <IconButton
+        icon={PanelLeft}
+        ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
+        on:click={handleToggle}
+      />
+    </div>
+  {/if}
   <slot />
   <!-- 如果未来还需要在标题栏放入其他控件，可通过 slot 注入 -->
   

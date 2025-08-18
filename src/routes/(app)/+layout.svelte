@@ -1,11 +1,10 @@
 <script lang="ts">
   import "../../app.css";
-  import { page } from "$app/stores";
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
   import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
-  import { currentPage, sidebarOpen, theme, uiActions } from "$lib/stores/ui";
+  import { sidebarOpen } from "$lib/stores/ui";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏配置常量
@@ -83,21 +82,10 @@
     // 恢复侧边栏状态
     restoreSidebarState();
     
-    // 初始化主题
-    if (browser) {
-      const savedTheme = localStorage.getItem('theme');
-      if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
-        uiActions.setTheme(savedTheme as 'light' | 'dark' | 'system');
-      } else {
-        uiActions.setTheme('system');
-      }
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handleSystemThemeChange = () => {
-        if ($theme === 'system') {
-          uiActions.setTheme('system');
-        }
-      };
-      mediaQuery.addEventListener('change', handleSystemThemeChange);
+    // 从 localStorage 恢复侧边栏宽度
+    const savedWidth = localStorage.getItem('main.sidebar.width');
+    if (savedWidth) {
+      sidebarWidth = parseInt(savedWidth);
     }
     
     if (browser) {
@@ -116,7 +104,7 @@
 </script>
 
 <div class="app">
-  <TitleBar sidebarOpen={$sidebarOpen} on:toggle={toggleSidebar} />
+  <TitleBar sidebarOpen={$sidebarOpen} showToggleButton={true} on:toggle={toggleSidebar} />
   
   <div class="sidebar-wrapper m-2" class:dragging={isDragging} style={`width:${$sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!$sidebarOpen}>
     <ResizableSidebar

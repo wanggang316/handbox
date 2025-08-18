@@ -1,10 +1,29 @@
 <script lang="ts">
   import "../app.css";
-  export let children;
+  import { onMount } from "svelte";
+  import { browser } from "$app/environment";
+  import { theme, uiActions } from "$lib/stores/ui";
 
-  // 最小根布局：仅渲染 children；实际应用布局在路由分组 (app) 中定义
+  let { children } = $props();
 
-  // 最小根布局无需逻辑
+  onMount(() => {
+    // 初始化主题
+    if (browser) {
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
+        uiActions.setTheme(savedTheme as 'light' | 'dark' | 'system');
+      } else {
+        uiActions.setTheme('system');
+      }
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleSystemThemeChange = () => {
+        if ($theme === 'system') {
+          uiActions.setTheme('system');
+        }
+      };
+      mediaQuery.addEventListener('change', handleSystemThemeChange);
+    }
+  });
 </script>
 
 {@render children()}

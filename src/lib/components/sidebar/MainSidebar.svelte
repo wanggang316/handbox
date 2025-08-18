@@ -119,7 +119,7 @@
   $: active = $currentPage as "chat" | "artifact";
 </script>
 
-<div class="h-full flex flex-col bg-[#f8f8f8] p-0 pt-15 rounded-2xl overflow-hidden">
+<div class="h-full flex flex-col bg-bg-secondary p-0 pt-15 rounded-2xl overflow-hidden">
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-6 mb-6">
     <!-- 顶部操作 -->
