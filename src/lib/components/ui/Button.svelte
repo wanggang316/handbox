@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let variant: 'primary' | 'secondary' | 'danger' | 'ghost' | 'clear' = 'primary';
+  export let variant: 'primary' | 'secondary' | 'gray' | 'danger' | 'ghost' | 'clear' = 'primary';
   export let size: 'sm' | 'md' = 'md';
   export let disabled = false;
   export let type: 'button' | 'submit' | 'reset' = 'button';
@@ -26,11 +26,14 @@
     .sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
     .primary { background: var(--bg-accent); color: var(--text-accent); }
     .secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); }
+    .gray { background: var(--bg-hover); color: var(--text-secondary); }
     .danger { background: #ef4444; color: #fff; }
     .ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }
     .clear { background: transparent; color: var(--text-primary); border: none; }
-    .btn.clear:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); opacity: 1; }
     .btn:hover:not(:disabled) { opacity: 0.9; }
+    .btn.gray:hover:not(:disabled) { background: var(--color-gray-200); color: var(--bg-text-parmary); opacity: 1; }
+    .btn.ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); opacity: 1; }
+    .btn.clear:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); opacity: 1; }
   </style>
 </button>
 
