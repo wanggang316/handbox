@@ -14,7 +14,7 @@
 <div class="flex h-screen bg-[color:var(--bg-primary)]">
   <TitleBar sidebarOpen={false} showToggleButton={false} on:toggle={handleToggle} />
   
-  <div class="m-2 w-40">
+  <div class="m-2 w-35">
     <SettingsSidebar/>
   </div>
   

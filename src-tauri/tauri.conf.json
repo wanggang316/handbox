@@ -40,6 +40,8 @@
         "hiddenTitle": true,
         "visible": false,
         "resizable": true,
+        "maximizable": false,
+        "minimizable": false,
         "trafficLightPosition": {
           "x": 15,
           "y": 27
