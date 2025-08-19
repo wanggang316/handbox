@@ -79,38 +79,38 @@
 </script>
 
 <div class="p-6 pr-8 flex flex-col gap-y-4">
-
   <div class="rounded-[20px] overflow-hidden">
-<!-- 供应商列表 -->
-<TableGroup>
-  <!-- 预定义供应商 -->
-  {#each presetProviders as provider}
-    <StatusLabelRow
-      label={provider.name}
-      iconSrc={provider.iconSrc}
-      status={provider.enabled ? "enabled" : "disabled"}
-      statusText={provider.enabled ? "已开启" : "未开启"}
-      onclick={() => handleProviderClick(provider)}
-    />
-  {/each}
+    <!-- 供应商列表 -->
+    <TableGroup>
+      <!-- 预定义供应商 -->
+      {#each presetProviders as provider}
+        <StatusLabelRow
+          label={provider.name}
+          iconSrc={provider.iconSrc}
+          status={provider.enabled ? "enabled" : "disabled"}
+          statusText={provider.enabled ? "已开启" : "未开启"}
+          onclick={() => handleProviderClick(provider)}
+        />
+      {/each}
 
-  <!-- 自定义供应商 -->
-  {#each $providers as provider}
-    <StatusLabelRow
-      label={provider.name}
-      icon={provider.name.charAt(0).toUpperCase()}
-      isCustomProvider={true}
-      status={provider.enabled ? "enabled" : "disabled"}
-      statusText={provider.enabled ? "已配置" : "未配置"}
-      onclick={() => handleProviderClick(provider)}
-    />
-  {/each}
-</TableGroup>
+      <!-- 自定义供应商 -->
+      {#each $providers as provider}
+        <StatusLabelRow
+          label={provider.name}
+          icon={provider.name.charAt(0).toUpperCase()}
+          isCustomProvider={true}
+          status={provider.enabled ? "enabled" : "disabled"}
+          statusText={provider.enabled ? "已配置" : "未配置"}
+          onclick={() => handleProviderClick(provider)}
+        />
+      {/each}
+    </TableGroup>
   </div>
-  
 
   <div>
-    <Button variant="gray" size="sm" on:click={handleAddProvider}>添加供应商</Button>
+    <Button variant="gray" size="sm" on:click={handleAddProvider}
+      >添加供应商</Button
+    >
   </div>
 </div>
 
