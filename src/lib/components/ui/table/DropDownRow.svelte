@@ -43,7 +43,6 @@
       {options}
       bind:selectedValue
       {disabled}
-      buttonClass="border border-gray-200 bg-white"
       onSelect={handleSelect}
     />
   </div>
