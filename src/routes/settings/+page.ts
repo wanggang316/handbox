@@ -1,10 +1,8 @@
 import type { PageLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
 
 export const load: PageLoad = async () => {
-  return {
-    status: 302,
-    redirect: '/settings/account'
-  } as unknown as any;
+  throw redirect(302, '/settings/account');
 };
 
 

@@ -26,7 +26,7 @@
     <Avatar 
       src={user.avatar}
       letter={user.username}
-      size="lg"
+      size="md"
     />
     <div class="flex-1 flex flex-col">
       <div class="flex flex-row gap-x-2 items-center">

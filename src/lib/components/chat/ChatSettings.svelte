@@ -115,7 +115,7 @@
 </script>
 
 <Modal {open} title="" {onClose}>
-  <div class="flex h-[600px]">
+  <div class="flex w-[650px] h-[600px]">
     <!-- 左侧边栏 -->
     <ChatSettingSidebar 
       {activeTab}

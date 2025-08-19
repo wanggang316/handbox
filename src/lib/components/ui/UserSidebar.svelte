@@ -29,7 +29,7 @@
   tabindex="0"
 >
   <!-- 头像 -->
-  <div class="">
+  <div class="flex flex-row gap-2 items-center">
     <Avatar 
       src={user.avatar}
       letter={user.username}

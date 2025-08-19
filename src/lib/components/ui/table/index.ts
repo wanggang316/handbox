@@ -5,3 +5,4 @@ export { default as SwitchRow } from './SwitchRow.svelte';
 export { default as NumberStepperRow } from './NumberStepperRow.svelte';
 export { default as LabeledSliderRow } from './LabeledSliderRow.svelte';
 export { default as TextareaRow } from './TextareaRow.svelte';
+export { default as TextRow } from './TextRow.svelte';

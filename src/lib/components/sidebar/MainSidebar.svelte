@@ -8,7 +8,7 @@
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import UserProfile from "$lib/components/ui/UserSidebar.svelte";
+  import UserSidebar from "$lib/components/ui/UserSidebar.svelte";
   import { 
     Box, 
     Code, 
@@ -160,7 +160,7 @@
 
   <!-- 用户信息 -->
    <div class="flex-shrink-0 p-2">
-    <UserProfile user={currentUser} onUserClick={handleUserClick} />
+    <UserSidebar user={currentUser} onUserClick={handleUserClick} />
    </div>
   
 </div>

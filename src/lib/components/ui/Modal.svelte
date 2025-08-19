@@ -15,7 +15,7 @@
     onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
   >
-    <div class="bg-white w-[650px] max-w-4xl shadow-2xl overflow-hidden relative" style="border-radius: 20px;">
+    <div class="bg-white  max-w-4xl shadow-2xl overflow-hidden relative" style="border-radius: 20px;">
       <!-- Overlay 标题视图 -->
       <div class="absolute top-0 left-0 z-20 flex items-center px-5 py-4">
         <TrafficLightsRedButton onClick={onClose} />

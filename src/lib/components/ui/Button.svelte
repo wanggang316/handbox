@@ -5,7 +5,7 @@
   export let type: 'button' | 'submit' | 'reset' = 'button';
 </script>
 
-<button class={`btn ${variant} ${size}`} {type} {disabled}>
+<button class={`btn ${variant} ${size}`} {type} {disabled} on:click>
   <slot />
   <style>
     .btn {
