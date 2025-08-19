@@ -7,8 +7,9 @@
   let { title, children }: Props = $props();
 </script>
 
-<div class="bg-bg-secondary rounded-[20px] overflow-hidden">
-  <div class="table-group">
+<div class="relative rounded-[20px]">
+  <div class="absolute inset-0 bg-bg-secondary rounded-[20px] pointer-events-none"></div>
+  <div class="relative table-group rounded-[20px]">
     {@render children?.()}
   </div>
 </div>

@@ -79,7 +79,7 @@
     class="bg-transparent text-[14px] text-[#7e7e7f] p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
   ></textarea>
 
-  <div class="flex flex-row justify-between items-center px-4 pt-0 pb-2">
+  <div class="flex flex-row justify-between items-center px-4 pt-0 pb-2 overflow-visible">
     <!-- 左侧：添加按钮 -->
     <IconButton
       icon={Plus}
