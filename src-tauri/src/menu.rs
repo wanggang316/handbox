@@ -1,6 +1,9 @@
 // 应用菜单配置
 
-use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem, Submenu}, AppHandle, Manager};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    AppHandle,
+};
 
 /// 创建应用菜单
 pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
@@ -73,10 +76,7 @@ fn create_macos_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         ],
     )?;
 
-    Menu::with_items(
-        app,
-        &[&app_menu, &edit_menu, &view_menu, &window_menu],
-    )
+    Menu::with_items(app, &[&app_menu, &edit_menu, &view_menu, &window_menu])
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -111,15 +111,13 @@ fn create_default_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         app,
         "View",
         true,
-        &[
-            &PredefinedMenuItem::fullscreen(app, Some("Enter Full Screen"))?,
-        ],
+        &[&PredefinedMenuItem::fullscreen(
+            app,
+            Some("Enter Full Screen"),
+        )?],
     )?;
 
-    Menu::with_items(
-        app,
-        &[&file_menu, &edit_menu, &view_menu],
-    )
+    Menu::with_items(app, &[&file_menu, &edit_menu, &view_menu])
 }
 
 /// 处理菜单事件
@@ -127,7 +125,9 @@ pub fn handle_menu_event(app: &AppHandle, event_id: &str) {
     match event_id {
         "settings" => {
             // 打开设置窗口
-            if let Err(e) = tauri::async_runtime::block_on(crate::commands::open_settings_window(app.clone())) {
+            if let Err(e) =
+                tauri::async_runtime::block_on(crate::commands::open_settings_window(app.clone()))
+            {
                 eprintln!("Failed to open settings window: {}", e);
             }
         }

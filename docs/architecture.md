@@ -32,15 +32,40 @@ HandBox 架构设计
 
 ## 3. 模块划分
 
-### 3.1 前端（SvelteKit）
-- 路由与页面：
-  - `routes/+page.svelte`：示例页（将演进为“聊天首页”）。
-  - 规划新增：`routes/chat/`、`routes/settings/`、`routes/artifacts/`、`routes/search/`。
-- UI 组件：Markdown 渲染、消息卡片（类型可扩展：思考过程、工具调用、代码执行）、模型选择弹窗、设置面板、搜索面板、Artifact 卡片。
-- 状态管理：Svelte stores（会话、设置、供应商/模型列表、MCP 选择）。
-- 前端服务封装：
-  - IPC 客户端：`@tauri-apps/api` 的 `invoke`/事件流封装。
-  - 本地缓存（必要时）：轻量持久化/快照（不过度堆积隐私数据）。
+### 3.1 前端（SvelteKit + Tailwind CSS 4.x + Lucide Icons）
+
+#### 技术栈
+- **框架**: Svelte 5 + SvelteKit 5 (TypeScript)
+- **样式系统**: Tailwind CSS 4.x（使用 `@theme` 指令和CSS变量）
+- **图标库**: Lucide Svelte (`@lucide/svelte`)
+- **构建工具**: Vite 6 + `@tailwindcss/vite` 插件
+
+#### 样式架构
+- **主题系统**: 基于CSS变量的双主题支持（浅色/深色）
+- **设计tokens**: 在 `src/app.css` 中通过 `@theme` 指令定义
+- **组件样式**: Tailwind utility classes + 必要时的组件级CSS
+- **响应式设计**: 桌面优先，最小宽度960px
+
+#### 路由与页面
+- `routes/+page.svelte`：聊天主页
+- `routes/chat/`：会话管理页面
+- `routes/settings/`：应用设置页面（已实现models子路由）
+- `routes/artifacts/`：Artifact 管理页面  
+- `routes/search/`：历史搜索页面
+
+#### UI 组件系统
+- **基础组件**: Button、Input、Toggle、Select、Modal等（使用Tailwind + Lucide图标）
+- **业务组件**: 消息卡片（类型可扩展）、模型选择弹窗、设置面板、搜索面板、Artifact 卡片
+- **布局组件**: Sidebar、ResizableSidebar、TitleBar等
+
+#### 状态管理
+- **Svelte stores**: 会话、设置、供应商/模型列表、MCP 选择
+- **响应式状态**: 使用Svelte 5的 `$state` 和 `$derived` 语法
+
+#### 前端服务封装
+- **IPC客户端**: `@tauri-apps/api` 的 `invoke`/事件流封装
+- **API层**: 统一的API调用封装，位于 `src/lib/api/`
+- **本地缓存**: 轻量持久化/快照（不过度堆积隐私数据）
 
 ### 3.2 后端（Tauri/Rust）
 - 命令层（Commands）：`#[tauri::command]` 暴露给前端的 IPC API。

@@ -1,6 +1,6 @@
 // 聊天相关 IPC 命令
 
-use crate::models::{ApiResponse, AppError, ChatRequest, ChatResponse, ChatSession, Message, UUID};
+use crate::models::{ApiResponse, ChatRequest, ChatResponse, ChatSession, Message, UUID};
 use crate::services::ChatService;
 use tauri::State;
 

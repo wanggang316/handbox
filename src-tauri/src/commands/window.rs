@@ -1,6 +1,6 @@
 // 窗口管理相关 IPC 命令
 
-use tauri::{AppHandle, Manager, WebviewWindowBuilder, WebviewUrl};
+use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// 打开设置窗口
 #[tauri::command]
@@ -12,16 +12,20 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
         window.set_focus().map_err(|e| e.to_string())?;
     } else {
         // 如果窗口不存在，创建新窗口
-        let _window = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("/settings".into()))
-            .title("Settings - handbox")
-            .inner_size(800.0, 600.0)
-            .min_inner_size(600.0, 400.0)
-            .resizable(true)
-            .decorations(true)
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .build()
-            .map_err(|e| e.to_string())?;
+        let _window =
+            WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("/settings".into()))
+                .title("Settings - handbox")
+                .inner_size(800.0, 600.0)
+                .min_inner_size(600.0, 400.0)
+                .resizable(true)
+                .decorations(true)
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true)
+                .maximizable(false)
+                .minimizable(false)
+                .traffic_light_position(LogicalPosition::new(15.0, 27.0))
+                .build()
+                .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

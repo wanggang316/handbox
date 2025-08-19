@@ -47,6 +47,10 @@ impl AppError {
     pub fn internal_error(message: &str) -> Self {
         Self::with_hint("INTERNAL_ERROR", message, "应用内部错误，请重新启动应用")
     }
+
+    pub fn not_found(message: &str) -> Self {
+        Self::with_hint("NOT_FOUND", message, "请求的资源未找到")
+    }
 }
 
 impl std::fmt::Display for AppError {

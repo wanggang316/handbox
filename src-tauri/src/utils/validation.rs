@@ -26,7 +26,7 @@ pub fn validate_url(url: &str) -> Result<(), AppError> {
 
 /// 验证模型参数
 pub fn validate_temperature(temperature: f32) -> Result<(), AppError> {
-    if temperature < 0.0 || temperature > 2.0 {
+    if !(0.0..=2.0).contains(&temperature) {
         return Err(AppError::validation_error(
             "Temperature must be between 0.0 and 2.0",
         ));
@@ -36,7 +36,7 @@ pub fn validate_temperature(temperature: f32) -> Result<(), AppError> {
 
 /// 验证 Top-P 参数
 pub fn validate_top_p(top_p: f32) -> Result<(), AppError> {
-    if top_p < 0.0 || top_p > 1.0 {
+    if !(0.0..=1.0).contains(&top_p) {
         return Err(AppError::validation_error(
             "Top-P must be between 0.0 and 1.0",
         ));

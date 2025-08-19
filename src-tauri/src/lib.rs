@@ -38,7 +38,7 @@ async fn initialize_services(
     storage_service
         .init_database()
         .await
-        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+        .map_err(|e| format!("Failed to initialize database: {e}"))?;
 
     // 初始化各个服务
     let chat_service = ChatService::new(storage_service.clone());
@@ -66,7 +66,7 @@ async fn initialize_services(
 // 保留原始的 greet 命令用于测试
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+    format!("Hello, {name}! You've been greeted from Rust!")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -82,7 +82,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = initialize_services(&app_handle).await {
-                    eprintln!("Failed to initialize services: {}", e);
+                    eprintln!("Failed to initialize services: {e}");
                     std::process::exit(1);
                 }
             });
@@ -110,6 +110,17 @@ pub fn run() {
             open_settings_window,
             close_settings_window,
             toggle_settings_window,
+            // 供应商相关命令
+            provider_list,
+            provider_get,
+            provider_create,
+            provider_update,
+            provider_delete,
+            provider_probe,
+            provider_list_models,
+            provider_toggle,
+            provider_toggle_model,
+            provider_get_available_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
