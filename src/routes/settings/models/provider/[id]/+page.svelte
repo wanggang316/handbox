@@ -101,6 +101,7 @@
   }
 
   async function handleFetchModels() {
+    console.log("handleFetchModels")
     if (!mockProvider) return;
     showModelsModal = true;
   }
@@ -142,10 +143,10 @@
   }
 
   function handleRefreshModels(e: CustomEvent<any>): void {
-    throw new Error("Function not implemented.");
+    showModelsModal = true
   }
 
-  function handleTestKey(e: CustomEvent<any>): void {
+  function handleTestKey(): void {
     throw new Error("Function not implemented.");
   }
 
@@ -221,7 +222,7 @@
 
     <div class="flex items-center mt-6">
       <div class="flex-1 text-text-primary text-base mx-2">模型列表</div>
-      <Button on:click={handleRefreshModels} variant="clear" size="sm">
+      <Button on:click={handleFetchModels} variant="clear" size="sm">
         <RefreshCw size={14} />
         获取模型列表
       </Button>

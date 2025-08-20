@@ -6,7 +6,7 @@
   export let customClass: string = '';
 </script>
 
-<button class={`btn ${variant} ${size} ${customClass}`} {type} {disabled}>
+<button class={`btn ${variant} ${size} ${customClass}`} {type} {disabled} on:click>
   <slot />
   <style>
     .btn {

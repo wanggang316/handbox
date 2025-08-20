@@ -50,7 +50,6 @@
       ariaLabel="设置" 
       on:click={handleChatSettings} 
     />
-  </div>
 </header>
 
 <!-- 聊天设置模态框 -->
