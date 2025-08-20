@@ -10,9 +10,18 @@
     Settings,
     Trash2,
     ChevronLeft,
+    Edit,
+    RefreshCw,
+    Settings2,
   } from "@lucide/svelte";
   import ModelSelectModal from "$lib/components/settings/ModelSelectModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
+  import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
+  import TextRow from "$lib/components/ui/table/TextRow.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
 
   let providerId = "";
   let isLoading = false;
@@ -30,15 +39,28 @@
   // 模拟数据
   const mockProvider = {
     name: "OpenAI",
-    icon: "🤖",
     type: "openai",
+    iconSrc: "/logo-openai.png",
+    enabled: true,
   };
 
-  const mockModels = [
-    { name: "GPT-4o", id: "gpt-4o", enabled: true },
-    { name: "GPT-4o Mini", id: "gpt-4o-mini", enabled: true },
-    { name: "GPT-3.5 Turbo", id: "gpt-3.5-turbo", enabled: false },
-  ];
+  const mockModels = {
+    "OpenAI": [
+      { name: "O3", id: "o3", enabled: true },
+      { name: "O3 Mini", id: "o3-mini", enabled: true },
+      { name: "O1", id: "o1", enabled: false },
+      { name: "O1 Mini", id: "o1-mini", enabled: false },
+      { name: "O1 Pro", id: "o1-pro", enabled: false },
+      { name: "O1 Pro Mini", id: "o1-pro-mini", enabled: false },
+      { name: "O1 Pro Max", id: "o1-pro-max", enabled: false },
+      { name: "O1 Pro Max Mini", id: "o1-pro-max-mini", enabled: false },
+    ],
+    "Google": [
+      { name: "Gemini 2.5 Flash", id: "gemini-2.5-flash", enabled: false },
+      { name: "Gemini 2.5 Pro", id: "gemini-2.5-pro", enabled: false },
+      { name: "Gemini 2.0 Flash", id: "gemini-2.0-flash", enabled: false },
+    ],
+  };
 
   onMount(() => {
     providerId = $page.params.id || "";
@@ -118,11 +140,35 @@
   function handleBack() {
     goto("/settings/models");
   }
+
+  function handleRefreshModels(e: CustomEvent<any>): void {
+    throw new Error("Function not implemented.");
+  }
+
+  function handleTestKey(e: CustomEvent<any>): void {
+    throw new Error("Function not implemented.");
+  }
+
+  function handleConfigModel(e: CustomEvent<any>): void {
+    throw new Error("Function not implemented.");
+  }
+
+  function handleRemoveModel(e: CustomEvent<any>): void {
+    throw new Error("Function not implemented.");
+  }
 </script>
+
+{#snippet iconSnippet()}
+  <img
+    src={mockProvider.iconSrc}
+    alt="{mockProvider.name} logo"
+    class="w-6 h-6 object-contain"
+  />
+{/snippet}
 
 <!-- 粘性导航栏 - 在右侧主体区域内固定 -->
 <div class="flex flex-col h-screen">
-  <header class="bg-blue-600 text-white py-2 px-4 shadow-lg flex-shrink-0">
+  <header class=" text-white py-2 px-4 flex-shrink-0">
     <CircleButton
       icon={ChevronLeft}
       iconSize={22}
@@ -136,184 +182,72 @@
     />
   </header>
 
-<!-- 主要内容区域 -->
-<main class="flex-grow overflow-y-auto bg-gray-100 p-4">
-
-    <!-- 供应商信息卡片 -->
-    <div class="bg-slate-50 rounded-2xl p-6 mb-6">
-      <div class="flex items-center gap-4">
-        <!-- 供应商图标 -->
-        <div
-          class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl"
-        >
-          {mockProvider.icon}
-        </div>
-
-        <!-- 供应商信息 -->
-        <div class="flex-1">
-          <h2 class="text-xl font-medium text-slate-900">
-            {mockProvider.name}
-          </h2>
-          <p class="text-slate-600">供应商类型: {mockProvider.type}</p>
-        </div>
-
-        <!-- 启用开关 -->
-        <label class="flex items-center gap-3 cursor-pointer">
-          <span class="text-sm font-medium text-slate-700">启用</span>
-          <div class="relative">
-            <input
-              type="checkbox"
-              bind:checked={formData.enabled}
-              class="sr-only peer"
-            />
-            <div
-              class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
-            ></div>
-          </div>
-        </label>
-      </div>
-    </div>
-
-    <!-- 配置表单 -->
-    <div class="bg-slate-50 rounded-2xl p-6 mb-6">
-      <h3 class="text-lg font-medium text-slate-900 mb-4">基础配置</h3>
-
-      <div class="space-y-4">
-        <!-- Base URL -->
-        <div>
-          <label
-            for="baseUrl"
-            class="block text-sm font-medium text-slate-700 mb-2"
-          >
-            Base URL
-          </label>
-          <input
-            id="baseUrl"
-            type="url"
-            bind:value={formData.baseUrl}
-            placeholder="https://api.openai.com/v1"
-            class="w-full px-4 py-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+  <!-- 主要内容区域 -->
+  <main class="flex-grow overflow-y-auto p-6 pr-8">
+    <TableBaseRow label={mockProvider.name} icon={iconSnippet}>
+      <div class="flex flex-row items-center gap-2">
+        <div class="flex items-center gap-4">
+          <IconButton
+            icon={Edit}
+            on:click={() => (formData.enabled = !formData.enabled)}
           />
-        </div>
 
-        <!-- API Key -->
-        <div>
-          <label
-            for="apiKey"
-            class="block text-sm font-medium text-slate-700 mb-2"
-          >
-            API Key
-          </label>
-          <div class="flex gap-2">
-            <div class="relative flex-1">
-              <input
-                id="apiKey"
-                type={showApiKey ? "text" : "password"}
-                bind:value={formData.apiKey}
-                placeholder="输入API Key"
-                class="w-full px-4 py-3 pr-12 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
-              <button
-                type="button"
-                on:click={() => (showApiKey = !showApiKey)}
-                class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                {#if showApiKey}
-                  <EyeOff class="w-5 h-5" />
-                {:else}
-                  <Eye class="w-5 h-5" />
-                {/if}
-              </button>
-            </div>
+          <IconButton
+            icon={Trash2}
+            on:click={() => (formData.enabled = !formData.enabled)}
+          />
 
-            <!-- 检测按钮 -->
-            <button
-              on:click={handleProbe}
-              disabled={isLoading || !formData.apiKey}
-              class="flex items-center gap-2 px-4 py-3 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {#if isLoading}
-                <RotateCw class="w-4 h-4 animate-spin" />
-                <span>检测中</span>
-              {:else}
-                <TestTube class="w-4 h-4" />
-                <span>检测</span>
-              {/if}
-            </button>
-          </div>
+          <Toggle checked={formData.enabled} />
         </div>
       </div>
+    </TableBaseRow>
+
+    <div class="flex items-center justify-end">
+      <Button on:click={handleTestKey} variant="clear" size="sm">
+        <RefreshCw size={14} />
+        检测
+      </Button>
     </div>
 
-    <!-- 模型管理 -->
-    <div class="bg-slate-50 rounded-2xl p-6 mb-6">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-medium text-slate-900">模型管理</h3>
-        <button
-          on:click={handleFetchModels}
-          class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <RotateCw class="w-4 h-4" />
-          获取模型列表
-        </button>
-      </div>
+    <TableGroup>
+      <TextRow
+        layout="vertical"
+        isPassword
+        label="API Key"
+        value={formData.apiKey}
+      />
+      <TextRow layout="vertical" label="Base URL" value={formData.baseUrl} />
+    </TableGroup>
 
-      <!-- 模型列表 -->
-      <div class="space-y-2">
-        {#each mockModels as model}
-          <div
-            class="flex items-center justify-between p-4 bg-white rounded-lg border border-slate-200"
-          >
-            <div class="flex items-center gap-3">
-              <input
-                type="checkbox"
-                bind:checked={model.enabled}
-                class="w-4 h-4 text-blue-600 bg-white border-slate-300 rounded focus:ring-blue-500"
+    <div class="flex items-center mt-6">
+      <div class="flex-1 text-text-primary text-base mx-2">模型列表</div>
+      <Button on:click={handleRefreshModels} variant="clear" size="sm">
+        <RefreshCw size={14} />
+        获取模型列表
+      </Button>
+    </div>
+
+    {#each Object.keys(mockModels) as key}
+      <TableGroup title={key}>
+        {#each mockModels[key as keyof typeof mockModels] as model}
+          <TableBaseRow label={model.name} py="2">
+            <div class="flex flex-row items-center gap-2">
+              <IconButton
+                icon={Settings2}
+                iconSize={16}
+                on:click={handleConfigModel}
               />
-              <span class="text-slate-900 font-medium">{model.name}</span>
-              <span class="text-sm text-slate-500">({model.id})</span>
+              <IconButton
+                icon={Trash2}
+                iconSize={16}
+                on:click={handleRemoveModel}
+              />
             </div>
-
-            <div class="flex items-center gap-2">
-              <button
-                class="p-1 text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                <Settings class="w-4 h-4" />
-              </button>
-              <button
-                class="p-1 text-slate-400 hover:text-red-600 transition-colors"
-              >
-                <Trash2 class="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+          </TableBaseRow>
         {/each}
-      </div>
-    </div>
+      </TableGroup>
+    {/each}
 
-    <!-- 操作按钮 -->
-    <div class="flex items-center justify-between">
-      <button
-        on:click={handleDelete}
-        class="flex items-center gap-2 px-4 py-2 text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
-      >
-        <Trash2 class="w-4 h-4" />
-        删除供应商
-      </button>
-
-      <button
-        on:click={handleSave}
-        disabled={isLoading}
-        class="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      >
-        {#if isLoading}
-          <RotateCw class="w-4 h-4 animate-spin" />
-          <span>保存中...</span>
-        {:else}
-          <span>保存配置</span>
-        {/if}
-      </button>
-    </div>
   </main>
 </div>
 

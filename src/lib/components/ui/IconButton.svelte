@@ -33,8 +33,7 @@
   {disabled}
 >
   {#if icon}
-    {@const Icon = icon}
-    <Icon size={iconSize} />
+    <svelte:component this={icon} size={iconSize} />
   {/if}
 </button>
 

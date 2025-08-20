@@ -41,7 +41,7 @@
 {/snippet}
 
 <button 
-  class="w-full {clickable ? 'hover:bg-bg-hover cursor-pointer' : ''}"
+  class="w-full {clickable ? 'hover:bg-bg-hover' : ''}"
   {onclick}
   onkeydown={(e) => e.key === "Enter" && onclick?.()}
 >
