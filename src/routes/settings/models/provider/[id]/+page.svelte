@@ -186,20 +186,18 @@
   <!-- 主要内容区域 -->
   <main class="flex-grow overflow-y-auto p-6 pr-8">
     <TableBaseRow label={mockProvider.name} icon={iconSnippet}>
-      <div class="flex flex-row items-center gap-2">
-        <div class="flex items-center gap-4">
-          <IconButton
-            icon={Edit}
-            on:click={() => (formData.enabled = !formData.enabled)}
-          />
+      <div class="flex flex-row items-center gap-4">
+        <IconButton
+          icon={Edit}
+          on:click={() => (formData.enabled = !formData.enabled)}
+        />
 
-          <IconButton
-            icon={Trash2}
-            on:click={() => (formData.enabled = !formData.enabled)}
-          />
+        <IconButton
+          icon={Trash2}
+          on:click={() => (formData.enabled = !formData.enabled)}
+        />
 
-          <Toggle checked={formData.enabled} />
-        </div>
+        <Toggle checked={formData.enabled} />
       </div>
     </TableBaseRow>
 
