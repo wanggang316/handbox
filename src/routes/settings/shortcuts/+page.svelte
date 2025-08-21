@@ -1,10 +1,26 @@
-<section class="content">
-  <h3>快捷键</h3>
-  <p>发送消息、换行等快捷键配置。</p>
-</section>
+<script lang="ts">
+    import DropDownRow from "$lib/components/ui/table/DropDownRow.svelte";
+    import SwitchRow from "$lib/components/ui/table/SwitchRow.svelte";
+  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
 
-<style>
-  .content{padding:32px 40px;max-width:800px}
-</style>
+  const options = [
+    { value: "1", label: "Enter" },
+    { value: "2", label: "Command+Enter" },
+  ];
+
+  let selectedValue = $state("1");
+
+  function handleSelect(value: string) {
+    selectedValue = value;
+    console.log(selectedValue);
+  }
+</script>
 
 
+<div class="p-6 pr-8 flex flex-col gap-y-4">
+
+  <TableGroup>
+    <DropDownRow label="发送消息" options={options} bind:selectedValue={selectedValue} onSelect={handleSelect} />
+  </TableGroup>
+
+</div>

@@ -109,7 +109,7 @@
   const defaultDropdownClass = `absolute ${positionClass} ${alignClass} ${minWidth} ${maxWidth} ${maxHeight} bg-white border border-[#e5e5e5] rounded-lg shadow-lg z-[9999] overflow-y-auto w-fit`;
   const finalDropdownClass = `${defaultDropdownClass} ${dropdownClass}`;
 
-  const defaultOptionClass = "w-full px-3 py-2 text-left text-[14px] hover:bg-gray-50 transition-colors whitespace-nowrap";
+  const defaultOptionClass = "w-full px-2 py-2 text-left text-[14px] hover:bg-gray-50 transition-colors whitespace-nowrap";
   const defaultSelectedOptionClass = "bg-blue-50 text-blue-600 font-medium";
 
 
