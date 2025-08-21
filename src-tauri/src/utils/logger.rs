@@ -10,7 +10,7 @@ pub fn init_logger() -> Result<(), AppError> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .try_init()
-        .map_err(|e| AppError::internal_error(&format!("Failed to initialize logger: {}", e)))?;
+        .map_err(|e| AppError::internal_error(&format!("Failed to initialize logger: {e}")))?;
 
     Ok(())
 }

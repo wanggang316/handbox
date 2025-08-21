@@ -8,6 +8,7 @@
     step?: number;
     formatValue?: (value: number) => string;
     placeholder?: string;
+    defaultValue?: number;
     disabled?: boolean;
   }
 
@@ -18,8 +19,13 @@
     step = 1,
     formatValue = (val: number) => val.toString(),
     placeholder = '',
+    defaultValue,
     disabled = false
   }: Props = $props();
+
+  // 当当前值等于默认值时，显示 placeholder 而不是实际值
+  const shouldShowPlaceholder = $derived(defaultValue !== undefined && value === defaultValue);
+  const displayValue = $derived(shouldShowPlaceholder ? '' : value);
 
   function increment() {
     if (disabled || value + step > max) return;
@@ -53,7 +59,7 @@
 <div class="relative flex items-center">
   <input
     type="number"
-    {value}
+    value={displayValue}
     {min}
     {max}
     {step}
@@ -61,7 +67,7 @@
     {disabled}
     oninput={handleInput}
     onkeydown={handleKeydown}
-    class="flex-1 px-3 py-2 pr-12 text-right bg-transparent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+    class="flex-1 px-3 py-1 pr-7 text-sm text-right bg-transparent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
   />
   
   <div class="absolute right-1 flex flex-col">
@@ -72,7 +78,7 @@
       class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       aria-label="增加"
     >
-      <ChevronUp size={14} />
+      <ChevronUp size={12} />
     </button>
     <button
       type="button"
@@ -81,7 +87,7 @@
       class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       aria-label="减少"
     >
-      <ChevronDown size={14} />
+      <ChevronDown size={12} />
     </button>
   </div>
 </div>

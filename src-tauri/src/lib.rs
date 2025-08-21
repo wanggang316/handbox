@@ -3,6 +3,7 @@
 // 声明模块
 pub mod commands;
 pub mod config;
+pub mod menu;
 pub mod models;
 pub mod services;
 pub mod utils;
@@ -37,7 +38,7 @@ async fn initialize_services(
     storage_service
         .init_database()
         .await
-        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+        .map_err(|e| format!("Failed to initialize database: {e}"))?;
 
     // 初始化各个服务
     let chat_service = ChatService::new(storage_service.clone());
@@ -65,7 +66,7 @@ async fn initialize_services(
 // 保留原始的 greet 命令用于测试
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+    format!("Hello, {name}! You've been greeted from Rust!")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -73,16 +74,23 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // 创建菜单
+            let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
+            app.set_menu(menu).expect("Failed to set menu");
+
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = initialize_services(&app_handle).await {
-                    eprintln!("Failed to initialize services: {}", e);
+                    eprintln!("Failed to initialize services: {e}");
                     std::process::exit(1);
                 }
             });
 
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            crate::menu::handle_menu_event(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
             // 测试命令
@@ -98,6 +106,21 @@ pub fn run() {
             chat_update_message,
             chat_delete_message,
             chat_regenerate_message,
+            // 窗口管理命令
+            open_settings_window,
+            close_settings_window,
+            toggle_settings_window,
+            // 供应商相关命令
+            provider_list,
+            provider_get,
+            provider_create,
+            provider_update,
+            provider_delete,
+            provider_probe,
+            provider_list_models,
+            provider_toggle,
+            provider_toggle_model,
+            provider_get_available_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

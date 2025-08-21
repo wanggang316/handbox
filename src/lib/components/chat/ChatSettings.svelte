@@ -22,8 +22,8 @@
   let temperature = $state('0.7');
   let topP = $state('0.9');
   let streamResponse = $state(true);
-  let maxTokens = $state('2048');
-  let contextLength = $state('4096');
+  let maxTokens = $state('0');
+  let contextLength = $state('10');
   let enabledMcpServers = $state<string[]>([]);
 
   function handleTabChange(tab: string) {
@@ -115,7 +115,7 @@
 </script>
 
 <Modal {open} title="" {onClose}>
-  <div class="flex h-[600px]">
+  <div class="flex w-[650px] h-[600px]">
     <!-- 左侧边栏 -->
     <ChatSettingSidebar 
       {activeTab}

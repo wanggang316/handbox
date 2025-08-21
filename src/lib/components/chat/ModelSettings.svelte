@@ -27,8 +27,8 @@
     temperature = '0.7',
     topP = '0.9',
     streamResponse = true,
-    maxTokens = '2048',
-    contextLength = '4096',
+    maxTokens = '0',
+    contextLength = '10',
     onSave
   }: Props = $props();
 
@@ -54,29 +54,29 @@
 
 
 
-  function handleSave() {
-    // 转换回字符串格式，保持与原接口兼容
-    const settingsToSave = {
-      temperature: currentSettings.temperature.toString(),
-      topP: currentSettings.topP.toString(),
-      streamResponse: currentSettings.streamResponse,
-      maxTokens: currentSettings.maxTokens.toString(),
-      contextLength: currentSettings.contextLength.toString()
-    };
-    onSave?.(settingsToSave);
-  }
+  // function handleSave() {
+  //   // 转换回字符串格式，保持与原接口兼容
+  //   const settingsToSave = {
+  //     temperature: currentSettings.temperature.toString(),
+  //     topP: currentSettings.topP.toString(),
+  //     streamResponse: currentSettings.streamResponse,
+  //     maxTokens: currentSettings.maxTokens.toString(),
+  //     contextLength: currentSettings.contextLength.toString()
+  //   }; 
+  //   onSave?.(settingsToSave);
+  // }
 
-  function handleReset() {
-    currentSettings = { ...originalSettings };
-  }
+  // function handleReset() {
+  //   currentSettings = { ...originalSettings };
+  // }
 
   function handleDefault() {
     currentSettings = {
       temperature: 0.7,
       topP: 0.9,
       streamResponse: true,
-      maxTokens: 2048,
-      contextLength: 4096
+      maxTokens: 0,
+      contextLength: 10
     };
   }
 </script>
@@ -133,18 +133,22 @@
     <NumberStepperRow 
       label="最大输出长度"
       bind:value={currentSettings.maxTokens}
-      min={256}
-      max={8192}
-      step={256}
+      defaultValue={0}
+      placeholder="默认"
+      min={100}
+      max={10000000}
+      step={100}
     />
 
     <!-- 上下文长度 -->
     <NumberStepperRow 
-      label="上下文长度"
+      label="上下文数"
       bind:value={currentSettings.contextLength}
-      min={2048}
-      max={32768}
-      step={2048}
+      defaultValue={10}
+      placeholder="默认"
+      min={0}
+      max={9999}
+      step={1}
     />
   </TableGroup>
 
@@ -158,23 +162,6 @@
       textColor="text-gray-600"
       hoverColor="hover:text-gray-800"
       on:click={handleDefault} 
-    ></RoundButton>
-
-    <RoundButton 
-      customClass="w-18"
-      label="重置" 
-      bgColor="bg-gray-200"
-      textColor="text-gray-600"
-      hoverColor="hover:text-gray-800"
-      on:click={handleReset} 
-      disabled={!hasChanges}
-    ></RoundButton>
-
-    <RoundButton 
-      customClass="w-18"
-      label="保存" 
-      on:click={handleSave} 
-      disabled={!hasChanges}
     ></RoundButton>
   </div>
 </div>

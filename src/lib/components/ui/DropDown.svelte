@@ -15,6 +15,7 @@
     position?: 'bottom' | 'top';
     align?: 'left' | 'right';
     minWidth?: string;
+    maxWidth?: string;
     maxHeight?: string;
     buttonClass?: string;
     dropdownClass?: string;
@@ -30,13 +31,14 @@
     disabled = false,
     position = 'bottom',
     align = 'left',
-    minWidth = 'min-w-40',
+    minWidth = 'min-w-20',
+    maxWidth = 'max-w-80',
     maxHeight = 'max-h-64',
     buttonClass = '',
     dropdownClass = '',
     optionClass = '',
     selectedOptionClass = '',
-    onSelect = (value: string, option: DropDownOption) => {}
+    onSelect = (_value: string, _option: DropDownOption) => {}
   }: Props = $props();
 
   let isOpen = $state(false);
@@ -104,11 +106,13 @@
 
   const positionClass = position === 'top' ? 'bottom-full mb-1' : 'top-full mt-1';
   const alignClass = align === 'right' ? 'right-0' : 'left-0';
-  const defaultDropdownClass = `absolute ${positionClass} ${alignClass} ${minWidth} ${maxHeight} bg-white border border-[#e5e5e5] rounded-lg shadow-md z-10 overflow-y-auto`;
+  const defaultDropdownClass = `absolute ${positionClass} ${alignClass} ${minWidth} ${maxWidth} ${maxHeight} bg-white border border-[#e5e5e5] rounded-lg shadow-lg z-[9999] overflow-y-auto w-fit`;
   const finalDropdownClass = `${defaultDropdownClass} ${dropdownClass}`;
 
-  const defaultOptionClass = "w-full px-3 py-2 text-left text-[14px] hover:bg-gray-50 transition-colors";
+  const defaultOptionClass = "w-full px-2 py-2 text-left text-[14px] hover:bg-gray-50 transition-colors whitespace-nowrap";
   const defaultSelectedOptionClass = "bg-blue-50 text-blue-600 font-medium";
+
+
 </script>
 
 <svelte:window on:click={handleClickOutside} />

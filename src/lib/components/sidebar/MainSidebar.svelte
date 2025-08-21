@@ -8,7 +8,7 @@
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import UserProfile from "$lib/components/ui/UserProfile.svelte";
+  import UserSidebar from "$lib/components/ui/UserSidebar.svelte";
   import { 
     Box, 
     Code, 
@@ -19,6 +19,7 @@
     Plus,
     Search
   } from '@lucide/svelte';
+  import { openSettingsWindow } from '$lib/api/window';
 
   // 基础会话数据（不包含 isActive，这将动态计算）
   const baseSessions = [
@@ -91,7 +92,10 @@
   function handleUserClick() {
     if (currentUser.isLoggedIn) {
       console.log('打开用户设置');
-      // 这里可以添加打开用户设置页面的逻辑
+      // 打开独立的设置窗口
+      openSettingsWindow().catch(err => {
+        console.error('Failed to open settings window:', err);
+      });
     } else {
       console.log('跳转到登录页面');
       // 这里可以添加跳转到登录页面的逻辑
@@ -115,7 +119,7 @@
   $: active = $currentPage as "chat" | "artifact";
 </script>
 
-<div class="h-full flex flex-col bg-[#f8f8f8] p-0 pt-15 rounded-2xl overflow-hidden">
+<div class="h-full flex flex-col bg-bg-secondary p-0 pt-15 rounded-2xl overflow-hidden">
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-6 mb-6">
     <!-- 顶部操作 -->
@@ -156,7 +160,7 @@
 
   <!-- 用户信息 -->
    <div class="flex-shrink-0 p-2">
-    <UserProfile user={currentUser} onUserClick={handleUserClick} />
+    <UserSidebar user={currentUser} onUserClick={handleUserClick} />
    </div>
   
 </div>

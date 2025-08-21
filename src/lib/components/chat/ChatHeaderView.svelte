@@ -3,6 +3,8 @@
     import IconButton from "../ui/IconButton.svelte";
     import ChatSettings from "./ChatSettings.svelte";
     import { modals, uiActions } from "../../stores/ui";
+    import Button from "../ui/Button.svelte";
+    import { RefreshCw } from "@lucide/svelte";
 
   interface Props {
     sessionId?: string;
@@ -25,6 +27,10 @@
   function handleCloseChatSettings() {
     uiActions.closeModal(CHAT_SETTINGS_MODAL);
   }
+
+  function handleRefresh() {
+    console.log('刷新状态');
+  }
 </script>
 
 <!-- 顶部栏 -->
@@ -44,7 +50,6 @@
       ariaLabel="设置" 
       on:click={handleChatSettings} 
     />
-  </div>
 </header>
 
 <!-- 聊天设置模态框 -->

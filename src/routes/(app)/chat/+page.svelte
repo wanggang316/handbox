@@ -93,7 +93,7 @@
   }
 </script>
 
-<!-- 聊天页面 -->
+<!-- 聊天页面（将被 (app) 分组布局包裹） -->
 <div class="flex-1 flex flex-col">
   <ChatHeaderView 
     {sessionId} 
