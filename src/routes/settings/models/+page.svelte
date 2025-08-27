@@ -8,7 +8,7 @@
   import type { Provider, ProviderConfig } from "$lib/types/provider";
   import Button from "$lib/components/ui/Button.svelte";
 
-  let showAddProviderModal = false;
+  let showAddProviderModal = $state(false);
 
   // 预定义供应商列表
   const presetProviders = [
@@ -74,7 +74,7 @@
   }
 
   function handleCloseAddProvider() {
-    // showAddProviderModal = false;
+    showAddProviderModal = false;
   }
 </script>
 
