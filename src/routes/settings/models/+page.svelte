@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { providers, providerActions } from "$lib/stores/provider";
   import { Plus, Cpu } from "@lucide/svelte";
   import { TableGroup } from "$lib/components/ui/table";
@@ -54,7 +55,7 @@
 
   function handleProviderClick(provider: any) {
     // 跳转到供应商配置页面
-    window.location.href = `/settings/models/provider/${provider.id || provider.type}`;
+    goto(`/settings/models/provider/${provider.id || provider.type}`);
   }
 
   function handleAddProvider() {

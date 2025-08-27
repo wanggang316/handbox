@@ -16,16 +16,10 @@
   ];
 
   let defaultItem = baseItems.find(i => i.id === 'account');
-  let currentItemId = defaultItem?.id || '';
-
-  // $: items = baseItems.map(i => ({
-  //   ...i,
-  //   isActive: $page.url.pathname.startsWith(i.url)
-  // }));
-
+  
+  $: currentItemId = baseItems.find(i => $page.url.pathname.startsWith(i.url))?.id || defaultItem?.id || '';
 
   function navTo(id: string) {
-    currentItemId = id;
     goto(baseItems.find(i => i.id === id)?.url || defaultItem?.url || '/settings/account');
   }
 </script>
