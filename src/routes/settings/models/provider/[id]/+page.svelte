@@ -111,11 +111,11 @@
   ) {
     const { selectedModels } = event.detail;
     console.log("Selected models:", selectedModels);
-    showModelsModal = false;
+    // showModelsModal = false; // 让 Modal 组件自己处理关闭动画
   }
 
   function handleCloseModels() {
-    showModelsModal = false;
+    showModelsModal = false; // 这里可以保留，因为是 Modal 组件调用的
   }
 
   async function handleDelete() {
@@ -251,13 +251,12 @@
 </div>
 
 <!-- 模型选择弹窗 -->
-{#if showModelsModal}
-  <ModelSelectModal
-    {providerId}
-    on:close={handleCloseModels}
-    on:confirm={handleModelsConfirm}
-  />
-{/if}
+<ModelSelectModal
+  open={showModelsModal}
+  {providerId}
+  on:close={handleCloseModels}
+  on:confirm={handleModelsConfirm}
+/>
 
 <!-- 删除确认弹窗 -->
 {#if showDeleteConfirm}

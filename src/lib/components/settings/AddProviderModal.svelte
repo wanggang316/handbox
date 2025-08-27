@@ -5,7 +5,10 @@
   import TextRow from "../ui/table/TextRow.svelte";
   import DropDownRow from "../ui/table/DropDownRow.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
+  import Modal from "../ui/Modal.svelte";
 
+  export let open = false;
+  
   const dispatch = createEventDispatcher<{
     close: void;
     confirm: ProviderConfig;
@@ -19,6 +22,9 @@
   let isLoading = false;
   let errors: Record<string, string> = {};
   let showDropdown = false;
+  
+  // Modal 引用
+  let modalRef: Modal;
 
   const providerTypes = [
     { value: "custom-openai", label: "OpenAI 兼容", icon: "🤖" },
@@ -36,6 +42,10 @@
   }
 
   function handleClose() {
+    modalRef?.handleClose();
+  }
+  
+  function onModalClose() {
     dispatch("close");
   }
 
@@ -58,6 +68,7 @@
       console.log("config", config);
 
       dispatch("confirm", config);
+      modalRef?.handleClose();
     } catch (error) {
       console.error("Failed to create provider:", error);
     } finally {
@@ -75,20 +86,17 @@
   );
 </script>
 
-<!-- 遮罩层 -->
-<div
-  class="fixed inset-0 transition-colors flex items-center justify-center z-10005 p-4"
->
+<Modal bind:this={modalRef} {open} onClose={onModalClose} showCloseButton={false}>
   <!-- 弹窗容器 -->
   <div
-    class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col shadow-2xl"
+    class="bg-white w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col"
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-6 py-4">
       <h2 class="font-normal text-text-primary">添加供应商</h2>
     </div>
 
-    <div class="flex-1  min-h-0 px-6 py-2">
+    <div class="flex-1 min-h-0 px-6 py-2">
       <TableGroup>
         <TextRow label="供应商名称" bind:value={formData.name}></TextRow>
         <DropDownRow
@@ -118,4 +126,4 @@
       ></RoundButton>
     </div>
   </div>
-</div>
+</Modal>

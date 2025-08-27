@@ -1,6 +1,5 @@
 <script lang="ts">
   import Modal from "../ui/Modal.svelte";
-  import Button from "../ui/Button.svelte";
   import { TextRow, TableGroup } from "../ui/table";
   import Avatar from "../ui/Avatar.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
@@ -22,6 +21,9 @@
   let editedUsername = "";
   let editedEmail = "";
   let editedAvatar = "";
+  
+  // Modal 引用
+  let modalRef: Modal;
 
   // 重置表单数据
   $: if (open && user) {
@@ -40,7 +42,7 @@
       email: editedEmail,
       avatar: editedAvatar,
     });
-    onClose();
+    modalRef?.handleClose();
   }
 
   function handleCancel() {
@@ -48,7 +50,7 @@
     editedUsername = user.username;
     editedEmail = user.email;
     editedAvatar = user.avatar;
-    onClose();
+    modalRef?.handleClose();
   }
 
   function handleAvatarChange(file: File) {
@@ -63,7 +65,7 @@
   }
 </script>
 
-<Modal {open} {onClose}>
+<Modal bind:this={modalRef} {open} {onClose} showCloseButton={false}>
   <div class="bg-white rounded-2xl relative flex flex-col p-8">
     <!-- 用户头像 -->
     <div class="flex justify-center py-4">

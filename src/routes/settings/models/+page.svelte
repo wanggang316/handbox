@@ -65,7 +65,7 @@
     const config = event.detail;
     try {
       await providerActions.createProvider(config);
-      showAddProviderModal = false;
+      // showAddProviderModal = false;
       // 跳转到新创建的供应商配置页面
       // TODO: 获取新创建的供应商ID
     } catch (error) {
@@ -74,7 +74,7 @@
   }
 
   function handleCloseAddProvider() {
-    showAddProviderModal = false;
+    // showAddProviderModal = false;
   }
 </script>
 
@@ -115,9 +115,8 @@
 </div>
 
 <!-- 添加供应商弹窗 -->
-{#if showAddProviderModal}
-  <AddProviderModal
-    on:close={handleCloseAddProvider}
-    on:confirm={handleCreateProvider}
-  />
-{/if}
+<AddProviderModal
+  open={showAddProviderModal}
+  on:close={handleCloseAddProvider}
+  on:confirm={handleCreateProvider}
+/>

@@ -5,7 +5,9 @@
     import IconButton from "../ui/IconButton.svelte";
     import { TableGroup, TableBaseRow } from "../ui/table";
     import RoundButton from "../ui/RoundButton.svelte";
+    import Modal from "../ui/Modal.svelte";
 
+  export let open = false;
   export let providerId: string;
 
   const dispatch = createEventDispatcher<{
@@ -16,6 +18,9 @@
   let searchQuery = "";
   let selectedModels = new Set<string>();
   let isLoading = false;
+  
+  // Modal 引用
+  let modalRef: Modal;
 
   // 模拟模型数据 - 在实际实现中应该从props传入或API获取
   const mockModels: { provider: string; models: Model[] }[] = [
@@ -159,6 +164,10 @@
   }
 
   function handleClose() {
+    modalRef?.handleClose();
+  }
+  
+  function onModalClose() {
     dispatch("close");
   }
 
@@ -169,27 +178,25 @@
       dispatch("confirm", {
         selectedModels: Array.from(selectedModels),
       });
+      modalRef?.handleClose();
     } finally {
       isLoading = false;
     }
   }
 </script>
 
-<!-- 遮罩层 -->
-<div
-  class="fixed inset-0 transition-colors flex items-center justify-center z-10005 p-4"
->
+<Modal bind:this={modalRef} {open} onClose={onModalClose} showCloseButton={false}>
   <!-- 弹窗容器 -->
   <div
-    class="bg-white rounded-2xl w-full max-w-xl max-h-[80vh] overflow-hidden flex flex-col shadow-2xl"
+    class="min-w-lg max-w-xl h-[80vh] overflow-hidden flex flex-col"
   >
     <!-- 头部 -->
     <div
-      class="flex items-center justify-between px-6 py-4"
+      class="flex items-center justify-between gap-4 px-6 py-4"
     >
       <h2 class="font-normal text-text-primary">选择要使用模型</h2>
 
-      <div class="relative max-w-sm">
+      <div class="relative">
         <Search
           class="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400"
         />
@@ -237,4 +244,4 @@
     
     </div>
   </div>
-</div>
+</Modal>
