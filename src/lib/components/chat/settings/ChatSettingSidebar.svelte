@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Menu from '../ui/Menu.svelte';
+  import Menu from '../../ui/Menu.svelte';
   import { MessageSquare, Settings, Server } from '@lucide/svelte';
 
   interface Props {

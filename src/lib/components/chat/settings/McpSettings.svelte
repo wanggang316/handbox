@@ -1,7 +1,7 @@
 <script lang="ts">
-  import Button from '../ui/Button.svelte';
-  import TableGroup from '../ui/table/TableGroup.svelte';
-  import SwitchRow from '../ui/table/SwitchRow.svelte';
+  import Button from '../../ui/Button.svelte';
+  import TableGroup from '../../ui/table/TableGroup.svelte';
+  import SwitchRow from '../../ui/table/SwitchRow.svelte';
   import { Server, Save, RefreshCw } from '@lucide/svelte';
 
   interface McpServer {

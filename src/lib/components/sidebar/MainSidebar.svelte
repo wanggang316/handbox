@@ -8,7 +8,7 @@
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import UserSidebar from "$lib/components/ui/UserSidebar.svelte";
+  import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
   import { 
     Box, 
     Code, 
@@ -152,9 +152,10 @@
   <div class="flex-1 min-h-0">
     <Menu 
       title="聊天"
-      items={sessions} 
+      items={baseSessions} 
       onItemClick={handleSessionClick}
       containerClass="h-full"
+      activeId={currentSessionId}
     />
   </div>
 

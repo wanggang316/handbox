@@ -1,8 +1,8 @@
 <script lang="ts">
-  import Button from '../ui/Button.svelte';
+  import Button from '../../ui/Button.svelte';
   import { MessageSquare, Save, RotateCcw, RefreshCw } from '@lucide/svelte';
-  import RoundButton from '../ui/RoundButton.svelte';
-  import { TableGroup, TextareaRow } from '../ui/table';
+  import RoundButton from '../../ui/RoundButton.svelte';
+  import { TableGroup, TextareaRow } from '../../ui/table';
 
   interface Props {
     systemPrompt?: string;

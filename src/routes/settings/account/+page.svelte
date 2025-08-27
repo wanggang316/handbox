@@ -1,5 +1,5 @@
 <script lang="ts">
-  import UserAccount from "$lib/components/ui/UserAccount.svelte";
+  import UserAccount from "$lib/components/settings/UserAccount.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import AccountEdit from "$lib/components/settings/AccountEdit.svelte";

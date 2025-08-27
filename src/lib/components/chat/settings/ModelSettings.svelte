@@ -1,10 +1,10 @@
 <script lang="ts">
-  import LabeledSliderRow from '../ui/table/LabeledSliderRow.svelte';
-  import SwitchRow from '../ui/table/SwitchRow.svelte';
-  import NumberStepperRow from '../ui/table/NumberStepperRow.svelte';
-  import TableGroup from '../ui/table/TableGroup.svelte';
+  import LabeledSliderRow from '../../ui/table/LabeledSliderRow.svelte';
+  import SwitchRow from '../../ui/table/SwitchRow.svelte';
+  import NumberStepperRow from '../../ui/table/NumberStepperRow.svelte';
+  import TableGroup from '../../ui/table/TableGroup.svelte';
   import { Save, RotateCcw, Info } from '@lucide/svelte';
-    import RoundButton from '../ui/RoundButton.svelte';
+  import RoundButton from '../../ui/RoundButton.svelte';
 
   interface Props {
     temperature?: string;

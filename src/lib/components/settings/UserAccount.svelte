@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Avatar from './Avatar.svelte';
+  import Avatar from '../ui/Avatar.svelte';
 
   // 用户信息接口
   interface UserInfo {

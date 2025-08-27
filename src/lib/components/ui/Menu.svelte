@@ -7,12 +7,13 @@
   export let items: Array<{
     id: string;
     title: string;
-    isActive?: boolean;
     icon?: typeof IconType;
     iconPosition?: "left" | "right";
     iconSize?: number;
   }> = [];
   
+  export let activeId: string = "";
+
   export let onItemClick: (item: any) => void = () => {};
   
   // 自定义样式类
@@ -32,7 +33,7 @@
     {#each items as item}
       <MenuButton
         title={item.title}
-        isActive={item.isActive || false}
+        isActive={item.id == activeId}
         icon={item.icon}
         iconPosition={item.iconPosition || "left"}
         iconSize={item.iconSize || 16}

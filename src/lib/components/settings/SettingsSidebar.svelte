@@ -4,23 +4,29 @@
   import { page } from '$app/stores';
   import Menu from '$lib/components/ui/Menu.svelte';
 
-  type Item = { id: string; title: string; icon: any; description?: string };
+  type Item = { id: string; title: string; icon: any, url: string, isActive?: boolean };
   
-  export let items: Item[] = [
-    { id: 'account', title: '账户', icon: User, description: '登录状态、用户资料管理' },
-    { id: 'general', title: '通用', icon: Palette, description: '外观、语言、主题等' },
-    { id: 'models', title: '模型', icon: Brain, description: '供应商与模型配置' },
-    { id: 'mcp', title: 'MCP', icon: Zap, description: 'MCP 服务器管理' },
-    { id: 'shortcuts', title: '快捷键', icon: Keyboard, description: '键盘快捷键' },
-    { id: 'about', title: '关于', icon: Info, description: '版本与链接' },
+  let baseItems: Item[] = [
+    { id: 'account', title: '账户', icon: User, url: '/settings/account' },
+    { id: 'general', title: '通用', icon: Palette, url: '/settings/general' },
+    { id: 'models', title: '模型', icon: Brain, url: '/settings/models' },
+    { id: 'mcp', title: 'MCP', icon: Zap, url: '/settings/mcp' },
+    { id: 'shortcuts', title: '快捷键', icon: Keyboard, url: '/settings/shortcuts' },
+    { id: 'about', title: '关于', icon: Info, url: '/settings/about' },
   ];
 
-  function isActive(id: string) {
-    return $page.url.pathname.startsWith(`/settings/${id}`);
-  }
+  let defaultItem = baseItems.find(i => i.id === 'account');
+  let currentItemId = defaultItem?.id || '';
+
+  // $: items = baseItems.map(i => ({
+  //   ...i,
+  //   isActive: $page.url.pathname.startsWith(i.url)
+  // }));
+
 
   function navTo(id: string) {
-    goto(`/settings/${id}`);
+    currentItemId = id;
+    goto(baseItems.find(i => i.id === id)?.url || defaultItem?.url || '/settings/account');
   }
 </script>
 
@@ -28,14 +34,10 @@
   <div class="flex-1 overflow-y-auto p-0">
     <Menu 
       title=""
-      items={items.map(i => ({
-        id: i.id,
-        title: i.title,
-        isActive: isActive(i.id),
-        icon: i.icon
-      }))}
+      items={baseItems}
       onItemClick={(item) => navTo(item.id)}
       containerClass="h-full"
+      activeId={currentItemId}
     />
   </div>
   <slot name="footer" />

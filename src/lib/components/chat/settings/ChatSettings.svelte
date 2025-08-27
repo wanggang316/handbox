@@ -1,10 +1,10 @@
 <script lang="ts">
-  import Modal from '../ui/Modal.svelte';
+  import Modal from '../../ui/Modal.svelte';
   import ChatSettingSidebar from './ChatSettingSidebar.svelte';
   import PromptSettings from './PromptSettings.svelte';
   import ModelSettings from './ModelSettings.svelte';
   import McpSettings from './McpSettings.svelte';
-  import Button from '../ui/Button.svelte';
+  import Button from '../../ui/Button.svelte';
   import { Download, Upload, Save } from '@lucide/svelte';
 
   interface Props {
