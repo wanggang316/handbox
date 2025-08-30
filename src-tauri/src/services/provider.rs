@@ -100,7 +100,7 @@ impl ProviderService {
         }
         provider.updated_at = now;
 
-        tracing::info!("Provider {} - Updating provider", provider_id);
+        tracing::info!("Provider {} - Updating provider with data: {:?}", provider_id, provider);
         // 更新数据库记录
         self.repository.update_provider(&provider).await?;
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/stores";
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { goto } from "$app/navigation";
   import { providerState, providerActions, getProviderIcon, getPreProvider } from "$lib/states/provider.svelte";
   import type { Provider, ProviderConfig } from "$lib/types/provider";
@@ -31,6 +31,7 @@
   let isProbing = $state(false);
   let isSaving = $state(false);
   let isLoadingModels = $state(false);
+  let saveTimeout: number | null = $state(null);
 
   // 当前供应商
   let currentProvider = $state<Provider | null>(null);
@@ -50,6 +51,13 @@
   onMount(() => {
     providerId = $page.params.id || "";
     loadProvider();
+  });
+
+  onDestroy(() => {
+    // 清理定时器
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
   });
 
   async function loadProvider() {
@@ -106,6 +114,21 @@
     }
   }
 
+  // 防抖自动保存函数
+  function autoSave() {
+    if (!currentProvider) return;
+    
+    // 清除之前的定时器
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+    
+    // 设置新的定时器，500ms 后保存
+    saveTimeout = setTimeout(async () => {
+      await handleSave();
+    }, 500);
+  }
+
   async function handleSave() {
     if (!currentProvider) return;
     
@@ -123,11 +146,10 @@
       if (formData.api_key.trim()) {
         config.api_key = formData.api_key;
       }
-      console.log("currentProvider:", currentProvider.id, "config:", config);
+      console.log("Auto-saving provider:", currentProvider.id, "config:", config);
       await providerActions.updateProvider(currentProvider.id, config);
-      console.log("Provider config saved successfully");
+      console.log("Provider config auto-saved successfully");
       
-      // 更新本地当前供应商数据
       // 更新本地当前供应商数据
       const currentId = currentProvider?.id;
       if (currentId) {
@@ -137,7 +159,7 @@
         }
       }
     } catch (error) {
-      console.error("Save failed:", error);
+      console.error("Auto-save failed:", error);
     } finally {
       isSaving = false;
     }
@@ -273,15 +295,12 @@
         {isProbing ? "检测中" : "检测"}
       </Button>
 
-      <Button 
-        on:click={handleSave} 
-        variant="clear" 
-        size="sm"
-        disabled={isSaving || !currentProvider}
-      >
-        <Save size={14} />
-        {isSaving ? "保存中" : "保存"}
-      </Button>
+      {#if isSaving}
+        <div class="flex items-center gap-2 text-sm text-gray-500">
+          <Save size={14} class="animate-pulse" />
+          自动保存中...
+        </div>
+      {/if}
     </div>
 
     <TableGroup>
@@ -290,11 +309,13 @@
         isPassword
         label="API Key"
         bind:value={formData.api_key}
+        on:input={autoSave}
       />
       <TextRow 
         layout="vertical" 
         label="Base URL" 
-        bind:value={formData.base_url} 
+        bind:value={formData.base_url}
+        on:input={autoSave}
       />
     </TableGroup>
 

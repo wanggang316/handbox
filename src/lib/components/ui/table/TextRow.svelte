@@ -29,6 +29,7 @@
                 class="w-full bg-transparent text-base text-right text-text-primary border-none outline-none p-1"
                 class:cursor-not-allowed={readonly}
                 class:text-[#b3b3b3]={readonly}
+                on:input
             />
         </div>
     </TableBaseRow>
@@ -43,6 +44,7 @@
                 class="w-full bg-white text-base text-left text-text-primary border-none outline-none px-2 py-1"
                 class:cursor-not-allowed={readonly}
                 class:text-[#b3b3b3]={readonly}
+                on:input
             />
 
             <div class="px-1 flex items-center justify-center" class:hidden={!isPassword}>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { providerState, providerActions, getEnabledProviders, preProviders, getProviderIcon } from "$lib/states/provider.svelte";
+  import { providerState, providerActions, preProviders, getProviderIcon } from "$lib/states/provider.svelte";
   import { Plus, Cpu, LoaderCircle, TriangleAlert } from "@lucide/svelte";
   import { TableGroup } from "$lib/components/ui/table";
   import StatusLabelRow from "$lib/components/ui/table/StatusLabelRow.svelte";

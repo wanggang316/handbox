@@ -35,14 +35,36 @@ impl DatabaseService {
             }
         }
 
-        // 创建连接池
+        // 创建连接池 - 使用单连接避免锁定问题
         let pool = SqlitePoolOptions::new()
-            .max_connections(10)
+            .max_connections(1)  // 使用单连接避免锁定
             .min_connections(1)
             .connect(&db_url)
             .await
             .map_err(|e| {
                 AppError::internal_error(&format!("Failed to connect to database: {}", e))
+            })?;
+            
+        // 配置 SQLite 特定设置
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&pool)
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to set journal mode: {}", e))
+            })?;
+            
+        sqlx::query("PRAGMA synchronous = NORMAL")
+            .execute(&pool)
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to set synchronous mode: {}", e))
+            })?;
+            
+        sqlx::query("PRAGMA busy_timeout = 30000")
+            .execute(&pool)
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to set busy timeout: {}", e))
             })?;
 
         // 运行迁移

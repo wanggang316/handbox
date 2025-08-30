@@ -52,6 +52,7 @@ impl ProviderRepository {
 
     /// 更新供应商
     pub async fn update_provider(&self, provider: &Provider) -> Result<(), AppError> {
+        tracing::debug!("Updating provider in database: ID={}, Name={}", provider.id, provider.name);
         let probe_result_json = provider.probe_result_to_json();
 
         let query = r#"
@@ -62,7 +63,7 @@ impl ProviderRepository {
             WHERE id = $1
         "#;
 
-        sqlx::query(query)
+        let result = sqlx::query(query)
             .bind(&provider.id)
             .bind(&provider.name)
             .bind(&format!("{:?}", provider.provider_type).to_lowercase())
@@ -78,6 +79,10 @@ impl ProviderRepository {
             .map_err(|e| {
                 AppError::internal_error(&format!("Failed to update provider: {}", e))
             })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::validation_error("Provider not found"));
+        }
 
         Ok(())
     }
