@@ -19,14 +19,14 @@
 </script>
 
 {#if layout === "horizontal"}
-    <TableBaseRow {label} {layout}>
+    <TableBaseRow {label} {layout} py="2">
         <!-- 输入框 -->
         <div class="flex flex-col items-end">
             <input
                 bind:value
                 {placeholder}
                 {readonly}
-                class="w-full bg-transparent text-base text-right text-text-primary border-none outline-none p-1"
+                class="w-full bg-transparent text-sm text-right text-text-primary border-none outline-none p-1"
                 class:cursor-not-allowed={readonly}
                 class:text-[#b3b3b3]={readonly}
                 on:input

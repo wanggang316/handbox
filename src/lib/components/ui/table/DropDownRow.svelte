@@ -8,9 +8,15 @@
     disabled?: boolean;
   }
 
+  interface DropDownGroup {
+    title?: string;
+    options: DropDownOption[];
+  }
+
   interface Props {
     label: string;
-    options: DropDownOption[];
+    options?: DropDownOption[];
+    groups?: DropDownGroup[];
     selectedValue: string;
     description?: string;
     disabled?: boolean;
@@ -20,6 +26,7 @@
   let { 
     label,
     options = [],
+    groups = [],
     selectedValue = $bindable(),
     description = '',
     disabled = false,
@@ -32,7 +39,7 @@
   }
 </script>
 
-<TableBaseRow {label}>
+<TableBaseRow {label} py=2>
   <div class="flex flex-col items-end">
     {#if description}
       <div class="text-xs text-gray-500 mb-1 text-right">
@@ -41,6 +48,7 @@
     {/if}
     <DropDown 
       {options}
+      {groups}
       bind:selectedValue
       {disabled}
       onSelect={handleSelect}

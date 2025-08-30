@@ -110,14 +110,10 @@
       {#if !providerState.isLoading && providerState.providers.length === 0}
         <div class="p-8 text-center">
           <Cpu class="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-            还没有供应商
-          </h3>
-          <p class="text-gray-500 dark:text-gray-400 mb-4">
+          <p class="text-base text-gray-500 dark:text-gray-400 mb-4">
             添加 AI 供应商开始使用各种模型
           </p>
           <Button variant="primary" size="sm" on:click={handleAddProvider}>
-            <Plus class="h-4 w-4 mr-2" />
             添加供应商
           </Button>
         </div>

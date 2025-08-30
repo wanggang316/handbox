@@ -17,7 +17,9 @@
 
   let formData = {
     name: "",
-    provider_type: "custom-openai" as const,
+    provider_type: "openai" as const,
+    base_url: "",
+    api_key: "",
   };
 
   let isLoading = false;
@@ -27,9 +29,29 @@
   // Modal 引用
   let modalRef: Modal;
 
-  const providerTypes = [
-    { value: "custom-openai", label: "OpenAI 兼容", icon: "🤖" },
-    { value: "custom-anthropic", label: "Anthropic 兼容", icon: "🧠" },
+  // 将预定义供应商转换为选项格式
+  const preProviderOptions = preProviders.map(provider => ({
+    value: provider.provider_type,
+    label: provider.name,
+    icon: provider.iconSrc
+  }));
+
+  // 自定义供应商类型选项
+  const customProviderOptions = [
+    { value: "custom-openai", label: "自定义 OpenAI 兼容", icon: "🤖" },
+    { value: "custom-anthropic", label: "自定义 Anthropic 兼容", icon: "🧠" },
+  ];
+
+  // 分组供应商类型
+  const providerGroups = [
+    {
+      title: "预定义供应商",
+      options: preProviderOptions
+    },
+    {
+      title: "自定义供应商",
+      options: customProviderOptions
+    }
   ];
 
   function validate() {
@@ -37,6 +59,14 @@
 
     if (!formData.name.trim()) {
       errors.name = "请输入供应商名称";
+    }
+
+    if (!formData.base_url.trim()) {
+      errors.base_url = "请输入 Base URL";
+    }
+
+    if (!formData.api_key.trim()) {
+      errors.api_key = "请输入 API Key";
     }
 
     return Object.keys(errors).length === 0;
@@ -61,8 +91,8 @@
       const config: ProviderConfig = {
         name: formData.name,
         provider_type: formData.provider_type,
-        base_url: '',
-        api_key: '',
+        base_url: formData.base_url,
+        api_key: formData.api_key,
         enabled: false,
       };
 
@@ -80,32 +110,56 @@
   function selectProviderType(type: string) {
     formData.provider_type = type as any;
     showDropdown = false;
+    
+    // 如果选择了预定义供应商，自动填充名称
+    const selectedPreProvider = preProviders.find(p => p.provider_type === type);
+    if (selectedPreProvider) {
+      formData.name = selectedPreProvider.name;
+      formData.base_url = selectedPreProvider.base_url_placeholder;
+    } else {
+      // 自定义供应商，清空名称让用户自己填写
+      if (formData.name === '' || preProviders.some(p => p.name === formData.name)) {
+        formData.name = '';
+      }
+      formData.base_url = '';
+    }
   }
 
-  $: selectedType = providerTypes.find(
-    (t) => t.value === formData.provider_type,
-  );
+  // 初始化表单数据
+  $: {
+    if (formData.provider_type === "openai" && formData.name === "") {
+      const defaultProvider = preProviders.find(p => p.provider_type === "openai");
+      if (defaultProvider) {
+        formData.name = defaultProvider.name;
+        formData.base_url = defaultProvider.base_url_placeholder;
+      }
+    }
+  }
 </script>
 
 <Modal bind:this={modalRef} {open} onClose={onModalClose} showCloseButton={false}>
   <!-- 弹窗容器 -->
   <div
-    class="bg-white w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col"
+    class="w-md max-w-md max-h-[80vh] flex flex-col"
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-6 py-4">
       <h2 class="font-normal text-text-primary">添加供应商</h2>
     </div>
 
-    <div class="flex-1 min-h-0 px-6 py-2">
+    <div class="flex-1 min-h-0 px-6 py-2 space-y-4">
       <TableGroup>
-        <TextRow label="供应商名称" bind:value={formData.name}></TextRow>
         <DropDownRow
           label="供应商类型"
-          options={providerTypes}
+          groups={providerGroups}
           selectedValue={formData.provider_type}
           onSelect={selectProviderType}
         ></DropDownRow>
+        <TextRow label="供应商名称" bind:value={formData.name}></TextRow>
+      </TableGroup>
+      <TableGroup>
+        <TextRow label="Base URL" bind:value={formData.base_url}></TextRow>
+        <TextRow label="API Key" bind:value={formData.api_key} isPassword={true}></TextRow>
       </TableGroup>
     </div>
 
