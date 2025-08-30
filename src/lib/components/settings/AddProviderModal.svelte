@@ -38,18 +38,18 @@
 
   // 自定义供应商类型选项
   const customProviderOptions = [
-    { value: "custom-openai", label: "自定义 OpenAI 兼容", icon: "🤖" },
-    { value: "custom-anthropic", label: "自定义 Anthropic 兼容", icon: "🧠" },
+    { value: "custom-openai", label: "OpenAI 兼容", icon: "🤖" },
+    { value: "custom-anthropic", label: "Anthropic 兼容", icon: "🧠" },
   ];
 
   // 分组供应商类型
   const providerGroups = [
     {
-      title: "预定义供应商",
+      title: "",
       options: preProviderOptions
     },
     {
-      title: "自定义供应商",
+      title: "",
       options: customProviderOptions
     }
   ];

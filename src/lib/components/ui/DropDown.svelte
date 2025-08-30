@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown } from '@lucide/svelte';
+  import { ChevronDown, ChevronsUpDown } from '@lucide/svelte';
 
   interface DropDownOption {
     value: string;
@@ -121,18 +121,18 @@
   }
 
   // 组合样式类
-  const defaultButtonClass = "h-8 px-3 rounded-md text-[14px] leading-[1.2] text-black flex items-center gap-1 hover:bg-bg-hover transition-colors";
+  const defaultButtonClass = "h-8 px-2 rounded-md text-[14px] leading-[1.2] text-black flex items-center gap-1 hover:bg-bg-hover";
   const finalButtonClass = `${defaultButtonClass} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${buttonClass}`;
 
   const positionClass = position === 'top' ? 'bottom-full mb-1' : 'top-full mt-1';
   const alignClass = align === 'right' ? 'right-0' : 'left-0';
-  const defaultDropdownClass = `absolute ${positionClass} ${alignClass} ${minWidth} ${maxWidth} ${maxHeight} bg-white border border-[#e5e5e5] rounded-lg shadow-lg z-[10020] overflow-y-auto w-fit`;
+  const defaultDropdownClass = `absolute ${positionClass} ${alignClass} ${minWidth} ${maxWidth} ${maxHeight} bg-white border border-[#e5e5e5] rounded-xl shadow-xl z-[10020] overflow-y-auto w-fit px-1 py-1`;
   const finalDropdownClass = `${defaultDropdownClass} ${dropdownClass}`;
 
-  const defaultOptionClass = "w-full px-2 py-2 text-left text-[14px] hover:bg-gray-50 transition-colors whitespace-nowrap";
-  const defaultSelectedOptionClass = "bg-blue-50 text-blue-600 font-medium";
-  const defaultGroupTitleClass = "px-2 py-1 text-[12px] font-medium text-gray-500 bg-gray-50 border-b border-gray-100";
-  const defaultSeparatorClass = "border-t border-gray-200 my-1";
+  const defaultOptionClass = "w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent whitespace-nowrap";
+  const defaultSelectedOptionClass = "";
+  const defaultGroupTitleClass = "px-2 py-1 text-[11px] text-gray-500";
+  const defaultSeparatorClass = "border-t border-gray-200 my-1 mx-2";
 
 
 </script>
@@ -151,9 +151,9 @@
     {disabled}
   >
     <span class="truncate flex-1 text-left">{selectedLabel}</span>
-    <ChevronDown 
+    <ChevronsUpDown 
       size={16} 
-      class="text-gray-500 transition-transform {isOpen ? 'rotate-180' : ''}"
+      class="text-gray-500"
     />
   </button>
 

@@ -38,9 +38,9 @@
           {#if icon}
             {@render icon({ class: "w-4 h-4 text-slate-600" })}
           {/if}
-          <div class="text-sm font-medium text-gray-700">{label}</div>
+          <div class="text-sm text-gray-700">{label}</div>
         </div>
-        <div class="ml-4">
+        <div class="ml-4 flex-1">
           {@render children?.()}
         </div>
       </div>

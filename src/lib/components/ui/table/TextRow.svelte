@@ -26,7 +26,7 @@
                 bind:value
                 {placeholder}
                 {readonly}
-                class="w-full bg-transparent text-sm text-right text-text-primary border-none outline-none p-1"
+                class="w-full text-sm text-right text-text-primary border-none outline-none p-1"
                 class:cursor-not-allowed={readonly}
                 class:text-[#b3b3b3]={readonly}
                 on:input
