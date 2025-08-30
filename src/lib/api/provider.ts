@@ -20,11 +20,20 @@ export async function getProviders(): Promise<Provider[]> {
 }
 
 /**
+ * 获取预定义供应商模板列表
+ */
+export async function getPredefinedProviders(): Promise<Provider[]> {
+  return apiCall<Provider[]>('provider_list_predefined');
+}
+
+/**
  * 获取供应商详情
  */
 export async function getProvider(providerId: UUID): Promise<Provider> {
-  return apiCall<Provider>('provider_get', { providerId });
+  return apiCall<Provider>('provider_get', { providerId: providerId });
 }
+
+
 
 /**
  * 创建供应商
@@ -40,21 +49,21 @@ export async function updateProvider(
   providerId: UUID,
   config: Partial<ProviderConfig>
 ): Promise<Provider> {
-  return apiCall<Provider>('provider_update', { providerId, ...config });
+  return apiCall<Provider>('provider_update', { providerId: providerId, config });
 }
 
 /**
  * 删除供应商
  */
 export async function deleteProvider(providerId: UUID): Promise<void> {
-  return apiCall<void>('provider_delete', { providerId });
+  return apiCall<void>('provider_delete', { providerId: providerId });
 }
 
 /**
  * 探活检测供应商
  */
 export async function probeProvider(providerId: UUID): Promise<ProbeResult> {
-  return apiCall<ProbeResult>('provider_probe', { providerId });
+  return apiCall<ProbeResult>('provider_probe', { providerId: providerId });
 }
 
 /**
@@ -71,7 +80,10 @@ export async function toggleProvider(
   providerId: UUID,
   enabled: boolean
 ): Promise<Provider> {
-  return apiCall<Provider>('provider_toggle', { providerId, enabled });
+  return apiCall<Provider>('provider_toggle', { 
+    providerId, 
+    enabled 
+  });
 }
 
 /**
@@ -82,7 +94,11 @@ export async function toggleModel(
   modelId: string,
   enabled: boolean
 ): Promise<void> {
-  return apiCall<void>('provider_toggle_model', { providerId, modelId, enabled });
+  return apiCall<void>('provider_toggle_model', { 
+    providerId, 
+    modelId, 
+    enabled 
+  });
 }
 
 /**

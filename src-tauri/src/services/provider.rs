@@ -1,35 +1,53 @@
 // 供应商服务实现
 
 use crate::models::{
-    AppError, Model, ProbeResult, Provider, ProviderConfig, ProviderStatus, ProviderType,
-    Timestamp, UUID,
+    AppError, Model, ModelFeature, ProbeResult, Provider, ProviderConfig, ProviderStatus, ProviderType,
+    ProviderWithModels, Timestamp, UUID,
 };
-use crate::services::StorageService;
-use std::sync::Arc;
+use crate::services::{DatabaseService, ProviderRepository};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// 供应商服务
 pub struct ProviderService {
-    storage: Arc<StorageService>,
+    repository: ProviderRepository,
 }
 
 impl ProviderService {
-    pub fn new(storage: Arc<StorageService>) -> Self {
-        Self { storage }
+    pub fn new(db: DatabaseService) -> Self {
+        Self { repository: ProviderRepository::new(db) }
     }
 
     /// 获取所有供应商列表
     pub async fn list_providers(&self) -> Result<Vec<Provider>, AppError> {
-        // TODO: 从数据库或存储中获取供应商列表
-        // 这里返回一个示例列表用于开发
-        Ok(vec![])
+        self.repository.list_providers().await
+    }
+
+    /// 获取预定义供应商模板（用于选择页面）
+    pub async fn get_predefined_providers(&self) -> Result<Vec<Provider>, AppError> {
+        // 获取所有预定义的供应商（ID以"-default"结尾的）
+        let all_providers = self.list_providers().await?;
+        let predefined = all_providers
+            .into_iter()
+            .filter(|p| p.id.ends_with("-default"))
+            .collect();
+        Ok(predefined)
     }
 
     /// 根据ID获取供应商
-    pub async fn get_provider(&self, _provider_id: &UUID) -> Result<Provider, AppError> {
-        // TODO: 从存储中根据ID查询供应商
-        Err(AppError::not_found("Provider not found"))
+    pub async fn get_provider(&self, provider_id: &UUID) -> Result<Provider, AppError> {
+        match self.repository.get_provider_by_id(provider_id).await? {
+            Some(provider) => Ok(provider),
+            None => Err(AppError::not_found("Provider not found")),
+        }
+    }
+
+    /// 获取带模型的供应商
+    pub async fn get_provider_with_models(&self, provider_id: &UUID) -> Result<ProviderWithModels, AppError> {
+        match self.repository.get_provider_with_models(provider_id).await? {
+            Some(provider) => Ok(provider),
+            None => Err(AppError::not_found("Provider not found")),
+        }
     }
 
     /// 创建新供应商
@@ -38,26 +56,28 @@ impl ProviderService {
         let provider_id = Uuid::new_v4().to_string();
 
         let provider = Provider {
-            id: provider_id,
+            id: provider_id.clone(),
             name: config
                 .name
                 .unwrap_or_else(|| self.get_default_name(&config.provider_type)),
             provider_type: config.provider_type,
             base_url: config.base_url,
-            status: ProviderStatus::Inactive,
+            api_key: config.api_key.clone(),
+            status: ProviderStatus::Disabled,
             enabled: config.enabled.unwrap_or(false),
-            models: vec![],
             last_probe_at: None,
             probe_result: None,
             created_at: now,
             updated_at: now,
         };
 
-        // TODO: 将供应商保存到存储
-        // self.storage.save_provider(&provider).await?;
+        // 创建数据库记录
+        self.repository.create_provider(&provider).await?;
 
         Ok(provider)
     }
+
+
 
     /// 更新供应商配置
     pub async fn update_provider(
@@ -74,27 +94,29 @@ impl ProviderService {
         }
         provider.provider_type = config.provider_type;
         provider.base_url = config.base_url;
+        provider.api_key = config.api_key;
         if let Some(enabled) = config.enabled {
             provider.enabled = enabled;
         }
         provider.updated_at = now;
 
-        // TODO: 保存到存储
-        // self.storage.save_provider(&provider).await?;
+        tracing::info!("Provider {} - Updating provider", provider_id);
+        // 更新数据库记录
+        self.repository.update_provider(&provider).await?;
 
         Ok(provider)
     }
 
     /// 删除供应商
-    pub async fn delete_provider(&self, _provider_id: &UUID) -> Result<(), AppError> {
-        // TODO: 从存储中删除供应商
-        // self.storage.delete_provider(provider_id).await?;
+    pub async fn delete_provider(&self, provider_id: &UUID) -> Result<(), AppError> {
+        // 删除数据库记录
+        self.repository.delete_provider(provider_id).await?;
         Ok(())
     }
 
     /// 探活检测供应商
     pub async fn probe_provider(&self, provider_id: &UUID) -> Result<ProbeResult, AppError> {
-        let provider = self.get_provider(provider_id).await?;
+        let _provider = self.get_provider(provider_id).await?;
         let now = self.current_timestamp();
 
         // TODO: 实现实际的探活逻辑
@@ -106,11 +128,8 @@ impl ProviderService {
             timestamp: now,
         };
 
-        // TODO: 更新供应商的探活结果
-        // let mut updated_provider = provider;
-        // updated_provider.last_probe_at = Some(now);
-        // updated_provider.probe_result = Some(probe_result.clone());
-        // self.storage.save_provider(&updated_provider).await?;
+        // 更新供应商的探活结果
+        self.repository.update_probe_result(provider_id, &probe_result).await?;
 
         Ok(probe_result)
     }
@@ -119,15 +138,19 @@ impl ProviderService {
     pub async fn get_provider_models(
         &self,
         provider_id: &UUID,
-        _force_refresh: bool,
+        force_refresh: bool,
     ) -> Result<Vec<Model>, AppError> {
         let provider = self.get_provider(provider_id).await?;
+        
+        // 如果不强制刷新，先尝试从数据库获取
+        if !force_refresh {
+            let cached_models = self.repository.get_models_by_provider(provider_id).await?;
+            if !cached_models.is_empty() {
+                return Ok(cached_models);
+            }
+        }
 
-        // TODO: 实现模型获取逻辑
-        // 如果force_refresh为true，从API获取最新模型列表
-        // 否则返回缓存的模型列表
-
-        // 这里返回示例模型列表
+        // 从API获取最新模型列表
         let models = match provider.provider_type {
             ProviderType::OpenAI | ProviderType::CustomOpenAI => {
                 self.get_openai_models(&provider).await?
@@ -139,6 +162,11 @@ impl ProviderService {
             ProviderType::DeepSeek => self.get_deepseek_models(&provider).await?,
             ProviderType::OpenRouter => self.get_openrouter_models(&provider).await?,
         };
+
+        // 保存到数据库
+        if !models.is_empty() {
+            self.repository.create_models(&models).await?;
+        }
 
         Ok(models)
     }
@@ -153,9 +181,7 @@ impl ProviderService {
         provider.enabled = enabled;
         provider.updated_at = self.current_timestamp();
 
-        // TODO: 保存到存储
-        // self.storage.save_provider(&provider).await?;
-
+        self.repository.update_provider(&provider).await?;
         Ok(provider)
     }
 
@@ -166,20 +192,7 @@ impl ProviderService {
         model_id: &str,
         enabled: bool,
     ) -> Result<(), AppError> {
-        let mut provider = self.get_provider(provider_id).await?;
-
-        // 更新模型状态
-        if let Some(model) = provider.models.iter_mut().find(|m| m.id == model_id) {
-            model.enabled = enabled;
-            provider.updated_at = self.current_timestamp();
-
-            // TODO: 保存到存储
-            // self.storage.save_provider(&provider).await?;
-        } else {
-            return Err(AppError::not_found("Model not found"));
-        }
-
-        Ok(())
+        self.repository.toggle_model(provider_id, model_id, enabled).await
     }
 
     // 私有辅助方法
@@ -204,71 +217,82 @@ impl ProviderService {
     }
 
     async fn get_openai_models(&self, provider: &Provider) -> Result<Vec<Model>, AppError> {
+        let now = self.current_timestamp();
         // TODO: 实际从OpenAI API获取模型列表
         Ok(vec![
             Model {
                 id: "gpt-4".to_string(),
+                provider_id: provider.id.clone(),
                 name: "GPT-4".to_string(),
-                provider: provider.id.clone(),
                 context_length: Some(8192),
                 input_cost: Some(0.03),
                 output_cost: Some(0.06),
                 supported_features: vec![
-                    crate::models::provider::ModelFeature::Text,
-                    crate::models::provider::ModelFeature::Vision,
-                    crate::models::provider::ModelFeature::FunctionCalling,
+                    ModelFeature::Text,
+                    ModelFeature::Vision,
+                    ModelFeature::FunctionCalling,
                 ],
                 enabled: false,
+                created_at: now,
+                updated_at: now,
             },
             Model {
                 id: "gpt-3.5-turbo".to_string(),
+                provider_id: provider.id.clone(),
                 name: "GPT-3.5 Turbo".to_string(),
-                provider: provider.id.clone(),
                 context_length: Some(4096),
                 input_cost: Some(0.0015),
                 output_cost: Some(0.002),
                 supported_features: vec![
-                    crate::models::provider::ModelFeature::Text,
-                    crate::models::provider::ModelFeature::FunctionCalling,
+                    ModelFeature::Text,
+                    ModelFeature::FunctionCalling,
                 ],
                 enabled: false,
+                created_at: now,
+                updated_at: now,
             },
         ])
     }
 
     async fn get_anthropic_models(&self, provider: &Provider) -> Result<Vec<Model>, AppError> {
+        let now = self.current_timestamp();
         // TODO: 实际从Anthropic API获取模型列表
         Ok(vec![Model {
             id: "claude-3-opus".to_string(),
+            provider_id: provider.id.clone(),
             name: "Claude 3 Opus".to_string(),
-            provider: provider.id.clone(),
             context_length: Some(200000),
             input_cost: Some(15.0),
             output_cost: Some(75.0),
             supported_features: vec![
-                crate::models::provider::ModelFeature::Text,
-                crate::models::provider::ModelFeature::Vision,
-                crate::models::provider::ModelFeature::FunctionCalling,
+                ModelFeature::Text,
+                ModelFeature::Vision,
+                ModelFeature::FunctionCalling,
             ],
             enabled: false,
+            created_at: now,
+            updated_at: now,
         }])
     }
 
     async fn get_google_models(&self, provider: &Provider) -> Result<Vec<Model>, AppError> {
+        let now = self.current_timestamp();
         // TODO: 实际从Google API获取模型列表
         Ok(vec![Model {
             id: "gemini-pro".to_string(),
+            provider_id: provider.id.clone(),
             name: "Gemini Pro".to_string(),
-            provider: provider.id.clone(),
             context_length: Some(32768),
             input_cost: None,
             output_cost: None,
             supported_features: vec![
-                crate::models::provider::ModelFeature::Text,
-                crate::models::provider::ModelFeature::Vision,
-                crate::models::provider::ModelFeature::FunctionCalling,
+                ModelFeature::Text,
+                ModelFeature::Vision,
+                ModelFeature::FunctionCalling,
             ],
             enabled: false,
+            created_at: now,
+            updated_at: now,
         }])
     }
 

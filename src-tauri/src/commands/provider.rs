@@ -1,8 +1,8 @@
 // 供应商相关 IPC 命令
 
 use crate::models::{
-    ApiResponse, ListModelsRequest, ListModelsResponse, Model, ProbeResult, Provider,
-    ProviderConfig, ToggleModelRequest, ToggleProviderRequest, UUID,
+    AppError, ListModelsRequest, ListModelsResponse, Model, ProbeResult, Provider,
+    ProviderConfig, ProviderWithModels, ToggleModelRequest, ToggleProviderRequest, UUID,
 };
 use crate::services::ProviderService;
 use tauri::State;
@@ -11,11 +11,16 @@ use tauri::State;
 #[tauri::command]
 pub async fn provider_list(
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<Vec<Provider>>, String> {
-    match provider_service.list_providers().await {
-        Ok(providers) => Ok(ApiResponse::success(providers)),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
+) -> Result<Vec<Provider>, AppError> {
+    provider_service.list_providers().await
+}
+
+/// 获取预定义供应商模板列表
+#[tauri::command]
+pub async fn provider_list_predefined(
+    provider_service: State<'_, ProviderService>,
+) -> Result<Vec<Provider>, AppError> {
+    provider_service.get_predefined_providers().await
 }
 
 /// 获取供应商详情
@@ -23,11 +28,19 @@ pub async fn provider_list(
 pub async fn provider_get(
     provider_id: UUID,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<Provider>, String> {
-    match provider_service.get_provider(&provider_id).await {
-        Ok(provider) => Ok(ApiResponse::success(provider)),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
+) -> Result<Provider, AppError> {
+    provider_service.get_provider(&provider_id).await
+}
+
+
+
+/// 获取带模型的供应商详情
+#[tauri::command]
+pub async fn provider_get_with_models(
+    provider_id: UUID,
+    provider_service: State<'_, ProviderService>,
+) -> Result<ProviderWithModels, AppError> {
+    provider_service.get_provider_with_models(&provider_id).await
 }
 
 /// 创建供应商
@@ -35,11 +48,8 @@ pub async fn provider_get(
 pub async fn provider_create(
     config: ProviderConfig,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<Provider>, String> {
-    match provider_service.create_provider(config).await {
-        Ok(provider) => Ok(ApiResponse::success(provider)),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
+) -> Result<Provider, AppError> {
+    provider_service.create_provider(config).await
 }
 
 /// 更新供应商配置
@@ -48,11 +58,10 @@ pub async fn provider_update(
     provider_id: UUID,
     config: ProviderConfig,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<Provider>, String> {
-    match provider_service.update_provider(&provider_id, config).await {
-        Ok(provider) => Ok(ApiResponse::success(provider)),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
+) -> Result<Provider, AppError> {
+    println!("provider_update: {:?}", config);
+    println!("provider_id: {:?}", provider_id);
+    provider_service.update_provider(&provider_id, config).await
 }
 
 /// 删除供应商
@@ -60,11 +69,8 @@ pub async fn provider_update(
 pub async fn provider_delete(
     provider_id: UUID,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<()>, String> {
-    match provider_service.delete_provider(&provider_id).await {
-        Ok(_) => Ok(ApiResponse::success(())),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
+) -> Result<(), AppError> {
+    provider_service.delete_provider(&provider_id).await
 }
 
 /// 探活检测供应商
@@ -72,11 +78,8 @@ pub async fn provider_delete(
 pub async fn provider_probe(
     provider_id: UUID,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<ProbeResult>, String> {
-    match provider_service.probe_provider(&provider_id).await {
-        Ok(result) => Ok(ApiResponse::success(result)),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
+) -> Result<ProbeResult, AppError> {
+    provider_service.probe_provider(&provider_id).await
 }
 
 /// 获取供应商模型列表
@@ -84,26 +87,21 @@ pub async fn provider_probe(
 pub async fn provider_list_models(
     request: ListModelsRequest,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<ListModelsResponse>, String> {
+) -> Result<ListModelsResponse, AppError> {
     let force_refresh = request.force_refresh.unwrap_or(false);
 
-    match provider_service
+    let models = provider_service
         .get_provider_models(&request.provider_id, force_refresh)
-        .await
-    {
-        Ok(models) => {
-            let response = ListModelsResponse {
-                models,
-                cached: !force_refresh,
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64,
-            };
-            Ok(ApiResponse::success(response))
-        }
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
+        .await?;
+
+    Ok(ListModelsResponse {
+        models,
+        cached: !force_refresh,
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64,
+    })
 }
 
 /// 切换供应商启用状态
@@ -111,14 +109,10 @@ pub async fn provider_list_models(
 pub async fn provider_toggle(
     request: ToggleProviderRequest,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<Provider>, String> {
-    match provider_service
+) -> Result<Provider, AppError> {
+    provider_service
         .toggle_provider(&request.provider_id, request.enabled)
         .await
-    {
-        Ok(provider) => Ok(ApiResponse::success(provider)),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
 }
 
 /// 切换模型启用状态
@@ -126,45 +120,37 @@ pub async fn provider_toggle(
 pub async fn provider_toggle_model(
     request: ToggleModelRequest,
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<()>, String> {
-    match provider_service
+) -> Result<(), AppError> {
+    provider_service
         .toggle_model(&request.provider_id, &request.model_id, request.enabled)
         .await
-    {
-        Ok(_) => Ok(ApiResponse::success(())),
-        Err(error) => Ok(ApiResponse::error(error)),
-    }
 }
 
 /// 获取所有可用模型列表
 #[tauri::command]
 pub async fn provider_get_available_models(
     provider_service: State<'_, ProviderService>,
-) -> Result<ApiResponse<Vec<(Provider, Vec<Model>)>>, String> {
-    match provider_service.list_providers().await {
-        Ok(providers) => {
-            let mut result = vec![];
+) -> Result<Vec<(Provider, Vec<Model>)>, AppError> {
+    let providers = provider_service.list_providers().await?;
+    let mut result = vec![];
 
-            for provider in providers {
-                if provider.enabled {
-                    match provider_service
-                        .get_provider_models(&provider.id, false)
-                        .await
-                    {
-                        Ok(models) => {
-                            let enabled_models: Vec<Model> =
-                                models.into_iter().filter(|m| m.enabled).collect();
-                            if !enabled_models.is_empty() {
-                                result.push((provider, enabled_models));
-                            }
-                        }
-                        Err(_) => continue, // 忽略获取失败的供应商
+    for provider in providers {
+        if provider.enabled {
+            match provider_service
+                .get_provider_models(&provider.id, false)
+                .await
+            {
+                Ok(models) => {
+                    let enabled_models: Vec<Model> =
+                        models.into_iter().filter(|m| m.enabled).collect();
+                    if !enabled_models.is_empty() {
+                        result.push((provider, enabled_models));
                     }
                 }
+                Err(_) => continue, // 忽略获取失败的供应商
             }
-
-            Ok(ApiResponse::success(result))
         }
-        Err(error) => Ok(ApiResponse::error(error)),
     }
+
+    Ok(result)
 }

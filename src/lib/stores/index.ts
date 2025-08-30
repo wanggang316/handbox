@@ -19,19 +19,15 @@ export {
 
 // 供应商相关
 export {
-  providers,
-  selectedProvider,
-  availableModels,
-  selectedModel,
-  isLoading as providerLoading,
-  isProbingProvider,
-  isFetchingModels,
-  providerError,
-  enabledProviders,
-  enabledModels,
-  modelsByProvider,
-  providerActions
-} from './provider';
+  providerState,
+  providerActions,
+  preProviders,
+  getProviderIcon,
+  getPreProvider,
+  getEnabledProviders,
+  getEnabledModels,
+  getModelsByProvider
+} from '../states/provider.svelte';
 
 // Artifact 相关
 export {

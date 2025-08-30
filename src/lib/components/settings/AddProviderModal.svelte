@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import type { ProviderConfig } from "$lib/types/provider";
+  import { preProviders } from "$lib/states/provider.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TextRow from "../ui/table/TextRow.svelte";
   import DropDownRow from "../ui/table/DropDownRow.svelte";
@@ -59,9 +60,9 @@
     try {
       const config: ProviderConfig = {
         name: formData.name,
-        type: formData.provider_type,
-        baseUrl: '',
-        apiKey: '',
+        provider_type: formData.provider_type,
+        base_url: '',
+        api_key: '',
         enabled: false,
       };
 

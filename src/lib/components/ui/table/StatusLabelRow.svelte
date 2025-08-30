@@ -8,7 +8,7 @@
     icon?: string;
     iconSrc?: string;
     isCustomProvider?: boolean;
-    status: "enabled" | "disabled" | "pending" | "error";
+    status: "enabled" | "disabled" | "idle" | "error";
     statusText: string;
     onclick?: () => void;
     clickable?: boolean;
@@ -48,10 +48,7 @@
   <TableBaseRow {label} icon={iconSnippet}>
     
     <div class="flex items-center gap-3">
-      {#if status == 'enabled'}
-        <StatusLabel {status} text={statusText} />
-      {/if}
-
+      <StatusLabel {status} text={statusText} />
       {#if clickable}
         <ChevronRight size=16
           class="text-slate-400 group-hover:text-slate-600 transition-colors duration-75"

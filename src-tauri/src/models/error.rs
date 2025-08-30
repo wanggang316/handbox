@@ -61,6 +61,13 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
+// sqlx 错误转换
+impl From<sqlx::Error> for AppError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::internal_error(&format!("Database error: {}", error))
+    }
+}
+
 /// API 响应包装类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "success")]
