@@ -108,14 +108,13 @@ pub fn run() {
             toggle_settings_window,
             // 供应商相关命令
             provider_list,
-            provider_list_predefined,
             provider_get,
 
             provider_get_with_models,
             provider_create,
             provider_update,
             provider_delete,
-            provider_probe,
+
             provider_list_models,
             provider_toggle,
             provider_toggle_model,

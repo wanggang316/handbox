@@ -7,6 +7,7 @@
   --color-bg-secondary: #f8f8f8;
   --color-bg-hover: #ededed;
   --color-bg-accent: #5661f6;
+  --color-bg-accent-hover: #3D49DA;
   --color-text-primary: #1e293b;
   --color-text-secondary: #64748b;
   --color-text-accent: #ffffff;
@@ -17,6 +18,7 @@
   --color-bg-secondary-dark: #1e293b;
   --color-bg-hover-dark: #334155;
   --color-bg-accent-dark: #3b82f6;
+  --color-bg-accent-hover-dark: #3D49DA;
   --color-text-primary-dark: #f8fafc;
   --color-text-secondary-dark: #94a3b8;
   --color-text-accent-dark: #ffffff;

@@ -1,6 +1,6 @@
 // Provider 数据访问层 - 使用普通查询避免 sqlx 宏问题
 
-use crate::models::{AppError, Model, Provider, ProviderStatus, ProviderType, ProviderWithModels, ProbeResult};
+use crate::models::{AppError, Model, Provider, ProviderType, ProviderWithModels};
 use crate::services::DatabaseService;
 use sqlx::Row;
 
@@ -17,12 +17,10 @@ impl ProviderRepository {
 
     /// 创建供应商
     pub async fn create_provider(&self, provider: &Provider) -> Result<(), AppError> {
-        let probe_result_json = provider.probe_result_to_json();
-
         let query = r#"
-            INSERT INTO providers (id, name, provider_type, base_url, api_key, status, enabled, 
-                                 last_probe_at, probe_result, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO providers (id, name, provider_type, base_url, api_key, enabled, 
+                                 created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#;
 
         sqlx::query(query)
@@ -31,10 +29,7 @@ impl ProviderRepository {
             .bind(&format!("{:?}", provider.provider_type).to_lowercase())
             .bind(&provider.base_url)
             .bind(&provider.api_key)
-            .bind(&format!("{:?}", provider.status).to_lowercase())
             .bind(provider.enabled)
-            .bind(provider.last_probe_at)
-            .bind(probe_result_json)
             .bind(provider.created_at)
             .bind(provider.updated_at)
             .execute(self.db.pool())
@@ -53,13 +48,11 @@ impl ProviderRepository {
     /// 更新供应商
     pub async fn update_provider(&self, provider: &Provider) -> Result<(), AppError> {
         tracing::debug!("Updating provider in database: ID={}, Name={}", provider.id, provider.name);
-        let probe_result_json = provider.probe_result_to_json();
 
         let query = r#"
             UPDATE providers SET 
                 name = $2, provider_type = $3, base_url = $4, api_key = $5,
-                status = $6, enabled = $7, last_probe_at = $8, 
-                probe_result = $9, updated_at = $10
+                enabled = $6, updated_at = $7
             WHERE id = $1
         "#;
 
@@ -69,10 +62,7 @@ impl ProviderRepository {
             .bind(&format!("{:?}", provider.provider_type).to_lowercase())
             .bind(&provider.base_url)
             .bind(&provider.api_key)
-            .bind(&format!("{:?}", provider.status).to_lowercase())
             .bind(provider.enabled)
-            .bind(provider.last_probe_at)
-            .bind(probe_result_json)
             .bind(provider.updated_at)
             .execute(self.db.pool())
             .await
@@ -90,8 +80,8 @@ impl ProviderRepository {
     /// 根据 ID 获取供应商
     pub async fn get_provider_by_id(&self, id: &str) -> Result<Option<Provider>, AppError> {
         let query = r#"
-            SELECT id, name, provider_type, base_url, api_key, status, enabled,
-                   last_probe_at, probe_result, created_at, updated_at
+            SELECT id, name, provider_type, base_url, api_key, enabled,
+                   created_at, updated_at
             FROM providers WHERE id = $1
         "#;
 
@@ -113,8 +103,8 @@ impl ProviderRepository {
     /// 根据名称获取供应商
     pub async fn get_provider_by_name(&self, name: &str) -> Result<Option<Provider>, AppError> {
         let query = r#"
-            SELECT id, name, provider_type, base_url, api_key, status, enabled,
-                   last_probe_at, probe_result, created_at, updated_at
+            SELECT id, name, provider_type, base_url, api_key, enabled,
+                   created_at, updated_at
             FROM providers WHERE name = $1
         "#;
 
@@ -136,8 +126,8 @@ impl ProviderRepository {
     /// 获取所有供应商
     pub async fn list_providers(&self) -> Result<Vec<Provider>, AppError> {
         let query = r#"
-            SELECT id, name, provider_type, base_url, api_key, status, enabled,
-                   last_probe_at, probe_result, created_at, updated_at
+            SELECT id, name, provider_type, base_url, api_key, enabled,
+                   created_at, updated_at
             FROM providers ORDER BY created_at DESC
         "#;
 
@@ -169,11 +159,8 @@ impl ProviderRepository {
                     provider_type: p.provider_type,
                     base_url: p.base_url,
                     api_key: p.api_key, // 将在服务层填充
-                    status: p.status,
                     enabled: p.enabled,
                     models,
-                    last_probe_at: p.last_probe_at,
-                    probe_result: p.probe_result,
                     created_at: p.created_at,
                     updated_at: p.updated_at,
                 }))
@@ -201,49 +188,9 @@ impl ProviderRepository {
         Ok(())
     }
 
-    /// 更新供应商状态
-    pub async fn update_provider_status(&self, id: &str, status: ProviderStatus) -> Result<(), AppError> {
-        let now = chrono::Utc::now().timestamp_millis();
-        
-        let result = sqlx::query("UPDATE providers SET status = $1, updated_at = $2 WHERE id = $3")
-            .bind(&format!("{:?}", status).to_lowercase())
-            .bind(now)
-            .bind(id)
-            .execute(self.db.pool())
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to update provider status: {}", e))
-            })?;
 
-        if result.rows_affected() == 0 {
-            return Err(AppError::validation_error("Provider not found"));
-        }
 
-        Ok(())
-    }
 
-    /// 更新探活结果
-    pub async fn update_probe_result(&self, id: &str, probe_result: &ProbeResult) -> Result<(), AppError> {
-        let probe_json = serde_json::to_string(probe_result).unwrap_or_default();
-        let now = chrono::Utc::now().timestamp_millis();
-
-        let result = sqlx::query("UPDATE providers SET probe_result = $1, last_probe_at = $2, updated_at = $3 WHERE id = $4")
-            .bind(probe_json)
-            .bind(probe_result.timestamp)
-            .bind(now)
-            .bind(id)
-            .execute(self.db.pool())
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to update probe result: {}", e))
-            })?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::validation_error("Provider not found"));
-        }
-
-        Ok(())
-    }
 
     /// 创建模型
     pub async fn create_model(&self, model: &Model) -> Result<(), AppError> {
@@ -377,8 +324,6 @@ impl ProviderRepository {
     // 辅助方法：将数据库行转换为 Provider
     fn row_to_provider(&self, row: sqlx::sqlite::SqliteRow) -> Result<Provider, AppError> {
         let provider_type_str: String = row.try_get("provider_type")?;
-        let status_str: String = row.try_get("status")?;
-        let probe_result_json: Option<String> = row.try_get("probe_result")?;
 
         let provider_type = match provider_type_str.as_str() {
             "openai" => ProviderType::OpenAI,
@@ -391,27 +336,13 @@ impl ProviderRepository {
             _ => return Err(AppError::internal_error("Invalid provider type")),
         };
 
-        let status = match status_str.as_str() {
-            "enabled" => ProviderStatus::Enabled,
-            "disabled" => ProviderStatus::Disabled,
-            "idle" => ProviderStatus::Idle,
-            "error" => ProviderStatus::Error,
-            _ => return Err(AppError::internal_error("Invalid provider status")),
-        };
-
-        let probe_result = Provider::probe_result_from_json(probe_result_json)
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse probe result: {}", e)))?;
-
         Ok(Provider {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
             provider_type,
             base_url: row.try_get("base_url")?,
             api_key: row.try_get("api_key")?,
-            status,
             enabled: row.try_get("enabled")?,
-            last_probe_at: row.try_get("last_probe_at")?,
-            probe_result,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -463,10 +394,7 @@ mod tests {
             provider_type: ProviderType::OpenAI,
             base_url: "https://api.openai.com".to_string(),
             api_key: "test-api-key".to_string(),
-            status: ProviderStatus::Enabled,
             enabled: true,
-            last_probe_at: None,
-            probe_result: None,
             created_at: now,
             updated_at: now,
         };

@@ -7,8 +7,7 @@ import type { BaseEntity } from './index';
 // 供应商类型
 export type ProviderType = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'openrouter' | 'custom-openai' | 'custom-anthropic';
 
-// 供应商状态
-export type ProviderStatus = 'enabled' | 'disabled' | 'idle' | 'error';
+
 
 // 供应商配置
 export interface Provider extends BaseEntity {
@@ -16,10 +15,7 @@ export interface Provider extends BaseEntity {
   provider_type: ProviderType;
   base_url: string;
   api_key: string;
-  status: ProviderStatus;
   enabled: boolean;
-  last_probe_at?: number;
-  probe_result?: ProbeResult;
 }
 
 // 带模型的供应商
@@ -44,13 +40,7 @@ export interface Model {
 // 模型特性
 export type ModelFeature = 'text' | 'vision' | 'function-calling' | 'streaming' | 'reasoning';
 
-// 探活结果
-export interface ProbeResult {
-  success: boolean;
-  latency?: number;
-  error?: string;
-  timestamp: number;
-}
+
 
 // 供应商配置请求
 export interface ProviderConfig {

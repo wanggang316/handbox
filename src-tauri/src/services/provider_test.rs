@@ -101,27 +101,6 @@ mod tests {
         assert_eq!(custom_providers[1].name, "OpenAI Provider");
     }
 
-    #[tokio::test]
-    async fn test_get_predefined_providers() {
-        let (service, _temp_dir) = create_test_service().await;
-        
-        let predefined = service.get_predefined_providers().await.unwrap();
-        assert_eq!(predefined.len(), 5);
-        
-        // 验证预定义供应商
-        let provider_names: Vec<_> = predefined.iter().map(|p| p.name.as_str()).collect();
-        assert!(provider_names.contains(&"OpenAI"));
-        assert!(provider_names.contains(&"Anthropic"));
-        assert!(provider_names.contains(&"Google AI"));
-        assert!(provider_names.contains(&"DeepSeek"));
-        assert!(provider_names.contains(&"OpenRouter"));
-        
-        // 验证所有预定义供应商都是未启用状态
-        assert!(predefined.iter().all(|p| !p.enabled));
-        
-        // 验证所有预定义供应商状态都是 inactive
-        assert!(predefined.iter().all(|p| p.status == crate::models::ProviderStatus::Disabled));
-    }
 
     #[tokio::test]
     async fn test_update_provider() {

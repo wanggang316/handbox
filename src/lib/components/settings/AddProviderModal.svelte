@@ -1,30 +1,38 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import type { ProviderConfig } from "$lib/types/provider";
-  import { preProviders } from "$lib/states/provider.svelte";
+  import type { ProviderConfig, Provider, ProviderType } from "$lib/types/provider";
+  import { preProviders, providerActions } from "$lib/states/provider.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TextRow from "../ui/table/TextRow.svelte";
   import DropDownRow from "../ui/table/DropDownRow.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
   import Modal from "../ui/Modal.svelte";
 
-  export let open = false;
+  // 使用 $props() 替代 export let
+  const { open = false, editProvider = null } = $props<{
+    open?: boolean;
+    editProvider?: Provider | null;
+  }>();
   
   const dispatch = createEventDispatcher<{
     close: void;
-    confirm: ProviderConfig;
+    confirm: Provider;
   }>();
 
-  let formData = {
+  // 使用 $derived 计算是否为编辑模式
+  const isEditMode = $derived(editProvider !== null);
+
+  // 使用 $state 定义响应式状态
+  let formData = $state({
     name: "",
-    provider_type: "openai" as const,
+    provider_type: "openai" as ProviderType,
     base_url: "",
     api_key: "",
-  };
+  });
 
-  let isLoading = false;
-  let errors: Record<string, string> = {};
-  let showDropdown = false;
+  let isLoading = $state(false);
+  let errors = $state<Record<string, string>>({});
+  let showDropdown = $state(false);
   
   // Modal 引用
   let modalRef: Modal;
@@ -93,22 +101,43 @@
         provider_type: formData.provider_type,
         base_url: formData.base_url,
         api_key: formData.api_key,
-        enabled: false,
+        enabled: true,
       };
 
-      console.log("config", config);
-
-      dispatch("confirm", config);
+      if (isEditMode && editProvider) {
+        // 编辑模式：更新供应商
+        console.log("Updating provider with config:", config);
+        await providerActions.updateProvider(editProvider.id, config);
+        console.log("Provider updated successfully");
+        
+        // 编辑模式下返回更新后的供应商数据
+        const updatedProvider: Provider = {
+          ...editProvider,
+          name: formData.name,
+          provider_type: formData.provider_type,
+          base_url: formData.base_url,
+          api_key: formData.api_key,
+        };
+        dispatch("confirm", updatedProvider);
+      } else {
+        // 创建模式：创建新供应商
+        console.log("Creating provider with config:", config);
+        const newProvider = await providerActions.createProvider(config);
+        console.log("Provider created successfully:", newProvider);
+        dispatch("confirm", newProvider);
+      }
+      // 成功后触发关闭动画
       modalRef?.handleClose();
     } catch (error) {
-      console.error("Failed to create provider:", error);
+      console.error(isEditMode ? "Failed to update provider:" : "Failed to create provider:", error);
+      // 这里可以显示错误信息给用户
     } finally {
       isLoading = false;
     }
   }
 
   function selectProviderType(type: string) {
-    formData.provider_type = type as any;
+    formData.provider_type = type as ProviderType;
     showDropdown = false;
     
     // 如果选择了预定义供应商，自动填充名称
@@ -125,9 +154,34 @@
     }
   }
 
-  // 初始化表单数据
-  $: {
-    if (formData.provider_type === "openai" && formData.name === "") {
+  // 使用 $effect 替代 $: 响应式语句
+  // 当模态框打开时初始化表单数据
+  $effect(() => {
+    if (open) {
+      initializeFormData();
+    } else {
+      // 当模态框关闭时重置表单数据
+      formData = {
+        name: "",
+        provider_type: "openai" as ProviderType,
+        base_url: "",
+        api_key: "",
+      };
+      errors = {};
+    }
+  });
+  
+  // 抽取初始化逻辑为单独的函数
+  function initializeFormData() {
+    if (isEditMode && editProvider) {
+      formData = {
+        name: editProvider.name,
+        provider_type: editProvider.provider_type,
+        base_url: editProvider.base_url,
+        api_key: editProvider.api_key
+      };
+    } else if (!isEditMode && formData.provider_type === "openai" && formData.name === "") {
+      // 创建模式的默认初始化
       const defaultProvider = preProviders.find(p => p.provider_type === "openai");
       if (defaultProvider) {
         formData.name = defaultProvider.name;
@@ -144,7 +198,7 @@
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-6 py-4">
-      <h2 class="font-normal text-text-primary">添加供应商</h2>
+      <h2 class="font-normal text-text-primary">{isEditMode ? '编辑供应商' : '添加供应商'}</h2>
     </div>
 
     <div class="flex-1 min-h-0 px-6 py-2 space-y-4">
@@ -175,7 +229,7 @@
       ></RoundButton>
       <RoundButton
         customClass="w-18"
-        label="确认"
+        label={isEditMode ? '保存' : '确认'}
         on:click={handleConfirm}
         disabled={isLoading}
       ></RoundButton>

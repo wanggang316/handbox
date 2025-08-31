@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { providerState, providerActions, preProviders, getProviderIcon } from "$lib/states/provider.svelte";
+  import {
+    providerState,
+    providerActions,
+    preProviders,
+    getProviderIcon,
+  } from "$lib/states/provider.svelte";
   import { Plus, Cpu, LoaderCircle, TriangleAlert } from "@lucide/svelte";
   import { TableGroup } from "$lib/components/ui/table";
   import StatusLabelRow from "$lib/components/ui/table/StatusLabelRow.svelte";
@@ -10,7 +15,6 @@
   import Button from "$lib/components/ui/Button.svelte";
 
   let showAddProviderModal = $state(false);
-
 
   onMount(async () => {
     try {
@@ -30,49 +34,41 @@
   }
 
   async function handleCreateProvider(event: CustomEvent<ProviderConfig>) {
-    const config = event.detail;
-    try {
-      const newProvider = await providerActions.createProvider(config);
-      showAddProviderModal = false;
-      // 跳转到新创建的供应商配置页面
-      goto(`/settings/models/provider/${newProvider.id}`);
-    } catch (error) {
-      console.error("Failed to create provider:", error);
-    }
+    showAddProviderModal = false;
   }
 
   function handleCloseAddProvider() {
     showAddProviderModal = false;
   }
 
-  function getProviderStatus(provider: Provider): "enabled" | "disabled" | "idle" | "error" {
-    // if (provider.enabled) return "enabled";
-    if (provider.status === "error") return "error";
-    if (provider.status === "disabled") return "disabled";
-    if (provider.status === "idle") return "idle";
-    return "enabled";
+  function getProviderStatus(
+    provider: Provider,
+  ): "enabled" | "disabled" {
+    return provider.enabled ? "enabled" : "disabled";
   }
 
   function getProviderStatusText(provider: Provider): string {
-    switch (provider.status) {
-      case "enabled": return "已开启";
-      case "error": return "错误";
-      case "disabled": return "未开启";
-      case "idle": return "未配置";
-      default: return "未知";
-    }
+    return provider.enabled ? "已启用" : "已禁用";
   }
 </script>
 
 <div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
   <!-- 错误提示 -->
   {#if providerState.error}
-    <div class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 flex items-start gap-3">
-      <TriangleAlert class="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+    <div
+      class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 flex items-start gap-3"
+    >
+      <TriangleAlert
+        class="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0"
+      />
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-red-800 dark:text-red-200">加载失败</p>
-        <p class="text-sm text-red-700 dark:text-red-300 mt-1">{providerState.error}</p>
-        <button 
+        <p class="text-sm font-medium text-red-800 dark:text-red-200">
+          加载失败
+        </p>
+        <p class="text-sm text-red-700 dark:text-red-300 mt-1">
+          {providerState.error}
+        </p>
+        <button
           class="text-sm text-red-700 dark:text-red-300 underline mt-2 hover:no-underline"
           onclick={() => providerActions.clearError()}
         >
@@ -98,8 +94,12 @@
         <StatusLabelRow
           label={provider.name}
           iconSrc={getProviderIcon(provider)}
-          icon={!getProviderIcon(provider) ? provider.name.charAt(0).toUpperCase() : undefined}
-          isCustomProvider={!preProviders.some(t => t.provider_type === provider.provider_type)}
+          icon={!getProviderIcon(provider)
+            ? provider.name.charAt(0).toUpperCase()
+            : undefined}
+          isCustomProvider={!preProviders.some(
+            (t) => t.provider_type === provider.provider_type,
+          )}
           status={getProviderStatus(provider)}
           statusText={getProviderStatusText(provider)}
           onclick={() => handleProviderClick(provider)}

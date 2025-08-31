@@ -40,7 +40,7 @@
           {/if}
           <div class="text-sm text-gray-700">{label}</div>
         </div>
-        <div class="ml-4 flex-1">
+        <div class="flex justify-end flex-1 ml-4">
           {@render children?.()}
         </div>
       </div>

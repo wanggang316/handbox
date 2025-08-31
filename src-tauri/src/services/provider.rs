@@ -1,7 +1,7 @@
 // 供应商服务实现
 
 use crate::models::{
-    AppError, Model, ModelFeature, ProbeResult, Provider, ProviderConfig, ProviderStatus, ProviderType,
+    AppError, Model, ModelFeature, Provider, ProviderConfig, ProviderType,
     ProviderWithModels, Timestamp, UUID,
 };
 use crate::services::{DatabaseService, ProviderRepository};
@@ -21,17 +21,6 @@ impl ProviderService {
     /// 获取所有供应商列表
     pub async fn list_providers(&self) -> Result<Vec<Provider>, AppError> {
         self.repository.list_providers().await
-    }
-
-    /// 获取预定义供应商模板（用于选择页面）
-    pub async fn get_predefined_providers(&self) -> Result<Vec<Provider>, AppError> {
-        // 获取所有预定义的供应商（ID以"-default"结尾的）
-        let all_providers = self.list_providers().await?;
-        let predefined = all_providers
-            .into_iter()
-            .filter(|p| p.id.ends_with("-default"))
-            .collect();
-        Ok(predefined)
     }
 
     /// 根据ID获取供应商
@@ -63,10 +52,7 @@ impl ProviderService {
             provider_type: config.provider_type,
             base_url: config.base_url,
             api_key: config.api_key.clone(),
-            status: ProviderStatus::Disabled,
             enabled: config.enabled.unwrap_or(false),
-            last_probe_at: None,
-            probe_result: None,
             created_at: now,
             updated_at: now,
         };
@@ -114,25 +100,7 @@ impl ProviderService {
         Ok(())
     }
 
-    /// 探活检测供应商
-    pub async fn probe_provider(&self, provider_id: &UUID) -> Result<ProbeResult, AppError> {
-        let _provider = self.get_provider(provider_id).await?;
-        let now = self.current_timestamp();
 
-        // TODO: 实现实际的探活逻辑
-        // 这里模拟探活结果
-        let probe_result = ProbeResult {
-            success: true,
-            latency: Some(150), // 150ms
-            error: None,
-            timestamp: now,
-        };
-
-        // 更新供应商的探活结果
-        self.repository.update_probe_result(provider_id, &probe_result).await?;
-
-        Ok(probe_result)
-    }
 
     /// 获取供应商的模型列表
     pub async fn get_provider_models(

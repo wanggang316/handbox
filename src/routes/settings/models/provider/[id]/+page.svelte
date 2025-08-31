@@ -1,37 +1,37 @@
 <script lang="ts">
   import { page } from "$app/stores";
-  import { onMount, onDestroy } from "svelte";
+  import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { providerState, providerActions, getProviderIcon, getPreProvider } from "$lib/states/provider.svelte";
+  import {
+    providerState,
+    providerActions,
+    getProviderIcon,
+    getPreProvider,
+  } from "$lib/states/provider.svelte";
   import type { Provider, ProviderConfig } from "$lib/types/provider";
   import {
-    RotateCw,
     Trash2,
     ChevronLeft,
-    Edit,
-    RefreshCw,
+    SquarePen,
     Settings2,
-    Save,
-    Magnet,
     ListChecks,
-    Activity,
   } from "@lucide/svelte";
   import ModelSelectModal from "$lib/components/settings/ModelSelectModal.svelte";
+  import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
-  import TextRow from "$lib/components/ui/table/TextRow.svelte";
+  import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
 
   let providerId = $state("");
   let showModelsModal = $state(false);
   let showDeleteConfirm = $state(false);
-  let isProbing = $state(false);
-  let isSaving = $state(false);
+  let showEditModal = $state(false);
+
   let isLoadingModels = $state(false);
-  let saveTimeout: number | null = $state(null);
 
   // 当前供应商
   let currentProvider = $state<Provider | null>(null);
@@ -39,54 +39,44 @@
   // 配置表单
   let formData = $state({
     name: "",
-    base_url: "",
-    api_key: "",
     enabled: false,
   });
 
-  // 获取预定义供应商信息  
-  let preProvider = $derived(currentProvider ? getPreProvider(currentProvider) : null);
-  let providerIcon = $derived(currentProvider ? getProviderIcon(currentProvider) : null);
+  // 获取预定义供应商信息
+  let providerIcon = $derived(
+    currentProvider ? getProviderIcon(currentProvider) : null,
+  );
 
   onMount(() => {
     providerId = $page.params.id || "";
     loadProvider();
   });
 
-  onDestroy(() => {
-    // 清理定时器
-    if (saveTimeout) {
-      clearTimeout(saveTimeout);
-    }
-  });
-
   async function loadProvider() {
     if (!providerId) return;
-    
+
     try {
       // 从全局状态中查找供应商
-      const provider = providerState.providers.find(p => p.id === providerId);
-      
+      const provider = providerState.providers.find((p) => p.id === providerId);
+
       if (provider) {
         currentProvider = provider;
         // 填充表单数据
         formData = {
           name: provider.name,
-          base_url: provider.base_url,
-          api_key: provider.api_key,
           enabled: provider.enabled,
         };
       } else {
         // 如果本地没有，先加载供应商列表
         await providerActions.loadProviders();
-        const loadedProvider = providerState.providers.find(p => p.id === providerId);
-        
+        const loadedProvider = providerState.providers.find(
+          (p) => p.id === providerId,
+        );
+
         if (loadedProvider) {
           currentProvider = loadedProvider;
           formData = {
             name: loadedProvider.name,
-            base_url: loadedProvider.base_url,
-            api_key: "",
             enabled: loadedProvider.enabled,
           };
         } else {
@@ -100,74 +90,34 @@
     }
   }
 
-  async function handleProbe() {
+  function handleEdit() {
     if (!currentProvider) return;
-    
-    isProbing = true;
-    try {
-      const result = await providerActions.probeProvider(currentProvider.id);
-      console.log("Probe result:", result);
-    } catch (error) {
-      console.error("Probe failed:", error);
-    } finally {
-      isProbing = false;
-    }
+    showEditModal = true;
   }
 
-  // 防抖自动保存函数
-  function autoSave() {
-    if (!currentProvider) return;
-    
-    // 清除之前的定时器
-    if (saveTimeout) {
-      clearTimeout(saveTimeout);
-    }
-    
-    // 设置新的定时器，500ms 后保存
-    saveTimeout = setTimeout(async () => {
-      await handleSave();
-    }, 500);
+  function handleCloseEdit() {
+    showEditModal = false;
   }
 
-  async function handleSave() {
-    if (!currentProvider) return;
+  async function handleEditConfirm(event: CustomEvent<Provider>) {
+    const updatedProvider = event.detail;
     
-    isSaving = true;
-    try {
-      // 准备更新配置
-      const config: Partial<ProviderConfig> = {
-        name: formData.name,
-        provider_type: currentProvider.provider_type,
-        base_url: formData.base_url,
-        enabled: formData.enabled,
-      };
-      
-      // 如果 API key 有值，也更新它
-      if (formData.api_key.trim()) {
-        config.api_key = formData.api_key;
-      }
-      console.log("Auto-saving provider:", currentProvider.id, "config:", config);
-      await providerActions.updateProvider(currentProvider.id, config);
-      console.log("Provider config auto-saved successfully");
-      
-      // 更新本地当前供应商数据
-      const currentId = currentProvider?.id;
-      if (currentId) {
-        const updatedProvider = providerState.providers.find(p => p.id === currentId);
-        if (updatedProvider) {
-          currentProvider = updatedProvider;
-        }
-      }
-    } catch (error) {
-      console.error("Auto-save failed:", error);
-    } finally {
-      isSaving = false;
-    }
+    // 更新本地的当前供应商数据
+    currentProvider = updatedProvider;
+
+    // 更新表单数据
+    formData = {
+      name: updatedProvider.name,
+      enabled: updatedProvider.enabled,
+    };
+
+    // 重新加载供应商列表以确保数据同步
+    await providerActions.loadProviders();
   }
 
   async function handleFetchModels() {
     if (!currentProvider) return;
-    
+
     isLoadingModels = true;
     try {
       await providerActions.fetchProviderModels(currentProvider.id, true); // force refresh
@@ -181,16 +131,23 @@
     }
   }
 
-  function handleModelsConfirm(
-    event: CustomEvent<{ selectedModels: string[] }>,
-  ) {
-    const { selectedModels } = event.detail;
-    console.log("Selected models:", selectedModels);
-    // showModelsModal = false; // 让 Modal 组件自己处理关闭动画
-  }
+  async function handleToggleProvider(enabled: boolean) {
+    console.log("handleToggleProvider", enabled);
+    if (!currentProvider) return;
 
-  function handleCloseModels() {
-    showModelsModal = false; // 这里可以保留，因为是 Modal 组件调用的
+    formData.enabled = enabled; // 立即更新UI
+
+    try {
+      console.log("handleToggleProvider", currentProvider.id, enabled);
+      await providerActions.toggleProvider(currentProvider.id, enabled);
+      // 更新当前供应商状态
+      currentProvider = { ...currentProvider, enabled };
+      console.log(`Provider ${enabled ? "enabled" : "disabled"} successfully`);
+    } catch (error) {
+      console.error("Failed to toggle provider:", error);
+      // 发生错误时回滚UI状态
+      formData.enabled = !enabled;
+    }
   }
 
   async function handleDelete() {
@@ -200,7 +157,7 @@
 
   async function confirmDelete() {
     if (!currentProvider) return;
-    
+
     try {
       await providerActions.deleteProvider(currentProvider.id);
       console.log("Provider deleted successfully");
@@ -213,15 +170,6 @@
 
   function handleBack() {
     goto("/settings/models");
-  }
-
-  function handleRefreshModels(e: CustomEvent<any>): void {
-    showModelsModal = true
-  }
-
-  function handleTestKey(): void {
-    // 测试 API Key 的功能，可以调用 handleProbe
-    handleProbe();
   }
 
   function handleConfigModel(model: any): void {
@@ -238,7 +186,9 @@
       class="w-6 h-6 object-contain"
     />
   {:else if currentProvider}
-    <div class="w-6 h-6 bg-gray-300 rounded flex items-center justify-center text-xs font-bold">
+    <div
+      class="w-6 h-6 bg-gray-300 rounded flex items-center justify-center text-xs font-bold"
+    >
       {currentProvider.name.charAt(0).toUpperCase()}
     </div>
   {/if}
@@ -263,67 +213,27 @@
   <!-- 主要内容区域 -->
   <main class="flex-grow overflow-y-auto p-6 pr-8">
     {#if currentProvider}
-    <TableBaseRow label={currentProvider.name} icon={iconSnippet}>
-      <div class="flex flex-row items-center gap-4">
-        <IconButton
-          icon={Edit}
-          on:click={() => {}}
-          disabled={true}
-        />
+      <TableGroup>
+        <TableBaseRow label={currentProvider.name} icon={iconSnippet}>
+          <div class="flex flex-row items-center gap-4">
+            <IconButton icon={SquarePen} on:click={handleEdit} />
 
-        <IconButton
-          icon={Trash2}
-          on:click={handleDelete}
-        />
+            <IconButton icon={Trash2} on:click={handleDelete} />
 
-        <Toggle 
-          checked={formData.enabled} 
-          on:change={(e) => formData.enabled = e.detail}
-        />
-      </div>
-    </TableBaseRow>
+            <Toggle
+              checked={formData.enabled}
+              onChange={handleToggleProvider}
+            />
+          </div>
+        </TableBaseRow>
+      </TableGroup>
     {/if}
-
-    <div class="flex items-center justify-end">
-      <Button 
-        on:click={handleProbe} 
-        variant="clear" 
-        size="sm"
-        disabled={isProbing || !currentProvider}
-      >
-        <Activity size={14} class={isProbing ? "animate-spin" : ""} />
-        {isProbing ? "检测中" : "检测"}
-      </Button>
-
-      {#if isSaving}
-        <div class="flex items-center gap-2 text-sm text-gray-500">
-          <Save size={14} class="animate-pulse" />
-          自动保存中...
-        </div>
-      {/if}
-    </div>
-
-    <TableGroup>
-      <TextRow
-        layout="vertical"
-        isPassword
-        label="API Key"
-        bind:value={formData.api_key}
-        on:input={autoSave}
-      />
-      <TextRow 
-        layout="vertical" 
-        label="Base URL" 
-        bind:value={formData.base_url}
-        on:input={autoSave}
-      />
-    </TableGroup>
 
     <div class="flex items-center mt-6">
       <div class="flex-1 text-text-primary text-base mx-2">模型列表</div>
-      <Button 
-        on:click={handleFetchModels} 
-        variant="clear" 
+      <Button
+        on:click={handleFetchModels}
+        variant="clear"
         size="sm"
         disabled={isLoadingModels || !currentProvider}
       >
@@ -333,17 +243,23 @@
     </div>
 
     {#if currentProvider}
-      {@const providerModels = providerState.availableModels.filter(m => m.provider_id === currentProvider?.id)}
+      {@const providerModels = providerState.availableModels.filter(
+        (m) => m.provider_id === currentProvider?.id,
+      )}
       {#if providerModels.length > 0}
         <TableGroup title={currentProvider.name}>
           {#each providerModels as model}
             <TableBaseRow label={model.name} py="2">
               <div class="flex flex-row items-center gap-2">
-                <Toggle 
-                  checked={model.enabled} 
-                  on:change={(e) => {
+                <Toggle
+                  checked={model.enabled}
+                  onChange={(enabled) => {
                     if (currentProvider) {
-                      providerActions.toggleModel(currentProvider.id, model.id, e.detail);
+                      providerActions.toggleModel(
+                        currentProvider.id,
+                        model.id,
+                        enabled,
+                      );
                     }
                   }}
                 />
@@ -363,50 +279,26 @@
         </div>
       {/if}
     {/if}
-
   </main>
 </div>
 
-<!-- 模型选择弹窗 -->
-<ModelSelectModal
-  open={showModelsModal}
-  {providerId}
-  on:close={handleCloseModels}
-  on:confirm={handleModelsConfirm}
+<!-- 编辑供应商弹窗 -->
+<AddProviderModal
+  open={showEditModal}
+  editProvider={currentProvider}
+  on:close={handleCloseEdit}
+  on:confirm={handleEditConfirm}
 />
 
 <!-- 删除确认弹窗 -->
-{#if showDeleteConfirm}
-  <div
-    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-  >
-    <div class="bg-white rounded-2xl p-6 max-w-md mx-4">
-      <h3 class="text-lg font-semibold text-slate-900 mb-2">确认删除</h3>
-      <p class="text-slate-600 mb-6">
-        确定要删除该供应商吗？此操作不可撤销，所有相关配置和数据都将被清除。
-      </p>
-
-      <div class="flex items-center justify-end gap-3">
-        <button
-          onclick={() => (showDeleteConfirm = false)}
-          class="px-4 py-2 text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
-        >
-          取消
-        </button>
-        <button
-          onclick={confirmDelete}
-          disabled={providerState.isLoading}
-          class="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {#if providerState.isLoading}
-            <RotateCw class="w-4 h-4 animate-spin" />
-            <span>删除中...</span>
-          {:else}
-            <Trash2 class="w-4 h-4" />
-            <span>确认删除</span>
-          {/if}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<ConfirmModal
+  open={showDeleteConfirm}
+  title="删除供应商"
+  message="确认要删除 <span class='font-medium'>{currentProvider?.name}</span> 吗？"
+  confirmText="删除"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  isLoading={providerState.isLoading}
+  on:close={() => (showDeleteConfirm = false)}
+  on:confirm={confirmDelete}
+/>

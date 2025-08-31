@@ -6,7 +6,6 @@ import { apiCall } from './index';
 import type { 
   Provider, 
   ProviderConfig, 
-  ProbeResult, 
   ListModelsRequest,
   ListModelsResponse,
   UUID 
@@ -20,26 +19,17 @@ export async function getProviders(): Promise<Provider[]> {
 }
 
 /**
- * 获取预定义供应商模板列表
- */
-export async function getPredefinedProviders(): Promise<Provider[]> {
-  return apiCall<Provider[]>('provider_list_predefined');
-}
-
-/**
  * 获取供应商详情
  */
 export async function getProvider(providerId: UUID): Promise<Provider> {
   return apiCall<Provider>('provider_get', { providerId: providerId });
 }
 
-
-
 /**
  * 创建供应商
  */
 export async function createProvider(config: ProviderConfig): Promise<Provider> {
-  return apiCall<Provider>('provider_create', config);
+  return apiCall<Provider>('provider_create', { config });
 }
 
 /**
@@ -60,20 +50,6 @@ export async function deleteProvider(providerId: UUID): Promise<void> {
 }
 
 /**
- * 探活检测供应商
- */
-export async function probeProvider(providerId: UUID): Promise<ProbeResult> {
-  return apiCall<ProbeResult>('provider_probe', { providerId: providerId });
-}
-
-/**
- * 获取供应商模型列表
- */
-export async function getProviderModels(request: ListModelsRequest): Promise<ListModelsResponse> {
-  return apiCall<ListModelsResponse>('provider_list_models', request);
-}
-
-/**
  * 启用/禁用供应商
  */
 export async function toggleProvider(
@@ -81,9 +57,18 @@ export async function toggleProvider(
   enabled: boolean
 ): Promise<Provider> {
   return apiCall<Provider>('provider_toggle', { 
-    providerId, 
-    enabled 
+    request: {
+      provider_id: providerId,
+      enabled
+    }
   });
+}
+
+/**
+ * 获取供应商模型列表
+ */
+export async function getProviderModels(request: ListModelsRequest): Promise<ListModelsResponse> {
+  return apiCall<ListModelsResponse>('provider_list_models', { request });
 }
 
 /**
@@ -95,9 +80,11 @@ export async function toggleModel(
   enabled: boolean
 ): Promise<void> {
   return apiCall<void>('provider_toggle_model', { 
-    providerId, 
-    modelId, 
-    enabled 
+    request: {
+      provider_id: providerId,
+      model_id: modelId,
+      enabled
+    }
   });
 }
 

@@ -2,7 +2,7 @@
  * 供应商相关状态管理 - 使用 Svelte 5 runes
  */
 
-import type { Provider, Model, ProbeResult, ProviderConfig, UUID } from '../types';
+import type { Provider, Model, ProviderConfig, UUID } from '../types';
 import * as providerApi from '../api/provider';
 
 // 预定义供应商模板
@@ -68,7 +68,7 @@ export const providerState = $state({
   isLoading: false,
   
   // 探活状态
-  isProbingProvider: null as UUID | null,
+
   
   // 获取模型列表状态
   isFetchingModels: null as UUID | null,
@@ -193,32 +193,7 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 探活检测供应商
-   */
-  async probeProvider(providerId: UUID): Promise<ProbeResult> {
-    try {
-      providerState.isProbingProvider = providerId;
-      const result = await providerApi.probeProvider(providerId);
-      
-      // 更新供应商的探活结果
-      const index = providerState.providers.findIndex(p => p.id === providerId);
-      if (index !== -1) {
-        providerState.providers[index] = { 
-          ...providerState.providers[index], 
-          probe_result: result, 
-          last_probe_at: Date.now() 
-        };
-      }
-      
-      return result;
-    } catch (error) {
-      providerState.error = error instanceof Error ? error.message : '探活检测失败';
-      throw error;
-    } finally {
-      providerState.isProbingProvider = null;
-    }
-  },
+
 
   /**
    * 获取供应商模型列表
@@ -247,6 +222,7 @@ export const providerActions = {
    */
   async toggleProvider(providerId: UUID, enabled: boolean): Promise<void> {
     try {
+      console.log('toggleProvider', providerId, enabled);
       const updatedProvider = await providerApi.toggleProvider(providerId, enabled);
       
       const index = providerState.providers.findIndex(p => p.id === providerId);
@@ -319,7 +295,7 @@ export const providerActions = {
     providerState.availableModels = [];
     providerState.selectedModel = null;
     providerState.isLoading = false;
-    providerState.isProbingProvider = null;
+
     providerState.isFetchingModels = null;
     providerState.error = null;
   }

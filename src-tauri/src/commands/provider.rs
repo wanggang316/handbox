@@ -1,7 +1,7 @@
 // 供应商相关 IPC 命令
 
 use crate::models::{
-    AppError, ListModelsRequest, ListModelsResponse, Model, ProbeResult, Provider,
+    AppError, ListModelsRequest, ListModelsResponse, Model, Provider,
     ProviderConfig, ProviderWithModels, ToggleModelRequest, ToggleProviderRequest, UUID,
 };
 use crate::services::ProviderService;
@@ -13,14 +13,6 @@ pub async fn provider_list(
     provider_service: State<'_, ProviderService>,
 ) -> Result<Vec<Provider>, AppError> {
     provider_service.list_providers().await
-}
-
-/// 获取预定义供应商模板列表
-#[tauri::command]
-pub async fn provider_list_predefined(
-    provider_service: State<'_, ProviderService>,
-) -> Result<Vec<Provider>, AppError> {
-    provider_service.get_predefined_providers().await
 }
 
 /// 获取供应商详情
@@ -73,14 +65,7 @@ pub async fn provider_delete(
     provider_service.delete_provider(&provider_id).await
 }
 
-/// 探活检测供应商
-#[tauri::command]
-pub async fn provider_probe(
-    provider_id: UUID,
-    provider_service: State<'_, ProviderService>,
-) -> Result<ProbeResult, AppError> {
-    provider_service.probe_provider(&provider_id).await
-}
+
 
 /// 获取供应商模型列表
 #[tauri::command]
