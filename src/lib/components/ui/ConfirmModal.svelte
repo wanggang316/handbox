@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import Modal from "./Modal.svelte";
   import RoundButton from "./RoundButton.svelte";
 
@@ -10,7 +9,11 @@
     confirmText = "确认",
     cancelText = "取消",
     isLoading = false,
-    confirmButtonStyle = "danger" // "danger" | "accent"
+    confirmButtonStyle = "danger", // "danger" | "accent"
+    autoCloseOnConfirm = true, // 确认后是否自动关闭
+    onClose = () => {},
+    onConfirm = () => {},
+    onCancel = () => {}
   } = $props<{
     open?: boolean;
     title?: string;
@@ -19,28 +22,34 @@
     cancelText?: string;
     isLoading?: boolean;
     confirmButtonStyle?: "danger" | "accent";
-  }>();
-
-  const dispatch = createEventDispatcher<{
-    close: void;
-    confirm: void;
-    cancel: void;
+    autoCloseOnConfirm?: boolean;
+    onClose?: () => void;
+    onConfirm?: () => void;
+    onCancel?: () => void;
   }>();
 
   let modalRef: Modal;
+  
+  // 暴露 modalRef 供外部访问
+  export { modalRef };
 
   function handleConfirm() {
-    dispatch("confirm");
-    // modalRef?.handleClose();
+    onConfirm();
+    // 根据配置决定是否自动关闭
+    if (autoCloseOnConfirm) {
+      modalRef?.handleClose();
+    }
   }
 
   function handleCancel() {
-    dispatch("cancel");
+    // 取消时先调用回调，再触发关闭动画
+    onCancel();
     modalRef?.handleClose();
   }
 
-  function onModalClose() {
-    dispatch("close");
+  function handleModalClose() {
+    // 动画完成后调用 onClose 回调
+    onClose();
   }
 
   // 根据按钮样式设置颜色
@@ -70,7 +79,7 @@
   const confirmColors = getConfirmButtonColors(confirmButtonStyle);
 </script>
 
-<Modal bind:this={modalRef} {open} onClose={onModalClose} showCloseButton={false}>
+<Modal bind:this={modalRef} {open} onClose={handleModalClose} showCloseButton={false}>
   <div class="max-w-md flex flex-col">
     <!-- 头部 -->
     <div class="flex items-center justify-center px-6 pt-4 pb-0">

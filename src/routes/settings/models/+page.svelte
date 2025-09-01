@@ -34,7 +34,7 @@
   }
 
   async function handleCreateProvider(event: CustomEvent<ProviderConfig>) {
-    showAddProviderModal = false;
+    // showAddProviderModal = false;
   }
 
   function handleCloseAddProvider() {

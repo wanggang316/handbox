@@ -30,6 +30,8 @@
   let showModelsModal = $state(false);
   let showDeleteConfirm = $state(false);
   let showEditModal = $state(false);
+  
+  let confirmModalRef: any;
 
   let isLoadingModels = $state(false);
 
@@ -164,7 +166,8 @@
       goto("/settings/models");
     } catch (error) {
       console.error("Delete failed:", error);
-      showDeleteConfirm = false;
+      // 删除失败时触发关闭动画
+      confirmModalRef?.modalRef?.handleClose();
     }
   }
 
@@ -292,6 +295,7 @@
 
 <!-- 删除确认弹窗 -->
 <ConfirmModal
+  bind:this={confirmModalRef}
   open={showDeleteConfirm}
   title="删除供应商"
   message="确认要删除 <span class='font-medium'>{currentProvider?.name}</span> 吗？"
@@ -299,6 +303,8 @@
   cancelText="取消"
   confirmButtonStyle="danger"
   isLoading={providerState.isLoading}
-  on:close={() => (showDeleteConfirm = false)}
-  on:confirm={confirmDelete}
+  autoCloseOnConfirm={false}
+  onClose={() => showDeleteConfirm = false}
+  onConfirm={confirmDelete}
+  onCancel={() => {}}
 />
