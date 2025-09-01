@@ -3,6 +3,7 @@
 pub mod artifact;
 pub mod chat;
 pub mod database;
+pub mod model_data;
 pub mod provider;
 pub mod provider_repository;
 pub mod search;

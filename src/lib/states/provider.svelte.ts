@@ -23,7 +23,7 @@ export const preProviders = [
     name: "Google AI",
     provider_type: "google" as const,
     iconSrc: "/logo-google.png",
-    base_url_placeholder: "https://generativelanguage.googleapis.com/v1",
+    base_url_placeholder: "https://generativelanguage.googleapis.com/v1beta",
   },
   {
     name: "DeepSeek",

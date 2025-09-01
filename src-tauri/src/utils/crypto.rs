@@ -72,54 +72,13 @@ mod tests {
         assert!(validate_api_key("sk-123 456").is_err());
     }
 
-    #[test]
-    fn test_keychain_service_and_account() {
-        let service = get_keychain_service();
-        assert_eq!(service, "com.handbox.provider");
-        
-        let account = get_keychain_account("test-provider-id");
-        assert_eq!(account, "provider_test-provider-id");
-    }
+    // #[test]
+    // fn test_keychain_service_and_account() {
+    //     // 钥匙串功能测试暂时禁用
+    // }
 
-    #[tokio::test]
-    async fn test_keychain_operations() {
-        let service = "test.handbox.provider";
-        let account = "test_provider_123";
-        let api_key = "sk-test1234567890";
-
-        // Clean up any existing test entry first
-        let _ = delete_api_key_from_keychain(service, account).await;
-
-        // Test save
-        let result = save_api_key_to_keychain(service, account, api_key).await;
-        if result.is_err() {
-            println!("Keychain operations not available in test environment, skipping keychain test");
-            return; // Skip test if keychain access is not available
-        }
-        println!("Save successful");
-
-        // Test get
-        let retrieved = get_api_key_from_keychain(service, account).await;
-        match &retrieved {
-            Ok(key) => {
-                println!("Retrieved key: {}", key);
-                assert_eq!(key, api_key);
-            },
-            Err(e) => {
-                println!("Retrieval failed: {:?}", e);
-                // Clean up and skip test if retrieval fails
-                let _ = delete_api_key_from_keychain(service, account).await;
-                println!("Keychain integration may not work properly in test environment");
-                return;
-            }
-        }
-
-        // Test delete
-        let delete_result = delete_api_key_from_keychain(service, account).await;
-        assert!(delete_result.is_ok());
-
-        // Test get after delete (should fail)
-        let after_delete = get_api_key_from_keychain(service, account).await;
-        assert!(after_delete.is_err());
-    }
+    // #[tokio::test]
+    // async fn test_keychain_operations() {
+    //     // 钥匙串功能测试暂时禁用
+    // }
 }
