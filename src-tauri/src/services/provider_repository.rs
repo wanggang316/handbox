@@ -1,6 +1,6 @@
 // Provider 数据访问层 - 使用普通查询避免 sqlx 宏问题
 
-use crate::models::{AppError, Model, Provider, ProviderType, ProviderWithModels};
+use crate::models::{AppError, Model, Provider, ProviderWithModels};
 use crate::services::DatabaseService;
 use sqlx::Row;
 
@@ -26,7 +26,7 @@ impl ProviderRepository {
         sqlx::query(query)
             .bind(&provider.id)
             .bind(&provider.name)
-            .bind(&format!("{:?}", provider.provider_type).to_lowercase())
+            .bind(&provider.provider_type)
             .bind(&provider.base_url)
             .bind(&provider.api_key)
             .bind(provider.enabled)
@@ -59,7 +59,7 @@ impl ProviderRepository {
         let result = sqlx::query(query)
             .bind(&provider.id)
             .bind(&provider.name)
-            .bind(&format!("{:?}", provider.provider_type).to_lowercase())
+            .bind(&provider.provider_type)
             .bind(&provider.base_url)
             .bind(&provider.api_key)
             .bind(provider.enabled)
@@ -128,7 +128,7 @@ impl ProviderRepository {
         let query = r#"
             SELECT id, name, provider_type, base_url, api_key, enabled,
                    created_at, updated_at
-            FROM providers ORDER BY created_at DESC
+            FROM providers ORDER BY created_at
         "#;
 
         let rows = sqlx::query(query)
@@ -323,23 +323,10 @@ impl ProviderRepository {
 
     // 辅助方法：将数据库行转换为 Provider
     fn row_to_provider(&self, row: sqlx::sqlite::SqliteRow) -> Result<Provider, AppError> {
-        let provider_type_str: String = row.try_get("provider_type")?;
-
-        let provider_type = match provider_type_str.as_str() {
-            "openai" => ProviderType::OpenAI,
-            "anthropic" => ProviderType::Anthropic,
-            "google" => ProviderType::Google,
-            "deepseek" => ProviderType::DeepSeek,
-            "openrouter" => ProviderType::OpenRouter,
-            "customopenai" => ProviderType::CustomOpenAI,
-            "customanthropic" => ProviderType::CustomAnthropic,
-            _ => return Err(AppError::internal_error("Invalid provider type")),
-        };
-
         Ok(Provider {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            provider_type,
+            provider_type: row.try_get("provider_type")?,
             base_url: row.try_get("base_url")?,
             api_key: row.try_get("api_key")?,
             enabled: row.try_get("enabled")?,
@@ -391,7 +378,7 @@ mod tests {
         let provider = Provider {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Test Provider".to_string(),
-            provider_type: ProviderType::OpenAI,
+            provider_type: "openai".to_string(),
             base_url: "https://api.openai.com".to_string(),
             api_key: "test-api-key".to_string(),
             enabled: true,
@@ -412,9 +399,9 @@ mod tests {
         assert!(fetched_by_name.is_some());
         assert_eq!(fetched_by_name.as_ref().unwrap().id, provider.id);
 
-        // List - includes 5 predefined providers + 1 test provider = 6 total
+        // List - includes 1 test provider (no predefined providers)
         let providers = repo.list_providers().await.unwrap();
-        assert_eq!(providers.len(), 6);
+        assert_eq!(providers.len(), 1);
 
         // Update
         let mut updated_provider = provider.clone();

@@ -2,52 +2,34 @@
  * 供应商相关状态管理 - 使用 Svelte 5 runes
  */
 
-import type { Provider, Model, ProviderConfig, UUID } from '../types';
+import type { Provider, Model, ProviderConfig, FrontendProviderConfig, UUID } from '../types';
 import * as providerApi from '../api/provider';
 
-// 预定义供应商模板
-export const preProviders = [
-  {
-    name: "OpenAI",
-    provider_type: "openai" as const,
-    iconSrc: "/logo-openai.png",
-    base_url_placeholder: "https://api.openai.com/v1",
-  },
-  {
-    name: "Anthropic",
-    provider_type: "anthropic" as const,
-    iconSrc: "/logo-anthropic.png",
-    base_url_placeholder: "https://api.anthropic.com",
-  },
-  {
-    name: "Google AI",
-    provider_type: "google" as const,
-    iconSrc: "/logo-google.png",
-    base_url_placeholder: "https://generativelanguage.googleapis.com/v1beta",
-  },
-  {
-    name: "DeepSeek",
-    provider_type: "deepseek" as const,
-    iconSrc: "/logo-deepseek.png",
-    base_url_placeholder: "https://api.deepseek.com",
-  },
-  {
-    name: "OpenRouter",
-    provider_type: "openrouter" as const,
-    iconSrc: "/logo-openrouter.png",
-    base_url_placeholder: "https://openrouter.ai/api/v1",
-  },
-];
+// 供应商配置模板（从后端获取）
+export let providerConfigs = $state<{
+  providers: FrontendProviderConfig[];
+  custom_providers: FrontendProviderConfig[];
+}>({
+  providers: [],
+  custom_providers: []
+});
 
-// 获取预定义供应商信息的工具函数
-export function getPreProvider(provider: Provider): typeof preProviders[0] | undefined {
-  return preProviders.find(t => t.name === provider.name);
+// 获取供应商配置信息的工具函数
+export function getProviderConfig(providerType: string): FrontendProviderConfig | undefined {
+  return [...providerConfigs.providers, ...providerConfigs.custom_providers]
+    .find(t => t.provider_type === providerType);
 }
 
 // 获取供应商图标
 export function getProviderIcon(provider: Provider): string | undefined {
-  const template = getPreProvider(provider);
-  return template?.iconSrc || undefined;
+  const config = getProviderConfig(provider.provider_type);
+  return config?.icon || undefined;
+}
+
+// 获取供应商显示名称
+export function getProviderDisplayName(providerType: string): string {
+  const config = getProviderConfig(providerType);
+  return config?.type_name || providerType;
 }
 
 // 全局状态对象
@@ -55,21 +37,18 @@ export const providerState = $state({
   // 供应商列表
   providers: [] as Provider[],
   
-  // 当前选中的供应商
-  selectedProvider: null as Provider | null,
+  // 当前选中的供应商（用于详情页面和编辑）
+  currentProvider: null as Provider | null,
+  
+  // 正在编辑的供应商（用于模态框）
+  editingProvider: null as Provider | null,
   
   // 所有可用模型
   availableModels: [] as Model[],
   
-  // 当前选中的模型
-  selectedModel: null as Model | null,
-  
   // 加载状态
   isLoading: false,
-  
-  // 探活状态
 
-  
   // 获取模型列表状态
   isFetchingModels: null as UUID | null,
   
@@ -104,10 +83,100 @@ export function getModelsByProvider(): Record<string, { provider: Provider; mode
   return groups;
 }
 
+// 获取供应商下拉选项组
+export function getProviderDropdownOptions() {
+  const preProviderOptions = providerConfigs.providers.map(provider => ({
+    value: provider.provider_type,
+    label: provider.type_name,
+    icon: provider.icon
+  }));
+
+  const customProviderOptions = providerConfigs.custom_providers.map(provider => ({
+    value: provider.provider_type,
+    label: provider.type_name,
+    icon: provider.icon
+  }));
+
+  return [
+    {
+      title: "",
+      options: preProviderOptions
+    },
+    {
+      title: "",
+      options: customProviderOptions
+    }
+  ];
+}
+
+// 供应商状态管理辅助函数
+export const providerStateActions = {
+  /**
+   * 设置当前供应商（用于详情页面）
+   */
+  setCurrentProvider(provider: Provider | null): void {
+    providerState.currentProvider = provider;
+  },
+
+  /**
+   * 根据ID设置当前供应商
+   */
+  setCurrentProviderById(providerId: UUID): Provider | null {
+    const provider = providerState.providers.find(p => p.id === providerId);
+    providerState.currentProvider = provider || null;
+    return provider || null;
+  },
+
+  /**
+   * 开始编辑供应商（用于模态框）
+   */
+  startEditProvider(provider: Provider | null): void {
+    providerState.editingProvider = provider;
+  },
+
+  /**
+   * 结束编辑供应商
+   */
+  endEditProvider(): void {
+    providerState.editingProvider = null;
+  },
+
+  /**
+   * 更新当前供应商信息（用于实时更新UI）
+   */
+  updateCurrentProvider(updatedProvider: Provider): void {
+    if (providerState.currentProvider && providerState.currentProvider.id === updatedProvider.id) {
+      providerState.currentProvider = updatedProvider;
+    }
+  },
+
+  /**
+   * 清除所有选中状态
+   */
+  clearSelection(): void {
+    providerState.currentProvider = null;
+    providerState.editingProvider = null;
+  }
+};
+
 /**
  * 供应商操作
  */
 export const providerActions = {
+  /**
+   * 加载供应商配置模板
+   */
+  async loadProviderConfigs(): Promise<void> {
+    try {
+      const configs = await providerApi.getProviderConfigs();
+      providerConfigs.providers = configs.providers;
+      providerConfigs.custom_providers = configs.custom_providers;
+    } catch (error) {
+      console.error('Failed to load provider templates:', error);
+      // 不抛出错误，因为这不应该阻止应用启动
+    }
+  },
+
   /**
    * 加载供应商列表
    */
@@ -182,8 +251,8 @@ export const providerActions = {
       providerState.providers = providerState.providers.filter(p => p.id !== providerId);
       
       // 如果是当前选中的供应商，清空选择
-      if (providerState.selectedProvider?.id === providerId) {
-        providerState.selectedProvider = null;
+      if (providerState.currentProvider?.id === providerId) {
+        providerStateActions.clearSelection();
       }
     } catch (error) {
       providerState.error = error instanceof Error ? error.message : '删除供应商失败';
@@ -259,17 +328,10 @@ export const providerActions = {
   },
 
   /**
-   * 选择供应商
+   * 选择供应商（保持向后兼容）
    */
   selectProvider(provider: Provider | null): void {
-    providerState.selectedProvider = provider;
-  },
-
-  /**
-   * 选择模型
-   */
-  selectModel(model: Model | null): void {
-    providerState.selectedModel = model;
+    providerStateActions.setCurrentProvider(provider);
   },
 
   /**
@@ -291,12 +353,15 @@ export const providerActions = {
    */
   reset(): void {
     providerState.providers = [];
-    providerState.selectedProvider = null;
+    providerState.currentProvider = null;
+    providerState.editingProvider = null;
     providerState.availableModels = [];
-    providerState.selectedModel = null;
     providerState.isLoading = false;
-
     providerState.isFetchingModels = null;
     providerState.error = null;
+    
+    // 重置模板
+    providerConfigs.providers = [];
+    providerConfigs.custom_providers = [];
   }
 };

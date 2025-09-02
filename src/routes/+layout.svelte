@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
   import { theme, uiActions } from "$lib/stores/ui";
+  import { providerActions } from "$lib/states/provider.svelte";
 
   let { children } = $props();
 
@@ -22,6 +23,11 @@
         }
       };
       mediaQuery.addEventListener('change', handleSystemThemeChange);
+      
+      // 初始化供应商配置模板
+      providerActions.loadProviderConfigs().catch(error => {
+        console.error('Failed to load provider configs:', error);
+      });
     }
   });
 </script>

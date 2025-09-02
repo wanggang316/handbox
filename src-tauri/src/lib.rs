@@ -119,6 +119,9 @@ pub fn run() {
             provider_toggle,
             provider_toggle_model,
             provider_get_available_models,
+            // LLM 配置相关命令
+            get_provider_configs,
+            get_provider_config_by_type,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

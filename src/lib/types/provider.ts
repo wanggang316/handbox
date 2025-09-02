@@ -5,14 +5,14 @@
 import type { BaseEntity } from './index';
 
 // 供应商类型
-export type ProviderType = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'openrouter' | 'custom-openai' | 'custom-anthropic';
+// export type ProviderType = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'openrouter' | 'custom-openai' | 'custom-anthropic';
 
 
 
 // 供应商配置
 export interface Provider extends BaseEntity {
   name: string;
-  provider_type: ProviderType;
+  provider_type: string;
   base_url: string;
   api_key: string;
   enabled: boolean;
@@ -44,11 +44,29 @@ export type ModelFeature = 'text' | 'vision' | 'function-calling' | 'streaming' 
 
 // 供应商配置请求
 export interface ProviderConfig {
-  name?: string;
-  provider_type: ProviderType;
+  name: string;
+  provider_type: string;
   base_url: string;
   api_key: string;
   enabled?: boolean;
+}
+
+// 前端供应商配置选项（从后端获取）
+export interface FrontendProviderConfig {
+  provider_type: string;
+  type_name: string;
+  default_name: string;
+  default_base_url: string;
+  icon: string;
+  api_type: string;
+  model_list_api_type: string;
+  description?: string;
+}
+
+// 前端供应商配置响应
+export interface ProviderConfigsResponse {
+  providers: FrontendProviderConfig[];
+  custom_providers: FrontendProviderConfig[];
 }
 
 // 模型列表请求

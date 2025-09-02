@@ -4,21 +4,26 @@
   import {
     providerState,
     providerActions,
-    preProviders,
+    providerStateActions,
+    providerConfigs,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import { Plus, Cpu, LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import { TriangleAlert, LoaderCircle, Cpu } from "@lucide/svelte";
   import { TableGroup } from "$lib/components/ui/table";
   import StatusLabelRow from "$lib/components/ui/table/StatusLabelRow.svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
-  import type { Provider, ProviderConfig } from "$lib/types/provider";
+  import type { Provider } from "$lib/types/provider";
   import Button from "$lib/components/ui/Button.svelte";
 
   let showAddProviderModal = $state(false);
 
   onMount(async () => {
     try {
-      await providerActions.loadProviders();
+      // 并行加载供应商配置和供应商列表
+      await Promise.all([
+        providerActions.loadProviderConfigs(),
+        providerActions.loadProviders()
+      ]);
     } catch (error) {
       console.error("Failed to load providers:", error);
     }
@@ -33,13 +38,13 @@
     showAddProviderModal = true;
   }
 
-  async function handleCreateProvider(event: CustomEvent<ProviderConfig>) {
-    // showAddProviderModal = false;
-  }
-
-  function handleCloseAddProvider() {
-    showAddProviderModal = false;
-  }
+  // 监听模态框状态变化
+  $effect(() => {
+    if (!showAddProviderModal) {
+      // 模态框关闭时，确保清理编辑状态
+      providerStateActions.endEditProvider();
+    }
+  });
 
   function getProviderStatus(
     provider: Provider,
@@ -97,7 +102,7 @@
           icon={!getProviderIcon(provider)
             ? provider.name.charAt(0).toUpperCase()
             : undefined}
-          isCustomProvider={!preProviders.some(
+          isCustomProvider={![...providerConfigs.providers, ...providerConfigs.custom_providers].some(
             (t) => t.provider_type === provider.provider_type,
           )}
           status={getProviderStatus(provider)}
@@ -134,6 +139,5 @@
 <!-- 添加供应商弹窗 -->
 <AddProviderModal
   open={showAddProviderModal}
-  on:close={handleCloseAddProvider}
-  on:confirm={handleCreateProvider}
+  onClose={() => showAddProviderModal = false}
 />

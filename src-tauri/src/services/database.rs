@@ -152,8 +152,8 @@ mod tests {
         let service = DatabaseService::new(&db_path).await.unwrap();
         let stats = service.get_stats().await.unwrap();
         
-        // After migration, we have 5 predefined providers
-        assert_eq!(stats.provider_count, 5);
+        // After migration, we have 0 providers (no predefined data)
+        assert_eq!(stats.provider_count, 0);
         assert_eq!(stats.model_count, 0);
     }
 }

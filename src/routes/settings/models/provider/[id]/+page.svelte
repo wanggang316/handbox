@@ -5,8 +5,8 @@
   import {
     providerState,
     providerActions,
+    providerStateActions,
     getProviderIcon,
-    getPreProvider,
   } from "$lib/states/provider.svelte";
   import type { Provider, ProviderConfig } from "$lib/types/provider";
   import {
@@ -16,7 +16,6 @@
     Settings2,
     ListChecks,
   } from "@lucide/svelte";
-  import ModelSelectModal from "$lib/components/settings/ModelSelectModal.svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
@@ -35,8 +34,8 @@
 
   let isLoadingModels = $state(false);
 
-  // 当前供应商
-  let currentProvider = $state<Provider | null>(null);
+  // 使用统一的当前供应商状态
+  const currentProvider = $derived(providerState.currentProvider);
 
   // 配置表单
   let formData = $state({
@@ -58,34 +57,28 @@
     if (!providerId) return;
 
     try {
-      // 从全局状态中查找供应商
-      const provider = providerState.providers.find((p) => p.id === providerId);
+      // 尝试从全局状态中设置当前供应商
+      let provider = providerStateActions.setCurrentProviderById(providerId);
+
+      if (!provider) {
+        // 如果本地没有，先加载供应商配置和列表
+        await Promise.all([
+          providerActions.loadProviderConfigs(),
+          providerActions.loadProviders()
+        ]);
+        provider = providerStateActions.setCurrentProviderById(providerId);
+      }
 
       if (provider) {
-        currentProvider = provider;
         // 填充表单数据
         formData = {
           name: provider.name,
           enabled: provider.enabled,
         };
       } else {
-        // 如果本地没有，先加载供应商列表
-        await providerActions.loadProviders();
-        const loadedProvider = providerState.providers.find(
-          (p) => p.id === providerId,
-        );
-
-        if (loadedProvider) {
-          currentProvider = loadedProvider;
-          formData = {
-            name: loadedProvider.name,
-            enabled: loadedProvider.enabled,
-          };
-        } else {
-          console.error("Provider not found:", providerId);
-          // 跳转到供应商列表页
-          goto("/settings/models");
-        }
+        console.error("Provider not found:", providerId);
+        // 跳转到供应商列表页
+        goto("/settings/models");
       }
     } catch (error) {
       console.error("Failed to load provider:", error);
@@ -94,28 +87,20 @@
 
   function handleEdit() {
     if (!currentProvider) return;
+    providerStateActions.startEditProvider(currentProvider);
     showEditModal = true;
   }
 
-  function handleCloseEdit() {
-    showEditModal = false;
-  }
 
-  async function handleEditConfirm(event: CustomEvent<Provider>) {
-    const updatedProvider = event.detail;
-    
-    // 更新本地的当前供应商数据
-    currentProvider = updatedProvider;
-
-    // 更新表单数据
-    formData = {
-      name: updatedProvider.name,
-      enabled: updatedProvider.enabled,
-    };
-
-    // 重新加载供应商列表以确保数据同步
-    await providerActions.loadProviders();
-  }
+  // 监听当前供应商变化，更新表单数据
+  $effect(() => {
+    if (currentProvider) {
+      formData = {
+        name: currentProvider.name,
+        enabled: currentProvider.enabled,
+      };
+    }
+  });
 
   async function handleFetchModels() {
     if (!currentProvider) return;
@@ -143,7 +128,7 @@
       console.log("handleToggleProvider", currentProvider.id, enabled);
       await providerActions.toggleProvider(currentProvider.id, enabled);
       // 更新当前供应商状态
-      currentProvider = { ...currentProvider, enabled };
+      providerStateActions.updateCurrentProvider({ ...currentProvider, enabled });
       console.log(`Provider ${enabled ? "enabled" : "disabled"} successfully`);
     } catch (error) {
       console.error("Failed to toggle provider:", error);
@@ -229,6 +214,7 @@
             />
           </div>
         </TableBaseRow>
+        
       </TableGroup>
     {/if}
 
@@ -288,9 +274,7 @@
 <!-- 编辑供应商弹窗 -->
 <AddProviderModal
   open={showEditModal}
-  editProvider={currentProvider}
-  on:close={handleCloseEdit}
-  on:confirm={handleEditConfirm}
+  onClose={() => showEditModal = false}
 />
 
 <!-- 删除确认弹窗 -->

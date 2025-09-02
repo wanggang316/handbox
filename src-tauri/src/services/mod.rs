@@ -3,8 +3,9 @@
 pub mod artifact;
 pub mod chat;
 pub mod database;
-pub mod model_data;
+pub mod llm_config;
 pub mod provider;
+pub mod provider_clients;
 pub mod provider_repository;
 pub mod search;
 pub mod settings;

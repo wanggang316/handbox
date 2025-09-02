@@ -8,6 +8,8 @@ import type {
   ProviderConfig, 
   ListModelsRequest,
   ListModelsResponse,
+  FrontendProviderConfig,
+  ProviderConfigsResponse,
   UUID 
 } from '../types';
 
@@ -93,4 +95,18 @@ export async function toggleModel(
  */
 export async function getAvailableModels(): Promise<Array<{ provider: Provider; models: any[] }>> {
   return apiCall<Array<{ provider: Provider; models: any[] }>>('provider_get_available_models');
+}
+
+/**
+ * 获取供应商配置模板（用于添加供应商时的选择）
+ */
+export async function getProviderConfigs(): Promise<ProviderConfigsResponse> {
+  return apiCall<ProviderConfigsResponse>('get_provider_configs');
+}
+
+/**
+ * 根据类型获取供应商配置
+ */
+export async function getProviderConfigByType(providerType: string): Promise<FrontendProviderConfig | null> {
+  return apiCall<FrontendProviderConfig | null>('get_provider_config_by_type', { provider_type: providerType });
 }

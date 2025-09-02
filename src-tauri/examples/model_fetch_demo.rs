@@ -4,7 +4,7 @@
 // cd src-tauri
 // cargo run --example model_fetch_demo
 
-use handbox_lib::models::{ProviderConfig, ProviderType, ModelFeature};
+use handbox_lib::models::{ProviderConfig, ModelFeature};
 use handbox_lib::services::{DatabaseService, ProviderService};
 use std::env;
 
@@ -30,8 +30,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. 演示 Anthropic（使用本地数据库）
     println!("\n📡 创建 Anthropic 供应商（使用本地模型数据库）...");
     let anthropic_config = ProviderConfig {
-        name: Some("Demo Anthropic".to_string()),
-        provider_type: ProviderType::Anthropic,
+        name: "Demo Anthropic".to_string(),
+        provider_type: "anthropic".to_string(),
         base_url: "https://api.anthropic.com".to_string(),
         api_key: "demo-key".to_string(),
         enabled: Some(true),
@@ -51,15 +51,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(input), Some(output)) = (model.input_cost, model.output_cost) {
             println!("    定价: ${:.4}/1K输入, ${:.4}/1K输出", input, output);
         }
-        println!("    特性: {:?}", model.supported_features);
+        if let Some(features) = &model.supported_features {
+            println!("    特性: {:?}", features);
+        }
         println!();
     }
     
     // 2. 演示 Google API 调用（预期会因无效密钥失败）
     println!("\n📡 演示 Google AI API 调用（预期会因无效密钥失败）...");
     let google_config = ProviderConfig {
-        name: Some("Demo Google AI".to_string()),
-        provider_type: ProviderType::Google,
+        name: "Demo Google AI".to_string(),
+        provider_type: "google".to_string(),
         base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
         api_key: "invalid-demo-key".to_string(),
         enabled: Some(true),
@@ -73,8 +75,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("📋 获取到 {} 个 Google AI 模型 (意外成功!)", models.len());
             for model in models.iter().take(3) {
                 println!("  - {} ({})", model.name, model.id);
-                if model.supported_features.contains(&ModelFeature::Reasoning) {
-                    println!("    🧠 支持推理模式");
+                if let Some(features) = &model.supported_features {
+                    if features.contains(&ModelFeature::Reasoning) {
+                        println!("    🧠 支持推理模式");
+                    }
                 }
             }
         }
@@ -87,8 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. 演示 OpenAI API 调用（也会因无效密钥失败）
     println!("\n📡 演示 OpenAI API 调用（预期会因无效密钥失败）...");
     let openai_config = ProviderConfig {
-        name: Some("Demo OpenAI Provider".to_string()),
-        provider_type: ProviderType::OpenAI,
+        name: "Demo OpenAI Provider".to_string(),
+        provider_type: "openai".to_string(),
         base_url: "https://api.openai.com/v1".to_string(),
         api_key: "invalid-demo-key".to_string(),
         enabled: Some(true),
@@ -110,8 +114,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. 演示供应商更新时自动刷新模型
     println!("\n🔄 演示供应商更新自动刷新模型...");
     let updated_config = ProviderConfig {
-        name: Some("Updated Anthropic".to_string()),
-        provider_type: ProviderType::Anthropic,
+        name: "Updated Anthropic".to_string(),
+        provider_type: "anthropic".to_string(),
         base_url: "https://api.anthropic.com".to_string(),
         api_key: "new-demo-key".to_string(), // 改变API密钥
         enabled: Some(true),

@@ -21,12 +21,15 @@ export {
 export {
   providerState,
   providerActions,
-  preProviders,
+  providerStateActions,
+  providerConfigs,
+  getProviderConfig,
   getProviderIcon,
-  getPreProvider,
+  getProviderDisplayName,
   getEnabledProviders,
   getEnabledModels,
-  getModelsByProvider
+  getModelsByProvider,
+  getProviderDropdownOptions
 } from '../states/provider.svelte';
 
 // Artifact 相关

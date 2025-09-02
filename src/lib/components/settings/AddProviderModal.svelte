@@ -1,7 +1,12 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
-  import type { ProviderConfig, Provider, ProviderType } from "$lib/types/provider";
-  import { preProviders, providerActions } from "$lib/states/provider.svelte";
+  import type { ProviderConfig, Provider } from "$lib/types/provider";
+  import { 
+    getProviderConfig, 
+    getProviderDropdownOptions, 
+    providerActions, 
+    providerState, 
+    providerStateActions 
+  } from "$lib/states/provider.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TextRow from "../ui/table/TextRow.svelte";
   import DropDownRow from "../ui/table/DropDownRow.svelte";
@@ -9,58 +14,31 @@
   import Modal from "../ui/Modal.svelte";
 
   // 使用 $props() 替代 export let
-  const { open = false, editProvider = null } = $props<{
+  const { open = false, onClose } = $props<{
     open?: boolean;
-    editProvider?: Provider | null;
+    onClose?: () => void;
   }>();
   
-  const dispatch = createEventDispatcher<{
-    close: void;
-    confirm: Provider;
-  }>();
-
-  // 使用 $derived 计算是否为编辑模式
+  // 使用统一的状态管理
+  const editProvider = $derived(providerState.editingProvider);
   const isEditMode = $derived(editProvider !== null);
 
   // 使用 $state 定义响应式状态
   let formData = $state({
     name: "",
-    provider_type: "openai" as ProviderType,
+    provider_type: "openai",
     base_url: "",
     api_key: "",
   });
 
   let isLoading = $state(false);
   let errors = $state<Record<string, string>>({});
-  let showDropdown = $state(false);
   
   // Modal 引用
   let modalRef: Modal;
 
-  // 将预定义供应商转换为选项格式
-  const preProviderOptions = preProviders.map(provider => ({
-    value: provider.provider_type,
-    label: provider.name,
-    icon: provider.iconSrc
-  }));
-
-  // 自定义供应商类型选项
-  const customProviderOptions = [
-    { value: "custom-openai", label: "OpenAI 兼容", icon: "🤖" },
-    { value: "custom-anthropic", label: "Anthropic 兼容", icon: "🧠" },
-  ];
-
-  // 分组供应商类型
-  const providerGroups = [
-    {
-      title: "",
-      options: preProviderOptions
-    },
-    {
-      title: "",
-      options: customProviderOptions
-    }
-  ];
+  // 使用统一的工具函数获取供应商分组
+  const providerGroups = $derived(getProviderDropdownOptions());
 
   function validate() {
     errors = {};
@@ -85,7 +63,9 @@
   }
   
   function onModalClose() {
-    dispatch("close");
+    providerStateActions.endEditProvider();
+    // 通知父组件关闭模态框
+    onClose?.();
   }
 
   async function handleConfirm() {
@@ -110,7 +90,7 @@
         await providerActions.updateProvider(editProvider.id, config);
         console.log("Provider updated successfully");
         
-        // 编辑模式下返回更新后的供应商数据
+        // 编辑模式：通知状态管理器更新当前供应商
         const updatedProvider: Provider = {
           ...editProvider,
           name: formData.name,
@@ -118,13 +98,12 @@
           base_url: formData.base_url,
           api_key: formData.api_key,
         };
-        dispatch("confirm", updatedProvider);
+        providerStateActions.updateCurrentProvider(updatedProvider);
       } else {
         // 创建模式：创建新供应商
         console.log("Creating provider with config:", config);
         const newProvider = await providerActions.createProvider(config);
         console.log("Provider created successfully:", newProvider);
-        dispatch("confirm", newProvider);
       }
       // 成功后触发关闭动画
       modalRef?.handleClose();
@@ -137,17 +116,19 @@
   }
 
   function selectProviderType(type: string) {
-    formData.provider_type = type as ProviderType;
-    showDropdown = false;
+    formData.provider_type = type;
     
     // 如果选择了预定义供应商，自动填充名称
-    const selectedPreProvider = preProviders.find(p => p.provider_type === type);
-    if (selectedPreProvider) {
-      formData.name = selectedPreProvider.name;
-      formData.base_url = selectedPreProvider.base_url_placeholder;
+    const selectedProviderConfig = getProviderConfig(type);
+    if (selectedProviderConfig) {
+      formData.name = selectedProviderConfig.default_name;
+      formData.base_url = selectedProviderConfig.default_base_url;
     } else {
-      // 自定义供应商，清空名称让用户自己填写
-      if (formData.name === '' || preProviders.some(p => p.name === formData.name)) {
+      // 如果没有找到配置，清空名称让用户自己填写
+      // 获取所有配置的默认名称
+      const allGroups = getProviderDropdownOptions();
+      const currentConfigNames = allGroups.flatMap(group => group.options.map(opt => opt.label));
+      if (formData.name === '' || currentConfigNames.includes(formData.name)) {
         formData.name = '';
       }
       formData.base_url = '';
@@ -160,14 +141,16 @@
     if (open) {
       initializeFormData();
     } else {
-      // 当模态框关闭时重置表单数据
+      // 当模态框关闭时重置表单数据和状态
       formData = {
         name: "",
-        provider_type: "openai" as ProviderType,
+        provider_type: "openai",
         base_url: "",
         api_key: "",
       };
       errors = {};
+      // 确保结束编辑状态
+      providerStateActions.endEditProvider();
     }
   });
   
@@ -180,12 +163,13 @@
         base_url: editProvider.base_url,
         api_key: editProvider.api_key
       };
+      console.log("editProvider", editProvider);
     } else if (!isEditMode && formData.provider_type === "openai" && formData.name === "") {
       // 创建模式的默认初始化
-      const defaultProvider = preProviders.find(p => p.provider_type === "openai");
-      if (defaultProvider) {
-        formData.name = defaultProvider.name;
-        formData.base_url = defaultProvider.base_url_placeholder;
+      const defaultProviderConfig = getProviderConfig("openai");
+      if (defaultProviderConfig) {
+        formData.name = defaultProviderConfig.default_name;
+        formData.base_url = defaultProviderConfig.default_base_url;
       }
     }
   }

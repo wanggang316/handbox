@@ -1,0 +1,240 @@
+{
+    "providers":
+    [
+        {
+            "type": "openai",
+            "type_name": "OpenAI",
+            "default_name": "OpenAI",
+            "default_base_url": "https://api.openai.com/v1",
+            "icon": "/logo-openai.png",
+            "api_type": "openai",
+            "model_list_api_type": "openai+local",
+            "model_local":
+            {
+                "gpt-4":
+                {
+                    "name": "GPT-4",
+                    "context_length": 8192,
+                    "input_cost_per_1k": 0.03,
+                    "output_cost_per_1k": 0.06,
+                    "features":
+                    [
+                        "text",
+                        "vision",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "gpt-4-turbo":
+                {
+                    "name": "GPT-4 Turbo",
+                    "context_length": 128000,
+                    "input_cost_per_1k": 0.01,
+                    "output_cost_per_1k": 0.03,
+                    "features":
+                    [
+                        "text",
+                        "vision",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "gpt-4-turbo-preview":
+                {
+                    "name": "GPT-4 Turbo Preview",
+                    "context_length": 128000,
+                    "input_cost_per_1k": 0.01,
+                    "output_cost_per_1k": 0.03,
+                    "features":
+                    [
+                        "text",
+                        "vision",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "gpt-4o":
+                {
+                    "name": "GPT-4o",
+                    "context_length": 128000,
+                    "input_cost_per_1k": 0.005,
+                    "output_cost_per_1k": 0.015,
+                    "features":
+                    [
+                        "text",
+                        "vision",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "gpt-4o-mini":
+                {
+                    "name": "GPT-4o Mini",
+                    "context_length": 128000,
+                    "input_cost_per_1k": 0.00015,
+                    "output_cost_per_1k": 0.0006,
+                    "features":
+                    [
+                        "text",
+                        "vision",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "gpt-3.5-turbo":
+                {
+                    "name": "GPT-3.5 Turbo",
+                    "context_length": 16385,
+                    "input_cost_per_1k": 0.0015,
+                    "output_cost_per_1k": 0.002,
+                    "features":
+                    [
+                        "text",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "gpt-3.5-turbo-instruct":
+                {
+                    "name": "GPT-3.5 Turbo Instruct",
+                    "context_length": 4096,
+                    "input_cost_per_1k": 0.0015,
+                    "output_cost_per_1k": 0.002,
+                    "features":
+                    [
+                        "text",
+                        "streaming"
+                    ]
+                },
+                "o1-preview":
+                {
+                    "name": "o1 Preview",
+                    "context_length": 128000,
+                    "input_cost_per_1k": 0.015,
+                    "output_cost_per_1k": 0.06,
+                    "features":
+                    [
+                        "text",
+                        "reasoning"
+                    ]
+                },
+                "o1-mini":
+                {
+                    "name": "o1 Mini",
+                    "context_length": 128000,
+                    "input_cost_per_1k": 0.003,
+                    "output_cost_per_1k": 0.012,
+                    "features":
+                    [
+                        "text",
+                        "reasoning"
+                    ]
+                }
+            }
+        },
+        {
+            "type": "google",
+            "type_name": "Google AI",
+            "default_name": "Google AI",
+            "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
+            "icon": "/logo-google.png",
+            "api_type": "google",
+            "model_list_api_type": "google",
+            "model_local": null
+        },
+        {
+            "type": "deepseek",
+            "type_name": "DeepSeek",
+            "default_name": "DeepSeek",
+            "default_base_url": "https://api.deepseek.com",
+            "icon": "/logo-deepseek.png",
+            "api_type": "openai",
+            "model_list_api_type": "openai+local",
+            "model_local":
+            {
+                "deepseek-chat":
+                {
+                    "name": "DeepSeek Chat",
+                    "context_length": 32768,
+                    "input_cost_per_1k": 0.00014,
+                    "output_cost_per_1k": 0.00028,
+                    "features":
+                    [
+                        "text",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "deepseek-coder":
+                {
+                    "name": "DeepSeek Coder",
+                    "context_length": 16384,
+                    "input_cost_per_1k": 0.00014,
+                    "output_cost_per_1k": 0.00028,
+                    "features":
+                    [
+                        "text",
+                        "function_calling",
+                        "streaming"
+                    ]
+                },
+                "deepseek-reasoner":
+                {
+                    "name": "DeepSeek Reasoner",
+                    "context_length": 32768,
+                    "input_cost_per_1k": 0.00055,
+                    "output_cost_per_1k": 0.0019,
+                    "features":
+                    [
+                        "text",
+                        "reasoning",
+                        "streaming"
+                    ]
+                }
+            }
+        },
+        {
+            "type": "anthropic",
+            "type_name": "Anthropic",
+            "default_name": "Anthropic",
+            "default_base_url": "https://api.anthropic.com",
+            "icon": "/logo-anthropic.png",
+            "api_type": "anthropic",
+            "model_list_api_type": "anthropic",
+            "model_local": null
+        },
+        {
+            "type": "openrouter",
+            "type_name": "OpenRouter",
+            "default_name": "OpenRouter",
+            "default_base_url": "https://openrouter.ai/api/v1",
+            "icon": "/logo-openrouter.png",
+            "api_type": "openai",
+            "model_list_api_type": "openrouter",
+            "model_local": null
+        }
+    ],
+    "custom_providers":
+    [
+        {
+            "type": "openai-compatible",
+            "type_name": "OpenAI Compatible",
+            "default_name": "Custom Provider",
+            "default_base_url": "",
+            "icon": "/logo-openai-compatible.png",
+            "api_type": "openai",
+            "model_list_api_type": "openai",
+            "model_local": null
+        },
+        {
+            "type": "anthropic-compatible",
+            "type_name": "Anthropic Compatible",
+            "default_name": "Custom Provider",
+            "default_base_url": "",
+            "icon": "/logo-anthropic-compatible.png",
+            "api_type": "anthropic",
+            "model_list_api_type": "anthropic",
+            "model_local": null
+        }
+    ]
+}
