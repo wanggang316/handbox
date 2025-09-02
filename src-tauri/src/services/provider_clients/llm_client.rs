@@ -21,8 +21,8 @@ pub struct StandardModel {
 /// LLM 客户端
 pub struct LlmClient {
     provider_type: String,
-    model_list_provider: Box<dyn ModelListProvider>,
-    api_provider: Box<dyn ApiProvider>,
+    model_api_provider: Box<dyn ModelListProvider>,
+    chat_api_provider: Box<dyn ApiProvider>,
 }
 
 impl LlmClient {
@@ -33,44 +33,44 @@ impl LlmClient {
             .ok_or_else(|| AppError::validation_error(&format!("Unknown provider type: {}", provider_type)))?;
 
         // 创建模型列表提供者
-        let model_list_provider = create_model_list_provider(&provider_config.model_list_api_type)?;
+        let model_api_provider = create_model_list_provider(&provider_config.model_api_type)?;
         
-        // 创建 API 提供者
-        let api_provider = create_api_provider(&provider_config.api_type)?;
+        // 创建聊天 API 提供者
+        let chat_api_provider = create_api_provider(&provider_config.chat_api_type)?;
 
         Ok(Self {
             provider_type: provider_type.to_string(),
-            model_list_provider,
-            api_provider,
+            model_api_provider,
+            chat_api_provider,
         })
     }
 
     /// 直接创建客户端（用于测试或特殊场景）
     pub fn new(
         provider_type: String,
-        model_list_provider: Box<dyn ModelListProvider>,
-        api_provider: Box<dyn ApiProvider>,
+        model_api_provider: Box<dyn ModelListProvider>,
+        chat_api_provider: Box<dyn ApiProvider>,
     ) -> Self {
         Self {
             provider_type,
-            model_list_provider,
-            api_provider,
+            model_api_provider,
+            chat_api_provider,
         }
     }
 
     /// 发送聊天请求
     pub async fn chat(&self, provider: &Provider, request: ChatRequest) -> Result<ChatResponse, AppError> {
-        self.api_provider.chat(provider, request).await
+        self.chat_api_provider.chat(provider, request).await
     }
 
     /// 发送流式聊天请求
     pub async fn chat_stream(&self, provider: &Provider, request: ChatRequest) -> Result<Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>, AppError> {
-        self.api_provider.chat_stream(provider, request).await
+        self.chat_api_provider.chat_stream(provider, request).await
     }
 
-    /// 获取 API 类型
+    /// 获取聊天 API 类型
     pub fn api_type(&self) -> &'static str {
-        self.api_provider.api_type()
+        self.chat_api_provider.api_type()
     }
 
     /// 获取供应商类型
@@ -80,7 +80,7 @@ impl LlmClient {
 
     /// 获取模型列表
     pub async fn list_models(&self, provider: &Provider) -> Result<Vec<StandardModel>, AppError> {
-        self.model_list_provider.list_models(provider, &self.provider_type).await
+        self.model_api_provider.list_models(provider, &self.provider_type).await
     }
     
 }

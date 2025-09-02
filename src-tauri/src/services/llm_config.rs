@@ -26,8 +26,8 @@ pub struct ProviderConfig {
     pub default_name: String,
     pub default_base_url: String,
     pub icon: String,
-    pub api_type: String, // "openai" | "google" | "anthropic"
-    pub model_list_api_type: String, // "openai" | "openai+local" | "google" | "anthropic" | "openrouter"
+    pub chat_api_type: String, // "openai" | "google" | "anthropic"
+    pub model_api_type: String, // "openai" | "openai+local" | "google" | "anthropic" | "openrouter"
     pub model_local: Option<HashMap<String, ModelExtraInfo>>,
 }
 

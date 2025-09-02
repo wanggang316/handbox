@@ -26,12 +26,6 @@ export function getProviderIcon(provider: Provider): string | undefined {
   return config?.icon || undefined;
 }
 
-// 获取供应商显示名称
-export function getProviderDisplayName(providerType: string): string {
-  const config = getProviderConfig(providerType);
-  return config?.type_name || providerType;
-}
-
 // 全局状态对象
 export const providerState = $state({
   // 供应商列表

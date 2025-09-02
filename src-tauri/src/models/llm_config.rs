@@ -10,8 +10,8 @@ pub struct FrontendProviderConfig {
     pub default_name: String,
     pub default_base_url: String,
     pub icon: String,
-    pub api_type: String,
-    pub model_list_api_type: String,
+    pub chat_api_type: String,
+    pub model_api_type: String,
     pub description: Option<String>,
 }
 

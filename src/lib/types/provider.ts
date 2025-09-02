@@ -58,8 +58,8 @@ export interface FrontendProviderConfig {
   default_name: string;
   default_base_url: string;
   icon: string;
-  api_type: string;
-  model_list_api_type: string;
+  chat_api_type: string;
+  model_api_type: string;
   description?: string;
 }
 

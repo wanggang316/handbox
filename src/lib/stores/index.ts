@@ -25,7 +25,6 @@ export {
   providerConfigs,
   getProviderConfig,
   getProviderIcon,
-  getProviderDisplayName,
   getEnabledProviders,
   getEnabledModels,
   getModelsByProvider,

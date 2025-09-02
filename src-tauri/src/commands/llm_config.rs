@@ -16,8 +16,8 @@ pub async fn get_provider_configs() -> Result<ProviderConfigsResponse, AppError>
             default_name: p.default_name.clone(),
             default_base_url: p.default_base_url.clone(),
             icon: p.icon.clone(),
-            api_type: p.api_type.clone(),
-            model_list_api_type: p.model_list_api_type.clone(),
+            chat_api_type: p.chat_api_type.clone(),
+            model_api_type: p.model_api_type.clone(),
             description: None, // 可以根据需要添加描述
         })
         .collect();
@@ -30,8 +30,8 @@ pub async fn get_provider_configs() -> Result<ProviderConfigsResponse, AppError>
             default_name: p.default_name.clone(),
             default_base_url: p.default_base_url.clone(),
             icon: p.icon.clone(),
-            api_type: p.api_type.clone(),
-            model_list_api_type: p.model_list_api_type.clone(),
+            chat_api_type: p.chat_api_type.clone(),
+            model_api_type: p.model_api_type.clone(),
             description: None,
         })
         .collect();
@@ -54,8 +54,8 @@ pub async fn get_provider_config_by_type(provider_type: String) -> Result<Option
             default_name: provider_config.default_name.clone(),
             default_base_url: provider_config.default_base_url.clone(),
             icon: provider_config.icon.clone(),
-            api_type: provider_config.api_type.clone(),
-            model_list_api_type: provider_config.model_list_api_type.clone(),
+            chat_api_type: provider_config.chat_api_type.clone(),
+            model_api_type: provider_config.model_api_type.clone(),
             description: None,
         }))
     } else {
