@@ -33,6 +33,7 @@ export interface Model {
   output_cost?: number;
   supported_features: ModelFeature[];
   enabled: boolean;
+  favorite: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -80,4 +81,11 @@ export interface ListModelsResponse {
   models: Model[];
   cached: boolean;
   timestamp: number;
+}
+
+// 模型收藏切换请求
+export interface ToggleModelFavoriteRequest {
+  provider_id: string;
+  model_id: string;
+  favorite: boolean;
 }

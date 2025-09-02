@@ -9,13 +9,7 @@
     getProviderIcon,
   } from "$lib/states/provider.svelte";
   import type { Provider, ProviderConfig } from "$lib/types/provider";
-  import {
-    Trash2,
-    ChevronLeft,
-    SquarePen,
-    Settings2,
-    ListChecks,
-  } from "@lucide/svelte";
+  import { Trash2, ChevronLeft, SquarePen, Heart, Star } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
@@ -23,16 +17,12 @@
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
 
   let providerId = $state("");
-  let showModelsModal = $state(false);
   let showDeleteConfirm = $state(false);
   let showEditModal = $state(false);
-  
-  let confirmModalRef: any;
 
-  let isLoadingModels = $state(false);
+  let confirmModalRef: any;
 
   // 使用统一的当前供应商状态
   const currentProvider = $derived(providerState.currentProvider);
@@ -64,7 +54,7 @@
         // 如果本地没有，先加载供应商配置和列表
         await Promise.all([
           providerActions.loadProviderConfigs(),
-          providerActions.loadProviders()
+          providerActions.loadProviders(),
         ]);
         provider = providerStateActions.setCurrentProviderById(providerId);
       }
@@ -75,6 +65,13 @@
           name: provider.name,
           enabled: provider.enabled,
         };
+
+        // 自动获取模型列表
+        try {
+          await providerActions.fetchProviderModels(provider.id, false);
+        } catch (error) {
+          console.error("Failed to fetch models:", error);
+        }
       } else {
         console.error("Provider not found:", providerId);
         // 跳转到供应商列表页
@@ -91,7 +88,6 @@
     showEditModal = true;
   }
 
-
   // 监听当前供应商变化，更新表单数据
   $effect(() => {
     if (currentProvider) {
@@ -101,22 +97,6 @@
       };
     }
   });
-
-  async function handleFetchModels() {
-    if (!currentProvider) return;
-
-    isLoadingModels = true;
-    try {
-      await providerActions.fetchProviderModels(currentProvider.id, true); // force refresh
-      showModelsModal = true;
-    } catch (error) {
-      console.error("Failed to fetch models:", error);
-      // 即使失败也显示模态框，让用户看到错误
-      showModelsModal = true;
-    } finally {
-      isLoadingModels = false;
-    }
-  }
 
   async function handleToggleProvider(enabled: boolean) {
     console.log("handleToggleProvider", enabled);
@@ -128,7 +108,10 @@
       console.log("handleToggleProvider", currentProvider.id, enabled);
       await providerActions.toggleProvider(currentProvider.id, enabled);
       // 更新当前供应商状态
-      providerStateActions.updateCurrentProvider({ ...currentProvider, enabled });
+      providerStateActions.updateCurrentProvider({
+        ...currentProvider,
+        enabled,
+      });
       console.log(`Provider ${enabled ? "enabled" : "disabled"} successfully`);
     } catch (error) {
       console.error("Failed to toggle provider:", error);
@@ -158,11 +141,6 @@
 
   function handleBack() {
     goto("/settings/models");
-  }
-
-  function handleConfigModel(model: any): void {
-    // TODO: 实现模型配置功能
-    console.log("Config model:", model);
   }
 </script>
 
@@ -214,57 +192,87 @@
             />
           </div>
         </TableBaseRow>
-        
       </TableGroup>
     {/if}
 
-    <div class="flex items-center mt-6">
+    <div class="flex items-center mt-6 mb-2">
       <div class="flex-1 text-text-primary text-base mx-2">模型列表</div>
-      <Button
-        on:click={handleFetchModels}
-        variant="clear"
-        size="sm"
-        disabled={isLoadingModels || !currentProvider}
-      >
-        <ListChecks size={16} class={isLoadingModels ? "animate-spin" : ""} />
-        {isLoadingModels ? "获取中..." : "管理模型"}
-      </Button>
     </div>
 
     {#if currentProvider}
-      {@const providerModels = providerState.availableModels.filter(
-        (m) => m.provider_id === currentProvider?.id,
-      )}
+      {@const providerModels = providerState.currentModels}
       {#if providerModels.length > 0}
-        <TableGroup title={currentProvider.name}>
-          {#each providerModels as model}
-            <TableBaseRow label={model.name} py="2">
-              <div class="flex flex-row items-center gap-2">
-                <Toggle
-                  checked={model.enabled}
-                  onChange={(enabled) => {
-                    if (currentProvider) {
-                      providerActions.toggleModel(
-                        currentProvider.id,
-                        model.id,
-                        enabled,
-                      );
-                    }
-                  }}
-                />
-                <IconButton
-                  icon={Settings2}
-                  iconSize={16}
-                  on:click={() => handleConfigModel(model)}
-                  disabled={true}
-                />
+        <div class="bg-bg-secondary rounded-xl overflow-hidden">
+          <!-- Table Headers -->
+          <div
+            class="flex flex-row items-center gap-4 px-4 py-2 bg-bg-hover border-b border-border text-xs font-medium text-text-primary"
+          >
+            <div class="flex-1">Name</div>
+            <div class="text-center w-16">Enabled</div>
+            <div class="text-center w-16">Favorite</div>
+          </div>
+
+          <!-- Model List -->
+          <div class="bg-bg-primary">
+            {#each providerModels as model, index}
+              <div
+                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-bg-primary' : 'bg-bg-secondary'} hover:bg-bg-hover"
+              >
+                <!-- Model Name -->
+                <div class="flex items-center flex-1">
+                  <span class="text-text-primary text-xs">{model.name}</span>
+                </div>
+
+                <!-- Enabled Toggle -->
+
+                <div class="flex items-center justify-center w-16">
+                  <input
+                    type="checkbox"
+                    bind:checked={model.enabled}
+                    onchange={(e) => {
+                      if (currentProvider) {
+                        providerActions.toggleModel(
+                          currentProvider.id,
+                          model.id,
+                          (e.currentTarget as HTMLInputElement).checked,
+                        );
+                      }
+                    }}
+                    class="w-4 h-4 text-accent bg-bg-primary border-border rounded focus:ring-accent focus:ring-2"
+                  />
+                </div>
+
+                <div class="flex items-center justify-center w-16">
+                  <button
+                    onclick={() => {
+                      if (currentProvider) {
+                        providerActions.toggleModelFavorite(
+                          currentProvider.id,
+                          model.id,
+                          !model.favorite,
+                        );
+                      }
+                    }}
+                    class="p-1 rounded hover:bg-bg-hover transition-colors"
+                    aria-label={model.favorite
+                      ? "Remove from favorites"
+                      : "Add to favorites"}
+                  >
+                    <Star
+                      size={16}
+                      class={model.favorite
+                        ? "text-text-primary fill-current"
+                        : "text-text-secondary hover:text-red-400"}
+                    />
+                  </button>
+                </div>
               </div>
-            </TableBaseRow>
-          {/each}
-        </TableGroup>
+            {/each}
+          </div>
+        </div>
       {:else}
         <div class="text-center text-sm py-8 text-gray-500">
-          默认显示所有模型，可以通过“管理模型”按钮进行手动管理
+          暂无模型数据，请检查供应商配置或网络连接
         </div>
       {/if}
     {/if}
@@ -274,7 +282,7 @@
 <!-- 编辑供应商弹窗 -->
 <AddProviderModal
   open={showEditModal}
-  onClose={() => showEditModal = false}
+  onClose={() => (showEditModal = false)}
 />
 
 <!-- 删除确认弹窗 -->
@@ -288,7 +296,7 @@
   confirmButtonStyle="danger"
   isLoading={providerState.isLoading}
   autoCloseOnConfirm={false}
-  onClose={() => showDeleteConfirm = false}
+  onClose={() => (showDeleteConfirm = false)}
   onConfirm={confirmDelete}
   onCancel={() => {}}
 />

@@ -220,6 +220,16 @@ impl ProviderService {
         self.repository.toggle_model(provider_id, model_id, enabled).await
     }
 
+    /// 切换模型收藏状态
+    pub async fn toggle_favorite_model(
+        &self,
+        provider_id: &UUID,
+        model_id: &str,
+        favorite: bool,
+    ) -> Result<(), AppError> {
+        self.repository.toggle_favorite_model(provider_id, model_id, favorite).await
+    }
+
     // === 私有辅助方法 ===
 
     /// 获取当前时间戳

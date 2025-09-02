@@ -2,7 +2,7 @@
 
 use crate::models::{
     AppError, ListModelsRequest, ListModelsResponse, Model, Provider,
-    ProviderConfig, ProviderWithModels, ToggleModelRequest, ToggleProviderRequest, UUID,
+    ProviderConfig, ProviderWithModels, ToggleModelRequest, ToggleModelFavoriteRequest, ToggleProviderRequest, UUID,
 };
 use crate::services::ProviderService;
 use tauri::State;
@@ -108,6 +108,17 @@ pub async fn provider_toggle_model(
 ) -> Result<(), AppError> {
     provider_service
         .toggle_model(&request.provider_id, &request.model_id, request.enabled)
+        .await
+}
+
+/// 切换模型收藏状态
+#[tauri::command]
+pub async fn provider_toggle_model_favorite(
+    request: ToggleModelFavoriteRequest,
+    provider_service: State<'_, ProviderService>,
+) -> Result<(), AppError> {
+    provider_service
+        .toggle_favorite_model(&request.provider_id, &request.model_id, request.favorite)
         .await
 }
 

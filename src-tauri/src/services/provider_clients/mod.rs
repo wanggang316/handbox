@@ -21,6 +21,7 @@ pub fn adapt_model(standard_model: StandardModel, provider_id: String, now: i64)
         output_cost: standard_model.output_cost,
         supported_features: standard_model.supported_features,
         enabled: true,
+        favorite: false,
         created_at: now,
         updated_at: now,
     }

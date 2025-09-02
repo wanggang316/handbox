@@ -38,7 +38,7 @@ export const providerState = $state({
   editingProvider: null as Provider | null,
   
   // 所有可用模型
-  availableModels: [] as Model[],
+  currentModels: [] as Model[],
   
   // 加载状态
   isLoading: false,
@@ -55,27 +55,6 @@ export function getEnabledProviders(): Provider[] {
   return providerState.providers.filter(p => p.enabled);
 }
 
-// 派生状态：可用的模型（来自已启用的供应商）
-export function getEnabledModels(): Model[] {
-  const enabledProviderIds = getEnabledProviders().map(p => p.id);
-  return providerState.availableModels.filter(m => 
-    enabledProviderIds.includes(m.provider_id) && m.enabled
-  );
-}
-
-// 派生状态：按供应商分组的模型
-export function getModelsByProvider(): Record<string, { provider: Provider; models: Model[] }> {
-  const groups: Record<string, { provider: Provider; models: Model[] }> = {};
-  
-  for (const provider of providerState.providers) {
-    const providerModels = providerState.availableModels.filter(m => m.provider_id === provider.id);
-    if (providerModels.length > 0) {
-      groups[provider.id] = { provider, models: providerModels };
-    }
-  }
-  
-  return groups;
-}
 
 // 获取供应商下拉选项组
 export function getProviderDropdownOptions() {
@@ -181,9 +160,6 @@ export const providerActions = {
       console.log('providerList', providerList);
       providerState.providers = providerList;
       
-      // 如果提供商包含模型，收集所有模型
-      const allModels = providerList.flatMap(p => (p as any).models || []);
-      providerState.availableModels = allModels;
     } catch (error) {
       providerState.error = error instanceof Error ? error.message : '加载供应商列表失败';
       throw error;
@@ -264,14 +240,15 @@ export const providerActions = {
   async fetchProviderModels(providerId: UUID, forceRefresh = false): Promise<void> {
     try {
       providerState.isFetchingModels = providerId;
-      const response = await providerApi.getProviderModels({ 
-        providerId: providerId, 
-        forceRefresh: forceRefresh 
-      });
+      const response = await providerApi.getProviderModels(
+        providerId, 
+        forceRefresh
+      );
       
-      // 更新全局模型列表
-      const otherModels = providerState.availableModels.filter(m => m.provider_id !== providerId);
-      providerState.availableModels = [...otherModels, ...response.models];
+      // 更新当前模型列表
+      providerState.currentModels = response.models;
+
+      console.log('fetchProviderModels', providerState.currentModels);
     } catch (error) {
       providerState.error = error instanceof Error ? error.message : '获取模型列表失败';
       throw error;
@@ -305,18 +282,41 @@ export const providerActions = {
     try {
       await providerApi.toggleModel(providerId, modelId, enabled);
       
-      // 更新模型状态
-      const index = providerState.availableModels.findIndex(m => 
-        m.id === modelId && m.provider_id === providerId
+      // 更新当前模型状态
+      const index = providerState.currentModels.findIndex(m => 
+        m.id === modelId
       );
       if (index !== -1) {
-        providerState.availableModels[index] = { 
-          ...providerState.availableModels[index], 
+        providerState.currentModels[index] = { 
+          ...providerState.currentModels[index], 
           enabled 
         };
       }
     } catch (error) {
       providerState.error = error instanceof Error ? error.message : '切换模型状态失败';
+      throw error;
+    }
+  },
+
+  /**
+   * 切换模型收藏状态
+   */
+  async toggleModelFavorite(providerId: UUID, modelId: string, favorite: boolean): Promise<void> {
+    try {
+      await providerApi.toggleModelFavorite(providerId, modelId, favorite);
+      
+      // 更新当前模型状态
+      const index = providerState.currentModels.findIndex(m => 
+        m.id === modelId
+      );
+      if (index !== -1) {
+        providerState.currentModels[index] = { 
+          ...providerState.currentModels[index], 
+          favorite 
+        };
+      }
+    } catch (error) {
+      providerState.error = error instanceof Error ? error.message : '切换模型收藏状态失败';
       throw error;
     }
   },
@@ -332,7 +332,7 @@ export const providerActions = {
    * 根据模型ID查找模型
    */
   findModel(modelId: string): Model | undefined {
-    return providerState.availableModels.find(m => m.id === modelId);
+    return providerState.currentModels.find(m => m.id === modelId);
   },
 
   /**
@@ -349,7 +349,7 @@ export const providerActions = {
     providerState.providers = [];
     providerState.currentProvider = null;
     providerState.editingProvider = null;
-    providerState.availableModels = [];
+    providerState.currentModels = [];
     providerState.isLoading = false;
     providerState.isFetchingModels = null;
     providerState.error = null;

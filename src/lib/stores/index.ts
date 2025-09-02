@@ -26,8 +26,6 @@ export {
   getProviderConfig,
   getProviderIcon,
   getEnabledProviders,
-  getEnabledModels,
-  getModelsByProvider,
   getProviderDropdownOptions
 } from '../states/provider.svelte';
 

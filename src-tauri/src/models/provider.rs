@@ -33,6 +33,7 @@ pub struct Model {
     pub output_cost: Option<f32>,
     pub supported_features: Option<Vec<ModelFeature>>,
     pub enabled: bool,
+    pub favorite: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -119,6 +120,14 @@ pub struct ToggleModelRequest {
     pub provider_id: UUID,
     pub model_id: String,
     pub enabled: bool,
+}
+
+/// 模型收藏切换请求
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToggleModelFavoriteRequest {
+    pub provider_id: UUID,
+    pub model_id: String,
+    pub favorite: bool,
 }
 
 

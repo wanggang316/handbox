@@ -198,8 +198,8 @@ impl ProviderRepository {
 
         let query = r#"
             INSERT INTO models (id, provider_id, name, context_length, input_cost, output_cost,
-                              supported_features, enabled, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                              supported_features, enabled, favorite, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         "#;
 
         sqlx::query(query)
@@ -211,6 +211,7 @@ impl ProviderRepository {
             .bind(model.output_cost)
             .bind(features_json)
             .bind(model.enabled)
+            .bind(model.favorite)
             .bind(model.created_at)
             .bind(model.updated_at)
             .execute(self.db.pool())
@@ -233,8 +234,8 @@ impl ProviderRepository {
 
             let query = r#"
                 INSERT OR REPLACE INTO models (id, provider_id, name, context_length, input_cost, output_cost,
-                                      supported_features, enabled, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                      supported_features, enabled, favorite, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#;
 
             sqlx::query(query)
@@ -246,6 +247,7 @@ impl ProviderRepository {
                 .bind(model.output_cost)
                 .bind(features_json)
                 .bind(model.enabled)
+                .bind(model.favorite)
                 .bind(model.created_at)
                 .bind(model.updated_at)
                 .execute(&mut *tx)
@@ -266,8 +268,8 @@ impl ProviderRepository {
     pub async fn get_models_by_provider(&self, provider_id: &str) -> Result<Vec<Model>, AppError> {
         let query = r#"
             SELECT id, provider_id, name, context_length, input_cost, output_cost,
-                   supported_features, enabled, created_at, updated_at
-            FROM models WHERE provider_id = $1 ORDER BY name
+                   supported_features, enabled, favorite, created_at, updated_at
+            FROM models WHERE provider_id = $1 ORDER BY created_at
         "#;
 
         let rows = sqlx::query(query)
@@ -299,6 +301,28 @@ impl ProviderRepository {
             .await
             .map_err(|e| {
                 AppError::internal_error(&format!("Failed to toggle model: {}", e))
+            })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::validation_error("Model not found"));
+        }
+
+        Ok(())
+    }
+
+    /// 更新模型收藏状态
+    pub async fn toggle_favorite_model(&self, provider_id: &str, model_id: &str, favorite: bool) -> Result<(), AppError> {
+        let now = chrono::Utc::now().timestamp_millis();
+        
+        let result = sqlx::query("UPDATE models SET favorite = $1, updated_at = $2 WHERE provider_id = $3 AND id = $4")
+            .bind(favorite)
+            .bind(now)
+            .bind(provider_id)
+            .bind(model_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to toggle model favorite: {}", e))
             })?;
 
         if result.rows_affected() == 0 {
@@ -350,6 +374,7 @@ impl ProviderRepository {
             output_cost: row.try_get("output_cost")?,
             supported_features,
             enabled: row.try_get("enabled")?,
+            favorite: row.try_get("favorite").unwrap_or(false),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

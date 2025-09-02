@@ -10,6 +10,7 @@ import type {
   ListModelsResponse,
   FrontendProviderConfig,
   ProviderConfigsResponse,
+  ToggleModelFavoriteRequest,
   UUID 
 } from '../types';
 
@@ -69,8 +70,11 @@ export async function toggleProvider(
 /**
  * 获取供应商模型列表
  */
-export async function getProviderModels(request: ListModelsRequest): Promise<ListModelsResponse> {
-  return apiCall<ListModelsResponse>('provider_list_models', { request });
+export async function getProviderModels(providerId: UUID, forceRefresh: boolean): Promise<ListModelsResponse> {
+  return apiCall<ListModelsResponse>('provider_list_models', { request: {
+    provider_id: providerId,
+    force_refresh: forceRefresh
+  }});
 }
 
 /**
@@ -86,6 +90,23 @@ export async function toggleModel(
       provider_id: providerId,
       model_id: modelId,
       enabled
+    }
+  });
+}
+
+/**
+ * 切换模型收藏状态
+ */
+export async function toggleModelFavorite(
+  providerId: UUID,
+  modelId: string,
+  favorite: boolean
+): Promise<void> {
+  return apiCall<void>('provider_toggle_model_favorite', { 
+    request: {
+      provider_id: providerId,
+      model_id: modelId,
+      favorite
     }
   });
 }
