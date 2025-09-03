@@ -8,7 +8,7 @@
     providerConfigs,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import { TriangleAlert, LoaderCircle, Cpu } from "@lucide/svelte";
+  import { LoaderCircle, Cpu } from "@lucide/svelte";
   import { TableGroup } from "$lib/components/ui/table";
   import StatusLabelRow from "$lib/components/ui/table/StatusLabelRow.svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
@@ -58,30 +58,6 @@
 </script>
 
 <div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
-  <!-- 错误提示 -->
-  {#if providerState.error}
-    <div
-      class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 flex items-start gap-3"
-    >
-      <TriangleAlert
-        class="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0"
-      />
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-red-800 dark:text-red-200">
-          加载失败
-        </p>
-        <p class="text-sm text-red-700 dark:text-red-300 mt-1">
-          {providerState.error}
-        </p>
-        <button
-          class="text-sm text-red-700 dark:text-red-300 underline mt-2 hover:no-underline"
-          onclick={() => providerActions.clearError()}
-        >
-          忽略
-        </button>
-      </div>
-    </div>
-  {/if}
 
   <!-- 加载状态 -->
   {#if providerState.isLoading}

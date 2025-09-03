@@ -124,6 +124,25 @@ export const providerStateActions = {
   },
 
   /**
+   * 刷新当前供应商的详细信息（包括模型列表）
+   */
+  async refreshCurrentProvider(): Promise<void> {
+    if (providerState.currentProvider) {
+      const providerId = providerState.currentProvider.id;
+      try {
+        // 重新获取供应商信息
+        const updatedProvider = await providerActions.getProvider(providerId);
+        providerState.currentProvider = updatedProvider;
+        
+        // 强制刷新模型列表
+        await providerActions.fetchProviderModels(providerId, true);
+      } catch (error) {
+        console.error("Failed to refresh current provider:", error);
+      }
+    }
+  },
+
+  /**
    * 清除所有选中状态
    */
   clearSelection(): void {
@@ -166,6 +185,14 @@ export const providerActions = {
     } finally {
       providerState.isLoading = false;
     }
+  },
+
+  /**
+   * 获取单个供应商
+   */
+  async getProvider(providerId: string): Promise<Provider> {
+    const response = await providerApi.getProvider(providerId);
+    return response;
   },
 
   /**

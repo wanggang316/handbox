@@ -223,6 +223,88 @@ impl ProviderRepository {
         Ok(())
     }
 
+    /// 同步供应商的模型列表（保留用户设置的状态）
+    pub async fn sync_provider_models(&self, provider_id: &str, new_models: &[Model]) -> Result<(), AppError> {
+        let mut tx = self.db.pool().begin().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to start transaction: {}", e))
+        })?;
+
+        // 1. 获取现有模型的用户状态（enabled, favorite）
+        let existing_states = sqlx::query(
+            r#"SELECT id, enabled, favorite FROM models WHERE provider_id = $1"#
+        )
+        .bind(provider_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| AppError::internal_error(&format!("Failed to get existing model states: {}", e)))?;
+
+        // 构建状态映射表（model_id -> (enabled, favorite)）
+        let mut state_map: std::collections::HashMap<String, (bool, bool)> = std::collections::HashMap::new();
+        for row in existing_states {
+            let id: String = row.get("id");
+            let enabled: bool = row.get("enabled");
+            let favorite: bool = row.get("favorite");
+            tracing::debug!("Found existing model state: id={}, enabled={}, favorite={}", id, enabled, favorite);
+            state_map.insert(id, (enabled, favorite));
+        }
+        tracing::info!("Built state map for {} existing models", state_map.len());
+
+        // 2. 删除该供应商的所有现有模型
+        sqlx::query(
+            r#"DELETE FROM models WHERE provider_id = $1"#
+        )
+        .bind(provider_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::internal_error(&format!("Failed to delete existing models: {}", e)))?;
+
+        // 3. 插入新模型，保留用户状态
+        tracing::info!("Inserting {} new models", new_models.len());
+        for model in new_models {
+            let features_json = model.features_to_json();
+            
+            // 从状态映射中获取用户设置的状态，如果没有则使用默认值
+            let (enabled, favorite) = match state_map.get(&model.id) {
+                Some((e, f)) => {
+                    tracing::debug!("Preserving state for model {}: enabled={}, favorite={}", model.id, e, f);
+                    (*e, *f)
+                }
+                None => {
+                    tracing::debug!("No existing state for model {}, using defaults: enabled=true, favorite=false", model.id);
+                    (true, false)
+                }
+            };
+
+            let query = r#"
+                INSERT INTO models (id, provider_id, name, context_length, input_cost, output_cost,
+                                  supported_features, enabled, favorite, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            "#;
+
+            sqlx::query(query)
+                .bind(&model.id)
+                .bind(&model.provider_id)
+                .bind(&model.name)
+                .bind(model.context_length)
+                .bind(model.input_cost)
+                .bind(model.output_cost)
+                .bind(&features_json)
+                .bind(enabled)
+                .bind(favorite)
+                .bind(model.created_at)
+                .bind(model.updated_at)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| AppError::internal_error(&format!("Failed to insert model {}: {}", model.name, e)))?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to commit transaction: {}", e))
+        })?;
+
+        Ok(())
+    }
+
     /// 批量创建模型
     pub async fn create_models(&self, models: &[Model]) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProviderConfig, Provider } from "$lib/types/provider";
+  import type { ProviderConfig } from "$lib/types/provider";
   import { 
     getProviderConfig, 
     getProviderDropdownOptions, 
@@ -12,6 +12,7 @@
   import DropDownRow from "../ui/table/DropDownRow.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
   import Modal from "../ui/Modal.svelte";
+  import Toast from "../ui/Toast.svelte";
 
   // 使用 $props() 替代 export let
   const { open = false, onClose } = $props<{
@@ -33,6 +34,8 @@
 
   let isLoading = $state(false);
   let errors = $state<Record<string, string>>({});
+  let errorMessage = $state('');
+  let showErrorToast = $state(false);
   
   // Modal 引用
   let modalRef: Modal;
@@ -90,15 +93,8 @@
         await providerActions.updateProvider(editProvider.id, config);
         console.log("Provider updated successfully");
         
-        // 编辑模式：通知状态管理器更新当前供应商
-        const updatedProvider: Provider = {
-          ...editProvider,
-          name: formData.name,
-          provider_type: formData.provider_type,
-          base_url: formData.base_url,
-          api_key: formData.api_key,
-        };
-        providerStateActions.updateCurrentProvider(updatedProvider);
+        // 编辑模式：刷新当前供应商的详细信息（包括可能更新的模型列表）
+        await providerStateActions.refreshCurrentProvider();
       } else {
         // 创建模式：创建新供应商
         console.log("Creating provider with config:", config);
@@ -109,7 +105,9 @@
       modalRef?.handleClose();
     } catch (error) {
       console.error(isEditMode ? "Failed to update provider:" : "Failed to create provider:", error);
-      // 这里可以显示错误信息给用户
+      // 显示错误提示
+      errorMessage = error instanceof Error ? error.message : '操作失败，请稍后重试';
+      showErrorToast = true;
     } finally {
       isLoading = false;
     }
@@ -149,6 +147,8 @@
         api_key: "",
       };
       errors = {};
+      errorMessage = '';
+      showErrorToast = false;
       // 确保结束编辑状态
       providerStateActions.endEditProvider();
     }
@@ -209,14 +209,22 @@
         bgColor="bg-gray-200"
         textColor="text-gray-600"
         hoverColor="hover:text-gray-800"
-        on:click={handleClose}
+        onclick={handleClose}
       ></RoundButton>
       <RoundButton
         customClass="w-18"
         label={isEditMode ? '保存' : '确认'}
-        on:click={handleConfirm}
+        onclick={handleConfirm}
         disabled={isLoading}
+        loading={isLoading}
       ></RoundButton>
     </div>
   </div>
 </Modal>
+
+<!-- 错误提示浮层 -->
+<Toast 
+  message={errorMessage}
+  show={showErrorToast}
+  onClose={() => showErrorToast = false}
+/>

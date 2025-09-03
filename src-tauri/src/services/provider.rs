@@ -30,6 +30,11 @@ impl ProviderService {
 
     /// 创建供应商
     pub async fn create_provider(&self, config: ProviderConfig) -> Result<Provider, AppError> {
+        self.create_provider_with_validation(config, true).await
+    }
+
+    /// 创建供应商（可选择是否验证 API Key）
+    pub async fn create_provider_with_validation(&self, config: ProviderConfig, validate_api_key: bool) -> Result<Provider, AppError> {
         let provider = Provider {
             id: Uuid::new_v4().to_string(),
             name: config.name,
@@ -41,20 +46,52 @@ impl ProviderService {
             updated_at: self.current_timestamp(),
         };
 
-        self.repository.create_provider(&provider).await?;
-        
-        // 自动拉取并保存模型列表（仅在非测试环境中）
-        if !cfg!(test) {
-            tracing::info!("Auto-fetching models for new provider: {}", provider.name);
-            match self.get_provider_models(&provider.id, true).await {
-                Ok(models) => {
-                    tracing::info!("Successfully fetched {} models for provider {}", models.len(), provider.name);
+        // 根据参数决定是否验证 API Key
+        if validate_api_key {
+            tracing::info!("Validating API key by fetching models for new provider: {}", provider.name);
+            // 对于新供应商，直接获取模型用于验证，先不保存到数据库
+            let client = create_llm_client(&provider.provider_type)?;
+            match client.list_models(&provider).await {
+                Ok(standard_models) => {
+                    tracing::info!("API key validation successful, fetched {} models", standard_models.len());
+                    // API Key 验证成功，创建供应商
+                    self.repository.create_provider(&provider).await?;
+                    
+                    // 然后保存模型（新供应商直接创建，不需要同步状态）
+                    if !standard_models.is_empty() {
+                        let now = self.current_timestamp();
+                        let models: Vec<Model> = standard_models
+                            .into_iter()
+                            .map(|standard_model| adapt_model(standard_model, provider.id.clone(), now))
+                            .collect();
+                        self.repository.create_models(&models).await?;
+                    }
+                    
+                    tracing::info!("Successfully created provider and models: {}", provider.name);
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to fetch models for provider {}: {}", provider.name, e);
-                    // 不让模型获取失败影响供应商创建
+                    tracing::warn!("Failed to validate API key for provider {}: {}", provider.name, e);
+                    // 检查是否是 API Key 相关错误
+                    if e.code == "INTERNAL_ERROR" && 
+                       (e.message.contains("Incorrect API key") || 
+                        e.message.contains("invalid_api_key") ||
+                        e.message.contains("401 Unauthorized")) {
+                        // 对于 API Key 错误，直接返回错误，不创建供应商
+                        return Err(AppError {
+                            code: "API_KEY_INVALID".to_string(),
+                            message: "API Key 无效，请检查后重试".to_string(),
+                            hint: Some("请确保 API Key 正确且有足够的权限".to_string()),
+                        });
+                    }
+                    // 对于其他错误（如网络问题），仍然创建供应商但给出警告
+                    self.repository.create_provider(&provider).await?;
+                    tracing::warn!("Provider created despite model fetch failure (network or other non-auth error)");
                 }
             }
+        } else {
+            // 不验证 API Key，直接创建供应商
+            self.repository.create_provider(&provider).await?;
+            tracing::info!("Provider created without API key validation");
         }
 
         Ok(provider)
@@ -65,6 +102,16 @@ impl ProviderService {
         &self,
         provider_id: &UUID,
         config: ProviderConfig,
+    ) -> Result<Provider, AppError> {
+        self.update_provider_with_validation(provider_id, config, true).await
+    }
+
+    /// 更新供应商（可选择是否验证 API Key）
+    pub async fn update_provider_with_validation(
+        &self,
+        provider_id: &UUID,
+        config: ProviderConfig,
+        validate_api_key: bool,
     ) -> Result<Provider, AppError> {
         let existing_provider = self.get_provider(provider_id).await?;
         
@@ -84,19 +131,52 @@ impl ProviderService {
             updated_at: self.current_timestamp(),
         };
 
-        self.repository.update_provider(&updated_provider).await?;
-        
-        // 如果关键配置有变更，自动刷新模型列表（仅在非测试环境中）
-        if should_refresh_models && !cfg!(test) {
-            tracing::info!("Key configuration changed, auto-refreshing models for provider: {}", updated_provider.name);
-            match self.get_provider_models(&updated_provider.id, true).await {
-                Ok(models) => {
-                    tracing::info!("Successfully refreshed {} models for provider {}", models.len(), updated_provider.name);
+        // 如果关键配置有变更且需要验证，先验证 API Key
+        if should_refresh_models && validate_api_key {
+            tracing::info!("Key configuration changed, validating API key for provider: {}", updated_provider.name);
+            let client = create_llm_client(&updated_provider.provider_type)?;
+            match client.list_models(&updated_provider).await {
+                Ok(standard_models) => {
+                    tracing::info!("API key validation successful, fetched {} models", standard_models.len());
+                    // API Key 验证成功，更新供应商
+                    self.repository.update_provider(&updated_provider).await?;
+                    
+                    // 同步模型，保留用户状态
+                    if !standard_models.is_empty() {
+                        let now = self.current_timestamp();
+                        let models: Vec<Model> = standard_models
+                            .into_iter()
+                            .map(|standard_model| adapt_model(standard_model, updated_provider.id.clone(), now))
+                            .collect();
+                        self.repository.sync_provider_models(&updated_provider.id, &models).await?;
+                    }
+                    
+                    tracing::info!("Successfully updated provider and synced models: {}", updated_provider.name);
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to refresh models for provider {}: {}", updated_provider.name, e);
-                    // 不让模型获取失败影响供应商更新
+                    tracing::warn!("Failed to validate API key for provider {}: {}", updated_provider.name, e);
+                    // 检查是否是 API Key 相关错误
+                    if e.code == "INTERNAL_ERROR" && 
+                       (e.message.contains("Incorrect API key") || 
+                        e.message.contains("invalid_api_key") ||
+                        e.message.contains("401 Unauthorized")) {
+                        // 对于 API Key 错误，直接返回错误，不更新供应商
+                        return Err(AppError {
+                            code: "API_KEY_INVALID".to_string(),
+                            message: "API Key 无效，请检查后重试".to_string(),
+                            hint: Some("请确保 API Key 正确且有足够的权限".to_string()),
+                        });
+                    }
+                    // 对于其他错误（如网络问题），仍然更新供应商但给出警告
+                    self.repository.update_provider(&updated_provider).await?;
+                    tracing::warn!("Provider updated despite model fetch failure (network or other non-auth error)");
                 }
+            }
+        } else {
+            // 没有关键配置变更或不需要验证，直接更新供应商
+            self.repository.update_provider(&updated_provider).await?;
+            if should_refresh_models {
+                tracing::info!("Provider updated without API key validation (validation disabled)");
             }
         }
 
@@ -183,12 +263,12 @@ impl ProviderService {
             .map(|standard_model| adapt_model(standard_model, provider.id.clone(), now))
             .collect();
 
-        // 保存到数据库
-        if !models.is_empty() {
-            self.repository.create_models(&models).await?;
-        }
+        // 同步到数据库（保留用户设置的状态）
+        self.repository.sync_provider_models(&provider.id, &models).await?;
 
-        Ok(models)
+        // 返回数据库中的模型（包含用户设置的状态）
+        let synced_models = self.repository.get_models_by_provider(&provider.id).await?;
+        Ok(synced_models)
     }
 
     /// 切换供应商启用状态
