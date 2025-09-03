@@ -12,7 +12,7 @@
   import DropDownRow from "../ui/table/DropDownRow.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
   import Modal from "../ui/Modal.svelte";
-  import Toast from "../ui/Toast.svelte";
+  import { toastActions } from "$lib/stores/toast.svelte";
 
   // 使用 $props() 替代 export let
   const { open = false, onClose } = $props<{
@@ -24,6 +24,14 @@
   const editProvider = $derived(providerState.editingProvider);
   const isEditMode = $derived(editProvider !== null);
 
+  // 原始数据，用于检测变化
+  let originalData = $state({
+    name: "",
+    provider_type: "",
+    base_url: "",
+    api_key: "",
+  });
+
   // 使用 $state 定义响应式状态
   let formData = $state({
     name: "",
@@ -34,14 +42,40 @@
 
   let isLoading = $state(false);
   let errors = $state<Record<string, string>>({});
-  let errorMessage = $state('');
-  let showErrorToast = $state(false);
+
+  // 检测是否可以保存
+  const canSave = $derived(
+    !isEditMode 
+      ? // 创建模式：所有必填字段都要有值
+        !!(formData.name?.trim() && 
+           formData.provider_type?.trim() && 
+           formData.base_url?.trim() && 
+           formData.api_key?.trim())
+      : // 编辑模式：至少有一个字段发生变化
+        (formData.name !== originalData.name ||
+         formData.provider_type !== originalData.provider_type ||
+         formData.base_url !== originalData.base_url ||
+         formData.api_key !== originalData.api_key)
+  );
   
   // Modal 引用
   let modalRef: Modal;
 
   // 使用统一的工具函数获取供应商分组
   const providerGroups = $derived(getProviderDropdownOptions());
+
+  // 简化的错误处理，使用后端标准化错误码
+  function handleError(error: any) {
+    console.error("Operation failed:", error);
+    
+    if (error && typeof error === 'object' && error.message) {
+      // 直接使用后端返回的错误信息，后端已经处理了多语言和错误分类
+      toastActions.error(error.message);
+    } else {
+      // 默认错误信息
+      toastActions.error('操作失败，请稍后重试');
+    }
+  }
 
   function validate() {
     errors = {};
@@ -101,13 +135,11 @@
         const newProvider = await providerActions.createProvider(config);
         console.log("Provider created successfully:", newProvider);
       }
-      // 成功后触发关闭动画
+      // 成功后显示成功提示并关闭
+      toastActions.success(isEditMode ? '供应商更新成功' : '供应商创建成功');
       modalRef?.handleClose();
     } catch (error) {
-      console.error(isEditMode ? "Failed to update provider:" : "Failed to create provider:", error);
-      // 显示错误提示
-      errorMessage = error instanceof Error ? error.message : '操作失败，请稍后重试';
-      showErrorToast = true;
+      handleError(error);
     } finally {
       isLoading = false;
     }
@@ -147,8 +179,6 @@
         api_key: "",
       };
       errors = {};
-      errorMessage = '';
-      showErrorToast = false;
       // 确保结束编辑状态
       providerStateActions.endEditProvider();
     }
@@ -157,6 +187,13 @@
   // 抽取初始化逻辑为单独的函数
   function initializeFormData() {
     if (isEditMode && editProvider) {
+      // 编辑模式：记录原始数据
+      originalData = {
+        name: editProvider.name,
+        provider_type: editProvider.provider_type,
+        base_url: editProvider.base_url,
+        api_key: editProvider.api_key
+      };
       formData = {
         name: editProvider.name,
         provider_type: editProvider.provider_type,
@@ -171,6 +208,13 @@
         formData.name = defaultProviderConfig.default_name;
         formData.base_url = defaultProviderConfig.default_base_url;
       }
+      // 创建模式重置原始数据
+      originalData = {
+        name: "",
+        provider_type: "openai",
+        base_url: "",
+        api_key: "",
+      };
     }
   }
 </script>
@@ -208,23 +252,15 @@
         label="取消"
         bgColor="bg-gray-200"
         textColor="text-gray-600"
-        hoverColor="hover:text-gray-800"
         onclick={handleClose}
       ></RoundButton>
       <RoundButton
         customClass="w-18"
         label={isEditMode ? '保存' : '确认'}
         onclick={handleConfirm}
-        disabled={isLoading}
+        disabled={isLoading || !canSave}
         loading={isLoading}
       ></RoundButton>
     </div>
   </div>
 </Modal>
-
-<!-- 错误提示浮层 -->
-<Toast 
-  message={errorMessage}
-  show={showErrorToast}
-  onClose={() => showErrorToast = false}
-/>

@@ -4,6 +4,7 @@
   import { browser } from "$app/environment";
   import { theme, uiActions } from "$lib/stores/ui";
   import { providerActions } from "$lib/states/provider.svelte";
+  import Toast from "$lib/components/ui/Toast.svelte";
 
   let { children } = $props();
 
@@ -33,5 +34,8 @@
 </script>
 
 {@render children()}
+
+<!-- 全局 Toast 组件 -->
+<Toast />
 
 <style></style>

@@ -24,9 +24,12 @@
 </script>
 
 <button
-  class="{size} {bgColor} {hoverColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 transition-colors {customClass}"
+  class="{size} {bgColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 disabled:bg-gray-600 {customClass}"
+  class:hover:opacity-90={!disabled && !loading && hoverColor === 'hover:opacity-90'}
+  class:hover:bg-opacity-90={!disabled && !loading && hoverColor !== 'hover:opacity-90'}
   class:opacity-50={disabled || loading}
   class:cursor-not-allowed={disabled || loading}
+  class:pointer-events-none={disabled || loading}
   on:click={handleClick}
   disabled={disabled || loading}
 >

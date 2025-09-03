@@ -21,7 +21,7 @@
 {#if layout === "horizontal"}
     <TableBaseRow {label} {layout} py="2">
         <!-- 输入框 -->
-        <div class="flex flex-col items-end">
+        <div class="flex flex-col items-end flex-1">
             <input
                 bind:value
                 {placeholder}

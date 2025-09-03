@@ -36,7 +36,7 @@ impl ProviderRepository {
             .await
             .map_err(|e| {
                 if e.to_string().contains("UNIQUE constraint failed") {
-                    AppError::validation_error("Provider name already exists")
+                    AppError::provider_name_exists()
                 } else {
                     AppError::internal_error(&format!("Failed to create provider: {}", e))
                 }
@@ -67,7 +67,11 @@ impl ProviderRepository {
             .execute(self.db.pool())
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to update provider: {}", e))
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    AppError::provider_name_exists()
+                } else {
+                    AppError::internal_error(&format!("Failed to update provider: {}", e))
+                }
             })?;
 
         if result.rows_affected() == 0 {

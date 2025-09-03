@@ -71,17 +71,25 @@ impl ProviderService {
                 }
                 Err(e) => {
                     tracing::warn!("Failed to validate API key for provider {}: {}", provider.name, e);
-                    // 检查是否是 API Key 相关错误
+                    // 检查是否是配置相关错误（API Key、端点等）
                     if e.code == "INTERNAL_ERROR" && 
                        (e.message.contains("Incorrect API key") || 
                         e.message.contains("invalid_api_key") ||
-                        e.message.contains("401 Unauthorized")) {
-                        // 对于 API Key 错误，直接返回错误，不创建供应商
-                        return Err(AppError {
-                            code: "API_KEY_INVALID".to_string(),
-                            message: "API Key 无效，请检查后重试".to_string(),
-                            hint: Some("请确保 API Key 正确且有足够的权限".to_string()),
-                        });
+                        e.message.contains("API key not valid") ||
+                        e.message.contains("400 Bad Request") ||
+                        e.message.contains("401 Unauthorized") ||
+                        e.message.contains("404 Not Found") ||
+                        e.message.contains("403 Forbidden")) {
+                        // 对于配置错误，直接返回错误，不创建供应商
+                        let error = if e.message.contains("404 Not Found") {
+                            AppError::provider_api_endpoint_invalid()
+                        } else if e.message.contains("403 Forbidden") {
+                            AppError::provider_api_permission_denied()
+                        } else {
+                            AppError::provider_api_key_invalid()
+                        };
+                        
+                        return Err(error);
                     }
                     // 对于其他错误（如网络问题），仍然创建供应商但给出警告
                     self.repository.create_provider(&provider).await?;
@@ -155,17 +163,25 @@ impl ProviderService {
                 }
                 Err(e) => {
                     tracing::warn!("Failed to validate API key for provider {}: {}", updated_provider.name, e);
-                    // 检查是否是 API Key 相关错误
+                    // 检查是否是配置相关错误（API Key、端点等）
                     if e.code == "INTERNAL_ERROR" && 
                        (e.message.contains("Incorrect API key") || 
                         e.message.contains("invalid_api_key") ||
-                        e.message.contains("401 Unauthorized")) {
-                        // 对于 API Key 错误，直接返回错误，不更新供应商
-                        return Err(AppError {
-                            code: "API_KEY_INVALID".to_string(),
-                            message: "API Key 无效，请检查后重试".to_string(),
-                            hint: Some("请确保 API Key 正确且有足够的权限".to_string()),
-                        });
+                        e.message.contains("API key not valid") ||
+                        e.message.contains("400 Bad Request") ||
+                        e.message.contains("401 Unauthorized") ||
+                        e.message.contains("404 Not Found") ||
+                        e.message.contains("403 Forbidden")) {
+                        // 对于配置错误，直接返回错误，不更新供应商
+                        let error = if e.message.contains("404 Not Found") {
+                            AppError::provider_api_endpoint_invalid()
+                        } else if e.message.contains("403 Forbidden") {
+                            AppError::provider_api_permission_denied()
+                        } else {
+                            AppError::provider_api_key_invalid()
+                        };
+                        
+                        return Err(error);
                     }
                     // 对于其他错误（如网络问题），仍然更新供应商但给出警告
                     self.repository.update_provider(&updated_provider).await?;
