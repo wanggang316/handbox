@@ -150,3 +150,76 @@ pub async fn provider_get_available_models(
 
     Ok(result)
 }
+
+/// 获取所有供应商及其模型（包含收藏状态）
+#[tauri::command]
+pub async fn provider_get_all_with_models(
+    force_refresh: Option<bool>,
+    provider_service: State<'_, ProviderService>,
+) -> Result<Vec<ProviderWithModels>, AppError> {
+    let force_refresh = force_refresh.unwrap_or(false);
+    let providers = provider_service.list_providers().await?;
+    let mut result = Vec::new();
+
+    for provider in providers {
+        match provider_service
+            .get_provider_models(&provider.id, force_refresh)
+            .await
+        {
+            Ok(models) => {
+                result.push(ProviderWithModels {
+                    id: provider.id,
+                    name: provider.name,
+                    provider_type: provider.provider_type,
+                    base_url: provider.base_url,
+                    api_key: provider.api_key,
+                    enabled: provider.enabled,
+                    created_at: provider.created_at,
+                    updated_at: provider.updated_at,
+                    models,
+                });
+            }
+            Err(_) => {
+                // 即使获取模型失败，也返回供应商信息（空模型列表）
+                result.push(ProviderWithModels {
+                    id: provider.id,
+                    name: provider.name,
+                    provider_type: provider.provider_type,
+                    base_url: provider.base_url,
+                    api_key: provider.api_key,
+                    enabled: provider.enabled,
+                    created_at: provider.created_at,
+                    updated_at: provider.updated_at,
+                    models: Vec::new(),
+                });
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// 获取所有收藏的模型
+#[tauri::command]
+pub async fn provider_get_favorite_models(
+    provider_service: State<'_, ProviderService>,
+) -> Result<Vec<Model>, AppError> {
+    let providers = provider_service.list_providers().await?;
+    let mut favorite_models = Vec::new();
+
+    for provider in providers {
+        match provider_service
+            .get_provider_models(&provider.id, false)
+            .await
+        {
+            Ok(models) => {
+                favorite_models.extend(
+                    models.into_iter().filter(|m| m.favorite)
+                );
+            }
+            Err(_) => continue, // 忽略获取失败的供应商
+        }
+    }
+
+    Ok(favorite_models)
+}

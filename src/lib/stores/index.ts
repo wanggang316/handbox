@@ -2,20 +2,8 @@
  * 状态管理 - 统一导出
  */
 
-// 聊天相关
-export {
-  currentSession,
-  sessions,
-  messages,
-  chatConfig,
-  isLoading as chatLoading,
-  isStreaming,
-  streamingContent,
-  chatError,
-  hasActiveSession,
-  messageCount,
-  chatActions
-} from './chat';
+// 聊天相关 - 使用新的状态管理
+export { chatState } from '../states/chat.svelte';
 
 // 供应商相关
 export {

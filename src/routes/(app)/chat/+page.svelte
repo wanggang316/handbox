@@ -5,10 +5,10 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { sidebarOpen } from '$lib/stores/ui';
+  import { chatState } from '$lib/states/chat.svelte';
 
   let sessionId = $state('');
   let messageInput = $state('');
-  let selectedModel = $state('DeepSeek R1');
 
   // 会话数据映射
   const sessionsData: Record<string, { title: string; content: string }> = {
@@ -43,10 +43,22 @@
   };
 
   // 从 URL 参数获取会话 ID
-  onMount(() => {
+  onMount(async () => {
     const urlParams = $page.url.searchParams;
     sessionId = urlParams.get('id') || '';
     console.log('Current session ID:', sessionId);
+    
+    // 初始化聊天状态
+    await chatState.initialize();
+    
+    // 如果有 sessionId，切换到对应会话
+    if (sessionId) {
+      try {
+        await chatState.switchToSession(sessionId);
+      } catch (error) {
+        console.error('Failed to switch to session:', error);
+      }
+    }
   });
 
   // 监听 URL 变化
@@ -81,15 +93,16 @@
   } : defaultMessage);
 
   // 处理消息发送
-  function handleSendMessage(message: string) {
-    console.log('Sending message:', message);
-    // 这里可以添加发送消息的逻辑
-  }
-
-  // 处理模型切换
-  function handleModelChange(model: string) {
-    console.log('Model changed to:', model);
-    // 这里可以添加模型切换的逻辑
+  async function handleSendMessage(message: string) {
+    try {
+      if (!chatState.currentSession) {
+        // 如果没有当前会话，创建新会话
+        await chatState.createSession();
+      }
+      await chatState.sendMessage(message);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    }
   }
 </script>
 
@@ -108,9 +121,7 @@
   <div class="px-4 pb-4">
     <ChatInputView 
       bind:messageInput={messageInput}
-      bind:selectedModel={selectedModel}
       onSendMessage={handleSendMessage}
-      onModelChange={handleModelChange}
     />
   </div>
 </div>

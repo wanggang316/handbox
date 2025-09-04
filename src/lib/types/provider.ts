@@ -4,11 +4,6 @@
 
 import type { BaseEntity } from './index';
 
-// 供应商类型
-// export type ProviderType = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'openrouter' | 'custom-openai' | 'custom-anthropic';
-
-
-
 // 供应商配置
 export interface Provider extends BaseEntity {
   name: string;
@@ -36,6 +31,12 @@ export interface Model {
   favorite: boolean;
   created_at: number;
   updated_at: number;
+}
+
+// 带供应商信息的模型（用于前端显示）
+export interface ModelWithProvider extends Model {
+  providerName: string;
+  providerType: string;
 }
 
 // 模型特性

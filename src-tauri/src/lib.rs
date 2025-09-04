@@ -120,6 +120,8 @@ pub fn run() {
             provider_toggle_model,
             provider_toggle_model_favorite,
             provider_get_available_models,
+            provider_get_all_with_models,
+            provider_get_favorite_models,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,

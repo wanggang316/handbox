@@ -11,6 +11,8 @@ import type {
   FrontendProviderConfig,
   ProviderConfigsResponse,
   ToggleModelFavoriteRequest,
+  ProviderWithModels,
+  Model,
   UUID 
 } from '../types';
 
@@ -130,4 +132,20 @@ export async function getProviderConfigs(): Promise<ProviderConfigsResponse> {
  */
 export async function getProviderConfigByType(providerType: string): Promise<FrontendProviderConfig | null> {
   return apiCall<FrontendProviderConfig | null>('get_provider_config_by_type', { provider_type: providerType });
+}
+
+/**
+ * 获取所有供应商及其模型（包含收藏状态）
+ */
+export async function getProvidersWithModels(forceRefresh: boolean = false): Promise<ProviderWithModels[]> {
+  return apiCall<ProviderWithModels[]>('provider_get_all_with_models', { 
+    force_refresh: forceRefresh 
+  });
+}
+
+/**
+ * 获取所有收藏的模型
+ */
+export async function getFavoriteModels(): Promise<Model[]> {
+  return apiCall<Model[]>('provider_get_favorite_models');
 }
