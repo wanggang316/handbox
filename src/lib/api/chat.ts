@@ -59,7 +59,7 @@ export async function getChatSessions(
  * 获取会话详情
  */
 export async function getChatSession(sessionId: UUID): Promise<ChatSession> {
-  return apiCall<ChatSession>('chat_get_session', { sessionId });
+  return apiCall<ChatSession>('chat_get_session', { session_id: sessionId });
 }
 
 /**
@@ -69,14 +69,14 @@ export async function updateChatSession(
   sessionId: UUID,
   updates: Partial<Omit<ChatSession, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<ChatSession> {
-  return apiCall<ChatSession>('chat_update_session', { sessionId, ...updates });
+  return apiCall<ChatSession>('chat_update_session', { session_id: sessionId, updates });
 }
 
 /**
  * 删除会话
  */
 export async function deleteChatSession(sessionId: UUID): Promise<void> {
-  return apiCall<void>('chat_delete_session', { sessionId });
+  return apiCall<void>('chat_delete_session', { session_id: sessionId });
 }
 
 /**
@@ -87,7 +87,7 @@ export async function getChatMessages(
   limit?: number,
   offset?: number
 ): Promise<Message[]> {
-  return apiCall<Message[]>('chat_get_messages', { sessionId, limit, offset });
+  return apiCall<Message[]>('chat_get_messages', { session_id: sessionId, limit, offset });
 }
 
 /**
@@ -97,19 +97,19 @@ export async function updateMessage(
   messageId: UUID,
   content: string
 ): Promise<Message> {
-  return apiCall<Message>('chat_update_message', { messageId, content });
+  return apiCall<Message>('chat_update_message', { message_id: messageId, content });
 }
 
 /**
  * 删除消息
  */
 export async function deleteMessage(messageId: UUID): Promise<void> {
-  return apiCall<void>('chat_delete_message', { messageId });
+  return apiCall<void>('chat_delete_message', { message_id: messageId });
 }
 
 /**
  * 重新生成助手消息
  */
 export async function regenerateMessage(messageId: UUID): Promise<ChatResponse> {
-  return apiCall<ChatResponse>('chat_regenerate_message', { messageId });
+  return apiCall<ChatResponse>('chat_regenerate_message', { message_id: messageId });
 }
