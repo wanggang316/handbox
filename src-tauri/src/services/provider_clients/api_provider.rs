@@ -52,11 +52,22 @@ pub struct ChatUsage {
 #[async_trait]
 pub trait ApiProvider: Send + Sync {
     /// 发送聊天请求
-    async fn chat(&self, provider: &Provider, request: ChatRequest) -> Result<ChatResponse, AppError>;
-    
+    async fn chat(
+        &self,
+        provider: &Provider,
+        request: ChatRequest,
+    ) -> Result<ChatResponse, AppError>;
+
     /// 发送流式聊天请求
-    async fn chat_stream(&self, provider: &Provider, request: ChatRequest) -> Result<Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>, AppError>;
-    
+    async fn chat_stream(
+        &self,
+        provider: &Provider,
+        request: ChatRequest,
+    ) -> Result<
+        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        AppError,
+    >;
+
     /// 获取 API 类型名称
     fn api_type(&self) -> &'static str;
 }
@@ -98,21 +109,28 @@ impl OpenAIApiProvider {
 
 #[async_trait]
 impl ApiProvider for OpenAIApiProvider {
-    async fn chat(&self, provider: &Provider, request: ChatRequest) -> Result<ChatResponse, AppError> {
+    async fn chat(
+        &self,
+        provider: &Provider,
+        request: ChatRequest,
+    ) -> Result<ChatResponse, AppError> {
         let url = format!("{}/chat/completions", provider.base_url);
         let req_body = self.build_openai_request(&request);
-        
+
         tracing::info!("Sending OpenAI-style chat request to: {}", url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", provider.api_key))
             .header("Content-Type", "application/json")
             .json(&req_body)
             .send()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to send chat request: {}", e)))?;
-            
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to send chat request: {}", e))
+            })?;
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -121,33 +139,42 @@ impl ApiProvider for OpenAIApiProvider {
                 status, error_text
             )));
         }
-        
-        let chat_response: ChatResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse chat response: {}", e)))?;
-            
+
+        let chat_response: ChatResponse = response.json().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse chat response: {}", e))
+        })?;
+
         Ok(chat_response)
     }
 
-    async fn chat_stream(&self, provider: &Provider, mut request: ChatRequest) -> Result<Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>, AppError> {
+    async fn chat_stream(
+        &self,
+        provider: &Provider,
+        mut request: ChatRequest,
+    ) -> Result<
+        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        AppError,
+    > {
         // 启用流式响应
         request.stream = Some(true);
-        
+
         let url = format!("{}/chat/completions", provider.base_url);
         let req_body = self.build_openai_request(&request);
-        
+
         tracing::info!("Sending OpenAI-style streaming chat request to: {}", url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", provider.api_key))
             .header("Content-Type", "application/json")
             .json(&req_body)
             .send()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to send streaming chat request: {}", e)))?;
-            
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to send streaming chat request: {}", e))
+            })?;
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -182,12 +209,16 @@ impl GoogleApiProvider {
     /// 将通用请求转换为 Google API 格式
     fn convert_to_google_request(&self, request: &ChatRequest) -> Value {
         // 转换消息格式
-        let contents: Vec<Value> = request.messages.iter().map(|msg| {
-            serde_json::json!({
-                "role": if msg.role == "assistant" { "model" } else { "user" },
-                "parts": [{"text": msg.content}]
+        let contents: Vec<Value> = request
+            .messages
+            .iter()
+            .map(|msg| {
+                serde_json::json!({
+                    "role": if msg.role == "assistant" { "model" } else { "user" },
+                    "parts": [{"text": msg.content}]
+                })
             })
-        }).collect();
+            .collect();
 
         let mut req_body = serde_json::json!({
             "contents": contents,
@@ -195,7 +226,7 @@ impl GoogleApiProvider {
 
         // 设置生成配置
         let mut generation_config = serde_json::json!({});
-        
+
         if let Some(temperature) = request.temperature {
             generation_config["temperature"] = temperature.into();
         }
@@ -212,18 +243,25 @@ impl GoogleApiProvider {
     }
 
     /// 将 Google 响应转换为通用格式
-    fn convert_google_response(&self, google_response: Value, model: &str) -> Result<ChatResponse, AppError> {
-        let candidates = google_response["candidates"].as_array()
+    fn convert_google_response(
+        &self,
+        google_response: Value,
+        model: &str,
+    ) -> Result<ChatResponse, AppError> {
+        let candidates = google_response["candidates"]
+            .as_array()
             .ok_or_else(|| AppError::internal_error("Invalid Google API response format"))?;
 
         let mut choices = Vec::new();
 
         for (index, candidate) in candidates.iter().enumerate() {
-            let content = candidate["content"]["parts"][0]["text"].as_str()
+            let content = candidate["content"]["parts"][0]["text"]
+                .as_str()
                 .unwrap_or("")
                 .to_string();
 
-            let finish_reason = candidate["finishReason"].as_str()
+            let finish_reason = candidate["finishReason"]
+                .as_str()
                 .map(|reason| match reason {
                     "STOP" => "stop",
                     "MAX_TOKENS" => "length",
@@ -243,13 +281,13 @@ impl GoogleApiProvider {
         }
 
         // Google API 通常不返回使用统计，可以从响应中提取或设为 None
-        let usage = google_response["usageMetadata"].as_object().map(|usage_obj| {
-            ChatUsage {
+        let usage = google_response["usageMetadata"]
+            .as_object()
+            .map(|usage_obj| ChatUsage {
                 prompt_tokens: usage_obj["promptTokenCount"].as_i64().unwrap_or(0) as i32,
                 completion_tokens: usage_obj["candidatesTokenCount"].as_i64().unwrap_or(0) as i32,
                 total_tokens: usage_obj["totalTokenCount"].as_i64().unwrap_or(0) as i32,
-            }
-        });
+            });
 
         Ok(ChatResponse {
             id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),
@@ -263,22 +301,32 @@ impl GoogleApiProvider {
 
 #[async_trait]
 impl ApiProvider for GoogleApiProvider {
-    async fn chat(&self, provider: &Provider, request: ChatRequest) -> Result<ChatResponse, AppError> {
+    async fn chat(
+        &self,
+        provider: &Provider,
+        request: ChatRequest,
+    ) -> Result<ChatResponse, AppError> {
         // Google API URL 格式不同，需要包含模型名称
-        let url = format!("{}/models/{}:generateContent", provider.base_url, request.model);
+        let url = format!(
+            "{}/models/{}:generateContent",
+            provider.base_url, request.model
+        );
         let req_body = self.convert_to_google_request(&request);
-        
+
         tracing::info!("Sending Google-style chat request to: {}", url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("Content-Type", "application/json")
             .query(&[("key", &provider.api_key)])
             .json(&req_body)
             .send()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to send Google chat request: {}", e)))?;
-            
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to send Google chat request: {}", e))
+            })?;
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -287,18 +335,26 @@ impl ApiProvider for GoogleApiProvider {
                 status, error_text
             )));
         }
-        
-        let google_response: Value = response
-            .json()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse Google response: {}", e)))?;
-            
+
+        let google_response: Value = response.json().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse Google response: {}", e))
+        })?;
+
         self.convert_google_response(google_response, &request.model)
     }
 
-    async fn chat_stream(&self, _provider: &Provider, _request: ChatRequest) -> Result<Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>, AppError> {
+    async fn chat_stream(
+        &self,
+        _provider: &Provider,
+        _request: ChatRequest,
+    ) -> Result<
+        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        AppError,
+    > {
         // Google 流式 API 实现待完成
-        Err(AppError::internal_error("Google streaming not yet implemented"))
+        Err(AppError::internal_error(
+            "Google streaming not yet implemented",
+        ))
     }
 
     fn api_type(&self) -> &'static str {
@@ -360,12 +416,18 @@ impl AnthropicApiProvider {
     }
 
     /// 将 Anthropic 响应转换为通用格式
-    fn convert_anthropic_response(&self, anthropic_response: Value, model: &str) -> Result<ChatResponse, AppError> {
-        let content = anthropic_response["content"][0]["text"].as_str()
+    fn convert_anthropic_response(
+        &self,
+        anthropic_response: Value,
+        model: &str,
+    ) -> Result<ChatResponse, AppError> {
+        let content = anthropic_response["content"][0]["text"]
+            .as_str()
             .ok_or_else(|| AppError::internal_error("Invalid Anthropic API response format"))?
             .to_string();
 
-        let finish_reason = anthropic_response["stop_reason"].as_str()
+        let finish_reason = anthropic_response["stop_reason"]
+            .as_str()
             .map(|reason| match reason {
                 "end_turn" => "stop",
                 "max_tokens" => "length",
@@ -373,14 +435,15 @@ impl AnthropicApiProvider {
             })
             .map(String::from);
 
-        let usage = anthropic_response["usage"].as_object().map(|usage_obj| {
-            ChatUsage {
+        let usage = anthropic_response["usage"]
+            .as_object()
+            .map(|usage_obj| ChatUsage {
                 prompt_tokens: usage_obj["input_tokens"].as_i64().unwrap_or(0) as i32,
                 completion_tokens: usage_obj["output_tokens"].as_i64().unwrap_or(0) as i32,
-                total_tokens: (usage_obj["input_tokens"].as_i64().unwrap_or(0) + 
-                               usage_obj["output_tokens"].as_i64().unwrap_or(0)) as i32,
-            }
-        });
+                total_tokens: (usage_obj["input_tokens"].as_i64().unwrap_or(0)
+                    + usage_obj["output_tokens"].as_i64().unwrap_or(0))
+                    as i32,
+            });
 
         Ok(ChatResponse {
             id: anthropic_response["id"].as_str().unwrap_or("").to_string(),
@@ -402,13 +465,18 @@ impl AnthropicApiProvider {
 
 #[async_trait]
 impl ApiProvider for AnthropicApiProvider {
-    async fn chat(&self, provider: &Provider, request: ChatRequest) -> Result<ChatResponse, AppError> {
+    async fn chat(
+        &self,
+        provider: &Provider,
+        request: ChatRequest,
+    ) -> Result<ChatResponse, AppError> {
         let url = format!("{}/messages", provider.base_url);
         let req_body = self.convert_to_anthropic_request(&request);
-        
+
         tracing::info!("Sending Anthropic-style chat request to: {}", url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("x-api-key", &provider.api_key)
             .header("Content-Type", "application/json")
@@ -416,8 +484,10 @@ impl ApiProvider for AnthropicApiProvider {
             .json(&req_body)
             .send()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to send Anthropic chat request: {}", e)))?;
-            
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to send Anthropic chat request: {}", e))
+            })?;
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -426,18 +496,26 @@ impl ApiProvider for AnthropicApiProvider {
                 status, error_text
             )));
         }
-        
-        let anthropic_response: Value = response
-            .json()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse Anthropic response: {}", e)))?;
-            
+
+        let anthropic_response: Value = response.json().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse Anthropic response: {}", e))
+        })?;
+
         self.convert_anthropic_response(anthropic_response, &request.model)
     }
 
-    async fn chat_stream(&self, _provider: &Provider, _request: ChatRequest) -> Result<Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>, AppError> {
+    async fn chat_stream(
+        &self,
+        _provider: &Provider,
+        _request: ChatRequest,
+    ) -> Result<
+        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        AppError,
+    > {
         // Anthropic 流式 API 实现待完成
-        Err(AppError::internal_error("Anthropic streaming not yet implemented"))
+        Err(AppError::internal_error(
+            "Anthropic streaming not yet implemented",
+        ))
     }
 
     fn api_type(&self) -> &'static str {
@@ -451,6 +529,9 @@ pub fn create_api_provider(api_type: &str) -> Result<Box<dyn ApiProvider>, AppEr
         "openai" => Ok(Box::new(OpenAIApiProvider::new())),
         "google" => Ok(Box::new(GoogleApiProvider::new())),
         "anthropic" => Ok(Box::new(AnthropicApiProvider::new())),
-        _ => Err(AppError::validation_error(&format!("Unsupported API type: {}", api_type))),
+        _ => Err(AppError::validation_error(&format!(
+            "Unsupported API type: {}",
+            api_type
+        ))),
     }
 }

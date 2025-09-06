@@ -1,6 +1,6 @@
 <script lang="ts">
   import { TriangleAlert, CircleCheck, TriangleAlert as Warning, Info, X } from '@lucide/svelte';
-  import { toastStore, toastActions, type ToastMessage } from '$lib/stores/toast.svelte';
+  import { toastStore, toastActions, type ToastMessage } from '$lib/states/toast.svelte';
 
   function getIcon(type: ToastMessage['type']) {
     switch (type) {

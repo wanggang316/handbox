@@ -54,42 +54,38 @@ impl AppError {
 
     // 供应商相关错误
     pub fn provider_name_exists() -> Self {
-        Self::with_hint(
-            "PROVIDER_NAME_EXISTS", 
-            "供应商名称已存在", 
-            "请使用其他名称"
-        )
+        Self::with_hint("PROVIDER_NAME_EXISTS", "供应商名称已存在", "请使用其他名称")
     }
 
     pub fn provider_api_key_invalid() -> Self {
         Self::with_hint(
-            "PROVIDER_API_KEY_INVALID", 
-            "API Key 无效", 
-            "请检查 API Key 是否正确"
+            "PROVIDER_API_KEY_INVALID",
+            "API Key 无效",
+            "请检查 API Key 是否正确",
         )
     }
 
     pub fn provider_api_endpoint_invalid() -> Self {
         Self::with_hint(
-            "PROVIDER_API_ENDPOINT_INVALID", 
-            "API 端点配置错误或服务不可用", 
-            "请检查 Base URL 和供应商类型配置"
+            "PROVIDER_API_ENDPOINT_INVALID",
+            "API 端点配置错误或服务不可用",
+            "请检查 Base URL 和供应商类型配置",
         )
     }
 
     pub fn provider_api_permission_denied() -> Self {
         Self::with_hint(
-            "PROVIDER_API_PERMISSION_DENIED", 
-            "API Key 权限不足", 
-            "请检查 API Key 的权限设置"
+            "PROVIDER_API_PERMISSION_DENIED",
+            "API Key 权限不足",
+            "请检查 API Key 的权限设置",
         )
     }
 
     pub fn provider_models_fetch_failed() -> Self {
         Self::with_hint(
-            "PROVIDER_MODELS_FETCH_FAILED", 
-            "获取供应商模型失败", 
-            "请检查网络连接和配置"
+            "PROVIDER_MODELS_FETCH_FAILED",
+            "获取供应商模型失败",
+            "请检查网络连接和配置",
         )
     }
 }

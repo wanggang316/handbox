@@ -3,9 +3,6 @@
 use super::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
 
-
-
-
 /// 模型特性
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
 #[serde(rename_all = "kebab-case")]
@@ -17,8 +14,6 @@ pub enum ModelFeature {
     Streaming,
     Reasoning,
 }
-
-
 
 /// 模型信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,9 +36,10 @@ pub struct Model {
 // 为 Model 的 supported_features 字段提供序列化支持
 impl Model {
     pub fn features_to_json(&self) -> String {
-        serde_json::to_string(&self.supported_features.as_ref().unwrap_or(&vec![])).unwrap_or_default()
+        serde_json::to_string(&self.supported_features.as_ref().unwrap_or(&vec![]))
+            .unwrap_or_default()
     }
-    
+
     pub fn features_from_json(json: &str) -> Result<Option<Vec<ModelFeature>>, serde_json::Error> {
         if json.is_empty() {
             Ok(None)
@@ -65,8 +61,6 @@ pub struct Provider {
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
-
-
 
 /// 带有模型的供应商实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,5 +123,3 @@ pub struct ToggleModelFavoriteRequest {
     pub model_id: String,
     pub favorite: bool,
 }
-
-

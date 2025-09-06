@@ -1,115 +1,68 @@
 /**
- * 聊天相关 API 封装
+ * 聊天相关 API 封装（仅 Chat 资源）
  */
 
-import { listen } from '@tauri-apps/api/event';
 import { apiCall } from './index';
 import type { 
-  ChatRequest, 
-  ChatResponse, 
   ChatSession, 
   ChatConfig,
-  ChatStreamEvent,
-  Message,
   UUID 
 } from '../types';
 
 /**
- * 发送聊天消息
+ * 创建新的聊天
+ * 后端签名: chat_create(name, system_prompt?, mcp_servers?)
  */
-export async function sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
-  return apiCall<ChatResponse>('chat_send', request);
-}
-
-/**
- * 监听流式聊天事件
- */
-export async function listenChatStream(
-  sessionId: UUID,
-  callback: (event: ChatStreamEvent) => void
-): Promise<() => void> {
-  const unlisten = await listen<ChatStreamEvent>(`chat_stream_${sessionId}`, (event) => {
-    callback(event.payload);
-  });
-  
-  return unlisten;
-}
-
-/**
- * 创建新的聊天会话
- */
-export async function createChatSession(
-  name?: string,
+export async function createChat(
+  name: string,
   config?: Partial<ChatConfig>
 ): Promise<ChatSession> {
-  return apiCall<ChatSession>('chat_create_session', { name, config });
+  const payload = {
+    name,
+    system_prompt: config?.systemPrompt,
+    mcp_servers: config?.mcpServers,
+  };
+  console.log('Creating chat:', payload);
+  return apiCall<ChatSession>('chat_create', payload);
 }
 
 /**
- * 获取聊天会话列表
+ * 获取聊天列表
  */
-export async function getChatSessions(
+export async function getChats(
   limit?: number,
   offset?: number
 ): Promise<ChatSession[]> {
-  return apiCall<ChatSession[]>('chat_list_sessions', { limit, offset });
+  return apiCall<ChatSession[]>('chat_list', { limit, offset });
 }
 
 /**
- * 获取会话详情
+ * 获取聊天详情
  */
-export async function getChatSession(sessionId: UUID): Promise<ChatSession> {
-  return apiCall<ChatSession>('chat_get_session', { sessionId });
+export async function getChat(chatId: UUID): Promise<ChatSession> {
+  return apiCall<ChatSession>('chat_get', { chat_id: chatId });
 }
 
 /**
- * 更新会话配置
+ * 更新聊天
+ * 后端签名: chat_update(chat_id, name?, system_prompt?, mcp_servers?)
  */
-export async function updateChatSession(
-  sessionId: UUID,
-  updates: Partial<Omit<ChatSession, 'id' | 'createdAt' | 'updatedAt'>>
+export async function updateChat(
+  chatId: UUID,
+  updates: Partial<Pick<ChatSession, 'name' | 'systemPrompt'>> & { mcpServers?: string[] }
 ): Promise<ChatSession> {
-  return apiCall<ChatSession>('chat_update_session', { sessionId, ...updates });
+  const payload = {
+    chat_id: chatId,
+    name: updates.name,
+    system_prompt: updates.systemPrompt,
+    mcp_servers: updates.mcpServers,
+  };
+  return apiCall<ChatSession>('chat_update', payload);
 }
 
 /**
- * 删除会话
+ * 删除聊天
  */
-export async function deleteChatSession(sessionId: UUID): Promise<void> {
-  return apiCall<void>('chat_delete_session', { sessionId });
-}
-
-/**
- * 获取会话消息
- */
-export async function getChatMessages(
-  sessionId: UUID,
-  limit?: number,
-  offset?: number
-): Promise<Message[]> {
-  return apiCall<Message[]>('chat_get_messages', { sessionId, limit, offset });
-}
-
-/**
- * 更新消息
- */
-export async function updateMessage(
-  messageId: UUID,
-  content: string
-): Promise<Message> {
-  return apiCall<Message>('chat_update_message', { messageId, content });
-}
-
-/**
- * 删除消息
- */
-export async function deleteMessage(messageId: UUID): Promise<void> {
-  return apiCall<void>('chat_delete_message', { messageId });
-}
-
-/**
- * 重新生成助手消息
- */
-export async function regenerateMessage(messageId: UUID): Promise<ChatResponse> {
-  return apiCall<ChatResponse>('chat_regenerate_message', { messageId });
+export async function deleteChat(chatId: UUID): Promise<void> {
+  return apiCall<void>('chat_delete', { chat_id: chatId });
 }

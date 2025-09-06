@@ -2,30 +2,30 @@
     import { Ellipsis } from "@lucide/svelte";
     import IconButton from "../ui/IconButton.svelte";
     import ChatSettings from "./settings/ChatSettings.svelte";
-    import { modals, uiActions } from "../../stores/ui";
+    import { uiState } from "$lib/states/ui.svelte";
     import Button from "../ui/Button.svelte";
     import { RefreshCw } from "@lucide/svelte";
 
   interface Props {
-    sessionId?: string;
+    chatId?: string;
     title?: string;
     sidebarOpen?: boolean;
   }
   
   let { 
-    sessionId = '', 
-    title = 'HandBox - AI 助手',
+    chatId = '', 
+    title = 'AI 助手',
     sidebarOpen = true 
   }: Props = $props();
 
   const CHAT_SETTINGS_MODAL = 'chat-settings';
 
   function handleChatSettings() {
-    uiActions.openModal(CHAT_SETTINGS_MODAL);
+    uiState.openModal(CHAT_SETTINGS_MODAL);
   }
 
   function handleCloseChatSettings() {
-    uiActions.closeModal(CHAT_SETTINGS_MODAL);
+    uiState.closeModal(CHAT_SETTINGS_MODAL);
   }
 
   function handleRefresh() {
@@ -38,8 +38,8 @@
   <div class="transition-all duration-300" class:ml-[120px]={!sidebarOpen}>
     <h1 class="text-base font-medium text-gray-900">
       {title}
-      {#if sessionId}
-        <span class="text-xs text-gray-500 ml-2">会话 ID: {sessionId}</span>
+      {#if chatId}
+        <span class="text-xs text-gray-500 ml-2">聊天 ID: {chatId}</span>
       {/if}
     </h1>
     
@@ -54,6 +54,6 @@
 
 <!-- 聊天设置模态框 -->
 <ChatSettings 
-  open={$modals[CHAT_SETTINGS_MODAL] || false}
+  open={uiState.modals[CHAT_SETTINGS_MODAL] || false}
   onClose={handleCloseChatSettings}
 />

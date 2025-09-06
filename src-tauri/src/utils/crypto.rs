@@ -35,8 +35,6 @@ pub fn validate_api_key(api_key: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,13 +59,13 @@ mod tests {
     fn test_validate_api_key() {
         // Valid API key
         assert!(validate_api_key("sk-1234567890").is_ok());
-        
+
         // Empty API key
         assert!(validate_api_key("").is_err());
-        
+
         // Too short
         assert!(validate_api_key("short").is_err());
-        
+
         // Contains spaces
         assert!(validate_api_key("sk-123 456").is_err());
     }

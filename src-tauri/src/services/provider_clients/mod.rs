@@ -8,7 +8,7 @@ pub mod llm_client;
 pub mod model_list_provider;
 
 // 重新导出 llm_client 中的公共接口
-pub use llm_client::{LlmClient, StandardModel, create_client, create_llm_client};
+pub use llm_client::{create_client, create_llm_client, LlmClient, StandardModel};
 
 /// 适配器：将StandardModel转换为我们的Model结构
 pub fn adapt_model(standard_model: StandardModel, provider_id: String, now: i64) -> Model {

@@ -35,7 +35,7 @@ export interface UpdateArtifactRequest {
 // Artifact 使用请求
 export interface UseArtifactRequest {
   artifactId: UUID;
-  sessionName?: string;
+  chatName?: string;
 }
 
 // Artifact 列表过滤

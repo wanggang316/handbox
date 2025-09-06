@@ -3,29 +3,26 @@
  */
 
 import type { 
-  ChatSession, 
+  Chat, 
   Message, 
-  ChatConfig,
   ChatStreamEvent,
   UUID 
 } from '../types';
 import type { Model, ProviderWithModels, ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
+import * as messageApi from '../api/message';
 import * as providerApi from '../api/provider';
 
 // 聊天状态类
 class ChatState {
-  // 当前活跃会话
-  currentSession = $state<ChatSession | null>(null);
+  // 当前活跃聊天
+  currentChat = $state<Chat | null>(null);
   
-  // 会话列表
-  sessions = $state<ChatSession[]>([]);
+  // 聊天列表
+  chats = $state<Chat[]>([]);
   
-  // 当前会话的消息列表
+  // 当前聊天的消息列表
   messages = $state<Message[]>([]);
-  
-  // 聊天配置
-  chatConfig = $state<ChatConfig | null>(null);
   
   // 加载状态
   isLoading = $state(false);
@@ -45,12 +42,12 @@ class ChatState {
   isLoadingProviders = $state(false);
   providerError = $state<string | null>(null);
 
-  // 派生状态：是否有活跃会话
-  get hasActiveSession() {
-    return this.currentSession !== null;
+  // 派生状态：是否有活跃聊天
+  get hasActiveChat() {
+    return this.currentChat !== null;
   }
 
-  // 派生状态：当前会话消息数量
+  // 派生状态：当前聊天消息数量
   get messageCount() {
     return this.messages.length;
   }
@@ -81,8 +78,6 @@ class ChatState {
       
       const providersWithModels = await providerApi.getProvidersWithModels(forceRefresh);
       this.providers = providersWithModels;
-      
-      // 收藏模型列表通过派生状态自动更新
       
     } catch (error) {
       this.providerError = error instanceof Error ? error.message : '加载供应商列表失败';
@@ -119,26 +114,18 @@ class ChatState {
    */
   selectModel(model: Model): void {
     this.selectedModel = model;
-    
-    // 如果有活跃会话，更新会话配置
-    if (this.currentSession && this.chatConfig) {
-      this.updateConfig({
-        model: model.id,
-        provider: model.provider_id
-      });
-    }
   }
 
   /**
-   * 加载会话列表
+   * 加载聊天列表
    */
-  async loadSessions(): Promise<void> {
+  async loadChats(): Promise<void> {
     try {
       this.isLoading = true;
-      const sessionList = await chatApi.getChatSessions();
-      this.sessions = sessionList;
+      const chatList = await chatApi.getChats();
+      this.chats = chatList;
     } catch (error) {
-      this.chatError = error instanceof Error ? error.message : '加载会话列表失败';
+      this.chatError = error instanceof Error ? error.message : '加载聊天列表失败';
       throw error;
     } finally {
       this.isLoading = false;
@@ -146,32 +133,32 @@ class ChatState {
   }
 
   /**
-   * 创建新会话
+   * 创建新聊天
    */
-  async createSession(name?: string, config?: Partial<ChatConfig>): Promise<ChatSession> {
+  async createChat(name?: string): Promise<Chat> {
+    console.log('Creating new chat:', name);
+    console.log('Selected model:', this.selectedModel);
     try {
       this.isLoading = true;
       
-      // 如果有选中的模型，使用该模型配置
-      const sessionConfig = config || {};
-      if (this.selectedModel) {
-        sessionConfig.model = this.selectedModel.id;
-        sessionConfig.provider = this.selectedModel.provider_id;
-      }
+      // 简化创建，暂时不传配置
+      const chat = await chatApi.createChat(name ?? '未命名');
       
-      const session = await chatApi.createChatSession(name, sessionConfig);
+      // 更新聊天列表（归一化为数组后再拼接，避免展开不可迭代对象）
+      const currentChats = Array.isArray(this.chats) ? this.chats : [];
+      this.chats = [chat, ...currentChats];
       
-      // 更新会话列表
-      this.sessions = [session, ...this.sessions];
-      
-      // 设置为当前会话
-      this.currentSession = session;
+      // 设置为当前聊天
+      this.currentChat = chat;
       this.messages = [];
-      this.chatConfig = session.config;
       
-      return session;
+      console.log('Created chat:', chat);
+      console.log('Current chat:', this.currentChat);
+      console.log('chats:', this.chats);
+
+      return chat;
     } catch (error) {
-      this.chatError = error instanceof Error ? error.message : '创建会话失败';
+      this.chatError = error instanceof Error ? error.message : '创建聊天失败';
       throw error;
     } finally {
       this.isLoading = false;
@@ -179,33 +166,22 @@ class ChatState {
   }
 
   /**
-   * 切换到指定会话
+   * 切换到指定聊天
    */
-  async switchToSession(sessionId: UUID): Promise<void> {
+  async switchToChat(chatId: UUID): Promise<void> {
     try {
       this.isLoading = true;
       
-      const [session, sessionMessages] = await Promise.all([
-        chatApi.getChatSession(sessionId),
-        chatApi.getChatMessages(sessionId)
+      const [chat, chatMessages] = await Promise.all([
+        chatApi.getChat(chatId),
+        messageApi.getMessages(chatId)
       ]);
       
-      this.currentSession = session;
-      this.messages = sessionMessages;
-      this.chatConfig = session.config;
-      
-      // 根据会话配置设置选中的模型
-      if (session.config.model) {
-        const model = this.allModels.find(m => 
-          m.id === session.config.model && m.provider_id === session.config.provider
-        );
-        if (model) {
-          this.selectedModel = model;
-        }
-      }
+      this.currentChat = chat;
+      this.messages = chatMessages;
       
     } catch (error) {
-      this.chatError = error instanceof Error ? error.message : '切换会话失败';
+      this.chatError = error instanceof Error ? error.message : '切换聊天失败';
       throw error;
     } finally {
       this.isLoading = false;
@@ -215,11 +191,22 @@ class ChatState {
   /**
    * 发送消息
    */
-  async sendMessage(content: string, attachments?: File[]): Promise<void> {
-    const session = this.currentSession;
-    if (!session) {
-      throw new Error('没有活跃的会话');
+  async sendMessage(content: string): Promise<void> {
+    const chat = this.currentChat;
+    if (!chat) {
+      throw new Error('没有活跃的聊天');
     }
+
+    if (!this.selectedModel) {
+      throw new Error('请先选择模型。如果供应商列表为空，请先配置AI供应商。');
+    }
+
+    console.log('Sending message to backend:', {
+      chatId: chat.id,
+      modelId: this.selectedModel!.id,
+      providerId: this.selectedModel!.provider_id,
+      messages: [{ role: 'user', content }]
+    });
 
     try {
       this.isLoading = true;
@@ -230,54 +217,38 @@ class ChatState {
       // 添加用户消息到本地状态
       const userMessage: Message = {
         id: crypto.randomUUID(),
-        sessionId: session.id,
+        chatId: chat.id,
         role: 'user',
         content,
+        modelId: this.selectedModel!.id,
+        providerId: this.selectedModel!.provider_id,
+        stream: true,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
       
-      this.messages = [...this.messages, userMessage];
+      // 归一化为数组后追加，避免展开不可迭代对象
+      const currentMessages = Array.isArray(this.messages) ? this.messages : [];
+      this.messages = [...currentMessages, userMessage];
 
-      // 监听流式响应
-      const unlisten = await chatApi.listenChatStream(session.id, (event: ChatStreamEvent) => {
-        switch (event.type) {
-          case 'delta':
-            this.streamingContent += event.data.content;
-            break;
-            
-          case 'done':
-            // 添加完整的助手消息
-            const assistantMessage: Message = {
-              id: event.data.messageId,
-              sessionId: event.data.sessionId,
-              role: 'assistant',
-              content: event.data.content,
-              metadata: event.data.metadata,
-              createdAt: Date.now(),
-              updatedAt: Date.now()
-            };
-            
-            this.messages = [...this.messages, assistantMessage];
-            this.streamingContent = '';
-            this.isStreaming = false;
-            unlisten();
-            break;
-            
-          case 'error':
-            this.chatError = event.data.error;
-            this.isStreaming = false;
-            unlisten();
-            break;
-        }
-      });
-
-      // 发送消息到后端
-      await chatApi.sendChatMessage({
-        sessionId: session.id,
-        messages: [{ role: 'user', content }],
-        attachments
-      });
+      // 发送消息到后端 - 简化请求
+      if (this.selectedModel) {
+        console.log('Sending message to backend:', {
+          chatId: chat.id,
+          modelId: this.selectedModel!.id,
+          providerId: this.selectedModel!.provider_id,
+          messages: [{ role: 'user', content }]
+        });
+        await messageApi.sendMessage({
+          chatId: chat.id,
+          modelId: this.selectedModel!.id,
+          providerId: this.selectedModel!.provider_id,
+          messages: [{ role: 'user', content }],
+          attachments: []
+        });
+      } else {
+        throw new Error('请先选择模型');
+      }
       
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '发送消息失败';
@@ -288,32 +259,13 @@ class ChatState {
     }
   }
 
-  /**
-   * 更新聊天配置
-   */
-  async updateConfig(newConfig: Partial<ChatConfig>): Promise<void> {
-    const session = this.currentSession;
-    if (!session) return;
-
-    try {
-      const updatedSession = await chatApi.updateChatSession(session.id, {
-        config: { ...session.config, ...newConfig }
-      });
-      
-      this.currentSession = updatedSession;
-      this.chatConfig = updatedSession.config;
-    } catch (error) {
-      this.chatError = error instanceof Error ? error.message : '更新配置失败';
-      throw error;
-    }
-  }
 
   /**
    * 删除消息
    */
   async deleteMessage(messageId: UUID): Promise<void> {
     try {
-      await chatApi.deleteMessage(messageId);
+      await messageApi.deleteMessage(messageId);
       this.messages = this.messages.filter(msg => msg.id !== messageId);
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '删除消息失败';
@@ -327,7 +279,7 @@ class ChatState {
   async regenerateMessage(messageId: UUID): Promise<void> {
     try {
       this.isStreaming = true;
-      await chatApi.regenerateMessage(messageId);
+      await messageApi.regenerateMessage(messageId);
       // 流式响应会通过事件处理
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '重新生成失败';
@@ -351,7 +303,7 @@ class ChatState {
     try {
       await Promise.all([
         this.loadProviders(),
-        this.loadSessions()
+        this.loadChats()
       ]);
     } catch (error) {
       console.error('Failed to initialize chat state:', error);
@@ -362,10 +314,9 @@ class ChatState {
    * 重置所有状态
    */
   reset(): void {
-    this.currentSession = null;
-    this.sessions = [];
+    this.currentChat = null;
+    this.chats = [];
     this.messages = [];
-    this.chatConfig = null;
     this.isLoading = false;
     this.isStreaming = false;
     this.streamingContent = '';

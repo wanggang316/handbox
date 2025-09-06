@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentPage } from "$lib/stores/ui";
+  import { uiState } from "$lib/states/ui.svelte";
   import { get } from "svelte/store";
   import { browser } from "$app/environment";
   import { page } from "$app/stores";
@@ -63,7 +63,7 @@
   }));
 
   function go(page: "chat" | "artifact") {
-    currentPage.set(page);
+    uiState.setCurrentPage(page);
   }
 
   function handleSessionClick(session: any) {
@@ -116,7 +116,7 @@
   //   isLoggedIn: false
   // };
 
-  $: active = $currentPage as "chat" | "artifact";
+  $: active = uiState.currentPage as "chat" | "artifact";
 </script>
 
 <div class="h-full flex flex-col bg-bg-secondary p-0 pt-15 rounded-2xl overflow-hidden">

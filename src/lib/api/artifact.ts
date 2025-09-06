@@ -76,14 +76,14 @@ export async function getArtifactStats(): Promise<ArtifactStats> {
 /**
  * 从会话保存为 Artifact
  */
-export async function saveSessionAsArtifact(
-  sessionId: UUID,
+export async function saveChatAsArtifact(
+  chatId: UUID,
   name: string,
   description?: string,
   tags?: string[]
 ): Promise<Artifact> {
-  return apiCall<Artifact>('artifact_save_from_session', {
-    sessionId,
+  return apiCall<Artifact>('artifact_save_from_chat', {
+    chatId,
     name,
     description,
     tags

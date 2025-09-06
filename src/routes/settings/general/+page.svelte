@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { TableGroup, SwitchRow, DropDownRow } from '$lib/components/ui/table';
-  import { appSettings, settingsActions } from '$lib/stores/settings';
+  import { settingsState } from '$lib/stores';
   import type { Theme, ThemeColor, Language } from '$lib/types/settings';
 
   // 外观样式选项
@@ -39,12 +39,12 @@
   // 加载设置
   onMount(async () => {
     try {
-      await settingsActions.loadSettings();
-      if ($appSettings?.general) {
-        theme = $appSettings.general.theme;
-        language = $appSettings.general.language;
-        themeColor = $appSettings.general.themeColor;
-        autoScroll = $appSettings.general.autoScroll;
+      await settingsState.loadSettings();
+      if (settingsState.settings?.general) {
+        theme = settingsState.settings.general.theme;
+        language = settingsState.settings.general.language;
+        themeColor = settingsState.settings.general.themeColor;
+        autoScroll = settingsState.settings.general.autoScroll;
       }
     } catch (error) {
       console.error('加载通用设置失败:', error);
@@ -54,7 +54,7 @@
   // 更新设置的通用函数
   async function updateGeneralSetting(key: string, value: any) {
     try {
-      await settingsActions.updateSettings({
+      await settingsState.updateSettings({
         section: 'general',
         data: { [key]: value }
       });

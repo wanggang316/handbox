@@ -1,11 +1,11 @@
 // 供应商服务实现
 
 use crate::models::{
-    AppError, Model, Provider, ProviderConfig,
-    ProviderWithModels, Timestamp, UUID,
+    AppError, Model, Provider, ProviderConfig, ProviderWithModels, Timestamp, UUID,
 };
+use crate::services::provider_clients::{adapt_model, create_llm_client};
 use crate::services::{DatabaseService, ProviderRepository};
-use crate::services::provider_clients::{create_llm_client, adapt_model};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ pub struct ProviderService {
 
 impl ProviderService {
     /// 创建新的供应商服务实例
-    pub fn new(db: DatabaseService) -> Self {
+    pub fn new(db: Arc<DatabaseService>) -> Self {
         Self {
             repository: ProviderRepository::new(db),
         }
@@ -34,7 +34,11 @@ impl ProviderService {
     }
 
     /// 创建供应商（可选择是否验证 API Key）
-    pub async fn create_provider_with_validation(&self, config: ProviderConfig, validate_api_key: bool) -> Result<Provider, AppError> {
+    pub async fn create_provider_with_validation(
+        &self,
+        config: ProviderConfig,
+        validate_api_key: bool,
+    ) -> Result<Provider, AppError> {
         let provider = Provider {
             id: Uuid::new_v4().to_string(),
             name: config.name,
@@ -48,38 +52,54 @@ impl ProviderService {
 
         // 根据参数决定是否验证 API Key
         if validate_api_key {
-            tracing::info!("Validating API key by fetching models for new provider: {}", provider.name);
+            tracing::info!(
+                "Validating API key by fetching models for new provider: {}",
+                provider.name
+            );
             // 对于新供应商，直接获取模型用于验证，先不保存到数据库
             let client = create_llm_client(&provider.provider_type)?;
             match client.list_models(&provider).await {
                 Ok(standard_models) => {
-                    tracing::info!("API key validation successful, fetched {} models", standard_models.len());
+                    tracing::info!(
+                        "API key validation successful, fetched {} models",
+                        standard_models.len()
+                    );
                     // API Key 验证成功，创建供应商
                     self.repository.create_provider(&provider).await?;
-                    
+
                     // 然后保存模型（新供应商直接创建，不需要同步状态）
                     if !standard_models.is_empty() {
                         let now = self.current_timestamp();
                         let models: Vec<Model> = standard_models
                             .into_iter()
-                            .map(|standard_model| adapt_model(standard_model, provider.id.clone(), now))
+                            .map(|standard_model| {
+                                adapt_model(standard_model, provider.id.clone(), now)
+                            })
                             .collect();
                         self.repository.create_models(&models).await?;
                     }
-                    
-                    tracing::info!("Successfully created provider and models: {}", provider.name);
+
+                    tracing::info!(
+                        "Successfully created provider and models: {}",
+                        provider.name
+                    );
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to validate API key for provider {}: {}", provider.name, e);
+                    tracing::warn!(
+                        "Failed to validate API key for provider {}: {}",
+                        provider.name,
+                        e
+                    );
                     // 检查是否是配置相关错误（API Key、端点等）
-                    if e.code == "INTERNAL_ERROR" && 
-                       (e.message.contains("Incorrect API key") || 
-                        e.message.contains("invalid_api_key") ||
-                        e.message.contains("API key not valid") ||
-                        e.message.contains("400 Bad Request") ||
-                        e.message.contains("401 Unauthorized") ||
-                        e.message.contains("404 Not Found") ||
-                        e.message.contains("403 Forbidden")) {
+                    if e.code == "INTERNAL_ERROR"
+                        && (e.message.contains("Incorrect API key")
+                            || e.message.contains("invalid_api_key")
+                            || e.message.contains("API key not valid")
+                            || e.message.contains("400 Bad Request")
+                            || e.message.contains("401 Unauthorized")
+                            || e.message.contains("404 Not Found")
+                            || e.message.contains("403 Forbidden"))
+                    {
                         // 对于配置错误，直接返回错误，不创建供应商
                         let error = if e.message.contains("404 Not Found") {
                             AppError::provider_api_endpoint_invalid()
@@ -88,7 +108,7 @@ impl ProviderService {
                         } else {
                             AppError::provider_api_key_invalid()
                         };
-                        
+
                         return Err(error);
                     }
                     // 对于其他错误（如网络问题），仍然创建供应商但给出警告
@@ -111,7 +131,8 @@ impl ProviderService {
         provider_id: &UUID,
         config: ProviderConfig,
     ) -> Result<Provider, AppError> {
-        self.update_provider_with_validation(provider_id, config, true).await
+        self.update_provider_with_validation(provider_id, config, true)
+            .await
     }
 
     /// 更新供应商（可选择是否验证 API Key）
@@ -122,11 +143,11 @@ impl ProviderService {
         validate_api_key: bool,
     ) -> Result<Provider, AppError> {
         let existing_provider = self.get_provider(provider_id).await?;
-        
+
         // 检查是否有关键配置变更
-        let should_refresh_models = config.api_key != existing_provider.api_key ||
-            config.base_url != existing_provider.base_url ||
-            config.provider_type != existing_provider.provider_type;
+        let should_refresh_models = config.api_key != existing_provider.api_key
+            || config.base_url != existing_provider.base_url
+            || config.provider_type != existing_provider.provider_type;
 
         let updated_provider = Provider {
             id: existing_provider.id,
@@ -141,37 +162,55 @@ impl ProviderService {
 
         // 如果关键配置有变更且需要验证，先验证 API Key
         if should_refresh_models && validate_api_key {
-            tracing::info!("Key configuration changed, validating API key for provider: {}", updated_provider.name);
+            tracing::info!(
+                "Key configuration changed, validating API key for provider: {}",
+                updated_provider.name
+            );
             let client = create_llm_client(&updated_provider.provider_type)?;
             match client.list_models(&updated_provider).await {
                 Ok(standard_models) => {
-                    tracing::info!("API key validation successful, fetched {} models", standard_models.len());
+                    tracing::info!(
+                        "API key validation successful, fetched {} models",
+                        standard_models.len()
+                    );
                     // API Key 验证成功，更新供应商
                     self.repository.update_provider(&updated_provider).await?;
-                    
+
                     // 同步模型，保留用户状态
                     if !standard_models.is_empty() {
                         let now = self.current_timestamp();
                         let models: Vec<Model> = standard_models
                             .into_iter()
-                            .map(|standard_model| adapt_model(standard_model, updated_provider.id.clone(), now))
+                            .map(|standard_model| {
+                                adapt_model(standard_model, updated_provider.id.clone(), now)
+                            })
                             .collect();
-                        self.repository.sync_provider_models(&updated_provider.id, &models).await?;
+                        self.repository
+                            .sync_provider_models(&updated_provider.id, &models)
+                            .await?;
                     }
-                    
-                    tracing::info!("Successfully updated provider and synced models: {}", updated_provider.name);
+
+                    tracing::info!(
+                        "Successfully updated provider and synced models: {}",
+                        updated_provider.name
+                    );
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to validate API key for provider {}: {}", updated_provider.name, e);
+                    tracing::warn!(
+                        "Failed to validate API key for provider {}: {}",
+                        updated_provider.name,
+                        e
+                    );
                     // 检查是否是配置相关错误（API Key、端点等）
-                    if e.code == "INTERNAL_ERROR" && 
-                       (e.message.contains("Incorrect API key") || 
-                        e.message.contains("invalid_api_key") ||
-                        e.message.contains("API key not valid") ||
-                        e.message.contains("400 Bad Request") ||
-                        e.message.contains("401 Unauthorized") ||
-                        e.message.contains("404 Not Found") ||
-                        e.message.contains("403 Forbidden")) {
+                    if e.code == "INTERNAL_ERROR"
+                        && (e.message.contains("Incorrect API key")
+                            || e.message.contains("invalid_api_key")
+                            || e.message.contains("API key not valid")
+                            || e.message.contains("400 Bad Request")
+                            || e.message.contains("401 Unauthorized")
+                            || e.message.contains("404 Not Found")
+                            || e.message.contains("403 Forbidden"))
+                    {
                         // 对于配置错误，直接返回错误，不更新供应商
                         let error = if e.message.contains("404 Not Found") {
                             AppError::provider_api_endpoint_invalid()
@@ -180,7 +219,7 @@ impl ProviderService {
                         } else {
                             AppError::provider_api_key_invalid()
                         };
-                        
+
                         return Err(error);
                     }
                     // 对于其他错误（如网络问题），仍然更新供应商但给出警告
@@ -201,7 +240,9 @@ impl ProviderService {
 
     /// 获取单个供应商
     pub async fn get_provider(&self, provider_id: &UUID) -> Result<Provider, AppError> {
-        self.repository.get_provider_by_id(provider_id).await?
+        self.repository
+            .get_provider_by_id(provider_id)
+            .await?
             .ok_or_else(|| AppError::validation_error("Provider not found"))
     }
 
@@ -217,7 +258,7 @@ impl ProviderService {
     ) -> Result<ProviderWithModels, AppError> {
         let provider = self.get_provider(provider_id).await?;
         let models = self.repository.get_models_by_provider(provider_id).await?;
-        
+
         Ok(ProviderWithModels {
             id: provider.id,
             name: provider.name,
@@ -241,14 +282,14 @@ impl ProviderService {
         // 获取所有启用供应商的模型
         let providers = self.list_providers().await?;
         let mut all_models = Vec::new();
-        
+
         for provider in providers {
             if provider.enabled {
                 let models = self.repository.get_models_by_provider(&provider.id).await?;
                 all_models.extend(models.into_iter().filter(|m| m.enabled));
             }
         }
-        
+
         Ok(all_models)
     }
 
@@ -259,19 +300,24 @@ impl ProviderService {
         force_refresh: bool,
     ) -> Result<Vec<Model>, AppError> {
         let provider = self.get_provider(provider_id).await?;
-        
+
+        tracing::info!(
+            "Getting provider models for provider: {}, force_refresh: {}",
+            provider.name,
+            force_refresh
+        );
         // 如果不强制刷新，先尝试从数据库获取
         if !force_refresh {
             let cached_models = self.repository.get_models_by_provider(provider_id).await?;
-            if !cached_models.is_empty() {
-                return Ok(cached_models);
-            }
+            // if !cached_models.is_empty() {
+            return Ok(cached_models);
+            // }
         }
 
         // 使用新的客户端架构获取模型列表
         let client = create_llm_client(&provider.provider_type)?;
         let standard_models = client.list_models(&provider).await?;
-        
+
         // 适配为我们的Model结构
         let now = self.current_timestamp();
         let models: Vec<Model> = standard_models
@@ -280,7 +326,9 @@ impl ProviderService {
             .collect();
 
         // 同步到数据库（保留用户设置的状态）
-        self.repository.sync_provider_models(&provider.id, &models).await?;
+        self.repository
+            .sync_provider_models(&provider.id, &models)
+            .await?;
 
         // 返回数据库中的模型（包含用户设置的状态）
         let synced_models = self.repository.get_models_by_provider(&provider.id).await?;
@@ -295,14 +343,14 @@ impl ProviderService {
     ) -> Result<Provider, AppError> {
         // 先获取供应商
         let mut provider = self.get_provider(provider_id).await?;
-        
+
         // 更新启用状态
         provider.enabled = enabled;
         provider.updated_at = self.current_timestamp();
-        
+
         // 保存到数据库
         self.repository.update_provider(&provider).await?;
-        
+
         Ok(provider)
     }
 
@@ -313,7 +361,9 @@ impl ProviderService {
         model_id: &str,
         enabled: bool,
     ) -> Result<(), AppError> {
-        self.repository.toggle_model(provider_id, model_id, enabled).await
+        self.repository
+            .toggle_model(provider_id, model_id, enabled)
+            .await
     }
 
     /// 切换模型收藏状态
@@ -323,7 +373,9 @@ impl ProviderService {
         model_id: &str,
         favorite: bool,
     ) -> Result<(), AppError> {
-        self.repository.toggle_favorite_model(provider_id, model_id, favorite).await
+        self.repository
+            .toggle_favorite_model(provider_id, model_id, favorite)
+            .await
     }
 
     // === 私有辅助方法 ===
@@ -335,5 +387,4 @@ impl ProviderService {
             .unwrap()
             .as_millis() as i64
     }
-
 }

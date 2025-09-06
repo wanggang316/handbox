@@ -4,10 +4,10 @@
   import ChatInputView from '$lib/components/chat/ChatInputView.svelte';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import { sidebarOpen } from '$lib/stores/ui';
+  import { uiState } from '$lib/states/ui.svelte';
   import { chatState } from '$lib/states/chat.svelte';
 
-  let sessionId = $state('');
+  let chatId = $state('');
   let messageInput = $state('');
 
   // 会话数据映射
@@ -42,21 +42,21 @@
     }
   };
 
-  // 从 URL 参数获取会话 ID
+  // 从 URL 参数获取聊天 ID
   onMount(async () => {
     const urlParams = $page.url.searchParams;
-    sessionId = urlParams.get('id') || '';
-    console.log('Current session ID:', sessionId);
+    chatId = urlParams.get('id') || '';
+    console.log('Current chat ID:', chatId);
     
     // 初始化聊天状态
     await chatState.initialize();
     
-    // 如果有 sessionId，切换到对应会话
-    if (sessionId) {
+    // 如果有 chatId，切换到对应聊天
+    if (chatId) {
       try {
-        await chatState.switchToSession(sessionId);
+        await chatState.switchToChat(chatId);
       } catch (error) {
-        console.error('Failed to switch to session:', error);
+        console.error('Failed to switch to chat:', error);
       }
     }
   });
@@ -64,12 +64,12 @@
   // 监听 URL 变化
   $effect(() => {
     const urlParams = $page.url.searchParams;
-    sessionId = urlParams.get('id') || '';
-    console.log('Session ID changed to:', sessionId);
+    chatId = urlParams.get('id') || '';
+    console.log('Chat ID changed to:', chatId);
   });
 
-  // 根据 sessionId 获取当前会话数据
-  const currentSession = $derived(sessionId ? sessionsData[sessionId] || null : null);
+  // 根据 chatId 获取当前聊天数据
+  const currentSession = $derived(chatId ? sessionsData[chatId] || null : null);
   
   // 默认消息（当没有选择会话时显示）
   const defaultMessage = {
@@ -94,11 +94,14 @@
 
   // 处理消息发送
   async function handleSendMessage(message: string) {
+    console.log('handleSendMessage:', message);
     try {
-      if (!chatState.currentSession) {
-        // 如果没有当前会话，创建新会话
-        await chatState.createSession();
+      if (!chatState.currentChat) {
+        console.log('No current chat, creating new chat');
+        // 如果没有当前聊天，创建新聊天
+        await chatState.createChat();
       }
+      console.log('currentChat:', chatState.currentChat);
       await chatState.sendMessage(message);
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -109,13 +112,13 @@
 <!-- 聊天页面（将被 (app) 分组布局包裹） -->
 <div class="flex-1 flex flex-col">
   <ChatHeaderView 
-    {sessionId} 
+    chatId={chatId} 
     title={currentSession ? currentSession.title : 'HandBox - AI 助手'}
-    sidebarOpen={$sidebarOpen}
+    sidebarOpen={uiState.sidebarOpen}
   />
   
   <ChatContentView 
-    message={currentMessage} 
+    
   />
   
   <div class="px-4 pb-4">

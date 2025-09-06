@@ -1,6 +1,9 @@
 <script lang="ts">
   import SearchPage from '$lib/components/search/SearchPage.svelte';
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
+  import { searchState } from '$lib/stores';
+  import { chatState } from '$lib/stores';
 
 let searchQuery = $state('');
 let selectedFilter = $state('all');
@@ -20,7 +23,7 @@ async function performSearch() {
     const types = selectedFilter === 'all'
       ? undefined
       : [selectedFilter === 'messages' ? 'message' : selectedFilter.slice(0, -1) as any];
-    await searchActions.search({ query: searchQuery, types });
+    await searchState.search({ query: searchQuery, types });
   } catch (error) {
     console.error('Search failed:', error);
   }
@@ -31,7 +34,7 @@ function handleSearchInput() {
   if (searchQuery.trim()) {
     performSearch();
   } else {
-    searchActions.clearResults();
+    searchState.clearResults();
   }
 }
 
@@ -42,10 +45,10 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-// 跳转到会话
-function goToSession(sessionId: string) {
-  chatActions.switchToSession(sessionId);
-  goto(`/chat?id=${sessionId}`);
+// 跳转到聊天
+function goToChat(chatId: string) {
+  chatState.switchToChat(chatId);
+  goto(`/chat?id=${chatId}`);
 }
 
 // 获取搜索结果图标

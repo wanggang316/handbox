@@ -21,7 +21,7 @@ impl DatabaseService {
         }
 
         let db_url = format!("sqlite://{}", db_path.display());
-        
+
         // 如果数据库文件不存在，创建它
         if !Sqlite::database_exists(&db_url).await.unwrap_or(false) {
             match Sqlite::create_database(&db_url).await {
@@ -37,46 +37,40 @@ impl DatabaseService {
 
         // 创建连接池 - 使用单连接避免锁定问题
         let pool = SqlitePoolOptions::new()
-            .max_connections(1)  // 使用单连接避免锁定
+            .max_connections(1) // 使用单连接避免锁定
             .min_connections(1)
             .connect(&db_url)
             .await
             .map_err(|e| {
                 AppError::internal_error(&format!("Failed to connect to database: {}", e))
             })?;
-            
+
         // 配置 SQLite 特定设置
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to set journal mode: {}", e))
-            })?;
-            
+            .map_err(|e| AppError::internal_error(&format!("Failed to set journal mode: {}", e)))?;
+
         sqlx::query("PRAGMA synchronous = NORMAL")
             .execute(&pool)
             .await
             .map_err(|e| {
                 AppError::internal_error(&format!("Failed to set synchronous mode: {}", e))
             })?;
-            
+
         sqlx::query("PRAGMA busy_timeout = 30000")
             .execute(&pool)
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to set busy timeout: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to set busy timeout: {}", e)))?;
 
         // 运行迁移
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to run migrations: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to run migrations: {}", e)))?;
 
         tracing::info!("Database service initialized successfully");
-        
+
         Ok(Self { pool })
     }
 
@@ -93,7 +87,7 @@ impl DatabaseService {
             .map_err(|e| {
                 AppError::internal_error(&format!("Database health check failed: {}", e))
             })?;
-        
+
         Ok(())
     }
 
@@ -109,9 +103,7 @@ impl DatabaseService {
         let model_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM models")
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to get model count: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to get model count: {}", e)))?;
 
         Ok(DatabaseStats {
             provider_count: provider_count as i32,
@@ -136,10 +128,10 @@ mod tests {
     async fn test_database_service_creation() {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        
+
         let db_service = DatabaseService::new(&db_path).await;
         assert!(db_service.is_ok());
-        
+
         let service = db_service.unwrap();
         assert!(service.health_check().await.is_ok());
     }
@@ -148,10 +140,10 @@ mod tests {
     async fn test_database_stats() {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test_stats.db");
-        
+
         let service = DatabaseService::new(&db_path).await.unwrap();
         let stats = service.get_stats().await.unwrap();
-        
+
         // After migration, we have 0 providers (no predefined data)
         assert_eq!(stats.provider_count, 0);
         assert_eq!(stats.model_count, 0);

@@ -3,15 +3,16 @@
 use crate::models::{AppError, Model, Provider, ProviderWithModels};
 use crate::services::DatabaseService;
 use sqlx::Row;
+use std::sync::Arc;
 
 /// Provider 仓储层
 #[derive(Clone)]
 pub struct ProviderRepository {
-    db: DatabaseService,
+    db: Arc<DatabaseService>,
 }
 
 impl ProviderRepository {
-    pub fn new(db: DatabaseService) -> Self {
+    pub fn new(db: Arc<DatabaseService>) -> Self {
         Self { db }
     }
 
@@ -47,7 +48,11 @@ impl ProviderRepository {
 
     /// 更新供应商
     pub async fn update_provider(&self, provider: &Provider) -> Result<(), AppError> {
-        tracing::debug!("Updating provider in database: ID={}, Name={}", provider.id, provider.name);
+        tracing::debug!(
+            "Updating provider in database: ID={}, Name={}",
+            provider.id,
+            provider.name
+        );
 
         let query = r#"
             UPDATE providers SET 
@@ -93,9 +98,7 @@ impl ProviderRepository {
             .bind(id)
             .fetch_optional(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to get provider: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to get provider: {}", e)))?;
 
         if let Some(row) = row {
             Ok(Some(self.row_to_provider(row)?))
@@ -138,22 +141,24 @@ impl ProviderRepository {
         let rows = sqlx::query(query)
             .fetch_all(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to list providers: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to list providers: {}", e)))?;
 
         let mut providers = Vec::new();
         for row in rows {
             providers.push(self.row_to_provider(row)?);
         }
 
+        tracing::info!("Providers: {:?}", providers);
         Ok(providers)
     }
 
     /// 获取带模型的供应商
-    pub async fn get_provider_with_models(&self, id: &str) -> Result<Option<ProviderWithModels>, AppError> {
+    pub async fn get_provider_with_models(
+        &self,
+        id: &str,
+    ) -> Result<Option<ProviderWithModels>, AppError> {
         let provider = self.get_provider_by_id(id).await?;
-        
+
         match provider {
             Some(p) => {
                 let models = self.get_models_by_provider(id).await?;
@@ -173,17 +178,13 @@ impl ProviderRepository {
         }
     }
 
-
-
     /// 删除供应商
     pub async fn delete_provider(&self, id: &str) -> Result<(), AppError> {
         let result = sqlx::query("DELETE FROM providers WHERE id = $1")
             .bind(id)
             .execute(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to delete provider: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to delete provider: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::validation_error("Provider not found"));
@@ -191,10 +192,6 @@ impl ProviderRepository {
 
         Ok(())
     }
-
-
-
-
 
     /// 创建模型
     pub async fn create_model(&self, model: &Model) -> Result<(), AppError> {
@@ -220,57 +217,71 @@ impl ProviderRepository {
             .bind(model.updated_at)
             .execute(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create model: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to create model: {}", e)))?;
 
         Ok(())
     }
 
     /// 同步供应商的模型列表（保留用户设置的状态）
-    pub async fn sync_provider_models(&self, provider_id: &str, new_models: &[Model]) -> Result<(), AppError> {
+    pub async fn sync_provider_models(
+        &self,
+        provider_id: &str,
+        new_models: &[Model],
+    ) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {
             AppError::internal_error(&format!("Failed to start transaction: {}", e))
         })?;
 
         // 1. 获取现有模型的用户状态（enabled, favorite）
-        let existing_states = sqlx::query(
-            r#"SELECT id, enabled, favorite FROM models WHERE provider_id = $1"#
-        )
-        .bind(provider_id)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|e| AppError::internal_error(&format!("Failed to get existing model states: {}", e)))?;
+        let existing_states =
+            sqlx::query(r#"SELECT id, enabled, favorite FROM models WHERE provider_id = $1"#)
+                .bind(provider_id)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to get existing model states: {}", e))
+                })?;
 
         // 构建状态映射表（model_id -> (enabled, favorite)）
-        let mut state_map: std::collections::HashMap<String, (bool, bool)> = std::collections::HashMap::new();
+        let mut state_map: std::collections::HashMap<String, (bool, bool)> =
+            std::collections::HashMap::new();
         for row in existing_states {
             let id: String = row.get("id");
             let enabled: bool = row.get("enabled");
             let favorite: bool = row.get("favorite");
-            tracing::debug!("Found existing model state: id={}, enabled={}, favorite={}", id, enabled, favorite);
+            tracing::debug!(
+                "Found existing model state: id={}, enabled={}, favorite={}",
+                id,
+                enabled,
+                favorite
+            );
             state_map.insert(id, (enabled, favorite));
         }
         tracing::info!("Built state map for {} existing models", state_map.len());
 
         // 2. 删除该供应商的所有现有模型
-        sqlx::query(
-            r#"DELETE FROM models WHERE provider_id = $1"#
-        )
-        .bind(provider_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::internal_error(&format!("Failed to delete existing models: {}", e)))?;
+        sqlx::query(r#"DELETE FROM models WHERE provider_id = $1"#)
+            .bind(provider_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to delete existing models: {}", e))
+            })?;
 
         // 3. 插入新模型，保留用户状态
         tracing::info!("Inserting {} new models", new_models.len());
         for model in new_models {
             let features_json = model.features_to_json();
-            
+
             // 从状态映射中获取用户设置的状态，如果没有则使用默认值
             let (enabled, favorite) = match state_map.get(&model.id) {
                 Some((e, f)) => {
-                    tracing::debug!("Preserving state for model {}: enabled={}, favorite={}", model.id, e, f);
+                    tracing::debug!(
+                        "Preserving state for model {}: enabled={}, favorite={}",
+                        model.id,
+                        e,
+                        f
+                    );
                     (*e, *f)
                 }
                 None => {
@@ -299,7 +310,12 @@ impl ProviderRepository {
                 .bind(model.updated_at)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| AppError::internal_error(&format!("Failed to insert model {}: {}", model.name, e)))?;
+                .map_err(|e| {
+                    AppError::internal_error(&format!(
+                        "Failed to insert model {}: {}",
+                        model.name, e
+                    ))
+                })?;
         }
 
         tx.commit().await.map_err(|e| {
@@ -362,9 +378,7 @@ impl ProviderRepository {
             .bind(provider_id)
             .fetch_all(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to get models: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to get models: {}", e)))?;
 
         let mut models = Vec::new();
         for row in rows {
@@ -375,19 +389,24 @@ impl ProviderRepository {
     }
 
     /// 更新模型启用状态
-    pub async fn toggle_model(&self, provider_id: &str, model_id: &str, enabled: bool) -> Result<(), AppError> {
+    pub async fn toggle_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        enabled: bool,
+    ) -> Result<(), AppError> {
         let now = chrono::Utc::now().timestamp_millis();
-        
-        let result = sqlx::query("UPDATE models SET enabled = $1, updated_at = $2 WHERE provider_id = $3 AND id = $4")
-            .bind(enabled)
-            .bind(now)
-            .bind(provider_id)
-            .bind(model_id)
-            .execute(self.db.pool())
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to toggle model: {}", e))
-            })?;
+
+        let result = sqlx::query(
+            "UPDATE models SET enabled = $1, updated_at = $2 WHERE provider_id = $3 AND id = $4",
+        )
+        .bind(enabled)
+        .bind(now)
+        .bind(provider_id)
+        .bind(model_id)
+        .execute(self.db.pool())
+        .await
+        .map_err(|e| AppError::internal_error(&format!("Failed to toggle model: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::validation_error("Model not found"));
@@ -397,19 +416,26 @@ impl ProviderRepository {
     }
 
     /// 更新模型收藏状态
-    pub async fn toggle_favorite_model(&self, provider_id: &str, model_id: &str, favorite: bool) -> Result<(), AppError> {
+    pub async fn toggle_favorite_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        favorite: bool,
+    ) -> Result<(), AppError> {
         let now = chrono::Utc::now().timestamp_millis();
-        
-        let result = sqlx::query("UPDATE models SET favorite = $1, updated_at = $2 WHERE provider_id = $3 AND id = $4")
-            .bind(favorite)
-            .bind(now)
-            .bind(provider_id)
-            .bind(model_id)
-            .execute(self.db.pool())
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to toggle model favorite: {}", e))
-            })?;
+
+        let result = sqlx::query(
+            "UPDATE models SET favorite = $1, updated_at = $2 WHERE provider_id = $3 AND id = $4",
+        )
+        .bind(favorite)
+        .bind(now)
+        .bind(provider_id)
+        .bind(model_id)
+        .execute(self.db.pool())
+        .await
+        .map_err(|e| {
+            AppError::internal_error(&format!("Failed to toggle model favorite: {}", e))
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::validation_error("Model not found"));
@@ -424,9 +450,7 @@ impl ProviderRepository {
             .bind(provider_id)
             .execute(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to delete models: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to delete models: {}", e)))?;
 
         Ok(())
     }
@@ -448,8 +472,9 @@ impl ProviderRepository {
     // 辅助方法：将数据库行转换为 Model
     fn row_to_model(&self, row: sqlx::sqlite::SqliteRow) -> Result<Model, AppError> {
         let features_json: String = row.try_get("supported_features")?;
-        let supported_features = Model::features_from_json(&features_json)
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse model features: {}", e)))?;
+        let supported_features = Model::features_from_json(&features_json).map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse model features: {}", e))
+        })?;
 
         Ok(Model {
             id: row.try_get("id")?,
@@ -484,7 +509,7 @@ mod tests {
     async fn test_provider_crud() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = ProviderRepository::new(db);
-        
+
         let now = chrono::Utc::now().timestamp_millis();
         let provider = Provider {
             id: uuid::Uuid::new_v4().to_string(),
@@ -518,9 +543,9 @@ mod tests {
         let mut updated_provider = provider.clone();
         updated_provider.name = "Updated Provider".to_string();
         updated_provider.updated_at = chrono::Utc::now().timestamp_millis();
-        
+
         repo.update_provider(&updated_provider).await.unwrap();
-        
+
         let fetched_updated = repo.get_provider_by_id(&provider.id).await.unwrap();
         assert_eq!(fetched_updated.unwrap().name, "Updated Provider");
 

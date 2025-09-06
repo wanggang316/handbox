@@ -2,7 +2,7 @@
 // 根据不同的 model_list_api_type 动态获取模型列表
 
 use super::llm_client::StandardModel;
-use crate::models::{AppError, Provider, ModelFeature};
+use crate::models::{AppError, ModelFeature, Provider};
 use crate::services::llm_config::{get_global_llm_config, ModelExtraInfo};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -10,7 +10,11 @@ use serde::Deserialize;
 /// 模型列表提供者 trait
 #[async_trait]
 pub trait ModelListProvider: Send + Sync {
-    async fn list_models(&self, provider: &Provider, provider_type: &str) -> Result<Vec<StandardModel>, AppError>;
+    async fn list_models(
+        &self,
+        provider: &Provider,
+        provider_type: &str,
+    ) -> Result<Vec<StandardModel>, AppError>;
 }
 
 /// OpenAI 风格的模型列表响应
@@ -80,18 +84,23 @@ impl OpenAIModelListProvider {
 
 #[async_trait]
 impl ModelListProvider for OpenAIModelListProvider {
-    async fn list_models(&self, provider: &Provider, _provider_type: &str) -> Result<Vec<StandardModel>, AppError> {
+    async fn list_models(
+        &self,
+        provider: &Provider,
+        _provider_type: &str,
+    ) -> Result<Vec<StandardModel>, AppError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching OpenAI-style models from: {}", url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", provider.api_key))
             .header("Content-Type", "application/json")
             .send()
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to fetch models: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -100,14 +109,14 @@ impl ModelListProvider for OpenAIModelListProvider {
                 status, error_text
             )));
         }
-        
+
         let models_response: OpenAIModelsResponse = response
             .json()
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to parse response: {}", e)))?;
-            
+
         let mut result_models = Vec::new();
-        
+
         for api_model in models_response.data {
             result_models.push(StandardModel {
                 id: api_model.id.clone(),
@@ -118,7 +127,7 @@ impl ModelListProvider for OpenAIModelListProvider {
                 supported_features: Some(vec![ModelFeature::Text]),
             });
         }
-        
+
         Ok(result_models)
     }
 }
@@ -135,19 +144,27 @@ impl OpenAIWithLocalProvider {
         }
     }
 
-    fn enhance_with_local_info(&self, mut models: Vec<StandardModel>, provider_type: &str) -> Vec<StandardModel> {
+    fn enhance_with_local_info(
+        &self,
+        mut models: Vec<StandardModel>,
+        provider_type: &str,
+    ) -> Vec<StandardModel> {
         let config = get_global_llm_config();
-        
+
         for model in &mut models {
             if let Some(extra_info) = config.get_model_extra_info(provider_type, &model.id) {
                 *model = self.convert_model_extra_info(&model.id, extra_info);
             }
         }
-        
+
         models
     }
 
-    fn convert_model_extra_info(&self, model_id: &str, extra_info: &ModelExtraInfo) -> StandardModel {
+    fn convert_model_extra_info(
+        &self,
+        model_id: &str,
+        extra_info: &ModelExtraInfo,
+    ) -> StandardModel {
         let config = get_global_llm_config();
         StandardModel {
             id: model_id.to_string(),
@@ -162,8 +179,15 @@ impl OpenAIWithLocalProvider {
 
 #[async_trait]
 impl ModelListProvider for OpenAIWithLocalProvider {
-    async fn list_models(&self, provider: &Provider, provider_type: &str) -> Result<Vec<StandardModel>, AppError> {
-        let models = self.openai_provider.list_models(provider, provider_type).await?;
+    async fn list_models(
+        &self,
+        provider: &Provider,
+        provider_type: &str,
+    ) -> Result<Vec<StandardModel>, AppError> {
+        let models = self
+            .openai_provider
+            .list_models(provider, provider_type)
+            .await?;
         Ok(self.enhance_with_local_info(models, provider_type))
     }
 }
@@ -183,18 +207,25 @@ impl GoogleModelListProvider {
 
 #[async_trait]
 impl ModelListProvider for GoogleModelListProvider {
-    async fn list_models(&self, provider: &Provider, _provider_type: &str) -> Result<Vec<StandardModel>, AppError> {
+    async fn list_models(
+        &self,
+        provider: &Provider,
+        _provider_type: &str,
+    ) -> Result<Vec<StandardModel>, AppError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("Content-Type", "application/json")
             .query(&[("key", &provider.api_key)])
             .send()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to fetch Google models: {}", e)))?;
-            
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to fetch Google models: {}", e))
+            })?;
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -203,20 +234,21 @@ impl ModelListProvider for GoogleModelListProvider {
                 status, error_text
             )));
         }
-        
-        let models_response: GoogleModelsResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse Google response: {}", e)))?;
-            
+
+        let models_response: GoogleModelsResponse = response.json().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse Google response: {}", e))
+        })?;
+
         let mut result_models = Vec::new();
-        
+
         for api_model in models_response.models {
             // 解析 Google 模型名称 (格式: models/gemini-pro)
-            let model_id = api_model.name.strip_prefix("models/")
+            let model_id = api_model
+                .name
+                .strip_prefix("models/")
                 .unwrap_or(&api_model.name)
                 .to_string();
-                
+
             result_models.push(StandardModel {
                 id: model_id.clone(),
                 name: api_model.display_name,
@@ -226,7 +258,7 @@ impl ModelListProvider for GoogleModelListProvider {
                 supported_features: Some(vec![ModelFeature::Text]),
             });
         }
-        
+
         Ok(result_models)
     }
 }
@@ -239,7 +271,11 @@ impl AnthropicModelListProvider {
         Self
     }
 
-    fn convert_model_extra_info(&self, model_id: &str, extra_info: &ModelExtraInfo) -> StandardModel {
+    fn convert_model_extra_info(
+        &self,
+        model_id: &str,
+        extra_info: &ModelExtraInfo,
+    ) -> StandardModel {
         let config = get_global_llm_config();
         StandardModel {
             id: model_id.to_string(),
@@ -254,11 +290,15 @@ impl AnthropicModelListProvider {
 
 #[async_trait]
 impl ModelListProvider for AnthropicModelListProvider {
-    async fn list_models(&self, _provider: &Provider, provider_type: &str) -> Result<Vec<StandardModel>, AppError> {
+    async fn list_models(
+        &self,
+        _provider: &Provider,
+        provider_type: &str,
+    ) -> Result<Vec<StandardModel>, AppError> {
         // Anthropic 不提供公开的模型列表 API，返回预定义的模型列表
         let config = get_global_llm_config();
         let provider_config = config.get_provider_config(provider_type);
-        
+
         if let Some(config) = provider_config {
             if let Some(local_models) = &config.model_local {
                 let mut result_models = Vec::new();
@@ -268,7 +308,7 @@ impl ModelListProvider for AnthropicModelListProvider {
                 return Ok(result_models);
             }
         }
-        
+
         Ok(vec![])
     }
 }
@@ -288,18 +328,25 @@ impl OpenRouterModelListProvider {
 
 #[async_trait]
 impl ModelListProvider for OpenRouterModelListProvider {
-    async fn list_models(&self, provider: &Provider, _provider_type: &str) -> Result<Vec<StandardModel>, AppError> {
+    async fn list_models(
+        &self,
+        provider: &Provider,
+        _provider_type: &str,
+    ) -> Result<Vec<StandardModel>, AppError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching OpenRouter models from: {}", url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", provider.api_key))
             .header("Content-Type", "application/json")
             .send()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to fetch OpenRouter models: {}", e)))?;
-            
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to fetch OpenRouter models: {}", e))
+            })?;
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -308,29 +355,35 @@ impl ModelListProvider for OpenRouterModelListProvider {
                 status, error_text
             )));
         }
-        
-        let models_response: OpenRouterModelsResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse OpenRouter response: {}", e)))?;
-            
+
+        let models_response: OpenRouterModelsResponse = response.json().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse OpenRouter response: {}", e))
+        })?;
+
         let mut result_models = Vec::new();
-        
+
         for api_model in models_response.data {
             result_models.push(StandardModel {
                 id: api_model.id.clone(),
-                name: api_model.name.clone().unwrap_or_else(|| api_model.id.clone()),
+                name: api_model
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| api_model.id.clone()),
                 context_length: api_model.context_length,
-                input_cost: api_model.pricing.as_ref()
+                input_cost: api_model
+                    .pricing
+                    .as_ref()
                     .and_then(|p| p.prompt.as_ref())
                     .and_then(|s| s.parse().ok()),
-                output_cost: api_model.pricing.as_ref()
+                output_cost: api_model
+                    .pricing
+                    .as_ref()
                     .and_then(|p| p.completion.as_ref())
                     .and_then(|s| s.parse().ok()),
                 supported_features: Some(vec![ModelFeature::Text]),
             });
         }
-        
+
         Ok(result_models)
     }
 }
@@ -343,6 +396,9 @@ pub fn create_model_list_provider(api_type: &str) -> Result<Box<dyn ModelListPro
         "google" => Ok(Box::new(GoogleModelListProvider::new())),
         "anthropic" => Ok(Box::new(AnthropicModelListProvider::new())),
         "openrouter" => Ok(Box::new(OpenRouterModelListProvider::new())),
-        _ => Err(AppError::validation_error(&format!("Unsupported model list API type: {}", api_type))),
+        _ => Err(AppError::validation_error(&format!(
+            "Unsupported model list API type: {}",
+            api_type
+        ))),
     }
 }

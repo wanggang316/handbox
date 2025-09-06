@@ -1,8 +1,9 @@
 // 供应商相关 IPC 命令
 
 use crate::models::{
-    AppError, ListModelsRequest, ListModelsResponse, Model, Provider,
-    ProviderConfig, ProviderWithModels, ToggleModelRequest, ToggleModelFavoriteRequest, ToggleProviderRequest, UUID,
+    AppError, ListModelsRequest, ListModelsResponse, Model, Provider, ProviderConfig,
+    ProviderWithModels, ToggleModelFavoriteRequest, ToggleModelRequest, ToggleProviderRequest,
+    UUID,
 };
 use crate::services::ProviderService;
 use tauri::State;
@@ -24,15 +25,15 @@ pub async fn provider_get(
     provider_service.get_provider(&provider_id).await
 }
 
-
-
 /// 获取带模型的供应商详情
 #[tauri::command]
 pub async fn provider_get_with_models(
     provider_id: UUID,
     provider_service: State<'_, ProviderService>,
 ) -> Result<ProviderWithModels, AppError> {
-    provider_service.get_provider_with_models(&provider_id).await
+    provider_service
+        .get_provider_with_models(&provider_id)
+        .await
 }
 
 /// 创建供应商
@@ -64,8 +65,6 @@ pub async fn provider_delete(
 ) -> Result<(), AppError> {
     provider_service.delete_provider(&provider_id).await
 }
-
-
 
 /// 获取供应商模型列表
 #[tauri::command]
@@ -213,9 +212,7 @@ pub async fn provider_get_favorite_models(
             .await
         {
             Ok(models) => {
-                favorite_models.extend(
-                    models.into_iter().filter(|m| m.favorite)
-                );
+                favorite_models.extend(models.into_iter().filter(|m| m.favorite));
             }
             Err(_) => continue, // 忽略获取失败的供应商
         }
