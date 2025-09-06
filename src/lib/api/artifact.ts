@@ -10,7 +10,7 @@ import type {
   UseArtifactRequest,
   ArtifactFilter,
   ArtifactStats,
-  ChatSession,
+  Chat,
   UUID 
 } from '../types';
 
@@ -50,10 +50,10 @@ export async function deleteArtifact(artifactId: UUID): Promise<void> {
 }
 
 /**
- * 使用 Artifact 创建新会话
+ * 使用 Artifact 创建新聊天
  */
-export async function useArtifact(request: UseArtifactRequest): Promise<ChatSession> {
-  return apiCall<ChatSession>('artifact_use', request);
+export async function useArtifact(request: UseArtifactRequest): Promise<Chat> {
+  return apiCall<Chat>('artifact_use', request);
 }
 
 /**

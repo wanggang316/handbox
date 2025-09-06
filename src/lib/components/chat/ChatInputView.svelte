@@ -5,23 +5,26 @@
   import Button from "../ui/Button.svelte";
   import ChatModelSelectModal from "./ChatModelSelectModal.svelte";
   import { chatState } from "$lib/states/chat.svelte";
+  import type { ModelWithProvider } from "$lib/types/provider";
 
   interface Props {
     messageInput?: string;
     onSendMessage?: (message: string) => void;
+    selectedModel?: ModelWithProvider | null;
   }
 
   let {
     messageInput = $bindable(""),
     onSendMessage = (message: string) =>
       console.log("Sending message:", message),
+    selectedModel = null,
   }: Props = $props();
 
   let textareaRef: HTMLTextAreaElement;
   let showModelModal = $state(false);
 
-  // 从状态管理中获取当前选中的模型
-  const selectedModel = $derived(chatState.selectedModel);
+  // 使用传入的模型
+  const currentModel = $derived(selectedModel);
 
   // 自动调整 textarea 高度
   function adjustTextareaHeight() {
@@ -88,7 +91,7 @@
         size="sm"
         on:click={() => showModelModal = true}
         >
-        {selectedModel ? selectedModel.name : "选择模型"}
+        {currentModel ? currentModel.name : "选择模型"}
         <ChevronsUpDown size={14} />
       </Button>
       <CircleButton icon={Send} ariaLabel="发送" on:click={sendMessage} />
@@ -99,4 +102,9 @@
 <!-- 模型选择模态框 -->
 <ChatModelSelectModal
   bind:open={showModelModal}
+  selectedModel={currentModel}
+  onModelSelect={(model) => {
+    // 通过 chatState 更新当前聊天的模型
+    chatState.updateCurrentChatModel(model.id, model.provider_id);
+  }}
 />

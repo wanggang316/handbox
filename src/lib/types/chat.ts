@@ -52,20 +52,11 @@ export interface Chat extends BaseEntity {
   systemPrompt?: string;
   mcpServers: string[];
   artifactId?: UUID;
-  config?: ChatConfig;
-}
-
-// 聊天会话（向后兼容的别名）
-export type ChatSession = Chat;
-
-// 聊天配置
-export interface ChatConfig {
+  // 直接在 Chat 上添加模型信息，简化访问
   modelId?: string;
   providerId?: string;
-  systemPrompt?: string;
-  parameters?: ModelParameters;
-  mcpServers?: string[];
 }
+
 
 // 模型参数
 export interface ModelParameters {

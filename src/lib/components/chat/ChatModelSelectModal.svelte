@@ -1,18 +1,22 @@
 <script lang="ts">
   import Modal from "$lib/components/ui/Modal.svelte";
   import { Search, Star, Check } from "@lucide/svelte";
-  import type { Model, ModelWithProvider } from "$lib/types/provider";
+  import type { ModelWithProvider } from "$lib/types/provider";
   import { chatState } from "$lib/states/chat.svelte";
   import { onMount } from "svelte";
 
   interface Props {
     open?: boolean;
     onClose?: () => void;
+    selectedModel?: ModelWithProvider | null;
+    onModelSelect?: (model: ModelWithProvider) => void;
   }
 
   let {
     open = $bindable(false),
-    onClose = () => {}
+    onClose = () => {},
+    selectedModel = null,
+    onModelSelect = () => {}
   }: Props = $props();
 
   let searchQuery = $state("");
@@ -21,7 +25,7 @@
   // 从状态管理中获取数据
   const allModels = $derived(chatState.allModels);
   const favoriteModels = $derived(chatState.favoriteModels);
-  const selectedModelId = $derived(chatState.selectedModel?.id || "");
+  const selectedModelId = $derived(selectedModel?.id || "");
 
   // 过滤后的模型
   const filteredModels = $derived(() => {
@@ -54,21 +58,7 @@
   });
 
   function handleModelSelect(model: ModelWithProvider) {
-    // 转换为基础 Model 类型
-    const baseModel: Model = {
-      id: model.id,
-      provider_id: model.provider_id,
-      name: model.name,
-      context_length: model.context_length,
-      input_cost: model.input_cost,
-      output_cost: model.output_cost,
-      supported_features: model.supported_features,
-      enabled: model.enabled,
-      favorite: model.favorite,
-      created_at: model.created_at,
-      updated_at: model.updated_at
-    };
-    chatState.selectModel(baseModel);
+    onModelSelect(model);
     handleClose();
   }
 

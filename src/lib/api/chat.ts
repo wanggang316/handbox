@@ -4,8 +4,7 @@
 
 import { apiCall } from './index';
 import type { 
-  ChatSession, 
-  ChatConfig,
+  Chat, 
   UUID 
 } from '../types';
 
@@ -15,15 +14,16 @@ import type {
  */
 export async function createChat(
   name: string,
-  config?: Partial<ChatConfig>
-): Promise<ChatSession> {
+  systemPrompt?: string,
+  mcpServers?: string[]
+): Promise<Chat> {
   const payload = {
     name,
-    system_prompt: config?.systemPrompt,
-    mcp_servers: config?.mcpServers,
+    system_prompt: systemPrompt,
+    mcp_servers: mcpServers,
   };
   console.log('Creating chat:', payload);
-  return apiCall<ChatSession>('chat_create', payload);
+  return apiCall<Chat>('chat_create', payload);
 }
 
 /**
@@ -32,15 +32,15 @@ export async function createChat(
 export async function getChats(
   limit?: number,
   offset?: number
-): Promise<ChatSession[]> {
-  return apiCall<ChatSession[]>('chat_list', { limit, offset });
+): Promise<Chat[]> {
+  return apiCall<Chat[]>('chat_list', { limit, offset });
 }
 
 /**
  * 获取聊天详情
  */
-export async function getChat(chatId: UUID): Promise<ChatSession> {
-  return apiCall<ChatSession>('chat_get', { chat_id: chatId });
+export async function getChat(chatId: UUID): Promise<Chat> {
+  return apiCall<Chat>('chat_get', { chatId: chatId });
 }
 
 /**
@@ -49,15 +49,15 @@ export async function getChat(chatId: UUID): Promise<ChatSession> {
  */
 export async function updateChat(
   chatId: UUID,
-  updates: Partial<Pick<ChatSession, 'name' | 'systemPrompt'>> & { mcpServers?: string[] }
-): Promise<ChatSession> {
+  updates: Partial<Pick<Chat, 'name' | 'systemPrompt'>> & { mcpServers?: string[] }
+): Promise<Chat> {
   const payload = {
     chat_id: chatId,
     name: updates.name,
     system_prompt: updates.systemPrompt,
     mcp_servers: updates.mcpServers,
   };
-  return apiCall<ChatSession>('chat_update', payload);
+  return apiCall<Chat>('chat_update', payload);
 }
 
 /**

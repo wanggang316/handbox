@@ -96,7 +96,7 @@ pub struct ChatConfig {
     pub default_parameters: Option<ModelParameters>, // 默认参数，可在消息级别覆盖
 }
 
-/// 聊天实体（重命名从 ChatSession 到 Chat）
+/// 聊天实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Chat {

@@ -37,28 +37,62 @@
   async function copyMessage(content: string) {
     try {
       await navigator.clipboard.writeText(content);
-      // TODO: 显示成功提示
+      console.log('Message copied successfully');
+      // TODO: 集成 toast 提示系统显示成功提示
     } catch (error) {
       console.error('Failed to copy message:', error);
-      // TODO: 显示错误提示
+      // Fallback: 使用传统方法复制
+      const textArea = document.createElement('textarea');
+      textArea.value = content;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        console.log('Message copied using fallback method');
+      } catch (fallbackError) {
+        console.error('Fallback copy also failed:', fallbackError);
+      }
+      document.body.removeChild(textArea);
     }
   }
 
+  // 操作状态
+  let operatingMessageId = $state<string | null>(null);
+
   // 重新生成消息
   async function regenerateMessage(messageId: string) {
+    if (operatingMessageId) return; // 防止重复操作
+    
     try {
+      operatingMessageId = messageId;
       await chatState.regenerateMessage(messageId);
+      console.log('Message regenerated successfully');
     } catch (error) {
       console.error('Failed to regenerate message:', error);
+      // TODO: 显示错误提示
+    } finally {
+      operatingMessageId = null;
     }
   }
 
   // 删除消息
   async function deleteMessage(messageId: string) {
+    if (operatingMessageId) return; // 防止重复操作
+    
+    // 确认删除
+    if (!confirm('确定要删除这条消息吗？')) {
+      return;
+    }
+
     try {
+      operatingMessageId = messageId;
       await chatState.deleteMessage(messageId);
+      console.log('Message deleted successfully');
     } catch (error) {
       console.error('Failed to delete message:', error);
+      // TODO: 显示错误提示
+    } finally {
+      operatingMessageId = null;
     }
   }
 
@@ -68,10 +102,11 @@
     console.log('Editing message:', messageId);
   }
 
-  // 获取当前聊天的消息 
-  $: messages = chatState.messages;
-  $: isLoading = chatState.isLoading;
-  $: streamingContent = chatState.streamingContent;
+  // 获取当前聊天的消息 - 使用 Svelte 5 派生状态
+  let messages = $derived(chatState.messages);
+  let isLoading = $derived(chatState.isLoading);
+  let isStreaming = $derived(chatState.isStreaming);
+  let streamingContent = $derived(chatState.streamingContent);
 </script>
 
 <div class="flex flex-col flex-1 overflow-hidden">
@@ -183,11 +218,16 @@
                     {#if message.role === 'assistant'}
                       <!-- 重新生成按钮 -->
                       <button
-                        class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                        class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         title="重新生成"
+                        disabled={operatingMessageId === message.id}
                         onclick={() => regenerateMessage(message.id)}
                       >
-                        <RotateCcw class="w-3.5 h-3.5" />
+                        {#if operatingMessageId === message.id}
+                          <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                        {:else}
+                          <RotateCcw class="w-3.5 h-3.5" />
+                        {/if}
                       </button>
                     {/if}
 
@@ -204,11 +244,16 @@
 
                     <!-- 删除按钮 -->
                     <button
-                      class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                      class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       title="删除消息"
+                      disabled={operatingMessageId === message.id}
                       onclick={() => deleteMessage(message.id)}
                     >
-                      <Trash2 class="w-3.5 h-3.5" />
+                      {#if operatingMessageId === message.id}
+                        <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                      {:else}
+                        <Trash2 class="w-3.5 h-3.5" />
+                      {/if}
                     </button>
                   </div>
                 </div>
@@ -218,7 +263,7 @@
         {/each}
 
         <!-- 流式响应中的消息 -->
-        {#if chatState.isStreaming && streamingContent}
+        {#if isStreaming && streamingContent}
           <div class="group relative">
             <div class="flex gap-4">
               <!-- 助手头像 -->

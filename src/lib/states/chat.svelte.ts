@@ -8,7 +8,7 @@ import type {
   ChatStreamEvent,
   UUID 
 } from '../types';
-import type { Model, ProviderWithModels, ModelWithProvider } from '../types/provider';
+import type { ProviderWithModels, ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
 import * as messageApi from '../api/message';
 import * as providerApi from '../api/provider';
@@ -38,7 +38,6 @@ class ChatState {
 
   // 模型和供应商相关状态
   providers = $state<ProviderWithModels[]>([]);
-  selectedModel = $state<Model | null>(null);
   isLoadingProviders = $state(false);
   providerError = $state<string | null>(null);
 
@@ -72,28 +71,22 @@ class ChatState {
     return this.allModels.filter(model => model.favorite);
   }
 
-  // 派生状态：当前聊天的模型信息（基于最后一条用户消息）
-  get currentChatModel(): { modelId?: string; providerId?: string; model?: ModelWithProvider } {
-    if (!this.currentChat || this.messages.length === 0) {
+  // 派生状态：当前聊天的模型信息（直接从 chat 获取）
+  get currentChatModel(): { model?: ModelWithProvider } {
+    if (!this.currentChat) {
       return {};
     }
 
-    // 找到最后一条用户消息
-    const lastUserMessage = this.messages
-      .filter(msg => msg.role === 'user')
-      .pop();
-
-    if (!lastUserMessage) {
+    const modelId = this.currentChat.modelId;
+    const providerId = this.currentChat.providerId;
+    
+    if (!modelId || !providerId) {
       return {};
     }
 
-    const modelId = lastUserMessage.modelId;
-    const providerId = lastUserMessage.providerId;
     const model = this.allModels.find(m => m.id === modelId && m.provider_id === providerId);
 
     return {
-      modelId,
-      providerId,
       model
     };
   }
@@ -140,20 +133,35 @@ class ChatState {
   }
 
   /**
-   * 选择模型
+   * 更新当前聊天的模型
    */
-  selectModel(model: Model): void {
-    this.selectedModel = model;
+  updateCurrentChatModel(modelId: string, providerId: string): void {
+    if (this.currentChat) {
+      this.currentChat.modelId = modelId;
+      this.currentChat.providerId = providerId;
+    }
   }
 
   /**
-   * 根据当前聊天的最后一条用户消息更新选中的模型
+   * 从最后一个用户消息中填充当前聊天的模型信息
    */
-  updateSelectedModelForCurrentChat(): void {
-    const chatModel = this.currentChatModel;
-    if (chatModel.model) {
-      this.selectedModel = chatModel.model;
+  fillCurrentChatModelFromLastUserMessage(): void {
+    if (!this.currentChat || this.messages.length === 0) {
+      return;
     }
+
+    // 获取最后一个用户消息
+    const lastUserMessage = this.messages
+      .filter(msg => msg.role === 'user')
+      .pop();
+
+    if (!lastUserMessage || !lastUserMessage.modelId || !lastUserMessage.providerId) {
+      return;
+    }
+
+    // 填充当前聊天的模型信息
+    this.currentChat.modelId = lastUserMessage.modelId;
+    this.currentChat.providerId = lastUserMessage.providerId;
   }
 
   /**
@@ -175,14 +183,19 @@ class ChatState {
   /**
    * 创建新聊天
    */
-  async createChat(name?: string): Promise<Chat> {
-    console.log('Creating new chat:', name);
-    console.log('Selected model:', this.selectedModel);
+  async createChat(name?: string, modelId?: string, providerId?: string): Promise<Chat> {
+    console.log('Creating new chat:', name, 'with model:', modelId, providerId);
     try {
       this.isLoading = true;
       
       // 简化创建，暂时不传配置
       const chat = await chatApi.createChat(name ?? '未命名');
+      
+      // 设置模型信息到聊天
+      if (modelId && providerId) {
+        chat.modelId = modelId;
+        chat.providerId = providerId;
+      }
       
       // 更新聊天列表（归一化为数组后再拼接，避免展开不可迭代对象）
       const currentChats = Array.isArray(this.chats) ? this.chats : [];
@@ -191,9 +204,6 @@ class ChatState {
       // 设置为当前聊天
       this.currentChat = chat;
       this.messages = [];
-      
-      // 对于新聊天，保持当前选中的模型
-      // updateSelectedModelForCurrentChat 在有消息时才会生效
       
       console.log('Created chat:', chat);
       console.log('Current chat:', this.currentChat);
@@ -222,10 +232,12 @@ class ChatState {
       
       this.currentChat = chat;
       this.messages = chatMessages;
-      
-      // 根据聊天的最后一条用户消息设置选中的模型
-      this.updateSelectedModelForCurrentChat();
-      
+
+      console.log('Current chat >>> :', this.currentChat);
+      console.log('Current chat messages >>> :', this.messages);
+
+      this.fillCurrentChatModelFromLastUserMessage();
+      console.log('Current chat:', this.currentChat.modelId ?? '');
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '切换聊天失败';
       throw error;
@@ -243,14 +255,14 @@ class ChatState {
       throw new Error('没有活跃的聊天');
     }
 
-    if (!this.selectedModel) {
-      throw new Error('请先选择模型。如果供应商列表为空，请先配置AI供应商。');
+    if (!chat.modelId || !chat.providerId) {
+      throw new Error('请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。');
     }
 
     console.log('Sending message to backend:', {
       chatId: chat.id,
-      modelId: this.selectedModel!.id,
-      providerId: this.selectedModel!.provider_id,
+      modelId: chat.modelId,
+      providerId: chat.providerId,
       messages: [{ role: 'user', content }]
     });
 
@@ -266,8 +278,8 @@ class ChatState {
         chatId: chat.id,
         role: 'user',
         content,
-        modelId: this.selectedModel!.id,
-        providerId: this.selectedModel!.provider_id,
+        modelId: chat.modelId,
+        providerId: chat.providerId,
         stream: true,
         createdAt: Date.now(),
         updatedAt: Date.now()
@@ -277,27 +289,20 @@ class ChatState {
       const currentMessages = Array.isArray(this.messages) ? this.messages : [];
       this.messages = [...currentMessages, userMessage];
 
-      // 更新当前聊天的选中模型（基于刚发送的用户消息）
-      this.updateSelectedModelForCurrentChat();
-
       // 发送消息到后端 - 简化请求
-      if (this.selectedModel) {
-        console.log('Sending message to backend:', {
-          chatId: chat.id,
-          modelId: this.selectedModel!.id,
-          providerId: this.selectedModel!.provider_id,
-          messages: [{ role: 'user', content }]
-        });
-        await messageApi.sendMessage({
-          chatId: chat.id,
-          modelId: this.selectedModel!.id,
-          providerId: this.selectedModel!.provider_id,
-          messages: [{ role: 'user', content }],
-          attachments: []
-        });
-      } else {
-        throw new Error('请先选择模型');
-      }
+      console.log('Sending message to backend:', {
+        chatId: chat.id,
+        modelId: chat.modelId,
+        providerId: chat.providerId,
+        messages: [{ role: 'user', content }]
+      });
+      await messageApi.sendMessage({
+        chatId: chat.id,
+        modelId: chat.modelId,
+        providerId: chat.providerId,
+        messages: [{ role: 'user', content }],
+        attachments: []
+      });
       
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '发送消息失败';
@@ -384,7 +389,6 @@ class ChatState {
     this.chatError = null;
     
     this.providers = [];
-    this.selectedModel = null;
     this.isLoadingProviders = false;
     this.providerError = null;
     

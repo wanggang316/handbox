@@ -45,11 +45,13 @@
     
   </div>
   <div class="flex items-center gap-2 relative z-[10001]">
-    <IconButton 
-      icon={Ellipsis} 
-      ariaLabel="设置" 
-      on:click={handleChatSettings} 
-    />
+    {#if chatId}
+      <IconButton 
+        icon={Ellipsis} 
+        ariaLabel="设置" 
+        on:click={handleChatSettings} 
+      />
+    {/if}
 </header>
 
 <!-- 聊天设置模态框 -->
