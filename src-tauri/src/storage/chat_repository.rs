@@ -1,0 +1,247 @@
+// Chat 数据访问层
+
+use crate::models::{AppError, Chat, UUID};
+use crate::services::DatabaseService;
+use sqlx::Row;
+use std::sync::Arc;
+
+/// Chat 仓储层
+#[derive(Clone)]
+pub struct ChatRepository {
+    db: Arc<DatabaseService>,
+}
+
+impl ChatRepository {
+    pub fn new(db: Arc<DatabaseService>) -> Self {
+        Self { db }
+    }
+
+    /// 创建聊天
+    pub async fn create_chat(&self, chat: &Chat) -> Result<(), AppError> {
+        let mcp_servers_json = serde_json::to_string(&chat.mcp_servers)
+            .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
+
+        let query = r#"
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        "#;
+
+        sqlx::query(query)
+            .bind(&chat.id)
+            .bind(&chat.name)
+            .bind(&chat.system_prompt)
+            .bind(&mcp_servers_json)
+            .bind(chat.created_at)
+            .bind(chat.updated_at)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to create chat: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 获取聊天列表
+    pub async fn list_chats(
+        &self,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<Chat>, AppError> {
+        let query = r#"
+            SELECT id, name, last_message_at, message_count, system_prompt, mcp_servers, artifact_id, created_at, updated_at
+            FROM chats ORDER BY updated_at DESC LIMIT $1 OFFSET $2
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to list chats: {}", e)))?;
+
+        let mut chats = Vec::new();
+        for row in rows {
+            chats.push(self.row_to_chat(row)?);
+        }
+
+        Ok(chats)
+    }
+
+    /// 根据 ID 获取聊天
+    pub async fn get_chat_by_id(&self, chat_id: &UUID) -> Result<Option<Chat>, AppError> {
+        let query = r#"
+            SELECT id, name, last_message_at, message_count, system_prompt, mcp_servers, artifact_id, created_at, updated_at
+            FROM chats WHERE id = $1
+        "#;
+
+        let row = sqlx::query(query)
+            .bind(chat_id)
+            .fetch_optional(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to get chat: {}", e)))?;
+
+        if let Some(row) = row {
+            Ok(Some(self.row_to_chat(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// 更新聊天
+    pub async fn update_chat(&self, chat: &Chat) -> Result<(), AppError> {
+        let mcp_servers_json = serde_json::to_string(&chat.mcp_servers)
+            .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
+
+        let query = r#"
+            UPDATE chats SET name = $1, system_prompt = $2, mcp_servers = $3, updated_at = $4
+            WHERE id = $5
+        "#;
+
+        let result = sqlx::query(query)
+            .bind(&chat.name)
+            .bind(&chat.system_prompt)
+            .bind(&mcp_servers_json)
+            .bind(chat.updated_at)
+            .bind(&chat.id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to update chat: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!("Chat not found: {}", chat.id)));
+        }
+
+        Ok(())
+    }
+
+    /// 删除聊天
+    pub async fn delete_chat(&self, chat_id: &UUID) -> Result<(), AppError> {
+        let result = sqlx::query("DELETE FROM chats WHERE id = $1")
+            .bind(chat_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to delete chat: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!("Chat not found: {}", chat_id)));
+        }
+
+        Ok(())
+    }
+
+    /// 更新聊天的消息统计
+    pub async fn update_message_stats(
+        &self,
+        chat_id: &UUID,
+        message_count: i32,
+        last_message_at: i64,
+    ) -> Result<(), AppError> {
+        let query = r#"
+            UPDATE chats SET message_count = $1, last_message_at = $2, updated_at = $3
+            WHERE id = $4
+        "#;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        sqlx::query(query)
+            .bind(message_count)
+            .bind(last_message_at)
+            .bind(now)
+            .bind(chat_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to update message stats: {}", e)))?;
+
+        Ok(())
+    }
+
+    // 辅助方法：将数据库行转换为 Chat
+    fn row_to_chat(&self, row: sqlx::sqlite::SqliteRow) -> Result<Chat, AppError> {
+        let mcp_servers_json: Option<String> = row.try_get("mcp_servers")?;
+        let mcp_servers: Vec<String> = if let Some(json) = mcp_servers_json {
+            serde_json::from_str(&json).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        Ok(Chat {
+            id: row.try_get("id")?,
+            name: row.try_get("name")?,
+            last_message_at: row.try_get("last_message_at").ok(),
+            message_count: row.try_get("message_count")?,
+            system_prompt: row.try_get("system_prompt").ok(),
+            mcp_servers,
+            artifact_id: row.try_get("artifact_id").ok(),
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::DatabaseService;
+    use tempfile::tempdir;
+
+    async fn create_test_db() -> (DatabaseService, tempfile::TempDir) {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db_service = DatabaseService::new(&db_path).await.unwrap();
+        (db_service, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn test_chat_crud() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = ChatRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let chat = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Test Chat".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            system_prompt: Some("You are a helpful assistant.".to_string()),
+            mcp_servers: vec!["server1".to_string(), "server2".to_string()],
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create
+        repo.create_chat(&chat).await.unwrap();
+
+        // Get by ID
+        let fetched = repo.get_chat_by_id(&chat.id).await.unwrap();
+        assert!(fetched.is_some());
+        let fetched_chat = fetched.unwrap();
+        assert_eq!(fetched_chat.name, chat.name);
+        assert_eq!(fetched_chat.mcp_servers, chat.mcp_servers);
+
+        // List
+        let chats = repo.list_chats(10, 0).await.unwrap();
+        assert_eq!(chats.len(), 1);
+
+        // Update
+        let mut updated_chat = chat.clone();
+        updated_chat.name = "Updated Chat".to_string();
+        updated_chat.updated_at = now + 1000;
+
+        repo.update_chat(&updated_chat).await.unwrap();
+
+        let fetched_updated = repo.get_chat_by_id(&chat.id).await.unwrap();
+        assert_eq!(fetched_updated.unwrap().name, "Updated Chat");
+
+        // Delete
+        repo.delete_chat(&chat.id).await.unwrap();
+        let deleted = repo.get_chat_by_id(&chat.id).await.unwrap();
+        assert!(deleted.is_none());
+    }
+}

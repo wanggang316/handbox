@@ -3,8 +3,9 @@
 use crate::models::{
     AppError, Model, Provider, ProviderConfig, ProviderWithModels, Timestamp, UUID,
 };
-use crate::services::provider_clients::{adapt_model, create_llm_client};
-use crate::services::{DatabaseService, ProviderRepository};
+use crate::clients::{adapt_model, create_llm_client};
+use crate::services::DatabaseService;
+use crate::storage::ProviderRepository;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;

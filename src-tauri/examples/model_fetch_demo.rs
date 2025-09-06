@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("📄 使用数据库: {:?}", db_path);
 
     let db_service = DatabaseService::new(&db_path).await?;
-    let provider_service = ProviderService::new(db_service);
+    let provider_service = ProviderService::new(std::sync::Arc::new(db_service));
 
     // 1. 演示 Anthropic（使用本地数据库）
     println!("\n📡 创建 Anthropic 供应商（使用本地模型数据库）...");

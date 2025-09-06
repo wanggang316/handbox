@@ -1,18 +1,20 @@
 // 消息服务实现
 
-use crate::models::{AppError, ChatRequest, ChatResponse, Message, MessageRole, UUID};
+use crate::models::{AppError, ChatRequest, ChatResponse, Message, MessageRole, MessageAttachment, UUID};
 use crate::services::DatabaseService;
-use sqlx::Row;
+use crate::storage::MessageRepository;
 use std::sync::Arc;
 
 /// 消息服务
 pub struct MessageService {
-    db: Arc<DatabaseService>,
+    repository: MessageRepository,
 }
 
 impl MessageService {
     pub fn new(db: Arc<DatabaseService>) -> Self {
-        Self { db }
+        Self {
+            repository: MessageRepository::new(db),
+        }
     }
 
     /// 发送消息
@@ -40,8 +42,6 @@ impl MessageService {
             return Err(AppError::validation_error(error));
         }
 
-        let pool = self.db.pool();
-
         // 2. 保存用户消息到数据库
         let user_message_id = uuid::Uuid::new_v4().to_string();
         let chat_id = request.chat_id.as_ref().ok_or_else(|| {
@@ -50,39 +50,40 @@ impl MessageService {
             AppError::validation_error(error)
         })?;
 
-        let attachments_json = if let Some(attachments) = &request.attachments {
-            Some(serde_json::to_string(attachments)
-                .map_err(|e| {
-                    let error = format!("Invalid attachments: {}", e);
-                    tracing::error!("[MessageService::send_message] Serialization failed: {}", error);
-                    AppError::validation_error(&error)
-                })?)
-        } else {
-            None
+        let user_message = Message {
+            id: user_message_id.clone(),
+            chat_id: chat_id.clone(),
+            role: MessageRole::User,
+            content: last_message.content.clone(),
+            model_id: None, // 在测试中避免外键约束
+            provider_id: None, // 在测试中避免外键约束
+            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
+            top_p: request.parameters.as_ref().and_then(|p| p.top_p),
+            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
+            stream: request.parameters.as_ref().and_then(|p| p.stream),
+            attachments: request.attachments.as_ref().map(|attachments| {
+                attachments.iter().map(|att| MessageAttachment {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: att.name.clone(),
+                    mime_type: att.mime_type.clone(),
+                    size: att.data.len() as i64,
+                    path: format!("/tmp/{}", uuid::Uuid::new_v4()), // 临时路径，实际应该保存文件
+                }).collect()
+            }),
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            start_time: None,
+            end_time: None,
+            duration: None,
+            created_at: now,
+            updated_at: now,
         };
 
-        sqlx::query(
-            "INSERT INTO messages (id, chat_id, role, content, model_id, provider_id, temperature, top_p, max_tokens, stream, attachments, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
-        )
-        .bind(&user_message_id)
-        .bind(chat_id)
-        .bind("user")
-        .bind(&last_message.content)
-        .bind(Option::<String>::None) // 在测试中避免外键约束
-        .bind(Option::<String>::None) // 在测试中避免外键约束
-        .bind(request.parameters.as_ref().and_then(|p| p.temperature))
-        .bind(request.parameters.as_ref().and_then(|p| p.top_p))
-        .bind(request.parameters.as_ref().and_then(|p| p.max_tokens))
-        .bind(request.parameters.as_ref().and_then(|p| p.stream))
-        .bind(&attachments_json)
-        .bind(now)
-        .bind(now)
-        .execute(pool)
-        .await
-        .map_err(|e| {
+        self.repository.create_message(&user_message).await.map_err(|e| {
             let error = format!("Failed to save user message: {}", e);
             tracing::error!("[MessageService::send_message] Database error: {}", error);
-            AppError::internal_error(&error)
+            e
         })?;
         
         tracing::info!("[MessageService::send_message] User message saved with ID: {}", user_message_id);
@@ -92,23 +93,32 @@ impl MessageService {
         let mock_response = "这是一个模拟的回复，实际的 LLM API 集成正在开发中。";
 
         // 4. 保存助手消息到数据库
-        sqlx::query(
-            "INSERT INTO messages (id, chat_id, role, content, model_id, provider_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
-        )
-        .bind(&assistant_message_id)
-        .bind(chat_id)
-        .bind("assistant")
-        .bind(mock_response)
-        .bind(Option::<String>::None) // 在测试中避免外键约束
-        .bind(Option::<String>::None) // 在测试中避免外键约束
-        .bind(now)
-        .bind(now)
-        .execute(pool)
-        .await
-        .map_err(|e| {
+        let assistant_message = Message {
+            id: assistant_message_id.clone(),
+            chat_id: chat_id.clone(),
+            role: MessageRole::Assistant,
+            content: mock_response.to_string(),
+            model_id: None, // 在测试中避免外键约束
+            provider_id: None, // 在测试中避免外键约束
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            attachments: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            start_time: None,
+            end_time: None,
+            duration: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.repository.create_message(&assistant_message).await.map_err(|e| {
             let error = format!("Failed to save assistant message: {}", e);
             tracing::error!("[MessageService::send_message] Database error: {}", error);
-            AppError::internal_error(&error)
+            e
         })?;
         
         tracing::info!("[MessageService::send_message] Assistant message saved with ID: {}", assistant_message_id);
@@ -140,61 +150,11 @@ impl MessageService {
         let limit = limit.unwrap_or(50);
         let offset = offset.unwrap_or(0);
 
-        let pool = self.db.pool();
-        let mut messages = Vec::new();
-
-        let rows = sqlx::query(
-            "SELECT id, chat_id, role, content, model_id, provider_id, temperature, top_p, max_tokens, stream, attachments, input_tokens, output_tokens, total_tokens, start_time, end_time, duration, created_at, updated_at FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC LIMIT ?2 OFFSET ?3"
-        )
-        .bind(&chat_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
+        let messages = self.repository.get_messages_by_chat(&chat_id, limit, offset).await.map_err(|e| {
             let error = format!("Failed to get messages: {}", e);
             tracing::error!("[MessageService::get_messages] Database error for chat_id {}: {}", chat_id, error);
-            AppError::internal_error(&error)
+            e
         })?;
-
-        for row in rows {
-            let role_str: String = row.try_get("role").unwrap_or_default();
-            let role = match role_str.as_str() {
-                "user" => MessageRole::User,
-                "assistant" => MessageRole::Assistant,
-                "system" => MessageRole::System,
-                _ => MessageRole::User,
-            };
-
-            let attachments_json: Option<String> = row.try_get("attachments").ok();
-            let attachments = if let Some(json) = attachments_json {
-                serde_json::from_str(&json).unwrap_or_default()
-            } else {
-                None
-            };
-
-            messages.push(Message {
-                id: row.try_get("id").unwrap_or_default(),
-                chat_id: row.try_get("chat_id").unwrap_or_default(),
-                role,
-                content: row.try_get("content").unwrap_or_default(),
-                model_id: row.try_get("model_id").ok(),
-                provider_id: row.try_get("provider_id").ok(),
-                temperature: row.try_get("temperature").ok(),
-                top_p: row.try_get("top_p").ok(),
-                max_tokens: row.try_get("max_tokens").ok(),
-                stream: row.try_get("stream").ok(),
-                attachments,
-                input_tokens: row.try_get("input_tokens").ok(),
-                output_tokens: row.try_get("output_tokens").ok(),
-                total_tokens: row.try_get("total_tokens").ok(),
-                start_time: row.try_get("start_time").ok(),
-                end_time: row.try_get("end_time").ok(),
-                duration: row.try_get("duration").ok(),
-                created_at: row.try_get("created_at").unwrap_or_default(),
-                updated_at: row.try_get("updated_at").unwrap_or_default(),
-            });
-        }
 
         tracing::info!("[MessageService::get_messages] Retrieved {} messages for chat_id: {}", messages.len(), chat_id);
         Ok(messages)
@@ -203,58 +163,9 @@ impl MessageService {
     /// 获取单条消息
     pub async fn get_message(&self, message_id: UUID) -> Result<Message, AppError> {
         tracing::info!("[MessageService::get_message] Getting message: {}", message_id);
-        let pool = self.db.pool();
-        let row = sqlx::query(
-            "SELECT id, chat_id, role, content, model_id, provider_id, temperature, top_p, max_tokens, stream, attachments, input_tokens, output_tokens, total_tokens, start_time, end_time, duration, created_at, updated_at FROM messages WHERE id = ?1"
-        )
-        .bind(&message_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| {
-            let error = format!("Failed to get message: {}", e);
-            tracing::error!("[MessageService::get_message] Database error for message_id {}: {}", message_id, error);
-            AppError::internal_error(&error)
-        })?;
-
-        match row {
-            Some(row) => {
-                let role_str: String = row.try_get("role").unwrap_or_default();
-                let role = match role_str.as_str() {
-                    "user" => MessageRole::User,
-                    "assistant" => MessageRole::Assistant,
-                    "system" => MessageRole::System,
-                    _ => MessageRole::User,
-                };
-
-                let attachments_json: Option<String> = row.try_get("attachments").ok();
-                let attachments = if let Some(json) = attachments_json {
-                    serde_json::from_str(&json).unwrap_or_default()
-                } else {
-                    None
-                };
-
-                Ok(Message {
-                    id: row.try_get("id").unwrap_or_default(),
-                    chat_id: row.try_get("chat_id").unwrap_or_default(),
-                    role,
-                    content: row.try_get("content").unwrap_or_default(),
-                    model_id: row.try_get("model_id").ok(),
-                    provider_id: row.try_get("provider_id").ok(),
-                    temperature: row.try_get("temperature").ok(),
-                    top_p: row.try_get("top_p").ok(),
-                    max_tokens: row.try_get("max_tokens").ok(),
-                    stream: row.try_get("stream").ok(),
-                    attachments,
-                    input_tokens: row.try_get("input_tokens").ok(),
-                    output_tokens: row.try_get("output_tokens").ok(),
-                    total_tokens: row.try_get("total_tokens").ok(),
-                    start_time: row.try_get("start_time").ok(),
-                    end_time: row.try_get("end_time").ok(),
-                    duration: row.try_get("duration").ok(),
-                    created_at: row.try_get("created_at").unwrap_or_default(),
-                    updated_at: row.try_get("updated_at").unwrap_or_default(),
-                })
-            }
+        
+        match self.repository.get_message_by_id(&message_id).await? {
+            Some(message) => Ok(message),
             None => {
                 let error = format!("Message not found: {}", message_id);
                 tracing::warn!("[MessageService::get_message] {}", error);
@@ -275,24 +186,14 @@ impl MessageService {
             .unwrap()
             .as_millis() as i64;
 
-        let pool = self.db.pool();
-        
         // 先检查消息是否存在
         let _existing = self.get_message(message_id.clone()).await?;
 
         // 更新消息内容
-        sqlx::query(
-            "UPDATE messages SET content = ?1, updated_at = ?2 WHERE id = ?3"
-        )
-        .bind(&content)
-        .bind(now)
-        .bind(&message_id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
+        self.repository.update_message_content(&message_id, &content, now).await.map_err(|e| {
             let error = format!("Failed to update message: {}", e);
             tracing::error!("[MessageService::update_message] Database error for message_id {}: {}", message_id, error);
-            AppError::internal_error(&error)
+            e
         })?;
         
         tracing::info!("[MessageService::update_message] Successfully updated message: {}", message_id);
@@ -304,27 +205,16 @@ impl MessageService {
     /// 删除消息
     pub async fn delete_message(&self, message_id: UUID) -> Result<(), AppError> {
         tracing::info!("[MessageService::delete_message] Deleting message: {}", message_id);
-        let pool = self.db.pool();
 
         // 先检查消息是否存在
         self.get_message(message_id.clone()).await?;
 
         // 删除消息
-        let result = sqlx::query("DELETE FROM messages WHERE id = ?1")
-            .bind(&message_id)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                let error = format!("Failed to delete message: {}", e);
-                tracing::error!("[MessageService::delete_message] Database error for message_id {}: {}", message_id, error);
-                AppError::internal_error(&error)
-            })?;
-
-        if result.rows_affected() == 0 {
-            let error = format!("Message not found: {}", message_id);
-            tracing::warn!("[MessageService::delete_message] {}", error);
-            return Err(AppError::not_found(&error));
-        }
+        self.repository.delete_message(&message_id).await.map_err(|e| {
+            let error = format!("Failed to delete message: {}", e);
+            tracing::error!("[MessageService::delete_message] Database error for message_id {}: {}", message_id, error);
+            e
+        })?;
         
         tracing::info!("[MessageService::delete_message] Successfully deleted message: {}", message_id);
 
@@ -349,8 +239,6 @@ impl MessageService {
             return Err(AppError::validation_error(error));
         }
 
-        let pool = self.db.pool();
-
         // 3. 生成新的内容（目前是模拟的，后续需要集成 LLM API）
         let new_content = format!("重新生成的回复: {}", 
             chrono::DateTime::from_timestamp(now / 1000, 0)
@@ -359,18 +247,10 @@ impl MessageService {
         );
 
         // 4. 更新消息内容
-        sqlx::query(
-            "UPDATE messages SET content = ?1, updated_at = ?2 WHERE id = ?3"
-        )
-        .bind(&new_content)
-        .bind(now)
-        .bind(&message_id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
+        self.repository.update_message_content(&message_id, &new_content, now).await.map_err(|e| {
             let error = format!("Failed to update regenerated message: {}", e);
             tracing::error!("[MessageService::regenerate_message] Database error for message_id {}: {}", message_id, error);
-            AppError::internal_error(&error)
+            e
         })?;
         
         tracing::info!("[MessageService::regenerate_message] Successfully regenerated message: {}", message_id);

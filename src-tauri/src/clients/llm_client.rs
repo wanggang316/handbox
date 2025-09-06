@@ -119,8 +119,8 @@ pub fn create_client(provider_type: &str) -> LlmClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::provider_clients::api_provider::OpenAIApiProvider;
-    use crate::services::provider_clients::model_list_provider::OpenAIModelListProvider;
+    use crate::clients::api_provider::OpenAIApiProvider;
+    use crate::clients::model_list_provider::OpenAIModelListProvider;
 
     #[test]
     fn test_llm_client_creation() {

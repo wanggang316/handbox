@@ -508,7 +508,7 @@ mod tests {
     #[tokio::test]
     async fn test_provider_crud() {
         let (db, _temp_dir) = create_test_db().await;
-        let repo = ProviderRepository::new(db);
+        let repo = ProviderRepository::new(Arc::new(db));
 
         let now = chrono::Utc::now().timestamp_millis();
         let provider = Provider {
