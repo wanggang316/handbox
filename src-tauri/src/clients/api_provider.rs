@@ -118,11 +118,21 @@ impl ApiProvider for OpenAIApiProvider {
         let req_body = self.build_openai_request(&request);
 
         tracing::info!("Sending OpenAI-style chat request to: {}", url);
+        
+        // 调试：检查认证头
+        let auth_header = format!("Bearer {}", provider.api_key);
+        let auth_preview = if auth_header.len() > 16 {
+            format!("Bearer {}...{}", &provider.api_key[..4], &provider.api_key[provider.api_key.len()-4..])
+        } else {
+            "Bearer ***".to_string()
+        };
+        tracing::info!("Using auth header: {}", auth_preview);
+        tracing::debug!("Request payload: {}", serde_json::to_string_pretty(&req_body).unwrap_or_default());
 
         let response = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", provider.api_key))
+            .header("Authorization", auth_header)
             .header("Content-Type", "application/json")
             .json(&req_body)
             .send()

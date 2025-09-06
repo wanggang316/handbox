@@ -109,11 +109,36 @@
   let isSending = $derived(messageStore.isSending);
   let streamingContent = $derived(messageStore.streamingContent);
   let streamingMessageId = $derived(messageStore.streamingMessageId);
+  
+  // 消息容器引用
+  let messagesContainer: HTMLDivElement;
+  
+  // 自动滚动到底部
+  function scrollToBottom() {
+    if (messagesContainer) {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+  }
+  
+  // 监听消息变化，自动滚动到底部
+  $effect(() => {
+    if (messages.length > 0) {
+      // 使用 setTimeout 确保 DOM 更新完成后再滚动
+      setTimeout(scrollToBottom, 100);
+    }
+  });
+  
+  // 监听流式内容变化，自动滚动
+  $effect(() => {
+    if (streamingContent) {
+      setTimeout(scrollToBottom, 50);
+    }
+  });
 </script>
 
-<div class="flex flex-col flex-1 overflow-hidden">
+<div class="flex flex-col h-full">
   <!-- 消息列表 -->
-  <div class="flex-1 overflow-y-auto">
+  <div bind:this={messagesContainer} class="flex-1 overflow-y-auto">
     {#if isLoading && messages.length === 0}
       <!-- 加载状态 -->
       <div class="flex items-center justify-center h-full">

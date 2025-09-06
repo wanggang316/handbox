@@ -127,16 +127,23 @@
 </script>
 
 <!-- 聊天页面（将被 (app) 分组布局包裹） -->
-<div class="flex-1 flex flex-col">
-  <ChatHeaderView 
-    chatId={displayChatId} 
-    title={chatTitle}
-    sidebarOpen={uiState.sidebarOpen}
-  />
+<div class="flex-1 flex flex-col h-full">
+  <!-- 固定在顶部的聊天头部 -->
+  <div class="flex-shrink-0">
+    <ChatHeaderView 
+      chatId={displayChatId} 
+      title={chatTitle}
+      sidebarOpen={uiState.sidebarOpen}
+    />
+  </div>
   
-  <ChatContentView />
+  <!-- 可滚动的聊天内容区域，占据剩余空间 -->
+  <div class="flex-1 min-h-0">
+    <ChatContentView />
+  </div>
   
-  <div class="px-4 pb-4">
+  <!-- 固定在底部的输入区域 -->
+  <div class="flex-shrink-0 px-4 pb-4">
     <ChatInputView 
       bind:messageInput={messageInput}
       onSendMessage={handleSendMessage}

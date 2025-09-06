@@ -1,19 +1,31 @@
 // 消息服务实现
 
 use crate::models::{AppError, ChatRequest, ChatResponse, Message, MessageRole, MessageAttachment, UUID};
-use crate::services::DatabaseService;
+use crate::services::{DatabaseService, ProviderService};
 use crate::storage::MessageRepository;
+use crate::clients::llm_client::create_llm_client;
+use crate::clients::api_provider::{ChatRequest as ApiChatRequest, ChatMessage as ApiChatMessage, ChatUsage};
 use std::sync::Arc;
+
+/// LLM API 响应结构
+#[derive(Debug)]
+struct LlmApiResponse {
+    content: String,
+    usage: Option<ChatUsage>,
+    duration: Option<f64>,
+}
 
 /// 消息服务
 pub struct MessageService {
     repository: MessageRepository,
+    provider_service: Arc<ProviderService>,
 }
 
 impl MessageService {
     pub fn new(db: Arc<DatabaseService>) -> Self {
         Self {
-            repository: MessageRepository::new(db),
+            repository: MessageRepository::new(db.clone()),
+            provider_service: Arc::new(ProviderService::new(db)),
         }
     }
 
@@ -88,29 +100,29 @@ impl MessageService {
         
         tracing::info!("[MessageService::send_message] User message saved with ID: {}", user_message_id);
 
-        // 3. 目前返回一个模拟的响应（后续需要集成实际的 LLM API 调用）
+        // 3. 调用实际的 LLM API
         let assistant_message_id = uuid::Uuid::new_v4().to_string();
-        let mock_response = "这是一个模拟的回复，实际的 LLM API 集成正在开发中。";
+        let llm_response = self.call_llm_api(&request).await?;
 
         // 4. 保存助手消息到数据库
         let assistant_message = Message {
             id: assistant_message_id.clone(),
             chat_id: chat_id.clone(),
             role: MessageRole::Assistant,
-            content: mock_response.to_string(),
-            model_id: None, // 在测试中避免外键约束
-            provider_id: None, // 在测试中避免外键约束
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stream: None,
+            content: llm_response.content.clone(),
+            model_id: Some(request.model_id.clone()),
+            provider_id: Some(request.provider_id.clone()),
+            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
+            top_p: request.parameters.as_ref().and_then(|p| p.top_p),
+            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
+            stream: request.parameters.as_ref().and_then(|p| p.stream),
             attachments: None,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            start_time: None,
-            end_time: None,
-            duration: None,
+            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
+            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
+            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
+            start_time: Some(now),
+            end_time: Some(now),
+            duration: llm_response.duration.map(|d| d as i64),
             created_at: now,
             updated_at: now,
         };
@@ -126,17 +138,109 @@ impl MessageService {
         let response = ChatResponse {
             chat_id: chat_id.clone(),
             message_id: assistant_message_id.clone(),
-            content: mock_response.to_string(),
+            content: llm_response.content,
             model_id: request.model_id,
             provider_id: request.provider_id,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            duration: None,
+            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
+            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
+            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
+            duration: llm_response.duration.map(|d| d as i64),
         };
         
         tracing::info!("[MessageService::send_message] Successfully completed for chat_id: {:?}, message_id: {}", chat_id, assistant_message_id);
         Ok(response)
+    }
+
+    /// 调用 LLM API
+    async fn call_llm_api(&self, request: &ChatRequest) -> Result<LlmApiResponse, AppError> {
+        tracing::info!("[MessageService::call_llm_api] Calling LLM API with provider: {}, model: {}", 
+            request.provider_id, request.model_id);
+
+        // 1. 获取供应商配置
+        let provider = self.provider_service.get_provider(&request.provider_id).await
+            .map_err(|e| {
+                let error = format!("Failed to get provider {}: {}", request.provider_id, e);
+                tracing::error!("[MessageService::call_llm_api] {}", error);
+                AppError::validation_error(&error)
+            })?;
+
+        // 调试：检查 API Key 是否存在
+        if provider.api_key.is_empty() {
+            tracing::error!("[MessageService::call_llm_api] Provider {} has empty API key", request.provider_id);
+            return Err(AppError::validation_error("Provider has no API key configured"));
+        } else {
+            let api_key_preview = if provider.api_key.len() > 8 {
+                format!("{}...{}", &provider.api_key[..4], &provider.api_key[provider.api_key.len()-4..])
+            } else {
+                "***".to_string()
+            };
+            tracing::info!("[MessageService::call_llm_api] Using provider: {} ({}), API key: {}", 
+                provider.name, provider.provider_type, api_key_preview);
+        }
+
+        // 2. 创建 LLM 客户端
+        let llm_client = create_llm_client(&provider.provider_type)
+            .map_err(|e| {
+                let error = format!("Failed to create LLM client for provider type {}: {}", provider.provider_type, e);
+                tracing::error!("[MessageService::call_llm_api] {}", error);
+                e
+            })?;
+
+        // 3. 转换请求格式
+        let api_request = self.convert_to_api_request(request)?;
+
+        // 4. 调用 API
+        let start_time = std::time::Instant::now();
+        let api_response = llm_client.chat(&provider, api_request).await
+            .map_err(|e| {
+                let error = format!("LLM API call failed: {}", e);
+                tracing::error!("[MessageService::call_llm_api] {}", error);
+                e
+            })?;
+        let duration = start_time.elapsed().as_millis() as f64;
+
+        // 5. 转换响应格式
+        let llm_response = self.convert_from_api_response(api_response, duration)?;
+
+        tracing::info!("[MessageService::call_llm_api] API call successful, duration: {}ms", duration);
+        Ok(llm_response)
+    }
+
+    /// 转换为 API 请求格式
+    fn convert_to_api_request(&self, request: &ChatRequest) -> Result<ApiChatRequest, AppError> {
+        let messages: Vec<ApiChatMessage> = request.messages.iter().map(|msg| {
+            ApiChatMessage {
+                role: match msg.role {
+                    MessageRole::User => "user".to_string(),
+                    MessageRole::Assistant => "assistant".to_string(),
+                    MessageRole::System => "system".to_string(),
+                },
+                content: msg.content.clone(),
+            }
+        }).collect();
+
+        Ok(ApiChatRequest {
+            model: request.model_id.clone(),
+            messages,
+            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
+            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
+            stream: request.parameters.as_ref().and_then(|p| p.stream),
+        })
+    }
+
+    /// 从 API 响应格式转换
+    fn convert_from_api_response(&self, api_response: crate::clients::api_provider::ChatResponse, duration: f64) -> Result<LlmApiResponse, AppError> {
+        let choice = api_response.choices.into_iter().next()
+            .ok_or_else(|| AppError::internal_error("No choices in API response"))?;
+        
+        let message = choice.message
+            .ok_or_else(|| AppError::internal_error("No message in API choice"))?;
+
+        Ok(LlmApiResponse {
+            content: message.content,
+            usage: api_response.usage,
+            duration: Some(duration),
+        })
     }
 
     /// 获取消息
@@ -239,12 +343,35 @@ impl MessageService {
             return Err(AppError::validation_error(error));
         }
 
-        // 3. 生成新的内容（目前是模拟的，后续需要集成 LLM API）
-        let new_content = format!("重新生成的回复: {}", 
-            chrono::DateTime::from_timestamp(now / 1000, 0)
-                .unwrap_or_default()
-                .format("%Y-%m-%d %H:%M:%S")
-        );
+        // 3. 获取聊天的历史消息，重新调用 LLM API
+        let chat_messages = self.get_messages(message.chat_id.clone(), None, None).await?;
+        
+        // 构造重新生成请求（使用原始请求参数）
+        let regenerate_request = ChatRequest {
+            chat_id: Some(message.chat_id.clone()),
+            artifact_id: None,
+            model_id: message.model_id.clone().unwrap_or_default(),
+            provider_id: message.provider_id.clone().unwrap_or_default(),
+            parameters: Some(crate::models::ModelParameters {
+                temperature: message.temperature,
+                top_p: message.top_p,
+                max_tokens: message.max_tokens,
+                context_length: None,
+                stream: message.stream,
+            }),
+            messages: chat_messages.iter()
+                .filter(|m| m.role != MessageRole::Assistant || m.id != message_id) // 排除要重新生成的消息
+                .map(|m| crate::models::ChatMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                })
+                .collect(),
+            attachments: None,
+        };
+        
+        // 调用 LLM API 重新生成
+        let llm_response = self.call_llm_api(&regenerate_request).await?;
+        let new_content = llm_response.content;
 
         // 4. 更新消息内容
         self.repository.update_message_content(&message_id, &new_content, now).await.map_err(|e| {
@@ -261,10 +388,10 @@ impl MessageService {
             content: new_content,
             model_id: message.model_id.unwrap_or_default(),
             provider_id: message.provider_id.unwrap_or_default(),
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            duration: None,
+            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
+            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
+            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
+            duration: llm_response.duration.map(|d| d as i64),
         })
     }
 }

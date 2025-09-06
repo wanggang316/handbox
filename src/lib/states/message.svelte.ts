@@ -214,8 +214,27 @@ class MessageStore {
       
       this.addMessage(request.chatId, userMessage);
       
-      // 发送到后端
-      await messageApi.sendMessage(request);
+      // 发送到后端并获取响应
+      const response = await messageApi.sendMessage(request);
+      
+      // 添加助手回复消息到本地状态
+      const assistantMessage: Message = {
+        id: response.messageId,
+        chatId: request.chatId,
+        role: 'assistant',
+        content: response.content,
+        modelId: response.modelId,
+        providerId: response.providerId,
+        stream: false,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        totalTokens: response.totalTokens,
+        duration: response.duration,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      
+      this.addMessage(request.chatId, assistantMessage);
       
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '发送消息失败');
