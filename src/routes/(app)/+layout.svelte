@@ -5,6 +5,7 @@
   import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
   import { uiState } from "$lib/states/ui.svelte";
+  import { chatState } from "$lib/states/chat.svelte";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏配置常量
@@ -79,6 +80,9 @@
   }
 
   onMount(() => {
+    // 全局初始化聊天状态
+    chatState.initialize();
+    
     // 恢复侧边栏状态
     restoreSidebarState();
     

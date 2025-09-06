@@ -42,6 +42,10 @@ class ChatState {
   isLoadingProviders = $state(false);
   providerError = $state<string | null>(null);
 
+  // 初始化状态
+  isInitialized = $state(false);
+  isInitializing = $state(false);
+
   // 派生状态：是否有活跃聊天
   get hasActiveChat() {
     return this.currentChat !== null;
@@ -66,6 +70,32 @@ class ChatState {
   // 派生状态：收藏模型
   get favoriteModels(): ModelWithProvider[] {
     return this.allModels.filter(model => model.favorite);
+  }
+
+  // 派生状态：当前聊天的模型信息（基于最后一条用户消息）
+  get currentChatModel(): { modelId?: string; providerId?: string; model?: ModelWithProvider } {
+    if (!this.currentChat || this.messages.length === 0) {
+      return {};
+    }
+
+    // 找到最后一条用户消息
+    const lastUserMessage = this.messages
+      .filter(msg => msg.role === 'user')
+      .pop();
+
+    if (!lastUserMessage) {
+      return {};
+    }
+
+    const modelId = lastUserMessage.modelId;
+    const providerId = lastUserMessage.providerId;
+    const model = this.allModels.find(m => m.id === modelId && m.provider_id === providerId);
+
+    return {
+      modelId,
+      providerId,
+      model
+    };
   }
 
   /**
@@ -117,6 +147,16 @@ class ChatState {
   }
 
   /**
+   * 根据当前聊天的最后一条用户消息更新选中的模型
+   */
+  updateSelectedModelForCurrentChat(): void {
+    const chatModel = this.currentChatModel;
+    if (chatModel.model) {
+      this.selectedModel = chatModel.model;
+    }
+  }
+
+  /**
    * 加载聊天列表
    */
   async loadChats(): Promise<void> {
@@ -152,6 +192,9 @@ class ChatState {
       this.currentChat = chat;
       this.messages = [];
       
+      // 对于新聊天，保持当前选中的模型
+      // updateSelectedModelForCurrentChat 在有消息时才会生效
+      
       console.log('Created chat:', chat);
       console.log('Current chat:', this.currentChat);
       console.log('chats:', this.chats);
@@ -179,6 +222,9 @@ class ChatState {
       
       this.currentChat = chat;
       this.messages = chatMessages;
+      
+      // 根据聊天的最后一条用户消息设置选中的模型
+      this.updateSelectedModelForCurrentChat();
       
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '切换聊天失败';
@@ -230,6 +276,9 @@ class ChatState {
       // 归一化为数组后追加，避免展开不可迭代对象
       const currentMessages = Array.isArray(this.messages) ? this.messages : [];
       this.messages = [...currentMessages, userMessage];
+
+      // 更新当前聊天的选中模型（基于刚发送的用户消息）
+      this.updateSelectedModelForCurrentChat();
 
       // 发送消息到后端 - 简化请求
       if (this.selectedModel) {
@@ -300,13 +349,25 @@ class ChatState {
    * 初始化状态
    */
   async initialize(): Promise<void> {
+    // 避免重复初始化
+    if (this.isInitialized || this.isInitializing) {
+      return;
+    }
+
     try {
+      this.isInitializing = true;
+      
       await Promise.all([
         this.loadProviders(),
         this.loadChats()
       ]);
+      
+      this.isInitialized = true;
+      console.log('Chat state initialized successfully');
     } catch (error) {
       console.error('Failed to initialize chat state:', error);
+    } finally {
+      this.isInitializing = false;
     }
   }
 
@@ -326,6 +387,9 @@ class ChatState {
     this.selectedModel = null;
     this.isLoadingProviders = false;
     this.providerError = null;
+    
+    this.isInitialized = false;
+    this.isInitializing = false;
   }
 }
 
