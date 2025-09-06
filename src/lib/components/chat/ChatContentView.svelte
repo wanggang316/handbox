@@ -1,5 +1,6 @@
 <script lang="ts">
   import { chatState } from '$lib/states/chat.svelte';
+  import { messageStore } from '$lib/states/message.svelte';
   import { Copy, RotateCcw, Trash2, Edit, User, Bot, Settings } from 'lucide-svelte';
 
   // 格式化时间戳
@@ -65,7 +66,7 @@
     
     try {
       operatingMessageId = messageId;
-      await chatState.regenerateMessage(messageId);
+      await messageStore.regenerateMessage(messageId);
       console.log('Message regenerated successfully');
     } catch (error) {
       console.error('Failed to regenerate message:', error);
@@ -77,7 +78,7 @@
 
   // 删除消息
   async function deleteMessage(messageId: string) {
-    if (operatingMessageId) return; // 防止重复操作
+    if (operatingMessageId || !chatState.currentChat) return; // 防止重复操作
     
     // 确认删除
     if (!confirm('确定要删除这条消息吗？')) {
@@ -86,7 +87,7 @@
 
     try {
       operatingMessageId = messageId;
-      await chatState.deleteMessage(messageId);
+      await messageStore.removeMessage(chatState.currentChat.id, messageId);
       console.log('Message deleted successfully');
     } catch (error) {
       console.error('Failed to delete message:', error);
@@ -103,10 +104,11 @@
   }
 
   // 获取当前聊天的消息 - 使用 Svelte 5 派生状态
-  let messages = $derived(chatState.messages);
-  let isLoading = $derived(chatState.isLoading);
-  let isStreaming = $derived(chatState.isStreaming);
-  let streamingContent = $derived(chatState.streamingContent);
+  let messages = $derived(chatState.currentMessages);
+  let isLoading = $derived(messageStore.isLoading);
+  let isSending = $derived(messageStore.isSending);
+  let streamingContent = $derived(messageStore.streamingContent);
+  let streamingMessageId = $derived(messageStore.streamingMessageId);
 </script>
 
 <div class="flex flex-col flex-1 overflow-hidden">
@@ -263,7 +265,7 @@
         {/each}
 
         <!-- 流式响应中的消息 -->
-        {#if isStreaming && streamingContent}
+        {#if streamingMessageId && streamingContent}
           <div class="group relative">
             <div class="flex gap-4">
               <!-- 助手头像 -->

@@ -4,14 +4,13 @@
 
 import type { 
   Chat, 
-  Message, 
-  ChatStreamEvent,
   UUID 
 } from '../types';
 import type { ProviderWithModels, ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
 import * as messageApi from '../api/message';
 import * as providerApi from '../api/provider';
+import { messageStore } from './message.svelte';
 
 // 聊天状态类
 class ChatState {
@@ -21,17 +20,8 @@ class ChatState {
   // 聊天列表
   chats = $state<Chat[]>([]);
   
-  // 当前聊天的消息列表
-  messages = $state<Message[]>([]);
-  
   // 加载状态
   isLoading = $state(false);
-  
-  // 流式输入状态
-  isStreaming = $state(false);
-  
-  // 当前流式消息内容
-  streamingContent = $state<string>('');
   
   // 错误状态
   chatError = $state<string | null>(null);
@@ -50,9 +40,14 @@ class ChatState {
     return this.currentChat !== null;
   }
 
+  // 派生状态：当前聊天消息列表
+  get currentMessages() {
+    return this.currentChat ? messageStore.getMessages(this.currentChat.id) : [];
+  }
+
   // 派生状态：当前聊天消息数量
   get messageCount() {
-    return this.messages.length;
+    return this.currentMessages.length;
   }
 
   // 派生状态：所有可用模型（带供应商信息）
@@ -146,12 +141,17 @@ class ChatState {
    * 从最后一个用户消息中填充当前聊天的模型信息
    */
   fillCurrentChatModelFromLastUserMessage(): void {
-    if (!this.currentChat || this.messages.length === 0) {
+    if (!this.currentChat) {
+      return;
+    }
+
+    const messages = this.currentMessages;
+    if (messages.length === 0) {
       return;
     }
 
     // 获取最后一个用户消息
-    const lastUserMessage = this.messages
+    const lastUserMessage = messages
       .filter(msg => msg.role === 'user')
       .pop();
 
@@ -203,7 +203,9 @@ class ChatState {
       
       // 设置为当前聊天
       this.currentChat = chat;
-      this.messages = [];
+      
+      // 清空该聊天的消息（新聊天）
+      messageStore.clearMessages(chat.id);
       
       console.log('Created chat:', chat);
       console.log('Current chat:', this.currentChat);
@@ -225,16 +227,14 @@ class ChatState {
     try {
       this.isLoading = true;
       
-      const [chat, chatMessages] = await Promise.all([
-        chatApi.getChat(chatId),
-        messageApi.getMessages(chatId)
-      ]);
-      
+      const chat = await chatApi.getChat(chatId);
       this.currentChat = chat;
-      this.messages = chatMessages;
-
+      
+      // 加载消息到 messageStore
+      await this.loadMessagesForChat(chatId);
+      
       console.log('Current chat >>> :', this.currentChat);
-      console.log('Current chat messages >>> :', this.messages);
+      console.log('Current chat messages >>> :', this.currentMessages);
 
       this.fillCurrentChatModelFromLastUserMessage();
       console.log('Current chat:', this.currentChat.modelId ?? '');
@@ -247,98 +247,18 @@ class ChatState {
   }
 
   /**
-   * 发送消息
+   * 加载指定聊天的消息
    */
-  async sendMessage(content: string): Promise<void> {
-    const chat = this.currentChat;
-    if (!chat) {
-      throw new Error('没有活跃的聊天');
-    }
-
-    if (!chat.modelId || !chat.providerId) {
-      throw new Error('请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。');
-    }
-
-    console.log('Sending message to backend:', {
-      chatId: chat.id,
-      modelId: chat.modelId,
-      providerId: chat.providerId,
-      messages: [{ role: 'user', content }]
-    });
-
+  async loadMessagesForChat(chatId: UUID): Promise<void> {
     try {
-      this.isLoading = true;
-      this.isStreaming = true;
-      this.streamingContent = '';
-      this.chatError = null;
-
-      // 添加用户消息到本地状态
-      const userMessage: Message = {
-        id: crypto.randomUUID(),
-        chatId: chat.id,
-        role: 'user',
-        content,
-        modelId: chat.modelId,
-        providerId: chat.providerId,
-        stream: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-      
-      // 归一化为数组后追加，避免展开不可迭代对象
-      const currentMessages = Array.isArray(this.messages) ? this.messages : [];
-      this.messages = [...currentMessages, userMessage];
-
-      // 发送消息到后端 - 简化请求
-      console.log('Sending message to backend:', {
-        chatId: chat.id,
-        modelId: chat.modelId,
-        providerId: chat.providerId,
-        messages: [{ role: 'user', content }]
-      });
-      await messageApi.sendMessage({
-        chatId: chat.id,
-        modelId: chat.modelId,
-        providerId: chat.providerId,
-        messages: [{ role: 'user', content }],
-        attachments: []
-      });
-      
+      messageStore.setLoading(true);
+      const messages = await messageApi.getMessages(chatId);
+      messageStore.setMessages(chatId, messages);
     } catch (error) {
-      this.chatError = error instanceof Error ? error.message : '发送消息失败';
-      this.isStreaming = false;
+      messageStore.setError(error instanceof Error ? error.message : '加载消息失败');
       throw error;
     } finally {
-      this.isLoading = false;
-    }
-  }
-
-
-  /**
-   * 删除消息
-   */
-  async deleteMessage(messageId: UUID): Promise<void> {
-    try {
-      await messageApi.deleteMessage(messageId);
-      this.messages = this.messages.filter(msg => msg.id !== messageId);
-    } catch (error) {
-      this.chatError = error instanceof Error ? error.message : '删除消息失败';
-      throw error;
-    }
-  }
-
-  /**
-   * 重新生成消息
-   */
-  async regenerateMessage(messageId: UUID): Promise<void> {
-    try {
-      this.isStreaming = true;
-      await messageApi.regenerateMessage(messageId);
-      // 流式响应会通过事件处理
-    } catch (error) {
-      this.chatError = error instanceof Error ? error.message : '重新生成失败';
-      this.isStreaming = false;
-      throw error;
+      messageStore.setLoading(false);
     }
   }
 
@@ -382,10 +302,7 @@ class ChatState {
   reset(): void {
     this.currentChat = null;
     this.chats = [];
-    this.messages = [];
     this.isLoading = false;
-    this.isStreaming = false;
-    this.streamingContent = '';
     this.chatError = null;
     
     this.providers = [];
@@ -394,6 +311,9 @@ class ChatState {
     
     this.isInitialized = false;
     this.isInitializing = false;
+    
+    // 清空消息状态
+    messageStore.clear();
   }
 }
 

@@ -2,8 +2,8 @@
   import SearchPage from '$lib/components/search/SearchPage.svelte';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { searchState } from '$lib/stores';
-  import { chatState } from '$lib/stores';
+  import { searchState } from '$lib/states/search.svelte';
+  import { chatState } from '$lib/states/chat.svelte';
 
 let searchQuery = $state('');
 let selectedFilter = $state('all');

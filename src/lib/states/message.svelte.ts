@@ -2,7 +2,8 @@
  * 消息状态管理
  */
 
-import type { Message, ChatResponse } from '$lib/types/chat';
+import type { Message, ChatResponse, ChatRequest } from '$lib/types/chat';
+import * as messageApi from '$lib/api/message';
 
 interface MessageState {
   // 按 chatId 组织消息
@@ -165,6 +166,91 @@ class MessageStore {
     this.state.messagesByChat = {};
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
+  }
+
+  // API 操作方法
+  
+  /**
+   * 加载指定聊天的消息
+   */
+  async loadMessages(chatId: string): Promise<void> {
+    try {
+      this.setLoading(true);
+      this.setError(null);
+      const messages = await messageApi.getMessages(chatId);
+      this.setMessages(chatId, messages);
+    } catch (error) {
+      this.setError(error instanceof Error ? error.message : '加载消息失败');
+      throw error;
+    } finally {
+      this.setLoading(false);
+    }
+  }
+
+  /**
+   * 发送消息
+   */
+  async sendMessage(request: ChatRequest): Promise<void> {
+    if (!request.chatId) {
+      throw new Error('缺少聊天ID');
+    }
+
+    try {
+      this.setSending(true);
+      this.setError(null);
+      
+      // 添加用户消息到本地状态
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        chatId: request.chatId,
+        role: 'user',
+        content: request.messages[0]?.content || '',
+        modelId: request.modelId,
+        providerId: request.providerId,
+        stream: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      
+      this.addMessage(request.chatId, userMessage);
+      
+      // 发送到后端
+      await messageApi.sendMessage(request);
+      
+    } catch (error) {
+      this.setError(error instanceof Error ? error.message : '发送消息失败');
+      throw error;
+    } finally {
+      this.setSending(false);
+    }
+  }
+
+  /**
+   * 删除消息（API调用）
+   */
+  async removeMessage(chatId: string, messageId: string): Promise<void> {
+    try {
+      await messageApi.deleteMessage(messageId);
+      this.deleteMessage(chatId, messageId);
+    } catch (error) {
+      this.setError(error instanceof Error ? error.message : '删除消息失败');
+      throw error;
+    }
+  }
+
+  /**
+   * 重新生成消息
+   */
+  async regenerateMessage(messageId: string): Promise<void> {
+    try {
+      this.setSending(true);
+      await messageApi.regenerateMessage(messageId);
+    } catch (error) {
+      this.setError(error instanceof Error ? error.message : '重新生成失败');
+      throw error;
+    } finally {
+      this.setSending(false);
+    }
   }
 
   // 清理所有状态

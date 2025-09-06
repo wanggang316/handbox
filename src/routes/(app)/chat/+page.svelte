@@ -6,6 +6,7 @@
   import { onMount } from 'svelte';
   import { uiState } from '$lib/states/ui.svelte';
   import { chatState } from '$lib/states/chat.svelte';
+  import { messageStore } from '$lib/states/message.svelte';
 
   let chatId = $state('');
   let messageInput = $state('');
@@ -28,7 +29,6 @@
       // 清空当前聊天状态，显示默认界面
       chatId = '';
       chatState.currentChat = null;
-      chatState.messages = [];
     }
   });
 
@@ -48,7 +48,6 @@
       } else {
         // 清空当前聊天状态，显示默认界面
         chatState.currentChat = null;
-        chatState.messages = [];
       }
     }
   });
@@ -95,8 +94,27 @@
         // 如果没有当前聊天，创建新聊天，但不设置模型，让用户在聊天中选择
         await chatState.createChat();
       }
-      console.log('currentChat:', chatState.currentChat);
-      await chatState.sendMessage(message);
+      
+      const chat = chatState.currentChat;
+      if (!chat) {
+        throw new Error('没有活跃的聊天');
+      }
+
+      if (!chat.modelId || !chat.providerId) {
+        throw new Error('请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。');
+      }
+      
+      console.log('currentChat:', chat);
+      
+      // 使用 messageStore 发送消息
+      await messageStore.sendMessage({
+        chatId: chat.id,
+        modelId: chat.modelId,
+        providerId: chat.providerId,
+        messages: [{ role: 'user', content: message }],
+        attachments: []
+      });
+      
     } catch (error) {
       console.error('Failed to send message:', error);
       // 如果是模型选择错误，可以在这里显示提示
