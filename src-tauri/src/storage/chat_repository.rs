@@ -47,11 +47,7 @@ impl ChatRepository {
     }
 
     /// 获取聊天列表
-    pub async fn list_chats(
-        &self,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<Chat>, AppError> {
+    pub async fn list_chats(&self, limit: i32, offset: i32) -> Result<Vec<Chat>, AppError> {
         let query = r#"
             SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, artifact_id, created_at, updated_at
             FROM chats ORDER BY updated_at DESC LIMIT $1 OFFSET $2
@@ -164,7 +160,9 @@ impl ChatRepository {
             .bind(chat_id)
             .execute(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to update message stats: {}", e)))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to update message stats: {}", e))
+            })?;
 
         Ok(())
     }

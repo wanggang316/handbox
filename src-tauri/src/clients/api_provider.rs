@@ -118,16 +118,23 @@ impl ApiProvider for OpenAIApiProvider {
         let req_body = self.build_openai_request(&request);
 
         tracing::info!("Sending OpenAI-style chat request to: {}", url);
-        
+
         // 调试：检查认证头
         let auth_header = format!("Bearer {}", provider.api_key);
         let auth_preview = if auth_header.len() > 16 {
-            format!("Bearer {}...{}", &provider.api_key[..4], &provider.api_key[provider.api_key.len()-4..])
+            format!(
+                "Bearer {}...{}",
+                &provider.api_key[..4],
+                &provider.api_key[provider.api_key.len() - 4..]
+            )
         } else {
             "Bearer ***".to_string()
         };
         tracing::info!("Using auth header: {}", auth_preview);
-        tracing::debug!("Request payload: {}", serde_json::to_string_pretty(&req_body).unwrap_or_default());
+        tracing::debug!(
+            "Request payload: {}",
+            serde_json::to_string_pretty(&req_body).unwrap_or_default()
+        );
 
         let response = self
             .client
@@ -194,9 +201,9 @@ impl ApiProvider for OpenAIApiProvider {
             )));
         }
 
-        // 这里需要实现 SSE 流解析逻辑
-        // 为了简化，先返回一个错误，表示流式功能待实现
-        Err(AppError::internal_error("Streaming not yet implemented"))
+        // 目前暂时返回错误，流式功能需要更复杂的 SSE 解析
+        // 这是一个占位实现，在实际项目中应该实现完整的 SSE 流解析
+        Err(AppError::internal_error("Streaming requires SSE parsing - using mock implementation in MessageService instead"))
     }
 
     fn api_type(&self) -> &'static str {

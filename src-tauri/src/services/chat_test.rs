@@ -32,14 +32,14 @@ mod tests {
         let result = chat_service
             .create_chat(
                 "Test Chat".to_string(),
-                Some(0.7),                             // temperature
-                Some(0.9),                             // top_p
-                Some(2048),                            // max_tokens
-                Some(true),                            // stream
-                Some("gpt-4o".to_string()),            // model_id
-                Some("openai".to_string()),            // provider_id
-                Some("System prompt".to_string()),     // system_prompt
-                Some(vec!["server1".to_string()]),     // mcp_servers
+                Some(0.7),                         // temperature
+                Some(0.9),                         // top_p
+                Some(2048),                        // max_tokens
+                Some(true),                        // stream
+                Some("gpt-4o".to_string()),        // model_id
+                Some("openai".to_string()),        // provider_id
+                Some("System prompt".to_string()), // system_prompt
+                Some(vec!["server1".to_string()]), // mcp_servers
             )
             .await;
 
@@ -66,15 +66,35 @@ mod tests {
         let chat_service = ChatService::new(db);
 
         // 首先创建几个聊天
-        let _chat1 = chat_service.create_chat(
-            "Chat 1".to_string(),
-            None, None, None, None, None, None, None, None
-        ).await.unwrap();
+        let _chat1 = chat_service
+            .create_chat(
+                "Chat 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await; // 确保时间戳不同
-        let _chat2 = chat_service.create_chat(
-            "Chat 2".to_string(),
-            None, None, None, None, None, None, None, None
-        ).await.unwrap();
+        let _chat2 = chat_service
+            .create_chat(
+                "Chat 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         let result = chat_service.list_chats(Some(10), Some(0)).await;
 
@@ -82,7 +102,7 @@ mod tests {
         assert!(result.is_ok());
         let chats = result.unwrap();
         assert_eq!(chats.len(), 2);
-        
+
         // 验证聊天按更新时间排序（最新的在前，因为 SQL 用的是 DESC）
         assert_eq!(chats[0].name, "Chat 2");
         assert_eq!(chats[1].name, "Chat 1");
@@ -94,10 +114,20 @@ mod tests {
         let chat_service = ChatService::new(db);
 
         // 先创建一个聊天
-        let created_chat = chat_service.create_chat(
-            "Test Chat".to_string(),
-            None, None, None, None, None, None, None, None
-        ).await.unwrap();
+        let created_chat = chat_service
+            .create_chat(
+                "Test Chat".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         let result = chat_service.get_chat(created_chat.id.clone()).await;
 
@@ -128,21 +158,31 @@ mod tests {
         let chat_service = ChatService::new(db);
 
         // 先创建一个聊天
-        let created_chat = chat_service.create_chat(
-            "Original Name".to_string(),
-            None, None, None, None, None, None, None, None
-        ).await.unwrap();
+        let created_chat = chat_service
+            .create_chat(
+                "Original Name".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         let result = chat_service
             .update_chat(
                 created_chat.id.clone(),
                 Some("Updated Name".to_string()),
-                Some(0.8),                              // temperature
-                Some(0.95),                             // top_p
-                Some(4096),                             // max_tokens
-                Some(false),                            // stream
-                Some("claude-3".to_string()),           // model_id
-                Some("anthropic".to_string()),          // provider_id
+                Some(0.8),                     // temperature
+                Some(0.95),                    // top_p
+                Some(4096),                    // max_tokens
+                Some(false),                   // stream
+                Some("claude-3".to_string()),  // model_id
+                Some("anthropic".to_string()), // provider_id
                 Some("Updated prompt".to_string()),
                 Some(vec!["server1".to_string(), "server2".to_string()]),
             )
@@ -158,8 +198,14 @@ mod tests {
         assert_eq!(updated_chat.stream, Some(false));
         assert_eq!(updated_chat.model_id, Some("claude-3".to_string()));
         assert_eq!(updated_chat.provider_id, Some("anthropic".to_string()));
-        assert_eq!(updated_chat.system_prompt, Some("Updated prompt".to_string()));
-        assert_eq!(updated_chat.mcp_servers, vec!["server1".to_string(), "server2".to_string()]);
+        assert_eq!(
+            updated_chat.system_prompt,
+            Some("Updated prompt".to_string())
+        );
+        assert_eq!(
+            updated_chat.mcp_servers,
+            vec!["server1".to_string(), "server2".to_string()]
+        );
         assert_eq!(updated_chat.id, created_chat.id);
     }
 
@@ -169,10 +215,20 @@ mod tests {
         let chat_service = ChatService::new(db);
 
         // 先创建一个聊天
-        let created_chat = chat_service.create_chat(
-            "Test Chat".to_string(),
-            None, None, None, None, None, None, None, None
-        ).await.unwrap();
+        let created_chat = chat_service
+            .create_chat(
+                "Test Chat".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         let result = chat_service.delete_chat(created_chat.id.clone()).await;
 
@@ -186,5 +242,4 @@ mod tests {
             assert_eq!(error.code, "NOT_FOUND");
         }
     }
-
 }

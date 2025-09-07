@@ -18,16 +18,20 @@ impl MessageRepository {
 
     /// 创建消息
     pub async fn create_message(&self, message: &Message) -> Result<(), AppError> {
-        let attachments_json = if let Some(attachments) = &message.attachments {
-            Some(serde_json::to_string(attachments)
-                .map_err(|e| AppError::validation_error(&format!("Invalid attachments: {}", e)))?)
-        } else {
-            None
-        };
+        let attachments_json =
+            if let Some(attachments) = &message.attachments {
+                Some(serde_json::to_string(attachments).map_err(|e| {
+                    AppError::validation_error(&format!("Invalid attachments: {}", e))
+                })?)
+            } else {
+                None
+            };
 
         let config_json = if let Some(config) = &message.config {
-            Some(serde_json::to_string(config)
-                .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))?)
+            Some(
+                serde_json::to_string(config)
+                    .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))?,
+            )
         } else {
             None
         };
@@ -135,7 +139,10 @@ impl MessageRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to update message: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Message not found: {}", message_id)));
+            return Err(AppError::not_found(&format!(
+                "Message not found: {}",
+                message_id
+            )));
         }
 
         Ok(())
@@ -170,7 +177,9 @@ impl MessageRepository {
             .bind(message_id)
             .execute(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to update message stats: {}", e)))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to update message stats: {}", e))
+            })?;
 
         Ok(())
     }
@@ -184,7 +193,10 @@ impl MessageRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to delete message: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Message not found: {}", message_id)));
+            return Err(AppError::not_found(&format!(
+                "Message not found: {}",
+                message_id
+            )));
         }
 
         Ok(())
@@ -196,7 +208,9 @@ impl MessageRepository {
             .bind(chat_id)
             .execute(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to delete chat messages: {}", e)))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to delete chat messages: {}", e))
+            })?;
 
         Ok(())
     }
@@ -215,11 +229,14 @@ impl MessageRepository {
 
     /// 获取聊天的最后一条消息时间
     pub async fn get_last_message_time(&self, chat_id: &UUID) -> Result<Option<i64>, AppError> {
-        let row = sqlx::query("SELECT MAX(created_at) as last_time FROM messages WHERE chat_id = $1")
-            .bind(chat_id)
-            .fetch_one(self.db.pool())
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to get last message time: {}", e)))?;
+        let row =
+            sqlx::query("SELECT MAX(created_at) as last_time FROM messages WHERE chat_id = $1")
+                .bind(chat_id)
+                .fetch_one(self.db.pool())
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to get last message time: {}", e))
+                })?;
 
         let last_time: Option<i64> = row.try_get("last_time").ok();
         Ok(last_time)
@@ -293,7 +310,7 @@ mod tests {
             .as_millis() as i64;
 
         let chat_id = uuid::Uuid::new_v4().to_string();
-        
+
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
             INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
@@ -351,7 +368,9 @@ mod tests {
         assert_eq!(messages.len(), 1);
 
         // Update content
-        repo.update_message_content(&message.id, "Updated content", now + 1000).await.unwrap();
+        repo.update_message_content(&message.id, "Updated content", now + 1000)
+            .await
+            .unwrap();
 
         let updated = repo.get_message_by_id(&message.id).await.unwrap();
         assert_eq!(updated.unwrap().content, "Updated content");

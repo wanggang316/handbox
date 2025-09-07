@@ -1,38 +1,12 @@
 <script lang="ts">
   import { chatState } from '$lib/states/chat.svelte';
   import { messageStore } from '$lib/states/message.svelte';
-  import { Copy, RotateCcw, Trash2, Edit, User, Bot, Settings } from 'lucide-svelte';
-
-  // 格式化时间戳
-  function formatTime(timestamp: number): string {
-    return new Date(timestamp).toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  }
-
-  // 格式化token使用 (暂时不使用，直接在模板中格式化)
-  // function formatTokens(message: Message): string {
-  //   if (!message.inputTokens && !message.outputTokens) return '';
-  //   
-  //   const parts = [];
-  //   if (message.inputTokens) parts.push(`输入: ${message.inputTokens}`);
-  //   if (message.outputTokens) parts.push(`输出: ${message.outputTokens}`);
-  //   if (message.totalTokens) parts.push(`总计: ${message.totalTokens}`);
-  //   
-  //   return parts.join(' | ');
-  // }
-
-  // 格式化持续时间
-  function formatDuration(duration?: number): string {
-    if (!duration) return '';
-    
-    if (duration < 1000) {
-      return `${duration}ms`;
-    } else {
-      return `${(duration / 1000).toFixed(1)}s`;
-    }
-  }
+  import { Bot } from 'lucide-svelte';
+  
+  // Import child components
+  import UserMessageView from './views/UserMessageView.svelte';
+  import AssistantMessageView from './views/AssistantMessageView.svelte';
+  import StreamingMessageView from './views/StreamingMessageView.svelte';
 
   // 复制消息内容
   async function copyMessage(content: string) {
@@ -160,158 +134,40 @@
       <!-- 消息列表 -->
       <div class="w-full max-w-4xl mx-auto p-4 space-y-6">
         {#each messages as message (message.id)}
-          <div class="group relative">
-            <!-- 消息容器 -->
-            <div class="flex gap-4 {message.role === 'user' ? 'flex-row-reverse' : ''}">
-              <!-- 头像 -->
-              <div class="flex-shrink-0">
-                <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
-                  {#if message.role === 'user'}
-                    <User class="w-4 h-4 text-gray-600" />
-                  {:else if message.role === 'assistant'}
-                    <Bot class="w-4 h-4 text-blue-600" />
-                  {:else}
-                    <Settings class="w-4 h-4 text-purple-600" />
-                  {/if}
-                </div>
-              </div>
-
-              <!-- 消息内容 -->
-              <div class="flex-1 min-w-0 {message.role === 'user' ? 'text-right' : ''}">
-                <!-- 消息气泡 -->
-                <div class="inline-block max-w-full p-4 rounded-2xl {
-                  message.role === 'user' 
-                    ? 'bg-blue-600 text-white' 
-                    : 'bg-gray-100 text-gray-900'
-                } shadow-sm">
-                  <!-- 消息内容 -->
-                  <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
-                    {message.content}
-                  </div>
-
-                  <!-- 模型和性能信息 -->
-                  {#if message.role === 'assistant' && (message.config?.modelId || message.inputTokens || message.duration)}
-                    <div class="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500 space-y-1">
-                      {#if message.config?.modelId}
-                        <div class="flex items-center gap-1">
-                          <span class="font-medium">模型:</span>
-                          <span>{message.config.modelId}</span>
-                          {#if message.config.providerId}
-                            <span class="text-gray-400">({message.config.providerId})</span>
-                          {/if}
-                        </div>
-                      {/if}
-                      
-                      {#if message.inputTokens || message.outputTokens || message.totalTokens}
-                        <div class="flex items-center gap-1">
-                          <span class="font-medium">Token:</span>
-                          <span>
-                            {#if message.inputTokens}输入: {message.inputTokens}{/if}
-                            {#if message.outputTokens} | 输出: {message.outputTokens}{/if}
-                            {#if message.totalTokens} | 总计: {message.totalTokens}{/if}
-                          </span>
-                        </div>
-                      {/if}
-                      
-                      {#if message.duration}
-                        <div class="flex items-center gap-1">
-                          <span class="font-medium">耗时:</span>
-                          <span>{formatDuration(message.duration)}</span>
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
-                </div>
-
-                <!-- 时间戳 -->
-                <div class="mt-2 text-xs text-gray-400 {message.role === 'user' ? 'text-right' : ''}">
-                  {formatTime(message.createdAt)}
-                </div>
-
-                <!-- 消息操作按钮 -->
-                <div class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 {
-                  message.role === 'user' ? 'text-right' : ''
-                }">
-                  <div class="inline-flex gap-1">
-                    <!-- 复制按钮 -->
-                    <button
-                      class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                      title="复制消息"
-                      onclick={() => copyMessage(message.content)}
-                    >
-                      <Copy class="w-3.5 h-3.5" />
-                    </button>
-
-                    {#if message.role === 'assistant'}
-                      <!-- 重新生成按钮 -->
-                      <button
-                        class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="重新生成"
-                        disabled={operatingMessageId === message.id}
-                        onclick={() => regenerateMessage(message.id)}
-                      >
-                        {#if operatingMessageId === message.id}
-                          <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-                        {:else}
-                          <RotateCcw class="w-3.5 h-3.5" />
-                        {/if}
-                      </button>
-                    {/if}
-
-                    {#if message.role === 'user'}
-                      <!-- 编辑按钮 -->
-                      <button
-                        class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                        title="编辑消息"
-                        onclick={() => editMessage(message.id)}
-                      >
-                        <Edit class="w-3.5 h-3.5" />
-                      </button>
-                    {/if}
-
-                    <!-- 删除按钮 -->
-                    <button
-                      class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="删除消息"
-                      disabled={operatingMessageId === message.id}
-                      onclick={() => deleteMessage(message.id)}
-                    >
-                      {#if operatingMessageId === message.id}
-                        <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-                      {:else}
-                        <Trash2 class="w-3.5 h-3.5" />
-                      {/if}
-                    </button>
-                  </div>
+          {#if message.role === 'user'}
+            <UserMessageView 
+              {message}
+              isOperating={operatingMessageId === message.id}
+              onCopy={copyMessage}
+              onEdit={editMessage}
+              onDelete={deleteMessage}
+            />
+          {:else if message.role === 'assistant'}
+            <AssistantMessageView 
+              {message}
+              isOperating={operatingMessageId === message.id}
+              onCopy={copyMessage}
+              onRegenerate={regenerateMessage}
+              onDelete={deleteMessage}
+            />
+          {:else}
+            <!-- System message fallback -->
+            <div class="group relative">
+              <div class="flex gap-4 justify-center">
+                <div class="inline-block max-w-full p-2 px-4 rounded-full bg-purple-100 text-purple-800 text-sm">
+                  {message.content}
                 </div>
               </div>
             </div>
-          </div>
+          {/if}
         {/each}
 
         <!-- 流式响应中的消息 -->
         {#if streamingMessageId && streamingContent}
-          <div class="group relative">
-            <div class="flex gap-4">
-              <!-- 助手头像 -->
-              <div class="flex-shrink-0">
-                <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
-                  <Bot class="w-4 h-4 text-blue-600" />
-                </div>
-              </div>
-
-              <!-- 流式内容 -->
-              <div class="flex-1 min-w-0">
-                <div class="inline-block max-w-full p-4 rounded-2xl bg-gray-100 text-gray-900 shadow-sm">
-                  <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
-                    {streamingContent}
-                    <!-- 打字光标 -->
-                    <span class="animate-pulse">▋</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <StreamingMessageView 
+            content={streamingContent}
+            showCursor={true}
+          />
         {/if}
       </div>
     {/if}

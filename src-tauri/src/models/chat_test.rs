@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::models::{
-        Chat, ChatMessage, ChatRequest, ChatResponse, Message, MessageAttachment,
-        MessageRole, MessageConfig, ModelParameters,
+        Chat, ChatMessage, ChatRequest, ChatResponse, Message, MessageAttachment, MessageConfig,
+        MessageRole, ModelParameters,
     };
     use serde_json;
 
@@ -153,7 +153,6 @@ mod tests {
         assert_eq!(params.context_length, Some(4096));
         assert_eq!(params.stream, Some(true));
     }
-
 
     #[test]
     fn test_message_attachment_serialization() {

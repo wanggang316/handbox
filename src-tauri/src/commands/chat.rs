@@ -4,7 +4,6 @@ use crate::models::{AppError, Chat, UUID};
 use crate::services::ChatService;
 use tauri::State;
 
-
 /// 创建新的聊天
 #[tauri::command]
 pub async fn chat_create(
@@ -92,4 +91,3 @@ pub async fn chat_delete(
 ) -> Result<(), AppError> {
     chat_service.delete_chat(chat_id).await
 }
-

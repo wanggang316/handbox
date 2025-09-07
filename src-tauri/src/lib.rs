@@ -11,7 +11,7 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ArtifactService, ChatService, DatabaseService, MessageService, ProviderService, SearchService, 
+    ArtifactService, ChatService, DatabaseService, MessageService, ProviderService, SearchService,
     SettingsService, StorageService,
 };
 use crate::utils::logger;
@@ -33,9 +33,11 @@ async fn initialize_services(
 
     // 初始化数据库服务
     let db_path = storage_service.get_database_path();
-    let database_service = Arc::new(DatabaseService::new(&db_path)
-        .await
-        .map_err(|e| format!("Failed to initialize database: {e}"))?);
+    let database_service = Arc::new(
+        DatabaseService::new(&db_path)
+            .await
+            .map_err(|e| format!("Failed to initialize database: {e}"))?,
+    );
 
     // 初始化各个服务
     let chat_service = ChatService::new(database_service.clone());
@@ -104,6 +106,7 @@ pub fn run() {
             chat_delete,
             // 消息相关命令
             message_send,
+            message_send_stream,
             message_list,
             message_get,
             message_update,

@@ -1,9 +1,9 @@
 // 供应商服务实现
 
+use crate::clients::{adapt_model, create_llm_client};
 use crate::models::{
     AppError, Model, Provider, ProviderConfig, ProviderWithModels, Timestamp, UUID,
 };
-use crate::clients::{adapt_model, create_llm_client};
 use crate::services::DatabaseService;
 use crate::storage::ProviderRepository;
 use std::sync::Arc;

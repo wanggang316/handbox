@@ -11,7 +11,10 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         println!("db_path: {:?}", db_path);
         let db_service = DatabaseService::new(&db_path).await.unwrap();
-        (ProviderService::new(std::sync::Arc::new(db_service)), temp_dir)
+        (
+            ProviderService::new(std::sync::Arc::new(db_service)),
+            temp_dir,
+        )
     }
 
     #[tokio::test]

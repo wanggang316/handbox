@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ChatMessage, ChatRequest, MessageRole, ModelParameters, MessageConfig};
+    use crate::models::{ChatMessage, ChatRequest, MessageConfig, MessageRole, ModelParameters};
     use crate::services::{ChatService, DatabaseService, MessageService};
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -19,13 +19,23 @@ mod tests {
         let db = create_test_database_service().await;
         let chat_service = ChatService::new(db.clone());
         let message_service = MessageService::new(db);
-        
+
         // 创建一个测试聊天
-        let chat = chat_service.create_chat(
-            "Test Chat".to_string(),
-            None, None, None, None, None, None, None, None
-        ).await.unwrap();
-        
+        let chat = chat_service
+            .create_chat(
+                "Test Chat".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
         (chat_service, message_service, chat.id)
     }
 
@@ -91,7 +101,9 @@ mod tests {
     async fn test_get_message_not_found() {
         let (_chat_service, message_service, _chat_id) = setup_test_services().await;
 
-        let result = message_service.get_message("nonexistent_message".to_string()).await;
+        let result = message_service
+            .get_message("nonexistent_message".to_string())
+            .await;
 
         // 验证返回未找到错误
         assert!(result.is_err());

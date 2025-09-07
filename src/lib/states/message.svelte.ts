@@ -111,7 +111,12 @@ class MessageStore {
 
   // 更新流式内容
   appendStreamingContent(content: string) {
-    this.state.streamingContent += content;
+    this.state.streamingContent = content; // 直接设置完整内容，因为后端发送的是累积内容
+  }
+
+  // 设置流式内容
+  setStreamingContent(content: string) {
+    this.state.streamingContent = content;
   }
 
   // 完成流式响应
@@ -190,7 +195,7 @@ class MessageStore {
   }
 
   /**
-   * 发送消息
+   * 发送消息（使用流式响应）
    */
   async sendMessage(request: ChatRequest): Promise<void> {
     if (!request.chatId) {
@@ -217,36 +222,53 @@ class MessageStore {
       };
       
       this.addMessage(request.chatId, userMessage);
-      
-      // 发送到后端并获取响应
-      const response = await messageApi.sendMessage(request);
-      
-      // 添加助手回复消息到本地状态
-      const assistantMessage: Message = {
-        id: response.messageId,
-        chatId: request.chatId,
-        role: 'assistant',
-        content: response.content,
-        config: {
-          modelId: response.modelId,
-          providerId: response.providerId,
-          stream: false,
+
+      // 设置流式响应参数
+      const streamRequest = { ...request, parameters: { ...request.parameters, stream: true } };
+
+      // 设置流式事件监听器
+      messageApi.listenToStreamEvents({
+        onStart: (data) => {
+          console.log('Stream started:', data);
+          this.startStreaming(data.messageId);
         },
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        totalTokens: response.totalTokens,
-        duration: response.duration,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-      
-      this.addMessage(request.chatId, assistantMessage);
+        onChunk: (data) => {
+          console.log('Stream chunk:', data.content);
+          this.setStreamingContent(data.content);
+        },
+        onEnd: (data) => {
+          console.log('Stream ended:', data);
+          // 创建响应对象
+          const response: ChatResponse = {
+            chatId: data.chatId,
+            messageId: data.streamId, // 使用 streamId 作为 messageId
+            content: data.finalContent,
+            modelId: data.modelId,
+            providerId: data.providerId,
+          };
+          this.finishStreaming(request.chatId!, response);
+          this.setSending(false);
+        },
+        onError: (error) => {
+          console.error('Stream error:', error);
+          this.setError('流式响应错误');
+          this.setSending(false);
+        }
+      });
+
+      // 发送流式消息
+      const streamId = await messageApi.sendStreamMessage(streamRequest);
+      console.log('Stream ID:', streamId);
+
+      // 稍后清理监听器（在流完成后）
+      // unlistenPromise.then(unlisten => {
+      //   // 监听器会在流结束后自动清理
+      // });
       
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '发送消息失败');
-      throw error;
-    } finally {
       this.setSending(false);
+      throw error;
     }
   }
 

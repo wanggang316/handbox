@@ -111,7 +111,7 @@ pub struct Chat {
     pub name: String,
     pub last_message_at: Option<Timestamp>,
     pub message_count: i32,
-    
+
     // Chat-level configuration (default values)
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -121,12 +121,11 @@ pub struct Chat {
     pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<String>,
-    
+
     pub artifact_id: Option<UUID>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
-
 
 /// 聊天请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
