@@ -1,6 +1,6 @@
 // 消息服务实现
 
-use crate::models::{AppError, ChatRequest, ChatResponse, Message, MessageRole, MessageAttachment, UUID};
+use crate::models::{AppError, ChatRequest, ChatResponse, Message, MessageRole, MessageAttachment, MessageConfig, UUID};
 use crate::services::{DatabaseService, ProviderService};
 use crate::storage::MessageRepository;
 use crate::clients::llm_client::create_llm_client;
@@ -67,12 +67,16 @@ impl MessageService {
             chat_id: chat_id.clone(),
             role: MessageRole::User,
             content: last_message.content.clone(),
-            model_id: None, // 在测试中避免外键约束
-            provider_id: None, // 在测试中避免外键约束
-            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
-            top_p: request.parameters.as_ref().and_then(|p| p.top_p),
-            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
-            stream: request.parameters.as_ref().and_then(|p| p.stream),
+            config: Some(MessageConfig {
+                temperature: request.parameters.as_ref().and_then(|p| p.temperature),
+                top_p: request.parameters.as_ref().and_then(|p| p.top_p),
+                max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
+                stream: request.parameters.as_ref().and_then(|p| p.stream),
+                model_id: Some(request.model_id.clone()),
+                provider_id: Some(request.provider_id.clone()),
+                system_prompt: None, // 系统提示由聊天级别设置决定
+                mcp_servers: None,  // MCP 服务器由聊天级别设置决定
+            }),
             attachments: request.attachments.as_ref().map(|attachments| {
                 attachments.iter().map(|att| MessageAttachment {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -110,12 +114,16 @@ impl MessageService {
             chat_id: chat_id.clone(),
             role: MessageRole::Assistant,
             content: llm_response.content.clone(),
-            model_id: Some(request.model_id.clone()),
-            provider_id: Some(request.provider_id.clone()),
-            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
-            top_p: request.parameters.as_ref().and_then(|p| p.top_p),
-            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
-            stream: request.parameters.as_ref().and_then(|p| p.stream),
+            config: Some(MessageConfig {
+                temperature: request.parameters.as_ref().and_then(|p| p.temperature),
+                top_p: request.parameters.as_ref().and_then(|p| p.top_p),
+                max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
+                stream: request.parameters.as_ref().and_then(|p| p.stream),
+                model_id: Some(request.model_id.clone()),
+                provider_id: Some(request.provider_id.clone()),
+                system_prompt: None,
+                mcp_servers: None,
+            }),
             attachments: None,
             input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
             output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
@@ -347,17 +355,18 @@ impl MessageService {
         let chat_messages = self.get_messages(message.chat_id.clone(), None, None).await?;
         
         // 构造重新生成请求（使用原始请求参数）
+        let config = message.config.as_ref();
         let regenerate_request = ChatRequest {
             chat_id: Some(message.chat_id.clone()),
             artifact_id: None,
-            model_id: message.model_id.clone().unwrap_or_default(),
-            provider_id: message.provider_id.clone().unwrap_or_default(),
+            model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
+            provider_id: config.and_then(|c| c.provider_id.clone()).unwrap_or_default(),
             parameters: Some(crate::models::ModelParameters {
-                temperature: message.temperature,
-                top_p: message.top_p,
-                max_tokens: message.max_tokens,
+                temperature: config.and_then(|c| c.temperature),
+                top_p: config.and_then(|c| c.top_p),
+                max_tokens: config.and_then(|c| c.max_tokens),
                 context_length: None,
-                stream: message.stream,
+                stream: config.and_then(|c| c.stream),
             }),
             messages: chat_messages.iter()
                 .filter(|m| m.role != MessageRole::Assistant || m.id != message_id) // 排除要重新生成的消息
@@ -386,8 +395,8 @@ impl MessageService {
             chat_id: message.chat_id,
             message_id,
             content: new_content,
-            model_id: message.model_id.unwrap_or_default(),
-            provider_id: message.provider_id.unwrap_or_default(),
+            model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
+            provider_id: config.and_then(|c| c.provider_id.clone()).unwrap_or_default(),
             input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
             output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
             total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),

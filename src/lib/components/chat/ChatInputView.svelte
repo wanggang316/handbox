@@ -105,6 +105,6 @@
   selectedModel={currentModel}
   onModelSelect={(model) => {
     // 通过 chatState 更新当前聊天的模型
-    chatState.updateCurrentChatModel(model.id, model.provider_id);
+    chatState.updateChatModel(model.id, model.provider_id);
   }}
 />

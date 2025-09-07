@@ -22,13 +22,19 @@ impl ChatRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
         let query = r#"
-            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO chats (id, name, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         "#;
 
         sqlx::query(query)
             .bind(&chat.id)
             .bind(&chat.name)
+            .bind(chat.temperature)
+            .bind(chat.top_p)
+            .bind(chat.max_tokens)
+            .bind(chat.stream)
+            .bind(&chat.model_id)
+            .bind(&chat.provider_id)
             .bind(&chat.system_prompt)
             .bind(&mcp_servers_json)
             .bind(chat.created_at)
@@ -47,7 +53,7 @@ impl ChatRepository {
         offset: i32,
     ) -> Result<Vec<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, system_prompt, mcp_servers, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, artifact_id, created_at, updated_at
             FROM chats ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -69,7 +75,7 @@ impl ChatRepository {
     /// 根据 ID 获取聊天
     pub async fn get_chat_by_id(&self, chat_id: &UUID) -> Result<Option<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, system_prompt, mcp_servers, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, artifact_id, created_at, updated_at
             FROM chats WHERE id = $1
         "#;
 
@@ -92,12 +98,18 @@ impl ChatRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
         let query = r#"
-            UPDATE chats SET name = $1, system_prompt = $2, mcp_servers = $3, updated_at = $4
-            WHERE id = $5
+            UPDATE chats SET name = $1, temperature = $2, top_p = $3, max_tokens = $4, stream = $5, model_id = $6, provider_id = $7, system_prompt = $8, mcp_servers = $9, updated_at = $10
+            WHERE id = $11
         "#;
 
         let result = sqlx::query(query)
             .bind(&chat.name)
+            .bind(chat.temperature)
+            .bind(chat.top_p)
+            .bind(chat.max_tokens)
+            .bind(chat.stream)
+            .bind(&chat.model_id)
+            .bind(&chat.provider_id)
             .bind(&chat.system_prompt)
             .bind(&mcp_servers_json)
             .bind(chat.updated_at)
@@ -171,6 +183,12 @@ impl ChatRepository {
             name: row.try_get("name")?,
             last_message_at: row.try_get("last_message_at").ok(),
             message_count: row.try_get("message_count")?,
+            temperature: row.try_get("temperature").ok(),
+            top_p: row.try_get("top_p").ok(),
+            max_tokens: row.try_get("max_tokens").ok(),
+            stream: row.try_get("stream").ok(),
+            model_id: row.try_get("model_id").ok(),
+            provider_id: row.try_get("provider_id").ok(),
             system_prompt: row.try_get("system_prompt").ok(),
             mcp_servers,
             artifact_id: row.try_get("artifact_id").ok(),
@@ -208,6 +226,12 @@ mod tests {
             name: "Test Chat".to_string(),
             last_message_at: None,
             message_count: 0,
+            temperature: Some(0.7),
+            top_p: Some(0.9),
+            max_tokens: Some(2048),
+            stream: Some(true),
+            model_id: Some("gpt-4o".to_string()),
+            provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant.".to_string()),
             mcp_servers: vec!["server1".to_string(), "server2".to_string()],
             artifact_id: None,

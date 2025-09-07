@@ -10,15 +10,27 @@ import type {
 
 /**
  * 创建新的聊天
- * 后端签名: chat_create(name, system_prompt?, mcp_servers?)
+ * 后端签名: chat_create(name, temperature?, top_p?, max_tokens?, stream?, model_id?, provider_id?, system_prompt?, mcp_servers?)
  */
 export async function createChat(
   name: string,
+  temperature?: number,
+  topP?: number,
+  maxTokens?: number,
+  stream?: boolean,
+  modelId?: string,
+  providerId?: string,
   systemPrompt?: string,
   mcpServers?: string[]
 ): Promise<Chat> {
   const payload = {
     name,
+    temperature,
+    top_p: topP,
+    max_tokens: maxTokens,
+    stream,
+    model_id: modelId,
+    provider_id: providerId,
     system_prompt: systemPrompt,
     mcp_servers: mcpServers,
   };
@@ -45,17 +57,23 @@ export async function getChat(chatId: UUID): Promise<Chat> {
 
 /**
  * 更新聊天
- * 后端签名: chat_update(chat_id, name?, system_prompt?, mcp_servers?)
+ * 后端签名: chat_update(chat_id, name?, temperature?, top_p?, max_tokens?, stream?, model_id?, provider_id?, system_prompt?, mcp_servers?)
  */
 export async function updateChat(
   chatId: UUID,
-  updates: Partial<Pick<Chat, 'name' | 'systemPrompt'>> & { mcpServers?: string[] }
+  updates: Partial<Pick<Chat, 'name' | 'temperature' | 'topP' | 'maxTokens' | 'stream' | 'modelId' | 'providerId' | 'systemPrompt'>> & { mcpServers?: string[] }
 ): Promise<Chat> {
   const payload = {
-    chat_id: chatId,
+    chatId: chatId,
     name: updates.name,
-    system_prompt: updates.systemPrompt,
-    mcp_servers: updates.mcpServers,
+    temperature: updates.temperature,
+    topP: updates.topP,
+    maxTokens: updates.maxTokens,
+    stream: updates.stream,
+    modelId: updates.modelId,
+    providerId: updates.providerId,
+    systemPrompt: updates.systemPrompt,
+    mcpServers: updates.mcpServers,
   };
   return apiCall<Chat>('chat_update', payload);
 }

@@ -138,9 +138,11 @@ class MessageStore {
         chatId: response.chatId,
         role: 'assistant',
         content: response.content,
-        modelId: response.modelId,
-        providerId: response.providerId,
-        stream: false, // 响应消息不是流式的
+        config: {
+          modelId: response.modelId,
+          providerId: response.providerId,
+          stream: false,
+        },
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,
@@ -205,9 +207,11 @@ class MessageStore {
         chatId: request.chatId,
         role: 'user',
         content: request.messages[0]?.content || '',
-        modelId: request.modelId,
-        providerId: request.providerId,
-        stream: true,
+        config: {
+          modelId: request.modelId,
+          providerId: request.providerId,
+          stream: true,
+        },
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
@@ -223,9 +227,11 @@ class MessageStore {
         chatId: request.chatId,
         role: 'assistant',
         content: response.content,
-        modelId: response.modelId,
-        providerId: response.providerId,
-        stream: false,
+        config: {
+          modelId: response.modelId,
+          providerId: response.providerId,
+          stream: false,
+        },
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,

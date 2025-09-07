@@ -7,21 +7,26 @@ import type { BaseEntity, UUID, Timestamp } from './index';
 // 消息角色
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+// 消息配置 - 每条消息可以有独立的配置参数
+export interface MessageConfig {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stream?: boolean;
+  modelId?: string;
+  providerId?: string;
+  systemPrompt?: string;
+  mcpServers?: string[];
+}
+
 // 消息类型
 export interface Message extends BaseEntity {
   chatId: UUID;
   role: MessageRole;
   content: string;
   
-  // 模型信息在消息级别
-  modelId: string;
-  providerId: string;
-  
-  // 模型参数
-  temperature?: number;
-  topP?: number;
-  maxTokens?: number;
-  stream: boolean;
+  // 每条消息的配置参数
+  config?: MessageConfig;
   
   // 附件
   attachments?: MessageAttachment[];
@@ -49,12 +54,18 @@ export interface Chat extends BaseEntity {
   name: string;
   lastMessageAt?: Timestamp;
   messageCount: number;
-  systemPrompt?: string;
-  mcpServers: string[];
-  artifactId?: UUID;
-  // 直接在 Chat 上添加模型信息，简化访问
+  
+  // Chat-level configuration (default values)
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stream?: boolean;
   modelId?: string;
   providerId?: string;
+  systemPrompt?: string;
+  mcpServers: string[];
+  
+  artifactId?: UUID;
 }
 
 

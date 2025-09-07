@@ -2,7 +2,7 @@
 mod tests {
     use crate::models::{
         Chat, ChatMessage, ChatRequest, ChatResponse, Message, MessageAttachment,
-        MessageRole, ModelParameters,
+        MessageRole, MessageConfig, ModelParameters,
     };
     use serde_json;
 
@@ -13,12 +13,16 @@ mod tests {
             chat_id: "chat_456".to_string(),
             role: MessageRole::User,
             content: "Hello world".to_string(),
-            model_id: Some("gpt-4".to_string()),
-            provider_id: Some("openai".to_string()),
-            temperature: Some(0.7),
-            top_p: Some(0.9),
-            max_tokens: Some(2048),
-            stream: Some(true),
+            config: Some(MessageConfig {
+                temperature: Some(0.7),
+                top_p: Some(0.9),
+                max_tokens: Some(2048),
+                stream: Some(true),
+                model_id: Some("gpt-4".to_string()),
+                provider_id: Some("openai".to_string()),
+                system_prompt: None,
+                mcp_servers: None,
+            }),
             attachments: None,
             input_tokens: Some(100),
             output_tokens: Some(200),
@@ -36,8 +40,7 @@ mod tests {
 
         assert_eq!(message.id, deserialized.id);
         assert_eq!(message.chat_id, deserialized.chat_id);
-        assert_eq!(message.model_id, deserialized.model_id);
-        assert_eq!(message.provider_id, deserialized.provider_id);
+        assert_eq!(message.config, deserialized.config);
     }
 
     #[test]
@@ -47,6 +50,12 @@ mod tests {
             name: "Test Chat".to_string(),
             last_message_at: Some(1693456789000),
             message_count: 5,
+            temperature: Some(0.7),
+            top_p: Some(0.9),
+            max_tokens: Some(2048),
+            stream: Some(true),
+            model_id: Some("gpt-4o".to_string()),
+            provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant".to_string()),
             mcp_servers: vec!["server1".to_string(), "server2".to_string()],
             artifact_id: Some("artifact_456".to_string()),

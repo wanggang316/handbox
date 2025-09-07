@@ -128,40 +128,35 @@ class ChatState {
   }
 
   /**
-   * 更新当前聊天的模型
+   * 更新当前聊天的模型信息并保存到后端
    */
-  updateCurrentChatModel(modelId: string, providerId: string): void {
-    if (this.currentChat) {
+  async updateChatModel(modelId: string, providerId: string): Promise<void> {
+    if (!this.currentChat) {
+      throw new Error('No current chat selected');
+    }
+
+    try {
+      // 更新本地状态
       this.currentChat.modelId = modelId;
       this.currentChat.providerId = providerId;
+
+      // 保存到后端
+      await chatApi.updateChat(this.currentChat.id, {
+        name: this.currentChat.name,
+        modelId,
+        providerId,
+        temperature: this.currentChat.temperature,
+        topP: this.currentChat.topP,
+        maxTokens: this.currentChat.maxTokens,
+        stream: this.currentChat.stream,
+        systemPrompt: this.currentChat.systemPrompt,
+        mcpServers: this.currentChat.mcpServers
+      });
+    } catch (error) {
+      // 回滚本地状态
+      this.loadChats(); // 重新加载以恢复状态
+      throw error;
     }
-  }
-
-  /**
-   * 从最后一个用户消息中填充当前聊天的模型信息
-   */
-  fillCurrentChatModelFromLastUserMessage(): void {
-    if (!this.currentChat) {
-      return;
-    }
-
-    const messages = this.currentMessages;
-    if (messages.length === 0) {
-      return;
-    }
-
-    // 获取最后一个用户消息
-    const lastUserMessage = messages
-      .filter(msg => msg.role === 'user')
-      .pop();
-
-    if (!lastUserMessage || !lastUserMessage.modelId || !lastUserMessage.providerId) {
-      return;
-    }
-
-    // 填充当前聊天的模型信息
-    this.currentChat.modelId = lastUserMessage.modelId;
-    this.currentChat.providerId = lastUserMessage.providerId;
   }
 
   /**
@@ -235,9 +230,6 @@ class ChatState {
       
       console.log('Current chat >>> :', this.currentChat);
       console.log('Current chat messages >>> :', this.currentMessages);
-
-      this.fillCurrentChatModelFromLastUserMessage();
-      console.log('Current chat:', this.currentChat.modelId ?? '');
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '切换聊天失败';
       throw error;

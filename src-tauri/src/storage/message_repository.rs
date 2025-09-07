@@ -1,6 +1,6 @@
 // Message 数据访问层
 
-use crate::models::{AppError, Message, MessageRole, UUID};
+use crate::models::{AppError, Message, MessageRole, MessageConfig, UUID};
 use crate::services::DatabaseService;
 use sqlx::Row;
 use std::sync::Arc;
@@ -25,6 +25,13 @@ impl MessageRepository {
             None
         };
 
+        let config_json = if let Some(config) = &message.config {
+            Some(serde_json::to_string(config)
+                .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))?)
+        } else {
+            None
+        };
+
         let role_str = match message.role {
             MessageRole::User => "user",
             MessageRole::Assistant => "assistant",
@@ -32,11 +39,10 @@ impl MessageRepository {
         };
 
         let query = r#"
-            INSERT INTO messages (id, chat_id, role, content, model_id, provider_id, 
-                                temperature, top_p, max_tokens, stream, attachments, 
+            INSERT INTO messages (id, chat_id, role, content, config, attachments, 
                                 input_tokens, output_tokens, total_tokens, start_time, 
                                 end_time, duration, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         "#;
 
         sqlx::query(query)
@@ -44,12 +50,7 @@ impl MessageRepository {
             .bind(&message.chat_id)
             .bind(role_str)
             .bind(&message.content)
-            .bind(&message.model_id)
-            .bind(&message.provider_id)
-            .bind(message.temperature)
-            .bind(message.top_p)
-            .bind(message.max_tokens)
-            .bind(message.stream)
+            .bind(&config_json)
             .bind(&attachments_json)
             .bind(message.input_tokens)
             .bind(message.output_tokens)
@@ -74,9 +75,8 @@ impl MessageRepository {
         offset: i32,
     ) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, model_id, provider_id, temperature, top_p, 
-                   max_tokens, stream, attachments, input_tokens, output_tokens, total_tokens, 
-                   start_time, end_time, duration, created_at, updated_at
+            SELECT id, chat_id, role, content, config, attachments, input_tokens, output_tokens, 
+                   total_tokens, start_time, end_time, duration, created_at, updated_at
             FROM messages WHERE chat_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3
         "#;
 
@@ -99,9 +99,8 @@ impl MessageRepository {
     /// 根据 ID 获取消息
     pub async fn get_message_by_id(&self, message_id: &UUID) -> Result<Option<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, model_id, provider_id, temperature, top_p, 
-                   max_tokens, stream, attachments, input_tokens, output_tokens, total_tokens, 
-                   start_time, end_time, duration, created_at, updated_at
+            SELECT id, chat_id, role, content, config, attachments, input_tokens, output_tokens, 
+                   total_tokens, start_time, end_time, duration, created_at, updated_at
             FROM messages WHERE id = $1
         "#;
 
@@ -243,17 +242,19 @@ impl MessageRepository {
             None
         };
 
+        let config_json: Option<String> = row.try_get("config").ok();
+        let config = if let Some(json) = config_json {
+            serde_json::from_str(&json).unwrap_or_default()
+        } else {
+            None
+        };
+
         Ok(Message {
             id: row.try_get("id").unwrap_or_default(),
             chat_id: row.try_get("chat_id").unwrap_or_default(),
             role,
             content: row.try_get("content").unwrap_or_default(),
-            model_id: row.try_get("model_id").ok(),
-            provider_id: row.try_get("provider_id").ok(),
-            temperature: row.try_get("temperature").ok(),
-            top_p: row.try_get("top_p").ok(),
-            max_tokens: row.try_get("max_tokens").ok(),
-            stream: row.try_get("stream").ok(),
+            config,
             attachments,
             input_tokens: row.try_get("input_tokens").ok(),
             output_tokens: row.try_get("output_tokens").ok(),
@@ -314,12 +315,16 @@ mod tests {
             chat_id: chat_id.clone(),
             role: MessageRole::User,
             content: "Hello, world!".to_string(),
-            model_id: None,
-            provider_id: None,
-            temperature: Some(0.7),
-            top_p: Some(0.9),
-            max_tokens: Some(1000),
-            stream: Some(true),
+            config: Some(MessageConfig {
+                temperature: Some(0.7),
+                top_p: Some(0.9),
+                max_tokens: Some(1000),
+                stream: Some(true),
+                model_id: Some("gpt-4o".to_string()),
+                provider_id: Some("openai".to_string()),
+                system_prompt: None,
+                mcp_servers: None,
+            }),
             attachments: None,
             input_tokens: None,
             output_tokens: None,

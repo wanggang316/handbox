@@ -9,12 +9,28 @@ use tauri::State;
 #[tauri::command]
 pub async fn chat_create(
     name: String,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    max_tokens: Option<i32>,
+    stream: Option<bool>,
+    model_id: Option<String>,
+    provider_id: Option<String>,
     system_prompt: Option<String>,
     mcp_servers: Option<Vec<String>>,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
     chat_service
-        .create_chat(name, system_prompt, mcp_servers)
+        .create_chat(
+            name,
+            temperature,
+            top_p,
+            max_tokens,
+            stream,
+            model_id,
+            provider_id,
+            system_prompt,
+            mcp_servers,
+        )
         .await
 }
 
@@ -42,12 +58,29 @@ pub async fn chat_get(
 pub async fn chat_update(
     chat_id: UUID,
     name: Option<String>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    max_tokens: Option<i32>,
+    stream: Option<bool>,
+    model_id: Option<String>,
+    provider_id: Option<String>,
     system_prompt: Option<String>,
     mcp_servers: Option<Vec<String>>,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
     chat_service
-        .update_chat(chat_id, name, system_prompt, mcp_servers)
+        .update_chat(
+            chat_id,
+            name,
+            temperature,
+            top_p,
+            max_tokens,
+            stream,
+            model_id,
+            provider_id,
+            system_prompt,
+            mcp_servers,
+        )
         .await
 }
 

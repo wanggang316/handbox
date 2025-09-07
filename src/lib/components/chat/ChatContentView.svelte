@@ -190,14 +190,14 @@
                   </div>
 
                   <!-- 模型和性能信息 -->
-                  {#if message.role === 'assistant' && (message.modelId || message.inputTokens || message.duration)}
+                  {#if message.role === 'assistant' && (message.config?.modelId || message.inputTokens || message.duration)}
                     <div class="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500 space-y-1">
-                      {#if message.modelId}
+                      {#if message.config?.modelId}
                         <div class="flex items-center gap-1">
                           <span class="font-medium">模型:</span>
-                          <span>{message.modelId}</span>
-                          {#if message.providerId}
-                            <span class="text-gray-400">({message.providerId})</span>
+                          <span>{message.config.modelId}</span>
+                          {#if message.config.providerId}
+                            <span class="text-gray-400">({message.config.providerId})</span>
                           {/if}
                         </div>
                       {/if}

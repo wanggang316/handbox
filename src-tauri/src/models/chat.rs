@@ -32,6 +32,20 @@ pub struct MessageMetadata {
     pub extra: Option<serde_json::Value>, // 用于存储其他元数据
 }
 
+/// 消息配置 - 每条消息可以有独立的配置参数
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageConfig {
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_tokens: Option<i32>,
+    pub stream: Option<bool>,
+    pub model_id: Option<String>,
+    pub provider_id: Option<String>,
+    pub system_prompt: Option<String>,
+    pub mcp_servers: Option<Vec<String>>,
+}
+
 /// 消息实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,15 +55,8 @@ pub struct Message {
     pub role: MessageRole,
     pub content: String,
 
-    // Model information at message level
-    pub model_id: Option<String>,
-    pub provider_id: Option<String>,
-
-    // Model parameters for this specific message
-    pub temperature: Option<f32>,
-    pub top_p: Option<f32>,
-    pub max_tokens: Option<i32>,
-    pub stream: Option<bool>,
+    // Per-message configuration stored as JSON
+    pub config: Option<MessageConfig>,
 
     pub attachments: Option<Vec<MessageAttachment>>,
 
@@ -104,8 +111,17 @@ pub struct Chat {
     pub name: String,
     pub last_message_at: Option<Timestamp>,
     pub message_count: i32,
+    
+    // Chat-level configuration (default values)
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_tokens: Option<i32>,
+    pub stream: Option<bool>,
+    pub model_id: Option<String>,
+    pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<String>,
+    
     pub artifact_id: Option<UUID>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
