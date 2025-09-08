@@ -39,6 +39,7 @@ pub async fn message_list(
                 "[message_list] Command completed successfully, returned {} messages",
                 messages.len()
             );
+            tracing::info!("[message_list] Messages: {:?}", messages);
             Ok(messages)
         }
         Err(e) => {

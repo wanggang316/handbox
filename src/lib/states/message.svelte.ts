@@ -3,11 +3,15 @@
  */
 
 import type { Message, ChatResponse, ChatRequest } from '$lib/types/chat';
+import type { FrontendProviderConfig } from '$lib/types';
 import * as messageApi from '$lib/api/message';
+import { getProviderConfigById, getProviderIconById } from './provider.svelte';
 
 interface MessageState {
   // 按 chatId 组织消息
   messagesByChat: Record<string, Message[]>;
+  // providerId 到 providerConfig 的映射字典（用于快速获取 provider 图标等信息）
+  providerConfigsCache: Record<string, FrontendProviderConfig>;
   isLoading: boolean;
   isSending: boolean;
   error: string | null;
@@ -19,6 +23,7 @@ interface MessageState {
 class MessageStore {
   private state = $state<MessageState>({
     messagesByChat: {},
+    providerConfigsCache: {},
     isLoading: false,
     isSending: false,
     error: null,
@@ -52,6 +57,44 @@ class MessageStore {
     return currentChatId ? this.getMessages(currentChatId) : [];
   }
 
+  // 根据 providerId 获取 providerConfig（带缓存）
+  getProviderConfig(providerId: string): FrontendProviderConfig | undefined {
+    // 先从缓存中查找
+    if (this.state.providerConfigsCache[providerId]) {
+      return this.state.providerConfigsCache[providerId];
+    }
+
+    // 缓存中没有，从 providerState 中获取
+    const config = getProviderConfigById(providerId);
+    if (config) {
+      // 缓存结果
+      this.state.providerConfigsCache[providerId] = config;
+      return config;
+    }
+
+    return undefined;
+  }
+
+  // 根据 providerId 获取 provider 图标
+  getProviderIcon(providerId: string): string | undefined {
+    const config = this.getProviderConfig(providerId);
+    return config?.icon || undefined;
+  }
+
+  // 批量缓存 providerConfigs（在加载消息时调用）
+  private cacheProviderConfigs(messages: Message[]): void {
+    const providerIds = new Set(messages.map(m => m.config?.providerId).filter(Boolean) as string[]);
+    
+    for (const providerId of providerIds) {
+      if (!this.state.providerConfigsCache[providerId]) {
+        const config = getProviderConfigById(providerId);
+        if (config) {
+          this.state.providerConfigsCache[providerId] = config;
+        }
+      }
+    }
+  }
+
   // 获取指定聊天的消息
   getMessages(chatId: string): Message[] {
     return this.state.messagesByChat[chatId] || [];
@@ -79,6 +122,8 @@ class MessageStore {
   // 设置聊天的消息列表
   setMessages(chatId: string, messages: Message[]) {
     this.state.messagesByChat[chatId] = messages;
+    // 缓存消息中的 providerConfigs
+    this.cacheProviderConfigs(messages);
   }
 
   // 添加消息到指定聊天
@@ -87,6 +132,8 @@ class MessageStore {
       this.state.messagesByChat[chatId] = [];
     }
     this.state.messagesByChat[chatId].push(message);
+    // 缓存新消息的 providerConfig
+    this.cacheProviderConfigs([message]);
   }
 
   // 更新消息
@@ -192,6 +239,8 @@ class MessageStore {
       this.setError(null);
       const messages = await messageApi.getMessages(chatId);
       this.setMessages(chatId, messages);
+
+      console.log("messages >>> :", messages);
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '加载消息失败');
       throw error;
@@ -304,6 +353,7 @@ class MessageStore {
   // 清理所有状态
   clear() {
     this.state.messagesByChat = {};
+    this.state.providerConfigsCache = {};
     this.state.isLoading = false;
     this.state.isSending = false;
     this.state.error = null;

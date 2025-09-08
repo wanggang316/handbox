@@ -2,7 +2,7 @@
  * 供应商相关状态管理 - 使用 Svelte 5 runes
  */
 
-import type { Provider, Model, ProviderConfig, FrontendProviderConfig, UUID } from '../types';
+import type { Provider, Model, ProviderConfig, FrontendProviderConfig, UUID, ProviderWithModels, ModelWithProvider } from '../types';
 import * as providerApi from '../api/provider';
 
 // 供应商配置模板（从后端获取）
@@ -26,6 +26,25 @@ export function getProviderIcon(provider: Provider): string | undefined {
   return config?.icon || undefined;
 }
 
+// 根据 providerId 获取供应商配置
+export function getProviderConfigById(providerId: string): FrontendProviderConfig | undefined {
+  // 先从当前 provider 列表中查找对应的供应商
+  const provider = providerState.providers.find(p => p.id === providerId) || 
+                  providerState.providersWithModels.find(p => p.id === providerId);
+  
+  if (provider) {
+    return getProviderConfig(provider.provider_type);
+  }
+  
+  return undefined;
+}
+
+// 根据 providerId 获取供应商图标
+export function getProviderIconById(providerId: string): string | undefined {
+  const config = getProviderConfigById(providerId);
+  return config?.icon || undefined;
+}
+
 // 全局状态对象
 export const providerState = $state({
   // 供应商列表
@@ -40,8 +59,12 @@ export const providerState = $state({
   // 所有可用模型
   currentModels: [] as Model[],
   
+  // 带模型的供应商列表（用于聊天功能）
+  providersWithModels: [] as ProviderWithModels[],
+  
   // 加载状态
   isLoading: false,
+  isLoadingWithModels: false,
 
   // 获取模型列表状态
   isFetchingModels: null as UUID | null,
@@ -53,6 +76,22 @@ export const providerState = $state({
 // 派生状态：已启用的供应商（函数形式）
 export function getEnabledProviders(): Provider[] {
   return providerState.providers.filter(p => p.enabled);
+}
+
+// 派生状态：所有可用模型（带供应商信息）
+export function getAllModels(): ModelWithProvider[] {
+  return providerState.providersWithModels.flatMap(provider => 
+    provider.models.map(model => ({
+      ...model,
+      providerName: provider.name,
+      providerType: provider.provider_type
+    }))
+  );
+}
+
+// 派生状态：收藏模型
+export function getFavoriteModels(): ModelWithProvider[] {
+  return getAllModels().filter(model => model.favorite);
 }
 
 
@@ -184,6 +223,25 @@ export const providerActions = {
       throw error;
     } finally {
       providerState.isLoading = false;
+    }
+  },
+
+  /**
+   * 加载带模型的供应商列表（用于聊天功能）
+   */
+  async loadProvidersWithModels(forceRefresh = false): Promise<void> {
+    try {
+      providerState.isLoadingWithModels = true;
+      providerState.error = null;
+      
+      const providersWithModels = await providerApi.getProvidersWithModels(forceRefresh);
+      providerState.providersWithModels = providersWithModels;
+      
+    } catch (error) {
+      providerState.error = error instanceof Error ? error.message : '加载供应商列表失败';
+      throw error;
+    } finally {
+      providerState.isLoadingWithModels = false;
     }
   },
 
@@ -377,7 +435,9 @@ export const providerActions = {
     providerState.currentProvider = null;
     providerState.editingProvider = null;
     providerState.currentModels = [];
+    providerState.providersWithModels = [];
     providerState.isLoading = false;
+    providerState.isLoadingWithModels = false;
     providerState.isFetchingModels = null;
     providerState.error = null;
     

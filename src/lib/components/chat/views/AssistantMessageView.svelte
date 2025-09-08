@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Copy, RotateCcw, Trash2 } from "lucide-svelte";
   import type { Message } from "$lib/types";
+  import { messageStore } from "$lib/states/message.svelte";
+  import { providerConfigs } from "$lib/states";
 
   interface Props {
     message: Message;
@@ -17,6 +19,16 @@
     onRegenerate,
     onDelete,
   }: Props = $props();
+
+  // 获取provider配置
+  const providerConfig = $derived(() => {
+    if (message.config?.providerId) {
+      console.log("message.config.providerId >>> :", message.config.providerId);
+      console.log("messageStore.getProviderConfig(message.config.providerId) >>> :", messageStore.getProviderConfig(message.config.providerId));
+      return messageStore.getProviderConfig(message.config.providerId);
+    }
+    return undefined;
+  });
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -59,11 +71,11 @@
       <div
         class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"
       >
-        {#if message.config?.providerId}
-          <img src="/logo-openai.png" alt="" class="w-4 h-4 object-contain" />
-        {:else}
-          <div class="w-4 h-4 rounded-full bg-blue-600"></div>
-        {/if}
+        <img
+          src={providerConfig()?.icon}
+          alt={providerConfig()?.type_name || "AI"}
+          class="w-4 h-4 object-contain"
+        />
       </div>
     </div>
 
@@ -88,9 +100,9 @@
                 <span class="font-medium">模型:</span>
                 <span>{message.config.modelId}</span>
                 {#if message.config.providerId}
-                  <span class="text-gray-400"
-                    >({message.config.providerId})</span
-                  >
+                  <span class="text-gray-400">
+                    ({providerConfig()?.type_name || message.config.providerId})
+                  </span>
                 {/if}
               </div>
             {/if}

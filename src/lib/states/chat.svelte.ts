@@ -6,9 +6,9 @@ import type {
   Chat, 
   UUID 
 } from '../types';
-import type { ProviderWithModels, ModelWithProvider } from '../types/provider';
+import type { ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
-import * as providerApi from '../api/provider';
+import { providerActions, getAllModels, getFavoriteModels } from './provider.svelte';
 
 // 聊天状态类
 class ChatState {
@@ -24,10 +24,6 @@ class ChatState {
   // 错误状态
   chatError = $state<string | null>(null);
 
-  // 模型和供应商相关状态
-  providers = $state<ProviderWithModels[]>([]);
-  isLoadingProviders = $state(false);
-  providerError = $state<string | null>(null);
 
   // 初始化状态
   isInitialized = $state(false);
@@ -39,20 +35,14 @@ class ChatState {
   }
 
 
-  // 派生状态：所有可用模型（带供应商信息）
+  // 派生状态：所有可用模型（通过 providerState 获取）
   get allModels(): ModelWithProvider[] {
-    return this.providers.flatMap(provider => 
-      provider.models.map(model => ({
-        ...model,
-        providerName: provider.name,
-        providerType: provider.provider_type
-      }))
-    );
+    return getAllModels();
   }
 
   // 派生状态：收藏模型
   get favoriteModels(): ModelWithProvider[] {
-    return this.allModels.filter(model => model.favorite);
+    return getFavoriteModels();
   }
 
   // 派生状态：当前聊天的模型信息（直接从 chat 获取）
@@ -76,44 +66,17 @@ class ChatState {
   }
 
   /**
-   * 加载所有供应商和模型
+   * 加载所有供应商和模型（委托给 providerActions）
    */
   async loadProviders(forceRefresh = false): Promise<void> {
-    try {
-      this.isLoadingProviders = true;
-      this.providerError = null;
-      
-      const providersWithModels = await providerApi.getProvidersWithModels(forceRefresh);
-      this.providers = providersWithModels;
-      
-    } catch (error) {
-      this.providerError = error instanceof Error ? error.message : '加载供应商列表失败';
-      throw error;
-    } finally {
-      this.isLoadingProviders = false;
-    }
+    return providerActions.loadProvidersWithModels(forceRefresh);
   }
 
   /**
-   * 切换模型收藏状态
+   * 切换模型收藏状态（委托给 providerActions）
    */
   async toggleModelFavorite(providerId: string, modelId: string, favorite: boolean): Promise<void> {
-    try {
-      await providerApi.toggleModelFavorite(providerId, modelId, favorite);
-      
-      // 更新本地状态
-      const provider = this.providers.find(p => p.id === providerId);
-      if (provider) {
-        const model = provider.models.find(m => m.id === modelId);
-        if (model) {
-          model.favorite = favorite;
-          // favoriteModels 是派生状态，会自动更新，无需手动赋值
-        }
-      }
-    } catch (error) {
-      this.providerError = error instanceof Error ? error.message : '更新收藏状态失败';
-      throw error;
-    }
+    return providerActions.toggleModelFavorite(providerId, modelId, favorite);
   }
 
   /**
@@ -226,7 +189,6 @@ class ChatState {
    */
   clearError(): void {
     this.chatError = null;
-    this.providerError = null;
   }
 
   /**
@@ -263,10 +225,6 @@ class ChatState {
     this.chats = [];
     this.isLoading = false;
     this.chatError = null;
-    
-    this.providers = [];
-    this.isLoadingProviders = false;
-    this.providerError = null;
     
     this.isInitialized = false;
     this.isInitializing = false;

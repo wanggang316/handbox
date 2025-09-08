@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { messageStore } from "$lib/states/message.svelte";
+
   interface Props {
     content: string;
     showCursor?: boolean;
@@ -6,6 +8,16 @@
   }
 
   let { content, showCursor = true, providerId }: Props = $props();
+
+  // 获取provider图标
+  const providerIcon = $derived(() => {
+    if (providerId) {
+      console.log("providerId >>> :", providerId);
+      console.log("messageStore.getProviderIcon(providerId) >>> :", messageStore.getProviderIcon(providerId));
+      return messageStore.getProviderIcon(providerId);
+    }
+    return undefined;
+  });
 </script>
 
 <div class="group relative">
@@ -15,11 +27,7 @@
       <div
         class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"
       >
-        {#if providerId}
-          <img src="/logo-openai.png" alt="" class="w-4 h-4 object-contain" />
-        {:else}
-          <div class="w-4 h-4 rounded-full bg-blue-600"></div>
-        {/if}
+        <img src={providerIcon()} alt="" class="w-4 h-4 object-contain" />
       </div>
     </div>
 

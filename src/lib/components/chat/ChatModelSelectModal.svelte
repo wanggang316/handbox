@@ -3,6 +3,7 @@
   import { Search, Star, Check } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
   import { chatState } from "$lib/states/chat.svelte";
+  import { providerState, providerActions } from "$lib/states/provider.svelte";
   import { onMount } from "svelte";
 
   interface Props {
@@ -72,8 +73,8 @@
 
   // 组件挂载时初始化数据
   onMount(async () => {
-    if (chatState.providers.length === 0) {
-      await chatState.loadProviders();
+    if (providerState.providersWithModels.length === 0) {
+      await providerActions.loadProvidersWithModels();
     }
   });
 
