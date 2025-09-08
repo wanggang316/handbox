@@ -388,17 +388,30 @@ export const providerActions = {
    */
   async toggleModelFavorite(providerId: UUID, modelId: string, favorite: boolean): Promise<void> {
     try {
+      console.log("toggleModelFavorite >>> :", providerId, modelId, favorite);
       await providerApi.toggleModelFavorite(providerId, modelId, favorite);
       
-      // 更新当前模型状态
-      const index = providerState.currentModels.findIndex(m => 
+      // 更新当前模型状态 (currentModels)
+      const currentIndex = providerState.currentModels.findIndex(m => 
         m.id === modelId
       );
-      if (index !== -1) {
-        providerState.currentModels[index] = { 
-          ...providerState.currentModels[index], 
+      if (currentIndex !== -1) {
+        providerState.currentModels[currentIndex] = { 
+          ...providerState.currentModels[currentIndex], 
           favorite 
         };
+      }
+
+      // 更新 providersWithModels 中的模型状态 (这是 getAllModels() 使用的数据源)
+      const providerIndex = providerState.providersWithModels.findIndex(p => p.id === providerId);
+      if (providerIndex !== -1) {
+        const modelIndex = providerState.providersWithModels[providerIndex].models.findIndex(m => m.id === modelId);
+        if (modelIndex !== -1) {
+          providerState.providersWithModels[providerIndex].models[modelIndex] = {
+            ...providerState.providersWithModels[providerIndex].models[modelIndex],
+            favorite
+          };
+        }
       }
     } catch (error) {
       providerState.error = error instanceof Error ? error.message : '切换模型收藏状态失败';

@@ -2,7 +2,6 @@
   import { Copy, RotateCcw, Trash2 } from "lucide-svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states/message.svelte";
-  import { providerConfigs } from "$lib/states";
 
   interface Props {
     message: Message;

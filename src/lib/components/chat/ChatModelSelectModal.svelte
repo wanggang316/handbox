@@ -2,7 +2,6 @@
   import Modal from "$lib/components/ui/Modal.svelte";
   import { Search, Star, Check } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
-  import { chatState } from "$lib/states/chat.svelte";
   import { providerState, providerActions } from "$lib/states/provider.svelte";
   import { onMount } from "svelte";
 
@@ -23,18 +22,29 @@
   let searchQuery = $state("");
   let showFavoritesOnly = $state(false);
 
-  // 从状态管理中获取数据
-  const allModels = $derived(chatState.allModels);
-  const favoriteModels = $derived(chatState.favoriteModels);
+  // 从状态管理中获取数据 (直接使用 provider 状态，避免透传)
+  const allModels = $derived(() => {
+    return providerState.providersWithModels.flatMap(provider => 
+      provider.models.map(model => ({
+        ...model,
+        providerName: provider.name,
+        providerType: provider.provider_type
+      }))
+    );
+  });
+  
+  const favoriteModels = $derived(() => {
+    return allModels().filter(model => model.favorite);
+  });
   const selectedModelId = $derived(selectedModel?.id || "");
 
   // 过滤后的模型
   const filteredModels = $derived(() => {
-    let models = showFavoritesOnly ? favoriteModels : allModels;
+    let models = showFavoritesOnly ? favoriteModels() : allModels();
     
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      models = models.filter(model => 
+      models = models.filter((model: ModelWithProvider) => 
         model.name.toLowerCase().includes(query) ||
         (model.providerName && model.providerName.toLowerCase().includes(query))
       );
@@ -47,7 +57,7 @@
   const groupedModels = $derived(() => {
     const groups: Record<string, ModelWithProvider[]> = {};
     
-    filteredModels().forEach(model => {
+    filteredModels().forEach((model: ModelWithProvider) => {
       const key = model.providerName || 'Unknown';
       if (!groups[key]) {
         groups[key] = [];
@@ -65,7 +75,8 @@
 
   async function handleToggleFavorite(model: ModelWithProvider) {
     try {
-      await chatState.toggleModelFavorite(model.provider_id, model.id, !model.favorite);
+      // 直接使用 providerActions，避免 chatState 透传
+      await providerActions.toggleModelFavorite(model.provider_id, model.id, !model.favorite);
     } catch (error) {
       console.error('Failed to toggle favorite:', error);
     }

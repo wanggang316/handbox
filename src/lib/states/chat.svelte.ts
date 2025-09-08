@@ -34,17 +34,6 @@ class ChatState {
     return this.currentChat !== null;
   }
 
-
-  // 派生状态：所有可用模型（通过 providerState 获取）
-  get allModels(): ModelWithProvider[] {
-    return getAllModels();
-  }
-
-  // 派生状态：收藏模型
-  get favoriteModels(): ModelWithProvider[] {
-    return getFavoriteModels();
-  }
-
   // 派生状态：当前聊天的模型信息（直接从 chat 获取）
   get currentChatModel(): { model?: ModelWithProvider } {
     if (!this.currentChat) {
@@ -58,7 +47,7 @@ class ChatState {
       return {};
     }
 
-    const model = this.allModels.find(m => m.id === modelId && m.provider_id === providerId);
+    const model = getAllModels().find(m => m.id === modelId && m.provider_id === providerId);
 
     return {
       model

@@ -63,27 +63,8 @@
     currentChat ? currentChat.id : ''
   );
 
-  // 派生状态：当前聊天的模型信息（直接从 currentChat 获取）
-  let currentChatModel = $derived(() => {
-    if (!chatState.currentChat) {
-      return {};
-    }
-
-    const modelId = chatState.currentChat.modelId;
-    const providerId = chatState.currentChat.providerId;
-    
-    if (!modelId || !providerId) {
-      return {};
-    }
-
-    const model = chatState.allModels.find(m => m.id === modelId && m.provider_id === providerId);
-
-    return {
-      modelId,
-      providerId,
-      model
-    };
-  });
+  // 派生状态：当前聊天的模型信息（直接使用 chatState 中的 getter）
+  let currentChatModel = $derived(chatState.currentChatModel);
 
   // 处理消息发送
   async function handleSendMessage(message: string) {
@@ -147,7 +128,7 @@
     <ChatInputView 
       bind:messageInput={messageInput}
       onSendMessage={handleSendMessage}
-      selectedModel={currentChatModel().model || null}
+      selectedModel={currentChatModel.model || null}
     />
   </div>
 </div>
