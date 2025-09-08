@@ -5,7 +5,7 @@ use crate::clients::api_provider::{
 };
 use crate::clients::llm_client::create_llm_client;
 use crate::models::{
-    AppError, ChatRequest, ChatResponse, Message, MessageAttachment, MessageConfig, MessageRole,
+    AppError, ChatRequest, ChatResponse, Message, MessageConfig, MessageRole,
     UUID,
 };
 use crate::services::{DatabaseService, ProviderService};
@@ -42,11 +42,6 @@ impl MessageService {
             request.chat_id
         );
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-
         tracing::debug!(
             "[MessageService::send_message] Request details: {:?}",
             request
@@ -73,7 +68,6 @@ impl MessageService {
         }
 
         // 2. 保存用户消息到数据库
-        let user_message_id = uuid::Uuid::new_v4().to_string();
         let chat_id = request.chat_id.as_ref().ok_or_else(|| {
             let error = "Chat ID is required";
             tracing::error!(
@@ -83,51 +77,16 @@ impl MessageService {
             AppError::validation_error(error)
         })?;
 
-        let user_message = Message {
-            id: user_message_id.clone(),
-            chat_id: chat_id.clone(),
-            role: MessageRole::User,
-            content: last_message.content.clone(),
-            config: Some(MessageConfig {
-                temperature: request.parameters.as_ref().and_then(|p| p.temperature),
-                top_p: request.parameters.as_ref().and_then(|p| p.top_p),
-                max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
-                stream: request.parameters.as_ref().and_then(|p| p.stream),
-                model_id: Some(request.model_id.clone()),
-                provider_id: Some(request.provider_id.clone()),
-                system_prompt: None, // 系统提示由聊天级别设置决定
-                mcp_servers: None,   // MCP 服务器由聊天级别设置决定
-            }),
-            attachments: request.attachments.as_ref().map(|attachments| {
-                attachments
-                    .iter()
-                    .map(|att| MessageAttachment {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        name: att.name.clone(),
-                        mime_type: att.mime_type.clone(),
-                        size: att.data.len() as i64,
-                        path: format!("/tmp/{}", uuid::Uuid::new_v4()), // 临时路径，实际应该保存文件
-                    })
-                    .collect()
-            }),
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            start_time: None,
-            end_time: None,
-            duration: None,
-            created_at: now,
-            updated_at: now,
-        };
-
-        self.repository
-            .create_message(&user_message)
-            .await
-            .map_err(|e| {
-                let error = format!("Failed to save user message: {}", e);
-                tracing::error!("[MessageService::send_message] Database error: {}", error);
-                e
-            })?;
+        let config = Self::extract_message_config(&request);
+        let user_message_id = self.save_user_message(
+            chat_id,
+            &last_message.content,
+            config,
+        ).await.map_err(|e| {
+            let error = format!("Failed to save user message: {}", e);
+            tracing::error!("[MessageService::send_message] Database error: {}", error);
+            e
+        })?;
 
         tracing::info!(
             "[MessageService::send_message] User message saved with ID: {}",
@@ -135,44 +94,25 @@ impl MessageService {
         );
 
         // 3. 调用实际的 LLM API
-        let assistant_message_id = uuid::Uuid::new_v4().to_string();
         let llm_response = self.call_llm_api(&request).await?;
 
         // 4. 保存助手消息到数据库
-        let assistant_message = Message {
-            id: assistant_message_id.clone(),
-            chat_id: chat_id.clone(),
-            role: MessageRole::Assistant,
-            content: llm_response.content.clone(),
-            config: Some(MessageConfig {
-                temperature: request.parameters.as_ref().and_then(|p| p.temperature),
-                top_p: request.parameters.as_ref().and_then(|p| p.top_p),
-                max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
-                stream: request.parameters.as_ref().and_then(|p| p.stream),
-                model_id: Some(request.model_id.clone()),
-                provider_id: Some(request.provider_id.clone()),
-                system_prompt: None,
-                mcp_servers: None,
-            }),
-            attachments: None,
-            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
-            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
-            start_time: Some(now),
-            end_time: Some(now),
-            duration: llm_response.duration.map(|d| d as i64),
-            created_at: now,
-            updated_at: now,
-        };
-
-        self.repository
-            .create_message(&assistant_message)
-            .await
-            .map_err(|e| {
-                let error = format!("Failed to save assistant message: {}", e);
-                tracing::error!("[MessageService::send_message] Database error: {}", error);
-                e
-            })?;
+        let config = Self::extract_message_config(&request);
+        let now = chrono::Utc::now().timestamp_millis();
+        let assistant_message_id = self.save_assistant_message(
+            chat_id,
+            &llm_response.content,
+            config,
+            now,
+            llm_response.duration.unwrap_or(0.0) as i64,
+            llm_response.usage.as_ref().map(|u| u.prompt_tokens),
+            llm_response.usage.as_ref().map(|u| u.completion_tokens),
+            llm_response.usage.as_ref().map(|u| u.total_tokens),
+        ).await.map_err(|e| {
+            let error = format!("Failed to save assistant message: {}", e);
+            tracing::error!("[MessageService::send_message] Database error: {}", error);
+            e
+        })?;
 
         tracing::info!(
             "[MessageService::send_message] Assistant message saved with ID: {}",
@@ -361,79 +301,201 @@ impl MessageService {
         let mut api_request = self.convert_to_api_request(request)?;
         api_request.stream = Some(true); // 强制启用流式
 
-        // 4. 调用真实的 LLM API (非流式)
-        // 由于完整的 SSE 流解析较复杂，我们使用真实的 API 调用，然后模拟流式输出
+        // 4. 保存用户输入消息到数据库（如果有chat_id）
+        if let Some(chat_id) = &request.chat_id {
+            // 从消息列表中找到最后一条用户消息进行保存
+            if let Some(last_user_message) = request.messages.iter().rev()
+                .find(|m| matches!(m.role, crate::models::MessageRole::User)) {
+                
+                let config = Self::extract_message_config(&request);
+                if let Err(e) = self.save_user_message(
+                    chat_id,
+                    &last_user_message.content,
+                    config,
+                ).await {
+                    tracing::error!("[MessageService::call_llm_api_stream] Failed to save user message: {}", e);
+                }
+            }
+        }
+
+        // 5. 调用真实的 LLM 流式 API
         let start_time = std::time::Instant::now();
-        api_request.stream = Some(false); // 禁用流式，使用常规 API
         
-        tracing::info!("[MessageService::call_llm_api_stream] Calling real LLM API...");
-        let api_response = llm_client.chat(&provider, api_request).await?;
+        tracing::info!("[MessageService::call_llm_api_stream] Calling real LLM streaming API...");
+        let mut stream = llm_client.chat_stream(&provider, api_request).await?;
         
-        // 提取真实响应内容
-        let real_content = if let Some(choice) = api_response.choices.first() {
-            choice.message.as_ref().map(|m| m.content.clone()).unwrap_or_default()
-        } else {
-            return Err(AppError::internal_error("No response from LLM API"));
-        };
-        
-        tracing::info!("[MessageService::call_llm_api_stream] Received {} characters from API", real_content.len());
-        
-        // 5. 模拟流式输出真实内容
         let mut accumulated_content = String::new();
-        let chars: Vec<char> = real_content.chars().collect();
-        let total_chars = chars.len();
         let mut chunk_count = 0;
         
-        // 按字符或单词逐步输出
-        let mut i = 0;
-        while i < total_chars {
-            // 决定这次输出多少字符 (1-3个字符，模拟打字效果)
-            let chunk_size = if i + 3 < total_chars { 
-                rand::random::<usize>() % 3 + 1 
-            } else { 
-                total_chars - i 
-            };
-            
-            let end = std::cmp::min(i + chunk_size, total_chars);
-            let chunk: String = chars[i..end].iter().collect();
-            accumulated_content.push_str(&chunk);
-            
-            callback(accumulated_content.clone());
-            chunk_count += 1;
-            
-            tracing::debug!(
-                "[MessageService::call_llm_api_stream] Streaming chunk {}: '{}'",
-                chunk_count, chunk
-            );
-            
-            // 短暂延迟以模拟真实流式效果
-            let delay = if chunk.trim().is_empty() { 10 } else { 30 }; // 空格延迟更短
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-            
-            i = end;
+        // 6. 处理真实的流式响应
+        use futures::StreamExt;
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(chunk_response) => {
+                    // 提取流式内容
+                    if let Some(choice) = chunk_response.choices.first() {
+                        if let Some(delta) = &choice.delta {
+                            let chunk = &delta.content;
+                            accumulated_content.push_str(chunk);
+                            
+                            callback(accumulated_content.clone());
+                            chunk_count += 1;
+                            
+                            tracing::debug!(
+                                "[MessageService::call_llm_api_stream] Real streaming chunk {}: '{}'",
+                                chunk_count, chunk
+                            );
+                            
+                            // 添加小延迟以控制流速
+                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                        }
+                        
+                        // 检查是否完成
+                        if choice.finish_reason.is_some() {
+                            tracing::info!(
+                                "[MessageService::call_llm_api_stream] Stream finished with reason: {:?}",
+                                choice.finish_reason
+                            );
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("[MessageService::call_llm_api_stream] Stream error: {}", e);
+                    return Err(e);
+                }
+            }
         }
 
         let duration = start_time.elapsed().as_millis() as i64;
         let message_id = uuid::Uuid::new_v4().to_string();
 
-        // 6. 创建最终响应 (使用真实API的统计信息)
+        // 7. 创建最终响应 (使用流式内容)
         let response = ChatResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: message_id.clone(),
-            content: real_content.clone(),  // 使用真实内容
+            content: accumulated_content.clone(),  // 使用流式累积的内容
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
-            input_tokens: api_response.usage.as_ref().map(|u| u.prompt_tokens),
-            output_tokens: api_response.usage.as_ref().map(|u| u.completion_tokens),
-            total_tokens: api_response.usage.as_ref().map(|u| u.total_tokens),
+            input_tokens: None,  // 流式API通常不返回token统计
+            output_tokens: None,
+            total_tokens: None,
             duration: Some(duration),
         };
 
         tracing::info!(
-            "[MessageService::call_llm_api_stream] Real API call completed with simulated streaming, chunks: {}, total_content_length: {}, duration: {}ms",
-            chunk_count, real_content.len(), duration
+            "[MessageService::call_llm_api_stream] Real streaming API call completed, chunks: {}, total_content_length: {}, duration: {}ms",
+            chunk_count, accumulated_content.len(), duration
         );
+
+        // 8. 流式输出完成后，保存完整的AI响应消息到数据库
+        if !accumulated_content.is_empty() && request.chat_id.is_some() {
+            let config = Self::extract_message_config(&request);
+            let start_time_millis = chrono::Utc::now().timestamp_millis() - duration;
+            
+            if let Err(e) = self.save_assistant_message(
+                &request.chat_id.clone().unwrap(),
+                &accumulated_content,
+                config,
+                start_time_millis,
+                duration,
+                None,  // 流式API通常不返回token统计
+                None,
+                None,
+            ).await {
+                tracing::error!(
+                    "[MessageService::call_llm_api_stream] Failed to save assistant message: {}",
+                    e
+                );
+                // 注意：这里不返回错误，因为流式输出已经完成，用户已经看到了响应
+                // 只是数据库保存失败，不应该影响用户体验
+            }
+        }
+
         Ok(response)
+    }
+
+    /// 构造并保存用户消息
+    async fn save_user_message(
+        &self,
+        chat_id: &str,
+        content: &str,
+        config: Option<MessageConfig>,
+    ) -> Result<String, AppError> {
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().timestamp_millis();
+        
+        let message = Message {
+            id: message_id.clone(),
+            chat_id: chat_id.to_string(),
+            role: crate::models::MessageRole::User,
+            content: content.to_string(),
+            config,
+            attachments: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            start_time: Some(now),
+            end_time: Some(now),
+            duration: Some(0), // 用户消息无耗时
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.repository.create_message(&message).await?;
+        tracing::info!("[MessageService] User message saved: {}", message_id);
+        Ok(message_id)
+    }
+
+    /// 构造并保存AI响应消息
+    async fn save_assistant_message(
+        &self,
+        chat_id: &str,
+        content: &str,
+        config: Option<MessageConfig>,
+        start_time_millis: i64,
+        duration_ms: i64,
+        input_tokens: Option<i32>,
+        output_tokens: Option<i32>,
+        total_tokens: Option<i32>,
+    ) -> Result<String, AppError> {
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().timestamp_millis();
+        
+        let message = Message {
+            id: message_id.clone(),
+            chat_id: chat_id.to_string(),
+            role: crate::models::MessageRole::Assistant,
+            content: content.to_string(),
+            config,
+            attachments: None,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            start_time: Some(start_time_millis),
+            end_time: Some(now),
+            duration: Some(duration_ms),
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.repository.create_message(&message).await?;
+        tracing::info!("[MessageService] Assistant message saved: {}", message_id);
+        Ok(message_id)
+    }
+
+    /// 从聊天请求中提取配置信息
+    fn extract_message_config(request: &ChatRequest) -> Option<MessageConfig> {
+        Some(MessageConfig {
+            model_id: Some(request.model_id.clone()),
+            provider_id: Some(request.provider_id.clone()),
+            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
+            top_p: request.parameters.as_ref().and_then(|p| p.top_p),
+            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
+            stream: request.parameters.as_ref().and_then(|p| p.stream),
+            system_prompt: None, // 系统提示通常在聊天级别处理
+            mcp_servers: None,   // MCP服务器通常在聊天级别处理
+        })
     }
 
     /// 从 API 响应格式转换

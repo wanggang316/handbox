@@ -3,6 +3,7 @@
 
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
+use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -105,6 +106,7 @@ impl OpenAIApiProvider {
 
         req_body
     }
+
 }
 
 #[async_trait]
@@ -179,6 +181,7 @@ impl ApiProvider for OpenAIApiProvider {
         let req_body = self.build_openai_request(&request);
 
         tracing::info!("Sending OpenAI-style streaming chat request to: {}", url);
+        tracing::debug!("Request payload: {}", serde_json::to_string_pretty(&req_body).unwrap_or_default());
 
         let response = self
             .client
@@ -201,9 +204,50 @@ impl ApiProvider for OpenAIApiProvider {
             )));
         }
 
-        // 目前暂时返回错误，流式功能需要更复杂的 SSE 解析
-        // 这是一个占位实现，在实际项目中应该实现完整的 SSE 流解析
-        Err(AppError::internal_error("Streaming requires SSE parsing - using mock implementation in MessageService instead"))
+        // 真正解析OpenAI流式响应数据
+        use futures::{StreamExt, TryStreamExt};
+        
+        let model_name = request.model.clone();
+        
+        // 解析真实的SSE响应流
+        let sse_stream = response
+            .bytes_stream()
+            .map_err(|e| AppError::internal_error(&format!("Stream read error: {}", e)))
+            .map_ok(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .map_ok(move |text| {
+                tracing::debug!("[OpenAI SSE Raw] Received: {}", text);
+                
+                // 解析SSE格式: "data: {json}\n\n"
+                let mut parsed_responses = Vec::new();
+                let lines: Vec<&str> = text.lines().collect();
+                
+                for line in lines {
+                    let line = line.trim();
+                    if line.starts_with("data: ") {
+                        let json_str = &line[6..]; // 去掉 "data: " 前缀
+                        
+                        if json_str == "[DONE]" {
+                            tracing::info!("[OpenAI SSE] Stream completed");
+                            break;
+                        }
+                        
+                        // 解析OpenAI流式JSON响应
+                        if let Ok(mut sse_response) = serde_json::from_str::<ChatResponse>(json_str) {
+                            sse_response.model = model_name.clone();
+                            tracing::debug!("[OpenAI SSE Parsed] Response: {:?}", sse_response);
+                            parsed_responses.push(sse_response);
+                        } else {
+                            tracing::warn!("[OpenAI SSE] Failed to parse: {}", json_str);
+                        }
+                    }
+                }
+                
+                futures::stream::iter(parsed_responses.into_iter().map(Ok))
+            })
+            .try_flatten()
+            .boxed();
+        
+        Ok(Box::new(sse_stream) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
     }
 
     fn api_type(&self) -> &'static str {
@@ -360,18 +404,160 @@ impl ApiProvider for GoogleApiProvider {
         self.convert_google_response(google_response, &request.model)
     }
 
+
+
     async fn chat_stream(
         &self,
-        _provider: &Provider,
-        _request: ChatRequest,
+        provider: &Provider,
+        mut request: ChatRequest,
     ) -> Result<
         Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
-        // Google 流式 API 实现待完成
-        Err(AppError::internal_error(
-            "Google streaming not yet implemented",
-        ))
+        // Google API流式URL格式
+        let url = format!(
+            "{}/models/{}:streamGenerateContent",
+            provider.base_url, request.model
+        );
+        let req_body = self.convert_to_google_request(&request);
+
+        tracing::info!("Sending Google-style streaming request to: {}", url);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .query(&[("key", &provider.api_key)])
+            .json(&req_body)
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to send Google streaming request: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AppError::internal_error(&format!(
+                "Google API returned error {}: {}",
+                status, error_text
+            )));
+        }
+
+        // 真正解析Google Gemini流式响应
+        tracing::info!("[Google] Successfully initiated streaming request to Google Gemini API");
+        
+        let model_name = request.model.clone();
+        let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
+        
+        // Google Gemini 流式响应是多个连续的JSON对象，使用状态机解析
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        
+        let accumulated_buffer = Arc::new(Mutex::new(String::new()));
+        
+        let stream = response
+            .bytes_stream()
+            .map_err(|e| AppError::network_error(&format!("Stream error: {}", e)))
+            .map_ok(move |bytes| {
+                let text = String::from_utf8_lossy(&bytes);
+                let mut responses = Vec::new();
+                
+                // 将新数据添加到缓冲区
+                let buffer_content = {
+                    let mut buffer = accumulated_buffer.lock().unwrap();
+                    buffer.push_str(&text);
+                    buffer.clone()
+                };
+                
+                // 解析缓冲区中的完整JSON对象
+                let mut processed_length = 0;
+                
+                // 从日志看，Google发送的是连续的JSON对象，中间可能有逗号分隔
+                // 尝试找到完整的JSON对象边界
+                let mut start_idx = 0;
+                let mut brace_count = 0;
+                let mut in_string = false;
+                let mut escape_next = false;
+                
+                for (i, ch) in buffer_content.char_indices() {
+                    if escape_next {
+                        escape_next = false;
+                        continue;
+                    }
+                    
+                    match ch {
+                        '\\' if in_string => escape_next = true,
+                        '"' => in_string = !in_string,
+                        '{' if !in_string => {
+                            if brace_count == 0 {
+                                start_idx = i;
+                            }
+                            brace_count += 1;
+                        },
+                        '}' if !in_string => {
+                            brace_count -= 1;
+                            if brace_count == 0 {
+                                // 找到完整的JSON对象
+                                let json_str = &buffer_content[start_idx..=i];
+                                if let Ok(gemini_response) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                    // 解析Google Gemini响应格式
+                                    if let Some(candidates) = gemini_response.get("candidates")
+                                        .and_then(|c| c.as_array()) {
+                                        
+                                        for candidate in candidates {
+                                            if let Some(content) = candidate.get("content")
+                                                .and_then(|content| content.get("parts"))
+                                                .and_then(|parts| parts.as_array())
+                                                .and_then(|parts| parts.first())
+                                                .and_then(|part| part.get("text"))
+                                                .and_then(|text| text.as_str()) {
+                                                
+                                                let finish_reason = candidate.get("finishReason")
+                                                    .and_then(|f| f.as_str())
+                                                    .map(|f| f.to_lowercase());
+                                                
+                                                let chat_response = ChatResponse {
+                                                    id: response_id.clone(),
+                                                    object: "chat.completion.chunk".to_string(),
+                                                    model: model_name.clone(),
+                                                    choices: vec![ChatChoice {
+                                                        index: 0,
+                                                        message: None,
+                                                        delta: Some(ChatMessage {
+                                                            role: "assistant".to_string(),
+                                                            content: content.to_string(),
+                                                        }),
+                                                        finish_reason,
+                                                    }],
+                                                    usage: None,
+                                                };
+                                                
+                                                responses.push(chat_response);
+                                                tracing::debug!("[Google Stream] Parsed content chunk: '{}'", content);
+                                            }
+                                        }
+                                    }
+                                }
+                                processed_length = i + 1;
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+                
+                // 清除已处理的数据
+                if processed_length > 0 {
+                    let mut buffer = accumulated_buffer.lock().unwrap();
+                    let remaining = buffer_content[processed_length..].trim_start_matches(|c| c == ',' || c == ' ' || c == '\n' || c == '\r');
+                    *buffer = remaining.to_string();
+                }
+                
+                futures::stream::iter(responses.into_iter().map(Ok))
+            })
+            .try_flatten();
+            
+        Ok(Box::new(Box::pin(stream)) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
     }
 
     fn api_type(&self) -> &'static str {
@@ -384,12 +570,14 @@ pub struct AnthropicApiProvider {
     client: reqwest::Client,
 }
 
+
 impl AnthropicApiProvider {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
         }
     }
+
 
     /// 将通用请求转换为 Anthropic API 格式
     fn convert_to_anthropic_request(&self, request: &ChatRequest) -> Value {
@@ -521,18 +709,128 @@ impl ApiProvider for AnthropicApiProvider {
         self.convert_anthropic_response(anthropic_response, &request.model)
     }
 
+
     async fn chat_stream(
         &self,
-        _provider: &Provider,
-        _request: ChatRequest,
+        provider: &Provider,
+        request: ChatRequest,
     ) -> Result<
         Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
-        // Anthropic 流式 API 实现待完成
-        Err(AppError::internal_error(
-            "Anthropic streaming not yet implemented",
-        ))
+        let url = format!("{}/messages", provider.base_url);
+        let mut req_body = self.convert_to_anthropic_request(&request);
+        req_body["stream"] = true.into(); // 启用流式
+
+        tracing::info!("Sending Anthropic-style streaming request to: {}", url);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &provider.api_key)
+            .header("Content-Type", "application/json")
+            .header("anthropic-version", "2023-06-01")
+            .json(&req_body)
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to send Anthropic streaming request: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AppError::internal_error(&format!(
+                "Anthropic API returned error {}: {}",
+                status, error_text
+            )));
+        }
+
+        // 真正解析Anthropic Claude流式响应
+        tracing::info!("[Anthropic] Successfully initiated streaming request to Claude API");
+        
+        let model_name = request.model.clone();
+        let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
+        
+        // Anthropic使用SSE格式的流式响应
+        let stream = response
+            .bytes_stream()
+            .map_err(|e| AppError::network_error(&format!("Stream error: {}", e)))
+            .map_ok(move |bytes| {
+                let text = String::from_utf8_lossy(&bytes);
+                let mut responses = Vec::new();
+                
+                // 解析Anthropic SSE格式
+                for line in text.lines() {
+                    let line = line.trim();
+                    
+                    // Anthropic SSE事件格式: "event: content_block_delta", "data: {...}"
+                    if line.starts_with("data: ") {
+                        let json_str = &line[6..];
+                        if json_str == "[DONE]" {
+                            break;
+                        }
+                        
+                        if let Ok(anthropic_event) = serde_json::from_str::<serde_json::Value>(json_str) {
+                            // Anthropic事件类型：content_block_delta包含文本增量
+                            if let Some(event_type) = anthropic_event.get("type").and_then(|t| t.as_str()) {
+                                if event_type == "content_block_delta" {
+                                    if let Some(delta) = anthropic_event.get("delta")
+                                        .and_then(|delta| delta.get("text"))
+                                        .and_then(|text| text.as_str()) {
+                                        
+                                        let chat_response = ChatResponse {
+                                            id: response_id.clone(),
+                                            object: "chat.completion.chunk".to_string(),
+                                            model: model_name.clone(),
+                                            choices: vec![ChatChoice {
+                                                index: 0,
+                                                message: None,
+                                                delta: Some(ChatMessage {
+                                                    role: "assistant".to_string(),
+                                                    content: delta.to_string(),
+                                                }),
+                                                finish_reason: None,
+                                            }],
+                                            usage: None,
+                                        };
+                                        
+                                        responses.push(chat_response);
+                                        tracing::debug!("[Anthropic Stream] Parsed content delta: '{}'", delta);
+                                    }
+                                } else if event_type == "message_stop" {
+                                    // 流结束事件
+                                    let chat_response = ChatResponse {
+                                        id: response_id.clone(),
+                                        object: "chat.completion.chunk".to_string(),
+                                        model: model_name.clone(),
+                                        choices: vec![ChatChoice {
+                                            index: 0,
+                                            message: None,
+                                            delta: Some(ChatMessage {
+                                                role: "assistant".to_string(),
+                                                content: "".to_string(),
+                                            }),
+                                            finish_reason: Some("stop".to_string()),
+                                        }],
+                                        usage: None,
+                                    };
+                                    
+                                    responses.push(chat_response);
+                                    tracing::debug!("[Anthropic Stream] Stream completed");
+                                }
+                            }
+                        } else {
+                            tracing::warn!("[Anthropic Stream] Failed to parse SSE data: {}", json_str);
+                        }
+                    }
+                }
+                
+                futures::stream::iter(responses.into_iter().map(Ok))
+            })
+            .try_flatten();
+            
+        Ok(Box::new(Box::pin(stream)) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
     }
 
     fn api_type(&self) -> &'static str {
