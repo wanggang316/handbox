@@ -1,5 +1,5 @@
 /**
- * 消息状态管理
+ * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
 import type { Message, ChatResponse, ChatRequest } from '$lib/types/chat';
@@ -45,6 +45,11 @@ class MessageStore {
 
   get streamingContent() {
     return this.state.streamingContent;
+  }
+
+  // 获取当前聊天的消息（通过外部传入 chatId）
+  getCurrentMessages(currentChatId: string | undefined): Message[] {
+    return currentChatId ? this.getMessages(currentChatId) : [];
   }
 
   // 获取指定聊天的消息
@@ -175,6 +180,7 @@ class MessageStore {
     this.state.streamingContent = '';
   }
 
+
   // API 操作方法
   
   /**
@@ -259,11 +265,6 @@ class MessageStore {
       // 发送流式消息
       const streamId = await messageApi.sendStreamMessage(streamRequest);
       console.log('Stream ID:', streamId);
-
-      // 稍后清理监听器（在流完成后）
-      // unlistenPromise.then(unlisten => {
-      //   // 监听器会在流结束后自动清理
-      // });
       
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '发送消息失败');

@@ -8,9 +8,7 @@ import type {
 } from '../types';
 import type { ProviderWithModels, ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
-import * as messageApi from '../api/message';
 import * as providerApi from '../api/provider';
-import { messageStore } from './message.svelte';
 
 // 聊天状态类
 class ChatState {
@@ -40,15 +38,6 @@ class ChatState {
     return this.currentChat !== null;
   }
 
-  // 派生状态：当前聊天消息列表
-  get currentMessages() {
-    return this.currentChat ? messageStore.getMessages(this.currentChat.id) : [];
-  }
-
-  // 派生状态：当前聊天消息数量
-  get messageCount() {
-    return this.currentMessages.length;
-  }
 
   // 派生状态：所有可用模型（带供应商信息）
   get allModels(): ModelWithProvider[] {
@@ -198,10 +187,7 @@ class ChatState {
       
       // 设置为当前聊天
       this.currentChat = chat;
-      
-      // 清空该聊天的消息（新聊天）
-      messageStore.clearMessages(chat.id);
-      
+            
       console.log('Created chat:', chat);
       console.log('Current chat:', this.currentChat);
       console.log('chats:', this.chats);
@@ -224,12 +210,8 @@ class ChatState {
       
       const chat = await chatApi.getChat(chatId);
       this.currentChat = chat;
-      
-      // 加载消息到 messageStore
-      await this.loadMessagesForChat(chatId);
-      
+            
       console.log('Current chat >>> :', this.currentChat);
-      console.log('Current chat messages >>> :', this.currentMessages);
     } catch (error) {
       this.chatError = error instanceof Error ? error.message : '切换聊天失败';
       throw error;
@@ -238,21 +220,6 @@ class ChatState {
     }
   }
 
-  /**
-   * 加载指定聊天的消息
-   */
-  async loadMessagesForChat(chatId: UUID): Promise<void> {
-    try {
-      messageStore.setLoading(true);
-      const messages = await messageApi.getMessages(chatId);
-      messageStore.setMessages(chatId, messages);
-    } catch (error) {
-      messageStore.setError(error instanceof Error ? error.message : '加载消息失败');
-      throw error;
-    } finally {
-      messageStore.setLoading(false);
-    }
-  }
 
   /**
    * 清除错误状态
@@ -303,9 +270,6 @@ class ChatState {
     
     this.isInitialized = false;
     this.isInitializing = false;
-    
-    // 清空消息状态
-    messageStore.clear();
   }
 }
 

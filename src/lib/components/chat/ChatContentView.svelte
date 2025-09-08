@@ -78,11 +78,25 @@
   }
 
   // 获取当前聊天的消息 - 使用 Svelte 5 派生状态
-  let messages = $derived(chatState.currentMessages);
+  let messages = $derived(messageStore.getCurrentMessages(chatState.currentChat?.id));
   let isLoading = $derived(messageStore.isLoading);
   let isSending = $derived(messageStore.isSending);
   let streamingContent = $derived(messageStore.streamingContent);
   let streamingMessageId = $derived(messageStore.streamingMessageId);
+
+  // 监听聊天切换，自动加载消息
+  $effect(() => {
+    const currentChat = chatState.currentChat;
+    if (currentChat?.id) {
+      // 检查是否已经有消息，没有则加载
+      const existingMessages = messageStore.getMessages(currentChat.id);
+      if (existingMessages.length === 0) {
+        messageStore.loadMessages(currentChat.id).catch(error => {
+          console.error('Failed to load messages:', error);
+        });
+      }
+    }
+  });
   
   // 消息容器引用
   let messagesContainer: HTMLDivElement;
@@ -137,10 +151,6 @@
           {#if message.role === 'user'}
             <UserMessageView 
               {message}
-              isOperating={operatingMessageId === message.id}
-              onCopy={copyMessage}
-              onEdit={editMessage}
-              onDelete={deleteMessage}
             />
           {:else if message.role === 'assistant'}
             <AssistantMessageView 
