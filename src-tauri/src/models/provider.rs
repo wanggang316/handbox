@@ -3,32 +3,10 @@
 use super::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
 
-/// 供应商类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProviderType {
-    OpenAI,
-    Anthropic,
-    Google,
-    DeepSeek,
-    OpenRouter,
-    CustomOpenAI,
-    CustomAnthropic,
-}
-
-/// 供应商状态
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ProviderStatus {
-    Active,
-    Inactive,
-    Error,
-    Testing,
-}
-
 /// 模型特性
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
 #[serde(rename_all = "kebab-case")]
+#[sqlx(type_name = "TEXT", rename_all = "kebab-case")]
 pub enum ModelFeature {
     Text,
     Vision,
@@ -37,26 +15,38 @@ pub enum ModelFeature {
     Reasoning,
 }
 
-/// 探活结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProbeResult {
-    pub success: bool,
-    pub latency: Option<i64>,
-    pub error: Option<String>,
-    pub timestamp: Timestamp,
-}
-
 /// 模型信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
+    // 必需字段
     pub id: String,
+    pub provider_id: String,
     pub name: String,
-    pub provider: String,
+    // 可选字段
     pub context_length: Option<i32>,
     pub input_cost: Option<f32>,
     pub output_cost: Option<f32>,
-    pub supported_features: Vec<ModelFeature>,
+    pub supported_features: Option<Vec<ModelFeature>>,
     pub enabled: bool,
+    pub favorite: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+// 为 Model 的 supported_features 字段提供序列化支持
+impl Model {
+    pub fn features_to_json(&self) -> String {
+        serde_json::to_string(&self.supported_features.as_ref().unwrap_or(&vec![]))
+            .unwrap_or_default()
+    }
+
+    pub fn features_from_json(json: &str) -> Result<Option<Vec<ModelFeature>>, serde_json::Error> {
+        if json.is_empty() {
+            Ok(None)
+        } else {
+            serde_json::from_str::<Vec<ModelFeature>>(json).map(Some)
+        }
+    }
 }
 
 /// 供应商实体
@@ -64,13 +54,24 @@ pub struct Model {
 pub struct Provider {
     pub id: UUID,
     pub name: String,
-    pub provider_type: ProviderType,
+    pub provider_type: String,
     pub base_url: String,
-    pub status: ProviderStatus,
+    pub api_key: String,
+    pub enabled: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// 带有模型的供应商实体
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderWithModels {
+    pub id: UUID,
+    pub name: String,
+    pub provider_type: String,
+    pub base_url: String,
+    pub api_key: String,
     pub enabled: bool,
     pub models: Vec<Model>,
-    pub last_probe_at: Option<Timestamp>,
-    pub probe_result: Option<ProbeResult>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -78,8 +79,8 @@ pub struct Provider {
 /// 供应商配置请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderConfig {
-    pub name: Option<String>,
-    pub provider_type: ProviderType,
+    pub name: String,
+    pub provider_type: String,
     pub base_url: String,
     pub api_key: String,
     pub enabled: Option<bool>,
@@ -113,4 +114,12 @@ pub struct ToggleModelRequest {
     pub provider_id: UUID,
     pub model_id: String,
     pub enabled: bool,
+}
+
+/// 模型收藏切换请求
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToggleModelFavoriteRequest {
+    pub provider_id: UUID,
+    pub model_id: String,
+    pub favorite: bool,
 }

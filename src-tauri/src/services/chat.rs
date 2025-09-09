@@ -1,104 +1,137 @@
 // 聊天服务实现
 
-use crate::models::{AppError, ChatRequest, ChatResponse, ChatSession, Message, UUID};
-use crate::services::StorageService;
+use crate::models::{AppError, Chat, UUID};
+use crate::services::DatabaseService;
+use crate::storage::ChatRepository;
 use std::sync::Arc;
 
 /// 聊天服务
 pub struct ChatService {
-    storage: Arc<StorageService>,
+    repository: ChatRepository,
 }
 
 impl ChatService {
-    pub fn new(storage: Arc<StorageService>) -> Self {
-        Self { storage }
+    pub fn new(db: Arc<DatabaseService>) -> Self {
+        Self {
+            repository: ChatRepository::new(db),
+        }
     }
 
-    /// 发送消息
-    pub async fn send_message(&self, _request: ChatRequest) -> Result<ChatResponse, AppError> {
-        // TODO: 实现消息发送逻辑
-        // 1. 验证请求参数
-        // 2. 保存用户消息
-        // 3. 调用 LLM API
-        // 4. 处理流式响应
-        // 5. 保存助手消息
-        // 6. 返回响应
-
-        Err(AppError::internal_error("Not implemented yet"))
-    }
-
-    /// 创建会话
-    pub async fn create_session(
+    /// 创建聊天
+    pub async fn create_chat(
         &self,
-        _name: Option<String>,
-        _config: Option<serde_json::Value>,
-    ) -> Result<ChatSession, AppError> {
-        // TODO: 实现会话创建逻辑
-        Err(AppError::internal_error("Not implemented yet"))
+        name: String,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        max_tokens: Option<i32>,
+        stream: Option<bool>,
+        model_id: Option<String>,
+        provider_id: Option<String>,
+        system_prompt: Option<String>,
+        mcp_servers: Option<Vec<String>>,
+    ) -> Result<Chat, AppError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let chat = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            last_message_at: None,
+            message_count: 0,
+            temperature,
+            top_p,
+            max_tokens,
+            stream,
+            model_id,
+            provider_id,
+            system_prompt,
+            mcp_servers: mcp_servers.unwrap_or_default(),
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.repository.create_chat(&chat).await?;
+        Ok(chat)
     }
 
-    /// 获取会话列表
-    pub async fn list_sessions(
+    /// 获取聊天列表
+    pub async fn list_chats(
         &self,
-        _limit: Option<i32>,
-        _offset: Option<i32>,
-    ) -> Result<Vec<ChatSession>, AppError> {
-        // TODO: 实现会话列表获取逻辑
-        Err(AppError::internal_error("Not implemented yet"))
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> Result<Vec<Chat>, AppError> {
+        let limit = limit.unwrap_or(50);
+        let offset = offset.unwrap_or(0);
+
+        self.repository.list_chats(limit, offset).await
     }
 
-    /// 获取会话详情
-    pub async fn get_session(&self, _session_id: UUID) -> Result<ChatSession, AppError> {
-        // TODO: 实现会话详情获取逻辑
-        Err(AppError::internal_error("Not implemented yet"))
+    /// 获取聊天详情
+    pub async fn get_chat(&self, chat_id: UUID) -> Result<Chat, AppError> {
+        match self.repository.get_chat_by_id(&chat_id).await? {
+            Some(chat) => Ok(chat),
+            None => Err(AppError::not_found(&format!("Chat not found: {}", chat_id))),
+        }
     }
 
-    /// 更新会话
-    pub async fn update_session(
+    /// 更新聊天
+    pub async fn update_chat(
         &self,
-        _session_id: UUID,
-        _updates: serde_json::Value,
-    ) -> Result<ChatSession, AppError> {
-        // TODO: 实现会话更新逻辑
-        Err(AppError::internal_error("Not implemented yet"))
+        chat_id: UUID,
+        name: Option<String>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        max_tokens: Option<i32>,
+        stream: Option<bool>,
+        model_id: Option<String>,
+        provider_id: Option<String>,
+        system_prompt: Option<String>,
+        mcp_servers: Option<Vec<String>>,
+    ) -> Result<Chat, AppError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // 先检查聊天是否存在
+        let existing_chat = self.get_chat(chat_id.clone()).await?;
+
+        // 构建更新后的聊天数据
+        let updated_chat = Chat {
+            id: existing_chat.id,
+            name: name.unwrap_or(existing_chat.name),
+            last_message_at: existing_chat.last_message_at,
+            message_count: existing_chat.message_count,
+            temperature: temperature.or(existing_chat.temperature),
+            top_p: top_p.or(existing_chat.top_p),
+            max_tokens: max_tokens.or(existing_chat.max_tokens),
+            stream: stream.or(existing_chat.stream),
+            model_id: model_id.or(existing_chat.model_id),
+            provider_id: provider_id.or(existing_chat.provider_id),
+            system_prompt: system_prompt.or(existing_chat.system_prompt),
+            mcp_servers: mcp_servers.unwrap_or(existing_chat.mcp_servers),
+            artifact_id: existing_chat.artifact_id,
+            created_at: existing_chat.created_at,
+            updated_at: now,
+        };
+
+        self.repository.update_chat(&updated_chat).await?;
+        Ok(updated_chat)
     }
 
-    /// 删除会话
-    pub async fn delete_session(&self, _session_id: UUID) -> Result<(), AppError> {
-        // TODO: 实现会话删除逻辑
-        Err(AppError::internal_error("Not implemented yet"))
-    }
+    /// 删除聊天
+    pub async fn delete_chat(&self, chat_id: UUID) -> Result<(), AppError> {
+        // 先检查聊天是否存在
+        self.get_chat(chat_id.clone()).await?;
 
-    /// 获取消息
-    pub async fn get_messages(
-        &self,
-        _session_id: UUID,
-        _limit: Option<i32>,
-        _offset: Option<i32>,
-    ) -> Result<Vec<Message>, AppError> {
-        // TODO: 实现消息获取逻辑
-        Err(AppError::internal_error("Not implemented yet"))
-    }
-
-    /// 更新消息
-    pub async fn update_message(
-        &self,
-        _message_id: UUID,
-        _content: String,
-    ) -> Result<Message, AppError> {
-        // TODO: 实现消息更新逻辑
-        Err(AppError::internal_error("Not implemented yet"))
-    }
-
-    /// 删除消息
-    pub async fn delete_message(&self, _message_id: UUID) -> Result<(), AppError> {
-        // TODO: 实现消息删除逻辑
-        Err(AppError::internal_error("Not implemented yet"))
-    }
-
-    /// 重新生成消息
-    pub async fn regenerate_message(&self, _message_id: UUID) -> Result<ChatResponse, AppError> {
-        // TODO: 实现消息重新生成逻辑
-        Err(AppError::internal_error("Not implemented yet"))
+        // 删除聊天（相关消息会通过外键级联删除）
+        self.repository.delete_chat(&chat_id).await
     }
 }
+
+#[cfg(test)]
+#[path = "chat_test.rs"]
+mod chat_test;

@@ -8,11 +8,11 @@ import type { UUID } from '../types';
 // 搜索结果类型
 export interface SearchResult {
   id: UUID;
-  type: 'message' | 'session' | 'artifact';
+  type: 'message' | 'chat' | 'artifact';
   title: string;
   content: string;
   snippet: string;
-  sessionId?: UUID;
+  chatId?: UUID;
   messageId?: UUID;
   artifactId?: UUID;
   score: number;
@@ -23,8 +23,8 @@ export interface SearchResult {
 // 搜索请求
 export interface SearchRequest {
   query: string;
-  types?: Array<'message' | 'session' | 'artifact'>;
-  sessionId?: UUID;
+  types?: Array<'message' | 'chat' | 'artifact'>;
+  chatId?: UUID;
   limit?: number;
   offset?: number;
   sortBy?: 'relevance' | 'timestamp';

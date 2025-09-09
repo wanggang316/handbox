@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown } from '@lucide/svelte';
+  import { ChevronDown, ChevronsUpDown } from '@lucide/svelte';
 
   interface DropDownOption {
     value: string;
@@ -7,8 +7,14 @@
     disabled?: boolean;
   }
 
-  interface Props {
+  interface DropDownGroup {
+    title?: string;
     options: DropDownOption[];
+  }
+
+  interface Props {
+    options?: DropDownOption[];
+    groups?: DropDownGroup[];
     selectedValue?: string;
     placeholder?: string;
     disabled?: boolean;
@@ -21,11 +27,14 @@
     dropdownClass?: string;
     optionClass?: string;
     selectedOptionClass?: string;
+    groupTitleClass?: string;
+    separatorClass?: string;
     onSelect?: (value: string, option: DropDownOption) => void;
   }
 
   let {
     options = [],
+    groups = [],
     selectedValue = $bindable(''),
     placeholder = '请选择...',
     disabled = false,
@@ -38,15 +47,26 @@
     dropdownClass = '',
     optionClass = '',
     selectedOptionClass = '',
+    groupTitleClass = '',
+    separatorClass = '',
     onSelect = (_value: string, _option: DropDownOption) => {}
   }: Props = $props();
 
   let isOpen = $state(false);
   let dropdownRef: HTMLDivElement;
 
+  // 获取所有选项（合并 options 和 groups 中的选项）
+  const allOptions = $derived.by(() => {
+    const flatOptions = [...options];
+    groups.forEach(group => {
+      flatOptions.push(...group.options);
+    });
+    return flatOptions;
+  });
+
   // 获取选中选项的标签
   const selectedLabel = $derived.by(() => {
-    const selected = options.find(option => option.value === selectedValue);
+    const selected = allOptions.find(option => option.value === selectedValue);
     return selected ? selected.label : placeholder;
   });
 
@@ -101,16 +121,18 @@
   }
 
   // 组合样式类
-  const defaultButtonClass = "h-8 px-3 rounded-md text-[14px] leading-[1.2] text-black flex items-center gap-1 hover:bg-bg-hover transition-colors";
+  const defaultButtonClass = "h-8 px-2 rounded-md text-[14px] leading-[1.2] text-black flex items-center gap-1 hover:bg-bg-hover";
   const finalButtonClass = `${defaultButtonClass} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${buttonClass}`;
 
   const positionClass = position === 'top' ? 'bottom-full mb-1' : 'top-full mt-1';
   const alignClass = align === 'right' ? 'right-0' : 'left-0';
-  const defaultDropdownClass = `absolute ${positionClass} ${alignClass} ${minWidth} ${maxWidth} ${maxHeight} bg-white border border-[#e5e5e5] rounded-lg shadow-lg z-[9999] overflow-y-auto w-fit`;
+  const defaultDropdownClass = `absolute ${positionClass} ${alignClass} ${minWidth} ${maxWidth} ${maxHeight} bg-white border border-[#e5e5e5] rounded-xl shadow-xl z-[10020] overflow-y-auto w-fit px-1 py-1`;
   const finalDropdownClass = `${defaultDropdownClass} ${dropdownClass}`;
 
-  const defaultOptionClass = "w-full px-2 py-2 text-left text-[14px] hover:bg-gray-50 transition-colors whitespace-nowrap";
-  const defaultSelectedOptionClass = "bg-blue-50 text-blue-600 font-medium";
+  const defaultOptionClass = "w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent whitespace-nowrap";
+  const defaultSelectedOptionClass = "";
+  const defaultGroupTitleClass = "px-2 py-1 text-[11px] text-gray-500";
+  const defaultSeparatorClass = "border-t border-gray-200 my-1 mx-2";
 
 
 </script>
@@ -129,28 +151,71 @@
     {disabled}
   >
     <span class="truncate flex-1 text-left">{selectedLabel}</span>
-    <ChevronDown 
+    <ChevronsUpDown 
       size={16} 
-      class="text-gray-500 transition-transform {isOpen ? 'rotate-180' : ''}"
+      class="text-gray-500"
     />
   </button>
 
   {#if isOpen}
     <div class={finalDropdownClass} role="listbox">
-      {#each options as option}
-        <button
-          type="button"
-          class="{defaultOptionClass} {option.value === selectedValue ? defaultSelectedOptionClass + ' ' + selectedOptionClass : ''} {option.disabled ? 'opacity-50 cursor-not-allowed' : ''} {optionClass}"
-          onclick={() => selectOption(option)}
-          disabled={option.disabled}
-          role="option"
-          aria-selected={option.value === selectedValue}
-        >
-          {option.label}
-        </button>
+      <!-- 渲染单独的 options -->
+      {#if options.length > 0}
+        {#each options as option}
+          <button
+            type="button"
+            class="{defaultOptionClass} {option.value === selectedValue ? defaultSelectedOptionClass + ' ' + selectedOptionClass : ''} {option.disabled ? 'opacity-50 cursor-not-allowed' : ''} {optionClass}"
+            onclick={() => selectOption(option)}
+            disabled={option.disabled}
+            role="option"
+            aria-selected={option.value === selectedValue}
+          >
+            {option.label}
+          </button>
+        {/each}
+        
+        <!-- 如果同时有 groups，添加分割线 -->
+        {#if groups.length > 0}
+          <div class="{defaultSeparatorClass} {separatorClass}"></div>
+        {/if}
+      {/if}
+      
+      <!-- 渲染分组 options -->
+      {#each groups as group, groupIndex}
+        {#if group.title}
+          <div class="{defaultGroupTitleClass} {groupTitleClass}" role="group" aria-label={group.title}>
+            {group.title}
+          </div>
+        {/if}
+        
+        {#each group.options as option}
+          <button
+            type="button"
+            class="{defaultOptionClass} {option.value === selectedValue ? defaultSelectedOptionClass + ' ' + selectedOptionClass : ''} {option.disabled ? 'opacity-50 cursor-not-allowed' : ''} {optionClass}"
+            onclick={() => selectOption(option)}
+            disabled={option.disabled}
+            role="option"
+            aria-selected={option.value === selectedValue}
+          >
+            {option.label}
+          </button>
+        {/each}
+        
+        <!-- 在组之间添加分割线（除了最后一组） -->
+        {#if groupIndex < groups.length - 1}
+          <div class="{defaultSeparatorClass} {separatorClass}"></div>
+        {/if}
       {/each}
       
-      {#if options.length === 0}
+      <!-- 没有任何选项时显示提示 -->
+      {#if options.length === 0 && groups.length === 0}
+        <div class="px-3 py-2 text-[14px] text-gray-500">
+          暂无选项
+        </div>
+      {/if}
+      
+      <!-- 所有组都没有选项时显示提示 -->
+      {#if options.length === 0 && groups.length > 0 && groups.every(g => g.options.length === 0)}
         <div class="px-3 py-2 text-[14px] text-gray-500">
           暂无选项
         </div>

@@ -35,33 +35,48 @@ pub fn validate_api_key(api_key: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 从 Keychain 获取 API Key
-pub async fn get_api_key_from_keychain(_service: &str, _account: &str) -> Result<String, AppError> {
-    // TODO: 实现 Keychain 集成
-    // 使用 keyring crate 或 platform-specific APIs
-    Err(AppError::internal_error(
-        "Keychain integration not implemented yet",
-    ))
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// 保存 API Key 到 Keychain
-pub async fn save_api_key_to_keychain(
-    _service: &str,
-    _account: &str,
-    api_key: &str,
-) -> Result<(), AppError> {
-    validate_api_key(api_key)?;
+    #[test]
+    fn test_generate_uuid() {
+        let uuid = generate_uuid();
+        assert!(!uuid.is_empty());
+        assert_eq!(uuid.len(), 36); // UUID v4 standard length
+    }
 
-    // TODO: 实现 Keychain 集成
-    Err(AppError::internal_error(
-        "Keychain integration not implemented yet",
-    ))
-}
+    #[test]
+    fn test_mask_api_key() {
+        // "sk-1234567890" has length 13, prefix 3 leaves 10 chars, min(10,8) = 8 stars
+        assert_eq!(mask_api_key("sk-1234567890", 3), "sk-********...");
+        assert_eq!(mask_api_key("short", 3), "sho**...");
+        assert_eq!(mask_api_key("ab", 5), "**");
+        assert_eq!(mask_api_key("", 3), "");
+    }
 
-/// 从 Keychain 删除 API Key
-pub async fn delete_api_key_from_keychain(_service: &str, _account: &str) -> Result<(), AppError> {
-    // TODO: 实现 Keychain 集成
-    Err(AppError::internal_error(
-        "Keychain integration not implemented yet",
-    ))
+    #[test]
+    fn test_validate_api_key() {
+        // Valid API key
+        assert!(validate_api_key("sk-1234567890").is_ok());
+
+        // Empty API key
+        assert!(validate_api_key("").is_err());
+
+        // Too short
+        assert!(validate_api_key("short").is_err());
+
+        // Contains spaces
+        assert!(validate_api_key("sk-123 456").is_err());
+    }
+
+    // #[test]
+    // fn test_keychain_service_and_account() {
+    //     // 钥匙串功能测试暂时禁用
+    // }
+
+    // #[tokio::test]
+    // async fn test_keychain_operations() {
+    //     // 钥匙串功能测试暂时禁用
+    // }
 }

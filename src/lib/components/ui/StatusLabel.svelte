@@ -1,6 +1,6 @@
 <script lang="ts">
   interface Props {
-    status: 'enabled' | 'disabled' | 'pending' | 'error';
+    status: 'enabled' | 'disabled' | 'idle' | 'error';
     text: string;
   }
 
@@ -8,8 +8,8 @@
 
   const statusStyles = {
     enabled: 'bg-green-100 text-green-800 border-green-200',
-    disabled: 'bg-slate-100 text-slate-600 border-slate-200',
-    pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    disabled: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    idle: 'bg-slate-100 text-slate-600 border-slate-200',
     error: 'bg-red-100 text-red-800 border-red-200'
   };
 </script>

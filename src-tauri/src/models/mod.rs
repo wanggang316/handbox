@@ -3,6 +3,7 @@
 pub mod artifact;
 pub mod chat;
 pub mod error;
+pub mod llm_config;
 pub mod provider;
 pub mod settings;
 
@@ -10,5 +11,6 @@ pub mod settings;
 pub use artifact::*;
 pub use chat::*;
 pub use error::*;
+pub use llm_config::*;
 pub use provider::*;
 pub use settings::*;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Icon as IconType } from '@lucide/svelte';
-  import { createEventDispatcher } from 'svelte';
+  import { Loader } from '@lucide/svelte';
 
   export let label: string;
   export let icon: typeof IconType | undefined = undefined;
@@ -12,27 +12,34 @@
   export let rounded: string = 'rounded-full';
   export let fontSize: string = 'text-[16px]';
   export let disabled: boolean = false;
+  export let loading: boolean = false;
   export let customClass: string = '';
-  
-  const dispatch = createEventDispatcher();
+  export let onclick: ((event: MouseEvent) => void) | undefined = undefined;
 
   function handleClick(event: MouseEvent) {
-    if (!disabled) {
-      dispatch('click', event);
+    if (!disabled && !loading) {
+      onclick?.(event);
     }
   }
 </script>
 
 <button
-  class="{size} {bgColor} {hoverColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 transition-colors {customClass}"
-  class:opacity-50={disabled}
-  class:cursor-not-allowed={disabled}
+  class="{size} {bgColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 disabled:bg-gray-600 {customClass}"
+  class:hover:opacity-90={!disabled && !loading && hoverColor === 'hover:opacity-90'}
+  class:hover:bg-opacity-90={!disabled && !loading && hoverColor !== 'hover:opacity-90'}
+  class:opacity-50={disabled || loading}
+  class:cursor-not-allowed={disabled || loading}
+  class:pointer-events-none={disabled || loading}
   on:click={handleClick}
-  {disabled}
+  disabled={disabled || loading}
 >
-  {#if icon}
-    {@const Icon = icon}
-    <Icon size={iconSize} />
+  {#if loading}
+    <Loader size={iconSize} class="animate-spin" />
+  {:else}
+    {#if icon}
+      {@const Icon = icon}
+      <Icon size={iconSize} />
+    {/if}
+    {label}
   {/if}
-  {label}
 </button>

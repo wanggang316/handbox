@@ -1,5 +1,5 @@
 /**
- * 聊天相关类型定义
+ * 聊天相关类型定义 - 匹配后端 Rust 架构
  */
 
 import type { BaseEntity, UUID, Timestamp } from './index';
@@ -7,13 +7,37 @@ import type { BaseEntity, UUID, Timestamp } from './index';
 // 消息角色
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+// 消息配置 - 每条消息可以有独立的配置参数
+export interface MessageConfig {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stream?: boolean;
+  modelId?: string;
+  providerId?: string;
+  systemPrompt?: string;
+  mcpServers?: string[];
+}
+
 // 消息类型
 export interface Message extends BaseEntity {
-  sessionId: UUID;
+  chatId: UUID;
   role: MessageRole;
   content: string;
+  
+  // 每条消息的配置参数
+  config?: MessageConfig;
+  
+  // 附件
   attachments?: MessageAttachment[];
-  metadata?: MessageMetadata;
+  
+  // 使用统计和时序信息
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  startTime?: Timestamp;
+  endTime?: Timestamp;
+  duration?: number;
 }
 
 // 消息附件
@@ -25,40 +49,25 @@ export interface MessageAttachment {
   path: string;
 }
 
-// 消息元数据
-export interface MessageMetadata {
-  model?: string;
-  provider?: string;
-  tokens?: {
-    input: number;
-    output: number;
-    total: number;
-  };
-  timing?: {
-    startTime: number;
-    endTime: number;
-    duration: number;
-  };
-  streaming?: boolean;
-}
-
-// 聊天会话
-export interface ChatSession extends BaseEntity {
+// 聊天实体
+export interface Chat extends BaseEntity {
   name: string;
   lastMessageAt?: Timestamp;
   messageCount: number;
-  config: ChatConfig;
+  
+  // Chat-level configuration (default values)
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stream?: boolean;
+  modelId?: string;
+  providerId?: string;
+  systemPrompt?: string;
+  mcpServers: string[];
+  
   artifactId?: UUID;
 }
 
-// 聊天配置
-export interface ChatConfig {
-  systemPrompt?: string;
-  model: string;
-  provider: string;
-  parameters: ModelParameters;
-  mcpServers: string[];
-}
 
 // 模型参数
 export interface ModelParameters {
@@ -71,23 +80,43 @@ export interface ModelParameters {
 
 // 聊天请求
 export interface ChatRequest {
-  sessionId?: UUID;
+  chatId?: UUID;
   artifactId?: UUID;
-  inlineConfig?: Partial<ChatConfig>;
-  messages: Omit<Message, keyof BaseEntity | 'sessionId' | 'metadata'>[];
-  attachments?: File[];
+  modelId: string;
+  providerId: string;
+  parameters?: ModelParameters;
+  messages: ChatMessage[];
+  attachments?: ChatAttachment[];
+}
+
+// 聊天消息（请求中使用）
+export interface ChatMessage {
+  role: MessageRole;
+  content: string;
+}
+
+// 聊天附件（请求中使用）
+export interface ChatAttachment {
+  name: string;
+  mimeType: string;
+  data: Uint8Array;
 }
 
 // 聊天响应
 export interface ChatResponse {
-  sessionId: UUID;
+  chatId: UUID;
   messageId: UUID;
   content: string;
-  metadata: MessageMetadata;
+  modelId: string;
+  providerId: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  duration?: number;
 }
 
 // 流式聊天事件
 export type ChatStreamEvent = 
-  | { type: 'delta'; data: { content: string; metadata?: Partial<MessageMetadata> } }
+  | { type: 'delta'; data: { content: string; tokens?: number } }
   | { type: 'done'; data: ChatResponse }
   | { type: 'error'; data: { error: string; code?: string } };

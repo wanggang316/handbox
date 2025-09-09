@@ -4,7 +4,8 @@
   import { browser } from "$app/environment";
   import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
-  import { sidebarOpen } from "$lib/stores/ui";
+  import { uiState } from "$lib/states/ui.svelte";
+  import { chatState } from "$lib/states/chat.svelte";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏配置常量
@@ -21,21 +22,21 @@
 
   // 切换侧边栏显示状态
   function toggleSidebar() {
-    sidebarOpen.update(open => !open);
+    uiState.toggleSidebar();
     autoHidden = false; // 手动操作时清除自动隐藏标记
     
     // 如果在窄屏模式下手动打开侧边栏，标记用户覆盖行为
-    if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH && $sidebarOpen) {
+    if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH && uiState.sidebarOpen) {
       userOverrideInNarrowMode = true;
     } 
     // 如果在宽屏模式下或手动关闭，清除覆盖标记
-    else if (windowWidth >= SIDEBAR_AUTO_HIDE_WIDTH || !$sidebarOpen) {
+    else if (windowWidth >= SIDEBAR_AUTO_HIDE_WIDTH || !uiState.sidebarOpen) {
       userOverrideInNarrowMode = false;
     }
     
     // 保存状态到 localStorage
     if (browser) {
-      localStorage.setItem('sidebar.open', JSON.stringify($sidebarOpen));
+      localStorage.setItem('sidebar.open', JSON.stringify(uiState.sidebarOpen));
     }
   }
 
@@ -46,14 +47,14 @@
       windowWidth = window.innerWidth;
       
       if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH) {
-        if ($sidebarOpen && !autoHidden && !userOverrideInNarrowMode) {
-          sidebarOpen.set(false);
+        if (uiState.sidebarOpen && !autoHidden && !userOverrideInNarrowMode) {
+          uiState.setSidebarOpen(false);
           autoHidden = true;
         }
       } else if (prevWindowWidth < SIDEBAR_AUTO_HIDE_WIDTH) {
         userOverrideInNarrowMode = false;
         if (autoHidden) {
-          sidebarOpen.set(true);
+          uiState.setSidebarOpen(true);
           autoHidden = false;
         }
       }
@@ -73,12 +74,15 @@
     if (browser) {
       const saved = localStorage.getItem('sidebar.open');
       if (saved !== null) {
-        sidebarOpen.set(JSON.parse(saved));
+        uiState.setSidebarOpen(JSON.parse(saved));
       }
     }
   }
 
   onMount(() => {
+    // 全局初始化聊天状态
+    chatState.initialize();
+    
     // 恢复侧边栏状态
     restoreSidebarState();
     
@@ -104,9 +108,9 @@
 </script>
 
 <div class="app">
-  <TitleBar sidebarOpen={$sidebarOpen} showToggleButton={true} on:toggle={toggleSidebar} />
+  <TitleBar sidebarOpen={uiState.sidebarOpen} showToggleButton={true} on:toggle={toggleSidebar} />
   
-  <div class="sidebar-wrapper m-2" class:dragging={isDragging} style={`width:${$sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!$sidebarOpen}>
+  <div class="sidebar-wrapper m-2" class:dragging={isDragging} style={`width:${uiState.sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!uiState.sidebarOpen}>
     <ResizableSidebar
       on:resizeStart={() => { isDragging = true; }}
       on:resizing={(e) => { sidebarWidth = e.detail.width; }}
@@ -122,7 +126,7 @@
     </ResizableSidebar>
   </div>
 
-  <main class="main-content" class:sidebar-hidden={!$sidebarOpen}>
+  <main class="main-content" class:sidebar-hidden={!uiState.sidebarOpen}>
     {@render children()}
   </main>
 </div>

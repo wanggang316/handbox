@@ -1,45 +1,38 @@
 <script lang="ts">
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import DropDown from "$lib/components/ui/DropDown.svelte";
-  import { Plus, Send } from "@lucide/svelte";
+  import { ChevronsUpDown, Plus, Send } from "@lucide/svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import Button from "../ui/Button.svelte";
+  import ChatModelSelectModal from "./ChatModelSelectModal.svelte";
+  import { chatState } from "$lib/states/chat.svelte";
+  import type { ModelWithProvider } from "$lib/types/provider";
 
   interface Props {
     messageInput?: string;
-    selectedModel?: string;
-    models?: string[];
     onSendMessage?: (message: string) => void;
-    onModelChange?: (model: string) => void;
+    selectedModel?: ModelWithProvider | null;
   }
-  
-  let { 
-    messageInput = $bindable(''),
-    selectedModel = $bindable('DeepSeek R1'),
-    models = ['DeepSeek R1', 'Claude 3.5 Sonnet', 'GPT-4', 'Gemini Pro'],
-    onSendMessage = (message: string) => console.log('Sending message:', message),
-    onModelChange = (model: string) => console.log('Model changed to:', model)
+
+  let {
+    messageInput = $bindable(""),
+    onSendMessage = (message: string) =>
+      console.log("Sending message:", message),
+    selectedModel = null,
   }: Props = $props();
 
   let textareaRef: HTMLTextAreaElement;
+  let showModelModal = $state(false);
 
-  // 将 models 数组转换为 DropDown 组件需要的格式
-  const modelOptions = $derived(models.map(model => ({
-    value: model,
-    label: model
-  })));
-
-  function handleModelSelect(value: string) {
-    selectedModel = value;
-    onModelChange(value);
-  }
+  // 使用传入的模型
+  const currentModel = $derived(selectedModel);
 
   // 自动调整 textarea 高度
   function adjustTextareaHeight() {
     if (textareaRef) {
-      textareaRef.style.height = 'auto';
+      textareaRef.style.height = "auto";
       const scrollHeight = textareaRef.scrollHeight;
       const maxHeight = 300;
-      textareaRef.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+      textareaRef.style.height = Math.min(scrollHeight, maxHeight) + "px";
     }
   }
 
@@ -51,7 +44,7 @@
   });
 
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendMessage();
     }
@@ -60,15 +53,17 @@
   function sendMessage() {
     if (!messageInput.trim()) return;
     onSendMessage(messageInput);
-    messageInput = '';
+    messageInput = "";
   }
 
   function handleAddAttachment() {
-    console.log('添加附加');
+    console.log("添加附加");
   }
 </script>
 
-<div class="flex flex-col bg-[#f7f7f7] rounded-xl border border-[#ebeaea] max-h-[300px] mx-auto w-full max-w-[800px]">
+<div
+  class="flex flex-col bg-[#f7f7f7] rounded-xl border border-[#ebeaea] max-h-[300px] mx-auto w-full max-w-[800px]"
+>
   <textarea
     bind:this={textareaRef}
     bind:value={messageInput}
@@ -79,7 +74,9 @@
     class="bg-transparent text-[14px] text-[#7e7e7f] p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
   ></textarea>
 
-  <div class="flex flex-row justify-between items-center px-4 pt-0 pb-2 overflow-visible">
+  <div
+    class="flex flex-row justify-between items-center px-4 pt-0 pb-2 overflow-visible"
+  >
     <!-- 左侧：添加按钮 -->
     <IconButton
       icon={Plus}
@@ -89,21 +86,25 @@
 
     <!-- 右侧：模型选择和发送按钮 -->
     <div class="flex items-center gap-3">
-      <DropDown
-        options={modelOptions}
-        bind:selectedValue={selectedModel}
-        placeholder="选择模型"
-        position="top"
-        align="right"
-        onSelect={handleModelSelect}
-      />
-
-      <CircleButton
-        icon={Send}
-        ariaLabel="发送"
-        on:click={sendMessage}
-      />
+      <Button
+        variant="clear"
+        size="sm"
+        on:click={() => showModelModal = true}
+        >
+        {currentModel ? currentModel.name : "选择模型"}
+        <ChevronsUpDown size={14} />
+      </Button>
+      <CircleButton icon={Send} ariaLabel="发送" on:click={sendMessage} />
     </div>
   </div>
-  
 </div>
+
+<!-- 模型选择模态框 -->
+<ChatModelSelectModal
+  bind:open={showModelModal}
+  selectedModel={currentModel}
+  onModelSelect={(model) => {
+    // 通过 chatState 更新当前聊天的模型
+    chatState.updateChatModel(model.id, model.provider_id);
+  }}
+/>

@@ -19,16 +19,17 @@
 </script>
 
 {#if layout === "horizontal"}
-    <TableBaseRow {label} {layout}>
+    <TableBaseRow {label} {layout} py="2">
         <!-- 输入框 -->
-        <div class="flex flex-col items-end">
+        <div class="flex flex-col items-end flex-1">
             <input
                 bind:value
                 {placeholder}
                 {readonly}
-                class="w-full bg-transparent text-base text-right text-text-primary border-none outline-none p-1"
+                class="w-full text-sm text-right text-text-primary border-none outline-none p-1"
                 class:cursor-not-allowed={readonly}
                 class:text-[#b3b3b3]={readonly}
+                on:input
             />
         </div>
     </TableBaseRow>
@@ -43,6 +44,7 @@
                 class="w-full bg-white text-base text-left text-text-primary border-none outline-none px-2 py-1"
                 class:cursor-not-allowed={readonly}
                 class:text-[#b3b3b3]={readonly}
+                on:input
             />
 
             <div class="px-1 flex items-center justify-center" class:hidden={!isPassword}>

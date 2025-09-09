@@ -76,7 +76,7 @@
     const mcpJson = event.detail;
     try {
       // await providerActions.createProvider(config);
-      showMcpServerTextEditModal = false;
+      // showMcpServerTextEditModal = false; // 让 Modal 组件自己处理关闭动画
     } catch (error) {
       console.error("Failed to create mcp server:", error);
     }
@@ -134,9 +134,8 @@
   </div>
 </div>
 
-{#if showMcpServerTextEditModal}
-  <McpServerTextEditModal
-    on:close={handleCloseMcpServerTextEditModal}
-    on:confirm={handleConfirmMcpServerTextEdit}
-  />
-{/if}
+<McpServerTextEditModal
+  open={showMcpServerTextEditModal}
+  on:close={handleCloseMcpServerTextEditModal}
+  on:confirm={handleConfirmMcpServerTextEdit}
+/>

@@ -51,6 +51,43 @@ impl AppError {
     pub fn not_found(message: &str) -> Self {
         Self::with_hint("NOT_FOUND", message, "请求的资源未找到")
     }
+
+    // 供应商相关错误
+    pub fn provider_name_exists() -> Self {
+        Self::with_hint("PROVIDER_NAME_EXISTS", "供应商名称已存在", "请使用其他名称")
+    }
+
+    pub fn provider_api_key_invalid() -> Self {
+        Self::with_hint(
+            "PROVIDER_API_KEY_INVALID",
+            "API Key 无效",
+            "请检查 API Key 是否正确",
+        )
+    }
+
+    pub fn provider_api_endpoint_invalid() -> Self {
+        Self::with_hint(
+            "PROVIDER_API_ENDPOINT_INVALID",
+            "API 端点配置错误或服务不可用",
+            "请检查 Base URL 和供应商类型配置",
+        )
+    }
+
+    pub fn provider_api_permission_denied() -> Self {
+        Self::with_hint(
+            "PROVIDER_API_PERMISSION_DENIED",
+            "API Key 权限不足",
+            "请检查 API Key 的权限设置",
+        )
+    }
+
+    pub fn provider_models_fetch_failed() -> Self {
+        Self::with_hint(
+            "PROVIDER_MODELS_FETCH_FAILED",
+            "获取供应商模型失败",
+            "请检查网络连接和配置",
+        )
+    }
 }
 
 impl std::fmt::Display for AppError {
@@ -60,6 +97,13 @@ impl std::fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
+
+// sqlx 错误转换
+impl From<sqlx::Error> for AppError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::internal_error(&format!("Database error: {}", error))
+    }
+}
 
 /// API 响应包装类型
 #[derive(Debug, Clone, Serialize, Deserialize)]

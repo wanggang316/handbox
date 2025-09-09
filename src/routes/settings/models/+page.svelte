@@ -1,123 +1,119 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { providers, providerActions } from "$lib/stores/provider";
-  import { Plus, Cpu } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
+  import {
+    providerState,
+    providerActions,
+    providerStateActions,
+    providerConfigs,
+    getProviderIcon,
+  } from "$lib/states/provider.svelte";
+  import { LoaderCircle, Cpu } from "@lucide/svelte";
   import { TableGroup } from "$lib/components/ui/table";
   import StatusLabelRow from "$lib/components/ui/table/StatusLabelRow.svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
-  import type { Provider, ProviderConfig } from "$lib/types/provider";
+  import type { Provider } from "$lib/types/provider";
   import Button from "$lib/components/ui/Button.svelte";
 
-  let showAddProviderModal = false;
-
-  // 预定义供应商列表
-  const presetProviders = [
-    {
-      name: "OpenAI",
-      type: "openai",
-      iconSrc: "/logo-openai.png",
-      enabled: true,
-    },
-    {
-      name: "Anthropic",
-      type: "anthropic",
-      iconSrc: "/logo-anthropic.png",
-      enabled: false,
-    },
-    {
-      name: "Google AI",
-      type: "google",
-      iconSrc: "/logo-google.png",
-      enabled: false,
-    },
-    {
-      name: "DeepSeek",
-      type: "deepseek",
-      iconSrc: "/logo-deepseek.png",
-      enabled: false,
-    },
-    {
-      name: "OpenRouter",
-      type: "openrouter",
-      iconSrc: "/logo-openrouter.png",
-      enabled: false,
-    },
-  ];
+  let showAddProviderModal = $state(false);
 
   onMount(async () => {
     try {
-      await providerActions.loadProviders();
+      // 并行加载供应商配置和供应商列表
+      await Promise.all([
+        providerActions.loadProviderConfigs(),
+        providerActions.loadProviders()
+      ]);
     } catch (error) {
       console.error("Failed to load providers:", error);
     }
   });
 
-  function handleProviderClick(provider: any) {
+  function handleProviderClick(provider: Provider) {
     // 跳转到供应商配置页面
-    window.location.href = `/settings/models/provider/${provider.id || provider.type}`;
+    goto(`/settings/models/provider/${provider.id}`);
   }
 
   function handleAddProvider() {
     showAddProviderModal = true;
   }
 
-  async function handleCreateProvider(event: CustomEvent<ProviderConfig>) {
-    const config = event.detail;
-    try {
-      await providerActions.createProvider(config);
-      showAddProviderModal = false;
-      // 跳转到新创建的供应商配置页面
-      // TODO: 获取新创建的供应商ID
-    } catch (error) {
-      console.error("Failed to create provider:", error);
+  // 监听模态框状态变化
+  $effect(() => {
+    if (!showAddProviderModal) {
+      // 模态框关闭时，确保清理编辑状态
+      providerStateActions.endEditProvider();
     }
+  });
+
+  function getProviderStatus(
+    provider: Provider,
+  ): "enabled" | "disabled" {
+    return provider.enabled ? "enabled" : "disabled";
   }
 
-  function handleCloseAddProvider() {
-    showAddProviderModal = false;
+  function getProviderStatusText(provider: Provider): string {
+    return provider.enabled ? "已启用" : "已禁用";
   }
 </script>
 
-<div class="p-6 pr-8 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
+
+  <!-- 加载状态 -->
+  {#if providerState.isLoading}
+    <div class="flex items-center justify-center py-8">
+      <LoaderCircle class="h-6 w-6 animate-spin text-gray-400" />
+      <span class="ml-2 text-sm text-gray-500">正在加载供应商...</span>
+    </div>
+  {/if}
+
   <div class="rounded-[20px] overflow-hidden">
     <!-- 供应商列表 -->
     <TableGroup>
-      <!-- 预定义供应商 -->
-      {#each presetProviders as provider}
+      <!-- 实际供应商 -->
+      {#each providerState.providers as provider (provider.id)}
         <StatusLabelRow
           label={provider.name}
-          iconSrc={provider.iconSrc}
-          status={provider.enabled ? "enabled" : "disabled"}
-          statusText={provider.enabled ? "已开启" : "未开启"}
+          iconSrc={getProviderIcon(provider)}
+          icon={!getProviderIcon(provider)
+            ? provider.name.charAt(0).toUpperCase()
+            : undefined}
+          isCustomProvider={![...providerConfigs.providers, ...providerConfigs.custom_providers].some(
+            (t) => t.provider_type === provider.provider_type,
+          )}
+          status={getProviderStatus(provider)}
+          statusText={getProviderStatusText(provider)}
           onclick={() => handleProviderClick(provider)}
         />
       {/each}
 
-      <!-- 自定义供应商 -->
-      {#each $providers as provider}
-        <StatusLabelRow
-          label={provider.name}
-          icon={provider.name.charAt(0).toUpperCase()}
-          isCustomProvider={true}
-          status={provider.enabled ? "enabled" : "disabled"}
-          statusText={provider.enabled ? "已配置" : "未配置"}
-          onclick={() => handleProviderClick(provider)}
-        />
-      {/each}
+      <!-- 空状态 -->
+      {#if !providerState.isLoading && providerState.providers.length === 0}
+        <div class="p-8 text-center">
+          <Cpu class="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <p class="text-base text-gray-500 dark:text-gray-400 mb-4">
+            添加 AI 供应商开始使用各种模型
+          </p>
+          <Button variant="primary" size="sm" on:click={handleAddProvider}>
+            添加供应商
+          </Button>
+        </div>
+      {/if}
     </TableGroup>
   </div>
 
-  <div>
-    <Button variant="gray" size="sm" on:click={handleAddProvider}
-      >添加供应商</Button
-    >
-  </div>
+  <!-- 添加供应商按钮 -->
+  {#if providerState.providers.length > 0}
+    <div>
+      <Button variant="gray" size="sm" on:click={handleAddProvider}>
+        添加其它供应商
+      </Button>
+    </div>
+  {/if}
 </div>
 
 <!-- 添加供应商弹窗 -->
-{#if showAddProviderModal}
-  <AddProviderModal
-    on:close={handleCloseAddProvider}
-    on:confirm={handleCreateProvider}
-  />
-{/if}
+<AddProviderModal
+  open={showAddProviderModal}
+  onClose={() => showAddProviderModal = false}
+/>

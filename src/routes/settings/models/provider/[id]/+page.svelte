@@ -3,64 +3,40 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import {
-    Eye,
-    EyeOff,
-    TestTube,
-    RotateCw,
-    Settings,
-    Trash2,
-    ChevronLeft,
-    Edit,
-    RefreshCw,
-    Settings2,
-  } from "@lucide/svelte";
-  import ModelSelectModal from "$lib/components/settings/ModelSelectModal.svelte";
+    providerState,
+    providerActions,
+    providerStateActions,
+    getProviderIcon,
+  } from "$lib/states/provider.svelte";
+  import type { Provider, ProviderConfig } from "$lib/types/provider";
+  import { Trash2, ChevronLeft, SquarePen, Heart, Star } from "@lucide/svelte";
+  import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
-  import TextRow from "$lib/components/ui/table/TextRow.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
+  import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
 
-  let providerId = "";
-  let isLoading = false;
-  let showModelsModal = false;
-  let showDeleteConfirm = false;
-  let showApiKey = false;
+  let providerId = $state("");
+  let showDeleteConfirm = $state(false);
+  let showEditModal = $state(false);
+
+  let confirmModalRef: any;
+
+  // 使用统一的当前供应商状态
+  const currentProvider = $derived(providerState.currentProvider);
 
   // 配置表单
-  let formData = {
-    baseUrl: "https://api.openai.com/v1",
-    apiKey: "",
-    enabled: true,
-  };
+  let formData = $state({
+    name: "",
+    enabled: false,
+  });
 
-  // 模拟数据
-  const mockProvider = {
-    name: "OpenAI",
-    type: "openai",
-    iconSrc: "/logo-openai.png",
-    enabled: true,
-  };
-
-  const mockModels = {
-    "OpenAI": [
-      { name: "O3", id: "o3", enabled: true },
-      { name: "O3 Mini", id: "o3-mini", enabled: true },
-      { name: "O1", id: "o1", enabled: false },
-      { name: "O1 Mini", id: "o1-mini", enabled: false },
-      { name: "O1 Pro", id: "o1-pro", enabled: false },
-      { name: "O1 Pro Mini", id: "o1-pro-mini", enabled: false },
-      { name: "O1 Pro Max", id: "o1-pro-max", enabled: false },
-      { name: "O1 Pro Max Mini", id: "o1-pro-max-mini", enabled: false },
-    ],
-    "Google": [
-      { name: "Gemini 2.5 Flash", id: "gemini-2.5-flash", enabled: false },
-      { name: "Gemini 2.5 Pro", id: "gemini-2.5-pro", enabled: false },
-      { name: "Gemini 2.0 Flash", id: "gemini-2.0-flash", enabled: false },
-    ],
-  };
+  // 获取预定义供应商信息
+  let providerIcon = $derived(
+    currentProvider ? getProviderIcon(currentProvider) : null,
+  );
 
   onMount(() => {
     providerId = $page.params.id || "";
@@ -68,103 +44,120 @@
   });
 
   async function loadProvider() {
-    // TODO: 从API加载供应商数据
-    console.log("Loading provider:", providerId);
-  }
+    if (!providerId) return;
 
-  async function handleProbe() {
-    if (!mockProvider) return;
-    isLoading = true;
     try {
-      // TODO: 实现探活检测
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      console.log("Probing provider:", mockProvider.name);
+      // 尝试从全局状态中设置当前供应商
+      let provider = providerStateActions.setCurrentProviderById(providerId);
+
+      if (!provider) {
+        // 如果本地没有，先加载供应商配置和列表
+        await Promise.all([
+          providerActions.loadProviderConfigs(),
+          providerActions.loadProviders(),
+        ]);
+        provider = providerStateActions.setCurrentProviderById(providerId);
+      }
+
+      if (provider) {
+        // 填充表单数据
+        formData = {
+          name: provider.name,
+          enabled: provider.enabled,
+        };
+
+        // 自动获取模型列表
+        try {
+          await providerActions.fetchProviderModels(provider.id, false);
+        } catch (error) {
+          console.error("Failed to fetch models:", error);
+        }
+      } else {
+        console.error("Provider not found:", providerId);
+        // 跳转到供应商列表页
+        goto("/settings/models");
+      }
     } catch (error) {
-      console.error("Probe failed:", error);
-    } finally {
-      isLoading = false;
+      console.error("Failed to load provider:", error);
     }
   }
 
-  async function handleSave() {
-    if (!mockProvider) return;
-    isLoading = true;
-    try {
-      // TODO: 保存配置
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.log("Saving provider config:", formData);
-    } catch (error) {
-      console.error("Save failed:", error);
-    } finally {
-      isLoading = false;
+  function handleEdit() {
+    if (!currentProvider) return;
+    providerStateActions.startEditProvider(currentProvider);
+    showEditModal = true;
+  }
+
+  // 监听当前供应商变化，更新表单数据
+  $effect(() => {
+    if (currentProvider) {
+      formData = {
+        name: currentProvider.name,
+        enabled: currentProvider.enabled,
+      };
     }
-  }
+  });
 
-  async function handleFetchModels() {
-    console.log("handleFetchModels")
-    if (!mockProvider) return;
-    showModelsModal = true;
-  }
+  async function handleToggleProvider(enabled: boolean) {
+    console.log("handleToggleProvider", enabled);
+    if (!currentProvider) return;
 
-  function handleModelsConfirm(
-    event: CustomEvent<{ selectedModels: string[] }>,
-  ) {
-    const { selectedModels } = event.detail;
-    console.log("Selected models:", selectedModels);
-    showModelsModal = false;
-  }
+    formData.enabled = enabled; // 立即更新UI
 
-  function handleCloseModels() {
-    showModelsModal = false;
+    try {
+      console.log("handleToggleProvider", currentProvider.id, enabled);
+      await providerActions.toggleProvider(currentProvider.id, enabled);
+      // 更新当前供应商状态
+      providerStateActions.updateCurrentProvider({
+        ...currentProvider,
+        enabled,
+      });
+      console.log(`Provider ${enabled ? "enabled" : "disabled"} successfully`);
+    } catch (error) {
+      console.error("Failed to toggle provider:", error);
+      // 发生错误时回滚UI状态
+      formData.enabled = !enabled;
+    }
   }
 
   async function handleDelete() {
-    if (!mockProvider) return;
+    if (!currentProvider) return;
     showDeleteConfirm = true;
   }
 
   async function confirmDelete() {
-    if (!mockProvider) return;
-    isLoading = true;
+    if (!currentProvider) return;
+
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.log("Deleting provider:", mockProvider.name);
+      await providerActions.deleteProvider(currentProvider.id);
+      console.log("Provider deleted successfully");
       goto("/settings/models");
     } catch (error) {
       console.error("Delete failed:", error);
-    } finally {
-      isLoading = false;
-      showDeleteConfirm = false;
+      // 删除失败时触发关闭动画
+      confirmModalRef?.modalRef?.handleClose();
     }
   }
 
   function handleBack() {
     goto("/settings/models");
   }
-
-  function handleRefreshModels(e: CustomEvent<any>): void {
-    showModelsModal = true
-  }
-
-  function handleTestKey(): void {
-    throw new Error("Function not implemented.");
-  }
-
-  function handleConfigModel(e: CustomEvent<any>): void {
-    throw new Error("Function not implemented.");
-  }
-
-  function handleRemoveModel(e: CustomEvent<any>): void {
-    throw new Error("Function not implemented.");
-  }
 </script>
 
 {#snippet iconSnippet()}
-  <img
-    src={mockProvider.iconSrc}
-    alt="{mockProvider.name} logo"
-    class="w-6 h-6 object-contain"
-  />
+  {#if providerIcon}
+    <img
+      src={providerIcon}
+      alt="{currentProvider?.name || 'Provider'} logo"
+      class="w-6 h-6 object-contain"
+    />
+  {:else if currentProvider}
+    <div
+      class="w-6 h-6 bg-gray-300 rounded flex items-center justify-center text-xs font-bold"
+    >
+      {currentProvider.name.charAt(0).toUpperCase()}
+    </div>
+  {/if}
 {/snippet}
 
 <!-- 粘性导航栏 - 在右侧主体区域内固定 -->
@@ -185,112 +178,125 @@
 
   <!-- 主要内容区域 -->
   <main class="flex-grow overflow-y-auto p-6 pr-8">
-    <TableBaseRow label={mockProvider.name} icon={iconSnippet}>
-      <div class="flex flex-row items-center gap-4">
-        <IconButton
-          icon={Edit}
-          on:click={() => (formData.enabled = !formData.enabled)}
-        />
+    {#if currentProvider}
+      <TableGroup>
+        <TableBaseRow label={currentProvider.name} icon={iconSnippet}>
+          <div class="flex flex-row items-center gap-4">
+            <IconButton icon={SquarePen} on:click={handleEdit} />
 
-        <IconButton
-          icon={Trash2}
-          on:click={() => (formData.enabled = !formData.enabled)}
-        />
+            <IconButton icon={Trash2} on:click={handleDelete} />
 
-        <Toggle checked={formData.enabled} />
-      </div>
-    </TableBaseRow>
-
-    <div class="flex items-center justify-end">
-      <Button on:click={handleTestKey} variant="clear" size="sm">
-        <RefreshCw size={14} />
-        检测
-      </Button>
-    </div>
-
-    <TableGroup>
-      <TextRow
-        layout="vertical"
-        isPassword
-        label="API Key"
-        value={formData.apiKey}
-      />
-      <TextRow layout="vertical" label="Base URL" value={formData.baseUrl} />
-    </TableGroup>
-
-    <div class="flex items-center mt-6">
-      <div class="flex-1 text-text-primary text-base mx-2">模型列表</div>
-      <Button on:click={handleFetchModels} variant="clear" size="sm">
-        <RefreshCw size={14} />
-        获取模型列表
-      </Button>
-    </div>
-
-    {#each Object.keys(mockModels) as key}
-      <TableGroup title={key}>
-        {#each mockModels[key as keyof typeof mockModels] as model}
-          <TableBaseRow label={model.name} py="2">
-            <div class="flex flex-row items-center gap-2">
-              <IconButton
-                icon={Settings2}
-                iconSize={16}
-                on:click={handleConfigModel}
-              />
-              <IconButton
-                icon={Trash2}
-                iconSize={16}
-                on:click={handleRemoveModel}
-              />
-            </div>
-          </TableBaseRow>
-        {/each}
+            <Toggle
+              checked={formData.enabled}
+              onChange={handleToggleProvider}
+            />
+          </div>
+        </TableBaseRow>
       </TableGroup>
-    {/each}
+    {/if}
 
+    <div class="flex items-center mt-6 mb-2">
+      <div class="flex-1 text-text-primary text-base mx-2">模型列表</div>
+    </div>
+
+    {#if currentProvider}
+      {@const providerModels = providerState.currentModels}
+      {#if providerModels.length > 0}
+        <div class="bg-bg-secondary rounded-xl overflow-hidden">
+          <!-- Table Headers -->
+          <div
+            class="flex flex-row items-center gap-4 px-4 py-2 bg-bg-hover border-b border-border text-xs font-medium text-text-primary"
+          >
+            <div class="flex-1">Name</div>
+            <div class="text-center w-16">Enabled</div>
+            <div class="text-center w-16">Favorite</div>
+          </div>
+
+          <!-- Model List -->
+          <div class="bg-bg-primary">
+            {#each providerModels as model, index}
+              <div
+                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-bg-primary' : 'bg-bg-secondary'} hover:bg-bg-hover"
+              >
+                <!-- Model Name -->
+                <div class="flex items-center flex-1">
+                  <span class="text-text-primary text-xs">{model.name}</span>
+                </div>
+
+                <!-- Enabled Toggle -->
+
+                <div class="flex items-center justify-center w-16">
+                  <input
+                    type="checkbox"
+                    bind:checked={model.enabled}
+                    onchange={(e) => {
+                      if (currentProvider) {
+                        providerActions.toggleModel(
+                          currentProvider.id,
+                          model.id,
+                          (e.currentTarget as HTMLInputElement).checked,
+                        );
+                      }
+                    }}
+                    class="w-4 h-4 text-accent bg-bg-primary border-border rounded focus:ring-accent focus:ring-2"
+                  />
+                </div>
+
+                <div class="flex items-center justify-center w-16">
+                  <button
+                    onclick={() => {
+                      if (currentProvider) {
+                        providerActions.toggleModelFavorite(
+                          currentProvider.id,
+                          model.id,
+                          !model.favorite,
+                        );
+                      }
+                    }}
+                    class="p-1 rounded hover:bg-bg-hover transition-colors"
+                    aria-label={model.favorite
+                      ? "Remove from favorites"
+                      : "Add to favorites"}
+                  >
+                    <Star
+                      size={16}
+                      class={model.favorite
+                        ? "text-text-primary fill-current"
+                        : "text-text-secondary hover:text-red-400"}
+                    />
+                  </button>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div class="text-center text-sm py-8 text-gray-500">
+          暂无模型数据，请检查供应商配置或网络连接
+        </div>
+      {/if}
+    {/if}
   </main>
 </div>
 
-<!-- 模型选择弹窗 -->
-{#if showModelsModal}
-  <ModelSelectModal
-    {providerId}
-    on:close={handleCloseModels}
-    on:confirm={handleModelsConfirm}
-  />
-{/if}
+<!-- 编辑供应商弹窗 -->
+<AddProviderModal
+  open={showEditModal}
+  onClose={() => (showEditModal = false)}
+/>
 
 <!-- 删除确认弹窗 -->
-{#if showDeleteConfirm}
-  <div
-    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-  >
-    <div class="bg-white rounded-2xl p-6 max-w-md mx-4">
-      <h3 class="text-lg font-semibold text-slate-900 mb-2">确认删除</h3>
-      <p class="text-slate-600 mb-6">
-        确定要删除该供应商吗？此操作不可撤销，所有相关配置和数据都将被清除。
-      </p>
-
-      <div class="flex items-center justify-end gap-3">
-        <button
-          on:click={() => (showDeleteConfirm = false)}
-          class="px-4 py-2 text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
-        >
-          取消
-        </button>
-        <button
-          on:click={confirmDelete}
-          disabled={isLoading}
-          class="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {#if isLoading}
-            <RotateCw class="w-4 h-4 animate-spin" />
-            <span>删除中...</span>
-          {:else}
-            <Trash2 class="w-4 h-4" />
-            <span>确认删除</span>
-          {/if}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<ConfirmModal
+  bind:this={confirmModalRef}
+  open={showDeleteConfirm}
+  title="删除供应商"
+  message="确认要删除 <span class='font-medium'>{currentProvider?.name}</span> 吗？"
+  confirmText="删除"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  isLoading={providerState.isLoading}
+  autoCloseOnConfirm={false}
+  onClose={() => (showDeleteConfirm = false)}
+  onConfirm={confirmDelete}
+  onCancel={() => {}}
+/>

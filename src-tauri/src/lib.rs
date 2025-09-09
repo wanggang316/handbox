@@ -1,25 +1,22 @@
 // HandBox Tauri 应用主入口
 
 // 声明模块
+pub mod clients;
 pub mod commands;
-pub mod config;
 pub mod menu;
 pub mod models;
 pub mod services;
+pub mod storage;
 pub mod utils;
 
 use crate::commands::*;
-use crate::config::AppConfig;
 use crate::services::{
-    ArtifactService, ChatService, ProviderService, SearchService, SettingsService, StorageService,
+    ArtifactService, ChatService, DatabaseService, MessageService, ProviderService, SearchService,
+    SettingsService, StorageService,
 };
+use crate::utils::logger;
 use std::sync::Arc;
 use tauri::Manager;
-
-/// 应用状态管理
-pub struct AppState {
-    pub config: AppConfig,
-}
 
 /// 初始化服务
 async fn initialize_services(
@@ -34,15 +31,18 @@ async fn initialize_services(
     // 初始化存储服务
     let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
 
-    // 初始化数据库
-    storage_service
-        .init_database()
-        .await
-        .map_err(|e| format!("Failed to initialize database: {e}"))?;
+    // 初始化数据库服务
+    let db_path = storage_service.get_database_path();
+    let database_service = Arc::new(
+        DatabaseService::new(&db_path)
+            .await
+            .map_err(|e| format!("Failed to initialize database: {e}"))?,
+    );
 
     // 初始化各个服务
-    let chat_service = ChatService::new(storage_service.clone());
-    let provider_service = ProviderService::new(storage_service.clone());
+    let chat_service = ChatService::new(database_service.clone());
+    let message_service = MessageService::new(database_service.clone());
+    let provider_service = ProviderService::new(database_service.clone());
     let artifact_service = ArtifactService::new(storage_service.clone());
     let settings_service = SettingsService::new(storage_service.clone());
     let search_service = SearchService::new(storage_service.clone());
@@ -50,15 +50,11 @@ async fn initialize_services(
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(chat_service);
+    app.manage(message_service);
     app.manage(provider_service);
     app.manage(artifact_service);
     app.manage(settings_service);
     app.manage(search_service);
-
-    // 加载应用配置
-    let config_path = data_dir.join("app_config.json");
-    let config = AppConfig::load_from_file(&config_path)?;
-    app.manage(AppState { config });
 
     Ok(())
 }
@@ -71,6 +67,13 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 初始化日志系统
+    if let Err(e) = logger::init_logger() {
+        eprintln!("Failed to initialize logger: {}", e);
+    } else {
+        tracing::info!("Logger initialized successfully");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -96,16 +99,19 @@ pub fn run() {
             // 测试命令
             greet,
             // 聊天相关命令
-            chat_send,
-            chat_create_session,
-            chat_list_sessions,
-            chat_get_session,
-            chat_update_session,
-            chat_delete_session,
-            chat_get_messages,
-            chat_update_message,
-            chat_delete_message,
-            chat_regenerate_message,
+            chat_create,
+            chat_list,
+            chat_get,
+            chat_update,
+            chat_delete,
+            // 消息相关命令
+            message_send,
+            message_send_stream,
+            message_list,
+            message_get,
+            message_update,
+            message_delete,
+            message_regenerate,
             // 窗口管理命令
             open_settings_window,
             close_settings_window,
@@ -113,14 +119,20 @@ pub fn run() {
             // 供应商相关命令
             provider_list,
             provider_get,
+            provider_get_with_models,
             provider_create,
             provider_update,
             provider_delete,
-            provider_probe,
             provider_list_models,
             provider_toggle,
             provider_toggle_model,
+            provider_toggle_model_favorite,
             provider_get_available_models,
+            provider_get_all_with_models,
+            provider_get_favorite_models,
+            // LLM 配置相关命令
+            get_provider_configs,
+            get_provider_config_by_type,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

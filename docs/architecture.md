@@ -150,7 +150,7 @@ MCP 配置 JSON：
 ### 6.1 模型供应商（OpenAI/Anthropic/Google/DeepSeek/OpenRouter/自定义）
 - 类型 1（特定主流）：字段为 `api_key`, `base_url`（可选）。
 - 类型 2（自定义，兼容 OpenAI/Anthropic API）：字段为 `name`, `type`, `base_url`, `api_key`。
-- 统一 Provider 接口：`probe()`、`listModels()`、`chatCompletion(stream)`。
+- 统一 Provider 接口：`listModels()`、`chatCompletion(stream)`。
 - 速率/错误处理：暴露错误码与建议（等待、降速、检查 Key、重试）。
 
 ### 6.2 MCP（Model Context Protocol）
@@ -160,7 +160,6 @@ MCP 配置 JSON：
 ## 7. 安全与隐私
 
 - 本地优先：用户数据默认不出本地；所有第三方调用需用户显式配置。
-- API Key 存储：优先 OS Keychain（Rust `keyring`）。
 - 代码执行/MCP：沙箱隔离、超时控制、内存上限；禁用危险系统调用。
 - CSP：生产环境启用严格 CSP（当前 `tauri.conf.json` 为 `null`，建议上线前收紧）。
 - 备份与恢复：仅手动导入/导出，本地存储加校验。
