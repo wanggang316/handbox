@@ -1,8 +1,8 @@
 // LLM 客户端
 // 根据配置组装模型列表提供者和 API 提供者
 
-use super::api_provider::{create_api_provider, ApiProvider, ChatRequest, ChatResponse};
-use super::model_list_provider::{create_model_list_provider, ModelListProvider};
+use super::chat_client::{create_chat_client, ChatClient, ChatRequest, ChatResponse};
+use super::model_client::{create_model_client, ModelClient};
 use crate::models::{AppError, ModelFeature, Provider};
 use crate::services::llm_config::get_global_llm_config;
 
@@ -20,8 +20,8 @@ pub struct StandardModel {
 /// LLM 客户端
 pub struct LlmClient {
     provider_type: String,
-    model_api_provider: Box<dyn ModelListProvider>,
-    chat_api_provider: Box<dyn ApiProvider>,
+    model_api_provider: Box<dyn ModelClient>,
+    chat_api_provider: Box<dyn ChatClient>,
 }
 
 impl LlmClient {
@@ -33,10 +33,10 @@ impl LlmClient {
         })?;
 
         // 创建模型列表提供者
-        let model_api_provider = create_model_list_provider(&provider_config.model_api_type)?;
+        let model_api_provider = create_model_client(&provider_config.model_api_type)?;
 
         // 创建聊天 API 提供者
-        let chat_api_provider = create_api_provider(&provider_config.chat_api_type)?;
+        let chat_api_provider = create_chat_client(&provider_config.chat_api_type)?;
 
         Ok(Self {
             provider_type: provider_type.to_string(),
@@ -48,8 +48,8 @@ impl LlmClient {
     /// 直接创建客户端（用于测试或特殊场景）
     pub fn new(
         provider_type: String,
-        model_api_provider: Box<dyn ModelListProvider>,
-        chat_api_provider: Box<dyn ApiProvider>,
+        model_api_provider: Box<dyn ModelClient>,
+        chat_api_provider: Box<dyn ChatClient>,
     ) -> Self {
         Self {
             provider_type,
@@ -119,15 +119,15 @@ pub fn create_client(provider_type: &str) -> LlmClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clients::api_provider::OpenAIApiProvider;
-    use crate::clients::model_list_provider::OpenAIModelListProvider;
+    use crate::clients::chat_client::OpenAIChatClient;
+    use crate::clients::model_client::OpenAIModelClient;
 
     #[test]
     fn test_llm_client_creation() {
         let client = LlmClient::new(
             "test".to_string(),
-            Box::new(OpenAIModelListProvider::new()),
-            Box::new(OpenAIApiProvider::new()),
+            Box::new(OpenAIModelClient::new()),
+            Box::new(OpenAIChatClient::new()),
         );
 
         assert_eq!(client.provider_type(), "test");

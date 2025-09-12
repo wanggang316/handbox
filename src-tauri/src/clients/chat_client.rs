@@ -49,9 +49,9 @@ pub struct ChatUsage {
     pub total_tokens: i32,
 }
 
-/// API 功能接口提供者 trait
+/// 聊天客户端 trait
 #[async_trait]
-pub trait ApiProvider: Send + Sync {
+pub trait ChatClient: Send + Sync {
     /// 发送聊天请求
     async fn chat(
         &self,
@@ -73,12 +73,12 @@ pub trait ApiProvider: Send + Sync {
     fn api_type(&self) -> &'static str;
 }
 
-/// OpenAI 风格 API 提供者
-pub struct OpenAIApiProvider {
+/// OpenAI 风格聊天客户端
+pub struct OpenAIChatClient {
     client: reqwest::Client,
 }
 
-impl OpenAIApiProvider {
+impl OpenAIChatClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -110,7 +110,7 @@ impl OpenAIApiProvider {
 }
 
 #[async_trait]
-impl ApiProvider for OpenAIApiProvider {
+impl ChatClient for OpenAIChatClient {
     async fn chat(
         &self,
         provider: &Provider,
@@ -255,12 +255,12 @@ impl ApiProvider for OpenAIApiProvider {
     }
 }
 
-/// Google 风格 API 提供者
-pub struct GoogleApiProvider {
+/// Google 风格聊天客户端
+pub struct GoogleChatClient {
     client: reqwest::Client,
 }
 
-impl GoogleApiProvider {
+impl GoogleChatClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -361,7 +361,7 @@ impl GoogleApiProvider {
 }
 
 #[async_trait]
-impl ApiProvider for GoogleApiProvider {
+impl ChatClient for GoogleChatClient {
     async fn chat(
         &self,
         provider: &Provider,
@@ -409,7 +409,7 @@ impl ApiProvider for GoogleApiProvider {
     async fn chat_stream(
         &self,
         provider: &Provider,
-        mut request: ChatRequest,
+        request: ChatRequest,
     ) -> Result<
         Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
         AppError,
@@ -565,13 +565,13 @@ impl ApiProvider for GoogleApiProvider {
     }
 }
 
-/// Anthropic 风格 API 提供者
-pub struct AnthropicApiProvider {
+/// Anthropic 风格聊天客户端
+pub struct AnthropicChatClient {
     client: reqwest::Client,
 }
 
 
-impl AnthropicApiProvider {
+impl AnthropicChatClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -669,7 +669,7 @@ impl AnthropicApiProvider {
 }
 
 #[async_trait]
-impl ApiProvider for AnthropicApiProvider {
+impl ChatClient for AnthropicChatClient {
     async fn chat(
         &self,
         provider: &Provider,
@@ -838,12 +838,12 @@ impl ApiProvider for AnthropicApiProvider {
     }
 }
 
-/// API 提供者工厂
-pub fn create_api_provider(api_type: &str) -> Result<Box<dyn ApiProvider>, AppError> {
+/// 聊天客户端工厂
+pub fn create_chat_client(api_type: &str) -> Result<Box<dyn ChatClient>, AppError> {
     match api_type {
-        "openai" => Ok(Box::new(OpenAIApiProvider::new())),
-        "google" => Ok(Box::new(GoogleApiProvider::new())),
-        "anthropic" => Ok(Box::new(AnthropicApiProvider::new())),
+        "openai" => Ok(Box::new(OpenAIChatClient::new())),
+        "google" => Ok(Box::new(GoogleChatClient::new())),
+        "anthropic" => Ok(Box::new(AnthropicChatClient::new())),
         _ => Err(AppError::validation_error(&format!(
             "Unsupported API type: {}",
             api_type

@@ -1,6 +1,6 @@
 // 消息服务实现
 
-use crate::clients::api_provider::{
+use crate::clients::chat_client::{
     ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest, ChatUsage,
 };
 use crate::clients::llm_client::create_llm_client;
@@ -501,7 +501,7 @@ impl MessageService {
     /// 从 API 响应格式转换
     fn convert_from_api_response(
         &self,
-        api_response: crate::clients::api_provider::ChatResponse,
+        api_response: crate::clients::chat_client::ChatResponse,
         duration: f64,
     ) -> Result<LlmApiResponse, AppError> {
         let choice = api_response
