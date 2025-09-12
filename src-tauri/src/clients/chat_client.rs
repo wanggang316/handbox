@@ -243,35 +243,50 @@ impl ChatClient for OpenAIChatClient {
             serde_json::to_string_pretty(&openai_request).unwrap_or_default()
         );
 
-        // 调用 openai-rust 库的流式方法并立即收集所有结果
-        let completions = openai_client.completions();
-        let openai_stream = completions
-            .create_stream(&openai_request)
-            .await
-            .map_err(|e| AppError::internal_error(&format!("OpenAI streaming API call failed: {}", e)))?;
-
-        // 转换流式响应 - 使用 collect 来收集所有结果然后转换为流
-        use futures::{StreamExt, stream};
+        // 使用 tokio::spawn 和 mpsc 来创建一个真正的流式传输
+        use tokio::sync::mpsc;
+        use futures::StreamExt;
         
-        // 将 openai_stream 收集为 Vec，然后转换为我们的流
-        let mut openai_stream = Box::pin(openai_stream);
-        let mut results = Vec::new();
+        let (tx, mut rx) = mpsc::channel::<Result<ChatResponse, AppError>>(100);
         
-        while let Some(result) = openai_stream.next().await {
-            let converted_result = result.map(|chunk| {
-                tracing::debug!("[OpenAI Stream] Received chunk: {:?}", chunk);
-                // 创建一个新的 OpenAIChatClient 实例来转换 chunk
-                let converter = OpenAIChatClient::new();
-                converter.convert_from_openai_chunk(chunk)
-            }).map_err(|e| AppError::internal_error(&format!("Stream error: {}", e)));
+        // 在后台任务中处理流，将 openai_client 和 openai_request 的所有权转移进去
+        tokio::spawn(async move {
+            let completions = openai_client.completions();
+            let openai_stream = match completions
+                .create_stream(&openai_request)
+                .await
+            {
+                Ok(stream) => stream,
+                Err(e) => {
+                    let _ = tx.send(Err(AppError::internal_error(&format!("OpenAI streaming API call failed: {}", e)))).await;
+                    return;
+                }
+            };
             
-            results.push(converted_result);
-        }
+            let mut openai_stream = Box::pin(openai_stream);
+            while let Some(result) = openai_stream.next().await {
+                let converted_result = result.map(|chunk| {
+                    tracing::debug!("[OpenAI Stream] Received chunk: {:?}", chunk);
+                    // 创建一个新的 OpenAIChatClient 实例来转换 chunk
+                    let converter = OpenAIChatClient::new();
+                    converter.convert_from_openai_chunk(chunk)
+                }).map_err(|e| AppError::internal_error(&format!("Stream error: {}", e)));
+                
+                if tx.send(converted_result).await.is_err() {
+                    // 接收端已关闭，退出
+                    break;
+                }
+            }
+        });
         
-        // 将结果转换为流
-        let converted_stream = stream::iter(results);
+        // 将接收端转换为流
+        let converted_stream = async_stream::stream! {
+            while let Some(result) = rx.recv().await {
+                yield result;
+            }
+        };
         
-        Ok(Box::new(converted_stream) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
+        Ok(Box::new(Box::pin(converted_stream)) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
     }
 
     fn api_type(&self) -> &'static str {
