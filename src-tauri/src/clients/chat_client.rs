@@ -75,38 +75,107 @@ pub trait ChatClient: Send + Sync {
 
 /// OpenAI 风格聊天客户端
 pub struct OpenAIChatClient {
-    client: reqwest::Client,
+    // 不再需要 reqwest::Client，因为 openai-rust 库会处理 HTTP 请求
 }
 
 impl OpenAIChatClient {
     pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
+        Self {}
+    }
+
+    /// 转换我们的 ChatRequest 到 openai-rust 的 ChatCompletionRequest
+    fn convert_to_openai_request(&self, request: &ChatRequest) -> openai_rust::types::ChatCompletionRequest {
+        let messages: Vec<openai_rust::types::ChatMessage> = request
+            .messages
+            .iter()
+            .map(|msg| openai_rust::types::ChatMessage {
+                role: match msg.role.as_str() {
+                    "system" => openai_rust::types::Role::System,
+                    "user" => openai_rust::types::Role::User,
+                    "assistant" => openai_rust::types::Role::Assistant,
+                    _ => openai_rust::types::Role::User, // 默认值
+                },
+                content: msg.content.clone(),
+            })
+            .collect();
+
+        openai_rust::types::ChatCompletionRequest {
+            model: request.model.clone(),
+            messages,
+            temperature: request.temperature,
+            stream: request.stream,
         }
     }
 
-    /// 构建 OpenAI 风格的请求体
-    fn build_openai_request(&self, request: &ChatRequest) -> Value {
-        let mut req_body = serde_json::json!({
-            "model": request.model,
-            "messages": request.messages,
+    /// 转换 openai-rust 的 ChatCompletionResponse 到我们的 ChatResponse
+    fn convert_from_openai_response(
+        &self,
+        response: openai_rust::types::ChatCompletionResponse,
+    ) -> ChatResponse {
+        let choices: Vec<ChatChoice> = response
+            .choices
+            .into_iter()
+            .map(|choice| ChatChoice {
+                index: choice.index as i32,
+                message: Some(ChatMessage {
+                    role: match choice.message.role {
+                        openai_rust::types::Role::System => "system".to_string(),
+                        openai_rust::types::Role::User => "user".to_string(),
+                        openai_rust::types::Role::Assistant => "assistant".to_string(),
+                    },
+                    content: choice.message.content,
+                }),
+                delta: None,
+                finish_reason: Some(choice.finish_reason),
+            })
+            .collect();
+
+        let usage = Some(ChatUsage {
+            prompt_tokens: response.usage.prompt_tokens as i32,
+            completion_tokens: response.usage.completion_tokens as i32,
+            total_tokens: response.usage.total_tokens as i32,
         });
 
-        if let Some(temperature) = request.temperature {
-            req_body["temperature"] = temperature.into();
+        ChatResponse {
+            id: response.id,
+            object: response.object,
+            model: response.model,
+            choices,
+            usage,
         }
-
-        if let Some(max_tokens) = request.max_tokens {
-            req_body["max_tokens"] = max_tokens.into();
-        }
-
-        if let Some(stream) = request.stream {
-            req_body["stream"] = stream.into();
-        }
-
-        req_body
     }
 
+    /// 转换 openai-rust 的 ChatCompletionChunkResponse 到我们的 ChatResponse
+    fn convert_from_openai_chunk(
+        &self,
+        chunk: openai_rust::types::ChatCompletionChunkResponse,
+    ) -> ChatResponse {
+        let choices: Vec<ChatChoice> = chunk
+            .choices
+            .into_iter()
+            .map(|choice| ChatChoice {
+                index: choice.index as i32,
+                message: None,
+                delta: Some(ChatMessage {
+                    role: choice.delta.role.map(|role| match role {
+                        openai_rust::types::Role::System => "system".to_string(),
+                        openai_rust::types::Role::User => "user".to_string(),
+                        openai_rust::types::Role::Assistant => "assistant".to_string(),
+                    }).unwrap_or_default(),
+                    content: choice.delta.content.unwrap_or_default(),
+                }),
+                finish_reason: choice.finish_reason,
+            })
+            .collect();
+
+        ChatResponse {
+            id: chunk.id,
+            object: chunk.object,
+            model: chunk.model,
+            choices,
+            usage: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -116,52 +185,32 @@ impl ChatClient for OpenAIChatClient {
         provider: &Provider,
         request: ChatRequest,
     ) -> Result<ChatResponse, AppError> {
-        let url = format!("{}/chat/completions", provider.base_url);
-        let req_body = self.build_openai_request(&request);
+        tracing::info!("Sending OpenAI-style chat request using openai-rust library");
 
-        tracing::info!("Sending OpenAI-style chat request to: {}", url);
+        // 创建 openai-rust 客户端
+        let openai_client = openai_rust::client::Client::builder()
+            .api_key(provider.api_key.clone())
+            .base_url(provider.base_url.clone())
+            .build()
+            .map_err(|e| AppError::internal_error(&format!("Failed to create OpenAI client: {}", e)))?;
 
-        // 调试：检查认证头
-        let auth_header = format!("Bearer {}", provider.api_key);
-        let auth_preview = if auth_header.len() > 16 {
-            format!(
-                "Bearer {}...{}",
-                &provider.api_key[..4],
-                &provider.api_key[provider.api_key.len() - 4..]
-            )
-        } else {
-            "Bearer ***".to_string()
-        };
-        tracing::info!("Using auth header: {}", auth_preview);
+        // 转换请求格式
+        let openai_request = self.convert_to_openai_request(&request);
+
         tracing::debug!(
             "Request payload: {}",
-            serde_json::to_string_pretty(&req_body).unwrap_or_default()
+            serde_json::to_string_pretty(&openai_request).unwrap_or_default()
         );
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", auth_header)
-            .header("Content-Type", "application/json")
-            .json(&req_body)
-            .send()
+        // 调用 openai-rust 库
+        let openai_response = openai_client
+            .completions()
+            .create(&openai_request)
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to send chat request: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("OpenAI API call failed: {}", e)))?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::internal_error(&format!(
-                "API returned error {}: {}",
-                status, error_text
-            )));
-        }
-
-        let chat_response: ChatResponse = response.json().await.map_err(|e| {
-            AppError::internal_error(&format!("Failed to parse chat response: {}", e))
-        })?;
+        // 转换响应格式
+        let chat_response = self.convert_from_openai_response(openai_response);
 
         Ok(chat_response)
     }
@@ -177,77 +226,52 @@ impl ChatClient for OpenAIChatClient {
         // 启用流式响应
         request.stream = Some(true);
 
-        let url = format!("{}/chat/completions", provider.base_url);
-        let req_body = self.build_openai_request(&request);
+        tracing::info!("Sending OpenAI-style streaming chat request using openai-rust library");
 
-        tracing::info!("Sending OpenAI-style streaming chat request to: {}", url);
-        tracing::debug!("Request payload: {}", serde_json::to_string_pretty(&req_body).unwrap_or_default());
+        // 创建 openai-rust 客户端
+        let openai_client = openai_rust::client::Client::builder()
+            .api_key(provider.api_key.clone())
+            .base_url(provider.base_url.clone())
+            .build()
+            .map_err(|e| AppError::internal_error(&format!("Failed to create OpenAI client: {}", e)))?;
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", provider.api_key))
-            .header("Content-Type", "application/json")
-            .json(&req_body)
-            .send()
+        // 转换请求格式
+        let openai_request = self.convert_to_openai_request(&request);
+
+        tracing::debug!(
+            "Request payload: {}",
+            serde_json::to_string_pretty(&openai_request).unwrap_or_default()
+        );
+
+        // 调用 openai-rust 库的流式方法并立即收集所有结果
+        let completions = openai_client.completions();
+        let openai_stream = completions
+            .create_stream(&openai_request)
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to send streaming chat request: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("OpenAI streaming API call failed: {}", e)))?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::internal_error(&format!(
-                "API returned error {}: {}",
-                status, error_text
-            )));
+        // 转换流式响应 - 使用 collect 来收集所有结果然后转换为流
+        use futures::{StreamExt, stream};
+        
+        // 将 openai_stream 收集为 Vec，然后转换为我们的流
+        let mut openai_stream = Box::pin(openai_stream);
+        let mut results = Vec::new();
+        
+        while let Some(result) = openai_stream.next().await {
+            let converted_result = result.map(|chunk| {
+                tracing::debug!("[OpenAI Stream] Received chunk: {:?}", chunk);
+                // 创建一个新的 OpenAIChatClient 实例来转换 chunk
+                let converter = OpenAIChatClient::new();
+                converter.convert_from_openai_chunk(chunk)
+            }).map_err(|e| AppError::internal_error(&format!("Stream error: {}", e)));
+            
+            results.push(converted_result);
         }
-
-        // 真正解析OpenAI流式响应数据
-        use futures::{StreamExt, TryStreamExt};
         
-        let model_name = request.model.clone();
+        // 将结果转换为流
+        let converted_stream = stream::iter(results);
         
-        // 解析真实的SSE响应流
-        let sse_stream = response
-            .bytes_stream()
-            .map_err(|e| AppError::internal_error(&format!("Stream read error: {}", e)))
-            .map_ok(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            .map_ok(move |text| {
-                tracing::debug!("[OpenAI SSE Raw] Received: {}", text);
-                
-                // 解析SSE格式: "data: {json}\n\n"
-                let mut parsed_responses = Vec::new();
-                let lines: Vec<&str> = text.lines().collect();
-                
-                for line in lines {
-                    let line = line.trim();
-                    if line.starts_with("data: ") {
-                        let json_str = &line[6..]; // 去掉 "data: " 前缀
-                        
-                        if json_str == "[DONE]" {
-                            tracing::info!("[OpenAI SSE] Stream completed");
-                            break;
-                        }
-                        
-                        // 解析OpenAI流式JSON响应
-                        if let Ok(mut sse_response) = serde_json::from_str::<ChatResponse>(json_str) {
-                            sse_response.model = model_name.clone();
-                            tracing::debug!("[OpenAI SSE Parsed] Response: {:?}", sse_response);
-                            parsed_responses.push(sse_response);
-                        } else {
-                            tracing::warn!("[OpenAI SSE] Failed to parse: {}", json_str);
-                        }
-                    }
-                }
-                
-                futures::stream::iter(parsed_responses.into_iter().map(Ok))
-            })
-            .try_flatten()
-            .boxed();
-        
-        Ok(Box::new(sse_stream) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
+        Ok(Box::new(converted_stream) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
     }
 
     fn api_type(&self) -> &'static str {
