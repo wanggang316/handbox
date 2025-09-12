@@ -12,6 +12,7 @@ use serde_json::Value;
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    pub reasoning: Option<String>,
 }
 
 /// 聊天请求结构
@@ -124,6 +125,7 @@ impl OpenAIChatClient {
                         openai_rust::types::Role::Assistant => "assistant".to_string(),
                     },
                     content: choice.message.content,
+                    reasoning: choice.message.reasoning,
                 }),
                 delta: None,
                 finish_reason: Some(choice.finish_reason),
@@ -163,6 +165,7 @@ impl OpenAIChatClient {
                         openai_rust::types::Role::Assistant => "assistant".to_string(),
                     }).unwrap_or_default(),
                     content: choice.delta.content.unwrap_or_default(),
+                    reasoning: choice.delta.reasoning,
                 }),
                 finish_reason: choice.finish_reason,
             })
@@ -374,6 +377,7 @@ impl GoogleChatClient {
                 message: Some(ChatMessage {
                     role: "assistant".to_string(),
                     content,
+                    reasoning: None, // Google API 不支持推理过程
                 }),
                 delta: None,
                 finish_reason,
@@ -566,6 +570,7 @@ impl ChatClient for GoogleChatClient {
                                                         delta: Some(ChatMessage {
                                                             role: "assistant".to_string(),
                                                             content: content.to_string(),
+                                                            reasoning: None, // Google API 不支持推理过程
                                                         }),
                                                         finish_reason,
                                                     }],
@@ -698,6 +703,7 @@ impl AnthropicChatClient {
                 message: Some(ChatMessage {
                     role: "assistant".to_string(),
                     content,
+                    reasoning: None, // Google API 不支持推理过程
                 }),
                 delta: None,
                 finish_reason,
@@ -828,6 +834,7 @@ impl ChatClient for AnthropicChatClient {
                                                 delta: Some(ChatMessage {
                                                     role: "assistant".to_string(),
                                                     content: delta.to_string(),
+                                                    reasoning: None, // Anthropic API 不支持推理过程
                                                 }),
                                                 finish_reason: None,
                                             }],
@@ -849,6 +856,7 @@ impl ChatClient for AnthropicChatClient {
                                             delta: Some(ChatMessage {
                                                 role: "assistant".to_string(),
                                                 content: "".to_string(),
+                                                reasoning: None, // Anthropic API 不支持推理过程
                                             }),
                                             finish_reason: Some("stop".to_string()),
                                         }],

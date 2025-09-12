@@ -144,6 +144,7 @@ pub struct ChatRequest {
 pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
+    pub reasoning: Option<String>,
 }
 
 /// 聊天附件（请求中使用）
@@ -176,6 +177,7 @@ pub enum ChatStreamEvent {
     #[serde(rename = "delta")]
     Delta {
         content: String,
+        reasoning: Option<String>,
         tokens: Option<i32>,
     },
     #[serde(rename = "done")]

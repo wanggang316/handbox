@@ -225,6 +225,7 @@ impl MessageService {
                     MessageRole::System => "system".to_string(),
                 },
                 content: msg.content.clone(),
+                reasoning: msg.reasoning.clone(),
             })
             .collect();
 
@@ -699,6 +700,7 @@ impl MessageService {
                 .map(|m| crate::models::ChatMessage {
                     role: m.role.clone(),
                     content: m.content.clone(),
+                    reasoning: None, // 历史消息没有推理过程
                 })
                 .collect(),
             attachments: None,

@@ -83,6 +83,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: MessageRole::User,
                 content: "Hello".to_string(),
+                reasoning: None,
             }],
             attachments: None,
         };
