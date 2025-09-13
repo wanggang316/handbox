@@ -79,13 +79,11 @@ export interface ModelParameters {
   stream?: boolean;
 }
 
-// 聊天请求
-export interface ChatRequest {
+// 消息请求
+export interface MessageRequest {
   chatId?: UUID;
-  artifactId?: UUID;
   modelId: string;
   providerId: string;
-  parameters?: ModelParameters;
   messages: ChatMessage[];
   attachments?: ChatAttachment[];
 }
@@ -104,11 +102,12 @@ export interface ChatAttachment {
   data: Uint8Array;
 }
 
-// 聊天响应
-export interface ChatResponse {
+// 消息响应
+export interface MessageResponse {
   chatId: UUID;
   messageId: UUID;
   content: string;
+  reasoning?: string;
   modelId: string;
   providerId: string;
   inputTokens?: number;
@@ -117,8 +116,8 @@ export interface ChatResponse {
   duration?: number;
 }
 
-// 流式聊天事件
-export type ChatStreamEvent = 
+// 流式消息事件
+export type MessageStreamEvent = 
   | { type: 'delta'; data: { content: string; reasoning?: string; tokens?: number } }
-  | { type: 'done'; data: ChatResponse }
+  | { type: 'done'; data: MessageResponse }
   | { type: 'error'; data: { error: string; code?: string } };

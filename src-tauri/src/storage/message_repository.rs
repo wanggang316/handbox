@@ -1,6 +1,6 @@
 // Message 数据访问层
 
-use crate::models::{AppError, Message, MessageRole, MessageConfig, UUID};
+use crate::models::{AppError, Message, MessageConfig, MessageRole, UUID};
 use crate::services::DatabaseService;
 use sqlx::Row;
 use std::sync::Arc;
@@ -43,10 +43,10 @@ impl MessageRepository {
         };
 
         let query = r#"
-            INSERT INTO messages (id, chat_id, role, content, config, attachments, 
+            INSERT INTO messages (id, chat_id, role, content, reasoning, config, attachments, 
                                 input_tokens, output_tokens, total_tokens, start_time, 
                                 end_time, duration, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         "#;
 
         sqlx::query(query)
@@ -54,6 +54,7 @@ impl MessageRepository {
             .bind(&message.chat_id)
             .bind(role_str)
             .bind(&message.content)
+            .bind(&message.reasoning)
             .bind(&config_json)
             .bind(&attachments_json)
             .bind(message.input_tokens)
@@ -79,7 +80,7 @@ impl MessageRepository {
         offset: i32,
     ) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, config, attachments, input_tokens, output_tokens, 
+            SELECT id, chat_id, role, content, reasoning, config, attachments, input_tokens, output_tokens, 
                    total_tokens, start_time, end_time, duration, created_at, updated_at
             FROM messages WHERE chat_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3
         "#;
@@ -103,7 +104,7 @@ impl MessageRepository {
     /// 根据 ID 获取消息
     pub async fn get_message_by_id(&self, message_id: &UUID) -> Result<Option<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, config, attachments, input_tokens, output_tokens, 
+            SELECT id, chat_id, role, content, reasoning, config, attachments, input_tokens, output_tokens, 
                    total_tokens, start_time, end_time, duration, created_at, updated_at
             FROM messages WHERE id = $1
         "#;
@@ -271,6 +272,7 @@ impl MessageRepository {
             chat_id: row.try_get("chat_id").unwrap_or_default(),
             role,
             content: row.try_get("content").unwrap_or_default(),
+            reasoning: row.try_get("reasoning").ok(),
             config,
             attachments,
             input_tokens: row.try_get("input_tokens").ok(),
@@ -332,6 +334,7 @@ mod tests {
             chat_id: chat_id.clone(),
             role: MessageRole::User,
             content: "Hello, world!".to_string(),
+            reasoning: None, // 用户消息没有推理过程
             config: Some(MessageConfig {
                 temperature: Some(0.7),
                 top_p: Some(0.9),

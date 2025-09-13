@@ -2,7 +2,7 @@
  * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Message, ChatResponse, ChatRequest } from '$lib/types/chat';
+import type { Message, MessageResponse, MessageRequest } from '$lib/types/chat';
 import type { FrontendProviderConfig } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { getProviderConfigById, getProviderIconById } from './provider.svelte';
@@ -184,7 +184,7 @@ class MessageStore {
   }
 
   // 完成流式响应
-  finishStreaming(chatId: string, response: ChatResponse) {
+  finishStreaming(chatId: string, response: MessageResponse) {
     // 更新或创建消息
     const messages = this.state.messagesByChat[chatId] || [];
     const existingIndex = messages.findIndex(m => m.id === response.messageId);
@@ -266,7 +266,7 @@ class MessageStore {
   /**
    * 发送消息（使用流式响应）
    */
-  async sendMessage(request: ChatRequest): Promise<void> {
+  async sendMessage(request: MessageRequest): Promise<void> {
     if (!request.chatId) {
       throw new Error('缺少聊天ID');
     }
@@ -292,8 +292,8 @@ class MessageStore {
       
       this.addMessage(request.chatId, userMessage);
 
-      // 设置流式响应参数
-      const streamRequest = { ...request, parameters: { ...request.parameters, stream: true } };
+      // 设置流式响应参数（参数现在从 chats 表获取）
+      const streamRequest = { ...request };
 
       // 设置流式事件监听器
       messageApi.listenToStreamEvents({
@@ -305,16 +305,18 @@ class MessageStore {
           console.log('Stream chunk:', data.content, 'reasoning:', data.reasoning);
           this.setStreamingContent(data.content);
           if (data.reasoning) {
-            this.setStreamingReasoning(data.reasoning);
+            // 累积推理过程内容
+            this.state.streamingReasoning += data.reasoning;
           }
         },
         onEnd: (data) => {
           console.log('Stream ended:', data);
           // 创建响应对象
-          const response: ChatResponse = {
+          const response: MessageResponse = {
             chatId: data.chatId,
             messageId: data.streamId, // 使用 streamId 作为 messageId
             content: data.finalContent,
+            reasoning: data.finalReasoning,
             modelId: data.modelId,
             providerId: data.providerId,
           };

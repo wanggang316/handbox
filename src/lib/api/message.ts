@@ -4,20 +4,18 @@
 
 import { apiCall } from './index';
 import { listen } from '@tauri-apps/api/event';
-import type { ChatRequest, ChatResponse, Message, UUID, ChatStreamEvent } from '../types';
+import type { MessageRequest, MessageResponse, Message, UUID, MessageStreamEvent } from '../types';
 
 /**
  * 发送消息
  */
-export async function sendMessage(request: ChatRequest): Promise<ChatResponse> {
+export async function sendMessage(request: MessageRequest): Promise<MessageResponse> {
   // Tauri 命令期望参数名与函数参数名匹配
   const payload = {
     request: {
       chat_id: request.chatId,
-      artifact_id: request.artifactId,
       model_id: request.modelId,
       provider_id: request.providerId,
-      parameters: request.parameters,
       messages: request.messages,
       attachments: request.attachments
     }
@@ -68,22 +66,20 @@ export async function deleteMessage(messageId: UUID): Promise<void> {
 /**
  * 重新生成助手消息
  */
-export async function regenerateMessage(messageId: UUID): Promise<ChatResponse> {
+export async function regenerateMessage(messageId: UUID): Promise<MessageResponse> {
   return await apiCall<any>('message_regenerate', { messageId: messageId });
 }
 
 /**
  * 发送流式消息
  */
-export async function sendStreamMessage(request: ChatRequest): Promise<string> {
+export async function sendStreamMessage(request: MessageRequest): Promise<string> {
   // Tauri 命令期望参数名与函数参数名匹配
   const payload = {
     request: {
       chat_id: request.chatId,
-      artifact_id: request.artifactId,
       model_id: request.modelId,
       provider_id: request.providerId,
-      parameters: request.parameters,
       messages: request.messages,
       attachments: request.attachments
     }
