@@ -1,6 +1,6 @@
 // 消息相关 IPC 命令
 
-use crate::models::{AppError, ChatRequest, ChatResponse, Message, UUID};
+use crate::models::{AppError, MessageRequest, MessageResponse, Message, UUID};
 use crate::services::MessageService;
 use serde_json::json;
 use tauri::{Emitter, State, Window};
@@ -8,9 +8,9 @@ use tauri::{Emitter, State, Window};
 /// 发送聊天消息
 #[tauri::command]
 pub async fn message_send(
-    request: ChatRequest,
+    request: MessageRequest,
     message_service: State<'_, MessageService>,
-) -> Result<ChatResponse, AppError> {
+) -> Result<MessageResponse, AppError> {
     tracing::info!("[message_send] IPC command called");
     match message_service.send_message(request).await {
         Ok(response) => {
@@ -121,7 +121,7 @@ pub async fn message_delete(
 pub async fn message_regenerate(
     message_id: UUID,
     message_service: State<'_, MessageService>,
-) -> Result<ChatResponse, AppError> {
+) -> Result<MessageResponse, AppError> {
     tracing::info!(
         "[message_regenerate] IPC command called for message_id: {}",
         message_id
@@ -141,7 +141,7 @@ pub async fn message_regenerate(
 /// 发送流式消息
 #[tauri::command]
 pub async fn message_send_stream(
-    request: ChatRequest,
+    request: MessageRequest,
     window: Window,
     message_service: State<'_, MessageService>,
 ) -> Result<String, AppError> {
@@ -173,12 +173,13 @@ pub async fn message_send_stream(
             let window = window_clone.clone();
             let stream_id = stream_id_clone.clone();
 
-            move |content: String| {
+            move |chunk: crate::services::message::StreamChunk| {
                 let _ = window.emit(
                     "message_stream_chunk",
                     json!({
                         "streamId": stream_id,
-                        "content": content,
+                        "content": chunk.content,
+                        "reasoning": chunk.reasoning,
                         "chunk": "",  // 这里可以改为增量内容
                         "index": 0
                     }),
@@ -198,6 +199,7 @@ pub async fn message_send_stream(
                     json!({
                         "streamId": stream_id_clone,
                         "finalContent": response.content,
+                        "finalReasoning": response.reasoning,
                         "chatId": response.chat_id,
                         "modelId": response.model_id,
                         "providerId": response.provider_id

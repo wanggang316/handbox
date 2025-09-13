@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ChatMessage, ChatRequest, MessageConfig, MessageRole, ModelParameters};
+    use crate::models::{ChatMessage, MessageRequest, MessageConfig, MessageRole, ModelParameters};
     use crate::services::{ChatService, DatabaseService, MessageService};
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -61,15 +61,14 @@ mod tests {
     async fn test_send_message_validation_error() {
         let (_chat_service, message_service, _chat_id) = setup_test_services().await;
 
-        let request = ChatRequest {
+        let request = MessageRequest {
             chat_id: None, // 缺少 chat_id
-            artifact_id: None,
             model_id: "gpt-4".to_string(),
             provider_id: "openai".to_string(),
-            parameters: None,
             messages: vec![ChatMessage {
                 role: MessageRole::User,
                 content: "Hello".to_string(),
+                reasoning: None,
             }],
             attachments: None,
         };

@@ -1,7 +1,15 @@
 // Artifact 相关数据模型
 
-use super::{ChatConfig, Timestamp, UUID};
+use super::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
+
+/// Artifact 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactConfig {
+    pub system_prompt: Option<String>,
+    pub mcp_servers: Vec<String>,
+    pub default_parameters: Option<crate::models::chat::ModelParameters>, // 默认参数，可在消息级别覆盖
+}
 
 /// Artifact 实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,7 +17,7 @@ pub struct Artifact {
     pub id: UUID,
     pub name: String,
     pub description: Option<String>,
-    pub config: ChatConfig,
+    pub config: ArtifactConfig,
     pub last_used_at: Option<Timestamp>,
     pub use_count: i32,
     pub tags: Option<Vec<String>>,
@@ -22,7 +30,7 @@ pub struct Artifact {
 pub struct CreateArtifactRequest {
     pub name: String,
     pub description: Option<String>,
-    pub config: ChatConfig,
+    pub config: ArtifactConfig,
     pub tags: Option<Vec<String>>,
 }
 
@@ -32,7 +40,7 @@ pub struct UpdateArtifactRequest {
     pub id: UUID,
     pub name: Option<String>,
     pub description: Option<String>,
-    pub config: Option<ChatConfig>,
+    pub config: Option<ArtifactConfig>,
     pub tags: Option<Vec<String>>,
 }
 

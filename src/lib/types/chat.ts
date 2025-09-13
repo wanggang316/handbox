@@ -24,6 +24,7 @@ export interface Message extends BaseEntity {
   chatId: UUID;
   role: MessageRole;
   content: string;
+  reasoning?: string; // 推理过程内容
   
   // 每条消息的配置参数
   config?: MessageConfig;
@@ -78,13 +79,11 @@ export interface ModelParameters {
   stream?: boolean;
 }
 
-// 聊天请求
-export interface ChatRequest {
+// 消息请求
+export interface MessageRequest {
   chatId?: UUID;
-  artifactId?: UUID;
   modelId: string;
   providerId: string;
-  parameters?: ModelParameters;
   messages: ChatMessage[];
   attachments?: ChatAttachment[];
 }
@@ -93,6 +92,7 @@ export interface ChatRequest {
 export interface ChatMessage {
   role: MessageRole;
   content: string;
+  reasoning?: string; // 推理过程内容
 }
 
 // 聊天附件（请求中使用）
@@ -102,11 +102,12 @@ export interface ChatAttachment {
   data: Uint8Array;
 }
 
-// 聊天响应
-export interface ChatResponse {
+// 消息响应
+export interface MessageResponse {
   chatId: UUID;
   messageId: UUID;
   content: string;
+  reasoning?: string;
   modelId: string;
   providerId: string;
   inputTokens?: number;
@@ -115,8 +116,8 @@ export interface ChatResponse {
   duration?: number;
 }
 
-// 流式聊天事件
-export type ChatStreamEvent = 
-  | { type: 'delta'; data: { content: string; tokens?: number } }
-  | { type: 'done'; data: ChatResponse }
+// 流式消息事件
+export type MessageStreamEvent = 
+  | { type: 'delta'; data: { content: string; reasoning?: string; tokens?: number } }
+  | { type: 'done'; data: MessageResponse }
   | { type: 'error'; data: { error: string; code?: string } };

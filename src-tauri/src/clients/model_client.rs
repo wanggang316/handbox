@@ -7,9 +7,9 @@ use crate::services::llm_config::{get_global_llm_config, ModelExtraInfo};
 use async_trait::async_trait;
 use serde::Deserialize;
 
-/// 模型列表提供者 trait
+/// 模型客户端 trait
 #[async_trait]
-pub trait ModelListProvider: Send + Sync {
+pub trait ModelClient: Send + Sync {
     async fn list_models(
         &self,
         provider: &Provider,
@@ -69,12 +69,12 @@ pub struct OpenRouterPricing {
     pub completion: Option<String>,
 }
 
-/// OpenAI 风格模型列表提供者
-pub struct OpenAIModelListProvider {
+/// OpenAI 风格模型客户端
+pub struct OpenAIModelClient {
     client: reqwest::Client,
 }
 
-impl OpenAIModelListProvider {
+impl OpenAIModelClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -83,7 +83,7 @@ impl OpenAIModelListProvider {
 }
 
 #[async_trait]
-impl ModelListProvider for OpenAIModelListProvider {
+impl ModelClient for OpenAIModelClient {
     async fn list_models(
         &self,
         provider: &Provider,
@@ -132,15 +132,15 @@ impl ModelListProvider for OpenAIModelListProvider {
     }
 }
 
-/// OpenAI + Local 增强模型列表提供者
+/// OpenAI + Local 增强模型客户端
 pub struct OpenAIWithLocalProvider {
-    openai_provider: OpenAIModelListProvider,
+    openai_provider: OpenAIModelClient,
 }
 
 impl OpenAIWithLocalProvider {
     pub fn new() -> Self {
         Self {
-            openai_provider: OpenAIModelListProvider::new(),
+            openai_provider: OpenAIModelClient::new(),
         }
     }
 
@@ -178,7 +178,7 @@ impl OpenAIWithLocalProvider {
 }
 
 #[async_trait]
-impl ModelListProvider for OpenAIWithLocalProvider {
+impl ModelClient for OpenAIWithLocalProvider {
     async fn list_models(
         &self,
         provider: &Provider,
@@ -192,12 +192,12 @@ impl ModelListProvider for OpenAIWithLocalProvider {
     }
 }
 
-/// Google 模型列表提供者
-pub struct GoogleModelListProvider {
+/// Google 模型客户端
+pub struct GoogleModelClient {
     client: reqwest::Client,
 }
 
-impl GoogleModelListProvider {
+impl GoogleModelClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -206,7 +206,7 @@ impl GoogleModelListProvider {
 }
 
 #[async_trait]
-impl ModelListProvider for GoogleModelListProvider {
+impl ModelClient for GoogleModelClient {
     async fn list_models(
         &self,
         provider: &Provider,
@@ -263,10 +263,10 @@ impl ModelListProvider for GoogleModelListProvider {
     }
 }
 
-/// Anthropic 模型列表提供者（基于本地配置）
-pub struct AnthropicModelListProvider;
+/// Anthropic 模型客户端（基于本地配置）
+pub struct AnthropicModelClient;
 
-impl AnthropicModelListProvider {
+impl AnthropicModelClient {
     pub fn new() -> Self {
         Self
     }
@@ -289,7 +289,7 @@ impl AnthropicModelListProvider {
 }
 
 #[async_trait]
-impl ModelListProvider for AnthropicModelListProvider {
+impl ModelClient for AnthropicModelClient {
     async fn list_models(
         &self,
         _provider: &Provider,
@@ -313,12 +313,12 @@ impl ModelListProvider for AnthropicModelListProvider {
     }
 }
 
-/// OpenRouter 模型列表提供者
-pub struct OpenRouterModelListProvider {
+/// OpenRouter 模型客户端
+pub struct OpenRouterModelClient {
     client: reqwest::Client,
 }
 
-impl OpenRouterModelListProvider {
+impl OpenRouterModelClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -327,7 +327,7 @@ impl OpenRouterModelListProvider {
 }
 
 #[async_trait]
-impl ModelListProvider for OpenRouterModelListProvider {
+impl ModelClient for OpenRouterModelClient {
     async fn list_models(
         &self,
         provider: &Provider,
@@ -388,14 +388,14 @@ impl ModelListProvider for OpenRouterModelListProvider {
     }
 }
 
-/// 模型列表提供者工厂
-pub fn create_model_list_provider(api_type: &str) -> Result<Box<dyn ModelListProvider>, AppError> {
+/// 模型客户端工厂
+pub fn create_model_client(api_type: &str) -> Result<Box<dyn ModelClient>, AppError> {
     match api_type {
-        "openai" => Ok(Box::new(OpenAIModelListProvider::new())),
+        "openai" => Ok(Box::new(OpenAIModelClient::new())),
         "openai+local" => Ok(Box::new(OpenAIWithLocalProvider::new())),
-        "google" => Ok(Box::new(GoogleModelListProvider::new())),
-        "anthropic" => Ok(Box::new(AnthropicModelListProvider::new())),
-        "openrouter" => Ok(Box::new(OpenRouterModelListProvider::new())),
+        "google" => Ok(Box::new(GoogleModelClient::new())),
+        "anthropic" => Ok(Box::new(AnthropicModelClient::new())),
+        "openrouter" => Ok(Box::new(OpenRouterModelClient::new())),
         _ => Err(AppError::validation_error(&format!(
             "Unsupported model list API type: {}",
             api_type

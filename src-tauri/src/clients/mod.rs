@@ -3,9 +3,9 @@
 
 use crate::models::Model;
 
-pub mod api_provider;
+pub mod chat_client;
 pub mod llm_client;
-pub mod model_list_provider;
+pub mod model_client;
 
 // 重新导出 llm_client 中的公共接口
 pub use llm_client::{create_client, create_llm_client, LlmClient, StandardModel};

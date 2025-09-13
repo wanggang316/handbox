@@ -1,21 +1,29 @@
 // 消息服务实现
 
-use crate::clients::api_provider::{
+use crate::clients::chat_client::{
     ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest, ChatUsage,
 };
 use crate::clients::llm_client::create_llm_client;
 use crate::models::{
-    AppError, ChatRequest, ChatResponse, Message, MessageConfig, MessageRole,
+    AppError, MessageRequest, MessageResponse, Message, MessageConfig, MessageRole,
     UUID,
 };
-use crate::services::{DatabaseService, ProviderService};
+use crate::services::{DatabaseService, ProviderService, ChatService};
 use crate::storage::MessageRepository;
 use std::sync::Arc;
+
+/// 流式数据结构
+#[derive(Debug, Clone)]
+pub struct StreamChunk {
+    pub content: String,
+    pub reasoning: Option<String>,
+}
 
 /// LLM API 响应结构
 #[derive(Debug)]
 struct LlmApiResponse {
     content: String,
+    reasoning: Option<String>, // 推理过程内容
     usage: Option<ChatUsage>,
     duration: Option<f64>,
 }
@@ -25,18 +33,20 @@ struct LlmApiResponse {
 pub struct MessageService {
     repository: MessageRepository,
     provider_service: Arc<ProviderService>,
+    chat_service: Arc<ChatService>,
 }
 
 impl MessageService {
     pub fn new(db: Arc<DatabaseService>) -> Self {
         Self {
             repository: MessageRepository::new(db.clone()),
-            provider_service: Arc::new(ProviderService::new(db)),
+            provider_service: Arc::new(ProviderService::new(db.clone())),
+            chat_service: Arc::new(ChatService::new(db)),
         }
     }
 
     /// 发送消息
-    pub async fn send_message(&self, request: ChatRequest) -> Result<ChatResponse, AppError> {
+    pub async fn send_message(&self, request: MessageRequest) -> Result<MessageResponse, AppError> {
         tracing::info!(
             "[MessageService::send_message] Starting to send message for chat_id: {:?}",
             request.chat_id
@@ -77,7 +87,14 @@ impl MessageService {
             AppError::validation_error(error)
         })?;
 
-        let config = Self::extract_message_config(&request);
+        // 从 chats 表获取配置参数
+        let chat = self.get_chat_config(chat_id).await.map_err(|e| {
+            let error = format!("Failed to get chat config: {}", e);
+            tracing::error!("[MessageService::send_message] Database error: {}", error);
+            e
+        })?;
+
+        let config = Self::extract_message_config_from_chat(&request, &chat);
         let user_message_id = self.save_user_message(
             chat_id,
             &last_message.content,
@@ -97,11 +114,12 @@ impl MessageService {
         let llm_response = self.call_llm_api(&request).await?;
 
         // 4. 保存助手消息到数据库
-        let config = Self::extract_message_config(&request);
+        let config = Self::extract_message_config_from_chat(&request, &chat);
         let now = chrono::Utc::now().timestamp_millis();
         let assistant_message_id = self.save_assistant_message(
             chat_id,
             &llm_response.content,
+            llm_response.reasoning.clone(),
             config,
             now,
             llm_response.duration.unwrap_or(0.0) as i64,
@@ -119,10 +137,11 @@ impl MessageService {
             assistant_message_id
         );
 
-        let response = ChatResponse {
+        let response = MessageResponse {
             chat_id: chat_id.clone(),
             message_id: assistant_message_id.clone(),
             content: llm_response.content,
+            reasoning: llm_response.reasoning,
             model_id: request.model_id,
             provider_id: request.provider_id,
             input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
@@ -136,14 +155,25 @@ impl MessageService {
     }
 
     /// 调用 LLM API
-    async fn call_llm_api(&self, request: &ChatRequest) -> Result<LlmApiResponse, AppError> {
+    async fn call_llm_api(&self, request: &MessageRequest) -> Result<LlmApiResponse, AppError> {
         tracing::info!(
             "[MessageService::call_llm_api] Calling LLM API with provider: {}, model: {}",
             request.provider_id,
             request.model_id
         );
 
-        // 1. 获取供应商配置
+        // 1. 获取聊天配置
+        let chat = if let Some(chat_id) = &request.chat_id {
+            self.get_chat_config(chat_id).await.map_err(|e| {
+                let error = format!("Failed to get chat config: {}", e);
+                tracing::error!("[MessageService::call_llm_api] {}", error);
+                e
+            })?
+        } else {
+            return Err(AppError::validation_error("Chat ID is required"));
+        };
+
+        // 2. 获取供应商配置
         let provider = self
             .provider_service
             .get_provider(&request.provider_id)
@@ -181,7 +211,7 @@ impl MessageService {
             );
         }
 
-        // 2. 创建 LLM 客户端
+        // 3. 创建 LLM 客户端
         let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
             let error = format!(
                 "Failed to create LLM client for provider type {}: {}",
@@ -191,10 +221,10 @@ impl MessageService {
             e
         })?;
 
-        // 3. 转换请求格式
-        let api_request = self.convert_to_api_request(request)?;
+        // 4. 转换请求格式
+        let api_request = self.convert_to_api_request(request, &chat)?;
 
-        // 4. 调用 API
+        // 5. 调用 API
         let start_time = std::time::Instant::now();
         let api_response = llm_client.chat(&provider, api_request).await.map_err(|e| {
             let error = format!("LLM API call failed: {}", e);
@@ -214,7 +244,7 @@ impl MessageService {
     }
 
     /// 转换为 API 请求格式
-    fn convert_to_api_request(&self, request: &ChatRequest) -> Result<ApiChatRequest, AppError> {
+    fn convert_to_api_request(&self, request: &MessageRequest, chat: &crate::models::Chat) -> Result<ApiChatRequest, AppError> {
         let messages: Vec<ApiChatMessage> = request
             .messages
             .iter()
@@ -225,31 +255,43 @@ impl MessageService {
                     MessageRole::System => "system".to_string(),
                 },
                 content: msg.content.clone(),
+                reasoning: msg.reasoning.clone(),
             })
             .collect();
 
         Ok(ApiChatRequest {
             model: request.model_id.clone(),
             messages,
-            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
-            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
-            stream: request.parameters.as_ref().and_then(|p| p.stream),
+            temperature: chat.temperature,
+            max_tokens: chat.max_tokens,
+            stream: chat.stream,
         })
     }
 
     /// 流式调用 LLM API
     pub async fn call_llm_api_stream<F>(
         &self,
-        request: &ChatRequest,
+        request: &MessageRequest,
         mut callback: F,
-    ) -> Result<ChatResponse, AppError>
+    ) -> Result<MessageResponse, AppError>
     where
-        F: FnMut(String) + Send + 'static,
+        F: FnMut(StreamChunk) + Send + 'static,
     {
         tracing::info!("[MessageService::call_llm_api_stream] Starting stream call with provider: {}, model: {}", 
             request.provider_id, request.model_id);
 
-        // 1. 获取供应商配置
+        // 1. 获取聊天配置
+        let chat = if let Some(chat_id) = &request.chat_id {
+            self.get_chat_config(chat_id).await.map_err(|e| {
+                let error = format!("Failed to get chat config: {}", e);
+                tracing::error!("[MessageService::call_llm_api_stream] {}", error);
+                e
+            })?
+        } else {
+            return Err(AppError::validation_error("Chat ID is required for streaming"));
+        };
+
+        // 2. 获取供应商配置
         let provider = self
             .provider_service
             .get_provider(&request.provider_id)
@@ -287,7 +329,7 @@ impl MessageService {
             api_key_preview
         );
 
-        // 2. 创建 LLM 客户端
+        // 3. 创建 LLM 客户端
         let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
             let error = format!(
                 "Failed to create LLM client for provider type {}: {}",
@@ -297,17 +339,26 @@ impl MessageService {
             e
         })?;
 
-        // 3. 转换请求格式
-        let mut api_request = self.convert_to_api_request(request)?;
+        // 4. 转换请求格式
+        let mut api_request = self.convert_to_api_request(request, &chat)?;
         api_request.stream = Some(true); // 强制启用流式
 
-        // 4. 保存用户输入消息到数据库（如果有chat_id）
+        // 5. 保存用户输入消息到数据库（如果有chat_id）
         if let Some(chat_id) = &request.chat_id {
             // 从消息列表中找到最后一条用户消息进行保存
             if let Some(last_user_message) = request.messages.iter().rev()
                 .find(|m| matches!(m.role, crate::models::MessageRole::User)) {
                 
-                let config = Self::extract_message_config(&request);
+                // 从 chats 表获取配置参数
+                let chat = match self.get_chat_config(chat_id).await {
+                    Ok(chat) => chat,
+                    Err(e) => {
+                        tracing::error!("[MessageService::call_llm_api_stream] Failed to get chat config: {}", e);
+                        return Err(e);
+                    }
+                };
+                
+                let config = Self::extract_message_config_from_chat(&request, &chat);
                 if let Err(e) = self.save_user_message(
                     chat_id,
                     &last_user_message.content,
@@ -318,16 +369,17 @@ impl MessageService {
             }
         }
 
-        // 5. 调用真实的 LLM 流式 API
+        // 6. 调用真实的 LLM 流式 API
         let start_time = std::time::Instant::now();
         
         tracing::info!("[MessageService::call_llm_api_stream] Calling real LLM streaming API...");
         let mut stream = llm_client.chat_stream(&provider, api_request).await?;
         
         let mut accumulated_content = String::new();
+        let mut accumulated_reasoning = String::new();
         let mut chunk_count = 0;
         
-        // 6. 处理真实的流式响应
+        // 7. 处理真实的流式响应
         use futures::StreamExt;
         while let Some(result) = stream.next().await {
             match result {
@@ -335,15 +387,26 @@ impl MessageService {
                     // 提取流式内容
                     if let Some(choice) = chunk_response.choices.first() {
                         if let Some(delta) = &choice.delta {
+                            // 处理内容
                             let chunk = &delta.content;
                             accumulated_content.push_str(chunk);
                             
-                            callback(accumulated_content.clone());
+                            // 处理推理过程
+                            if let Some(reasoning_chunk) = &delta.reasoning {
+                                accumulated_reasoning.push_str(reasoning_chunk);
+                            }
+                            
+                            callback(StreamChunk {
+                                content: accumulated_content.clone(),
+                                reasoning: delta.reasoning.clone(),
+                            });
                             chunk_count += 1;
                             
                             tracing::debug!(
-                                "[MessageService::call_llm_api_stream] Real streaming chunk {}: '{}'",
-                                chunk_count, chunk
+                                "[MessageService::call_llm_api_stream] Real streaming chunk {}: content='{}', reasoning='{}'",
+                                chunk_count, 
+                                &delta.content,
+                                delta.reasoning.as_deref().unwrap_or("")
                             );
                             
                             // 添加小延迟以控制流速
@@ -371,10 +434,11 @@ impl MessageService {
         let message_id = uuid::Uuid::new_v4().to_string();
 
         // 7. 创建最终响应 (使用流式内容)
-        let response = ChatResponse {
+        let response = MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: message_id.clone(),
             content: accumulated_content.clone(),  // 使用流式累积的内容
+            reasoning: if accumulated_reasoning.is_empty() { None } else { Some(accumulated_reasoning.clone()) },
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
             input_tokens: None,  // 流式API通常不返回token统计
@@ -390,12 +454,22 @@ impl MessageService {
 
         // 8. 流式输出完成后，保存完整的AI响应消息到数据库
         if !accumulated_content.is_empty() && request.chat_id.is_some() {
-            let config = Self::extract_message_config(&request);
+            // 从 chats 表获取配置参数
+            let chat = match self.get_chat_config(&request.chat_id.clone().unwrap()).await {
+                Ok(chat) => chat,
+                Err(e) => {
+                    tracing::error!("[MessageService::call_llm_api_stream] Failed to get chat config for saving: {}", e);
+                    return Err(e);
+                }
+            };
+            
+            let config = Self::extract_message_config_from_chat(&request, &chat);
             let start_time_millis = chrono::Utc::now().timestamp_millis() - duration;
             
             if let Err(e) = self.save_assistant_message(
                 &request.chat_id.clone().unwrap(),
                 &accumulated_content,
+                if accumulated_reasoning.is_empty() { None } else { Some(accumulated_reasoning) },
                 config,
                 start_time_millis,
                 duration,
@@ -430,6 +504,7 @@ impl MessageService {
             chat_id: chat_id.to_string(),
             role: crate::models::MessageRole::User,
             content: content.to_string(),
+            reasoning: None, // 用户消息没有推理过程
             config,
             attachments: None,
             input_tokens: None,
@@ -452,6 +527,7 @@ impl MessageService {
         &self,
         chat_id: &str,
         content: &str,
+        reasoning: Option<String>,
         config: Option<MessageConfig>,
         start_time_millis: i64,
         duration_ms: i64,
@@ -467,6 +543,7 @@ impl MessageService {
             chat_id: chat_id.to_string(),
             role: crate::models::MessageRole::Assistant,
             content: content.to_string(),
+            reasoning,
             config,
             attachments: None,
             input_tokens,
@@ -484,24 +561,29 @@ impl MessageService {
         Ok(message_id)
     }
 
-    /// 从聊天请求中提取配置信息
-    fn extract_message_config(request: &ChatRequest) -> Option<MessageConfig> {
+    /// 获取聊天配置
+    async fn get_chat_config(&self, chat_id: &str) -> Result<crate::models::Chat, AppError> {
+        self.chat_service.get_chat(chat_id.to_string()).await
+    }
+
+    /// 从聊天信息中提取消息配置
+    fn extract_message_config_from_chat(request: &MessageRequest, chat: &crate::models::Chat) -> Option<MessageConfig> {
         Some(MessageConfig {
             model_id: Some(request.model_id.clone()),
             provider_id: Some(request.provider_id.clone()),
-            temperature: request.parameters.as_ref().and_then(|p| p.temperature),
-            top_p: request.parameters.as_ref().and_then(|p| p.top_p),
-            max_tokens: request.parameters.as_ref().and_then(|p| p.max_tokens),
-            stream: request.parameters.as_ref().and_then(|p| p.stream),
-            system_prompt: None, // 系统提示通常在聊天级别处理
-            mcp_servers: None,   // MCP服务器通常在聊天级别处理
+            temperature: chat.temperature,
+            top_p: chat.top_p,
+            max_tokens: chat.max_tokens,
+            stream: chat.stream,
+            system_prompt: chat.system_prompt.clone(),
+            mcp_servers: Some(chat.mcp_servers.clone()),
         })
     }
 
     /// 从 API 响应格式转换
     fn convert_from_api_response(
         &self,
-        api_response: crate::clients::api_provider::ChatResponse,
+        api_response: crate::clients::chat_client::ChatResponse,
         duration: f64,
     ) -> Result<LlmApiResponse, AppError> {
         let choice = api_response
@@ -516,6 +598,7 @@ impl MessageService {
 
         Ok(LlmApiResponse {
             content: message.content,
+            reasoning: message.reasoning,
             usage: api_response.usage,
             duration: Some(duration),
         })
@@ -648,7 +731,7 @@ impl MessageService {
     }
 
     /// 重新生成消息
-    pub async fn regenerate_message(&self, message_id: UUID) -> Result<ChatResponse, AppError> {
+    pub async fn regenerate_message(&self, message_id: UUID) -> Result<MessageResponse, AppError> {
         tracing::info!(
             "[MessageService::regenerate_message] Regenerating message: {}",
             message_id
@@ -679,26 +762,19 @@ impl MessageService {
 
         // 构造重新生成请求（使用原始请求参数）
         let config = message.config.as_ref();
-        let regenerate_request = ChatRequest {
+        let regenerate_request = MessageRequest {
             chat_id: Some(message.chat_id.clone()),
-            artifact_id: None,
             model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
             provider_id: config
                 .and_then(|c| c.provider_id.clone())
                 .unwrap_or_default(),
-            parameters: Some(crate::models::ModelParameters {
-                temperature: config.and_then(|c| c.temperature),
-                top_p: config.and_then(|c| c.top_p),
-                max_tokens: config.and_then(|c| c.max_tokens),
-                context_length: None,
-                stream: config.and_then(|c| c.stream),
-            }),
             messages: chat_messages
                 .iter()
                 .filter(|m| m.role != MessageRole::Assistant || m.id != message_id) // 排除要重新生成的消息
                 .map(|m| crate::models::ChatMessage {
                     role: m.role.clone(),
                     content: m.content.clone(),
+                    reasoning: None, // 历史消息没有推理过程
                 })
                 .collect(),
             attachments: None,
@@ -727,10 +803,11 @@ impl MessageService {
             message_id
         );
 
-        Ok(ChatResponse {
+        Ok(MessageResponse {
             chat_id: message.chat_id,
             message_id,
             content: new_content,
+            reasoning: llm_response.reasoning,
             model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
             provider_id: config
                 .and_then(|c| c.provider_id.clone())

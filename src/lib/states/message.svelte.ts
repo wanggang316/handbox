@@ -2,7 +2,7 @@
  * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Message, ChatResponse, ChatRequest } from '$lib/types/chat';
+import type { Message, MessageResponse, MessageRequest } from '$lib/types/chat';
 import type { FrontendProviderConfig } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { getProviderConfigById, getProviderIconById } from './provider.svelte';
@@ -18,6 +18,7 @@ interface MessageState {
   // 流式响应状态
   streamingMessageId: string | null;
   streamingContent: string;
+  streamingReasoning: string;
 }
 
 class MessageStore {
@@ -29,6 +30,7 @@ class MessageStore {
     error: null,
     streamingMessageId: null,
     streamingContent: '',
+    streamingReasoning: '',
   });
 
   // Getters
@@ -50,6 +52,10 @@ class MessageStore {
 
   get streamingContent() {
     return this.state.streamingContent;
+  }
+
+  get streamingReasoning() {
+    return this.state.streamingReasoning;
   }
 
   // 获取当前聊天的消息（通过外部传入 chatId）
@@ -159,6 +165,7 @@ class MessageStore {
   startStreaming(messageId: string) {
     this.state.streamingMessageId = messageId;
     this.state.streamingContent = '';
+    this.state.streamingReasoning = '';
   }
 
   // 更新流式内容
@@ -171,8 +178,13 @@ class MessageStore {
     this.state.streamingContent = content;
   }
 
+  // 设置流式推理过程
+  setStreamingReasoning(reasoning: string) {
+    this.state.streamingReasoning = reasoning;
+  }
+
   // 完成流式响应
-  finishStreaming(chatId: string, response: ChatResponse) {
+  finishStreaming(chatId: string, response: MessageResponse) {
     // 更新或创建消息
     const messages = this.state.messagesByChat[chatId] || [];
     const existingIndex = messages.findIndex(m => m.id === response.messageId);
@@ -213,6 +225,7 @@ class MessageStore {
     // 清理流式状态
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
+    this.state.streamingReasoning = '';
   }
 
   // 清理指定聊天的消息
@@ -225,6 +238,7 @@ class MessageStore {
     this.state.messagesByChat = {};
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
+    this.state.streamingReasoning = '';
   }
 
 
@@ -252,7 +266,7 @@ class MessageStore {
   /**
    * 发送消息（使用流式响应）
    */
-  async sendMessage(request: ChatRequest): Promise<void> {
+  async sendMessage(request: MessageRequest): Promise<void> {
     if (!request.chatId) {
       throw new Error('缺少聊天ID');
     }
@@ -278,8 +292,8 @@ class MessageStore {
       
       this.addMessage(request.chatId, userMessage);
 
-      // 设置流式响应参数
-      const streamRequest = { ...request, parameters: { ...request.parameters, stream: true } };
+      // 设置流式响应参数（参数现在从 chats 表获取）
+      const streamRequest = { ...request };
 
       // 设置流式事件监听器
       messageApi.listenToStreamEvents({
@@ -288,16 +302,21 @@ class MessageStore {
           this.startStreaming(data.messageId);
         },
         onChunk: (data) => {
-          console.log('Stream chunk:', data.content);
+          console.log('Stream chunk:', data.content, 'reasoning:', data.reasoning);
           this.setStreamingContent(data.content);
+          if (data.reasoning) {
+            // 累积推理过程内容
+            this.state.streamingReasoning += data.reasoning;
+          }
         },
         onEnd: (data) => {
           console.log('Stream ended:', data);
           // 创建响应对象
-          const response: ChatResponse = {
+          const response: MessageResponse = {
             chatId: data.chatId,
             messageId: data.streamId, // 使用 streamId 作为 messageId
             content: data.finalContent,
+            reasoning: data.finalReasoning,
             modelId: data.modelId,
             providerId: data.providerId,
           };
