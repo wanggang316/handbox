@@ -82,7 +82,7 @@
     <div class="flex-1 min-w-0">
       <!-- 消息气泡 -->
       <div
-        class="inline-block max-w-full p-4 rounded-2xl bg-gray-100 text-gray-900 shadow-sm"
+        class="inline-block max-w-full p-4 rounded-2xl bg-gray-100 text-gray-900"
       >
         <!-- 推理过程（如果有） -->
         {#if message.reasoning}

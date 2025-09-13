@@ -127,7 +127,7 @@
 
 <div class="flex flex-col h-full">
   <!-- 消息列表 -->
-  <div bind:this={messagesContainer} class="flex-1 overflow-y-auto">
+  <div bind:this={messagesContainer} class="flex-1 overflow-y-auto bg-blue-100">
     {#if isLoading && messages.length === 0}
       <!-- 加载状态 -->
       <div class="flex items-center justify-center h-full">
@@ -147,7 +147,7 @@
       </div>
     {:else}
       <!-- 消息列表 -->
-      <div class="w-full max-w-4xl mx-auto p-4 space-y-6">
+      <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6 bg-green-100">
         {#each messages as message (message.id)}
           {#if message.role === 'user'}
             <UserMessageView 

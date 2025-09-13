@@ -108,7 +108,7 @@
 </script>
 
 <!-- 聊天页面（将被 (app) 分组布局包裹） -->
-<div class="flex-1 flex flex-col h-full">
+<div class="flex-1 flex flex-col h-full bg-amber-100">
   <!-- 固定在顶部的聊天头部 -->
   <div class="flex-shrink-0">
     <ChatHeaderView 
@@ -119,7 +119,7 @@
   </div>
   
   <!-- 可滚动的聊天内容区域，占据剩余空间 -->
-  <div class="flex-1 min-h-0">
+  <div class="flex-1 min-h-0 bg-amber-200">
     <ChatContentView />
   </div>
   
