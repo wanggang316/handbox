@@ -1,5 +1,6 @@
 <script lang="ts">
   import { messageStore } from "$lib/states/message.svelte";
+  import { marked } from "marked";
 
   interface Props {
     content: string;
@@ -9,6 +10,11 @@
   }
 
   let { content, reasoning, showCursor = true, providerId }: Props = $props();
+
+  // 渲染 markdown 内容
+  function renderMarkdown(content: string): string {
+    return marked(content);
+  }
 
   // 获取provider图标
   const providerIcon = $derived(() => {
@@ -44,8 +50,8 @@
               <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
               <span class="text-sm font-medium text-blue-700">推理过程</span>
             </div>
-            <div class="text-sm text-blue-800 whitespace-pre-wrap break-words leading-relaxed">
-              {reasoning}
+            <div class="text-sm text-blue-800 break-words leading-relaxed reasoning-content">
+              {@html renderMarkdown(reasoning)}
               <!-- 推理过程的光标 -->
               {#if showCursor}
                 <span class="animate-pulse">▋</span>
@@ -55,8 +61,8 @@
         {/if}
 
         <!-- 消息内容 -->
-        <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
-          {content}
+        <div class="break-words text-[15px] leading-[1.6] markdown-content">
+          {@html renderMarkdown(content)}
           <!-- 打字光标 -->
           {#if showCursor}
             <span class="animate-pulse">▋</span>

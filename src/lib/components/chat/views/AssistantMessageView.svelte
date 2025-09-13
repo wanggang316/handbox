@@ -2,6 +2,7 @@
   import { Copy, RotateCcw, Trash2 } from "lucide-svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states/message.svelte";
+  import { marked } from "marked";
 
   interface Props {
     message: Message;
@@ -60,6 +61,11 @@
   function handleDelete() {
     onDelete?.(message.id);
   }
+
+  // 渲染 markdown 内容
+  function renderMarkdown(content: string): string {
+    return marked(content);
+  }
 </script>
 
 <div class="group relative">
@@ -91,15 +97,15 @@
               <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
               <span class="text-sm font-medium text-blue-700">推理过程</span>
             </div>
-            <div class="text-sm text-blue-800 whitespace-pre-wrap break-words leading-relaxed">
-              {message.reasoning}
+            <div class="text-sm text-blue-800 break-words leading-relaxed reasoning-content">
+              {@html renderMarkdown(message.reasoning)}
             </div>
           </div>
         {/if}
 
         <!-- 消息内容 -->
-        <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
-          {message.content}
+        <div class="break-words text-[15px] leading-[1.6] markdown-content">
+          {@html renderMarkdown(message.content)}
         </div>
 
         <!-- 模型和性能信息 -->
