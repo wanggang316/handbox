@@ -82,6 +82,7 @@
   let isLoading = $derived(messageStore.isLoading);
   let isSending = $derived(messageStore.isSending);
   let streamingContent = $derived(messageStore.streamingContent);
+  let streamingReasoning = $derived(messageStore.streamingReasoning);
   let streamingMessageId = $derived(messageStore.streamingMessageId);
 
   // 监听聊天切换，自动加载消息
@@ -173,9 +174,10 @@
         {/each}
 
         <!-- 流式响应中的消息 -->
-        {#if streamingMessageId && streamingContent}
+        {#if streamingMessageId && (streamingContent || streamingReasoning)}
           <StreamingMessageView 
             content={streamingContent}
+            reasoning={streamingReasoning}
             showCursor={true}
           />
         {/if}

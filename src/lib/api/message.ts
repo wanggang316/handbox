@@ -97,8 +97,8 @@ export async function sendStreamMessage(request: ChatRequest): Promise<string> {
  */
 export interface StreamEventHandlers {
   onStart?: (data: { streamId: string; messageId: string }) => void;
-  onChunk?: (data: { streamId: string; content: string; chunk: string; index: number }) => void;
-  onEnd?: (data: { streamId: string; finalContent: string; chatId: string; modelId: string; providerId: string }) => void;
+  onChunk?: (data: { streamId: string; content: string; reasoning?: string; chunk: string; index: number }) => void;
+  onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string }) => void;
   onError?: (error: any) => void;
 }
 

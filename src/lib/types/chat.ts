@@ -24,6 +24,7 @@ export interface Message extends BaseEntity {
   chatId: UUID;
   role: MessageRole;
   content: string;
+  reasoning?: string; // 推理过程内容
   
   // 每条消息的配置参数
   config?: MessageConfig;
@@ -93,6 +94,7 @@ export interface ChatRequest {
 export interface ChatMessage {
   role: MessageRole;
   content: string;
+  reasoning?: string; // 推理过程内容
 }
 
 // 聊天附件（请求中使用）
@@ -117,6 +119,6 @@ export interface ChatResponse {
 
 // 流式聊天事件
 export type ChatStreamEvent = 
-  | { type: 'delta'; data: { content: string; tokens?: number } }
+  | { type: 'delta'; data: { content: string; reasoning?: string; tokens?: number } }
   | { type: 'done'; data: ChatResponse }
   | { type: 'error'; data: { error: string; code?: string } };

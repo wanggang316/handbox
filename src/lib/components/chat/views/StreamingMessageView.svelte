@@ -3,11 +3,12 @@
 
   interface Props {
     content: string;
+    reasoning?: string;
     showCursor?: boolean;
     providerId?: string;
   }
 
-  let { content, showCursor = true, providerId }: Props = $props();
+  let { content, reasoning, showCursor = true, providerId }: Props = $props();
 
   // 获取provider图标
   const providerIcon = $derived(() => {
@@ -36,6 +37,24 @@
       <div
         class="inline-block max-w-full p-4 rounded-2xl bg-gray-100 text-gray-900 shadow-sm"
       >
+        <!-- 推理过程（如果有） -->
+        {#if reasoning}
+          <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+              <span class="text-sm font-medium text-blue-700">推理过程</span>
+            </div>
+            <div class="text-sm text-blue-800 whitespace-pre-wrap break-words leading-relaxed">
+              {reasoning}
+              <!-- 推理过程的光标 -->
+              {#if showCursor}
+                <span class="animate-pulse">▋</span>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
+        <!-- 消息内容 -->
         <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
           {content}
           <!-- 打字光标 -->
