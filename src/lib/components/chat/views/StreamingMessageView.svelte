@@ -1,6 +1,7 @@
 <script lang="ts">
   import { messageStore } from "$lib/states/message.svelte";
   import { marked } from "marked";
+  import { ChevronDown, ChevronRight } from "lucide-svelte";
 
   interface Props {
     content: string;
@@ -11,6 +12,9 @@
 
   let { content, reasoning, showCursor = true, providerId }: Props = $props();
 
+  // reasoning 折叠状态，streaming 时默认收起
+  let reasoningExpanded = $state(false);
+
   // 渲染 markdown 内容
   function renderMarkdown(content: string): string {
     const result = marked(content);
@@ -20,12 +24,15 @@
   // 获取provider图标
   const providerIcon = $derived(() => {
     if (providerId) {
-      console.log("providerId >>> :", providerId);
-      console.log("messageStore.getProviderIcon(providerId) >>> :", messageStore.getProviderIcon(providerId));
       return messageStore.getProviderIcon(providerId);
     }
     return undefined;
   });
+
+  // 切换推理过程显示状态
+  function toggleReasoning() {
+    reasoningExpanded = !reasoningExpanded;
+  }
 </script>
 
 <div class="group relative">
@@ -47,17 +54,33 @@
         <!-- 推理过程（如果有） -->
         {#if reasoning}
           <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div class="flex items-center gap-2 mb-2">
+            <!-- 推理过程标题，可点击折叠 -->
+            <button
+              class="flex items-center gap-2 mb-2 w-full text-left hover:bg-blue-100 rounded p-1 -m-1 transition-colors"
+              onclick={toggleReasoning}
+            >
+              {#if reasoningExpanded}
+                <ChevronDown size={16} class="text-blue-600" />
+              {:else}
+                <ChevronRight size={16} class="text-blue-600" />
+              {/if}
               <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
               <span class="text-sm font-medium text-blue-700">推理过程</span>
-            </div>
-            <div class="text-sm text-blue-800 break-words leading-relaxed reasoning-content">
-              {@html renderMarkdown(reasoning)}
-              <!-- 推理过程的光标 -->
-              {#if showCursor}
-                <span class="animate-pulse">▋</span>
-              {/if}
-            </div>
+              <span class="text-xs text-blue-600 ml-auto">
+                {reasoningExpanded ? '收起' : '展开'}
+              </span>
+            </button>
+
+            <!-- 推理过程内容，根据展开状态显示 -->
+            {#if reasoningExpanded}
+              <div class="text-sm text-blue-800 break-words leading-relaxed reasoning-content">
+                {@html renderMarkdown(reasoning)}
+                <!-- 推理过程的光标 -->
+                {#if showCursor}
+                  <span class="animate-pulse">▋</span>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/if}
 

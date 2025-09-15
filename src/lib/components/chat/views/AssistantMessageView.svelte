@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Copy, RotateCcw, Trash2 } from "lucide-svelte";
+  import { Copy, RotateCcw, Trash2, ChevronDown, ChevronRight } from "lucide-svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states/message.svelte";
   import { marked } from "marked";
@@ -20,11 +20,12 @@
     onDelete,
   }: Props = $props();
 
+  // reasoning 折叠状态，完成的消息默认展开
+  let reasoningExpanded = $state(true);
+
   // 获取provider配置
   const providerConfig = $derived(() => {
     if (message.config?.providerId) {
-      console.log("message.config.providerId >>> :", message.config.providerId);
-      console.log("messageStore.getProviderConfig(message.config.providerId) >>> :", messageStore.getProviderConfig(message.config.providerId));
       return messageStore.getProviderConfig(message.config.providerId);
     }
     return undefined;
@@ -71,6 +72,11 @@
     const result = marked(content);
     return typeof result === 'string' ? result : '';
   }
+
+  // 切换推理过程显示状态
+  function toggleReasoning() {
+    reasoningExpanded = !reasoningExpanded;
+  }
 </script>
 
 <div class="group relative">
@@ -98,13 +104,29 @@
         <!-- 推理过程（如果有） -->
         {#if message.reasoning}
           <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div class="flex items-center gap-2 mb-2">
+            <!-- 推理过程标题，可点击折叠 -->
+            <button
+              class="flex items-center gap-2 mb-2 w-full text-left hover:bg-blue-100 rounded p-1 -m-1 transition-colors"
+              onclick={toggleReasoning}
+            >
+              {#if reasoningExpanded}
+                <ChevronDown size={16} class="text-blue-600" />
+              {:else}
+                <ChevronRight size={16} class="text-blue-600" />
+              {/if}
               <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
               <span class="text-sm font-medium text-blue-700">推理过程</span>
-            </div>
-            <div class="text-sm text-blue-800 break-words leading-relaxed reasoning-content">
-              {@html renderMarkdown(message.reasoning)}
-            </div>
+              <span class="text-xs text-blue-600 ml-auto">
+                {reasoningExpanded ? '收起' : '展开'}
+              </span>
+            </button>
+
+            <!-- 推理过程内容，根据展开状态显示 -->
+            {#if reasoningExpanded}
+              <div class="text-sm text-blue-800 break-words leading-relaxed reasoning-content">
+                {@html renderMarkdown(message.reasoning)}
+              </div>
+            {/if}
           </div>
         {/if}
 
