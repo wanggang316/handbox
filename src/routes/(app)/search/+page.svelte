@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { searchState } from '$lib/states/search.svelte';
-  import { chatState } from '$lib/states/chat.svelte';
+  import { chatActions } from '$lib/states/chat.svelte';
 
 let searchQuery = $state('');
 let selectedFilter = $state('all');
@@ -47,7 +47,7 @@ function handleKeydown(event: KeyboardEvent) {
 
 // 跳转到聊天
 function goToChat(chatId: string) {
-  chatState.switchToChat(chatId);
+  chatActions.switchToChat(chatId);
   goto(`/chat?id=${chatId}`);
 }
 

@@ -2,7 +2,7 @@
 
 use crate::clients::{adapt_model, create_llm_client};
 use crate::models::{
-    AppError, Model, Provider, ProviderConfig, ProviderWithModels, Timestamp, UUID,
+    AppError, AddProviderRequest, Model, Provider, ProviderWithModels, Timestamp, UUID,
 };
 use crate::services::DatabaseService;
 use crate::storage::ProviderRepository;
@@ -30,14 +30,14 @@ impl ProviderService {
     }
 
     /// 创建供应商
-    pub async fn create_provider(&self, config: ProviderConfig) -> Result<Provider, AppError> {
+    pub async fn create_provider(&self, config: AddProviderRequest) -> Result<Provider, AppError> {
         self.create_provider_with_validation(config, true).await
     }
 
     /// 创建供应商（可选择是否验证 API Key）
     pub async fn create_provider_with_validation(
         &self,
-        config: ProviderConfig,
+        config: AddProviderRequest,
         validate_api_key: bool,
     ) -> Result<Provider, AppError> {
         let provider = Provider {
@@ -130,7 +130,7 @@ impl ProviderService {
     pub async fn update_provider(
         &self,
         provider_id: &UUID,
-        config: ProviderConfig,
+        config: AddProviderRequest,
     ) -> Result<Provider, AppError> {
         self.update_provider_with_validation(provider_id, config, true)
             .await
@@ -140,7 +140,7 @@ impl ProviderService {
     pub async fn update_provider_with_validation(
         &self,
         provider_id: &UUID,
-        config: ProviderConfig,
+        config: AddProviderRequest,
         validate_api_key: bool,
     ) -> Result<Provider, AppError> {
         let existing_provider = self.get_provider(provider_id).await?;

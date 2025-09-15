@@ -1,7 +1,7 @@
 // 供应商相关 IPC 命令
 
 use crate::models::{
-    AppError, ListModelsRequest, ListModelsResponse, Model, Provider, ProviderConfig,
+    AppError, AddProviderRequest, ListModelsRequest, ListModelsResponse, Model, Provider,
     ProviderWithModels, ToggleModelFavoriteRequest, ToggleModelRequest, ToggleProviderRequest,
     UUID,
 };
@@ -39,7 +39,7 @@ pub async fn provider_get_with_models(
 /// 创建供应商
 #[tauri::command]
 pub async fn provider_create(
-    config: ProviderConfig,
+    config: AddProviderRequest,
     provider_service: State<'_, ProviderService>,
 ) -> Result<Provider, AppError> {
     provider_service.create_provider(config).await
@@ -49,7 +49,7 @@ pub async fn provider_create(
 #[tauri::command]
 pub async fn provider_update(
     provider_id: UUID,
-    config: ProviderConfig,
+    config: AddProviderRequest,
     provider_service: State<'_, ProviderService>,
 ) -> Result<Provider, AppError> {
     println!("provider_update: {:?}", config);
@@ -119,35 +119,6 @@ pub async fn provider_toggle_model_favorite(
     provider_service
         .toggle_favorite_model(&request.provider_id, &request.model_id, request.favorite)
         .await
-}
-
-/// 获取所有可用模型列表
-#[tauri::command]
-pub async fn provider_get_available_models(
-    provider_service: State<'_, ProviderService>,
-) -> Result<Vec<(Provider, Vec<Model>)>, AppError> {
-    let providers = provider_service.list_providers().await?;
-    let mut result = vec![];
-
-    for provider in providers {
-        if provider.enabled {
-            match provider_service
-                .get_provider_models(&provider.id, false)
-                .await
-            {
-                Ok(models) => {
-                    let enabled_models: Vec<Model> =
-                        models.into_iter().filter(|m| m.enabled).collect();
-                    if !enabled_models.is_empty() {
-                        result.push((provider, enabled_models));
-                    }
-                }
-                Err(_) => continue, // 忽略获取失败的供应商
-            }
-        }
-    }
-
-    Ok(result)
 }
 
 /// 获取所有供应商及其模型（包含收藏状态）

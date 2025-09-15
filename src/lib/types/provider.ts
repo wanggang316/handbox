@@ -44,8 +44,8 @@ export type ModelFeature = 'text' | 'vision' | 'function-calling' | 'streaming' 
 
 
 
-// 供应商配置请求
-export interface ProviderConfig {
+// 添加供应商请求
+export interface AddProviderRequest {
   name: string;
   provider_type: string;
   base_url: string;

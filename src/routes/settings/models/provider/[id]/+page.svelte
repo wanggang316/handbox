@@ -8,7 +8,7 @@
     providerStateActions,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import type { Provider, ProviderConfig } from "$lib/types/provider";
+  import type { Provider, AddProviderRequest } from "$lib/types/provider";
   import { Trash2, ChevronLeft, SquarePen, Heart, Star } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
@@ -67,10 +67,12 @@
         };
 
         // 自动获取模型列表
-        try {
-          await providerActions.fetchProviderModels(provider.id, false);
-        } catch (error) {
-          console.error("Failed to fetch models:", error);
+        if (provider.id) {
+          try {
+            await providerActions.fetchProviderModels(provider.id, false);
+          } catch (error) {
+            console.error("Failed to fetch models:", error);
+          }
         }
       } else {
         console.error("Provider not found:", providerId);
@@ -105,6 +107,9 @@
     formData.enabled = enabled; // 立即更新UI
 
     try {
+      if (!currentProvider.id) {
+        throw new Error('Provider ID is undefined');
+      }
       console.log("handleToggleProvider", currentProvider.id, enabled);
       await providerActions.toggleProvider(currentProvider.id, enabled);
       // 更新当前供应商状态
@@ -126,7 +131,7 @@
   }
 
   async function confirmDelete() {
-    if (!currentProvider) return;
+    if (!currentProvider || !currentProvider.id) return;
 
     try {
       await providerActions.deleteProvider(currentProvider.id);
@@ -172,7 +177,7 @@
       hoverColor="hover:bg-bg-hover"
       textColor="text-text-primary"
       customClass="hover:text-text-secondary z-10004 relative"
-      on:click={handleBack}
+      onclick={handleBack}
     />
   </header>
 
@@ -230,7 +235,7 @@
                     type="checkbox"
                     bind:checked={model.enabled}
                     onchange={(e) => {
-                      if (currentProvider) {
+                      if (currentProvider && currentProvider.id) {
                         providerActions.toggleModel(
                           currentProvider.id,
                           model.id,
@@ -245,7 +250,7 @@
                 <div class="flex items-center justify-center w-16">
                   <button
                     onclick={() => {
-                      if (currentProvider) {
+                      if (currentProvider && currentProvider.id) {
                         providerActions.toggleModelFavorite(
                           currentProvider.id,
                           model.id,

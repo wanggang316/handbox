@@ -5,24 +5,29 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { uiState } from '$lib/states/ui.svelte';
-  import { chatState } from '$lib/states/chat.svelte';
+  import { chatState, chatActions, hasActiveChat, currentChatModel } from '$lib/states/chat.svelte';
   import { messageStore } from '$lib/states/message.svelte';
+    import { goto } from '$app/navigation';
 
   let chatId = $state('');
   let messageInput = $state('');
 
   // 从 URL 参数获取聊天 ID
   onMount(async () => {
+    // 确保 chatState 已经初始化
+    if (!chatState.isInitialized && !chatState.isInitializing) {
+      await chatActions.initialize();
+    }
+
     const urlParams = $page.url.searchParams;
     const newChatId = urlParams.get('id') || '';
-    console.log('Current chat ID:', newChatId);
-    
+
     // 如果有 chatId，切换到对应聊天
     if (newChatId && newChatId !== chatId) {
       chatId = newChatId;
       try {
-        await chatState.switchToChat(chatId);
-      } catch (error) {
+        await chatActions.switchToChat(chatId);
+      } catch (error: any) {
         console.error('Failed to switch to chat:', error);
       }
     } else if (!newChatId) {
@@ -36,13 +41,13 @@
   $effect(() => {
     const urlParams = $page.url.searchParams;
     const newChatId = urlParams.get('id') || '';
-    
+
     if (newChatId !== chatId) {
       chatId = newChatId;
       console.log('Chat ID changed to:', chatId);
-      
+
       if (chatId) {
-        chatState.switchToChat(chatId).catch(error => {
+        chatActions.switchToChat(chatId).catch(error => {
           console.error('Failed to switch to chat:', error);
         });
       } else {
@@ -57,36 +62,41 @@
 
   // 派生状态：聊天标题和 ID
   let chatTitle = $derived(
-    currentChat ? currentChat.name : 'HandBox - AI 助手'
+    currentChat ? currentChat.name : 'HandBox'
   );
   let displayChatId = $derived(
     currentChat ? currentChat.id : ''
   );
 
-  // 派生状态：当前聊天的模型信息（直接使用 chatState 中的 getter）
-  let currentChatModel = $derived(chatState.currentChatModel);
+  // 当前聊天的模型信息已通过导入的 currentChatModel 提供
 
   // 处理消息发送
   async function handleSendMessage(message: string) {
     console.log('handleSendMessage:', message);
     try {
-      if (!chatState.currentChat) {
-        console.log('No current chat, creating new chat');
-        // 如果没有当前聊天，创建新聊天，但不设置模型，让用户在聊天中选择
-        await chatState.createChat();
+      if (!hasActiveChat()) {
+        console.log('No active chat, creating new chat');
+        // 如果没有活跃聊天，创建新聊天
+        await chatActions.createChat();
+        // 立即更新 URL，通知页面切换到新会话
+        if (chatState.currentChat?.id) {
+          await goto(`/chat?id=${chatState.currentChat.id}`);
+        }
       }
-      
+
       const chat = chatState.currentChat;
       if (!chat) {
         throw new Error('没有活跃的聊天');
       }
 
+      if (!chat.id) {
+        throw new Error('聊天ID缺失');
+      }
+
       if (!chat.modelId || !chat.providerId) {
         throw new Error('请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。');
       }
-      
-      console.log('currentChat:', chat);
-      
+
       // 使用 messageStore 发送消息
       await messageStore.sendMessage({
         chatId: chat.id,
@@ -95,7 +105,7 @@
         messages: [{ role: 'user', content: message }],
         attachments: []
       });
-      
+
     } catch (error) {
       console.error('Failed to send message:', error);
       // 如果是模型选择错误，可以在这里显示提示
@@ -128,7 +138,6 @@
     <ChatInputView 
       bind:messageInput={messageInput}
       onSendMessage={handleSendMessage}
-      selectedModel={currentChatModel.model || null}
     />
   </div>
 </div>

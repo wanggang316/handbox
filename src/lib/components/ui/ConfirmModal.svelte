@@ -101,7 +101,7 @@
         bgColor="bg-gray-200"
         textColor="text-gray-600"
         hoverColor="hover:bg-gray-300"
-        on:click={handleCancel}
+        onclick={handleCancel}
       />
       <RoundButton
         customClass="w-22"
@@ -112,7 +112,7 @@
         textColor={confirmColors.textColor}
         hoverColor={confirmColors.hoverColor}
         disabled={isLoading}
-        on:click={handleConfirm}
+        onclick={handleConfirm}
       />
     </div>
   </div>

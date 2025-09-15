@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::models::{ModelFeature, ProviderConfig};
+    use crate::models::{AddProviderRequest, ModelFeature};
     use crate::services::{DatabaseService, ProviderService};
     use tempfile::tempdir;
 
@@ -21,7 +21,7 @@ mod tests {
     async fn test_create_provider() {
         let (service, _temp_dir) = create_test_service().await;
 
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "Test OpenAI".to_string(),
             provider_type: "openai".to_string().to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
@@ -46,7 +46,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 先创建一个供应商
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "Test Provider".to_string(),
             provider_type: "anthropic".to_string(),
             base_url: "https://api.anthropic.com".to_string(),
@@ -72,14 +72,14 @@ mod tests {
 
         // 创建多个供应商
         let configs = vec![
-            ProviderConfig {
+            AddProviderRequest {
                 name: "OpenAI Provider".to_string(),
                 provider_type: "openai".to_string(),
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: "key1".to_string(),
                 enabled: Some(true),
             },
-            ProviderConfig {
+            AddProviderRequest {
                 name: "Anthropic Provider".to_string(),
                 provider_type: "anthropic".to_string(),
                 base_url: "https://api.anthropic.com".to_string(),
@@ -107,7 +107,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建供应商
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "Original Name".to_string(),
             provider_type: "google".to_string(),
             base_url: "https://api.google.com".to_string(),
@@ -121,7 +121,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 
         // 更新供应商
-        let update_config = ProviderConfig {
+        let update_config = AddProviderRequest {
             name: "Updated Name".to_string(),
             provider_type: "google".to_string(),
             base_url: "https://updated-api.google.com".to_string(),
@@ -144,7 +144,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建供应商
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "To Delete".to_string(),
             provider_type: "deepseek".to_string(),
             base_url: "https://api.deepseek.com".to_string(),
@@ -173,7 +173,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建供应商
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "Toggle Test".to_string(),
             provider_type: "anthropic".to_string(),
             base_url: "https://api.anthropic.com".to_string(),
@@ -198,7 +198,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建 OpenAI 供应商
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "OpenAI Models Test".to_string(),
             provider_type: "openai".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
@@ -245,7 +245,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建供应商并获取模型
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "Model Toggle Test".to_string(),
             provider_type: "openai".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
@@ -287,7 +287,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建多个供应商
-        let openai_config = ProviderConfig {
+        let openai_config = AddProviderRequest {
             name: "OpenAI Available".to_string(),
             provider_type: "openai".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
@@ -295,7 +295,7 @@ mod tests {
             enabled: Some(true),
         };
 
-        let anthropic_config = ProviderConfig {
+        let anthropic_config = AddProviderRequest {
             name: "Anthropic Disabled".to_string(),
             provider_type: "anthropic".to_string(),
             base_url: "https://api.anthropic.com".to_string(),
@@ -344,7 +344,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建供应商
-        let config = ProviderConfig {
+        let config = AddProviderRequest {
             name: "With Models Test".to_string(),
             provider_type: "anthropic".to_string(),
             base_url: "https://api.anthropic.com".to_string(),
@@ -386,7 +386,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service().await;
 
         // 创建第一个供应商
-        let config1 = ProviderConfig {
+        let config1 = AddProviderRequest {
             name: "Duplicate Name".to_string(),
             provider_type: "openai".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
@@ -398,7 +398,7 @@ mod tests {
         assert!(result1.is_ok());
 
         // 尝试创建同名供应商
-        let config2 = ProviderConfig {
+        let config2 = AddProviderRequest {
             name: "Duplicate Name".to_string(),
             provider_type: "anthropic".to_string(),
             base_url: "https://api.anthropic.com".to_string(),

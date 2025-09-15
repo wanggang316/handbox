@@ -52,8 +52,8 @@
 
   // 删除消息
   async function deleteMessage(messageId: string) {
-    if (operatingMessageId || !chatState.currentChat) return; // 防止重复操作
-    
+    if (operatingMessageId || !chatState.currentChat?.id) return; // 防止重复操作
+
     // 确认删除
     if (!confirm('确定要删除这条消息吗？')) {
       return;
@@ -77,24 +77,32 @@
     console.log('Editing message:', messageId);
   }
 
-  // 获取当前聊天的消息 - 使用 Svelte 5 派生状态
-  let messages = $derived(messageStore.getCurrentMessages(chatState.currentChat?.id));
+  // 当前聊天ID的派生状态
+  let currentChatId = $derived(chatState.currentChat?.id);
+
+  // 派生状态：获取当前聊天的消息 - 使用响应式getter
+  let messages = $derived(currentChatId ? messageStore.getMessagesReactive(currentChatId) : []);
   let isLoading = $derived(messageStore.isLoading);
-  let isSending = $derived(messageStore.isSending);
   let streamingContent = $derived(messageStore.streamingContent);
   let streamingReasoning = $derived(messageStore.streamingReasoning);
   let streamingMessageId = $derived(messageStore.streamingMessageId);
 
-  // 监听聊天切换，自动加载消息
+  // 监听聊天切换，自动加载消息（使用单独的 effect 避免循环）
+  let lastLoadedChatId = $state<string | null>(null);
+
   $effect(() => {
-    const currentChat = chatState.currentChat;
-    if (currentChat?.id) {
+    if (currentChatId && currentChatId !== lastLoadedChatId) {
       // 检查是否已经有消息，没有则加载
-      const existingMessages = messageStore.getMessages(currentChat.id);
-      if (existingMessages.length === 0) {
-        messageStore.loadMessages(currentChat.id).catch(error => {
+      const existingMessages = messageStore.getMessages(currentChatId);
+      // 如果正在发送消息或有流式响应，不要加载（避免覆盖本地消息）
+      if (existingMessages.length === 0 && !messageStore.isSending && !messageStore.streamingMessageId) {
+        messageStore.loadMessages(currentChatId).catch(error => {
           console.error('Failed to load messages:', error);
+        }).finally(() => {
+          lastLoadedChatId = currentChatId;
         });
+      } else {
+        lastLoadedChatId = currentChatId;
       }
     }
   });
@@ -128,7 +136,7 @@
 <div class="flex flex-col h-full">
   <!-- 消息列表 -->
   <div bind:this={messagesContainer} class="flex-1 overflow-y-auto bg-blue-100">
-    {#if isLoading && messages.length === 0}
+    {#if isLoading && messages.length === 0 && !streamingMessageId}
       <!-- 加载状态 -->
       <div class="flex items-center justify-center h-full">
         <div class="flex items-center gap-2 text-gray-500">
@@ -136,7 +144,7 @@
           加载消息中...
         </div>
       </div>
-    {:else if messages.length === 0}
+    {:else if messages.length === 0 && !streamingMessageId}
       <!-- 空状态 -->
       <div class="flex items-center justify-center h-full">
         <div class="text-center text-gray-500">
@@ -150,11 +158,11 @@
       <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6 bg-green-100">
         {#each messages as message (message.id)}
           {#if message.role === 'user'}
-            <UserMessageView 
+            <UserMessageView
               {message}
             />
           {:else if message.role === 'assistant'}
-            <AssistantMessageView 
+            <AssistantMessageView
               {message}
               isOperating={operatingMessageId === message.id}
               onCopy={copyMessage}
@@ -175,7 +183,7 @@
 
         <!-- 流式响应中的消息 -->
         {#if streamingMessageId && (streamingContent || streamingReasoning)}
-          <StreamingMessageView 
+          <StreamingMessageView
             content={streamingContent}
             reasoning={streamingReasoning}
             showCursor={true}

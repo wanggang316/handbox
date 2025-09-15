@@ -132,7 +132,7 @@
             onSave={handlePromptSave}
           />
         {:else if activeTab === 'model'}
-          <ModelSettings 
+          <ModelSettings
             {temperature}
             {topP}
             {streamResponse}
@@ -150,5 +150,4 @@
     </div>
   </div>
 </Modal>
-
 

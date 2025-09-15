@@ -55,16 +55,21 @@
   }
 
   function handleRegenerate() {
-    onRegenerate?.(message.id);
+    if (message.id) {
+      onRegenerate?.(message.id);
+    }
   }
 
   function handleDelete() {
-    onDelete?.(message.id);
+    if (message.id) {
+      onDelete?.(message.id);
+    }
   }
 
   // 渲染 markdown 内容
   function renderMarkdown(content: string): string {
-    return marked(content);
+    const result = marked(content);
+    return typeof result === 'string' ? result : '';
   }
 </script>
 

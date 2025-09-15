@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProviderConfig } from "$lib/types/provider";
+  import type { AddProviderRequest } from "$lib/types/provider";
   import { 
     getProviderConfig, 
     getProviderDropdownOptions, 
@@ -113,7 +113,7 @@
 
     isLoading = true;
     try {
-      const config: ProviderConfig = {
+      const config: AddProviderRequest = {
         name: formData.name,
         provider_type: formData.provider_type,
         base_url: formData.base_url,
@@ -121,7 +121,7 @@
         enabled: true,
       };
 
-      if (isEditMode && editProvider) {
+      if (isEditMode && editProvider && editProvider.id) {
         // 编辑模式：更新供应商
         console.log("Updating provider with config:", config);
         await providerActions.updateProvider(editProvider.id, config);

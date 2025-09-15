@@ -2,7 +2,8 @@
  * 供应商相关状态管理 - 使用 Svelte 5 runes
  */
 
-import type { Provider, Model, ProviderConfig, FrontendProviderConfig, UUID, ProviderWithModels, ModelWithProvider } from '../types';
+import type { Provider, Model, AddProviderRequest, FrontendProviderConfig, UUID, ProviderWithModels } from '../types';
+import type { ModelWithProvider } from '../types/provider';
 import * as providerApi from '../api/provider';
 
 // 供应商配置模板（从后端获取）
@@ -56,7 +57,7 @@ export const providerState = $state({
   // 正在编辑的供应商（用于模态框）
   editingProvider: null as Provider | null,
   
-  // 所有可用模型
+  // currentProvider的模型
   currentModels: [] as Model[],
   
   // 带模型的供应商列表（用于聊天功能）
@@ -80,7 +81,10 @@ export function getEnabledProviders(): Provider[] {
 
 // 派生状态：所有可用模型（带供应商信息）
 export function getAllModels(): ModelWithProvider[] {
-  return providerState.providersWithModels.flatMap(provider => 
+  
+  console.log('getAllModels >>> :', providerState.providersWithModels);
+  
+  return providerState.providersWithModels.flatMap(provider =>
     provider.models.map(model => ({
       ...model,
       providerName: provider.name,
@@ -166,7 +170,7 @@ export const providerStateActions = {
    * 刷新当前供应商的详细信息（包括模型列表）
    */
   async refreshCurrentProvider(): Promise<void> {
-    if (providerState.currentProvider) {
+    if (providerState.currentProvider && providerState.currentProvider.id) {
       const providerId = providerState.currentProvider.id;
       try {
         // 重新获取供应商信息
@@ -256,7 +260,7 @@ export const providerActions = {
   /**
    * 创建供应商
    */
-  async createProvider(config: ProviderConfig): Promise<Provider> {
+  async createProvider(config: AddProviderRequest): Promise<Provider> {
     try {
       providerState.isLoading = true;
       const provider = await providerApi.createProvider(config);
@@ -276,7 +280,7 @@ export const providerActions = {
   /**
    * 更新供应商
    */
-  async updateProvider(providerId: UUID, config: Partial<ProviderConfig>): Promise<void> {
+  async updateProvider(providerId: UUID, config: Partial<AddProviderRequest>): Promise<void> {
     try {
       providerState.isLoading = true;
       const updatedProvider = await providerApi.updateProvider(providerId, config);
@@ -417,13 +421,6 @@ export const providerActions = {
       providerState.error = error instanceof Error ? error.message : '切换模型收藏状态失败';
       throw error;
     }
-  },
-
-  /**
-   * 选择供应商（保持向后兼容）
-   */
-  selectProvider(provider: Provider | null): void {
-    providerStateActions.setCurrentProvider(provider);
   },
 
   /**

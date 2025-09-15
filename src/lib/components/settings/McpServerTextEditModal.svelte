@@ -80,12 +80,12 @@
 				bgColor="bg-gray-200"
 				textColor="text-gray-600"
 				hoverColor="hover:text-gray-800"
-				on:click={handleClose}
+				onclick={handleClose}
 			></RoundButton>
 			<RoundButton
 				customClass="w-18"
 				label="确认"
-				on:click={handleConfirm}
+				onclick={handleConfirm}
 				disabled={isLoading}
 			></RoundButton>
 		</div>

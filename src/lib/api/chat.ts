@@ -26,13 +26,13 @@ export async function createChat(
   const payload = {
     name,
     temperature,
-    top_p: topP,
-    max_tokens: maxTokens,
+    topP: topP,
+    maxTokens: maxTokens,
     stream,
-    model_id: modelId,
-    provider_id: providerId,
-    system_prompt: systemPrompt,
-    mcp_servers: mcpServers,
+    modelId: modelId,
+    providerId: providerId,
+    systemPrompt: systemPrompt,
+    mcpServers: mcpServers,
   };
   console.log('Creating chat:', payload);
   return apiCall<Chat>('chat_create', payload);

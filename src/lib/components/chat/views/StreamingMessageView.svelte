@@ -13,7 +13,8 @@
 
   // 渲染 markdown 内容
   function renderMarkdown(content: string): string {
-    return marked(content);
+    const result = marked(content);
+    return typeof result === 'string' ? result : '';
   }
 
   // 获取provider图标
