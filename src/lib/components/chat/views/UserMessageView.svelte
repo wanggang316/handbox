@@ -25,7 +25,7 @@
     <!-- 消息内容 -->
     <div class="flex-1 min-w-0 text-right">
       <!-- 消息气泡 -->
-      <div class="inline-block max-w-full px-4 py-3 rounded-2xl bg-blue-600 text-white">
+      <div class="inline-block max-w-full px-4 py-3 rounded-2xl bg-[#f7f7f7] text-text-primary">
         <!-- 消息内容 -->
         <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
           {message.content}

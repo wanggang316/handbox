@@ -135,7 +135,7 @@
             <div class="mb-4">
               <!-- 推理过程标题，可点击折叠 -->
               <button
-                class="flex items-center gap-2 my-2 text-left hover:bg-bg-hover rounded-lg p-1"
+                class="flex items-center gap-1 my-2 text-left hover:bg-bg-hover rounded-full py-1 px-2"
                 onclick={toggleReasoning}
               >
                 {#if reasoningExpanded}
