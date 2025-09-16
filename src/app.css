@@ -225,7 +225,7 @@ html, body {
 /* 推理过程的特殊样式 */
 .reasoning-content {
   line-height: 1.5;
-  color: #1e40af;
+  color: #64748b;
 }
 
 .reasoning-content h1,

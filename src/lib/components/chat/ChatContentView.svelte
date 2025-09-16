@@ -6,7 +6,6 @@
   // Import child components
   import UserMessageView from './views/UserMessageView.svelte';
   import AssistantMessageView from './views/AssistantMessageView.svelte';
-  import StreamingMessageView from './views/StreamingMessageView.svelte';
 
   // 复制消息内容
   async function copyMessage(content: string) {
@@ -135,7 +134,7 @@
 
 <div class="flex flex-col h-full">
   <!-- 消息列表 -->
-  <div bind:this={messagesContainer} class="flex-1 overflow-y-auto bg-blue-100">
+  <div bind:this={messagesContainer} class="flex-1 overflow-y-auto">
     {#if isLoading && messages.length === 0 && !streamingMessageId}
       <!-- 加载状态 -->
       <div class="flex items-center justify-center h-full">
@@ -155,7 +154,7 @@
       </div>
     {:else}
       <!-- 消息列表 -->
-      <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6 bg-green-100">
+      <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
         {#each messages as message (message.id)}
           {#if message.role === 'user'}
             <UserMessageView
@@ -183,10 +182,27 @@
 
         <!-- 流式响应中的消息 -->
         {#if streamingMessageId && (streamingContent || streamingReasoning)}
-          <StreamingMessageView
-            content={streamingContent}
-            reasoning={streamingReasoning}
-            showCursor={true}
+          <AssistantMessageView
+            message={{
+              id: streamingMessageId,
+              chatId: currentChatId || '',
+              role: 'assistant',
+              content: streamingContent,
+              reasoning: streamingReasoning,
+              createdAt: Date.now(),
+              config: {
+                modelId: chatState.currentChat?.modelId,
+                providerId: chatState.currentChat?.providerId,
+                temperature: chatState.currentChat?.temperature,
+                topP: chatState.currentChat?.topP,
+                maxTokens: chatState.currentChat?.maxTokens,
+                stream: chatState.currentChat?.stream,
+                systemPrompt: chatState.currentChat?.systemPrompt,
+                mcpServers: chatState.currentChat?.mcpServers,
+              },
+              updatedAt: Date.now(),
+            }}
+            isStreaming={true}
           />
         {/if}
       </div>

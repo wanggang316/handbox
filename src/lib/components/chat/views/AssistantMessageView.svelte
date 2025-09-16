@@ -7,6 +7,7 @@
   interface Props {
     message: Message;
     isOperating?: boolean;
+    isStreaming?: boolean;
     onCopy?: (content: string) => void;
     onRegenerate?: (messageId: string) => void;
     onDelete?: (messageId: string) => void;
@@ -15,13 +16,14 @@
   let {
     message,
     isOperating = false,
+    isStreaming = false,
     onCopy,
     onRegenerate,
     onDelete,
   }: Props = $props();
 
-  // reasoning 折叠状态，完成的消息默认展开
-  let reasoningExpanded = $state(true);
+  // reasoning 折叠状态，流式消息默认收起，完成的消息默认展开
+  let reasoningExpanded = $state(!isStreaming);
 
   // 获取provider配置
   const providerConfig = $derived(() => {
@@ -81,7 +83,7 @@
 
 <div class="group relative">
   <!-- 消息容器 -->
-  <div class="flex gap-4">
+  <div class="flex gap-2">
     <!-- 头像 -->
     <div class="flex-shrink-0">
       <div
@@ -99,31 +101,27 @@
     <div class="flex-1 min-w-0">
       <!-- 消息气泡 -->
       <div
-        class="inline-block max-w-full p-4 rounded-2xl bg-gray-100 text-gray-900"
+        class="max-w-full py-1 text-gray-900"
       >
         <!-- 推理过程（如果有） -->
         {#if message.reasoning}
-          <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div class="mb-4">
             <!-- 推理过程标题，可点击折叠 -->
             <button
-              class="flex items-center gap-2 mb-2 w-full text-left hover:bg-blue-100 rounded p-1 -m-1 transition-colors"
+              class="flex items-center gap-2 mb-2 text-left hover:bg-bg-hover rounded-lg p-1"
               onclick={toggleReasoning}
             >
               {#if reasoningExpanded}
-                <ChevronDown size={16} class="text-blue-600" />
+                <ChevronDown size={16} class="text-gray-600" />
               {:else}
-                <ChevronRight size={16} class="text-blue-600" />
+                <ChevronRight size={16} class="text-gray-600" />
               {/if}
-              <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span class="text-sm font-medium text-blue-700">推理过程</span>
-              <span class="text-xs text-blue-600 ml-auto">
-                {reasoningExpanded ? '收起' : '展开'}
-              </span>
+              <span class="text-sm font-medium text-gray-600">推理过程</span>
             </button>
 
             <!-- 推理过程内容，根据展开状态显示 -->
             {#if reasoningExpanded}
-              <div class="text-sm text-blue-800 break-words leading-relaxed reasoning-content">
+              <div class="mt-2 mb-6 px-3 text-sm border-l border-gray-200 text-gray-600 break-words leading-relaxed reasoning-content">
                 {@html renderMarkdown(message.reasoning)}
               </div>
             {/if}
@@ -131,7 +129,7 @@
         {/if}
 
         <!-- 消息内容 -->
-        <div class="break-words text-[15px] leading-[1.6] markdown-content">
+        <div class="flex-1 break-words text-[15px] leading-[1.6] markdown-content">
           {@html renderMarkdown(message.content)}
         </div>
 
@@ -180,53 +178,55 @@
         {formatTime(message.createdAt)}
       </div>
 
-      <!-- 消息操作按钮 -->
-      <div
-        class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-      >
-        <div class="inline-flex gap-1">
-          <!-- 复制按钮 -->
-          <button
-            class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-            title="复制消息"
-            onclick={handleCopy}
-          >
-            <Copy class="w-3.5 h-3.5" />
-          </button>
+      <!-- 消息操作按钮 (仅在非流式状态下显示) -->
+      {#if !isStreaming}
+        <div
+          class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+        >
+          <div class="inline-flex gap-1">
+            <!-- 复制按钮 -->
+            <button
+              class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              title="复制消息"
+              onclick={handleCopy}
+            >
+              <Copy class="w-3.5 h-3.5" />
+            </button>
 
-          <!-- 重新生成按钮 -->
-          <button
-            class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="重新生成"
-            disabled={isOperating}
-            onclick={handleRegenerate}
-          >
-            {#if isOperating}
-              <div
-                class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"
-              ></div>
-            {:else}
-              <RotateCcw class="w-3.5 h-3.5" />
-            {/if}
-          </button>
+            <!-- 重新生成按钮 -->
+            <button
+              class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="重新生成"
+              disabled={isOperating}
+              onclick={handleRegenerate}
+            >
+              {#if isOperating}
+                <div
+                  class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"
+                ></div>
+              {:else}
+                <RotateCcw class="w-3.5 h-3.5" />
+              {/if}
+            </button>
 
-          <!-- 删除按钮 -->
-          <button
-            class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="删除消息"
-            disabled={isOperating}
-            onclick={handleDelete}
-          >
-            {#if isOperating}
-              <div
-                class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"
-              ></div>
-            {:else}
-              <Trash2 class="w-3.5 h-3.5" />
-            {/if}
-          </button>
+            <!-- 删除按钮 -->
+            <button
+              class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="删除消息"
+              disabled={isOperating}
+              onclick={handleDelete}
+            >
+              {#if isOperating}
+                <div
+                  class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"
+                ></div>
+              {:else}
+                <Trash2 class="w-3.5 h-3.5" />
+              {/if}
+            </button>
+          </div>
         </div>
-      </div>
+      {/if}
     </div>
   </div>
 </div>
