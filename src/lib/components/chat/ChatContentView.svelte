@@ -85,6 +85,8 @@
   let streamingContent = $derived(messageStore.streamingContent);
   let streamingReasoning = $derived(messageStore.streamingReasoning);
   let streamingMessageId = $derived(messageStore.streamingMessageId);
+  let isReasoning = $derived(messageStore.isReasoning);
+  let isMessageLoading = $derived(messageStore.isMessageLoading);
 
   // 监听聊天切换，自动加载消息（使用单独的 effect 避免循环）
   let lastLoadedChatId = $state<string | null>(null);
@@ -180,10 +182,10 @@
           {/if}
         {/each}
 
-        <!-- 流式响应中的消息 -->
-        {#if streamingMessageId && (streamingContent || streamingReasoning)}
+        <!-- 消息加载状态或流式响应中的消息 -->
+        {#if isMessageLoading || (streamingMessageId && (streamingContent || streamingReasoning))}
           <AssistantMessageView
-            message={{
+            message={streamingMessageId && (streamingContent || streamingReasoning) ? {
               id: streamingMessageId,
               chatId: currentChatId || '',
               role: 'assistant',
@@ -201,8 +203,10 @@
                 mcpServers: chatState.currentChat?.mcpServers,
               },
               updatedAt: Date.now(),
-            }}
-            isStreaming={true}
+            } : undefined}
+            isStreaming={!!streamingMessageId && !!(streamingContent || streamingReasoning)}
+            isReasoning={!!isReasoning}
+            isMessageLoading={isMessageLoading}
           />
         {/if}
       </div>

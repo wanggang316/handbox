@@ -61,6 +61,16 @@ class MessageStore {
     return this.state.streamingReasoning;
   }
 
+  // 判断是否正在推理中（有推理内容但还没有最终内容）
+  get isReasoning() {
+    return this.state.streamingReasoning && !this.state.streamingContent;
+  }
+
+  // 判断是否在等待消息响应（发送中但还没有任何流式内容）
+  get isMessageLoading() {
+    return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
+  }
+
   // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
   getMessagesReactive(chatId: string) {
     return this.state.messagesByChat[chatId] || [];
