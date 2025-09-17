@@ -1,25 +1,38 @@
 <script lang="ts">
   import MenuButton from "./MenuButton.svelte";
   import type { Icon as IconType } from '@lucide/svelte';
-  
-  export let title: String = "";
 
-  export let items: Array<{
-    id: string;
-    title: string;
-    icon?: typeof IconType;
-    iconPosition?: "left" | "right";
-    iconSize?: number;
-  }> = [];
-  
-  export let activeId: string = "";
+  interface Props {
+    title?: string;
+    items?: Array<{
+      id: string;
+      title: string;
+      icon?: typeof IconType;
+      iconPosition?: "left" | "right";
+      iconSize?: number;
+    }>;
+    activeId?: string;
+    onItemClick?: (item: any) => void;
+    enableContextMenu?: boolean;
+    onItemRename?: ((item: any, newName: string) => void) | undefined;
+    onItemDelete?: ((item: any) => void) | undefined;
+    containerClass?: string;
+    itemClass?: string;
+    activeItemClass?: string;
+  }
 
-  export let onItemClick: (item: any) => void = () => {};
-  
-  // 自定义样式类
-  export let containerClass = "";
-  export let itemClass = "";
-  export let activeItemClass = "";
+  let {
+    title = "",
+    items = [],
+    activeId = "",
+    onItemClick = () => {},
+    enableContextMenu = false,
+    onItemRename = undefined,
+    onItemDelete = undefined,
+    containerClass = "",
+    itemClass = "",
+    activeItemClass = ""
+  }: Props = $props();
 </script>
 
 <div class="flex flex-col {containerClass}">
@@ -40,6 +53,9 @@
         onClick={() => onItemClick(item)}
         buttonClass={itemClass}
         activeClass={activeItemClass}
+        enableContextMenu={enableContextMenu}
+        onRename={onItemRename ? (newName) => onItemRename(item, newName) : undefined}
+        onDelete={onItemDelete ? () => onItemDelete(item) : undefined}
       />
     {/each}
   </div>

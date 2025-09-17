@@ -310,6 +310,63 @@ export const chatActions = {
   },
 
   /**
+   * 删除聊天
+   */
+  async deleteChat(chatId: UUID): Promise<void> {
+    try {
+      isLoading = true;
+
+      // 调用后端删除聊天
+      await chatApi.deleteChat(chatId);
+
+      // 从本地状态中移除聊天
+      chats = chats.filter(chat => chat.id !== chatId);
+
+      // 如果删除的是当前聊天，清空当前聊天状态
+      if (currentChat?.id === chatId) {
+        currentChat = null;
+      }
+
+      console.log('Chat deleted:', chatId);
+    } catch (error) {
+      chatError = error instanceof Error ? error.message : '删除聊天失败';
+      throw error;
+    } finally {
+      isLoading = false;
+    }
+  },
+
+  /**
+   * 重命名聊天
+   */
+  async renameChat(chatId: UUID, newName: string): Promise<void> {
+    try {
+      isLoading = true;
+
+      // 调用后端更新聊天名称
+      const updatedChat = await chatApi.updateChat(chatId, { name: newName });
+
+      // 更新本地状态
+      const chatIndex = chats.findIndex(chat => chat.id === chatId);
+      if (chatIndex !== -1) {
+        chats[chatIndex] = updatedChat;
+      }
+
+      // 如果是当前聊天，也更新当前聊天状态
+      if (currentChat?.id === chatId) {
+        currentChat = updatedChat;
+      }
+
+      console.log('Chat renamed:', chatId, newName);
+    } catch (error) {
+      chatError = error instanceof Error ? error.message : '重命名聊天失败';
+      throw error;
+    } finally {
+      isLoading = false;
+    }
+  },
+
+  /**
    * 重置所有状态
    */
   reset(): void {

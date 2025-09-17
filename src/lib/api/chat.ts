@@ -82,5 +82,5 @@ export async function updateChat(
  * 删除聊天
  */
 export async function deleteChat(chatId: UUID): Promise<void> {
-  return apiCall<void>('chat_delete', { chat_id: chatId });
+  return apiCall<void>('chat_delete', { chatId: chatId });
 }

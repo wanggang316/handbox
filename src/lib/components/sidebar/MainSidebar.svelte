@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { chatState } from "$lib/states/chat.svelte";
+  import { chatState, chatActions } from "$lib/states/chat.svelte";
   import { browser } from "$app/environment";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
@@ -8,8 +8,8 @@
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
-  import { 
-    Box, 
+  import {
+    Box,
     Plus,
     Search
   } from '@lucide/svelte';
@@ -65,6 +65,33 @@
     }
   }
 
+  // 处理聊天重命名
+  async function handleChatRename(chat: any, newName: string) {
+    try {
+      await chatActions.renameChat(chat.id, newName);
+      console.log('Chat renamed successfully:', chat.id, newName);
+    } catch (error) {
+      console.error('Failed to rename chat:', error);
+      // 这里可以显示错误提示
+    }
+  }
+
+  // 处理聊天删除
+  async function handleChatDelete(chat: any) {
+    try {
+      await chatActions.deleteChat(chat.id);
+      console.log('Chat deleted successfully:', chat.id);
+
+      // 如果删除的是当前聊天，跳转到默认页面
+      if (currentChatId === chat.id) {
+        goto('/chat');
+      }
+    } catch (error) {
+      console.error('Failed to delete chat:', error);
+      // 这里可以显示错误提示
+    }
+  }
+
   // 模拟用户状态，实际应该从 store 或 API 获取
   // 可以切换这两个状态来测试不同的显示效果
   let currentUser = $state({
@@ -112,12 +139,15 @@
 
   <!-- 中间可滚动区域 -->
   <div class="flex-1 min-h-0">
-    <Menu 
+    <Menu
       title="聊天"
-      items={chats} 
+      items={chats}
       onItemClick={handleChatClick}
       containerClass="h-full"
       activeId={currentChatId}
+      enableContextMenu={true}
+      onItemRename={handleChatRename}
+      onItemDelete={handleChatDelete}
     />
   </div>
 
