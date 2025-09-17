@@ -1,89 +1,118 @@
 <script lang="ts">
+  import { chatState, chatActions } from '$lib/states/chat.svelte';
   import Button from '../../ui/Button.svelte';
   import TableGroup from '../../ui/table/TableGroup.svelte';
   import SwitchRow from '../../ui/table/SwitchRow.svelte';
-  import { Server, Save, RefreshCw } from '@lucide/svelte';
+  import RoundButton from '../../ui/RoundButton.svelte';
+  import { Server, RefreshCw } from '@lucide/svelte';
 
   interface McpServer {
     id: string;
     name: string;
-    status: 'enabled' | 'disabled' | 'error';
     enabled: boolean;
     description?: string;
-    command?: string;
+    status?: 'enabled' | 'disabled' | 'error';
   }
 
-  interface Props {
-    servers?: McpServer[];
-    onSave?: (enabledServers: string[]) => void;
-    onRefresh?: () => void;
-  }
-
-  let { 
-    servers = [],
-    onSave,
-    onRefresh
-  }: Props = $props();
-
-  // 示例 MCP 服务器数据
-  let currentServers = $state<McpServer[]>(servers.length > 0 ? servers : [
+  // 预定义的 MCP 服务器列表 (后续可以从后端获取)
+  const availableMcpServers = [
     {
       id: 'filesystem',
       name: 'File System',
-      status: 'enabled',
-      enabled: true,
       description: '文件系统操作工具，可以读取、写入和管理本地文件',
-      command: 'mcp-server-filesystem'
+      enabled: false
     },
     {
       id: 'browser',
       name: 'Browser Automation',
-      status: 'disabled',
-      enabled: false,
       description: '浏览器自动化工具，支持网页抓取和自动化操作',
-      command: 'mcp-server-puppeteer'
+      enabled: false
     },
     {
       id: 'database',
       name: 'Database Query',
-      status: 'error',
-      enabled: false,
       description: '数据库查询工具，支持 SQL 查询和数据分析',
-      command: 'mcp-server-sqlite'
+      enabled: false
     },
     {
       id: 'github',
       name: 'GitHub Integration',
-      status: 'enabled',
-      enabled: true,
       description: 'GitHub API 集成，可以管理代码仓库和问题',
-      command: 'mcp-server-github'
+      enabled: false
     },
     {
       id: 'calendar',
       name: 'Calendar',
-      status: 'disabled',
-      enabled: false,
       description: '日历管理工具，可以查看和管理日程安排',
-      command: 'mcp-server-calendar'
+      enabled: false
     }
-  ]);
+  ];
 
-  const originalEnabledServers = servers.filter(s => s.enabled).map(s => s.id);
-  let hasChanges = $derived(
-    JSON.stringify(currentServers.filter(s => s.enabled).map(s => s.id).sort()) !== 
-    JSON.stringify(originalEnabledServers.sort())
-  );
+  // 从当前聊天获取已启用的 MCP 服务器
+  const getEnabledServers = (): McpServer[] => {
+    const enabledIds = chatState.currentChat?.mcpServers || [];
+    return availableMcpServers.map(server => ({
+      ...server,
+      enabled: enabledIds.includes(server.id),
+      status: (enabledIds.includes(server.id) ? 'enabled' : 'disabled') as 'enabled' | 'disabled'
+    }));
+  };
 
-  function handleRefresh() {
-    onRefresh?.();
+  let currentServers = $state<McpServer[]>(getEnabledServers());
+  let originalEnabledServers = $state<string[]>(chatState.currentChat?.mcpServers || []);
+
+  // 监听 currentChat 变化，更新本地状态
+  $effect(() => {
+    currentServers = getEnabledServers();
+    originalEnabledServers = chatState.currentChat?.mcpServers || [];
+  });
+
+  let hasChanges = $derived(() => {
+    const currentEnabledIds = currentServers
+      .filter(s => s.enabled)
+      .map(s => s.id)
+      .sort();
+    const originalIds = originalEnabledServers.sort();
+    return JSON.stringify(currentEnabledIds) !== JSON.stringify(originalIds);
+  });
+
+  async function handleSave() {
+    try {
+      const enabledServerIds = currentServers
+        .filter(s => s.enabled)
+        .map(s => s.id);
+
+      await chatActions.updateMcpServers(enabledServerIds);
+
+      // 更新原始状态
+      originalEnabledServers = enabledServerIds;
+    } catch (error) {
+      console.error('Failed to update MCP servers:', error);
+      // 回滚到原始状态
+      currentServers = getEnabledServers();
+    }
   }
 
+  function handleReset() {
+    currentServers = getEnabledServers();
+  }
+
+  function handleRefresh() {
+    // 暂时只是刷新本地状态，后续可以调用后端 API 获取最新状态
+    currentServers = [...currentServers];
+  }
 </script>
 
 <div class="flex-1 mt-1 p-0 space-y-2">
+  <div class="flex items-center justify-between">
+    <div class="text-sm text-gray-500">
+      {#if chatState.currentChat}
+        已启用 {currentServers.filter(s => s.enabled).length} 个服务器
+      {:else}
+        请先选择或创建聊天
+      {/if}
+    </div>
 
-  <div class="flex items-center justify-end">
     <Button
       on:click={handleRefresh}
       variant="clear"
@@ -95,19 +124,46 @@
   </div>
 
   <!-- 服务器列表 -->
-  {#if currentServers.length > 0}
+  {#if currentServers.length > 0 && chatState.currentChat}
     <TableGroup>
       {#each currentServers as server (server.id)}
-        <SwitchRow 
+        <SwitchRow
           label={server.name}
+          description={server.description}
           bind:checked={server.enabled}
         />
       {/each}
     </TableGroup>
+
+    <!-- 操作按钮 -->
+    <div class="flex gap-3 pt-4 justify-end">
+      <RoundButton
+        customClass="w-24"
+        label="重置"
+        bgColor="bg-gray-200"
+        textColor="text-gray-600"
+        hoverColor="hover:text-gray-800"
+        onclick={handleReset}
+        disabled={!hasChanges()}
+      />
+
+      <RoundButton
+        customClass="w-18"
+        label="保存"
+        onclick={handleSave}
+        disabled={!hasChanges()}
+      />
+    </div>
+  {:else if !chatState.currentChat}
+    <div class="text-center py-8 text-gray-500">
+      <Server size={48} class="mx-auto mb-4 text-gray-300" />
+      <p class="mb-2">请先选择或创建聊天</p>
+      <p class="text-sm">MCP 服务器配置将与聊天关联</p>
+    </div>
   {:else}
     <div class="text-center py-8 text-gray-500">
       <Server size={48} class="mx-auto mb-4 text-gray-300" />
-      <p class="mb-2">暂无 MCP 服务器</p>
+      <p class="mb-2">暂无可用的 MCP 服务器</p>
       <p class="text-sm">请在应用设置中配置 MCP 服务器</p>
     </div>
   {/if}

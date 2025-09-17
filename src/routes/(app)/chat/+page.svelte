@@ -84,27 +84,8 @@
         }
       }
 
-      const chat = chatState.currentChat;
-      if (!chat) {
-        throw new Error('没有活跃的聊天');
-      }
-
-      if (!chat.id) {
-        throw new Error('聊天ID缺失');
-      }
-
-      if (!chat.modelId || !chat.providerId) {
-        throw new Error('请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。');
-      }
-
-      // 使用 messageStore 发送消息
-      await messageStore.sendMessage({
-        chatId: chat.id,
-        modelId: chat.modelId,
-        providerId: chat.providerId,
-        messages: [{ role: 'user', content: message }],
-        attachments: []
-      });
+      // 使用简化的 messageStore 发送消息
+      await messageStore.sendMessage(message, []);
 
     } catch (error) {
       console.error('Failed to send message:', error);

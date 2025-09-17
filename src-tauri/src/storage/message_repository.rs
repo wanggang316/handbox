@@ -1,6 +1,6 @@
 // Message 数据访问层
 
-use crate::models::{AppError, Message, MessageConfig, MessageRole, UUID};
+use crate::models::{AppError, Message, MessageRole, UUID};
 use crate::services::DatabaseService;
 use sqlx::Row;
 use std::sync::Arc;

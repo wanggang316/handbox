@@ -762,21 +762,40 @@ impl MessageService {
 
         // 构造重新生成请求（使用原始请求参数）
         let config = message.config.as_ref();
+        // 获取聊天的系统提示词
+        let chat = self.chat_service.get_chat(message.chat_id.clone()).await?;
+
+        // 构建消息数组，如果有系统提示词则添加到开头
+        let mut request_messages = Vec::new();
+        if let Some(system_prompt) = &chat.system_prompt {
+            if !system_prompt.trim().is_empty() {
+                request_messages.push(crate::models::ChatMessage {
+                    role: crate::models::MessageRole::System,
+                    content: system_prompt.clone(),
+                    reasoning: None,
+                });
+            }
+        }
+
+        // 添加历史消息（排除要重新生成的助手消息）
+        request_messages.extend(
+            chat_messages
+                .iter()
+                .filter(|m| m.role != MessageRole::Assistant || m.id != message_id)
+                .map(|m| crate::models::ChatMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                    reasoning: None, // 历史消息没有推理过程
+                })
+        );
+
         let regenerate_request = MessageRequest {
             chat_id: Some(message.chat_id.clone()),
             model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
             provider_id: config
                 .and_then(|c| c.provider_id.clone())
                 .unwrap_or_default(),
-            messages: chat_messages
-                .iter()
-                .filter(|m| m.role != MessageRole::Assistant || m.id != message_id) // 排除要重新生成的消息
-                .map(|m| crate::models::ChatMessage {
-                    role: m.role.clone(),
-                    content: m.content.clone(),
-                    reasoning: None, // 历史消息没有推理过程
-                })
-                .collect(),
+            messages: request_messages,
             attachments: None,
         };
 
