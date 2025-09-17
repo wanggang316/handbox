@@ -2,10 +2,11 @@
  * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Message, MessageResponse, MessageRequest } from '$lib/types/chat';
+import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage } from '$lib/types/chat';
 import type { FrontendProviderConfig } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { getProviderConfigById, getProviderIconById } from './provider.svelte';
+import { chatState } from './chat.svelte';
 
 interface MessageState {
   // 按 chatId 组织消息
@@ -289,36 +290,58 @@ class MessageStore {
   }
 
   /**
-   * 发送消息（使用流式响应）
+   * 发送消息（使用流式响应）- 简化版本，只需要内容和附件
    */
-  async sendMessage(request: MessageRequest): Promise<void> {
-    if (!request.chatId) {
-      throw new Error('缺少聊天ID');
+  async sendMessage(content: string, attachments: ChatAttachment[]): Promise<void> {
+    // 获取当前聊天信息
+    const currentChat = chatState.currentChat;
+    if (!currentChat || !currentChat.id) {
+      throw new Error('没有活跃的聊天');
+    }
+
+    if (!currentChat.modelId || !currentChat.providerId) {
+      throw new Error('请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。');
     }
 
     try {
       this.setSending(true);
       this.setError(null);
-      
+
       // 添加用户消息到本地状态
       const userMessage: Message = {
         id: crypto.randomUUID(),
-        chatId: request.chatId,
+        chatId: currentChat.id,
         role: 'user',
-        content: request.messages[0]?.content || '',
+        content: content,
         config: {
-          modelId: request.modelId,
-          providerId: request.providerId,
+          modelId: currentChat.modelId,
+          providerId: currentChat.providerId,
           stream: true,
         },
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
-      
-      this.addMessage(request.chatId, userMessage);
 
-      // 设置流式响应参数（参数现在从 chats 表获取）
-      const streamRequest = { ...request };
+      this.addMessage(currentChat.id, userMessage);
+
+      // 构建消息数组，如果有系统提示词则添加到开头
+      const messages: ChatMessage[] = [];
+      if (currentChat.systemPrompt && currentChat.systemPrompt.trim()) {
+        messages.push({ role: 'system', content: currentChat.systemPrompt });
+      }
+      messages.push({ role: 'user', content: content });
+
+      // 构建完整的消息请求
+      const fullRequest: MessageRequest = {
+        chatId: currentChat.id,
+        modelId: currentChat.modelId,
+        providerId: currentChat.providerId,
+        messages: messages,
+        attachments: attachments
+      };
+
+      // 设置流式响应参数
+      const streamRequest = { ...fullRequest };
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
@@ -350,7 +373,7 @@ class MessageStore {
             modelId: data.modelId,
             providerId: data.providerId,
           };
-          this.finishStreaming(request.chatId!, response);
+          this.finishStreaming(currentChat.id!, response);
           this.setSending(false);
           // 流式完成后清理监听器
           if (this.currentStreamUnlisten) {

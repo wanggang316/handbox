@@ -1,6 +1,6 @@
 // Message 数据访问层
 
-use crate::models::{AppError, Message, MessageConfig, MessageRole, UUID};
+use crate::models::{AppError, Message, MessageRole, UUID};
 use crate::services::DatabaseService;
 use sqlx::Row;
 use std::sync::Arc;
@@ -290,7 +290,7 @@ impl MessageRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::DatabaseService;
+    use crate::{models::MessageConfig, services::DatabaseService};
     use tempfile::tempdir;
 
     async fn create_test_db() -> (DatabaseService, tempfile::TempDir) {

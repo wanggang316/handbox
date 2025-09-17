@@ -14,9 +14,10 @@
     required?: boolean;
     showCharCount?: boolean;
     description?: string;
+    rightContent?: any;
   }
 
-  let { 
+  let {
     label = '',
     value = $bindable(),
     placeholder = '',
@@ -27,11 +28,12 @@
     minlength,
     required = false,
     showCharCount = false,
-    description = ''
+    description = '',
+    rightContent
   }: Props = $props();
 </script>
 
-<TableBaseRow {label} layout="vertical">
+<TableBaseRow {label} {rightContent} layout="vertical">
   <div class="space-y-2">
     <Textarea 
       bind:value

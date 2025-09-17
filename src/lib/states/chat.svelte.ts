@@ -76,6 +76,68 @@ export const chatActions = {
   },
 
   /**
+   * 更新聊天配置
+   */
+  async updateChatSettings(settings: Partial<Chat>): Promise<void> {
+    if (!currentChat?.id) {
+      // 如果没有保存的聊天，只更新本地状态
+      if (currentChat) {
+        Object.assign(currentChat, settings);
+      }
+      return;
+    }
+
+    try {
+      // 更新本地状态
+      Object.assign(currentChat, settings);
+
+      // 更新后端
+      await chatApi.updateChat(currentChat.id, {
+        name: currentChat.name,
+        modelId: currentChat.modelId,
+        providerId: currentChat.providerId,
+        temperature: currentChat.temperature,
+        topP: currentChat.topP,
+        maxTokens: currentChat.maxTokens,
+        stream: currentChat.stream,
+        systemPrompt: currentChat.systemPrompt,
+        mcpServers: currentChat.mcpServers
+      });
+    } catch (error) {
+      // 回滚本地状态
+      await chatActions.loadChats();
+      throw error;
+    }
+  },
+
+  /**
+   * 更新系统提示词
+   */
+  async updateSystemPrompt(systemPrompt: string): Promise<void> {
+    return chatActions.updateChatSettings({ systemPrompt });
+  },
+
+  /**
+   * 更新模型参数
+   */
+  async updateModelSettings(settings: {
+    temperature?: number;
+    topP?: number;
+    maxTokens?: number;
+    stream?: boolean;
+    contextLength?: number;
+  }): Promise<void> {
+    return chatActions.updateChatSettings(settings);
+  },
+
+  /**
+   * 更新MCP服务器配置
+   */
+  async updateMcpServers(mcpServers: string[]): Promise<void> {
+    return chatActions.updateChatSettings({ mcpServers });
+  },
+
+  /**
    * 更新当前聊天的模型信息并保存到后端
    */
   async updateChatModel(modelId: string, providerId: string): Promise<void> {

@@ -88,6 +88,12 @@ export interface MessageRequest {
   attachments?: ChatAttachment[];
 }
 
+// 简化的发送消息请求
+export interface SendMessageRequest {
+  content: string;
+  attachments?: ChatAttachment[];
+}
+
 // 聊天消息（请求中使用）
 export interface ChatMessage {
   role: MessageRole;
