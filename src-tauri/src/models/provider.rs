@@ -76,9 +76,9 @@ pub struct ProviderWithModels {
     pub updated_at: Timestamp,
 }
 
-/// 供应商配置请求
+/// 添加供应商请求
 #[derive(Debug, Clone, Deserialize)]
-pub struct ProviderConfig {
+pub struct AddProviderRequest {
     pub name: String,
     pub provider_type: String,
     pub base_url: String,

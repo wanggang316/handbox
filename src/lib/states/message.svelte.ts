@@ -33,6 +33,9 @@ class MessageStore {
     streamingReasoning: '',
   });
 
+  // 当前流式事件监听器的清理函数
+  private currentStreamUnlisten: (() => void) | null = null;
+
   // Getters
   get isLoading() {
     return this.state.isLoading;
@@ -56,6 +59,21 @@ class MessageStore {
 
   get streamingReasoning() {
     return this.state.streamingReasoning;
+  }
+
+  // 判断是否正在推理中（有推理内容但还没有最终内容）
+  get isReasoning() {
+    return this.state.streamingReasoning && !this.state.streamingContent;
+  }
+
+  // 判断是否在等待消息响应（发送中但还没有任何流式内容）
+  get isMessageLoading() {
+    return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
+  }
+
+  // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
+  getMessagesReactive(chatId: string) {
+    return this.state.messagesByChat[chatId] || [];
   }
 
   // 获取当前聊天的消息（通过外部传入 chatId）
@@ -127,6 +145,12 @@ class MessageStore {
 
   // 设置聊天的消息列表
   setMessages(chatId: string, messages: Message[]) {
+    // 如果正在发送消息且本地已有消息，避免覆盖
+    const existingMessages = this.state.messagesByChat[chatId] || [];
+    if (this.isSending && existingMessages.length > 0 && messages.length === 0) {
+      return;
+    }
+
     this.state.messagesByChat[chatId] = messages;
     // 缓存消息中的 providerConfigs
     this.cacheProviderConfigs(messages);
@@ -188,12 +212,13 @@ class MessageStore {
     // 更新或创建消息
     const messages = this.state.messagesByChat[chatId] || [];
     const existingIndex = messages.findIndex(m => m.id === response.messageId);
-    
+
     if (existingIndex !== -1) {
       // 更新现有消息
       messages[existingIndex] = {
         ...messages[existingIndex],
         content: response.content,
+        reasoning: response.reasoning,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,
@@ -207,6 +232,7 @@ class MessageStore {
         chatId: response.chatId,
         role: 'assistant',
         content: response.content,
+        reasoning: response.reasoning,
         config: {
           modelId: response.modelId,
           providerId: response.providerId,
@@ -254,7 +280,6 @@ class MessageStore {
       const messages = await messageApi.getMessages(chatId);
       this.setMessages(chatId, messages);
 
-      console.log("messages >>> :", messages);
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '加载消息失败');
       throw error;
@@ -295,17 +320,22 @@ class MessageStore {
       // 设置流式响应参数（参数现在从 chats 表获取）
       const streamRequest = { ...request };
 
-      // 设置流式事件监听器
-      messageApi.listenToStreamEvents({
+      // 清理之前的监听器（如果存在）
+      if (this.currentStreamUnlisten) {
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+
+      // 先设置流式事件监听器，确保在发送消息前完全就绪
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents({
         onStart: (data) => {
           console.log('Stream started:', data);
           this.startStreaming(data.messageId);
         },
         onChunk: (data) => {
-          console.log('Stream chunk:', data.content, 'reasoning:', data.reasoning);
           this.setStreamingContent(data.content);
           if (data.reasoning) {
-            // 累积推理过程内容
+            // 累积推理过程内容，因为后端发送的是增量内容
             this.state.streamingReasoning += data.reasoning;
           }
         },
@@ -322,15 +352,25 @@ class MessageStore {
           };
           this.finishStreaming(request.chatId!, response);
           this.setSending(false);
+          // 流式完成后清理监听器
+          if (this.currentStreamUnlisten) {
+            this.currentStreamUnlisten();
+            this.currentStreamUnlisten = null;
+          }
         },
         onError: (error) => {
           console.error('Stream error:', error);
           this.setError('流式响应错误');
           this.setSending(false);
+          // 错误时也清理监听器
+          if (this.currentStreamUnlisten) {
+            this.currentStreamUnlisten();
+            this.currentStreamUnlisten = null;
+          }
         }
       });
 
-      // 发送流式消息
+      // 事件监听器设置完成后，再发送流式消息
       const streamId = await messageApi.sendStreamMessage(streamRequest);
       console.log('Stream ID:', streamId);
       

@@ -5,7 +5,7 @@
 import { apiCall } from './index';
 import type { 
   Provider, 
-  ProviderConfig, 
+  AddProviderRequest, 
   ListModelsRequest,
   ListModelsResponse,
   FrontendProviderConfig,
@@ -33,7 +33,7 @@ export async function getProvider(providerId: UUID): Promise<Provider> {
 /**
  * 创建供应商
  */
-export async function createProvider(config: ProviderConfig): Promise<Provider> {
+export async function createProvider(config: AddProviderRequest): Promise<Provider> {
   return apiCall<Provider>('provider_create', { config });
 }
 
@@ -42,7 +42,7 @@ export async function createProvider(config: ProviderConfig): Promise<Provider> 
  */
 export async function updateProvider(
   providerId: UUID,
-  config: Partial<ProviderConfig>
+  config: Partial<AddProviderRequest>
 ): Promise<Provider> {
   return apiCall<Provider>('provider_update', { providerId: providerId, config });
 }
@@ -111,13 +111,6 @@ export async function toggleModelFavorite(
       favorite
     }
   });
-}
-
-/**
- * 获取所有可用模型
- */
-export async function getAvailableModels(): Promise<Array<{ provider: Provider; models: any[] }>> {
-  return apiCall<Array<{ provider: Provider; models: any[] }>>('provider_get_available_models');
 }
 
 /**

@@ -23,7 +23,7 @@
     contextLength: string;
   }
 
-  let { 
+  let {
     temperature = '0.7',
     topP = '0.9',
     streamResponse = true,
@@ -161,7 +161,7 @@
       bgColor="bg-gray-200"
       textColor="text-gray-600"
       hoverColor="hover:text-gray-800"
-      on:click={handleDefault} 
+      onclick={handleDefault} 
     ></RoundButton>
   </div>
 </div>

@@ -43,7 +43,7 @@
     <RoundButton 
       customClass="w-18"
       label="保存" 
-      on:click={handleSave} 
+      onclick={handleSave} 
       disabled={!hasChanges}
     ></RoundButton>
     

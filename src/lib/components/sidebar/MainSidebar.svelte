@@ -22,10 +22,12 @@
 
   // 将真实聊天数据转换为 Menu 组件期望的格式
   let chats = $derived(
-    chatState.chats.map(chat => ({
-      id: chat.id,
-      title: chat.name
-    }))
+    chatState.chats
+      .filter(chat => chat.id) // 过滤掉没有 id 的聊天
+      .map(chat => ({
+        id: chat.id!,
+        title: chat.name
+      }))
   );
 
   function handleChatClick(chat: any) {
@@ -41,7 +43,6 @@
 
   function handleNewChatClick() {
     console.log('Clicked new chat');
-    // 导航到聊天页面，不带 id 参数（表示新建聊天）
     goto('/chat');
   }
 
@@ -89,12 +90,12 @@
         customClass="flex-1"
         label="New chat"
         icon={Plus}
-        on:click={handleNewChatClick}
+        onclick={handleNewChatClick}
       />
       <CircleButton
         icon={Search}
         ariaLabel="搜索"
-        on:click={handleSearchClick}
+        onclick={handleSearchClick}
       />
     </div>
     

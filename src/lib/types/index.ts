@@ -24,7 +24,7 @@ export type ApiResponse<T> = {
 
 // 基础实体接口
 export interface BaseEntity {
-  id: UUID;
+  id?: UUID; // 可以是 undefined，表示还没有保存到后端
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

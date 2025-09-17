@@ -103,13 +103,13 @@
         bgColor="bg-gray-200"
         textColor="text-gray-600"
         hoverColor="hover:text-gray-800"
-        on:click={handleCancel}
+        onclick={handleCancel}
       />
 
       <RoundButton 
         customClass="w-18" 
         label="保存" 
-        on:click={handleSave} 
+        onclick={handleSave} 
       />
     </div>
   </div>
