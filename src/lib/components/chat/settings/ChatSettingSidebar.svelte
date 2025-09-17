@@ -14,19 +14,16 @@
       id: 'prompt',
       title: '提示词',
       icon: MessageSquare,
-      isActive: activeTab === 'prompt'
     },
     {
       id: 'model',
       title: '模型参数',
       icon: Settings,
-      isActive: activeTab === 'model'
     },
     {
       id: 'mcp',
       title: 'MCP 服务器',
       icon: Server,
-      isActive: activeTab === 'mcp'
     }
   ]);
 
@@ -41,5 +38,6 @@
     items={menuItems}
     onItemClick={handleItemClick}
     containerClass="h-full pt-10"
+    activeId={activeTab}
   />
 </div>
