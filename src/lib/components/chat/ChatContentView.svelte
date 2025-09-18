@@ -2,7 +2,8 @@
   import { chatState } from '$lib/states/chat.svelte';
   import { messageStore } from '$lib/states/message.svelte';
   import { Bot } from 'lucide-svelte';
-  
+  import type { Message } from '$lib/types';
+
   // Import child components
   import UserMessageView from './views/UserMessageView.svelte';
   import AssistantMessageView from './views/AssistantMessageView.svelte';
@@ -87,6 +88,28 @@
   let streamingMessageId = $derived(messageStore.streamingMessageId);
   let isReasoning = $derived(messageStore.isReasoning);
   let isMessageLoading = $derived(messageStore.isMessageLoading);
+
+  let streamingMessage = $derived(
+    {
+          id: streamingMessageId,
+          chatId: currentChatId ?? '',
+          role: 'assistant' as const,
+          content: streamingContent ?? '',
+          reasoning: streamingReasoning,
+          createdAt: Date.now(),
+          config: {
+            modelId: chatState.currentChat?.modelId,
+            providerId: chatState.currentChat?.providerId,
+            temperature: chatState.currentChat?.temperature,
+            topP: chatState.currentChat?.topP,
+            maxTokens: chatState.currentChat?.maxTokens,
+            stream: chatState.currentChat?.stream,
+            systemPrompt: chatState.currentChat?.systemPrompt,
+            mcpServers: chatState.currentChat?.mcpServers,
+          },
+          updatedAt: Date.now(),
+        } as Message
+  );
 
   // 监听聊天切换，自动加载消息（使用单独的 effect 避免循环）
   let lastLoadedChatId = $state<string | null>(null);
@@ -185,26 +208,8 @@
         <!-- 消息加载状态或流式响应中的消息 -->
         {#if isMessageLoading || (streamingMessageId && (streamingContent || streamingReasoning))}
           <AssistantMessageView
-            message={streamingMessageId && (streamingContent || streamingReasoning) ? {
-              id: streamingMessageId,
-              chatId: currentChatId || '',
-              role: 'assistant',
-              content: streamingContent,
-              reasoning: streamingReasoning,
-              createdAt: Date.now(),
-              config: {
-                modelId: chatState.currentChat?.modelId,
-                providerId: chatState.currentChat?.providerId,
-                temperature: chatState.currentChat?.temperature,
-                topP: chatState.currentChat?.topP,
-                maxTokens: chatState.currentChat?.maxTokens,
-                stream: chatState.currentChat?.stream,
-                systemPrompt: chatState.currentChat?.systemPrompt,
-                mcpServers: chatState.currentChat?.mcpServers,
-              },
-              updatedAt: Date.now(),
-            } : undefined}
-            isStreaming={!!streamingMessageId && !!(streamingContent || streamingReasoning)}
+            message={streamingMessage ?? undefined}
+            isStreaming={!!streamingMessage}
             isReasoning={!!isReasoning}
             isMessageLoading={isMessageLoading}
           />
