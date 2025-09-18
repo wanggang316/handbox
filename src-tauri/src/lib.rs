@@ -104,6 +104,7 @@ pub fn run() {
             chat_get,
             chat_update,
             chat_delete,
+            chat_generate_title,
             // 消息相关命令
             message_send,
             message_send_stream,

@@ -3,6 +3,12 @@
 use crate::models::{AppError, Chat, UUID};
 use crate::services::ChatService;
 use tauri::State;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GenerateTitleResponse {
+    pub title: String,
+}
 
 /// 创建新的聊天
 #[tauri::command]
@@ -90,4 +96,14 @@ pub async fn chat_delete(
     chat_service: State<'_, ChatService>,
 ) -> Result<(), AppError> {
     chat_service.delete_chat(chat_id).await
+}
+
+/// 生成聊天标题
+#[tauri::command]
+pub async fn chat_generate_title(
+    chat_id: UUID,
+    chat_service: State<'_, ChatService>,
+) -> Result<GenerateTitleResponse, AppError> {
+    let title = chat_service.generate_title(chat_id).await?;
+    Ok(GenerateTitleResponse { title })
 }
