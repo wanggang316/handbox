@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "highlight.js/styles/github.css";
+@import "katex/dist/katex.min.css";
 
 /* 使用 Tailwind @theme 指令定义主题变量 */
 @theme {
@@ -124,7 +126,7 @@ html, body {
   color: var(--text-primary);
 }
 
-.markdown-content code {
+.markdown-content code:not(.hljs) {
   background-color: var(--bg-secondary);
   color: #e11d48;
   padding: 0.125rem 0.25rem;
@@ -135,23 +137,141 @@ html, body {
 }
 
 .markdown-content pre {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 0.5rem;
-  padding: 1rem;
   margin: 1rem 0;
   overflow-x: auto;
-  font-family: 'Fira Code', 'Monaco', 'Consolas', 'Courier New', monospace;
-  font-size: 0.875rem;
-  line-height: 1.5;
 }
 
 .markdown-content pre code {
-  background: none;
-  border: none;
-  padding: 0;
+  font-family: 'Fira Code', 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.markdown-content .markdown-math {
   color: var(--text-primary);
-  font-size: inherit;
+}
+
+.markdown-content .markdown-math--inline {
+  display: inline-block;
+  font-size: 0.8rem;
+  vertical-align: middle;
+}
+
+.markdown-content .markdown-math--block {
+  display: block;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+[data-theme="dark"] .markdown-content .katex {
+  color: var(--text-primary);
+}
+
+.markdown-content .markdown-code-block {
+  margin: 1.25rem 0;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+[data-theme="dark"] .markdown-content .markdown-code-block {
+  background-color: rgba(30, 41, 59, 0.7);
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.35);
+}
+
+.markdown-content .markdown-code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.9rem;
+  background-color: rgba(148, 163, 184, 0.12);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--text-secondary);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+[data-theme="dark"] .markdown-content .markdown-code-block__header {
+  background-color: rgba(30, 41, 59, 0.65);
+  border-bottom-color: rgba(94, 96, 206, 0.25);
+  color: #cbd5f5;
+}
+
+.markdown-content .markdown-code-block__language {
+  font-family: 'Fira Code', 'Monaco', 'Consolas', 'Courier New', monospace;
+  /* font-weight: 600; */
+}
+
+.markdown-content .markdown-code-block__copy {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  /* transition: background-color 0.2s, color 0.2s; */
+}
+
+.markdown-content .markdown-code-block__copy:hover {
+  background-color: #dfe2e6;
+  color: var(--bg-accent);
+}
+
+.markdown-content .markdown-code-block__copy-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  pointer-events: none;
+}
+
+.markdown-content .markdown-code-block__copy-icon .code-icon {
+  width: 100%;
+  height: 100%;
+}
+
+.markdown-content .markdown-code-block__copy-label {
+  display: none;
+  font-size: 0.7rem;
+  /* font-weight: 600; */
+  pointer-events: none;
+}
+
+.markdown-content .markdown-code-block__copy.copied {
+  background-color: transparent;
+  color: var(--bg-accent);
+}
+
+.markdown-content .markdown-code-block__copy.copied .markdown-code-block__copy-icon {
+  display: none;
+}
+
+.markdown-content .markdown-code-block__copy.copied .markdown-code-block__copy-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.markdown-content .markdown-code-block pre {
+  margin: 0;
+  background: transparent;
+}
+
+.markdown-content .markdown-code-block pre code {
+  background: transparent;
+  display: block;
+  padding: 1.1rem 1.25rem;
 }
 
 .markdown-content ul {
