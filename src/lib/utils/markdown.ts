@@ -2,6 +2,7 @@ import { Marked } from "marked";
 import { markedHighlight } from "marked-highlight";
 import type { Tokens } from "marked";
 import hljs from "highlight.js/lib/common";
+import katex from "katex";
 
 const CODE_BLOCK_LANG_PATTERN = /\s+/;
 
@@ -48,6 +49,15 @@ const LANGUAGE_LABEL_MAP: Record<string, string> = {
 const COPY_BUTTON_ICON = `<svg class="code-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 const COPY_BUTTON_LABEL = "已复制";
 
+type MathTokenType = "math-inline" | "math-block";
+
+interface MathToken extends Tokens.Generic {
+  type: MathTokenType;
+  raw: string;
+  text: string;
+  display: boolean;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -73,6 +83,22 @@ function formatLanguageLabel(language?: string): string {
     .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ")
     || language.toUpperCase();
+}
+
+function renderMath(value: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(value, {
+      displayMode,
+      throwOnError: false,
+      strict: "ignore",
+      trust: true,
+    });
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("KaTeX rendering failed", { value, error });
+    }
+    return escapeHtml(value);
+  }
 }
 
 const markedRenderer = new Marked(
@@ -102,6 +128,63 @@ const markedRenderer = new Marked(
     },
   })
 );
+
+const blockMathExtension = {
+  name: "math-block",
+  level: "block" as const,
+  start(src: string) {
+    const index = src.indexOf("$$");
+    return index !== -1 ? index : undefined;
+  },
+  tokenizer(src: string): MathToken | undefined {
+    const match = src.match(/^\$\$([^]*?)\$\$\s*/);
+    if (!match) return undefined;
+
+    return {
+      type: "math-block",
+      raw: match[0],
+      text: match[1].trim(),
+      display: true,
+    };
+  },
+  renderer(token: MathToken) {
+    return `<div class="markdown-math markdown-math--block">${renderMath(token.text, true)}</div>`;
+  },
+};
+
+const inlineMathExtension = {
+  name: "math-inline",
+  level: "inline" as const,
+  start(src: string) {
+    const index = src.indexOf("$");
+    return index !== -1 ? index : undefined;
+  },
+  tokenizer(src: string): MathToken | undefined {
+    const match = src.match(/^\$(?!\$)(?:(?:\\.)|[^$\n\\])+?\$/);
+    if (!match) return undefined;
+
+    const text = match[0]
+      .slice(1, -1)
+      .replace(/\\\$/g, "$")
+      .trim();
+
+    if (!text) return undefined;
+
+    return {
+      type: "math-inline",
+      raw: match[0],
+      text,
+      display: false,
+    };
+  },
+  renderer(token: MathToken) {
+    return `<span class="markdown-math markdown-math--inline">${renderMath(token.text, false)}</span>`;
+  },
+};
+
+markedRenderer.use({
+  extensions: [blockMathExtension, inlineMathExtension],
+});
 
 markedRenderer.use({
   renderer: {
