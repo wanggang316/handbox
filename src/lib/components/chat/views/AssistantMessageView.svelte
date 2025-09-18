@@ -8,7 +8,7 @@
   } from "lucide-svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states/message.svelte";
-  import { marked } from "marked";
+  import { renderMarkdown } from "$lib/utils";
 
   interface Props {
     message?: Message;
@@ -81,10 +81,75 @@
     }
   }
 
-  // 渲染 markdown 内容
-  function renderMarkdown(content: string): string {
-    const result = marked(content);
-    return typeof result === "string" ? result : "";
+  function closestButton(target: EventTarget | null): HTMLButtonElement | null {
+    if (!(target instanceof Element)) return null;
+    return target.closest<HTMLButtonElement>(".markdown-code-block__copy");
+  }
+
+  async function copyText(content: string) {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (error) {
+      const textarea = document.createElement("textarea");
+      textarea.value = content;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+      } catch (fallbackError) {
+        console.error("Failed to copy code block", fallbackError);
+      }
+      document.body.removeChild(textarea);
+    }
+  }
+
+  function markdownCopy(node: HTMLElement) {
+    const handleClick = async (event: MouseEvent) => {
+      const button = closestButton(event.target);
+      if (!button) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const block = button.closest<HTMLElement>(".markdown-code-block");
+      const codeElement = block?.querySelector("code");
+      const codeContent = codeElement?.textContent ?? "";
+
+      if (!codeContent) return;
+
+      if (onCopy) {
+        onCopy(codeContent);
+      } else {
+        await copyText(codeContent);
+      }
+
+      button.classList.add("copied");
+
+      const timerId = button.dataset.copyTimeout
+        ? Number(button.dataset.copyTimeout)
+        : undefined;
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+
+      const timeoutHandle = window.setTimeout(() => {
+        button.classList.remove("copied");
+        delete button.dataset.copyTimeout;
+      }, 1500);
+
+      button.dataset.copyTimeout = String(timeoutHandle);
+    };
+
+    node.addEventListener("click", handleClick);
+
+    return {
+      destroy() {
+        node.removeEventListener("click", handleClick);
+      },
+    };
   }
 
   // 切换推理过程显示状态
@@ -151,7 +216,8 @@
               <!-- 推理过程内容，根据展开状态显示 -->
               {#if reasoningExpanded}
                 <div
-                  class="mt-2 mb-6 px-4 text-sm border-l border-gray-200 text-gray-600 break-words leading-relaxed reasoning-content"
+                  class="mt-2 mb-6 px-4 text-sm border-l border-gray-200 text-gray-600 break-words leading-relaxed reasoning-content markdown-content"
+                  use:markdownCopy
                 >
                   {@html renderMarkdown(message.reasoning)}
                 </div>
@@ -162,6 +228,7 @@
           <!-- 消息内容 -->
           <div
             class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+            use:markdownCopy
           >
             {@html renderMarkdown(message?.content || "")}
           </div>
