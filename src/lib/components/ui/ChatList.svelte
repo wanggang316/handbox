@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { PencilLine, Trash2 } from '@lucide/svelte';
+  import { PencilLine, Trash2, Sparkles, Copy, Hash, LoaderCircle } from '@lucide/svelte';
+  import { apiCall } from '$lib/api/index';
 
   interface Chat {
     id: string;
@@ -12,6 +13,7 @@
     onChatClick?: (chat: Chat) => void;
     onRename?: (chat: Chat, newName: string) => void;
     onDelete?: (chat: Chat) => void;
+    onGenerateTitle?: (chat: Chat, newTitle: string) => void;
   }
 
   let {
@@ -19,7 +21,8 @@
     activeId = "",
     onChatClick = () => {},
     onRename,
-    onDelete
+    onDelete,
+    onGenerateTitle
   }: Props = $props();
 
   // 右键菜单状态
@@ -32,6 +35,10 @@
   let isRenaming = $state(false);
   let renamingChatId = $state("");
   let renameValue = $state("");
+
+  // 标题生成状态
+  let isGeneratingTitle = $state(false);
+  let generatingChatId = $state("");
 
   // 处理右键点击
   function handleContextMenu(event: MouseEvent, chat: Chat) {
@@ -90,6 +97,62 @@
     showContextMenu = false;
   }
 
+  // 生成标题
+  async function handleGenerateTitle() {
+    if (!selectedChat) return;
+
+    showContextMenu = false;
+
+    // 设置 loading 状态
+    isGeneratingTitle = true;
+    generatingChatId = selectedChat.id;
+
+    try {
+      // 调用后端的 generateTitle 方法
+      const response = await apiCall<{ title: string }>('chat_generate_title', {
+        chatId: selectedChat.id
+      });
+
+      const generatedTitle = response.title.trim();
+
+      if (generatedTitle && onGenerateTitle) {
+        onGenerateTitle(selectedChat, generatedTitle);
+      }
+    } catch (error) {
+      console.error('Failed to generate title:', error);
+    } finally {
+      // 清除 loading 状态
+      isGeneratingTitle = false;
+      generatingChatId = "";
+    }
+  }
+
+  // 复制标题
+  async function handleCopyTitle() {
+    if (!selectedChat) return;
+
+    try {
+      await navigator.clipboard.writeText(selectedChat.title);
+      console.log('Title copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy title:', error);
+    }
+    showContextMenu = false;
+  }
+
+  // 复制聊天ID
+  async function handleCopyId() {
+    if (!selectedChat) return;
+
+    try {
+      await navigator.clipboard.writeText(selectedChat.id);
+      console.log('Chat ID copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy chat ID:', error);
+    }
+    showContextMenu = false;
+  }
+
   // 键盘事件处理
   function handleKeydown(event: KeyboardEvent) {
     if (isRenaming) {
@@ -140,11 +203,16 @@
       {:else}
         <!-- 聊天项 -->
         <button
-          class="w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-gray-700 hover:bg-bg-hover truncate {chat.id === activeId ? 'bg-bg-hover' : ''}"
+          class="w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-gray-700 hover:bg-bg-hover {chat.id === activeId ? 'bg-bg-hover' : ''}"
           onclick={() => handleChatClick(chat)}
           oncontextmenu={(e) => handleContextMenu(e, chat)}
         >
-          <span class="truncate">{chat.title}</span>
+          <div class="flex items-center justify-between">
+            <span class="truncate">{chat.title}</span>
+            {#if isGeneratingTitle && generatingChatId === chat.id}
+              <LoaderCircle size={12} class="text-gray-400 animate-spin flex-shrink-0 ml-2" />
+            {/if}
+          </div>
         </button>
       {/if}
     {/each}
@@ -154,9 +222,19 @@
 <!-- 右键菜单 -->
 {#if showContextMenu}
   <div
-    class="context-menu fixed z-[10020] bg-white border border-[#e5e5e5] rounded-xl shadow-xl px-1 py-1 min-w-32"
+    class="context-menu fixed z-[10020] bg-white border border-[#e5e5e5] rounded-xl shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenuX}px; top: {contextMenuY}px;"
   >
+    {#if onGenerateTitle}
+      <button
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
+        onclick={handleGenerateTitle}
+      >
+        <Sparkles size={14} />
+        生成标题
+      </button>
+    {/if}
+
     {#if onRename}
       <button
         class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
@@ -166,7 +244,31 @@
         重命名
       </button>
     {/if}
+
+    <!-- 分隔线 -->
+    {#if (onGenerateTitle || onRename) && (onDelete)}
+      <div class="border-t border-gray-200 my-1 mx-2"></div>
+    {/if}
+
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
+      onclick={handleCopyTitle}
+    >
+      <Copy size={14} />
+      复制标题
+    </button>
+
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
+      onclick={handleCopyId}
+    >
+      <Hash size={14} />
+      复制ID
+    </button>
+
     {#if onDelete}
+      <!-- 分隔线 -->
+      <div class="border-t border-gray-200 my-1 mx-2"></div>
       <button
         class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-red-50 text-red-600 flex items-center gap-2 whitespace-nowrap"
         onclick={handleDelete}

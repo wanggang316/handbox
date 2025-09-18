@@ -92,6 +92,17 @@
     }
   }
 
+  // 处理生成标题
+  async function handleGenerateTitle(chat: any, newTitle: string) {
+    try {
+      await chatActions.renameChat(chat.id, newTitle);
+      console.log('Chat title generated and updated successfully:', chat.id, newTitle);
+    } catch (error) {
+      console.error('Failed to update generated title:', error);
+      // 这里可以显示错误提示
+    }
+  }
+
   // 模拟用户状态，实际应该从 store 或 API 获取
   // 可以切换这两个状态来测试不同的显示效果
   let currentUser = $state({
@@ -145,6 +156,7 @@
       onChatClick={handleChatClick}
       onRename={handleChatRename}
       onDelete={handleChatDelete}
+      onGenerateTitle={handleGenerateTitle}
     />
   </div>
 
