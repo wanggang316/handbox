@@ -3,7 +3,7 @@
   import { browser } from "$app/environment";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import Menu from "$lib/components/ui/Menu.svelte";
+  import ChatList from "$lib/components/ui/ChatList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
@@ -139,15 +139,12 @@
 
   <!-- 中间可滚动区域 -->
   <div class="flex-1 min-h-0">
-    <Menu
-      title="聊天"
-      items={chats}
-      onItemClick={handleChatClick}
-      containerClass="h-full"
+    <ChatList
+      chats={chats}
       activeId={currentChatId}
-      enableContextMenu={true}
-      onItemRename={handleChatRename}
-      onItemDelete={handleChatDelete}
+      onChatClick={handleChatClick}
+      onRename={handleChatRename}
+      onDelete={handleChatDelete}
     />
   </div>
 
