@@ -172,9 +172,8 @@
       <!-- 空状态 -->
       <div class="flex items-center justify-center h-full">
         <div class="text-center text-gray-500">
-          <Bot class="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <Bot class="w-12 h-12 mx-auto mb-4" />
           <p class="text-lg mb-2">开始新的对话</p>
-          <p class="text-sm">发送消息开始与 AI 助手交流</p>
         </div>
       </div>
     {:else}

@@ -14,7 +14,7 @@
   
   let { 
     chatId = '', 
-    title = 'AI 助手',
+    title = '',
     sidebarOpen = true 
   }: Props = $props();
 
