@@ -1,6 +1,6 @@
 <script lang="ts">
   import { PencilLine, Trash2, Sparkles, Copy, Hash, LoaderCircle } from '@lucide/svelte';
-  import { apiCall } from '$lib/api/index';
+  import * as chatApi from '$lib/api/chat';
 
   interface Chat {
     id: string;
@@ -108,11 +108,7 @@
     generatingChatId = selectedChat.id;
 
     try {
-      // 调用后端的 generateTitle 方法
-      const response = await apiCall<{ title: string }>('chat_generate_title', {
-        chatId: selectedChat.id
-      });
-
+      const response = await chatApi.generateChatTitle(selectedChat.id);
       const generatedTitle = response.title.trim();
 
       if (generatedTitle && onGenerateTitle) {

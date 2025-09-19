@@ -6,8 +6,9 @@
   import { onMount } from 'svelte';
   import { uiState } from '$lib/states/ui.svelte';
   import { chatState, chatActions, hasActiveChat, currentChatModel } from '$lib/states/chat.svelte';
-  import { messageStore } from '$lib/states/message.svelte';
-    import { goto } from '$app/navigation';
+  import * as chatApi from '$lib/api/chat';
+  import { goto } from '$app/navigation';
+    import { messageStore } from '$lib/states';
 
   let chatId = $state('');
   let messageInput = $state('');
@@ -77,10 +78,23 @@
       if (!hasActiveChat()) {
         console.log('No active chat, creating new chat');
         // 如果没有活跃聊天，创建新聊天
-        await chatActions.createChat();
+        await chatActions.createChat("新会话");
         // 立即更新 URL，通知页面切换到新会话
         if (chatState.currentChat?.id) {
           await goto(`/chat?id=${chatState.currentChat.id}`);
+
+          // 异步生成标题，不阻塞消息发送
+          const chatId = chatState.currentChat.id;
+          setTimeout(async () => {
+            try {
+              const result = await chatApi.generateChatTitle(chatId);
+              if (result.title) {
+                await chatActions.renameChat(chatId, result.title);
+              }
+            } catch (error) {
+              console.error('Failed to generate title:', error);
+            }
+          }, 100); // 给一点延迟确保消息先发送
         }
       }
 

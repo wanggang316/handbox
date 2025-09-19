@@ -84,3 +84,10 @@ export async function updateChat(
 export async function deleteChat(chatId: UUID): Promise<void> {
   return apiCall<void>('chat_delete', { chatId: chatId });
 }
+
+/**
+ * 生成聊天标题
+ */
+export async function generateChatTitle(chatId: UUID): Promise<{ title: string }> {
+  return apiCall<{ title: string }>('chat_generate_title', { chatId });
+}

@@ -5,7 +5,7 @@
 import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage } from '$lib/types/chat';
 import type { FrontendProviderConfig } from '$lib/types';
 import * as messageApi from '$lib/api/message';
-import { getProviderConfigById, getProviderIconById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
+import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
 import { chatState } from './chat.svelte';
 
 interface MessageState {

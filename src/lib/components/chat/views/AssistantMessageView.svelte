@@ -7,7 +7,7 @@
     ChevronRight,
   } from "lucide-svelte";
   import type { Message } from "$lib/types";
-  import { messageStore } from "$lib/states/message.svelte";
+  import { messageStore } from "$lib/states";
   import { renderMarkdown } from "$lib/utils";
 
   interface Props {

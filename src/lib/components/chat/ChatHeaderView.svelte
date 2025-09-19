@@ -39,7 +39,7 @@
     <h1 class="text-base font-medium text-gray-900">
       {title}
       {#if chatId}
-        <span class="text-xs text-gray-500 ml-2">聊天 ID: {chatId}</span>
+        <span class="text-xs text-gray-500 ml-2">ID: {chatId}</span>
       {/if}
     </h1>
     

@@ -92,11 +92,11 @@
     }
   }
 
-  // 处理生成标题
+  // 处理生成标题（接收ChatList组件生成的标题）
   async function handleGenerateTitle(chat: any, newTitle: string) {
     try {
       await chatActions.renameChat(chat.id, newTitle);
-      console.log('Chat title generated and updated successfully:', chat.id, newTitle);
+      console.log('Chat title updated successfully:', chat.id, newTitle);
     } catch (error) {
       console.error('Failed to update generated title:', error);
       // 这里可以显示错误提示
