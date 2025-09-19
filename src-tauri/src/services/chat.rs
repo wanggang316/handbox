@@ -163,7 +163,7 @@ impl ChatService {
         let user_messages: Vec<String> = messages
             .iter()
             .filter(|msg| matches!(msg.role, MessageRole::User))
-            .take(20) 
+            .take(20)
             .map(|msg| msg.content.clone())
             .collect();
 

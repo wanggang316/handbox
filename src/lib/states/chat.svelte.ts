@@ -8,7 +8,7 @@ import type {
 } from '../types';
 import type { ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
-import { providerActions, getAllModels, getFavoriteModels, providerState } from './provider.svelte';
+import { providerActions, getAllModels, providerState } from './provider.svelte';
 
 // 聊天状态 - 使用 Svelte 5 runes
 let currentChat = $state<Chat | null>(null);
@@ -117,6 +117,7 @@ export const chatActions = {
     return chatActions.updateChatSettings({ systemPrompt });
   },
 
+
   /**
    * 更新模型参数
    */
@@ -210,7 +211,7 @@ export const chatActions = {
   /**
    * 创建新聊天
    */
-  async createChat(name?: string): Promise<Chat> {
+  async createChat(name: string): Promise<Chat> {
 
     try {
 
@@ -226,7 +227,7 @@ export const chatActions = {
 
       // 使用完整参数创建聊天，一次性包含所有信息
       const chat = await chatApi.createChat(
-        name ?? '未命名',
+        name,
         0.7, // temperature
         1.0, // topP
         4000, // maxTokens
@@ -337,12 +338,10 @@ export const chatActions = {
   },
 
   /**
-   * 重命名聊天
+   * 重命名聊天（包括手动重命名和自动标题生成）
    */
   async renameChat(chatId: UUID, newName: string): Promise<void> {
     try {
-      isLoading = true;
-
       // 调用后端更新聊天名称
       const updatedChat = await chatApi.updateChat(chatId, { name: newName });
 
@@ -361,8 +360,6 @@ export const chatActions = {
     } catch (error) {
       chatError = error instanceof Error ? error.message : '重命名聊天失败';
       throw error;
-    } finally {
-      isLoading = false;
     }
   },
 

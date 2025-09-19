@@ -1,6 +1,6 @@
 <script lang="ts">
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import { ChevronsUpDown, Plus, Send } from "@lucide/svelte";
+  import { ChevronsUpDown, Plus, ArrowUp } from "@lucide/svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Button from "../ui/Button.svelte";
   import ChatModelSelectModal from "./ChatModelSelectModal.svelte";
@@ -92,7 +92,7 @@
         {currentModel ? currentModel.name : "选择模型"}
         <ChevronsUpDown size={14} />
       </Button>
-      <CircleButton icon={Send} ariaLabel="发送" onclick={sendMessage} />
+      <CircleButton icon={ArrowUp} iconSize={18} size="w-8 h-8" ariaLabel="发送" onclick={sendMessage} />
     </div>
   </div>
 </div>

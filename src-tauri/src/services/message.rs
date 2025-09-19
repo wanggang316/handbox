@@ -462,7 +462,7 @@ impl MessageService {
                     return Err(e);
                 }
             };
-            
+
             let config = Self::extract_message_config_from_chat(&request, &chat);
             let start_time_millis = chrono::Utc::now().timestamp_millis() - duration;
             

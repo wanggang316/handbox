@@ -7,7 +7,7 @@
     ChevronRight,
   } from "lucide-svelte";
   import type { Message } from "$lib/types";
-  import { messageStore } from "$lib/states/message.svelte";
+  import { messageStore } from "$lib/states";
   import { renderMarkdown } from "$lib/utils";
 
   interface Props {
@@ -184,13 +184,8 @@
     <div class="flex-1 min-w-0">
       {#if isMessageLoading}
         <!-- 加载状态 -->
-        <div class="max-w-full py-0 text-gray-900">
-          <div class="flex items-center gap-2 text-gray-500">
-            <div
-              class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
-            ></div>
-            <span class="text-sm">正在思考...</span>
-          </div>
+        <div class="max-w-full py-2 text-gray-900 flex items-center">
+          <div class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"></div>
         </div>
       {:else}
         <!-- 消息气泡 -->
@@ -233,6 +228,7 @@
             {@html renderMarkdown(message?.content || "")}
           </div>
 
+          {#if !isStreaming && !isMessageLoading}
           <!-- 性能信息 -->
           <div class="flex flex-row gap-2 mt-6 text-xs text-gray-400">
             {#if message?.createdAt}
@@ -256,6 +252,7 @@
               <span> | 耗时: {formatDuration(message.duration)}</span>
             {/if}
           </div>
+          {/if}
         </div>
 
         <!-- 消息操作按钮 (仅在非流式且非加载状态下显示) -->

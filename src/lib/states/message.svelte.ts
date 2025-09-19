@@ -5,7 +5,7 @@
 import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage } from '$lib/types/chat';
 import type { FrontendProviderConfig } from '$lib/types';
 import * as messageApi from '$lib/api/message';
-import { getProviderConfigById, getProviderIconById } from './provider.svelte';
+import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
 import { chatState } from './chat.svelte';
 
 interface MessageState {
@@ -90,7 +90,10 @@ class MessageStore {
     }
 
     // 缓存中没有，从 providerState 中获取
-    const config = getProviderConfigById(providerId);
+    let config = getProviderConfigById(providerId);
+    if (!config) {
+      config = getProviderConfigByType(providerId);
+    }
     if (config) {
       // 缓存结果
       this.state.providerConfigsCache[providerId] = config;
