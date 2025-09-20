@@ -74,9 +74,154 @@ pub trait ChatClient: Send + Sync {
     fn api_type(&self) -> &'static str;
 }
 
-/// OpenAI 风格聊天客户端
+/// OpenAI Completions 风格聊天客户端
 pub struct OpenAIChatClient {
     // 不再需要 reqwest::Client，因为 openai-rust 库会处理 HTTP 请求
+}
+
+/// OpenAI Responses 风格聊天客户端
+pub struct OpenAIResponsesChatClient {
+    // 使用 openai-rust 库的 Responses API
+}
+
+impl OpenAIResponsesChatClient {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    /// 转换我们的 ChatRequest 到 openai-rust 的 CreateResponseRequest
+    fn convert_to_openai_response_request(&self, request: &ChatRequest) -> openai_rust::types::CreateResponseRequest {
+        // 将消息转换为 ResponseInput 格式
+        let input_items: Vec<openai_rust::types::InputItem> = request
+            .messages
+            .iter()
+            .map(|msg| openai_rust::types::InputItem::Message {
+                role: msg.role.clone(),
+                content: openai_rust::types::MessageContent::Text(msg.content.clone()),
+            })
+            .collect();
+
+        // 提取系统指令
+        let instructions = request
+            .messages
+            .iter()
+            .find(|msg| msg.role == "system")
+            .map(|msg| msg.content.clone());
+
+        openai_rust::types::CreateResponseRequest {
+            model: request.model.clone(),
+            input: openai_rust::types::ResponseInput::Items(input_items),
+            instructions,
+            metadata: None,
+            previous_response_id: None,
+            tools: None,
+            stream: request.stream,
+        }
+    }
+
+    /// 转换 openai-rust 的 Response 到我们的 ChatResponse
+    fn convert_from_openai_response(
+        &self,
+        response: openai_rust::types::Response,
+    ) -> ChatResponse {
+        let mut choices = Vec::new();
+
+        // 从 output 中提取文本内容
+        for (index, item) in response.output.iter().enumerate() {
+            let mut content = String::new();
+            for output_content in &item.content {
+                if output_content.content_type == "output_text" {
+                    if let Some(text) = &output_content.text {
+                        content.push_str(text);
+                    }
+                }
+            }
+
+            let choice = ChatChoice {
+                index: index as i32,
+                message: Some(ChatMessage {
+                    role: item.role.clone().unwrap_or_else(|| "assistant".to_string()),
+                    content,
+                    reasoning: None, // Response API 可能有 reasoning 字段，但暂时设为 None
+                }),
+                delta: None,
+                finish_reason: if response.status == "completed" {
+                    Some("stop".to_string())
+                } else {
+                    None
+                },
+            };
+            choices.push(choice);
+        }
+
+        let usage = response.usage.map(|usage| ChatUsage {
+            prompt_tokens: usage.input_tokens,
+            completion_tokens: usage.output_tokens,
+            total_tokens: usage.total_tokens,
+        });
+
+        ChatResponse {
+            id: response.id,
+            object: "chat.completion".to_string(), // 保持兼容性
+            model: response.model,
+            choices,
+            usage,
+        }
+    }
+
+    /// 转换 openai-rust 的 ResponseStreamEvent 到我们的 ChatResponse
+    fn convert_from_response_stream_event(
+        &self,
+        event: &openai_rust::types::ResponseStreamEvent,
+        response_id: &str,
+        model: &str,
+    ) -> Option<ChatResponse> {
+        match event {
+            openai_rust::types::ResponseStreamEvent::OutputTextDelta {
+                delta, ..
+            } => {
+                Some(ChatResponse {
+                    id: response_id.to_string(),
+                    object: "chat.completion.chunk".to_string(),
+                    model: model.to_string(),
+                    choices: vec![ChatChoice {
+                        index: 0,
+                        message: None,
+                        delta: Some(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: delta.clone(),
+                            reasoning: None,
+                        }),
+                        finish_reason: None,
+                    }],
+                    usage: None,
+                })
+            }
+            openai_rust::types::ResponseStreamEvent::ResponseCompleted { response, .. } => {
+                Some(ChatResponse {
+                    id: response_id.to_string(),
+                    object: "chat.completion.chunk".to_string(),
+                    model: model.to_string(),
+                    choices: vec![ChatChoice {
+                        index: 0,
+                        message: None,
+                        delta: Some(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: "".to_string(),
+                            reasoning: None,
+                        }),
+                        finish_reason: Some("stop".to_string()),
+                    }],
+                    usage: response.usage.as_ref().map(|usage| ChatUsage {
+                        prompt_tokens: usage.input_tokens,
+                        completion_tokens: usage.output_tokens,
+                        total_tokens: usage.total_tokens,
+                    }),
+                })
+            }
+            _ => None, // 忽略其他事件类型
+        }
+    }
 }
 
 impl OpenAIChatClient {
@@ -293,7 +438,140 @@ impl ChatClient for OpenAIChatClient {
     }
 
     fn api_type(&self) -> &'static str {
-        "openai"
+        "openai-completions"
+    }
+}
+
+#[async_trait]
+impl ChatClient for OpenAIResponsesChatClient {
+    async fn chat(
+        &self,
+        provider: &Provider,
+        request: ChatRequest,
+    ) -> Result<ChatResponse, AppError> {
+        tracing::info!("Sending OpenAI-style response request using openai-rust library");
+
+        // 创建 openai-rust 客户端
+        let openai_client = openai_rust::client::Client::builder()
+            .api_key(provider.api_key.clone())
+            .base_url(provider.base_url.clone())
+            .build()
+            .map_err(|e| AppError::internal_error(&format!("Failed to create OpenAI client: {}", e)))?;
+
+        // 转换请求格式
+        let openai_request = self.convert_to_openai_response_request(&request);
+
+        tracing::debug!(
+            "Request payload: {}",
+            serde_json::to_string_pretty(&openai_request).unwrap_or_default()
+        );
+
+        // 调用 openai-rust 库的 responses API
+        let openai_response = openai_client
+            .responses()
+            .create(&openai_request)
+            .await
+            .map_err(|e| AppError::internal_error(&format!("OpenAI Responses API call failed: {}", e)))?;
+
+        // 转换响应格式
+        let chat_response = self.convert_from_openai_response(openai_response);
+
+        Ok(chat_response)
+    }
+
+    async fn chat_stream(
+        &self,
+        provider: &Provider,
+        mut request: ChatRequest,
+    ) -> Result<
+        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        AppError,
+    > {
+        // 启用流式响应
+        request.stream = Some(true);
+
+        tracing::info!("Sending OpenAI-style streaming response request using openai-rust library");
+
+        // 创建 openai-rust 客户端
+        let openai_client = openai_rust::client::Client::builder()
+            .api_key(provider.api_key.clone())
+            .base_url(provider.base_url.clone())
+            .build()
+            .map_err(|e| AppError::internal_error(&format!("Failed to create OpenAI client: {}", e)))?;
+
+        // 转换请求格式
+        let openai_request = self.convert_to_openai_response_request(&request);
+
+        tracing::debug!(
+            "Request payload: {}",
+            serde_json::to_string_pretty(&openai_request).unwrap_or_default()
+        );
+
+        // 使用 tokio::spawn 和 mpsc 来创建一个真正的流式传输
+        use tokio::sync::mpsc;
+        use futures::StreamExt;
+
+        let (tx, mut rx) = mpsc::channel::<Result<ChatResponse, AppError>>(100);
+
+        let response_id = format!("response-{}", uuid::Uuid::new_v4());
+        let model_name = request.model.clone();
+
+        // 在后台任务中处理流，将 openai_client 和 openai_request 的所有权转移进去
+        tokio::spawn(async move {
+            let responses = openai_client.responses();
+            let openai_stream = match responses
+                .create_stream(&openai_request)
+                .await
+            {
+                Ok(stream) => stream,
+                Err(e) => {
+                    let _ = tx.send(Err(AppError::internal_error(&format!("OpenAI Responses streaming API call failed: {}", e)))).await;
+                    return;
+                }
+            };
+
+            let mut openai_stream = Box::pin(openai_stream);
+            while let Some(result) = openai_stream.next().await {
+                let converted_result = result.map(|chunk| {
+                    tracing::debug!("[OpenAI Responses Stream] Received chunk: {:?}", chunk);
+                    // 创建一个新的 OpenAIResponsesChatClient 实例来转换 chunk
+                    let converter = OpenAIResponsesChatClient::new();
+                    converter.convert_from_response_stream_event(&chunk.event, &response_id, &model_name)
+                }).map_err(|e| AppError::internal_error(&format!("Stream error: {}", e)));
+
+                match converted_result {
+                    Ok(Some(chat_response)) => {
+                        if tx.send(Ok(chat_response)).await.is_err() {
+                            // 接收端已关闭，退出
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        // 忽略不需要的事件
+                        continue;
+                    }
+                    Err(e) => {
+                        if tx.send(Err(e)).await.is_err() {
+                            // 接收端已关闭，退出
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        // 将接收端转换为流
+        let converted_stream = async_stream::stream! {
+            while let Some(result) = rx.recv().await {
+                yield result;
+            }
+        };
+
+        Ok(Box::new(Box::pin(converted_stream)) as Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>)
+    }
+
+    fn api_type(&self) -> &'static str {
+        "openai-responses"
     }
 }
 
@@ -888,12 +1166,43 @@ impl ChatClient for AnthropicChatClient {
 /// 聊天客户端工厂
 pub fn create_chat_client(api_type: &str) -> Result<Box<dyn ChatClient>, AppError> {
     match api_type {
-        "openai" => Ok(Box::new(OpenAIChatClient::new())),
+        "openai" | "openai-completions" => Ok(Box::new(OpenAIChatClient::new())),
+        "openai-responses" => Ok(Box::new(OpenAIResponsesChatClient::new())),
         "google" => Ok(Box::new(GoogleChatClient::new())),
         "anthropic" => Ok(Box::new(AnthropicChatClient::new())),
         _ => Err(AppError::validation_error(&format!(
             "Unsupported API type: {}",
             api_type
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_openai_completions_client() {
+        let client = create_chat_client("openai-completions").unwrap();
+        assert_eq!(client.api_type(), "openai-completions");
+    }
+
+    #[test]
+    fn test_create_openai_responses_client() {
+        let client = create_chat_client("openai-responses").unwrap();
+        assert_eq!(client.api_type(), "openai-responses");
+    }
+
+    #[test]
+    fn test_create_openai_legacy_client() {
+        // Test backward compatibility with "openai"
+        let client = create_chat_client("openai").unwrap();
+        assert_eq!(client.api_type(), "openai-completions");
+    }
+
+    #[test]
+    fn test_create_unsupported_client() {
+        let result = create_chat_client("unsupported");
+        assert!(result.is_err());
     }
 }

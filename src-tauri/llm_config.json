@@ -7,7 +7,7 @@
             "default_name": "OpenAI",
             "default_base_url": "https://api.openai.com/v1",
             "icon": "/logo-openai.png",
-            "chat_api_type": "openai",
+            "chat_api_type": "openai-responses",
             "model_api_type": "openai+local",
             "model_local":
             {
@@ -148,7 +148,7 @@
             "default_name": "DeepSeek",
             "default_base_url": "https://api.deepseek.com",
             "icon": "/logo-deepseek.png",
-            "chat_api_type": "openai",
+            "chat_api_type": "openai-completions",
             "model_api_type": "openai+local",
             "model_local":
             {
@@ -209,7 +209,7 @@
             "default_name": "OpenRouter",
             "default_base_url": "https://openrouter.ai/api/v1",
             "icon": "/logo-openrouter.png",
-            "chat_api_type": "openai",
+            "chat_api_type": "openai-completions",
             "model_api_type": "openrouter",
             "model_local": null
         }
@@ -222,7 +222,7 @@
             "default_name": "Custom Provider",
             "default_base_url": "",
             "icon": "/logo-openai-compatible.png",
-            "chat_api_type": "openai",
+            "chat_api_type": "openai-completions",
             "model_api_type": "openai",
             "model_local": null
         },

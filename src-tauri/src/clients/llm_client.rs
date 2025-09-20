@@ -131,7 +131,7 @@ mod tests {
         );
 
         assert_eq!(client.provider_type(), "test");
-        assert_eq!(client.api_type(), "openai");
+        assert_eq!(client.api_type(), "openai-completions");
     }
 
     #[tokio::test]
