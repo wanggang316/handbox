@@ -1,7 +1,7 @@
 // LLM 配置管理器
 // 从 llm_config.json 读取供应商和模型配置信息
 
-use crate::models::ModelFeature;
+use crate::models::provider::ModelFeature;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

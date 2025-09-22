@@ -1,6 +1,6 @@
 // 供应商服务实现
 
-use crate::clients::{adapt_model, create_llm_client};
+use crate::llm_client::{adapt_model, create_llm_client};
 use crate::models::{
     AddProviderRequest, AppError, Model, Provider, ProviderWithModels, Timestamp, UUID,
 };

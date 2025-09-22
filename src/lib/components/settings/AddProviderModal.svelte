@@ -12,7 +12,7 @@
   import DropDownRow from "../ui/table/DropDownRow.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
   import Modal from "../ui/Modal.svelte";
-  import { toastActions } from "$lib/stores";
+  import { toastActions } from "$lib/states/toast.svelte";
 
   // 使用 $props() 替代 export let
   const { open = false, onClose } = $props<{

@@ -1,8 +1,8 @@
 // HandBox Tauri 应用主入口
 
 // 声明模块
-pub mod clients;
 pub mod commands;
+pub mod llm_client;
 pub mod menu;
 pub mod models;
 pub mod services;

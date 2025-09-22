@@ -1,7 +1,7 @@
 // 聊天服务实现
 
-use crate::clients::chat_client::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
-use crate::clients::llm_client::create_llm_client;
+use crate::llm_client::create_llm_client;
+use crate::llm_client::types::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
 use crate::models::{AppError, Chat, MessageRole, UUID};
 use crate::services::{DatabaseService, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
