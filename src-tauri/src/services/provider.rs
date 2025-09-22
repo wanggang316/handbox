@@ -4,7 +4,7 @@ use crate::llm_client::create_llm_client;
 use crate::models::{
     AddProviderRequest, AppError, Model, Provider, ProviderWithModels, Timestamp, UUID,
 };
-use crate::services::DatabaseService;
+use crate::services::Database;
 use crate::storage::ProviderRepository;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,7 +17,7 @@ pub struct ProviderService {
 
 impl ProviderService {
     /// 创建新的供应商服务实例
-    pub fn new(db: Arc<DatabaseService>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: ProviderRepository::new(db),
         }

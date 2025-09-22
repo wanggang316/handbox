@@ -1,18 +1,18 @@
 // Chat 数据访问层
 
 use crate::models::{AppError, Chat, UUID};
-use crate::services::DatabaseService;
+use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
 /// Chat 仓储层
 #[derive(Clone)]
 pub struct ChatRepository {
-    db: Arc<DatabaseService>,
+    db: Arc<Database>,
 }
 
 impl ChatRepository {
-    pub fn new(db: Arc<DatabaseService>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self { db }
     }
 
@@ -199,13 +199,13 @@ impl ChatRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::DatabaseService;
+    use crate::storage::Database;
     use tempfile::tempdir;
 
-    async fn create_test_db() -> (DatabaseService, tempfile::TempDir) {
+    async fn create_test_db() -> (Database, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        let db_service = DatabaseService::new(&db_path).await.unwrap();
+        let db_service = Database::new(&db_path).await.unwrap();
         (db_service, temp_dir)
     }
 

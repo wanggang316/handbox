@@ -1,7 +1,7 @@
 // LLM 配置相关 IPC 命令
 
+use crate::config::llm_config::get_global_llm_config;
 use crate::models::{AppError, FrontendProviderConfig, ProviderConfigsResponse};
-use crate::services::llm_config::get_global_llm_config;
 
 /// 获取所有可用的供应商配置（用于前端添加/编辑供应商）
 #[tauri::command]

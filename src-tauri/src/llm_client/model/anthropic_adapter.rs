@@ -1,9 +1,9 @@
 // Anthropic 模型客户端实现
 
 use super::model_client::ModelClient;
+use crate::config::llm_config::{get_global_llm_config, ModelExtraInfo};
 use crate::llm_client::types::{ModelFeature, StandardModel};
 use crate::models::{AppError, Provider};
-use crate::services::llm_config::{get_global_llm_config, ModelExtraInfo};
 use async_trait::async_trait;
 
 /// Anthropic 模型客户端（基于本地配置）
