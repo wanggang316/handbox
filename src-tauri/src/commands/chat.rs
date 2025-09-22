@@ -2,8 +2,8 @@
 
 use crate::models::{AppError, Chat, UUID};
 use crate::services::ChatService;
-use tauri::State;
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GenerateTitleResponse {

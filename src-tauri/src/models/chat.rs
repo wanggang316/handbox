@@ -28,7 +28,6 @@ impl Default for ModelParameters {
     }
 }
 
-
 /// 聊天实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +51,6 @@ pub struct Chat {
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
-
 
 #[cfg(test)]
 #[path = "chat_test.rs"]

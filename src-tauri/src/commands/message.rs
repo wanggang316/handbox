@@ -1,6 +1,6 @@
 // 消息相关 IPC 命令
 
-use crate::models::{AppError, MessageRequest, MessageResponse, Message, UUID};
+use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
 use crate::services::MessageService;
 use serde_json::json;
 use tauri::{Emitter, State, Window};

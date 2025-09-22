@@ -1,7 +1,7 @@
 // 供应商相关 IPC 命令
 
 use crate::models::{
-    AppError, AddProviderRequest, ListModelsRequest, ListModelsResponse, Model, Provider,
+    AddProviderRequest, AppError, ListModelsRequest, ListModelsResponse, Model, Provider,
     ProviderWithModels, ToggleModelFavoriteRequest, ToggleModelRequest, ToggleProviderRequest,
     UUID,
 };

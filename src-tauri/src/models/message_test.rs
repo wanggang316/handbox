@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::models::{
-        Message, MessageAttachment, MessageConfig, MessageRequest, MessageRequestAttachment, MessageResponse, MessageRole,
+        Message, MessageAttachment, MessageConfig, MessageRequest, MessageRequestAttachment,
+        MessageResponse, MessageRole,
     };
     use serde_json;
 

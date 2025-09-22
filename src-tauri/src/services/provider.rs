@@ -2,7 +2,7 @@
 
 use crate::clients::{adapt_model, create_llm_client};
 use crate::models::{
-    AppError, AddProviderRequest, Model, Provider, ProviderWithModels, Timestamp, UUID,
+    AddProviderRequest, AppError, Model, Provider, ProviderWithModels, Timestamp, UUID,
 };
 use crate::services::DatabaseService;
 use crate::storage::ProviderRepository;
