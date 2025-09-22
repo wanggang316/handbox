@@ -2,14 +2,14 @@
 mod tests {
     use super::*;
     use crate::models::{ChatMessage, MessageConfig, MessageRequest, MessageRole, ModelParameters};
-    use crate::services::{ChatService, DatabaseService, MessageService};
+    use crate::services::{ChatService, Database, MessageService};
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    async fn create_test_database_service() -> Arc<DatabaseService> {
+    async fn create_test_database_service() -> Arc<Database> {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let db_path = temp_dir.path().join("test.db");
-        let db_service = DatabaseService::new(&db_path)
+        let db_service = Database::new(&db_path)
             .await
             .expect("Failed to create database service");
         Arc::new(db_service)

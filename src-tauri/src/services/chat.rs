@@ -3,7 +3,7 @@
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
 use crate::models::{AppError, Chat, MessageRole, UUID};
-use crate::services::{DatabaseService, ProviderService};
+use crate::services::{Database, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ pub struct ChatService {
 }
 
 impl ChatService {
-    pub fn new(db: Arc<DatabaseService>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: ChatRepository::new(db.clone()),
             message_repository: MessageRepository::new(db.clone()),

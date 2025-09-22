@@ -2,6 +2,7 @@
 
 // 声明模块
 pub mod commands;
+pub mod config;
 pub mod llm_client;
 pub mod menu;
 pub mod models;
@@ -11,9 +12,10 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ArtifactService, ChatService, DatabaseService, MessageService, ProviderService, SearchService,
-    SettingsService, StorageService,
+    ArtifactService, ChatService, MessageService, ProviderService, SearchService, SettingsService,
+    StorageService,
 };
+use crate::storage::Database;
 use crate::utils::logger;
 use std::sync::Arc;
 use tauri::Manager;
@@ -34,7 +36,7 @@ async fn initialize_services(
     // 初始化数据库服务
     let db_path = storage_service.get_database_path();
     let database_service = Arc::new(
-        DatabaseService::new(&db_path)
+        Database::new(&db_path)
             .await
             .map_err(|e| format!("Failed to initialize database: {e}"))?,
     );

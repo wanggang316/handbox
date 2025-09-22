@@ -6,11 +6,11 @@ use std::path::Path;
 
 /// 数据库服务
 #[derive(Clone)]
-pub struct DatabaseService {
+pub struct Database {
     pool: SqlitePool,
 }
 
-impl DatabaseService {
+impl Database {
     /// 创建数据库服务实例
     pub async fn new(db_path: &Path) -> Result<Self, AppError> {
         // 确保父目录存在
@@ -129,7 +129,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let db_service = DatabaseService::new(&db_path).await;
+        let db_service = Database::new(&db_path).await;
         assert!(db_service.is_ok());
 
         let service = db_service.unwrap();
@@ -141,7 +141,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test_stats.db");
 
-        let service = DatabaseService::new(&db_path).await.unwrap();
+        let service = Database::new(&db_path).await.unwrap();
         let stats = service.get_stats().await.unwrap();
 
         // After migration, we have 0 providers (no predefined data)

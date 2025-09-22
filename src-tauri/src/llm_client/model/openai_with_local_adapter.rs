@@ -2,9 +2,9 @@
 
 use super::model_client::ModelClient;
 use super::openai_adapter::OpenAIModelClient;
+use crate::config::llm_config::{get_global_llm_config, ModelExtraInfo};
 use crate::llm_client::types::{ModelFeature, StandardModel};
 use crate::models::{AppError, Provider};
-use crate::services::llm_config::{get_global_llm_config, ModelExtraInfo};
 use async_trait::async_trait;
 
 /// OpenAI + Local 增强模型客户端

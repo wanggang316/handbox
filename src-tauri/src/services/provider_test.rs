@@ -3,14 +3,14 @@
 #[cfg(test)]
 mod tests {
     use crate::models::{AddProviderRequest, ModelFeature};
-    use crate::services::{DatabaseService, ProviderService};
+    use crate::services::{Database, ProviderService};
     use tempfile::tempdir;
 
     async fn create_test_service() -> (ProviderService, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
         println!("db_path: {:?}", db_path);
-        let db_service = DatabaseService::new(&db_path).await.unwrap();
+        let db_service = Database::new(&db_path).await.unwrap();
         (
             ProviderService::new(std::sync::Arc::new(db_service)),
             temp_dir,

@@ -7,7 +7,7 @@ use crate::llm_client::types::{
 use crate::models::{
     AppError, Message, MessageConfig, MessageRequest, MessageResponse, MessageRole, UUID,
 };
-use crate::services::{ChatService, DatabaseService, ProviderService};
+use crate::services::{ChatService, Database, ProviderService};
 use crate::storage::MessageRepository;
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ pub struct MessageService {
 }
 
 impl MessageService {
-    pub fn new(db: Arc<DatabaseService>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: MessageRepository::new(db.clone()),
             provider_service: Arc::new(ProviderService::new(db.clone())),
