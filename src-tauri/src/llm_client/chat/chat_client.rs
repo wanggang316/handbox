@@ -5,8 +5,9 @@ use crate::llm_client::types::{ChatApiType, ChatRequest, ChatResponse};
 use crate::models::{AppError, Provider};
 
 use super::{
-    anthropic::AnthropicChatClient, google::GoogleChatClient,
-    openai_completions::OpenAICompletionsChatClient, openai_responses::OpenAIResponsesChatClient,
+    anthropic_adapter::AnthropicChatClient, google_adapter::GoogleChatClient,
+    openai_completions_adapter::OpenAICompletionsChatClient,
+    openai_responses_adapter::OpenAIResponsesChatClient,
 };
 
 #[async_trait]

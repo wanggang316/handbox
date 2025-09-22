@@ -130,9 +130,11 @@ mod tests {
     fn test_llm_client_creation_with_custom_clients() {
         let client = LlmClient::with_clients(
             "custom".to_string(),
-            Box::new(crate::llm_client::model::openai::OpenAIModelClient::new()),
             Box::new(
-                crate::llm_client::chat::openai_completions::OpenAICompletionsChatClient::new(),
+                crate::llm_client::model::openai_adapter::OpenAIModelClient::new(),
+            ),
+            Box::new(
+                crate::llm_client::chat::openai_completions_adapter::OpenAICompletionsChatClient::new(),
             ),
         );
 

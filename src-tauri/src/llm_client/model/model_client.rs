@@ -18,20 +18,21 @@ pub trait ModelClient: Send + Sync {
 pub fn create_model_client(api_type: ModelApiType) -> Result<Box<dyn ModelClient>, AppError> {
     Ok(match api_type {
         ModelApiType::OpenAI => {
-            Box::new(crate::llm_client::model::openai::OpenAIModelClient::new()) as Box<_>
+            Box::new(crate::llm_client::model::openai_adapter::OpenAIModelClient::new()) as Box<_>
         }
-        ModelApiType::OpenAIWithLocal => {
-            Box::new(crate::llm_client::model::openai_with_local::OpenAIWithLocalProvider::new())
-                as Box<_>
-        }
+        ModelApiType::OpenAIWithLocal => Box::new(
+            crate::llm_client::model::openai_with_local_adapter::OpenAIWithLocalProvider::new(),
+        ) as Box<_>,
         ModelApiType::Google => {
-            Box::new(crate::llm_client::model::google::GoogleModelClient::new()) as Box<_>
+            Box::new(crate::llm_client::model::google_adapter::GoogleModelClient::new()) as Box<_>
         }
         ModelApiType::Anthropic => {
-            Box::new(crate::llm_client::model::anthropic::AnthropicModelClient::new()) as Box<_>
+            Box::new(crate::llm_client::model::anthropic_adapter::AnthropicModelClient::new())
+                as Box<_>
         }
         ModelApiType::OpenRouter => {
-            Box::new(crate::llm_client::model::openrouter::OpenRouterModelClient::new()) as Box<_>
+            Box::new(crate::llm_client::model::openrouter_adapter::OpenRouterModelClient::new())
+                as Box<_>
         }
     })
 }

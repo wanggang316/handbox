@@ -1,8 +1,8 @@
-pub mod anthropic;
-pub mod google;
+pub mod anthropic_adapter;
+pub mod google_adapter;
 pub mod model_client;
-pub mod openai;
-pub mod openai_with_local;
-pub mod openrouter;
+pub mod openai_adapter;
+pub mod openai_with_local_adapter;
+pub mod openrouter_adapter;
 
 pub use model_client::{create_model_client, ModelClient};
