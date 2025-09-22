@@ -124,5 +124,112 @@ pub enum MessageStreamEvent {
 }
 
 #[cfg(test)]
-#[path = "message_test.rs"]
-mod message_test;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_roundtrip_preserves_fields() {
+        let message = Message {
+            id: "msg_123".to_string(),
+            chat_id: "chat_456".to_string(),
+            role: MessageRole::User,
+            content: "Hello, world!".to_string(),
+            reasoning: None,
+            config: None,
+            attachments: None,
+            input_tokens: Some(10),
+            output_tokens: Some(20),
+            total_tokens: Some(30),
+            start_time: Some(1000),
+            end_time: Some(2000),
+            duration: Some(1000),
+            created_at: 1000,
+            updated_at: 2000,
+        };
+
+        let json = serde_json::to_string(&message).expect("serialize message");
+        let deserialized: Message = serde_json::from_str(&json).expect("deserialize message");
+
+        assert_eq!(message.id, deserialized.id);
+        assert_eq!(message.chat_id, deserialized.chat_id);
+        assert_eq!(message.content, deserialized.content);
+    }
+
+    #[test]
+    fn message_with_attachments_roundtrip() {
+        let attachment = MessageAttachment {
+            id: "att_123".to_string(),
+            name: "test.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+            size: 1024,
+            path: "/tmp/test.txt".to_string(),
+        };
+
+        let message = Message {
+            id: "msg_123".to_string(),
+            chat_id: "chat_456".to_string(),
+            role: MessageRole::User,
+            content: "Here's a file".to_string(),
+            reasoning: None,
+            config: None,
+            attachments: Some(vec![attachment]),
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            start_time: None,
+            end_time: None,
+            duration: None,
+            created_at: 1000,
+            updated_at: 1000,
+        };
+
+        let json = serde_json::to_string(&message).expect("serialize");
+        let deserialized: Message = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deserialized.attachments.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn message_config_serialization_roundtrip() {
+        let config = MessageConfig {
+            temperature: Some(0.8),
+            top_p: Some(0.9),
+            max_tokens: Some(1000),
+            stream: Some(true),
+            model_id: Some("gpt-4".to_string()),
+            provider_id: Some("openai".to_string()),
+            system_prompt: Some("You are a helpful assistant".to_string()),
+            mcp_servers: Some(vec!["server1".to_string()]),
+        };
+
+        let json = serde_json::to_string(&config).expect("serialize config");
+        let deserialized: MessageConfig = serde_json::from_str(&json).expect("deserialize config");
+
+        assert_eq!(config.temperature, deserialized.temperature);
+        assert_eq!(config.model_id, deserialized.model_id);
+    }
+
+    #[test]
+    fn message_response_serialization_roundtrip() {
+        let response = MessageResponse {
+            chat_id: "chat_123".to_string(),
+            message_id: "msg_456".to_string(),
+            content: "Hello! How can I help you?".to_string(),
+            reasoning: Some("I need to be helpful and friendly".to_string()),
+            model_id: "gpt-4".to_string(),
+            provider_id: "openai".to_string(),
+            input_tokens: Some(15),
+            output_tokens: Some(20),
+            total_tokens: Some(35),
+            duration: Some(1500),
+        };
+
+        let json = serde_json::to_string(&response).expect("serialize response");
+        let deserialized: MessageResponse =
+            serde_json::from_str(&json).expect("deserialize response");
+
+        assert_eq!(response.model_id, deserialized.model_id);
+        assert_eq!(response.provider_id, deserialized.provider_id);
+        assert_eq!(response.total_tokens, deserialized.total_tokens);
+    }
+}
