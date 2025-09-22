@@ -7,7 +7,7 @@ use crate::llm_client::types::{
 use crate::models::{
     AppError, Message, MessageConfig, MessageRequest, MessageResponse, MessageRole, UUID,
 };
-use crate::services::{ChatService, DatabaseService, ProviderService};
+use crate::services::{ChatService, Database, ProviderService};
 use crate::storage::MessageRepository;
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ pub struct MessageService {
 }
 
 impl MessageService {
-    pub fn new(db: Arc<DatabaseService>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: MessageRepository::new(db.clone()),
             provider_service: Arc::new(ProviderService::new(db.clone())),
@@ -872,5 +872,124 @@ impl MessageService {
 }
 
 #[cfg(test)]
-#[path = "message_test.rs"]
-mod message_test;
+mod tests {
+    use super::*;
+    use crate::models::{ChatMessage, MessageConfig, MessageRequest, MessageRole, ModelParameters};
+    use crate::services::ChatService;
+    use crate::storage::Database;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    async fn create_test_database() -> Arc<Database> {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let db_path = temp_dir.path().join("test.db");
+        Arc::new(
+            Database::new(&db_path)
+                .await
+                .expect("Failed to create database"),
+        )
+    }
+
+    async fn setup_services() -> (ChatService, MessageService, String) {
+        let db = create_test_database().await;
+        let chat_service = ChatService::new(db.clone());
+        let message_service = MessageService::new(db);
+
+        let chat = chat_service
+            .create_chat(
+                "Test Chat".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        (chat_service, message_service, chat.id)
+    }
+
+    #[tokio::test]
+    async fn creates_service_successfully() {
+        let db = create_test_database().await;
+        let _service = MessageService::new(db);
+    }
+
+    #[tokio::test]
+    async fn send_message_requires_chat_id() {
+        let (_chat_service, message_service, _chat_id) = setup_services().await;
+
+        let request = MessageRequest {
+            chat_id: None,
+            model_id: "gpt-4".to_string(),
+            provider_id: "openai".to_string(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "Hello".to_string(),
+                reasoning: None,
+            }],
+            attachments: None,
+        };
+
+        let err = message_service
+            .send_message(request)
+            .await
+            .expect_err("expected validation error");
+
+        assert_eq!(err.code, "VALIDATION_ERROR");
+    }
+
+    #[tokio::test]
+    async fn get_message_returns_not_found() {
+        let (_chat_service, message_service, _chat_id) = setup_services().await;
+
+        let err = message_service
+            .get_message("nonexistent_message".to_string())
+            .await
+            .expect_err("expected not found");
+
+        assert_eq!(err.code, "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires provider setup"]
+    async fn send_message_with_provider_integration() {
+        let (_chat_service, _message_service, _chat_id) = setup_services().await;
+    }
+
+    #[test]
+    fn message_config_serialization_roundtrip() {
+        let config = MessageConfig {
+            temperature: Some(0.8),
+            top_p: Some(0.9),
+            max_tokens: Some(1000),
+            stream: Some(true),
+            model_id: Some("gpt-4".to_string()),
+            provider_id: Some("openai".to_string()),
+            system_prompt: Some("You are a helpful assistant".to_string()),
+            mcp_servers: Some(vec!["server1".to_string()]),
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        let roundtrip: MessageConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(roundtrip.temperature, config.temperature);
+        assert_eq!(roundtrip.model_id, config.model_id);
+        assert_eq!(roundtrip.provider_id, config.provider_id);
+    }
+
+    #[test]
+    fn model_parameters_default_values() {
+        let defaults = ModelParameters::default();
+
+        assert_eq!(defaults.temperature, Some(0.7));
+        assert_eq!(defaults.top_p, Some(0.9));
+        assert_eq!(defaults.max_tokens, Some(2048));
+        assert_eq!(defaults.context_length, Some(4096));
+        assert_eq!(defaults.stream, Some(true));
+    }
+}

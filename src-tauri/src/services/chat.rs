@@ -3,7 +3,7 @@
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
 use crate::models::{AppError, Chat, MessageRole, UUID};
-use crate::services::{DatabaseService, ProviderService};
+use crate::services::{Database, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ pub struct ChatService {
 }
 
 impl ChatService {
-    pub fn new(db: Arc<DatabaseService>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: ChatRepository::new(db.clone()),
             message_repository: MessageRepository::new(db.clone()),
@@ -255,5 +255,273 @@ impl ChatService {
 }
 
 #[cfg(test)]
-#[path = "chat_test.rs"]
-mod chat_test;
+mod tests {
+    use super::*;
+    use crate::models::ModelParameters;
+    use crate::storage::Database;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    async fn create_test_database() -> Arc<Database> {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let db_path = temp_dir.path().join("test.db");
+        Arc::new(
+            Database::new(&db_path)
+                .await
+                .expect("Failed to create database"),
+        )
+    }
+
+    #[tokio::test]
+    async fn creates_service_successfully() {
+        let db = create_test_database().await;
+        let _service = ChatService::new(db);
+    }
+
+    #[tokio::test]
+    async fn creates_chat_with_all_fields() {
+        let db = create_test_database().await;
+        let service = ChatService::new(db);
+
+        let chat = service
+            .create_chat(
+                "Test Chat".to_string(),
+                Some(0.7),
+                Some(0.9),
+                Some(2048),
+                Some(true),
+                Some("gpt-4o".to_string()),
+                Some("openai".to_string()),
+                Some("System prompt".to_string()),
+                Some(vec!["server1".to_string()]),
+            )
+            .await
+            .expect("chat creation failed");
+
+        assert_eq!(chat.name, "Test Chat");
+        assert_eq!(chat.temperature, Some(0.7));
+        assert_eq!(chat.top_p, Some(0.9));
+        assert_eq!(chat.max_tokens, Some(2048));
+        assert_eq!(chat.stream, Some(true));
+        assert_eq!(chat.model_id, Some("gpt-4o".to_string()));
+        assert_eq!(chat.provider_id, Some("openai".to_string()));
+        assert_eq!(chat.system_prompt, Some("System prompt".to_string()));
+        assert_eq!(chat.mcp_servers, vec!["server1".to_string()]);
+        assert_eq!(chat.message_count, 0);
+        assert!(chat.last_message_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn lists_chats_sorted_by_updated_at() {
+        let db = create_test_database().await;
+        let service = ChatService::new(db);
+
+        service
+            .create_chat(
+                "Chat 1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        service
+            .create_chat(
+                "Chat 2".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let chats = service
+            .list_chats(Some(10), Some(0))
+            .await
+            .expect("list chats failed");
+
+        assert_eq!(chats.len(), 2);
+        assert_eq!(chats[0].name, "Chat 2");
+        assert_eq!(chats[1].name, "Chat 1");
+    }
+
+    #[tokio::test]
+    async fn fetches_chat_by_id() {
+        let db = create_test_database().await;
+        let service = ChatService::new(db);
+
+        let created = service
+            .create_chat(
+                "Test Chat".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let fetched = service
+            .get_chat(created.id.clone())
+            .await
+            .expect("expected chat");
+
+        assert_eq!(fetched.id, created.id);
+        assert_eq!(fetched.name, "Test Chat");
+    }
+
+    #[tokio::test]
+    async fn get_chat_returns_not_found_error() {
+        let db = create_test_database().await;
+        let service = ChatService::new(db);
+
+        let err = service
+            .get_chat("nonexistent_chat".to_string())
+            .await
+            .expect_err("expected error");
+
+        assert_eq!(err.code, "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn updates_existing_chat() {
+        let db = create_test_database().await;
+        let service = ChatService::new(db);
+
+        let created = service
+            .create_chat(
+                "Original Name".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let updated = service
+            .update_chat(
+                created.id.clone(),
+                Some("Updated Name".to_string()),
+                Some(0.8),
+                Some(0.95),
+                Some(4096),
+                Some(false),
+                Some("claude-3".to_string()),
+                Some("anthropic".to_string()),
+                Some("Updated prompt".to_string()),
+                Some(vec!["server1".to_string(), "server2".to_string()]),
+            )
+            .await
+            .expect("update failed");
+
+        assert_eq!(updated.name, "Updated Name");
+        assert_eq!(updated.temperature, Some(0.8));
+        assert_eq!(updated.top_p, Some(0.95));
+        assert_eq!(updated.max_tokens, Some(4096));
+        assert_eq!(updated.stream, Some(false));
+        assert_eq!(updated.model_id, Some("claude-3".to_string()));
+        assert_eq!(updated.provider_id, Some("anthropic".to_string()));
+        assert_eq!(updated.system_prompt, Some("Updated prompt".to_string()));
+        assert_eq!(updated.mcp_servers, vec!["server1", "server2"]);
+    }
+
+    #[tokio::test]
+    async fn delete_chat_removes_record() {
+        let db = create_test_database().await;
+        let service = ChatService::new(db);
+
+        let created = service
+            .create_chat(
+                "To Delete".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        service
+            .delete_chat(created.id.clone())
+            .await
+            .expect("delete failed");
+
+        let err = service
+            .get_chat(created.id)
+            .await
+            .expect_err("expected missing chat");
+
+        assert_eq!(err.code, "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn generate_title_requires_messages() {
+        let db = create_test_database().await;
+        let service = ChatService::new(db);
+
+        let chat = service
+            .create_chat(
+                "No Messages".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let err = service
+            .generate_title(chat.id)
+            .await
+            .expect_err("expected validation error");
+
+        assert_eq!(err.code, "VALIDATION_ERROR");
+    }
+
+    #[tokio::test]
+    async fn model_parameters_default_values_overridable() {
+        let params = ModelParameters {
+            temperature: Some(0.5),
+            top_p: Some(0.8),
+            max_tokens: Some(1024),
+            context_length: Some(2048),
+            stream: Some(false),
+        };
+
+        assert_eq!(params.temperature, Some(0.5));
+        assert_eq!(params.top_p, Some(0.8));
+        assert_eq!(params.max_tokens, Some(1024));
+        assert_eq!(params.context_length, Some(2048));
+        assert_eq!(params.stream, Some(false));
+    }
+}

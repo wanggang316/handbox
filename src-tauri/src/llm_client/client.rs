@@ -1,10 +1,10 @@
+use crate::config::llm_config::get_global_llm_config;
 use crate::llm_client::chat::{self, ChatClient};
 use crate::llm_client::model::{create_model_client, ModelClient};
 use crate::llm_client::types::{
     ChatApiType, ChatRequest, ChatResponse, ModelApiType, StandardModel,
 };
 use crate::models::{AppError, Provider};
-use crate::services::llm_config::get_global_llm_config;
 
 /// LLM 客户端入口 - 为外部调用提供统一接口
 pub struct LlmClient {

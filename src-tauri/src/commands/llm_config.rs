@@ -1,7 +1,7 @@
 // LLM 配置相关 IPC 命令
 
-use crate::models::{AppError, FrontendProviderConfig, ProviderConfigsResponse};
-use crate::services::llm_config::get_global_llm_config;
+use crate::config::llm_config::get_global_llm_config;
+use crate::models::{AppError, ProviderConfig, ProviderConfigsResponse};
 
 /// 获取所有可用的供应商配置（用于前端添加/编辑供应商）
 #[tauri::command]
@@ -11,7 +11,7 @@ pub async fn get_provider_configs() -> Result<ProviderConfigsResponse, AppError>
     let providers = config
         .providers
         .iter()
-        .map(|p| FrontendProviderConfig {
+        .map(|p| ProviderConfig {
             provider_type: p.provider_type.clone(),
             type_name: p.type_name.clone(),
             default_name: p.default_name.clone(),
@@ -26,7 +26,7 @@ pub async fn get_provider_configs() -> Result<ProviderConfigsResponse, AppError>
     let custom_providers = config
         .custom_providers
         .iter()
-        .map(|p| FrontendProviderConfig {
+        .map(|p| ProviderConfig {
             provider_type: p.provider_type.clone(),
             type_name: p.type_name.clone(),
             default_name: p.default_name.clone(),
@@ -48,11 +48,11 @@ pub async fn get_provider_configs() -> Result<ProviderConfigsResponse, AppError>
 #[tauri::command]
 pub async fn get_provider_config_by_type(
     provider_type: String,
-) -> Result<Option<FrontendProviderConfig>, AppError> {
+) -> Result<Option<ProviderConfig>, AppError> {
     let config = get_global_llm_config();
 
     if let Some(provider_config) = config.get_provider_config(&provider_type) {
-        Ok(Some(FrontendProviderConfig {
+        Ok(Some(ProviderConfig {
             provider_type: provider_config.provider_type.clone(),
             type_name: provider_config.type_name.clone(),
             default_name: provider_config.default_name.clone(),

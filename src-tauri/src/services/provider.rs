@@ -4,7 +4,7 @@ use crate::llm_client::create_llm_client;
 use crate::models::{
     AddProviderRequest, AppError, Model, Provider, ProviderWithModels, Timestamp, UUID,
 };
-use crate::services::DatabaseService;
+use crate::services::Database;
 use crate::storage::ProviderRepository;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,7 +17,7 @@ pub struct ProviderService {
 
 impl ProviderService {
     /// 创建新的供应商服务实例
-    pub fn new(db: Arc<DatabaseService>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: ProviderRepository::new(db),
         }
@@ -434,5 +434,179 @@ fn adapt_model(
         favorite: false,
         created_at: now,
         updated_at: now,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::AddProviderRequest;
+    use crate::storage::Database;
+    use tempfile::tempdir;
+
+    async fn create_service() -> (ProviderService, tempfile::TempDir) {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let database = Database::new(&db_path).await.unwrap();
+        (ProviderService::new(Arc::new(database)), temp_dir)
+    }
+
+    #[tokio::test]
+    async fn create_provider_persists_record() {
+        let (service, _dir) = create_service().await;
+
+        let config = AddProviderRequest {
+            name: "Test OpenAI".to_string(),
+            provider_type: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "test-api-key".to_string(),
+            enabled: Some(true),
+        };
+
+        let provider = service
+            .create_provider(config)
+            .await
+            .expect("provider creation failed");
+
+        assert_eq!(provider.name, "Test OpenAI");
+        assert_eq!(provider.provider_type, "openai");
+        assert!(provider.enabled);
+    }
+
+    #[tokio::test]
+    async fn get_provider_returns_record() {
+        let (service, _dir) = create_service().await;
+
+        let config = AddProviderRequest {
+            name: "Test Provider".to_string(),
+            provider_type: "anthropic".to_string(),
+            base_url: "https://api.anthropic.com".to_string(),
+            api_key: "test-key".to_string(),
+            enabled: Some(false),
+        };
+
+        let created = service.create_provider(config).await.unwrap();
+        let fetched = service.get_provider(&created.id).await.unwrap();
+
+        assert_eq!(fetched.id, created.id);
+        assert_eq!(fetched.name, "Test Provider");
+        assert_eq!(fetched.provider_type, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn list_providers_returns_all() {
+        let (service, _dir) = create_service().await;
+
+        let configs = vec![
+            AddProviderRequest {
+                name: "OpenAI Provider".to_string(),
+                provider_type: "openai".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                api_key: "key1".to_string(),
+                enabled: Some(true),
+            },
+            AddProviderRequest {
+                name: "Anthropic Provider".to_string(),
+                provider_type: "anthropic".to_string(),
+                base_url: "https://api.anthropic.com".to_string(),
+                api_key: "key2".to_string(),
+                enabled: Some(false),
+            },
+        ];
+
+        for cfg in configs {
+            service.create_provider(cfg).await.unwrap();
+        }
+
+        let providers = service.list_providers().await.unwrap();
+        assert_eq!(providers.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn update_provider_changes_fields() {
+        let (service, _dir) = create_service().await;
+
+        let provider = service
+            .create_provider(AddProviderRequest {
+                name: "Original".to_string(),
+                provider_type: "google".to_string(),
+                base_url: "https://api.google.com".to_string(),
+                api_key: "original".to_string(),
+                enabled: Some(false),
+            })
+            .await
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+
+        let updated = service
+            .update_provider(
+                &provider.id,
+                AddProviderRequest {
+                    name: "Updated".to_string(),
+                    provider_type: "google".to_string(),
+                    base_url: "https://updated.google.com".to_string(),
+                    api_key: "updated".to_string(),
+                    enabled: Some(true),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(updated.name, "Updated");
+        assert_eq!(updated.base_url, "https://updated.google.com");
+        assert!(updated.enabled);
+        assert!(updated.updated_at > provider.updated_at);
+    }
+
+    #[tokio::test]
+    async fn delete_provider_removes_record() {
+        let (service, _dir) = create_service().await;
+
+        let provider = service
+            .create_provider(AddProviderRequest {
+                name: "To Delete".to_string(),
+                provider_type: "deepseek".to_string(),
+                base_url: "https://api.deepseek.com".to_string(),
+                api_key: "delete".to_string(),
+                enabled: Some(true),
+            })
+            .await
+            .unwrap();
+
+        service.delete_provider(&provider.id).await.unwrap();
+        assert!(service.get_provider(&provider.id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn toggle_provider_updates_flag() {
+        let (service, _dir) = create_service().await;
+
+        let provider = service
+            .create_provider(AddProviderRequest {
+                name: "Toggle".to_string(),
+                provider_type: "anthropic".to_string(),
+                base_url: "https://api.anthropic.com".to_string(),
+                api_key: "toggle".to_string(),
+                enabled: Some(false),
+            })
+            .await
+            .unwrap();
+
+        assert!(!provider.enabled);
+        assert!(
+            service
+                .toggle_provider(&provider.id, true)
+                .await
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            !service
+                .toggle_provider(&provider.id, false)
+                .await
+                .unwrap()
+                .enabled
+        );
     }
 }
