@@ -2,9 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 前端供应商配置选项
+/// 供应商配置选项（供前端使用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FrontendProviderConfig {
+pub struct ProviderConfig {
     pub provider_type: String,
     pub type_name: String,
     pub default_name: String,
@@ -18,6 +18,6 @@ pub struct FrontendProviderConfig {
 /// 前端供应商配置响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfigsResponse {
-    pub providers: Vec<FrontendProviderConfig>,
-    pub custom_providers: Vec<FrontendProviderConfig>,
+    pub providers: Vec<ProviderConfig>,
+    pub custom_providers: Vec<ProviderConfig>,
 }
