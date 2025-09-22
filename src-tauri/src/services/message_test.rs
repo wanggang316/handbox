@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ChatMessage, MessageRequest, MessageConfig, MessageRole, ModelParameters};
+    use crate::models::{ChatMessage, MessageConfig, MessageRequest, MessageRole, ModelParameters};
     use crate::services::{ChatService, DatabaseService, MessageService};
     use std::sync::Arc;
     use tempfile::TempDir;

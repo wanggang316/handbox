@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::chat::{UUID, Timestamp};
+use crate::models::chat::{Timestamp, UUID};
 
 /// 消息角色
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

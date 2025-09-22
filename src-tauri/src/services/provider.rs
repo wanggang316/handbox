@@ -1,8 +1,8 @@
 // 供应商服务实现
 
-use crate::clients::{adapt_model, create_llm_client};
+use crate::llm_client::create_llm_client;
 use crate::models::{
-    AppError, AddProviderRequest, Model, Provider, ProviderWithModels, Timestamp, UUID,
+    AddProviderRequest, AppError, Model, Provider, ProviderWithModels, Timestamp, UUID,
 };
 use crate::services::DatabaseService;
 use crate::storage::ProviderRepository;
@@ -387,5 +387,52 @@ impl ProviderService {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64
+    }
+}
+
+/// 将标准模型适配为应用内部的 `Model`
+fn adapt_model(
+    standard_model: crate::llm_client::StandardModel,
+    provider_id: String,
+    now: i64,
+) -> Model {
+    let supported_features = standard_model.supported_features.map(|features| {
+        features
+            .into_iter()
+            .map(|feature| match feature {
+                crate::llm_client::ModelFeature::Chat => {
+                    crate::models::provider::ModelFeature::Text
+                }
+                crate::llm_client::ModelFeature::Vision => {
+                    crate::models::provider::ModelFeature::Vision
+                }
+                crate::llm_client::ModelFeature::FunctionCalling => {
+                    crate::models::provider::ModelFeature::FunctionCalling
+                }
+                crate::llm_client::ModelFeature::Completion => {
+                    crate::models::provider::ModelFeature::Text
+                }
+                crate::llm_client::ModelFeature::Embedding => {
+                    crate::models::provider::ModelFeature::Text
+                }
+                crate::llm_client::ModelFeature::Streaming => {
+                    crate::models::provider::ModelFeature::Streaming
+                }
+            })
+            .collect()
+    });
+
+    Model {
+        id: standard_model.id,
+        provider_id,
+        name: standard_model.name,
+        context_length: standard_model.context_length,
+        input_cost: standard_model.input_cost,
+        output_cost: standard_model.output_cost,
+        supported_features,
+        enabled: true,
+        favorite: false,
+        created_at: now,
+        updated_at: now,
     }
 }

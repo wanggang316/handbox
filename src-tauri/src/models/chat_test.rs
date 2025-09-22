@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::models::{
-        Chat, ModelParameters,
-    };
+    use crate::models::{Chat, ModelParameters};
     use serde_json;
 
     #[test]
@@ -42,5 +40,4 @@ mod tests {
         assert_eq!(params.context_length, Some(4096));
         assert_eq!(params.stream, Some(true));
     }
-
 }

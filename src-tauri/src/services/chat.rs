@@ -1,10 +1,10 @@
 // 聊天服务实现
 
-use crate::models::{AppError, Chat, UUID, MessageRole};
+use crate::llm_client::create_llm_client;
+use crate::llm_client::types::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
+use crate::models::{AppError, Chat, MessageRole, UUID};
 use crate::services::{DatabaseService, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
-use crate::clients::llm_client::create_llm_client;
-use crate::clients::chat_client::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
 use std::sync::Arc;
 
 /// 聊天服务
@@ -139,24 +139,32 @@ impl ChatService {
 
     /// 生成聊天标题
     pub async fn generate_title(&self, chat_id: UUID) -> Result<String, AppError> {
-        tracing::info!("[ChatService::generate_title] Generating title for chat: {}", chat_id);
+        tracing::info!(
+            "[ChatService::generate_title] Generating title for chat: {}",
+            chat_id
+        );
 
         // 1. 获取聊天信息
         let chat = self.get_chat(chat_id.clone()).await?;
 
         // 2. 验证模型和供应商配置
-        let model_id = chat.model_id.ok_or_else(|| {
-            AppError::validation_error("Chat has no model configured")
-        })?;
-        let provider_id = chat.provider_id.ok_or_else(|| {
-            AppError::validation_error("Chat has no provider configured")
-        })?;
+        let model_id = chat
+            .model_id
+            .ok_or_else(|| AppError::validation_error("Chat has no model configured"))?;
+        let provider_id = chat
+            .provider_id
+            .ok_or_else(|| AppError::validation_error("Chat has no provider configured"))?;
 
         // 3. 获取聊天的最近消息（最多10条）
-        let messages = self.message_repository.get_messages_by_chat(&chat_id, 100, 0).await?;
+        let messages = self
+            .message_repository
+            .get_messages_by_chat(&chat_id, 100, 0)
+            .await?;
 
         if messages.is_empty() {
-            return Err(AppError::validation_error("No messages found for title generation"));
+            return Err(AppError::validation_error(
+                "No messages found for title generation",
+            ));
         }
 
         // 4. 只获取用户发送的消息
@@ -168,7 +176,9 @@ impl ChatService {
             .collect();
 
         if user_messages.is_empty() {
-            return Err(AppError::validation_error("No user messages found for title generation"));
+            return Err(AppError::validation_error(
+                "No user messages found for title generation",
+            ));
         }
 
         // 5. 构建对话上下文
@@ -185,7 +195,10 @@ impl ChatService {
 
         // 8. 创建LLM客户端
         let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
-            let error = format!("Failed to create LLM client for provider type {}: {}", provider.provider_type, e);
+            let error = format!(
+                "Failed to create LLM client for provider type {}: {}",
+                provider.provider_type, e
+            );
             tracing::error!("[ChatService::generate_title] {}", error);
             AppError::internal_error(&error)
         })?;
@@ -199,7 +212,7 @@ impl ChatService {
                 reasoning: None,
             }],
             temperature: Some(0.1), // 使用低温度确保稳定输出
-            max_tokens: Some(50), // 限制输出长度
+            max_tokens: Some(50),   // 限制输出长度
             stream: Some(false),
         };
 
@@ -233,7 +246,10 @@ impl ChatService {
             generated_title.to_string()
         };
 
-        tracing::info!("[ChatService::generate_title] Generated title: {}", final_title);
+        tracing::info!(
+            "[ChatService::generate_title] Generated title: {}",
+            final_title
+        );
         Ok(final_title)
     }
 }

@@ -3,6 +3,7 @@
 pub mod artifact;
 pub mod chat;
 pub mod error;
+pub mod llm_client;
 pub mod llm_config;
 pub mod message;
 pub mod provider;
