@@ -164,7 +164,7 @@
     <!-- 模型供应商图标（模型） -->
     <div class="flex flex-row gap-2">
       <div
-        class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center"
+        class="w-8 h-8 rounded-full bg-base-200 flex items-center justify-center"
       >
         <img
           src={providerConfig()?.icon}
@@ -174,7 +174,7 @@
       </div>
 
       {#if message?.config?.modelId}
-        <div class="flex items-center gap-1 text-gray-400 text-xs">
+        <div class="flex items-center gap-1 text-base-content/60 text-xs">
           {message.config.modelId}
         </div>
       {/if}
@@ -184,26 +184,26 @@
     <div class="flex-1 min-w-0">
       {#if isMessageLoading}
         <!-- 加载状态 -->
-        <div class="max-w-full py-2 text-gray-900 flex items-center">
+        <div class="max-w-full py-2 text-base-content flex items-center">
           <div class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"></div>
         </div>
       {:else}
         <!-- 消息气泡 -->
-        <div class="max-w-full py-0 text-gray-900">
+        <div class="max-w-full py-0 text-base-content">
           <!-- 推理过程（如果有） -->
           {#if message?.reasoning}
             <div class="mb-4">
               <!-- 推理过程标题，可点击折叠 -->
               <button
-                class="flex items-center gap-1 my-2 text-left hover:bg-bg-hover rounded-full py-1 px-2"
+                class="flex items-center gap-1 my-2 text-left hover:bg-base-300 rounded-full py-1 px-2"
                 onclick={toggleReasoning}
               >
                 {#if reasoningExpanded}
-                  <ChevronDown size={16} class="text-gray-600" />
+                  <ChevronDown size={16} class="text-base-content" />
                 {:else}
-                  <ChevronRight size={16} class="text-gray-600" />
+                  <ChevronRight size={16} class="text-base-content" />
                 {/if}
-                <span class="text-sm font-medium text-gray-600">
+                <span class="text-sm font-medium text-base-content/80">
                   {isReasoning ? "推理中..." : "推理过程"}
                 </span>
               </button>
@@ -211,7 +211,7 @@
               <!-- 推理过程内容，根据展开状态显示 -->
               {#if reasoningExpanded}
                 <div
-                  class="mt-2 mb-6 px-4 text-sm border-l border-gray-200 text-gray-600 break-words leading-relaxed reasoning-content markdown-content"
+                  class="mt-2 mb-6 px-4 text-sm border-l border-base-300 text-base-content/80 break-words leading-relaxed reasoning-content markdown-content"
                   use:markdownCopy
                 >
                   {@html renderMarkdown(message.reasoning)}
@@ -230,7 +230,7 @@
 
           {#if !isStreaming && !isMessageLoading}
           <!-- 性能信息 -->
-          <div class="flex flex-row gap-2 mt-6 text-xs text-gray-400">
+          <div class="flex flex-row gap-2 mt-6 text-xs text-base-content/60">
             {#if message?.createdAt}
               <span>
                 {formatTime(message.createdAt)}
@@ -263,7 +263,7 @@
             <div class="inline-flex gap-1">
               <!-- 复制按钮 -->
               <button
-                class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"
                 title="复制消息"
                 onclick={handleCopy}
               >
@@ -272,7 +272,7 @@
 
               <!-- 重新生成按钮 -->
               <button
-                class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="重新生成"
                 disabled={isOperating}
                 onclick={handleRegenerate}
@@ -288,7 +288,7 @@
 
               <!-- 删除按钮 -->
               <button
-                class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="p-1.5 text-base-content/60 hover:text-error hover:bg-error/10 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="删除消息"
                 disabled={isOperating}
                 onclick={handleDelete}

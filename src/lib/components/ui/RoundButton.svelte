@@ -1,19 +1,19 @@
 <script lang="ts">
-  import type { Icon as IconType } from '@lucide/svelte';
-  import { Loader } from '@lucide/svelte';
+  import type { Icon as IconType } from "@lucide/svelte";
+  import { Loader } from "@lucide/svelte";
 
   export let label: string;
   export let icon: typeof IconType | undefined = undefined;
   export let iconSize: number = 16;
-  export let bgColor: string = 'bg-[#5661f6]';
-  export let hoverColor: string = 'hover:opacity-90';
-  export let textColor: string = 'text-white';
-  export let size: string = 'h-10';
-  export let rounded: string = 'rounded-full';
-  export let fontSize: string = 'text-[16px]';
+  export let bgColor: string = "bg-primary";
+  export let hoverColor: string = "hover:opacity-90";
+  export let textColor: string = "text-primary-content";
+  export let size: string = "h-10";
+  export let rounded: string = "rounded-full";
+  export let fontSize: string = "text-[16px]";
   export let disabled: boolean = false;
   export let loading: boolean = false;
-  export let customClass: string = '';
+  export let customClass: string = "";
   export let onclick: ((event: MouseEvent) => void) | undefined = undefined;
 
   function handleClick(event: MouseEvent) {
@@ -24,9 +24,13 @@
 </script>
 
 <button
-  class="{size} {bgColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 disabled:bg-gray-600 {customClass}"
-  class:hover:opacity-90={!disabled && !loading && hoverColor === 'hover:opacity-90'}
-  class:hover:bg-opacity-90={!disabled && !loading && hoverColor !== 'hover:opacity-90'}
+  class="{size} {bgColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 disabled:bg-base-300 {customClass}"
+  class:hover:opacity-90={!disabled &&
+    !loading &&
+    hoverColor === "hover:opacity-90"}
+  class:hover:bg-opacity-90={!disabled &&
+    !loading &&
+    hoverColor !== "hover:opacity-90"}
   class:opacity-50={disabled || loading}
   class:cursor-not-allowed={disabled || loading}
   class:pointer-events-none={disabled || loading}

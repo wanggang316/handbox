@@ -163,7 +163,7 @@
     {#if isLoading && messages.length === 0 && !streamingMessageId}
       <!-- 加载状态 -->
       <div class="flex items-center justify-center h-full">
-        <div class="flex items-center gap-2 text-gray-500">
+        <div class="flex items-center gap-2 text-base-content/70">
           <div class="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
           加载消息中...
         </div>
@@ -171,7 +171,7 @@
     {:else if messages.length === 0 && !streamingMessageId}
       <!-- 空状态 -->
       <div class="flex items-center justify-center h-full">
-        <div class="text-center text-gray-500">
+        <div class="text-center text-base-content/70">
           <Bot class="w-12 h-12 mx-auto mb-4" />
           <p class="text-lg mb-2">开始新的对话</p>
         </div>
@@ -196,7 +196,7 @@
             <!-- System message fallback -->
             <div class="group relative">
               <div class="flex gap-4 justify-center">
-                <div class="inline-block max-w-full p-2 px-4 rounded-full bg-purple-100 text-purple-800 text-sm">
+                <div class="inline-block max-w-full p-2 px-4 rounded-full bg-accent/10 text-accent text-sm">
                   {message.content}
                 </div>
               </div>
@@ -229,11 +229,11 @@
   }
   
   .overflow-y-auto::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.1);
+    background: color-mix(in oklch, var(--base-content) 15%, transparent);
     border-radius: 3px;
   }
   
   .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.2);
+    background: color-mix(in oklch, var(--base-content) 25%, transparent);
   }
 </style>

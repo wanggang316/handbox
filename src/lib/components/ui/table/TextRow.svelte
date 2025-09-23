@@ -26,24 +26,24 @@
                 bind:value
                 {placeholder}
                 {readonly}
-                class="w-full text-sm text-right text-text-primary border-none outline-none p-1"
+                class="w-full text-sm text-right text-base-content border-none outline-none p-1"
                 class:cursor-not-allowed={readonly}
-                class:text-[#b3b3b3]={readonly}
+                class:opacity-60={readonly}
                 on:input
             />
         </div>
     </TableBaseRow>
 {:else}
     <TableBaseRow {label} {layout}>
-        <div class="flex flex-row bg-white rounded-lg overflow-hidden">
+        <div class="flex flex-row bg-base-100 rounded-lg overflow-hidden">
             <input
                 type={inputType}
                 bind:value
                 {placeholder}
                 {readonly}
-                class="w-full bg-white text-base text-left text-text-primary border-none outline-none px-2 py-1"
+                class="w-full bg-base-100 text-base text-left text-base-content border-none outline-none px-2 py-1"
                 class:cursor-not-allowed={readonly}
-                class:text-[#b3b3b3]={readonly}
+                class:opacity-60={readonly}
                 on:input
             />
 

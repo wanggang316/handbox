@@ -1,34 +1,56 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github.css";
+@import "./lib/styles/highlight-dark.css";
 @import "katex/dist/katex.min.css";
 
 /* 使用 Tailwind @theme 指令定义主题变量 */
 @theme {
-  /* 浅色主题 */
-  --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f8f8f8;
-  --color-bg-hover: #ededed;
-  --color-bg-accent: #5661f6;
-  --color-bg-accent-hover: #3D49DA;
-  --color-text-primary: #1e293b;
-  --color-text-secondary: #64748b;
-  --color-text-accent: #ffffff;
-  --color-border: #EBEAEA;
-  
-  /* 深色主题变量 */
-  --color-bg-primary-dark: #0f172a;
-  --color-bg-secondary-dark: #1e293b;
-  --color-bg-hover-dark: #334155;
-  --color-bg-accent-dark: #3b82f6;
-  --color-bg-accent-hover-dark: #3D49DA;
-  --color-text-primary-dark: #f8fafc;
-  --color-text-secondary-dark: #94a3b8;
-  --color-text-accent-dark: #ffffff;
-  --color-border-dark: #334155;
+  --color-base-100: oklch(100% 0 0);
+  --color-base-200: oklch(98% 0 0);
+  --color-base-300: oklch(95% 0 0);
+  --color-base-content: oklch(21% 0.006 285.885);
+  --color-primary: oklch(51% 0.262 276.966);
+  --color-primary-content: oklch(93% 0.034 272.788);
+  --color-secondary: oklch(65% 0.241 354.308);
+  --color-secondary-content: oklch(94% 0.028 342.258);
+  --color-accent: oklch(77% 0.152 181.912);
+  --color-accent-content: oklch(38% 0.063 188.416);
+  --color-neutral: oklch(14% 0.005 285.823);
+  --color-neutral-content: oklch(92% 0.004 286.32);
+  --color-info: oklch(74% 0.16 232.661);
+  --color-info-content: oklch(29% 0.066 243.157);
+  --color-success: oklch(76% 0.177 163.223);
+  --color-success-content: oklch(37% 0.077 168.94);
+  --color-warning: oklch(82% 0.189 84.429);
+  --color-warning-content: oklch(41% 0.112 45.904);
+  --color-error: oklch(71% 0.194 13.428);
+  --color-error-content: oklch(27% 0.105 12.094);
+
+  --color-base-100-dark: oklch(0.2308 0 0);
+  --color-base-200-dark: oklch(0.2838 0.0047 247.99);
+  --color-base-300-dark: oklch(0.3268 0.0055 236.68);
+  --color-base-content-dark: oklch(97.807% 0.029 256.847);
+  --color-primary-dark: oklch(58% 0.233 277.117);
+  --color-primary-content-dark: oklch(96% 0.018 272.314);
+  --color-secondary-dark: oklch(65% 0.241 354.308);
+  --color-secondary-content-dark: oklch(94% 0.028 342.258);
+  --color-accent-dark: oklch(77% 0.152 181.912);
+  --color-accent-content-dark: oklch(38% 0.063 188.416);
+  --color-neutral-dark: oklch(14% 0.005 285.823);
+  --color-neutral-content-dark: oklch(92% 0.004 286.32);
+  --color-info-dark: oklch(74% 0.16 232.661);
+  --color-info-content-dark: oklch(29% 0.066 243.157);
+  --color-success-dark: oklch(76% 0.177 163.223);
+  --color-success-content-dark: oklch(37% 0.077 168.94);
+  --color-warning-dark: oklch(82% 0.189 84.429);
+  --color-warning-content-dark: oklch(41% 0.112 45.904);
+  --color-error-dark: oklch(71% 0.194 13.428);
+  --color-error-content-dark: oklch(27% 0.105 12.094);
 }
 
 /* 禁用桌面应用的全局滚动，但保留内部组件滚动 */
-html, body {
+html,
+body {
   height: 100%;
   margin: 0;
   padding: 0;
@@ -37,40 +59,87 @@ html, body {
 
 /* 浅色主题（默认） */
 :root {
-  --bg-primary: var(--color-bg-primary);
-  --bg-secondary: var(--color-bg-secondary);
-  --bg-hover: var(--color-bg-hover);
-  --bg-accent: var(--color-bg-accent);
-  --text-primary: var(--color-text-primary);
-  --text-secondary: var(--color-text-secondary);
-  --text-accent: var(--color-text-accent);
-  --border-color: var(--color-border);
+  --base-100: var(--color-base-100);
+  --base-200: var(--color-base-200);
+  --base-300: var(--color-base-300);
+  --base-content: var(--color-base-content);
+  --primary: var(--color-primary);
+  --primary-content: var(--color-primary-content);
+  --secondary: var(--color-secondary);
+  --secondary-content: var(--color-secondary-content);
+  --accent: var(--color-accent);
+  --accent-content: var(--color-accent-content);
+  --neutral: var(--color-neutral);
+  --neutral-content: var(--color-neutral-content);
+  --info: var(--color-info);
+  --info-content: var(--color-info-content);
+  --success: var(--color-success);
+  --success-content: var(--color-success-content);
+  --warning: var(--color-warning);
+  --warning-content: var(--color-warning-content);
+  --error: var(--color-error);
+  --error-content: var(--color-error-content);
 }
 
 /* 深色主题 */
 [data-theme="dark"] {
-  --bg-primary: var(--color-bg-primary-dark);
-  --bg-secondary: var(--color-bg-secondary-dark);
-  --bg-hover: var(--color-bg-hover-dark);
-  --bg-accent: var(--color-bg-accent-dark);
-  --text-primary: var(--color-text-primary-dark);
-  --text-secondary: var(--color-text-secondary-dark);
-  --text-accent: var(--color-text-accent-dark);
-  --border-color: var(--color-border-dark);
+  /* 颜色映射到深色主题 */
+  --color-base-100: var(--color-base-100-dark);
+  --color-base-200: var(--color-base-200-dark);
+  --color-base-300: var(--color-base-300-dark);
+  --color-base-content: var(--color-base-content-dark);
+  --color-primary: var(--color-primary-dark);
+  --color-primary-content: var(--color-primary-content-dark);
+  --color-secondary: var(--color-secondary-dark);
+  --color-secondary-content: var(--color-secondary-content-dark);
+  --color-accent: var(--color-accent-dark);
+  --color-accent-content: var(--color-accent-content-dark);
+  --color-neutral: var(--color-neutral-dark);
+  --color-neutral-content: var(--color-neutral-content-dark);
+  --color-info: var(--color-info-dark);
+  --color-info-content: var(--color-info-content-dark);
+  --color-success: var(--color-success-dark);
+  --color-success-content: var(--color-success-content-dark);
+  --color-warning: var(--color-warning-dark);
+  --color-warning-content: var(--color-warning-content-dark);
+  --color-error: var(--color-error-dark);
+  --color-error-content: var(--color-error-content-dark);
+
+  /* 变量映射到深色主题 */
+  --base-100: var(--color-base-100-dark);
+  --base-200: var(--color-base-200-dark);
+  --base-300: var(--color-base-300-dark);
+  --base-content: var(--color-base-content-dark);
+  --primary: var(--color-primary-dark);
+  --primary-content: var(--color-primary-content-dark);
+  --secondary: var(--color-secondary-dark);
+  --secondary-content: var(--color-secondary-content-dark);
+  --accent: var(--color-accent-dark);
+  --accent-content: var(--color-accent-content-dark);
+  --neutral: var(--color-neutral-dark);
+  --neutral-content: var(--color-neutral-content-dark);
+  --info: var(--color-info-dark);
+  --info-content: var(--color-info-content-dark);
+  --success: var(--color-success-dark);
+  --success-content: var(--color-success-content-dark);
+  --warning: var(--color-warning-dark);
+  --warning-content: var(--color-warning-content-dark);
+  --error: var(--color-error-dark);
+  --error-content: var(--color-error-content-dark);
 }
 
 /* Markdown 样式 */
 .markdown-content {
   line-height: 1.6;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content h1 {
   font-size: 1.5rem;
   font-weight: 700;
   margin: 1.5rem 0 1rem 0;
-  color: var(--text-primary);
-  border-bottom: 2px solid var(--border-color);
+  color: var(--base-content);
+  border-bottom: 2px solid var(--base-300);
   padding-bottom: 0.5rem;
 }
 
@@ -78,8 +147,8 @@ html, body {
   font-size: 1.25rem;
   font-weight: 600;
   margin: 1.25rem 0 0.75rem 0;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--border-color);
+  color: var(--base-content);
+  border-bottom: 1px solid var(--base-300);
   padding-bottom: 0.25rem;
 }
 
@@ -87,28 +156,28 @@ html, body {
   font-size: 1.125rem;
   font-weight: 600;
   margin: 1rem 0 0.5rem 0;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content h4 {
   font-size: 1rem;
   font-weight: 600;
   margin: 0.75rem 0 0.5rem 0;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content h5 {
   font-size: 0.875rem;
   font-weight: 600;
   margin: 0.5rem 0 0.25rem 0;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content h6 {
   font-size: 0.75rem;
   font-weight: 600;
   margin: 0.5rem 0 0.25rem 0;
-  color: var(--text-secondary);
+  color: color-mix(in oklch, var(--base-content) 80%, transparent);
 }
 
 .markdown-content p {
@@ -118,22 +187,22 @@ html, body {
 
 .markdown-content strong {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content em {
   font-style: italic;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content code:not(.hljs) {
-  background-color: var(--bg-secondary);
-  color: #e11d48;
+  background-color: var(--base-200);
+  color: var(--primary);
   padding: 0.125rem 0.25rem;
   border-radius: 0.25rem;
-  font-family: 'Fira Code', 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-family: "Fira Code", "Monaco", "Consolas", "Courier New", monospace;
   font-size: 0.875em;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--base-300);
 }
 
 .markdown-content pre {
@@ -142,13 +211,13 @@ html, body {
 }
 
 .markdown-content pre code {
-  font-family: 'Fira Code', 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-family: "Fira Code", "Monaco", "Consolas", "Courier New", monospace;
   font-size: 0.8rem;
   line-height: 1.5;
 }
 
 .markdown-content .markdown-math {
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content .markdown-math--inline {
@@ -164,21 +233,16 @@ html, body {
 }
 
 [data-theme="dark"] .markdown-content .katex {
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content .markdown-code-block {
   margin: 1.25rem 0;
   border-radius: 0.75rem;
-  border: 1px solid var(--border-color);
-  background-color: var(--bg-secondary);
+  border: 1px solid var(--base-300);
+  background-color: var(--base-200);
   overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-}
-
-[data-theme="dark"] .markdown-content .markdown-code-block {
-  background-color: rgba(30, 41, 59, 0.7);
-  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.35);
 }
 
 .markdown-content .markdown-code-block__header {
@@ -191,19 +255,13 @@ html, body {
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
   font-size: 0.75rem;
   line-height: 1;
-  color: var(--text-secondary);
+  color: color-mix(in oklch, var(--base-content) 80%, transparent);
   text-transform: lowercase;
   letter-spacing: 0.04em;
 }
 
-[data-theme="dark"] .markdown-content .markdown-code-block__header {
-  background-color: rgba(30, 41, 59, 0.65);
-  border-bottom-color: rgba(94, 96, 206, 0.25);
-  color: #cbd5f5;
-}
-
 .markdown-content .markdown-code-block__language {
-  font-family: 'Fira Code', 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-family: "Fira Code", "Monaco", "Consolas", "Courier New", monospace;
   /* font-weight: 600; */
 }
 
@@ -223,8 +281,8 @@ html, body {
 }
 
 .markdown-content .markdown-code-block__copy:hover {
-  background-color: #dfe2e6;
-  color: var(--bg-accent);
+  background-color: var(--base-300);
+  color: var(--primary);
 }
 
 .markdown-content .markdown-code-block__copy-icon {
@@ -250,14 +308,18 @@ html, body {
 
 .markdown-content .markdown-code-block__copy.copied {
   background-color: transparent;
-  color: var(--bg-accent);
+  color: var(--primary);
 }
 
-.markdown-content .markdown-code-block__copy.copied .markdown-code-block__copy-icon {
+.markdown-content
+  .markdown-code-block__copy.copied
+  .markdown-code-block__copy-icon {
   display: none;
 }
 
-.markdown-content .markdown-code-block__copy.copied .markdown-code-block__copy-label {
+.markdown-content
+  .markdown-code-block__copy.copied
+  .markdown-code-block__copy-label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -290,29 +352,29 @@ html, body {
 }
 
 .markdown-content blockquote {
-  border-left: 4px solid var(--bg-accent);
-  background-color: var(--bg-secondary);
+  border-left: 4px solid var(--primary);
+  background-color: var(--base-200);
   margin: 1rem 0;
   padding: 0.75rem 1rem;
   border-radius: 0 0.25rem 0.25rem 0;
-  color: var(--text-secondary);
+  color: color-mix(in oklch, var(--base-content) 80%, transparent);
   font-style: italic;
 }
 
 .markdown-content a {
-  color: var(--bg-accent);
+  color: var(--primary);
   text-decoration: underline;
   text-decoration-color: transparent;
   transition: text-decoration-color 0.2s;
 }
 
 .markdown-content a:hover {
-  text-decoration-color: var(--bg-accent);
+  text-decoration-color: var(--primary);
 }
 
 .markdown-content hr {
   border: none;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--base-300);
   margin: 2rem 0;
 }
 
@@ -320,7 +382,7 @@ html, body {
   width: 100%;
   border-collapse: collapse;
   margin: 1rem 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--base-300);
   border-radius: 0.5rem;
   overflow: hidden;
 }
@@ -329,13 +391,13 @@ html, body {
 .markdown-content td {
   padding: 0.75rem;
   text-align: left;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--base-300);
 }
 
 .markdown-content th {
-  background-color: var(--bg-secondary);
+  background-color: var(--base-200);
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .markdown-content tr:last-child td {
@@ -381,7 +443,8 @@ html, body {
 
 /* 动画：与类名 pulse-scale 对应，供 Tailwind 任意值动画使用 */
 @keyframes pulse-scale {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(0.6);
     opacity: 1;
   }

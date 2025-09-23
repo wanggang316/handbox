@@ -25,7 +25,7 @@
     <!-- 消息内容 -->
     <div class="flex-1 min-w-0 text-right">
       <!-- 消息气泡 -->
-      <div class="inline-block max-w-full px-4 py-3 rounded-2xl bg-[#f7f7f7] text-text-primary">
+      <div class="inline-block max-w-full px-4 py-3 rounded-2xl bg-base-200 text-base-content">
         <!-- 消息内容 -->
         <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
           {message.content}
@@ -33,7 +33,7 @@
       </div>
 
       <!-- 时间戳 -->
-      <div class="mt-2 text-xs text-gray-400 text-right">
+      <div class="mt-2 text-xs text-base-content/60 text-right">
         {formatTime(message.createdAt)}
       </div>
     </div>

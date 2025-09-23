@@ -9,12 +9,12 @@
 
 {#if title}
   <div class="flex flex-col pt-2">
-    <div class="text-text-secondary text-xs my-1 mx-2">
+    <div class="text-base-content/80 text-xs my-1 mx-2">
       {title}
     </div>
     <div class="relative flex-1">
       <div
-        class="absolute inset-0 bg-bg-secondary rounded-[20px] pointer-events-none"
+        class="absolute inset-0 bg-base-200 rounded-[20px] pointer-events-none"
       ></div>
       <div class="relative table-group rounded-[20px]">
         {@render children?.()}
@@ -24,7 +24,7 @@
 {:else}
   <div class="relative">
     <div
-      class="absolute inset-0 bg-bg-secondary rounded-[20px] pointer-events-none"
+      class="absolute inset-0 bg-base-200 rounded-[20px] pointer-events-none"
     ></div>
     <div class="relative table-group rounded-[20px]">
       {@render children?.()}
@@ -44,6 +44,6 @@
     left: 1.5rem;
     right: 1.5rem;
     height: 1px;
-    background-color: var(--border-color);
+    background-color: var(--base-300);
   }
 </style>

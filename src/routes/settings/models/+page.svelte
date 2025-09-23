@@ -62,8 +62,8 @@
   <!-- 加载状态 -->
   {#if providerState.isLoading}
     <div class="flex items-center justify-center py-8">
-      <LoaderCircle class="h-6 w-6 animate-spin text-gray-400" />
-      <span class="ml-2 text-sm text-gray-500">正在加载供应商...</span>
+      <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
+      <span class="ml-2 text-sm text-base-content/70">正在加载供应商...</span>
     </div>
   {/if}
 
@@ -90,8 +90,8 @@
       <!-- 空状态 -->
       {#if !providerState.isLoading && providerState.providers.length === 0}
         <div class="p-8 text-center">
-          <Cpu class="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <p class="text-base text-gray-500 dark:text-gray-400 mb-4">
+          <Cpu class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
+          <p class="text-base text-base-content/70 mb-4">
             添加 AI 供应商开始使用各种模型
           </p>
           <Button variant="primary" size="sm" on:click={handleAddProvider}>

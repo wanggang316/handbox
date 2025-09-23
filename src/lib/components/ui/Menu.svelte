@@ -25,7 +25,7 @@
 <div class="flex flex-col {containerClass}">
   <!-- 固定标题 -->
   {#if title}
-    <div class="text-sm text-gray-600 pb-2 pl-4 flex-shrink-0">{title}</div>
+    <div class="text-sm text-base-content/70 pb-2 pl-4 flex-shrink-0">{title}</div>
   {/if}
   
   <!-- 可滚动的菜单项 -->

@@ -179,7 +179,7 @@
 
 <div class="flex flex-col h-full">
   <!-- 标题 -->
-  <div class="text-sm text-gray-600 pb-2 pl-4 flex-shrink-0">聊天</div>
+  <div class="text-sm text-base-content/70 pb-2 pl-4 flex-shrink-0">聊天</div>
 
   <!-- 聊天列表 -->
   <div class="flex-1 overflow-y-auto space-y-1 px-2">
@@ -189,7 +189,7 @@
         <div class="relative">
           <input
             data-chat-id={chat.id}
-            class="w-full p-2 text-[14px] bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            class="w-full p-2 text-[14px] bg-base-100 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={renameValue}
             onkeydown={handleKeydown}
             onblur={confirmRename}
@@ -199,14 +199,14 @@
       {:else}
         <!-- 聊天项 -->
         <button
-          class="w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-gray-700 hover:bg-bg-hover {chat.id === activeId ? 'bg-bg-hover' : ''}"
+          class="w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 {chat.id === activeId ? 'bg-base-300' : ''}"
           onclick={() => handleChatClick(chat)}
           oncontextmenu={(e) => handleContextMenu(e, chat)}
         >
           <div class="flex items-center justify-between">
             <span class="truncate">{chat.title}</span>
             {#if isGeneratingTitle && generatingChatId === chat.id}
-              <LoaderCircle size={12} class="text-gray-400 animate-spin flex-shrink-0 ml-2" />
+              <LoaderCircle size={12} class="text-base-content/60 animate-spin flex-shrink-0 ml-2" />
             {/if}
           </div>
         </button>
@@ -218,12 +218,12 @@
 <!-- 右键菜单 -->
 {#if showContextMenu}
   <div
-    class="context-menu fixed z-[10020] bg-white border border-[#e5e5e5] rounded-xl shadow-xl px-1 py-1 min-w-36"
+    class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenuX}px; top: {contextMenuY}px;"
   >
     {#if onGenerateTitle}
       <button
-        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
         onclick={handleGenerateTitle}
       >
         <Sparkles size={14} />
@@ -233,7 +233,7 @@
 
     {#if onRename}
       <button
-        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
         onclick={startRename}
       >
         <PencilLine size={14} />
@@ -243,11 +243,11 @@
 
     <!-- 分隔线 -->
     {#if (onGenerateTitle || onRename) && (onDelete)}
-      <div class="border-t border-gray-200 my-1 mx-2"></div>
+      <div class="border-t border-base-300 my-1 mx-2"></div>
     {/if}
 
     <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
       onclick={handleCopyTitle}
     >
       <Copy size={14} />
@@ -255,7 +255,7 @@
     </button>
 
     <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-bg-accent hover:text-text-accent flex items-center gap-2 whitespace-nowrap"
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
       onclick={handleCopyId}
     >
       <Hash size={14} />
@@ -264,9 +264,9 @@
 
     {#if onDelete}
       <!-- 分隔线 -->
-      <div class="border-t border-gray-200 my-1 mx-2"></div>
+      <div class="border-t border-base-300 my-1 mx-2"></div>
       <button
-        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-red-50 text-red-600 flex items-center gap-2 whitespace-nowrap"
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-error/10 text-error flex items-center gap-2 whitespace-nowrap"
         onclick={handleDelete}
       >
         <Trash2 size={14} />

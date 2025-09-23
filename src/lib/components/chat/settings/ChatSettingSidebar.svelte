@@ -32,7 +32,7 @@
   }
 </script>
 
-<div class="w-36 bg-[#f8f8f8] m-2 rounded-2xl overflow-hidden">
+<div class="w-36 bg-base-200 m-2 rounded-2xl overflow-hidden">
   <Menu 
     title="聊天设置"
     items={menuItems}

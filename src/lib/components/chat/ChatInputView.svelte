@@ -60,7 +60,7 @@
 </script>
 
 <div
-  class="flex flex-col bg-[#f7f7f7] rounded-xl border border-[#ebeaea] max-h-[300px] mx-auto w-full max-w-[800px]"
+  class="flex flex-col bg-base-200 rounded-xl border border-base-300 max-h-[300px] mx-auto w-full max-w-[800px]"
 >
   <textarea
     bind:this={textareaRef}
@@ -69,7 +69,7 @@
     onkeydown={handleKeydown}
     oninput={adjustTextareaHeight}
     rows="1"
-    class="bg-transparent text-[14px] text-[#7e7e7f] p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
+    class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
   ></textarea>
 
   <div

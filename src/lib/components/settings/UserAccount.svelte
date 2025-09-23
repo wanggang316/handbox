@@ -30,16 +30,16 @@
     />
     <div class="flex-1 flex flex-col">
       <div class="flex flex-row gap-x-2 items-center">
-        <div class="text-md text-[#757575]">{displayName}</div>
+        <div class="text-md text-base-content/80">{displayName}</div>
         {#if planText}
-          <div class="text-xs text-blue-500 rounded-xl bg-blue-100 border border-blue-500 px-2 py-0">
+          <div class="text-xs text-primary rounded-xl bg-primary/10 border border-primary px-2 py-0">
             {planText}
           </div>
         {/if}
       </div>
       
       {#if user.email}
-        <div class="text-[12px] text-[#b3b3b3]">{user.email}</div>
+        <div class="text-[12px] text-base-content/60">{user.email}</div>
       {/if}
     </div>
   </div>
@@ -48,7 +48,7 @@
   <div class="flex flex-row gap-2 items-center">
     <Avatar size="lg" />
     <div class="flex-1">
-      <div class="text-xs text-[#757575]">未登录</div>
+      <div class="text-xs text-base-content/70">未登录</div>
     </div>
   </div>
 {/if}

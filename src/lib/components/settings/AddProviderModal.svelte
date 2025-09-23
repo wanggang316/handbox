@@ -226,7 +226,7 @@
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-6 py-4">
-      <h2 class="font-normal text-text-primary">{isEditMode ? '编辑供应商' : '添加供应商'}</h2>
+      <h2 class="font-normal text-base-content">{isEditMode ? '编辑供应商' : '添加供应商'}</h2>
     </div>
 
     <div class="flex-1 min-h-0 px-6 py-2 space-y-4">
@@ -250,8 +250,8 @@
       <RoundButton
         customClass="w-18"
         label="取消"
-        bgColor="bg-gray-200"
-        textColor="text-gray-600"
+        bgColor="bg-base-200"
+        textColor="text-base-content/80"
         onclick={handleClose}
       ></RoundButton>
       <RoundButton

@@ -10,8 +10,8 @@
   export let size: string = 'w-7 h-7';
   export let rounded: string = 'rounded-md';
   export let bgColor: string = 'bg-transparent';
-  export let hoverColor: string = 'hover:bg-bg-hover';
-  export let textColor: string = 'text-text-primary';
+  export let hoverColor: string = 'hover:bg-base-300';
+  export let textColor: string = 'text-base-content';
   export let disabled: boolean = false;
   export let customClass: string = '';
 

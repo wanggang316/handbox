@@ -15,14 +15,6 @@
   // 文件上传引用
   let fileInput = $state<HTMLInputElement>();
 
-  // 生成默认头像 SVG
-  function generateLetterAvatar(letter?: string): string {
-    const displayLetter = letter ? letter.charAt(0).toUpperCase() : '?';
-    const color = letter ? '#6B7280' : '#9CA3AF';
-    
-    return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='${encodeURIComponent(color)}'/%3E%3Ctext x='16' y='20' text-anchor='middle' fill='white' font-size='12' font-family='Arial'%3E${displayLetter}%3C/text%3E%3C/svg%3E`;
-  }
-
   // 尺寸映射
   const sizeClasses = {
     sm: 'w-8 h-8',
@@ -36,9 +28,10 @@
     lg: 32
   };
 
-  const avatarSrc = $derived(src || (letter ? generateLetterAvatar(letter) : null));
+  const avatarSrc = $derived(src || null);
   const sizeClass = $derived(sizeClasses[size]);
   const iconSize = $derived(iconSizes[size]);
+  const fallbackLetter = $derived(letter ? letter.charAt(0).toUpperCase() : '');
 
   // 处理文件上传
   function handleFileUpload() {
@@ -78,15 +71,19 @@
       />
     {:else}
       <!-- 默认头像图标 -->
-      <div class="w-full h-full rounded-full bg-gray-200 flex items-center justify-center">
-        <User size={iconSize} class="text-gray-600" />
+      <div class="w-full h-full rounded-full bg-base-200 flex items-center justify-center text-base-content/80 font-semibold">
+        {#if fallbackLetter}
+          {fallbackLetter}
+        {:else}
+          <User size={iconSize} class="text-base-content/70" />
+        {/if}
       </div>
     {/if}
     
     <!-- 编辑遮罩层 -->
     {#if editable}
-      <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-200 rounded-full flex items-center justify-center">
-        <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-white text-xs text-center">
+      <div class="absolute inset-0 bg-base-content/0 group-hover:bg-base-content/30 transition-all duration-200 rounded-full flex items-center justify-center">
+        <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-base-100 text-xs text-center">
           点击上传
         </div>
       </div>

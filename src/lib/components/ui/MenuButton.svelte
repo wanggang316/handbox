@@ -14,8 +14,8 @@
   export let iconClass: string = "";
 
   // 默认样式
-  const defaultButtonClass = "w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-gray-700 hover:bg-bg-hover truncate";
-  const defaultActiveClass = "bg-bg-hover";
+  const defaultButtonClass = "w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 truncate";
+  const defaultActiveClass = "bg-base-300";
   const defaultIconClass = "flex-shrink-0";
 
   // 优化样式计算，避免频繁字符串拼接

@@ -11,14 +11,15 @@
 </script>
 
 <button 
-  class="w-3 h-3 rounded-full flex items-center justify-center transition-all duration-200"
-  style="background-color: {isHovered ? '#FF5F56' : '#E3E3E2'}"
+  class="w-3 h-3 rounded-full flex items-center justify-center transition-colors duration-200"
+  class:bg-error={isHovered}
+  class:bg-base-300={!isHovered}
   aria-label="Close"
   onclick={onClick}
   onmouseenter={() => isHovered = true}
   onmouseleave={() => isHovered = false}
 >
   {#if isHovered}
-    <X size={8} style="color: #730000; stroke-width: 2.5" />
+    <X size={8} class="text-error-content" style="stroke-width: 2.5" />
   {/if}
 </button>

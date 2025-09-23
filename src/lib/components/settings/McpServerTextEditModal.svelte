@@ -61,12 +61,12 @@
 		class="min-w-lg max-w-xl h-[80vh] overflow-hidden flex flex-col"
 	>
 		<div class="flex items-center justify-between px-6 py-4">
-			<h2 class="font-normal text-text-primary">编辑MCP服务器</h2>
+			<h2 class="font-normal text-base-content">编辑MCP服务器</h2>
 		</div>
 
 		<div class="flex-1 px-6">
 			<textarea
-				class="w-full h-full min-h-40 border-1 border-gray-200 rounded-md p-2 resize-none"
+				class="w-full h-full min-h-40 border-1 border-base-300 rounded-md p-2 resize-none bg-base-100 text-base-content"
 				placeholder="请输入MCP服务器配置..."
 				bind:value={mcpJson}
 			></textarea>
@@ -77,9 +77,9 @@
 			<RoundButton
 				customClass="w-18"
 				label="取消"
-				bgColor="bg-gray-200"
-				textColor="text-gray-600"
-				hoverColor="hover:text-gray-800"
+				bgColor="bg-base-200"
+				textColor="text-base-content/80"
+				hoverColor="hover:text-base-content"
 				onclick={handleClose}
 			></RoundButton>
 			<RoundButton

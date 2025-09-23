@@ -17,10 +17,10 @@
 </div>
 
 <style>
-.tabs { display: flex; border-bottom: 1px solid var(--border-color); margin-bottom: 1rem; }
-.tab { padding: .75rem 1rem; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); cursor: pointer; }
-.tab:hover { color: var(--text-primary); }
-.tab.active { color: var(--bg-accent); border-bottom-color: var(--bg-accent); }
+.tabs { display: flex; border-bottom: 1px solid var(--base-300); margin-bottom: 1rem; }
+.tab { padding: .75rem 1rem; background: none; border: none; border-bottom: 2px solid transparent; color: color-mix(in oklch, var(--base-content) 80%, transparent); cursor: pointer; }
+.tab:hover { color: var(--base-content); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
 </style>
 
 

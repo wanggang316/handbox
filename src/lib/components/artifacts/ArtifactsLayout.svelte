@@ -17,7 +17,19 @@
     </div>
     <div class="list">
       {#each artifacts.filter(a => a.name.toLowerCase().includes(search.toLowerCase())) as a (a.id)}
-        <div class="item" class:selected={selected?.id===a.id} onclick={() => selected = a}>
+        <div
+          class="item"
+          class:selected={selected?.id===a.id}
+          role="button"
+          tabindex="0"
+          onclick={() => selected = a}
+          onkeydown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              selected = a;
+            }
+          }}
+        >
           <div class="avatar">A</div>
           <div class="info">
             <h4>{a.name}</h4>
@@ -60,28 +72,26 @@
 
 <style>
 .layout { display:flex; height:100vh; }
-.sidebar { width:320px; background:var(--bg-secondary); border-right:1px solid var(--border-color); display:flex; flex-direction:column; }
-.sidebar-header { padding:1rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; }
+.sidebar { width:320px; background:var(--base-200); border-right:1px solid var(--base-300); display:flex; flex-direction:column; }
+.sidebar-header { padding:1rem; border-bottom:1px solid var(--base-300); display:flex; justify-content:space-between; align-items:center; }
 .search { position:relative; padding:1rem; }
-.search input { width:100%; padding:.5rem .75rem .5rem 2.25rem; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-primary); color:var(--text-primary); }
-.search .icon { position:absolute; left:1.75rem; top:50%; transform: translateY(-50%); color: var(--text-secondary); }
+.search input { width:100%; padding:.5rem .75rem .5rem 2.25rem; border:1px solid var(--base-300); border-radius:6px; background:var(--base-100); color:var(--base-content); }
+.search .icon { position:absolute; left:1.75rem; top:50%; transform: translateY(-50%); color: color-mix(in oklch, var(--base-content) 80%, transparent); }
 .list { flex:1; overflow:auto; padding:.5rem; }
 .item { display:flex; align-items:center; gap:.75rem; padding:.75rem; border-radius:6px; cursor:pointer; position:relative; }
-.item:hover { background: var(--bg-hover); }
-.item.selected { background: var(--bg-accent); color: var(--text-accent); }
-.avatar { width:32px; height:32px; background:#3b82f6; color:white; display:flex; align-items:center; justify-content:center; border-radius:6px; font-weight:700; }
+.item:hover { background: var(--base-300); }
+.item.selected { background: var(--primary); color: var(--base-100); }
+.avatar { width:32px; height:32px; background:var(--primary); color:var(--primary-content); display:flex; align-items:center; justify-content:center; border-radius:6px; font-weight:700; }
 .info h4 { margin:0 0 .25rem 0; font-size:.9rem; font-weight:600; }
-.muted { color: var(--text-secondary); }
-.delete { position:absolute; right:.5rem; background:none; border:none; color:var(--text-secondary); opacity:0; cursor:pointer; border-radius:4px; padding:.25rem; }
+.muted { color: color-mix(in oklch, var(--base-content) 80%, transparent); }
+.delete { position:absolute; right:.5rem; background:none; border:none; color:color-mix(in oklch, var(--base-content) 80%, transparent); opacity:0; cursor:pointer; border-radius:4px; padding:.25rem; }
 .item:hover .delete { opacity:1; }
 .main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
 .viewer { flex:1; display:flex; flex-direction:column; }
-.viewer-header { padding:1.5rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; }
+.viewer-header { padding:1.5rem; border-bottom:1px solid var(--base-300); display:flex; justify-content:space-between; align-items:center; }
 .title { display:flex; align-items:center; gap:1rem; }
-.meta { display:flex; gap:.75rem; align-items:center; color: var(--text-secondary); margin-top:.25rem; }
-.badge { background: var(--bg-secondary); color: var(--text-secondary); padding:.125rem .5rem; border-radius:4px; font-size:.75rem; }
+.meta { display:flex; gap:.75rem; align-items:center; color: color-mix(in oklch, var(--base-content) 80%, transparent); margin-top:.25rem; }
+.badge { background: var(--base-200); color: color-mix(in oklch, var(--base-content) 80%, transparent); padding:.125rem .5rem; border-radius:4px; font-size:.75rem; }
 .content { flex:1; overflow:auto; padding:1.5rem; }
-.empty { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:.5rem; color: var(--text-secondary); }
+.empty { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:.5rem; color: color-mix(in oklch, var(--base-content) 80%, transparent); }
 </style>
-
-

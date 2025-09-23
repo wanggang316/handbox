@@ -22,7 +22,7 @@
 </script>
 
 <div 
-  class="flex items-center justify-center gap-3 p-2 cursor-pointer hover:bg-[#EDEDED] transition-colors rounded-lg"
+  class="flex items-center justify-center gap-3 p-2 cursor-pointer hover:bg-base-200 transition-colors rounded-lg"
   on:click={onUserClick}
   on:keydown={(e) => e.key === 'Enter' && onUserClick()}
   role="button"
@@ -39,7 +39,7 @@
 
   <!-- 用户信息 -->
   <div class="leading-[1.4] flex-1">
-    <div class="text-[14px] text-[#757575]">{displayName}</div>
-    <div class="text-[12px] {user.isLoggedIn ? 'text-[#b3b3b3]' : 'text-blue-500'}">{planText}</div>
+    <div class="text-[14px] text-base-content/80">{displayName}</div>
+    <div class={`text-[12px] ${user.isLoggedIn ? 'text-base-content/60' : 'text-primary'}`}>{planText}</div>
   </div>
 </div>

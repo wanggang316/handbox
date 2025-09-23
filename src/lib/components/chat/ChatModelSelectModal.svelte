@@ -102,20 +102,20 @@
 <Modal bind:open onClose={handleClose} showCloseButton={false}>
   <div class="w-[600px] h-[70vh] max-h-[70vh] flex flex-col">
     <!-- 搜索和过滤器区域 -->
-    <div class="px-6 py-4 border-b border-bg-hover space-y-3">
+    <div class="px-6 py-4 border-b border-base-300 space-y-3">
       <!-- 搜索框 -->
       <div class="relative">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" size={16} />
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/80" size={16} />
         <input
           type="text"
           bind:value={searchQuery}
           placeholder="搜索模型..."
-          class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-bg-accent focus:border-bg-accent"
+          class="w-full pl-10 pr-4 py-2 border border-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
         />
         {#if searchQuery}
           <button
             onclick={clearSearch}
-            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-base-content/60 hover:text-base-content"
           >
             ×
           </button>
@@ -125,15 +125,15 @@
       <!-- 过滤器按钮 -->
       <div class="flex items-center justify-between gap-3">
         
-        <div class="text-xs text-gray-500">
+        <div class="text-xs text-base-content/70">
           共找到 {filteredModels().length} 个模型
         </div>
 
         <button
           onclick={() => showFavoritesOnly = !showFavoritesOnly}
-          class="flex items-center gap-1 px-2 py-1 rounded-md text-sm {showFavoritesOnly ? 'bg-yellow-100 text-yellow-800 border border-yellow-300' : 'bg-gray-100 text-gray-700 border border-gray-100 hover:bg-gray-200'}"
+          class="flex items-center gap-1 px-2 py-1 rounded-md text-sm {showFavoritesOnly ? 'bg-warning/10 text-warning border border-warning/30' : 'bg-base-200 text-base-content/80 border border-base-200 hover:bg-base-300'}"
         >
-          <Star size={14} class={showFavoritesOnly ? "fill-yellow-500 text-yellow-500" : ""} />
+          <Star size={14} class={showFavoritesOnly ? "fill-warning text-warning" : "text-base-content/60"} />
           收藏模型
         </button>
       </div>
@@ -142,7 +142,7 @@
     <!-- 模型列表 -->
     <div class="flex-1 overflow-y-auto">
       {#if filteredModels().length === 0}
-        <div class="flex flex-col items-center justify-center py-12 text-gray-500">
+        <div class="flex flex-col items-center justify-center py-12 text-base-content/70">
           <Search size={48} class="mb-4 opacity-50" />
           <p class="text-lg">未找到匹配的模型</p>
           <p class="text-sm">尝试调整搜索条件或清除过滤器</p>
@@ -152,28 +152,28 @@
         <div class="px-6 py-4 space-y-6">
           {#each Object.entries(groupedModels()) as [providerName, models]}
             <div>
-              <h3 class="text-sm font-medium text-gray-700 mb-3">{providerName}</h3>
+              <h3 class="text-sm font-medium text-base-content mb-3">{providerName}</h3>
               <div class="space-y-1">
                 {#each models as model, index (model.id)}
-                  <div class="w-full flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-gray-100">
+                  <div class="w-full flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-base-100' : 'bg-base-200'} hover:bg-base-300">
                     <button
                       onclick={() => handleModelSelect(model)}
                       class="flex-1 text-left"
                     >
                       <div class="flex items-center gap-2">
-                        <span class="text-text-primary text-sm">{model.name}</span>
+                        <span class="text-base-content text-sm">{model.name}</span>
                         {#if model.id === selectedModelId}
-                          <Check size={16} class="text-bg-accent" />
+                          <Check size={16} class="text-primary" />
                         {/if}
                       </div>
                     </button>
                     <button
                       onclick={(e) => { e.stopPropagation(); handleToggleFavorite(model); }}
-                      class="p-1 hover:bg-gray-100 rounded transition-colors ml-2"
+                      class="p-1 hover:bg-base-200 rounded transition-colors ml-2"
                     >
                       <Star 
                         size={16} 
-                        class={model.favorite ? "fill-yellow-500 text-yellow-500" : "text-gray-400 hover:text-gray-600"} 
+                        class={model.favorite ? "fill-warning text-warning" : "text-base-content/60 hover:text-base-content"} 
                       />
                     </button>
                   </div>

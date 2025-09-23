@@ -43,7 +43,7 @@
   <!-- 数值显示 -->
   {#if showValue}
     <div class="flex justify-end">
-      <span class="text-sm font-mono text-gray-600 bg-gray-100 px-2 py-1 rounded">
+      <span class="text-sm font-mono text-base-content/80 bg-base-200 px-2 py-1 rounded">
         {formatValue(value)}
       </span>
     </div>
@@ -51,7 +51,7 @@
 
   <!-- 左右标签 -->
   {#if leftLabel || rightLabel}
-    <div class="flex justify-between items-center text-xs text-gray-500 mb-2 px-1">
+    <div class="flex justify-between items-center text-xs text-base-content/70 mb-2 px-1">
       <span>{leftLabel}</span>
       <span>{rightLabel}</span>
     </div>
@@ -59,24 +59,24 @@
   
   <div class="relative px-1">
     <!-- 滑杆轨道 -->
-    <div class="relative h-1 bg-gray-200 rounded-full">
+    <div class="relative h-1 bg-base-300 rounded-full">
       <!-- 已填充部分 -->
       <div 
-        class="absolute top-0 left-0 h-full bg-bg-accent rounded-full transition-all duration-200 ease-out"
+        class="absolute top-0 left-0 h-full bg-primary rounded-full transition-all duration-200 ease-out"
         style="width: {percentage}%"
       ></div>
       
       <!-- 刻度圆环 -->
       {#each scaleMarks as mark}
         <div 
-          class="absolute top-1/2 transform -translate-y-1/2 w-2 h-2 bg-white border border-gray-300 rounded-full" 
+          class="absolute top-1/2 transform -translate-y-1/2 w-2 h-2 bg-base-100 border border-base-300 rounded-full" 
           style="left: calc({mark.position}% - 4px)"
         ></div>
       {/each}
       
       <!-- 滑块 -->
       <div 
-        class="absolute top-1/2 transform -translate-y-1/2 w-4 h-4 bg-white border-2 border-bg-accent rounded-full shadow-md cursor-pointer transition-all duration-200 hover:scale-110 hover:shadow-lg focus:ring-4 focus:ring-blue-200 focus:outline-none z-10"
+        class="absolute top-1/2 transform -translate-y-1/2 w-4 h-4 bg-base-100 border-2 border-primary rounded-full shadow-md cursor-pointer transition-all duration-200 hover:scale-110 hover:shadow-lg focus:ring-4 focus:ring-primary/30 focus:outline-none z-10"
         style="left: calc({percentage}% - 8px)"
       ></div>
     </div>
@@ -99,7 +99,7 @@
       <div class="relative h-4">
         {#each scaleMarks as mark}
           <span 
-            class="absolute font-mono text-text-secondary text-xs transform -translate-x-1/2" 
+            class="absolute font-mono text-base-content/80 text-xs transform -translate-x-1/2" 
             style="left: {mark.position}%"
           >
             {mark.value}
@@ -110,7 +110,7 @@
   {/if}
   
   {#if description}
-    <div class="text-xs text-gray-500">
+    <div class="text-xs text-base-content/70">
       {description}
     </div>
   {/if}
