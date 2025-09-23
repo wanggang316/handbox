@@ -105,7 +105,7 @@
 
 <div class="flex-1 mt-1 p-0 space-y-2">
   <div class="flex items-center justify-between">
-    <div class="text-sm text-gray-500">
+    <div class="text-sm text-base-content/70">
       {#if chatState.currentChat}
         已启用 {currentServers.filter(s => s.enabled).length} 个服务器
       {:else}
@@ -140,9 +140,9 @@
       <RoundButton
         customClass="w-24"
         label="重置"
-        bgColor="bg-gray-200"
-        textColor="text-gray-600"
-        hoverColor="hover:text-gray-800"
+        bgColor="bg-base-200"
+        textColor="text-base-content/80"
+        hoverColor="hover:text-base-content"
         onclick={handleReset}
         disabled={!hasChanges()}
       />
@@ -155,14 +155,14 @@
       />
     </div>
   {:else if !chatState.currentChat}
-    <div class="text-center py-8 text-gray-500">
-      <Server size={48} class="mx-auto mb-4 text-gray-300" />
+    <div class="text-center py-8 text-base-content/70">
+      <Server size={48} class="mx-auto mb-4 text-base-content/40" />
       <p class="mb-2">请先选择或创建聊天</p>
       <p class="text-sm">MCP 服务器配置将与聊天关联</p>
     </div>
   {:else}
-    <div class="text-center py-8 text-gray-500">
-      <Server size={48} class="mx-auto mb-4 text-gray-300" />
+    <div class="text-center py-8 text-base-content/70">
+      <Server size={48} class="mx-auto mb-4 text-base-content/40" />
       <p class="mb-2">暂无可用的 MCP 服务器</p>
       <p class="text-sm">请在应用设置中配置 MCP 服务器</p>
     </div>

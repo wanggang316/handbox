@@ -7,10 +7,10 @@
   let { status, text }: Props = $props();
 
   const statusStyles = {
-    enabled: 'bg-green-100 text-green-800 border-green-200',
-    disabled: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    idle: 'bg-slate-100 text-slate-600 border-slate-200',
-    error: 'bg-red-100 text-red-800 border-red-200'
+    enabled: 'bg-success/10 text-success border-success/30',
+    disabled: 'bg-warning/10 text-warning border-warning/30',
+    idle: 'bg-base-200 text-base-content/70 border-base-300',
+    error: 'bg-error/10 text-error border-error/30'
   };
 </script>
 

@@ -12,8 +12,8 @@
 
 <style>
 .label { display:block; margin-bottom:.5rem; font-weight:500; }
-.input { width:100%; padding:.5rem .75rem; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-primary); color:var(--text-primary); }
-.input:focus{ outline:none; border-color: var(--bg-accent); }
+.input { width:100%; padding:.5rem .75rem; border:1px solid var(--base-300); border-radius:6px; background:var(--base-100); color:var(--base-content); }
+.input:focus{ outline:none; border-color: var(--primary); }
 </style>
 
 

@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { createEventDispatcher } from 'svelte';
+  import { onMount } from "svelte";
+  import { createEventDispatcher } from "svelte";
 
   export let initialWidth = 347;
   export let minWidth = 240;
   export let maxWidth = 600;
   export let storageKey: string | null = null;
-  export let containerClass: string = '';
+  export let containerClass: string = "";
 
   export let width = initialWidth;
   let dragging = false;
@@ -29,9 +29,9 @@
     return Math.min(Math.max(value, minWidth), maxWidth);
   }
 
-  let originalUserSelect = '';
-  let originalWebkitUserSelect = '';
-  let originalCursor = '';
+  let originalUserSelect = "";
+  let originalWebkitUserSelect = "";
+  let originalCursor = "";
 
   function startDrag(event: PointerEvent) {
     event.preventDefault();
@@ -44,12 +44,12 @@
     // @ts-ignore - webkit prefixed property for Safari
     originalWebkitUserSelect = (bodyStyle as any).webkitUserSelect;
     originalCursor = bodyStyle.cursor;
-    bodyStyle.userSelect = 'none';
+    bodyStyle.userSelect = "none";
     // @ts-ignore
-    (bodyStyle as any).webkitUserSelect = 'none';
-    bodyStyle.cursor = 'col-resize';
+    (bodyStyle as any).webkitUserSelect = "none";
+    bodyStyle.cursor = "col-resize";
 
-    dispatch('resizeStart');
+    dispatch("resizeStart");
   }
 
   let rafId: number | null = null;
@@ -65,7 +65,7 @@
       rafId = requestAnimationFrame(() => {
         if (pendingWidth !== null) {
           width = pendingWidth;
-          dispatch('resizing', { width });
+          dispatch("resizing", { width });
           pendingWidth = null;
         }
         rafId = null;
@@ -89,7 +89,7 @@
     // @ts-ignore
     (bodyStyle as any).webkitUserSelect = originalWebkitUserSelect;
     bodyStyle.cursor = originalCursor;
-    dispatch('resizeEnd', { width });
+    dispatch("resizeEnd", { width });
   }
 
   function resetWidth() {
@@ -98,10 +98,14 @@
   }
 </script>
 
-<div bind:this={container} class={`relative flex-shrink-0 ${containerClass}`} style={`width:${width}px; height:100%`}>
+<div
+  bind:this={container}
+  class={`relative flex-shrink-0 ${containerClass}`}
+  style={`width:${width}px; height:100%`}
+>
   <slot />
   <div
-    class="absolute right-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-gray-100 active:bg-gray-200 z-[10001]"
+    class="absolute right-0 top-0 h-full w-1 cursor-col-resize bg-transparent active:bg-base-300 z-[10001]"
     role="separator"
     aria-orientation="vertical"
     aria-valuenow={width}
@@ -115,6 +119,3 @@
     aria-label="调整侧栏宽度"
   ></div>
 </div>
-
-
-

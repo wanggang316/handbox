@@ -18,9 +18,9 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             {#if icon}
-              {@render icon({ class: "w-4 h-4 text-slate-600" })}
+              {@render icon({ class: "w-4 h-4 text-base-content/70" })}
             {/if}
-            <div class="text-sm font-medium text-gray-700">{label}</div>
+            <div class="text-sm font-medium text-base-content">{label}</div>
           </div>
           {#if rightContent}
             <div>
@@ -36,9 +36,9 @@
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
           {#if icon}
-            {@render icon({ class: "w-4 h-4 text-slate-600" })}
+            {@render icon({ class: "w-4 h-4 text-base-content/70" })}
           {/if}
-          <div class="text-sm text-gray-700">{label}</div>
+          <div class="text-sm text-base-content">{label}</div>
         </div>
         <div class="flex justify-end flex-1 ml-4">
           {@render children?.()}

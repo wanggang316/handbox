@@ -49,17 +49,17 @@
 
     {value}
     oninput={handleInput}
-    class="w-full px-3 py-2 border border-gray-300 rounded-md resize-none 
-           focus:outline-none focus:ring-2 focus:ring-bg-accent focus:border-transparent 
-           font-mono text-sm bg-bg-primary
-           scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 
-           hover:scrollbar-thumb-gray-400
-           disabled:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50
-           readonly:bg-gray-50"
+    class="w-full px-3 py-2 border border-base-300 rounded-md resize-none 
+           focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent 
+           font-mono text-sm bg-base-100
+           scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200 
+           hover:scrollbar-thumb-base-300/80
+           disabled:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50
+           readonly:bg-base-200"
   ></textarea>
   
   {#if showCharCount}
-    <div class="text-xs text-gray-500 text-left">
+    <div class="text-xs text-base-content/70 text-left">
       {#if maxlength}
         {value.length} / {maxlength}
       {:else}

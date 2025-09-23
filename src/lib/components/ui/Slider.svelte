@@ -28,8 +28,8 @@
 <div class="space-y-2">
   {#if label}
     <div class="flex items-center justify-between">
-      <label for="slider-{label}" class="text-sm font-medium text-gray-700">{label}</label>
-      <span class="text-sm font-mono text-gray-600 bg-gray-100 px-2 py-1 rounded">
+      <label for="slider-{label}" class="text-sm font-medium text-base-content">{label}</label>
+      <span class="text-sm font-mono text-base-content/80 bg-base-200 px-2 py-1 rounded">
         {formatValue(value)}
       </span>
     </div>
@@ -44,13 +44,13 @@
       {max}
       {step}
       {disabled}
-      class="slider w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
-      style="background: linear-gradient(to right, #3b82f6 0%, #3b82f6 {percentage}%, #e5e7eb {percentage}%, #e5e7eb 100%)"
+      class="slider w-full h-2 bg-base-300 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      style="background: linear-gradient(to right, var(--primary) 0%, var(--primary) {percentage}%, var(--base-300) {percentage}%, var(--base-300) 100%)"
     />
   </div>
   
   {#if description}
-    <div class="text-xs text-gray-500">
+    <div class="text-xs text-base-content/70">
       {description}
     </div>
   {/if}
@@ -62,44 +62,44 @@
     height: 20px;
     width: 20px;
     border-radius: 50%;
-    background: #3b82f6;
+    background: var(--primary);
     cursor: pointer;
-    border: 2px solid #ffffff;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 2px solid var(--base-100);
+    box-shadow: 0 2px 4px color-mix(in oklch, var(--base-content) 15%, transparent);
     transition: all 0.2s ease;
   }
 
   .slider::-webkit-slider-thumb:hover {
-    background: #2563eb;
+    filter: brightness(1.1);
     transform: scale(1.1);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 8px color-mix(in oklch, var(--base-content) 20%, transparent);
   }
 
   .slider::-moz-range-thumb {
     height: 20px;
     width: 20px;
     border-radius: 50%;
-    background: #3b82f6;
+    background: var(--primary);
     cursor: pointer;
-    border: 2px solid #ffffff;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 2px solid var(--base-100);
+    box-shadow: 0 2px 4px color-mix(in oklch, var(--base-content) 15%, transparent);
     transition: all 0.2s ease;
   }
 
   .slider::-moz-range-thumb:hover {
-    background: #2563eb;
+    filter: brightness(1.1);
     transform: scale(1.1);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 8px color-mix(in oklch, var(--base-content) 20%, transparent);
   }
 
   .slider:disabled::-webkit-slider-thumb {
-    background: #9ca3af;
+    background: color-mix(in oklch, var(--base-content) 40%, transparent);
     cursor: not-allowed;
     transform: none;
   }
 
   .slider:disabled::-moz-range-thumb {
-    background: #9ca3af;
+    background: color-mix(in oklch, var(--base-content) 40%, transparent);
     cursor: not-allowed;
     transform: none;
   }

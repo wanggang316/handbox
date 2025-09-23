@@ -9,10 +9,10 @@
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏配置常量
-  const SIDEBAR_AUTO_HIDE_WIDTH = 600;  // 自动隐藏侧边栏的最小窗口宽度阈值
-  const SIDEBAR_INITIAL_WIDTH = 240;    // 侧边栏初始宽度
-  const SIDEBAR_MIN_WIDTH = 200;        // 侧边栏最小宽度
-  const SIDEBAR_MAX_WIDTH = 300;        // 侧边栏最大宽度
+  const SIDEBAR_AUTO_HIDE_WIDTH = 600; // 自动隐藏侧边栏的最小窗口宽度阈值
+  const SIDEBAR_INITIAL_WIDTH = 240; // 侧边栏初始宽度
+  const SIDEBAR_MIN_WIDTH = 200; // 侧边栏最小宽度
+  const SIDEBAR_MAX_WIDTH = 300; // 侧边栏最大宽度
 
   let sidebarWidth = $state(SIDEBAR_INITIAL_WIDTH);
   let isDragging = $state(false);
@@ -24,19 +24,19 @@
   function toggleSidebar() {
     uiState.toggleSidebar();
     autoHidden = false; // 手动操作时清除自动隐藏标记
-    
+
     // 如果在窄屏模式下手动打开侧边栏，标记用户覆盖行为
     if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH && uiState.sidebarOpen) {
       userOverrideInNarrowMode = true;
-    } 
+    }
     // 如果在宽屏模式下或手动关闭，清除覆盖标记
     else if (windowWidth >= SIDEBAR_AUTO_HIDE_WIDTH || !uiState.sidebarOpen) {
       userOverrideInNarrowMode = false;
     }
-    
+
     // 保存状态到 localStorage
     if (browser) {
-      localStorage.setItem('sidebar.open', JSON.stringify(uiState.sidebarOpen));
+      localStorage.setItem("sidebar.open", JSON.stringify(uiState.sidebarOpen));
     }
   }
 
@@ -45,7 +45,7 @@
     if (browser) {
       const prevWindowWidth = windowWidth;
       windowWidth = window.innerWidth;
-      
+
       if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH) {
         if (uiState.sidebarOpen && !autoHidden && !userOverrideInNarrowMode) {
           uiState.setSidebarOpen(false);
@@ -63,7 +63,7 @@
 
   // 键盘快捷键支持
   function handleKeydown(event: KeyboardEvent) {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'b') {
+    if ((event.metaKey || event.ctrlKey) && event.key === "b") {
       event.preventDefault();
       toggleSidebar();
     }
@@ -72,7 +72,7 @@
   // 从 localStorage 恢复侧边栏状态
   function restoreSidebarState() {
     if (browser) {
-      const saved = localStorage.getItem('sidebar.open');
+      const saved = localStorage.getItem("sidebar.open");
       if (saved !== null) {
         uiState.setSidebarOpen(JSON.parse(saved));
       }
@@ -82,24 +82,24 @@
   onMount(() => {
     // 全局初始化聊天状态
     chatActions.initialize();
-    
+
     // 恢复侧边栏状态
     restoreSidebarState();
-    
+
     // 从 localStorage 恢复侧边栏宽度
-    const savedWidth = localStorage.getItem('main.sidebar.width');
+    const savedWidth = localStorage.getItem("main.sidebar.width");
     if (savedWidth) {
       sidebarWidth = parseInt(savedWidth);
     }
-    
+
     if (browser) {
       windowWidth = window.innerWidth;
       handleResize();
-      window.addEventListener('keydown', handleKeydown);
-      window.addEventListener('resize', handleResize);
+      window.addEventListener("keydown", handleKeydown);
+      window.addEventListener("resize", handleResize);
       return () => {
-        window.removeEventListener('keydown', handleKeydown);
-        window.removeEventListener('resize', handleResize);
+        window.removeEventListener("keydown", handleKeydown);
+        window.removeEventListener("resize", handleResize);
       };
     }
   });
@@ -108,13 +108,29 @@
 </script>
 
 <div class="app">
-  <TitleBar sidebarOpen={uiState.sidebarOpen} showToggleButton={true} on:toggle={toggleSidebar} />
-  
-  <div class="sidebar-wrapper m-2" class:dragging={isDragging} style={`width:${uiState.sidebarOpen ? sidebarWidth : 0}px`} aria-hidden={!uiState.sidebarOpen}>
+  <TitleBar
+    sidebarOpen={uiState.sidebarOpen}
+    showToggleButton={true}
+    on:toggle={toggleSidebar}
+  />
+
+  <div
+    class="sidebar-wrapper m-2"
+    class:dragging={isDragging}
+    style={`width:${uiState.sidebarOpen ? sidebarWidth : 0}px`}
+    aria-hidden={!uiState.sidebarOpen}
+  >
     <ResizableSidebar
-      on:resizeStart={() => { isDragging = true; }}
-      on:resizing={(e) => { sidebarWidth = e.detail.width; }}
-      on:resizeEnd={(e) => { isDragging = false; sidebarWidth = e.detail.width; }}
+      on:resizeStart={() => {
+        isDragging = true;
+      }}
+      on:resizing={(e) => {
+        sidebarWidth = e.detail.width;
+      }}
+      on:resizeEnd={(e) => {
+        isDragging = false;
+        sidebarWidth = e.detail.width;
+      }}
       bind:width={sidebarWidth}
       initialWidth={SIDEBAR_INITIAL_WIDTH}
       minWidth={SIDEBAR_MIN_WIDTH}
@@ -136,8 +152,8 @@
     display: flex;
     height: 100vh;
     width: 100vw;
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
+    background-color: var(--base-100);
+    color: var(--base-content);
     position: relative;
     overflow: hidden;
     overscroll-behavior: none;
@@ -146,7 +162,7 @@
   .sidebar-wrapper {
     flex-shrink: 0;
     min-width: 0;
-    transition: width 0.0s linear;
+    transition: width 0s linear;
     overflow: hidden;
   }
 
@@ -163,15 +179,17 @@
   }
 
   @media (max-width: 768px) {
-    .main-content { margin-left: 0; }
+    .main-content {
+      margin-left: 0;
+    }
   }
 
-  :global(*, *::before, *::after) { box-sizing: border-box; }
+  :global(*, *::before, *::after) {
+    box-sizing: border-box;
+  }
   :global(body) {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
       Ubuntu, Cantarell, sans-serif;
   }
 </style>
-
-

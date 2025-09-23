@@ -158,7 +158,7 @@
     />
   {:else if currentProvider}
     <div
-      class="w-6 h-6 bg-gray-300 rounded flex items-center justify-center text-xs font-bold"
+      class="w-6 h-6 bg-base-300 rounded flex items-center justify-center text-xs font-bold"
     >
       {currentProvider.name.charAt(0).toUpperCase()}
     </div>
@@ -167,16 +167,16 @@
 
 <!-- 粘性导航栏 - 在右侧主体区域内固定 -->
 <div class="flex flex-col h-screen">
-  <header class=" text-white py-2 px-4 flex-shrink-0">
+  <header class="text-base-content py-2 px-4 flex-shrink-0">
     <CircleButton
       icon={ChevronLeft}
       iconSize={22}
       ariaLabel="返回"
       size="w-8 h-8"
-      bgColor="bg-bg-secondary"
-      hoverColor="hover:bg-bg-hover"
-      textColor="text-text-primary"
-      customClass="hover:text-text-secondary z-10004 relative"
+      bgColor="bg-base-200"
+      hoverColor="hover:bg-base-300"
+      textColor="text-base-content"
+      customClass="hover:text-base-content/80 z-10004 relative"
       onclick={handleBack}
     />
   </header>
@@ -201,16 +201,16 @@
     {/if}
 
     <div class="flex items-center mt-6 mb-2">
-      <div class="flex-1 text-text-primary text-base mx-2">模型列表</div>
+      <div class="flex-1 text-base-content text-base mx-2">模型列表</div>
     </div>
 
     {#if currentProvider}
       {@const providerModels = providerState.currentModels}
       {#if providerModels.length > 0}
-        <div class="bg-bg-secondary rounded-xl overflow-hidden">
+        <div class="bg-base-200 rounded-xl overflow-hidden">
           <!-- Table Headers -->
           <div
-            class="flex flex-row items-center gap-4 px-4 py-2 bg-bg-hover border-b border-border text-xs font-medium text-text-primary"
+            class="flex flex-row items-center gap-4 px-4 py-2 bg-base-300 border-b border-base-300 text-xs font-medium text-base-content"
           >
             <div class="flex-1">Name</div>
             <div class="text-center w-16">Enabled</div>
@@ -218,14 +218,14 @@
           </div>
 
           <!-- Model List -->
-          <div class="bg-bg-primary">
+          <div class="bg-base-100">
             {#each providerModels as model, index}
               <div
-                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-bg-primary' : 'bg-bg-secondary'} hover:bg-bg-hover"
+                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-base-100' : 'bg-base-200'} hover:bg-base-300"
               >
                 <!-- Model Name -->
                 <div class="flex items-center flex-1">
-                  <span class="text-text-primary text-xs">{model.name}</span>
+                  <span class="text-base-content text-xs">{model.name}</span>
                 </div>
 
                 <!-- Enabled Toggle -->
@@ -243,7 +243,7 @@
                         );
                       }
                     }}
-                    class="w-4 h-4 text-accent bg-bg-primary border-border rounded focus:ring-accent focus:ring-2"
+                    class="w-4 h-4 text-primary bg-base-100 border-base-300 rounded focus:ring-primary focus:ring-2"
                   />
                 </div>
 
@@ -258,7 +258,7 @@
                         );
                       }
                     }}
-                    class="p-1 rounded hover:bg-bg-hover transition-colors"
+                    class="p-1 rounded hover:bg-base-300 transition-colors"
                     aria-label={model.favorite
                       ? "Remove from favorites"
                       : "Add to favorites"}
@@ -266,8 +266,8 @@
                     <Star
                       size={16}
                       class={model.favorite
-                        ? "text-text-primary fill-current"
-                        : "text-text-secondary hover:text-red-400"}
+                        ? "text-base-content fill-current"
+                        : "text-base-content/60 hover:text-error"}
                     />
                   </button>
                 </div>
@@ -276,7 +276,7 @@
           </div>
         </div>
       {:else}
-        <div class="text-center text-sm py-8 text-gray-500">
+        <div class="text-center text-sm py-8 text-base-content/70">
           暂无模型数据，请检查供应商配置或网络连接
         </div>
       {/if}

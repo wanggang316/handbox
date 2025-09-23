@@ -26,26 +26,26 @@ onMount(() => {
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background-color: var(--bg-primary);
+  background-color: var(--base-100);
 }
 
 .loading-content {
   text-align: center;
-  color: var(--text-primary);
+  color: var(--base-content);
 }
 
 .logo h1 {
   font-size: 2.5rem;
   font-weight: 700;
   margin: 0 0 2rem 0;
-  color: var(--bg-accent);
+  color: var(--primary);
 }
 
 .loading-spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid var(--border-color);
-  border-top-color: var(--bg-accent);
+  border: 3px solid var(--base-300);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin: 0 auto 1rem auto;
@@ -57,7 +57,7 @@ onMount(() => {
 
 .loading-container p {
   margin: 0;
-  color: var(--text-secondary);
+  color: color-mix(in oklch, var(--base-content) 80%, transparent);
   font-size: 0.875rem;
 }
 </style>

@@ -48,10 +48,10 @@
           <div class="flex items-center gap-2 px-1">
             <span
               class="w-2 h-2 rounded-full {saveStatus === 'saving'
-                ? 'bg-yellow-500'
-                : 'bg-red-500'}"
+                ? 'bg-warning'
+                : 'bg-error'}"
             ></span>
-            <span class="text-xs text-gray-500">
+            <span class="text-xs text-base-content/70">
               {saveStatus === "saving" ? "保存中..." : "保存失败"}
             </span>
           </div>

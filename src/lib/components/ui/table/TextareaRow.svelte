@@ -48,7 +48,7 @@
     />
     
     {#if description}
-      <div class="text-xs text-gray-500">
+      <div class="text-xs text-base-content/70">
         {description}
       </div>
     {/if}

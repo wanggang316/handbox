@@ -34,12 +34,12 @@
 </script>
 
 <!-- 顶部栏 -->
-<header class="h-[50px] px-4 border-b border-gray-200 flex items-center justify-between">
+<header class="h-[50px] px-4 border-b border-base-300 flex items-center justify-between">
   <div class="transition-all duration-300" class:ml-[120px]={!sidebarOpen}>
-    <h1 class="text-base font-medium text-gray-900">
+    <h1 class="text-base font-medium text-base-content">
       {title}
       {#if chatId}
-        <span class="text-xs text-gray-500 ml-2">ID: {chatId}</span>
+        <span class="text-xs text-base-content/70 ml-2">ID: {chatId}</span>
       {/if}
     </h1>
     
@@ -52,6 +52,7 @@
         on:click={handleChatSettings}
       />
     {/if}
+  </div>
 </header>
 
 <!-- 聊天设置模态框 -->

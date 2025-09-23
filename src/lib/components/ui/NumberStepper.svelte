@@ -75,7 +75,7 @@
       type="button"
       onclick={increment}
       disabled={disabled || value >= max}
-      class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      class="p-0.5 text-base-content/60 hover:text-base-content disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       aria-label="增加"
     >
       <ChevronUp size={12} />
@@ -84,7 +84,7 @@
       type="button"
       onclick={decrement}
       disabled={disabled || value <= min}
-      class="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      class="p-0.5 text-base-content/60 hover:text-base-content disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       aria-label="减少"
     >
       <ChevronDown size={12} />

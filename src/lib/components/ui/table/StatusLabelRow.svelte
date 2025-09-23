@@ -34,14 +34,16 @@
       class="w-6 h-6 object-contain"
     />
   {:else if icon}
-    <div class="w-6 h-6 rounded bg-gradient-to-br {isCustomProvider ? 'from-green-500 to-teal-600' : 'from-blue-500 to-purple-600'} flex items-center justify-center text-white text-xs font-medium">
+    <div
+      class={`w-6 h-6 rounded flex items-center justify-center text-xs font-medium ${isCustomProvider ? 'bg-success text-success-content' : 'bg-primary text-primary-content'}`}
+    >
       {icon}
     </div>
   {/if}
 {/snippet}
 
 <button 
-  class="w-full {clickable ? 'hover:bg-bg-hover' : ''}"
+  class="w-full {clickable ? 'hover:bg-base-300' : ''} group"
   {onclick}
   onkeydown={(e) => e.key === "Enter" && onclick?.()}
 >
@@ -51,7 +53,7 @@
       <StatusLabel {status} text={statusText} />
       {#if clickable}
         <ChevronRight size=16
-          class="text-slate-400 group-hover:text-slate-600 transition-colors duration-75"
+          class="text-base-content/50 group-hover:text-base-content transition-colors duration-75"
         />
       {/if}
     </div>

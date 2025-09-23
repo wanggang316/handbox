@@ -1,16 +1,16 @@
 <script lang="ts">
-  import type { Icon as IconType } from '@lucide/svelte';
+  import type { Icon as IconType } from "@lucide/svelte";
 
   export let icon: typeof IconType;
   export let iconSize: number = 16;
   export let ariaLabel: string;
-  export let bgColor: string = 'bg-black';
-  export let hoverColor: string = 'hover:bg-black/80';
-  export let textColor: string = 'text-white';
-  export let size: string = 'w-10 h-10';
-  export let rounded: string = 'rounded-full';
+  export let bgColor: string = "bg-neutral";
+  export let hoverColor: string = "hover:bg-neutral/90";
+  export let textColor: string = "text-neutral-content";
+  export let size: string = "w-10 h-10";
+  export let rounded: string = "rounded-full";
   export let disabled: boolean = false;
-  export let customClass: string = '';
+  export let customClass: string = "";
 
   export let onclick: ((event: MouseEvent) => void) | undefined = undefined;
 

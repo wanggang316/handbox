@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { TableGroup, SwitchRow, DropDownRow } from '$lib/components/ui/table';
-  import { settingsState } from '$lib/stores';
+  import { settingsState } from '$lib/states';
   import type { Theme, ThemeColor, Language } from '$lib/types/settings';
 
   // 外观样式选项
@@ -118,5 +118,4 @@
     />
   </TableGroup>
 </div>
-
 

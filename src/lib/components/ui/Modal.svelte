@@ -26,7 +26,7 @@
 {#if open}
   <div 
     bind:this={modalElement}
-    class="fixed inset-0 bg-black/30 flex items-center justify-center z-[10010] animate-backdrop" 
+    class="fixed inset-0 bg-base-content/30 flex items-center justify-center z-[10010] animate-backdrop" 
     class:animate-backdrop-close={closing}
     role="dialog" 
     aria-modal="true"
@@ -41,7 +41,7 @@
     >
       <!-- 背景层：负责视觉效果和边界裁切，但不影响内容层 -->
       <div 
-        class="bg-white max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative pointer-events-none" 
+        class="bg-base-100 max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative pointer-events-none" 
         style="border-radius: 20px; z-index: 1;"
       >
         <!-- 预留内容空间 -->
@@ -62,7 +62,7 @@
               <TrafficLightsRedButton onClick={handleClose} />
             {/if}
             {#if title}
-              <h3 class="text-base font-medium text-gray-600 ml-4">{title}</h3>
+              <h3 class="text-base font-medium text-base-content/80 ml-4">{title}</h3>
             {/if}
           </div>
         {/if}

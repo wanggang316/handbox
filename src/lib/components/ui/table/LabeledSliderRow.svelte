@@ -41,7 +41,7 @@
 
 <TableBaseRow {label} layout="vertical">
   {#snippet rightContent()}
-    <span class="text-sm font-mono text-gray-600 bg-gray-100 px-2 py-1 rounded">
+    <span class="text-sm font-mono text-base-content/80 bg-base-200 px-2 py-1 rounded">
       {formatValue(value)}
     </span>
   {/snippet}

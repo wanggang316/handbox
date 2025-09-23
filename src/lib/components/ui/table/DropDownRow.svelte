@@ -42,7 +42,7 @@
 <TableBaseRow {label} py=2>
   <div class="flex flex-col items-end">
     {#if description}
-      <div class="text-xs text-gray-500 mb-1 text-right">
+      <div class="text-xs text-base-content/70 mb-1 text-right">
         {description}
       </div>
     {/if}

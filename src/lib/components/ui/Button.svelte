@@ -25,17 +25,15 @@
     }
     .md { padding: 0.5rem 1rem; }
     .sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
-    .primary { background: var(--bg-accent); color: var(--text-accent); }
-    .secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); }
-    .gray { background: var(--bg-hover); color: var(--text-secondary); }
-    .danger { background: #ef4444; color: #fff; }
-    .ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }
-    .clear { background: transparent; color: var(--text-primary); border: none; }
+    .primary { background: var(--primary); color: var(--primary-content); }
+    .secondary { background: var(--base-200); color: var(--base-content); border: 1px solid var(--base-300); }
+    .gray { background: var(--base-200); color: color-mix(in oklch, var(--base-content) 80%, transparent); border: 1px solid var(--base-300); }
+    .danger { background: var(--error); color: var(--error-content); }
+    .ghost { background: transparent; color: color-mix(in oklch, var(--base-content) 80%, transparent); border: 1px solid var(--base-300); }
+    .clear { background: transparent; color: var(--base-content); border: none; }
     .btn:hover:not(:disabled) { opacity: 0.9; }
-    .btn.gray:hover:not(:disabled) { background: var(--color-gray-200); color: var(--bg-text-parmary); opacity: 1; }
-    .btn.ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); opacity: 1; }
-    .btn.clear:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); opacity: 1; }
+    .btn.gray:hover:not(:disabled) { background: var(--base-300); color: var(--base-content); opacity: 1; }
+    .btn.ghost:hover:not(:disabled) { background: var(--base-300); color: var(--base-content); opacity: 1; }
+    .btn.clear:hover:not(:disabled) { background: var(--base-300); color: var(--base-content); opacity: 1; }
   </style>
 </button>
-
-

@@ -57,21 +57,21 @@
     switch (style) {
       case "danger":
         return {
-          bgColor: "bg-red-600",
-          textColor: "text-white",
-          hoverColor: "hover:bg-red-700"
+          bgColor: "bg-error",
+          textColor: "text-base-100",
+          hoverColor: "hover:bg-error/90"
         };
       case "accent":
         return {
-          bgColor: "bg-bg-accent",
-          textColor: "text-white",
-          hoverColor: "hover:bg-bg-accent-hover"
+          bgColor: "bg-primary",
+          textColor: "text-primary-content",
+          hoverColor: "hover:bg-primary/90"
         };
       default:
         return {
-          bgColor: "bg-bg-accent",
-          textColor: "text-white",
-          hoverColor: "hover:bg-bg-accent-hover"
+          bgColor: "bg-primary",
+          textColor: "text-primary-content",
+          hoverColor: "hover:bg-primary/90"
         };
     }
   };
@@ -87,7 +87,7 @@
     </div>
 
     <!-- 内容 -->
-    <div class="px-6 py-2 text-center text-text-primary text-[12px]">
+    <div class="px-6 py-2 text-center text-base-content text-[12px]">
       {@html message}
     </div>
 
@@ -98,9 +98,9 @@
         label={cancelText}
         size="h-8"
         fontSize="text-sm"
-        bgColor="bg-gray-200"
-        textColor="text-gray-600"
-        hoverColor="hover:bg-gray-300"
+        bgColor="bg-base-200"
+        textColor="text-base-content/80"
+        hoverColor="hover:bg-base-300"
         onclick={handleCancel}
       />
       <RoundButton

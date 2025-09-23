@@ -14,20 +14,20 @@
 </script>
 
 <button
-	class="w-full {clickable ? 'hover:bg-bg-hover' : ''}"
+	class="w-full {clickable ? 'hover:bg-base-300' : ''} group"
 	{onclick}
 	onkeydown={(e) => e.key === "Enter" && onclick?.()}
 >
 	<TableBaseRow {label}>
 		<div class="flex flex-row items-center justify-between">
 			{#if value}
-				<div class="text-sm text-text-secondary text-right px-2">
+				<div class="text-sm text-base-content/80 text-right px-2">
 					{value}
 				</div>
 			{/if}
 			<ChevronRight
 				size="16"
-				class="text-slate-400 group-hover:text-slate-600 transition-colors duration-75"
+				class="text-base-content/50 group-hover:text-base-content transition-colors duration-75"
 			/>
 		</div>
 	</TableBaseRow>

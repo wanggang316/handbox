@@ -139,9 +139,9 @@
     <RoundButton
       customClass="w-24"
       label="恢复默认"
-      bgColor="bg-gray-200"
-      textColor="text-gray-600"
-      hoverColor="hover:text-gray-800"
+      bgColor="bg-base-200"
+      textColor="text-base-content/80"
+      hoverColor="hover:text-base-content"
       onclick={handleDefault}
     />
     {#if saveStatus !== "saved"}
@@ -149,10 +149,10 @@
         <div class="flex items-center gap-2">
           <span
             class="w-2 h-2 rounded-full {saveStatus === 'saving'
-              ? 'bg-yellow-500'
-              : 'bg-red-500'}"
+              ? 'bg-warning'
+              : 'bg-error'}"
           ></span>
-          <span class="text-xs text-gray-500">
+          <span class="text-xs text-base-content/70">
             {saveStatus === "saving" ? "保存中..." : "保存失败"}
           </span>
         </div>

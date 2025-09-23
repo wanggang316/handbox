@@ -16,7 +16,7 @@
 
 <style>
 .label { display:block; margin-bottom:.5rem; font-weight:500; }
-.select { width:100%; padding:.5rem; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-primary); color:var(--text-primary); }
+.select { width:100%; padding:.5rem; border:1px solid var(--base-300); border-radius:6px; background:var(--base-100); color:var(--base-content); }
 </style>
 
 
