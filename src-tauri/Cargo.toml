@@ -36,8 +36,8 @@ futures = "0.3"
 futures-util = "0.3"
 tokio-stream = "0.1"
 rand = "0.8"
-openai-rust = { path = "../../../openai-rust/openai-rust" }
-google-genai-rust = { path = "../../../google-genai-rust/google-genai-rust" }
+openai-rust = { path = "../../../../openai-rust/openai-rust" }
+google-genai-rust = { path = "../../../../google-genai-rust/google-genai-rust" }
 async-stream = "0.3"
 
 [dev-dependencies]
