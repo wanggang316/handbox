@@ -8,7 +8,7 @@
   } from "lucide-svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states";
-  import { renderMarkdown } from "$lib/utils";
+  import { openInBrowser, renderMarkdown } from "$lib/utils";
 
   interface Props {
     message?: Message;
@@ -86,6 +86,31 @@
     return target.closest<HTMLButtonElement>(".markdown-code-block__copy");
   }
 
+  function closestLink(target: EventTarget | null): HTMLAnchorElement | null {
+    if (!(target instanceof Element)) return null;
+    return target.closest<HTMLAnchorElement>("a[href]");
+  }
+
+  function isExternalLink(link: HTMLAnchorElement): boolean {
+    const href = link.getAttribute("href")?.trim();
+    if (!href) return false;
+
+    const lowerHref = href.toLowerCase();
+    if (lowerHref.startsWith("http://") || lowerHref.startsWith("https://")) {
+      return true;
+    }
+
+    return lowerHref.startsWith("mailto:") || lowerHref.startsWith("tel:");
+  }
+
+  async function openMarkdownLink(link: HTMLAnchorElement) {
+    try {
+      await openInBrowser(link.href);
+    } catch (error) {
+      console.error("Failed to open markdown link", error);
+    }
+  }
+
   async function copyText(content: string) {
     try {
       await navigator.clipboard.writeText(content);
@@ -106,41 +131,49 @@
     }
   }
 
-  function markdownCopy(node: HTMLElement) {
+  function markdownInteractions(node: HTMLElement) {
     const handleClick = async (event: MouseEvent) => {
       const button = closestButton(event.target);
-      if (!button) return;
+      if (button) {
+        event.preventDefault();
+        event.stopPropagation();
 
-      event.preventDefault();
-      event.stopPropagation();
+        const block = button.closest<HTMLElement>(".markdown-code-block");
+        const codeElement = block?.querySelector("code");
+        const codeContent = codeElement?.textContent ?? "";
 
-      const block = button.closest<HTMLElement>(".markdown-code-block");
-      const codeElement = block?.querySelector("code");
-      const codeContent = codeElement?.textContent ?? "";
+        if (!codeContent) return;
 
-      if (!codeContent) return;
+        if (onCopy) {
+          onCopy(codeContent);
+        } else {
+          await copyText(codeContent);
+        }
 
-      if (onCopy) {
-        onCopy(codeContent);
-      } else {
-        await copyText(codeContent);
+        button.classList.add("copied");
+
+        const timerId = button.dataset.copyTimeout
+          ? Number(button.dataset.copyTimeout)
+          : undefined;
+        if (timerId) {
+          window.clearTimeout(timerId);
+        }
+
+        const timeoutHandle = window.setTimeout(() => {
+          button.classList.remove("copied");
+          delete button.dataset.copyTimeout;
+        }, 1500);
+
+        button.dataset.copyTimeout = String(timeoutHandle);
+        return;
       }
 
-      button.classList.add("copied");
-
-      const timerId = button.dataset.copyTimeout
-        ? Number(button.dataset.copyTimeout)
-        : undefined;
-      if (timerId) {
-        window.clearTimeout(timerId);
+      const link = closestLink(event.target);
+      if (link && isExternalLink(link)) {
+        event.preventDefault();
+        event.stopPropagation();
+        await openMarkdownLink(link);
       }
-
-      const timeoutHandle = window.setTimeout(() => {
-        button.classList.remove("copied");
-        delete button.dataset.copyTimeout;
-      }, 1500);
-
-      button.dataset.copyTimeout = String(timeoutHandle);
     };
 
     node.addEventListener("click", handleClick);
@@ -212,7 +245,7 @@
               {#if reasoningExpanded}
                 <div
                   class="mt-2 mb-6 px-4 text-sm border-l border-base-300 text-base-content/80 break-words leading-relaxed reasoning-content markdown-content"
-                  use:markdownCopy
+                  use:markdownInteractions
                 >
                   {@html renderMarkdown(message.reasoning)}
                 </div>
@@ -223,7 +256,7 @@
           <!-- 消息内容 -->
           <div
             class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-            use:markdownCopy
+            use:markdownInteractions
           >
             {@html renderMarkdown(message?.content || "")}
           </div>
