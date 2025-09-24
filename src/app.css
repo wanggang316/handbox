@@ -282,8 +282,8 @@ body {
 }
 
 .markdown-content .markdown-code-block__copy:hover {
-  background-color: var(--base-300);
-  color: var(--primary);
+  background-color: var(--color-neutral);
+  color: var(--color-neutral-content);
 }
 
 .markdown-content .markdown-code-block__copy-icon {
@@ -309,7 +309,7 @@ body {
 
 .markdown-content .markdown-code-block__copy.copied {
   background-color: transparent;
-  color: var(--primary);
+  color: var(--color-base-content);
 }
 
 .markdown-content
