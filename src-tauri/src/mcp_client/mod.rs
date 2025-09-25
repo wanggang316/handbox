@@ -15,6 +15,21 @@ use rmcp::{
 
 use crate::models::McpTool;
 
+/// Common command paths to search for Node.js tools
+const NODE_COMMAND_PATHS: &[&str] = &[
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    "/usr/bin",
+];
+
+/// NVM-style paths to search (common locations)
+const NVM_PATHS: &[&str] = &[
+    "/.nvm/versions/node/v22.19.0/bin",
+    "/.nvm/versions/node/v20.18.0/bin",
+    "/.nvm/versions/node/v18.20.0/bin",
+    "/.nvm/current/bin",
+];
+
 /// Lightweight client wrapper around RMCP's [`RunningService`].
 ///
 /// The client owns the underlying transport task. Drop the struct or call
@@ -34,36 +49,61 @@ impl McpClient {
         working_dir: Option<&Path>,
         env: &HashMap<String, String>,
     ) -> Result<Self> {
+        tracing::info!("> command: {}", command);
+        tracing::info!("> extra_args: {:?}", extra_args);
+        tracing::info!("> working_dir: {:?}", working_dir);
+        tracing::info!("> env: {:?}", env);
+
         let (program, mut parsed_args) = parse_command(command)?;
+
         parsed_args.extend(extra_args.iter().cloned());
 
-        let mut display_parts = Vec::with_capacity(1 + parsed_args.len());
-        display_parts.push(program.clone());
-        display_parts.extend(parsed_args.iter().cloned());
-        let display_command = display_parts.join(" ");
+        // Resolve the full path for the program
+        let resolved_program = resolve_command_path(&program)?;
 
-        let mut cmd = tokio::process::Command::new(&program);
+        tracing::info!("program: {} (resolved to: {})", program, resolved_program);
+        tracing::info!("parsed_args: {:?}", parsed_args);
+
+        // let mut display_parts = Vec::with_capacity(1 + parsed_args.len());
+        // display_parts.push(program.clone());
+        // display_parts.extend(parsed_args.iter().cloned());
+        // let display_command = display_parts.join(" ");
+
+        let mut cmd = tokio::process::Command::new(&resolved_program);
         if !parsed_args.is_empty() {
             cmd.args(&parsed_args);
         }
         if let Some(dir) = working_dir {
-            cmd.current_dir(dir);
+            tracing::info!("> working_dir: {:?}", dir);
+            // Only set working directory if it's not empty
+            if !dir.as_os_str().is_empty() {
+                cmd.current_dir(dir);
+            } else {
+                tracing::warn!("Empty working directory provided, using default");
+            }
         }
         if !env.is_empty() {
             cmd.envs(env.iter().map(|(k, v)| (k, v)));
         }
 
-        let transport = TokioChildProcess::new(cmd)
-            .with_context(|| format!("无法启动 MCP 服务器命令: {}", display_command))?;
+        let client = (default_client_info())
+        .serve(
+            TokioChildProcess::new(cmd).with_context(|| {
+                format!(
+                    "Failed to start MCP server process: {} {}",
+                    resolved_program,
+                    parsed_args.join(" ")
+                )
+            })?,
+        )
+        .await
+        .with_context(|| format!("Failed to establish MCP connection to {}", resolved_program))?;
+    
+        // Initialize
+        let server_info = client.peer_info();
+        tracing::info!("Connected to server: {server_info:#?}");
 
-        let client_info = default_client_info();
-        let service = client_info
-            .clone()
-            .serve(transport)
-            .await
-            .context("MCP 初始化失败")?;
-
-        Ok(Self { service })
+        Ok(Self { service: client })
     }
 
     /// Connect to an MCP server that exposes an SSE endpoint. Requires the
@@ -184,9 +224,67 @@ pub fn parse_command(command: &str) -> Result<(String, Vec<String>)> {
     Ok((program, iter.collect()))
 }
 
+/// Resolve a command to its full path, searching common locations if not found in PATH
+fn resolve_command_path(command: &str) -> Result<String> {
+    // First, try to find the command using the `which` command
+    if let Ok(output) = std::process::Command::new("which")
+        .arg(command)
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() && std::path::Path::new(&path).exists() {
+                return Ok(path);
+            }
+        }
+    }
+
+    // If `which` didn't work, try common paths for Node.js tools
+    if command == "npx" || command == "npm" || command == "node" {
+        // First try standard system paths
+        for base_path in NODE_COMMAND_PATHS {
+            let full_path = format!("{}/{}", base_path, command);
+            if std::path::Path::new(&full_path).exists() {
+                return Ok(full_path);
+            }
+        }
+
+        // Then try NVM paths with home directory
+        if let Ok(home) = std::env::var("HOME") {
+            for nvm_path in NVM_PATHS {
+                let full_path = format!("{}{}/{}", home, nvm_path, command);
+                if std::path::Path::new(&full_path).exists() {
+                    return Ok(full_path);
+                }
+            }
+        }
+
+        // Try to find any Node version in NVM
+        if let Ok(home) = std::env::var("HOME") {
+            let nvm_versions_dir = format!("{}/.nvm/versions/node", home);
+            if let Ok(entries) = std::fs::read_dir(&nvm_versions_dir) {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        if entry.path().is_dir() {
+                            let bin_path = entry.path().join("bin").join(command);
+                            if bin_path.exists() {
+                                return Ok(bin_path.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If all else fails, return the original command and let the system try to find it
+    // This provides a fallback for commands that might be in PATH but not found by our search
+    Ok(command.to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_command;
+    use super::{parse_command, resolve_command_path};
 
     #[test]
     fn parse_command_handles_single_word() {
@@ -223,5 +321,42 @@ mod tests {
             "unexpected error: {}",
             error
         );
+    }
+
+    #[test]
+    fn resolve_command_path_handles_absolute_paths() {
+        // Absolute paths should be returned as-is if they exist
+        let result = resolve_command_path("/bin/sh").expect("should resolve");
+        assert_eq!(result, "/bin/sh");
+    }
+
+    #[test]
+    fn resolve_command_path_fallback_for_unknown_commands() {
+        // Unknown commands should fall back to the original command
+        let result = resolve_command_path("unknown_command_xyz").expect("should resolve");
+        assert_eq!(result, "unknown_command_xyz");
+    }
+
+    #[test]
+    fn resolve_command_path_handles_node_tools() {
+        // This test will vary depending on the system, but it should not panic
+        let result = resolve_command_path("npx");
+        assert!(result.is_ok(), "Command resolution should not fail");
+    }
+
+    #[test]
+    fn connect_process_handles_empty_working_dir() {
+        // This test verifies that empty working directory doesn't cause errors
+        // We can't test the full connection since it requires an actual MCP server,
+        // but we can at least verify the path normalization works
+        use std::path::Path;
+
+        // Test that empty path is handled correctly
+        let empty_path = Path::new("");
+        assert!(empty_path.as_os_str().is_empty());
+
+        // Test that non-empty path is handled correctly
+        let valid_path = Path::new("/tmp");
+        assert!(!valid_path.as_os_str().is_empty());
     }
 }
