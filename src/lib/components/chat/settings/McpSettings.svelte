@@ -1,115 +1,119 @@
 <script lang="ts">
-  import { chatState, chatActions } from '$lib/states/chat.svelte';
-  import Button from '../../ui/Button.svelte';
-  import TableGroup from '../../ui/table/TableGroup.svelte';
-  import SwitchRow from '../../ui/table/SwitchRow.svelte';
-  import RoundButton from '../../ui/RoundButton.svelte';
+  import { onMount } from 'svelte';
   import { Server, RefreshCw } from '@lucide/svelte';
+  import TableGroup from '$lib/components/ui/table/TableGroup.svelte';
+  import TableBaseRow from '$lib/components/ui/table/TableBaseRow.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
+  import Toggle from '$lib/components/ui/Toggle.svelte';
+  import StatusLabel from '$lib/components/ui/StatusLabel.svelte';
+  import { chatState, chatActions } from '$lib/states/chat.svelte';
+  import { mcpState, mcpActions } from '$lib/states/mcp.svelte';
+  import type { McpServer, McpServerStatus } from '$lib/types';
 
-  interface McpServer {
-    id: string;
-    name: string;
-    enabled: boolean;
-    description?: string;
-    status?: 'enabled' | 'disabled' | 'error';
+  let currentServers = $state<string[]>(chatState.currentChat?.mcpServers || []);
+  let originalServers = $state<string[]>(chatState.currentChat?.mcpServers || []);
+  let saving = $state(false);
+  let refreshing = $state(false);
+
+  onMount(() => {
+    if (!mcpState.initialized) {
+      mcpActions.loadServers().catch(error => {
+        console.error('Failed to load MCP servers:', error);
+      });
+    }
+  });
+
+  $effect(() => {
+    currentServers = chatState.currentChat?.mcpServers || [];
+    originalServers = chatState.currentChat?.mcpServers || [];
+  });
+
+  const hasChanges = $derived(() => {
+    const currentSorted = [...currentServers].sort();
+    const originalSorted = [...originalServers].sort();
+    return JSON.stringify(currentSorted) !== JSON.stringify(originalSorted);
+  });
+
+  const availableServers = $derived(() =>
+    mcpState.servers.filter(server => server.enabled)
+  );
+
+  const decoratedServers = $derived(() =>
+    availableServers().map(server => ({
+      server,
+      checked: currentServers.includes(server.id),
+      statusInfo: mapStatus(server)
+    }))
+  );
+
+  function toggleSelection(serverId: string, selected: boolean) {
+    if (selected) {
+      if (!currentServers.includes(serverId)) {
+        currentServers = [...currentServers, serverId];
+      }
+    } else {
+      currentServers = currentServers.filter(id => id !== serverId);
+    }
   }
 
-  // 预定义的 MCP 服务器列表 (后续可以从后端获取)
-  const availableMcpServers = [
-    {
-      id: 'filesystem',
-      name: 'File System',
-      description: '文件系统操作工具，可以读取、写入和管理本地文件',
-      enabled: false
-    },
-    {
-      id: 'browser',
-      name: 'Browser Automation',
-      description: '浏览器自动化工具，支持网页抓取和自动化操作',
-      enabled: false
-    },
-    {
-      id: 'database',
-      name: 'Database Query',
-      description: '数据库查询工具，支持 SQL 查询和数据分析',
-      enabled: false
-    },
-    {
-      id: 'github',
-      name: 'GitHub Integration',
-      description: 'GitHub API 集成，可以管理代码仓库和问题',
-      enabled: false
-    },
-    {
-      id: 'calendar',
-      name: 'Calendar',
-      description: '日历管理工具，可以查看和管理日程安排',
-      enabled: false
-    }
-  ];
-
-  // 从当前聊天获取已启用的 MCP 服务器
-  const getEnabledServers = (): McpServer[] => {
-    const enabledIds = chatState.currentChat?.mcpServers || [];
-    return availableMcpServers.map(server => ({
-      ...server,
-      enabled: enabledIds.includes(server.id),
-      status: (enabledIds.includes(server.id) ? 'enabled' : 'disabled') as 'enabled' | 'disabled'
-    }));
-  };
-
-  let currentServers = $state<McpServer[]>(getEnabledServers());
-  let originalEnabledServers = $state<string[]>(chatState.currentChat?.mcpServers || []);
-
-  // 监听 currentChat 变化，更新本地状态
-  $effect(() => {
-    currentServers = getEnabledServers();
-    originalEnabledServers = chatState.currentChat?.mcpServers || [];
-  });
-
-  let hasChanges = $derived(() => {
-    const currentEnabledIds = currentServers
-      .filter(s => s.enabled)
-      .map(s => s.id)
-      .sort();
-    const originalIds = originalEnabledServers.sort();
-    return JSON.stringify(currentEnabledIds) !== JSON.stringify(originalIds);
-  });
-
   async function handleSave() {
+    if (!chatState.currentChat?.id) {
+      if (chatState.currentChat) {
+        chatState.currentChat.mcpServers = currentServers;
+      }
+      originalServers = [...currentServers];
+      return;
+    }
+
+    saving = true;
     try {
-      const enabledServerIds = currentServers
-        .filter(s => s.enabled)
-        .map(s => s.id);
-
-      await chatActions.updateMcpServers(enabledServerIds);
-
-      // 更新原始状态
-      originalEnabledServers = enabledServerIds;
+      await chatActions.updateMcpServers(currentServers);
+      originalServers = [...currentServers];
     } catch (error) {
       console.error('Failed to update MCP servers:', error);
-      // 回滚到原始状态
-      currentServers = getEnabledServers();
+      await chatActions.loadChats();
+    } finally {
+      saving = false;
     }
   }
 
   function handleReset() {
-    currentServers = getEnabledServers();
+    currentServers = [...originalServers];
   }
 
-  function handleRefresh() {
-    // 暂时只是刷新本地状态，后续可以调用后端 API 获取最新状态
-    currentServers = [...currentServers];
+  async function handleRefresh() {
+    refreshing = true;
+    try {
+      await mcpActions.loadServers(true);
+    } catch (error) {
+      console.error('Failed to refresh MCP servers:', error);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  function mapStatus(server: McpServer): { status: 'enabled' | 'disabled' | 'idle' | 'error'; text: string } {
+    if (!server.enabled) {
+      return { status: 'disabled', text: '未启用' };
+    }
+    switch (server.status as McpServerStatus) {
+      case 'ready':
+        return { status: 'enabled', text: '可用' };
+      case 'error':
+        return { status: 'error', text: '异常' };
+      default:
+        return { status: 'idle', text: '同步中' };
+    }
   }
 </script>
 
-<div class="flex-1 mt-1 p-0 space-y-2">
+<div class="flex-1 mt-1 p-0 space-y-3">
   <div class="flex items-center justify-between">
     <div class="text-sm text-base-content/70">
-      {#if chatState.currentChat}
-        已启用 {currentServers.filter(s => s.enabled).length} 个服务器
-      {:else}
+      {#if !chatState.currentChat}
         请先选择或创建聊天
+      {:else}
+        已选择 {currentServers.length} 个服务器
       {/if}
     </div>
 
@@ -117,54 +121,84 @@
       on:click={handleRefresh}
       variant="clear"
       size="sm"
+      disabled={refreshing}
     >
-      <RefreshCw size={14} />
-      刷新状态
+      <RefreshCw class={refreshing ? 'animate-spin' : ''} size={14} />
+      刷新列表
     </Button>
   </div>
 
-  <!-- 服务器列表 -->
-  {#if currentServers.length > 0 && chatState.currentChat}
-    <TableGroup>
-      {#each currentServers as server (server.id)}
-        <SwitchRow
-          label={server.name}
-          description={server.description}
-          bind:checked={server.enabled}
-        />
-      {/each}
-    </TableGroup>
-
-    <!-- 操作按钮 -->
-    <div class="flex gap-3 pt-4 justify-end">
-      <RoundButton
-        customClass="w-24"
-        label="重置"
-        bgColor="bg-base-200"
-        textColor="text-base-content/80"
-        hoverColor="hover:text-base-content"
-        onclick={handleReset}
-        disabled={!hasChanges()}
-      />
-
-      <RoundButton
-        customClass="w-18"
-        label="保存"
-        onclick={handleSave}
-        disabled={!hasChanges()}
-      />
-    </div>
-  {:else if !chatState.currentChat}
+  {#if !chatState.currentChat}
     <div class="text-center py-8 text-base-content/70">
       <Server size={48} class="mx-auto mb-4 text-base-content/40" />
       <p class="mb-2">请先选择或创建聊天</p>
       <p class="text-sm">MCP 服务器配置将与聊天关联</p>
     </div>
-  {:else}
+  {:else if mcpState.servers.length === 0}
     <div class="text-center py-8 text-base-content/70">
       <Server size={48} class="mx-auto mb-4 text-base-content/40" />
       <p class="mb-2">暂无可用的 MCP 服务器</p>
       <p class="text-sm">请在应用设置中配置 MCP 服务器</p>
+    </div>
+  {:else}
+    <TableGroup>
+      {#each decoratedServers() as item (item.server.id)}
+        <TableBaseRow label={item.server.displayName ?? item.server.name} layout="vertical">
+            <div class="flex flex-col gap-3 text-sm text-base-content/80">
+              <div class="flex items-center gap-3 justify-between">
+                <StatusLabel status={item.statusInfo.status} text={item.statusInfo.text} />
+                <Toggle
+                  checked={item.checked}
+                  disabled={!item.server.enabled || item.server.status !== 'ready'}
+                  onChange={(value) => toggleSelection(item.server.id, value)}
+                />
+              </div>
+
+              <div class="flex flex-wrap gap-2 text-xs text-base-content/70">
+                <span class="px-2 py-0.5 rounded bg-base-200">工具 {item.server.tools.length}</span>
+                <span class="px-2 py-0.5 rounded bg-base-200">
+                  命令 {item.server.command}
+                </span>
+                {#if item.server.lastSyncAt}
+                  <span class="px-2 py-0.5 rounded bg-base-200">
+                    最近同步 {new Date(item.server.lastSyncAt).toLocaleString('zh-CN')}
+                  </span>
+                {/if}
+              </div>
+
+              {#if item.server.description}
+                <p class="text-xs leading-relaxed text-base-content/70">
+                  {item.server.description}
+                </p>
+              {/if}
+
+              {#if item.server.lastError && item.server.status === 'error'}
+                <div class="text-xs text-error bg-error/10 rounded-md px-3 py-2">
+                  {item.server.lastError}
+                </div>
+              {/if}
+            </div>
+          </TableBaseRow>
+      {/each}
+    </TableGroup>
+
+    <div class="flex gap-3 pt-4 justify-end">
+      <Button
+        variant="gray"
+        size="sm"
+        on:click={handleReset}
+        disabled={!hasChanges()}
+      >
+        重置
+      </Button>
+
+      <Button
+        size="sm"
+        on:click={handleSave}
+        disabled={!hasChanges() || saving}
+      >
+        {saving ? '保存中...' : '保存'}
+      </Button>
     </div>
   {/if}
 </div>

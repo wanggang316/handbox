@@ -5,9 +5,10 @@ use crate::llm_client::types::{
     ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest, ChatUsage,
 };
 use crate::models::{
-    AppError, Message, MessageConfig, MessageRequest, MessageResponse, MessageRole, UUID,
+    AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest, MessageResponse,
+    MessageRole, UUID,
 };
-use crate::services::{ChatService, Database, ProviderService};
+use crate::services::{ChatService, Database, McpService, ProviderService};
 use crate::storage::MessageRepository;
 use std::sync::Arc;
 
@@ -33,14 +34,21 @@ pub struct MessageService {
     repository: MessageRepository,
     provider_service: Arc<ProviderService>,
     chat_service: Arc<ChatService>,
+    mcp_service: Arc<McpService>,
 }
 
 impl MessageService {
-    pub fn new(db: Arc<Database>) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        provider_service: Arc<ProviderService>,
+        chat_service: Arc<ChatService>,
+        mcp_service: Arc<McpService>,
+    ) -> Self {
         Self {
-            repository: MessageRepository::new(db.clone()),
-            provider_service: Arc::new(ProviderService::new(db.clone())),
-            chat_service: Arc::new(ChatService::new(db)),
+            repository: MessageRepository::new(db),
+            provider_service,
+            chat_service,
+            mcp_service,
         }
     }
 
@@ -223,7 +231,7 @@ impl MessageService {
         })?;
 
         // 4. 转换请求格式
-        let api_request = self.convert_to_api_request(request, &chat)?;
+        let api_request = self.convert_to_api_request(request, &chat).await?;
 
         // 5. 调用 API
         let start_time = std::time::Instant::now();
@@ -245,12 +253,12 @@ impl MessageService {
     }
 
     /// 转换为 API 请求格式
-    fn convert_to_api_request(
+    async fn convert_to_api_request(
         &self,
         request: &MessageRequest,
         chat: &crate::models::Chat,
     ) -> Result<ApiChatRequest, AppError> {
-        let messages: Vec<ApiChatMessage> = request
+        let mut messages: Vec<ApiChatMessage> = request
             .messages
             .iter()
             .map(|msg| ApiChatMessage {
@@ -264,6 +272,15 @@ impl MessageService {
             })
             .collect();
 
+        if let Some(mcp_message) = self.maybe_build_mcp_message(chat).await? {
+            let insertion_index = messages
+                .iter()
+                .rposition(|msg| msg.role == "system")
+                .map(|idx| idx + 1)
+                .unwrap_or(0);
+            messages.insert(insertion_index, mcp_message);
+        }
+
         Ok(ApiChatRequest {
             model: request.model_id.clone(),
             messages,
@@ -271,6 +288,71 @@ impl MessageService {
             max_tokens: chat.max_tokens,
             stream: chat.stream,
         })
+    }
+
+    async fn maybe_build_mcp_message(
+        &self,
+        chat: &crate::models::Chat,
+    ) -> Result<Option<ApiChatMessage>, AppError> {
+        if chat.mcp_servers.is_empty() {
+            return Ok(None);
+        }
+
+        let servers = self
+            .mcp_service
+            .get_servers_by_ids(&chat.mcp_servers)
+            .await?;
+
+        let active_servers: Vec<McpServer> = servers
+            .into_iter()
+            .filter(|server| server.enabled && matches!(server.status, McpServerStatus::Ready))
+            .collect();
+
+        if active_servers.is_empty() {
+            return Ok(None);
+        }
+
+        let summary = Self::format_mcp_summary(&active_servers);
+        Ok(Some(ApiChatMessage {
+            role: "system".to_string(),
+            content: summary,
+            reasoning: None,
+        }))
+    }
+
+    fn format_mcp_summary(servers: &[McpServer]) -> String {
+        let lines = servers
+            .iter()
+            .map(|server| {
+                let display_name = server
+                    .display_name
+                    .as_ref()
+                    .and_then(|name| {
+                        if name.is_empty() {
+                            None
+                        } else {
+                            Some(name.as_str())
+                        }
+                    })
+                    .unwrap_or(&server.name);
+                let tools = if server.tools.is_empty() {
+                    "无工具".to_string()
+                } else {
+                    server
+                        .tools
+                        .iter()
+                        .map(|tool| tool.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                format!("• {}（工具: {}）", display_name, tools)
+            })
+            .collect::<Vec<_>>();
+
+        format!(
+            "以下 MCP 服务器已关联并可用于检索额外上下文:\n{}",
+            lines.join("\n")
+        )
     }
 
     /// 流式调用 LLM API
@@ -347,7 +429,7 @@ impl MessageService {
         })?;
 
         // 4. 转换请求格式
-        let mut api_request = self.convert_to_api_request(request, &chat)?;
+        let mut api_request = self.convert_to_api_request(request, &chat).await?;
         api_request.stream = Some(true); // 强制启用流式
 
         // 5. 保存用户输入消息到数据库（如果有chat_id）
@@ -875,7 +957,7 @@ impl MessageService {
 mod tests {
     use super::*;
     use crate::models::{ChatMessage, MessageConfig, MessageRequest, MessageRole, ModelParameters};
-    use crate::services::ChatService;
+    use crate::services::{ChatService, McpService, ProviderService};
     use crate::storage::Database;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -890,10 +972,13 @@ mod tests {
         )
     }
 
-    async fn setup_services() -> (ChatService, MessageService, String) {
+    async fn setup_services() -> (Arc<ChatService>, MessageService, String) {
         let db = create_test_database().await;
-        let chat_service = ChatService::new(db.clone());
-        let message_service = MessageService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let mcp_service = Arc::new(McpService::new(db.clone()));
+        let chat_service = Arc::new(ChatService::new(db.clone(), provider_service.clone()));
+        let message_service =
+            MessageService::new(db, provider_service, chat_service.clone(), mcp_service);
 
         let chat = chat_service
             .create_chat(
@@ -916,7 +1001,10 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let _service = MessageService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let mcp_service = Arc::new(McpService::new(db.clone()));
+        let chat_service = Arc::new(ChatService::new(db.clone(), provider_service.clone()));
+        let _service = MessageService::new(db, provider_service, chat_service, mcp_service);
     }
 
     #[tokio::test]

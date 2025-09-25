@@ -3,6 +3,7 @@
 pub mod artifact;
 pub mod chat;
 pub mod llm_config;
+pub mod mcp;
 pub mod message;
 pub mod provider;
 pub mod search;
@@ -13,6 +14,7 @@ pub mod window;
 pub use artifact::*;
 pub use chat::*;
 pub use llm_config::*;
+pub use mcp::*;
 pub use message::*;
 pub use provider::*;
 pub use search::*;

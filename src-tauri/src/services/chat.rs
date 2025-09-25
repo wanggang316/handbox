@@ -8,6 +8,7 @@ use crate::storage::{ChatRepository, MessageRepository};
 use std::sync::Arc;
 
 /// 聊天服务
+#[derive(Clone)]
 pub struct ChatService {
     repository: ChatRepository,
     message_repository: MessageRepository,
@@ -15,11 +16,11 @@ pub struct ChatService {
 }
 
 impl ChatService {
-    pub fn new(db: Arc<Database>) -> Self {
+    pub fn new(db: Arc<Database>, provider_service: Arc<ProviderService>) -> Self {
         Self {
             repository: ChatRepository::new(db.clone()),
-            message_repository: MessageRepository::new(db.clone()),
-            provider_service: Arc::new(ProviderService::new(db)),
+            message_repository: MessageRepository::new(db),
+            provider_service,
         }
     }
 
@@ -258,6 +259,7 @@ impl ChatService {
 mod tests {
     use super::*;
     use crate::models::ModelParameters;
+    use crate::services::ProviderService;
     use crate::storage::Database;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -275,13 +277,15 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let _service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let _service = ChatService::new(db, provider_service);
     }
 
     #[tokio::test]
     async fn creates_chat_with_all_fields() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let chat = service
             .create_chat(
@@ -314,7 +318,8 @@ mod tests {
     #[tokio::test]
     async fn lists_chats_sorted_by_updated_at() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         service
             .create_chat(
@@ -361,7 +366,8 @@ mod tests {
     #[tokio::test]
     async fn fetches_chat_by_id() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -390,7 +396,8 @@ mod tests {
     #[tokio::test]
     async fn get_chat_returns_not_found_error() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let err = service
             .get_chat("nonexistent_chat".to_string())
@@ -403,7 +410,8 @@ mod tests {
     #[tokio::test]
     async fn updates_existing_chat() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -450,7 +458,8 @@ mod tests {
     #[tokio::test]
     async fn delete_chat_removes_record() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -483,7 +492,8 @@ mod tests {
     #[tokio::test]
     async fn generate_title_requires_messages() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let chat = service
             .create_chat(
