@@ -1,9 +1,8 @@
 // MCP service: manages Model Context Protocol server configurations
 
-use std::collections::HashMap;
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
-use crate::mcp_client::McpClient;
+use crate::mcp_client::McpClientFactory;
 use crate::models::{
     AppError, CreateMcpServerRequest, McpServer, McpServerStatus, McpTool, RefreshMcpServerRequest,
     ToggleMcpServerRequest, UpdateMcpServerRequest,
@@ -298,18 +297,15 @@ impl McpService {
     }
 
     async fn fetch_server_tools(&self, server: &McpServer) -> anyhow::Result<Vec<McpTool>> {
-        let working_dir = server.working_dir.as_ref().map(PathBuf::from);
-
-        let client = McpClient::connect_process(
-            &server.command,
-            &server.args,
-            working_dir.as_deref(),
-            &server.env,
-        )
-        .await?;
+        // Use the new factory to create the client
+        let client = McpClientFactory::create_client(server).await?;
 
         let tools = client.list_tools().await?;
-        client.shutdown().await.ok();
+
+        // Gracefully shutdown the client
+        if let Err(e) = client.shutdown().await {
+            tracing::warn!("Failed to gracefully shutdown MCP client for {}: {}", server.name, e);
+        }
 
         Ok(tools)
     }

@@ -104,8 +104,8 @@
     }
   }
 
-  async function handleSave(event: CustomEvent<{ mode: 'create' | 'update'; data: CreateMcpServerRequest | UpdateMcpServerRequest }>) {
-    const { mode, data } = event.detail;
+  async function handleSave(payload: { mode: 'create' | 'update'; data: CreateMcpServerRequest | UpdateMcpServerRequest }) {
+    const { mode, data } = payload;
     try {
       if (mode === 'create') {
         await mcpActions.createServer(data as CreateMcpServerRequest);
@@ -157,10 +157,7 @@
         共 {mcpState.servers.length} 个服务器
       {/if}
     </div>
-    <Button size="sm" variant="primary" on:click={openCreateModal}>
-      <Plus size={14} />
-      新增服务器
-    </Button>
+    
   </div>
 
   {#if decoratedServers().length > 0}
@@ -268,6 +265,12 @@
           </TableBaseRow>
       {/each}
     </TableGroup>
+    <div class="flex justify-start">
+      <Button size="sm" variant="primary" on:click={openCreateModal}>
+        <Plus size={14} />
+        新增服务器
+      </Button>
+    </div>
   {:else if mcpState.isLoading}
     <div class="flex items-center justify-center py-12 text-base-content/70 text-sm">
       正在加载 MCP 服务器...
@@ -275,14 +278,14 @@
   {:else}
     <div class="flex flex-col items-center gap-3 py-12 text-base-content/70">
       <p class="text-base">暂无配置的 MCP 服务器</p>
-      <p class="text-sm">点击右上角的“新增服务器”开始配置</p>
+      <p class="text-sm">点击“新增服务器”开始配置</p>
     </div>
   {/if}
 </div>
 
 <McpServerFormModal
   bind:open={showFormModal}
-  server={editingServer}
-  on:close={closeModal}
-  on:save={handleSave}
+  bind:server={editingServer}
+  onClose={closeModal}
+  onSave={handleSave}
 />
