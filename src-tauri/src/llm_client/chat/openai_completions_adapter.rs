@@ -2,10 +2,17 @@
 // 使用 openai-rust SDK 进行通信
 
 use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{ChatChoice, ChatMessage, ChatRequest, ChatResponse, ChatUsage};
+use crate::llm_client::types::{
+    ChatChoice, ChatMessage, ChatRequest, ChatResponse, ChatToolCall, ChatToolCallDelta,
+    ChatToolChoice, ChatUsage,
+};
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use futures::StreamExt;
+use openai_rust::types::{
+    CompletionChunkResponse, CompletionRequest, CompletionResponse, DeltaToolCall, Function,
+    FunctionCall, RequestMessage, Role, Tool, ToolCall as OpenAIToolCall, ToolChoice,
+};
 
 /// OpenAI Completions 风格聊天客户端
 pub struct OpenAICompletionsChatClient {}
@@ -16,53 +23,79 @@ impl OpenAICompletionsChatClient {
     }
 
     /// 转换我们的 ChatRequest 到 openai-rust 的 ChatCompletionRequest
-    fn convert_to_openai_request(
-        &self,
-        request: &ChatRequest,
-    ) -> openai_rust::types::ChatCompletionRequest {
-        let messages: Vec<openai_rust::types::ChatMessage> = request
+    fn convert_to_openai_request(&self, request: &ChatRequest) -> CompletionRequest {
+        let messages: Vec<RequestMessage> = request
             .messages
             .iter()
-            .map(|msg| openai_rust::types::ChatMessage {
-                role: match msg.role.as_str() {
-                    "system" => openai_rust::types::Role::System,
-                    "user" => openai_rust::types::Role::User,
-                    "assistant" => openai_rust::types::Role::Assistant,
-                    _ => openai_rust::types::Role::User, // 默认值
-                },
-                content: msg.content.clone(),
+            .map(|msg| {
+                let mut message = RequestMessage::new(map_role(&msg.role), msg.content.clone());
+
+                if let Some(tool_calls) = &msg.tool_calls {
+                    message.tool_calls = Some(tool_calls.iter().map(convert_tool_call).collect());
+                }
+
+                if let Some(tool_call_id) = &msg.tool_call_id {
+                    message.tool_call_id = Some(tool_call_id.clone());
+                }
+
+                message
             })
             .collect();
 
-        openai_rust::types::ChatCompletionRequest {
+        let tools = request.tools.as_ref().map(|tools| {
+            tools
+                .iter()
+                .map(|tool| Tool {
+                    tool_type: tool.tool_type.clone(),
+                    function: Function {
+                        name: tool.function.name.clone(),
+                        description: tool.function.description.clone(),
+                        parameters: tool.function.parameters.clone(),
+                    },
+                })
+                .collect()
+        });
+
+        let tool_choice = request.tool_choice.as_ref().map(|choice| match choice {
+            ChatToolChoice::Auto => ToolChoice::None("auto".to_string()),
+            ChatToolChoice::None => ToolChoice::None("none".to_string()),
+            ChatToolChoice::Required => ToolChoice::Required("required".to_string()),
+        });
+
+        CompletionRequest {
             model: request.model.clone(),
             messages,
             temperature: request.temperature,
             stream: request.stream,
+            tools,
+            tool_choice,
+            parallel_tool_calls: request.parallel_tool_calls,
         }
     }
 
     /// 转换 openai-rust 的 ChatCompletionResponse 到我们的 ChatResponse
-    fn convert_from_openai_response(
-        &self,
-        response: openai_rust::types::ChatCompletionResponse,
-    ) -> ChatResponse {
+    fn convert_from_openai_response(&self, response: CompletionResponse) -> ChatResponse {
         let choices: Vec<ChatChoice> = response
             .choices
             .into_iter()
-            .map(|choice| ChatChoice {
-                index: choice.index as i32,
-                message: Some(ChatMessage {
-                    role: match choice.message.role {
-                        openai_rust::types::Role::System => "system".to_string(),
-                        openai_rust::types::Role::User => "user".to_string(),
-                        openai_rust::types::Role::Assistant => "assistant".to_string(),
-                    },
-                    content: choice.message.content,
-                    reasoning: choice.message.reasoning,
-                }),
-                delta: None,
-                finish_reason: Some(choice.finish_reason),
+            .map(|choice| {
+                let message = choice.message;
+                ChatChoice {
+                    index: choice.index as i32,
+                    message: Some(ChatMessage {
+                        role: map_role_to_string(message.role),
+                        content: message.content.unwrap_or_default(),
+                        reasoning: message.reasoning,
+                        tool_calls: message
+                            .tool_calls
+                            .map(|calls| calls.into_iter().map(convert_openai_tool_call).collect()),
+                        tool_call_deltas: None,
+                        tool_call_id: None,
+                    }),
+                    delta: None,
+                    tool_calls_delta: None,
+                    finish_reason: Some(choice.finish_reason),
+                }
             })
             .collect();
 
@@ -82,30 +115,33 @@ impl OpenAICompletionsChatClient {
     }
 
     /// 转换 openai-rust 的 ChatCompletionChunkResponse 到我们的 ChatResponse
-    fn convert_from_openai_chunk(
-        &self,
-        chunk: openai_rust::types::ChatCompletionChunkResponse,
-    ) -> ChatResponse {
+    fn convert_from_openai_chunk(&self, chunk: CompletionChunkResponse) -> ChatResponse {
         let choices: Vec<ChatChoice> = chunk
             .choices
             .into_iter()
-            .map(|choice| ChatChoice {
-                index: choice.index as i32,
-                message: None,
-                delta: Some(ChatMessage {
-                    role: choice
-                        .delta
-                        .role
-                        .map(|role| match role {
-                            openai_rust::types::Role::System => "system".to_string(),
-                            openai_rust::types::Role::User => "user".to_string(),
-                            openai_rust::types::Role::Assistant => "assistant".to_string(),
-                        })
-                        .unwrap_or_default(),
-                    content: choice.delta.content.unwrap_or_default(),
-                    reasoning: choice.delta.reasoning,
-                }),
-                finish_reason: choice.finish_reason,
+            .map(|choice| {
+                let delta_role = choice.delta.role.map(map_role_to_string);
+                let tool_call_deltas = choice.delta.tool_calls.clone().map(|calls| {
+                    calls
+                        .into_iter()
+                        .map(convert_openai_delta_tool_call)
+                        .collect()
+                });
+
+                ChatChoice {
+                    index: choice.index as i32,
+                    message: None,
+                    delta: Some(ChatMessage {
+                        role: delta_role.unwrap_or_default(),
+                        content: choice.delta.content.unwrap_or_default(),
+                        reasoning: choice.delta.reasoning,
+                        tool_calls: None,
+                        tool_call_deltas: tool_call_deltas.clone(),
+                        tool_call_id: None,
+                    }),
+                    tool_calls_delta: tool_call_deltas,
+                    finish_reason: choice.finish_reason,
+                }
             })
             .collect();
 
@@ -247,5 +283,56 @@ impl ChatClient for OpenAICompletionsChatClient {
 impl Default for OpenAICompletionsChatClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn map_role(role: &str) -> Role {
+    match role {
+        "system" => Role::System,
+        "assistant" => Role::Assistant,
+        "tool" => Role::Tool,
+        _ => Role::User,
+    }
+}
+
+fn map_role_to_string(role: Role) -> String {
+    match role {
+        Role::System => "system".to_string(),
+        Role::Assistant => "assistant".to_string(),
+        Role::Tool => "tool".to_string(),
+        Role::User => "user".to_string(),
+    }
+}
+
+fn convert_tool_call(call: &ChatToolCall) -> OpenAIToolCall {
+    OpenAIToolCall {
+        id: call.id.clone(),
+        tool_type: call
+            .tool_type
+            .clone()
+            .unwrap_or_else(|| "function".to_string()),
+        function: FunctionCall {
+            name: call.name.clone(),
+            arguments: call.arguments.clone(),
+        },
+    }
+}
+
+fn convert_openai_tool_call(call: OpenAIToolCall) -> ChatToolCall {
+    ChatToolCall {
+        id: call.id,
+        tool_type: Some(call.tool_type),
+        name: call.function.name,
+        arguments: call.function.arguments,
+    }
+}
+
+fn convert_openai_delta_tool_call(call: DeltaToolCall) -> ChatToolCallDelta {
+    ChatToolCallDelta {
+        index: call.index,
+        id: call.id,
+        tool_type: call.tool_type,
+        name: call.function.as_ref().and_then(|f| f.name.clone()),
+        arguments: call.function.and_then(|f| f.arguments),
     }
 }

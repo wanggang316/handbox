@@ -304,7 +304,11 @@ impl McpService {
 
         // Gracefully shutdown the client
         if let Err(e) = client.shutdown().await {
-            tracing::warn!("Failed to gracefully shutdown MCP client for {}: {}", server.name, e);
+            tracing::warn!(
+                "Failed to gracefully shutdown MCP client for {}: {}",
+                server.name,
+                e
+            );
         }
 
         Ok(tools)

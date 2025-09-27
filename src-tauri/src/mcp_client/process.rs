@@ -96,8 +96,8 @@ mod tests {
 
     #[test]
     fn parse_command_with_args_handles_simple_cases() {
-        let (program, args) = parse_command_with_args("npx", &["-y".to_string()])
-            .expect("should parse");
+        let (program, args) =
+            parse_command_with_args("npx", &["-y".to_string()]).expect("should parse");
         assert_eq!(program, "npx");
         assert_eq!(args, vec!["-y"]);
     }
@@ -106,20 +106,28 @@ mod tests {
     fn parse_command_with_args_handles_complex_commands() {
         let (program, args) = parse_command_with_args(
             "npx -y @modelcontextprotocol/server-everything",
-            &["--debug".to_string()]
-        ).expect("should parse");
+            &["--debug".to_string()],
+        )
+        .expect("should parse");
         assert_eq!(program, "npx");
-        assert_eq!(args, vec!["-y", "@modelcontextprotocol/server-everything", "--debug"]);
+        assert_eq!(
+            args,
+            vec!["-y", "@modelcontextprotocol/server-everything", "--debug"]
+        );
     }
 
     #[test]
     fn parse_command_with_args_handles_quotes() {
         let (program, args) = parse_command_with_args(
             r#"python -m server --config "path/with space/config.json""#,
-            &[]
-        ).expect("should parse");
+            &[],
+        )
+        .expect("should parse");
         assert_eq!(program, "python");
-        assert_eq!(args, vec!["-m", "server", "--config", "path/with space/config.json"]);
+        assert_eq!(
+            args,
+            vec!["-m", "server", "--config", "path/with space/config.json"]
+        );
     }
 
     #[test]

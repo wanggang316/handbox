@@ -3,7 +3,7 @@
 //! This module handles connecting to MCP servers that expose SSE endpoints
 //! for real-time communication.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 /// SSE transport for MCP servers
 pub struct SseTransport;
@@ -12,7 +12,9 @@ impl SseTransport {
     /// Create a new SSE transport connecting to the given endpoint
     /// Currently disabled due to dependency conflicts
     pub async fn new(_endpoint: String) -> Result<()> {
-        Err(anyhow::anyhow!("SSE transport is temporarily disabled due to dependency conflicts"))
+        Err(anyhow::anyhow!(
+            "SSE transport is temporarily disabled due to dependency conflicts"
+        ))
     }
 
     /// Validate that the endpoint URL is well-formed
@@ -23,11 +25,17 @@ impl SseTransport {
 
         // Basic URL validation - reject non-HTTP(S) protocols
         if endpoint.starts_with("ftp://") || endpoint.starts_with("file://") {
-            return Err(anyhow::anyhow!("Unsupported protocol for SSE endpoint: {}", endpoint));
+            return Err(anyhow::anyhow!(
+                "Unsupported protocol for SSE endpoint: {}",
+                endpoint
+            ));
         }
 
         // Must have some form of URL structure
-        if !endpoint.contains("://") && !endpoint.starts_with("localhost") && !endpoint.contains(':') {
+        if !endpoint.contains("://")
+            && !endpoint.starts_with("localhost")
+            && !endpoint.contains(':')
+        {
             return Err(anyhow::anyhow!("Invalid SSE endpoint format: {}", endpoint));
         }
 

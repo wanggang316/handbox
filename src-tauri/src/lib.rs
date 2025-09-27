@@ -129,6 +129,8 @@ pub fn run() {
             message_update,
             message_delete,
             message_regenerate,
+            message_execute_mcp_call,
+            message_execute_tool_calls,
             // 窗口管理命令
             open_settings_window,
             close_settings_window,

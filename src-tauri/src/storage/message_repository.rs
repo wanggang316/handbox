@@ -1,7 +1,8 @@
 // Message 数据访问层
 
-use crate::models::{AppError, Message, MessageRole, UUID};
+use crate::models::{AppError, Message, MessageConfig, MessageRole, Timestamp, UUID};
 use crate::storage::Database;
+use serde_json;
 use sqlx::Row;
 use std::sync::Arc;
 
@@ -36,6 +37,15 @@ impl MessageRepository {
             None
         };
 
+        let tools_json = if let Some(tools) = &message.tools {
+            Some(
+                serde_json::to_string(tools)
+                    .map_err(|e| AppError::validation_error(&format!("Invalid tools: {}", e)))?,
+            )
+        } else {
+            None
+        };
+
         let role_str = match message.role {
             MessageRole::User => "user",
             MessageRole::Assistant => "assistant",
@@ -43,10 +53,10 @@ impl MessageRepository {
         };
 
         let query = r#"
-            INSERT INTO messages (id, chat_id, role, content, reasoning, config, attachments, 
-                                input_tokens, output_tokens, total_tokens, start_time, 
+            INSERT INTO messages (id, chat_id, role, content, reasoning, config, tools, attachments,
+                                input_tokens, output_tokens, total_tokens, start_time,
                                 end_time, duration, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         "#;
 
         sqlx::query(query)
@@ -56,6 +66,7 @@ impl MessageRepository {
             .bind(&message.content)
             .bind(&message.reasoning)
             .bind(&config_json)
+            .bind(&tools_json)
             .bind(&attachments_json)
             .bind(message.input_tokens)
             .bind(message.output_tokens)
@@ -80,7 +91,7 @@ impl MessageRepository {
         offset: i32,
     ) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, attachments, input_tokens, output_tokens, 
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
                    total_tokens, start_time, end_time, duration, created_at, updated_at
             FROM messages WHERE chat_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3
         "#;
@@ -104,7 +115,7 @@ impl MessageRepository {
     /// 根据 ID 获取消息
     pub async fn get_message_by_id(&self, message_id: &UUID) -> Result<Option<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, attachments, input_tokens, output_tokens, 
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
                    total_tokens, start_time, end_time, duration, created_at, updated_at
             FROM messages WHERE id = $1
         "#;
@@ -133,6 +144,33 @@ impl MessageRepository {
 
         let result = sqlx::query(query)
             .bind(content)
+            .bind(updated_at)
+            .bind(message_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to update message: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Message not found: {}",
+                message_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// 更新消息推理内容
+    pub async fn update_message_reasoning(
+        &self,
+        message_id: &UUID,
+        reasoning: Option<&str>,
+        updated_at: i64,
+    ) -> Result<(), AppError> {
+        let query = "UPDATE messages SET reasoning = $1, updated_at = $2 WHERE id = $3";
+
+        let result = sqlx::query(query)
+            .bind(reasoning)
             .bind(updated_at)
             .bind(message_id)
             .execute(self.db.pool())
@@ -181,6 +219,76 @@ impl MessageRepository {
             .map_err(|e| {
                 AppError::internal_error(&format!("Failed to update message stats: {}", e))
             })?;
+
+        Ok(())
+    }
+
+    /// 更新消息配置
+    pub async fn update_message_config(
+        &self,
+        message_id: &UUID,
+        config: Option<&MessageConfig>,
+        updated_at: i64,
+    ) -> Result<(), AppError> {
+        let config_json = if let Some(config) = config {
+            Some(
+                serde_json::to_string(config)
+                    .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))?,
+            )
+        } else {
+            None
+        };
+
+        let query = "UPDATE messages SET config = $1, updated_at = $2 WHERE id = $3";
+
+        let result = sqlx::query(query)
+            .bind(config_json)
+            .bind(updated_at)
+            .bind(message_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to update message: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Message not found: {}",
+                message_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// 更新消息工具数据
+    pub async fn update_message_tools(
+        &self,
+        message_id: &UUID,
+        tools: Option<&crate::models::MessageTools>,
+        updated_at: Timestamp,
+    ) -> Result<(), AppError> {
+        let tools_json = if let Some(tools) = tools {
+            Some(serde_json::to_string(tools).map_err(|e| {
+                AppError::validation_error(&format!("Invalid tools: {}", e))
+            })?)
+        } else {
+            None
+        };
+
+        let query = "UPDATE messages SET tools = $1, updated_at = $2 WHERE id = $3";
+        let result = sqlx::query(query)
+            .bind(&tools_json)
+            .bind(updated_at)
+            .bind(message_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to update message tools: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Message not found: {}",
+                message_id
+            )));
+        }
 
         Ok(())
     }
@@ -267,6 +375,12 @@ impl MessageRepository {
             None
         };
 
+        let tools: Option<crate::models::MessageTools> = if let Ok(tools_json) = row.try_get::<String, _>("tools") {
+            serde_json::from_str(&tools_json).ok()
+        } else {
+            None
+        };
+
         Ok(Message {
             id: row.try_get("id").unwrap_or_default(),
             chat_id: row.try_get("chat_id").unwrap_or_default(),
@@ -274,6 +388,7 @@ impl MessageRepository {
             content: row.try_get("content").unwrap_or_default(),
             reasoning: row.try_get("reasoning").ok(),
             config,
+            tools,
             attachments,
             input_tokens: row.try_get("input_tokens").ok(),
             output_tokens: row.try_get("output_tokens").ok(),
@@ -345,6 +460,7 @@ mod tests {
                 system_prompt: None,
                 mcp_servers: None,
             }),
+            tools: None,
             attachments: None,
             input_tokens: None,
             output_tokens: None,

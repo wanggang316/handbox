@@ -160,7 +160,10 @@ mod tests {
         let config = ProcessConfig::new("npx")
             .with_args(vec!["-y".to_string(), "@mcp/server".to_string()])
             .with_working_dir("/tmp")
-            .with_env(HashMap::from([("NODE_ENV".to_string(), "development".to_string())]));
+            .with_env(HashMap::from([(
+                "NODE_ENV".to_string(),
+                "development".to_string(),
+            )]));
 
         assert_eq!(config.command, "npx");
         assert_eq!(config.args, vec!["-y", "@mcp/server"]);
@@ -171,11 +174,17 @@ mod tests {
     #[test]
     fn sse_config_builder_works() {
         let config = SseConfig::new("http://localhost:8000/sse")
-            .with_headers(HashMap::from([("Authorization".to_string(), "Bearer token".to_string())]))
+            .with_headers(HashMap::from([(
+                "Authorization".to_string(),
+                "Bearer token".to_string(),
+            )]))
             .with_timeout(5000);
 
         assert_eq!(config.endpoint, "http://localhost:8000/sse");
-        assert_eq!(config.headers.get("Authorization"), Some(&"Bearer token".to_string()));
+        assert_eq!(
+            config.headers.get("Authorization"),
+            Some(&"Bearer token".to_string())
+        );
         assert_eq!(config.timeout_ms, Some(5000));
     }
 
@@ -190,7 +199,9 @@ mod tests {
         }
 
         match sse {
-            ConnectionConfig::Sse(config) => assert_eq!(config.endpoint, "http://localhost:8000/sse"),
+            ConnectionConfig::Sse(config) => {
+                assert_eq!(config.endpoint, "http://localhost:8000/sse")
+            }
             _ => panic!("Expected SSE config"),
         }
     }

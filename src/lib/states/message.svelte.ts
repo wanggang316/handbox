@@ -3,7 +3,7 @@
  */
 
 import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage } from '$lib/types/chat';
-import type { FrontendProviderConfig } from '$lib/types';
+import type { FrontendProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
 import { chatState } from './chat.svelte';
@@ -123,6 +123,74 @@ class MessageStore {
     }
   }
 
+  private applyMessageResponse(chatId: string, response: MessageResponse): void {
+    if (!this.state.messagesByChat[chatId]) {
+      this.state.messagesByChat[chatId] = [];
+    }
+
+    const messages = this.state.messagesByChat[chatId];
+    const pending = response.pendingMcpCall;
+    const index = messages.findIndex(message => message.id === response.messageId);
+
+    if (index !== -1) {
+      const existing = messages[index];
+      const updatedConfig: NonNullable<Message['config']> = {
+        ...(existing.config ?? {}),
+      };
+
+      if (pending) {
+        updatedConfig.pendingMcpCall = pending;
+      } else {
+        delete updatedConfig.pendingMcpCall;
+      }
+
+      const finalConfig = Object.keys(updatedConfig).length ? updatedConfig : undefined;
+
+      const updated: Message = {
+        ...existing,
+        content: response.content,
+        reasoning: response.reasoning,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        totalTokens: response.totalTokens,
+        duration: response.duration,
+        config: finalConfig,
+        pendingMcpCall: pending ?? undefined,
+        updatedAt: Date.now(),
+      };
+
+      messages[index] = updated;
+    } else {
+      const baseConfig: NonNullable<Message['config']> = {
+        modelId: response.modelId,
+        providerId: response.providerId,
+        stream: false,
+      };
+
+      if (pending) {
+        baseConfig.pendingMcpCall = pending;
+      }
+
+      const newMessage: Message = {
+        id: response.messageId,
+        chatId,
+        role: 'assistant',
+        content: response.content,
+        reasoning: response.reasoning,
+        config: baseConfig,
+        pendingMcpCall: pending ?? undefined,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        totalTokens: response.totalTokens,
+        duration: response.duration,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      this.addMessage(chatId, newMessage);
+    }
+  }
+
   // 获取指定聊天的消息
   getMessages(chatId: string): Message[] {
     return this.state.messagesByChat[chatId] || [];
@@ -213,44 +281,7 @@ class MessageStore {
 
   // 完成流式响应
   finishStreaming(chatId: string, response: MessageResponse) {
-    // 更新或创建消息
-    const messages = this.state.messagesByChat[chatId] || [];
-    const existingIndex = messages.findIndex(m => m.id === response.messageId);
-
-    if (existingIndex !== -1) {
-      // 更新现有消息
-      messages[existingIndex] = {
-        ...messages[existingIndex],
-        content: response.content,
-        reasoning: response.reasoning,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        totalTokens: response.totalTokens,
-        duration: response.duration,
-        updatedAt: Date.now(),
-      };
-    } else {
-      // 创建新消息
-      const newMessage: Message = {
-        id: response.messageId,
-        chatId: response.chatId,
-        role: 'assistant',
-        content: response.content,
-        reasoning: response.reasoning,
-        config: {
-          modelId: response.modelId,
-          providerId: response.providerId,
-          stream: false,
-        },
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        totalTokens: response.totalTokens,
-        duration: response.duration,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      this.addMessage(chatId, newMessage);
-    }
+    this.applyMessageResponse(chatId, response);
 
     // 清理流式状态
     this.state.streamingMessageId = null;
@@ -370,11 +401,12 @@ class MessageStore {
           // 创建响应对象
           const response: MessageResponse = {
             chatId: data.chatId,
-            messageId: data.streamId, // 使用 streamId 作为 messageId
+            messageId: data.messageId ?? data.streamId,
             content: data.finalContent,
             reasoning: data.finalReasoning,
             modelId: data.modelId,
             providerId: data.providerId,
+            pendingMcpCall: data.pendingMcpCall,
           };
           this.finishStreaming(currentChat.id!, response);
           this.setSending(false);
@@ -426,7 +458,8 @@ class MessageStore {
   async regenerateMessage(messageId: string): Promise<void> {
     try {
       this.setSending(true);
-      await messageApi.regenerateMessage(messageId);
+      const response = await messageApi.regenerateMessage(messageId as UUID);
+      this.applyMessageResponse(response.chatId, response);
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '重新生成失败');
       throw error;
@@ -444,6 +477,20 @@ class MessageStore {
     this.state.error = null;
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
+  }
+
+  async executePendingMcpCall(pendingId: string): Promise<void> {
+    try {
+      this.setSending(true);
+      this.setError(null);
+      const response = await messageApi.executePendingMcpCall(pendingId);
+      this.applyMessageResponse(response.chatId, response);
+    } catch (error) {
+      this.setError(error instanceof Error ? error.message : '执行 MCP 工具失败');
+      throw error;
+    } finally {
+      this.setSending(false);
+    }
   }
 }
 

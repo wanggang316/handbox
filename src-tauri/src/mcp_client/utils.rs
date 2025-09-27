@@ -12,11 +12,7 @@ use serde_json::Value;
 use crate::models::McpTool;
 
 /// Common command paths to search for Node.js tools
-const NODE_COMMAND_PATHS: &[&str] = &[
-    "/usr/local/bin",
-    "/opt/homebrew/bin",
-    "/usr/bin",
-];
+const NODE_COMMAND_PATHS: &[&str] = &["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"];
 
 /// NVM-style paths to search (common locations)
 const NVM_PATHS: &[&str] = &[
@@ -31,10 +27,7 @@ pub fn resolve_command_path(command: &str) -> Result<String> {
     tracing::debug!("Resolving command path for: {}", command);
 
     // First, try to find the command using the `which` command
-    if let Ok(output) = std::process::Command::new("which")
-        .arg(command)
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("which").arg(command).output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() && std::path::Path::new(&path).exists() {
@@ -151,11 +144,7 @@ pub fn validate_server_config(
 }
 
 /// Create a display name for MCP server configuration
-pub fn create_server_display_name(
-    command: &str,
-    args: &[String],
-    name: Option<&str>,
-) -> String {
+pub fn create_server_display_name(command: &str, args: &[String], name: Option<&str>) -> String {
     if let Some(name) = name {
         if !name.trim().is_empty() {
             return name.to_string();
@@ -232,7 +221,8 @@ mod tests {
         let result = create_server_display_name("/usr/bin/node", &[], None);
         assert_eq!(result, "node");
 
-        let result = create_server_display_name("npx", &["-y".to_string(), "@mcp/server".to_string()], None);
+        let result =
+            create_server_display_name("npx", &["-y".to_string(), "@mcp/server".to_string()], None);
         assert_eq!(result, "npx @mcp/server");
     }
 }

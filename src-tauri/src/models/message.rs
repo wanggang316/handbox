@@ -1,8 +1,10 @@
 // 消息相关数据模型
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::models::chat::{Timestamp, UUID};
+use crate::llm_client::types::ChatToolCallDelta;
 
 /// 消息角色
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -38,6 +40,20 @@ pub struct MessageConfig {
     pub mcp_servers: Option<Vec<String>>,
 }
 
+/// 消息工具数据 - 直接存储 DeltaToolCall 对象
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageTools {
+    // 待执行的 MCP 调用信息
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_mcp_call: Option<PendingMcpCall>,
+
+    // 工具调用增量数据 - 直接存储模型返回的 DeltaToolCall
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_deltas: Option<Vec<ChatToolCallDelta>>,
+}
+
+
 /// 消息实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +66,9 @@ pub struct Message {
 
     // Per-message configuration stored as JSON
     pub config: Option<MessageConfig>,
+
+    // Tool-related data stored as JSON
+    pub tools: Option<MessageTools>,
 
     pub attachments: Option<Vec<MessageAttachment>>,
 
@@ -105,6 +124,30 @@ pub struct MessageResponse {
     pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
     pub duration: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_mcp_call: Option<PendingMcpCall>,
+}
+
+/// 待执行的 MCP 调用信息
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingMcpCall {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub tool_calls: Vec<PendingMcpToolCall>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingMcpToolCall {
+    pub call_id: String,
+    pub server_id: String,
+    pub server_name: String,
+    pub server_display_name: Option<String>,
+    pub tool_name: String,
+    pub tool_description: Option<String>,
+    pub arguments: Value,
 }
 
 /// 流式消息事件
@@ -136,6 +179,7 @@ mod tests {
             content: "Hello, world!".to_string(),
             reasoning: None,
             config: None,
+            tools: None,
             attachments: None,
             input_tokens: Some(10),
             output_tokens: Some(20),
@@ -172,6 +216,7 @@ mod tests {
             content: "Here's a file".to_string(),
             reasoning: None,
             config: None,
+            tools: None,
             attachments: Some(vec![attachment]),
             input_tokens: None,
             output_tokens: None,
@@ -222,6 +267,7 @@ mod tests {
             output_tokens: Some(20),
             total_tokens: Some(35),
             duration: Some(1500),
+            pending_mcp_call: None,
         };
 
         let json = serde_json::to_string(&response).expect("serialize response");

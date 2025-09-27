@@ -104,8 +104,12 @@ impl GoogleChatClient {
                     role: "assistant".to_string(),
                     content,
                     reasoning: None, // Google API 不支持推理过程
+                    tool_calls: None,
+                    tool_call_deltas: None,
+                    tool_call_id: None,
                 }),
                 delta: None,
+                tool_calls_delta: None,
                 finish_reason,
             });
         }
@@ -180,7 +184,11 @@ impl GoogleChatClient {
                     role: "assistant".to_string(),
                     content: delta_content,
                     reasoning: None,
+                    tool_calls: None,
+                    tool_call_deltas: None,
+                    tool_call_id: None,
                 }),
+                tool_calls_delta: None,
                 finish_reason,
             }],
             usage: None,

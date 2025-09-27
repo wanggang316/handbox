@@ -1,7 +1,7 @@
 // 聊天服务实现
 
 use crate::llm_client::create_llm_client;
-use crate::llm_client::types::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
+use crate::llm_client::types::{ChatMessage, ChatRequest};
 use crate::models::{AppError, Chat, MessageRole, UUID};
 use crate::services::{Database, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
@@ -205,16 +205,22 @@ impl ChatService {
         })?;
 
         // 9. 构建API请求
-        let api_request = ApiChatRequest {
+        let api_request = ChatRequest {
             model: model_id,
-            messages: vec![ApiChatMessage {
+            messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: title_prompt,
                 reasoning: None,
+                tool_calls: None,
+                tool_call_deltas: None,
+                tool_call_id: None,
             }],
             temperature: Some(0.1), // 使用低温度确保稳定输出
             max_tokens: Some(50),   // 限制输出长度
             stream: Some(false),
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
         };
 
         // 10. 调用LLM API

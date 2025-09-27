@@ -17,6 +17,7 @@ export interface MessageConfig {
   providerId?: string;
   systemPrompt?: string;
   mcpServers?: string[];
+  pendingMcpCall?: PendingMcpCall;
 }
 
 // 消息类型
@@ -28,6 +29,11 @@ export interface Message extends BaseEntity {
   
   // 每条消息的配置参数
   config?: MessageConfig;
+
+  // 工具相关数据
+  tools?: MessageTools;
+
+  pendingMcpCall?: PendingMcpCall;
   
   // 附件
   attachments?: MessageAttachment[];
@@ -120,6 +126,39 @@ export interface MessageResponse {
   outputTokens?: number;
   totalTokens?: number;
   duration?: number;
+  pendingMcpCall?: PendingMcpCall;
+}
+
+export interface PendingMcpCall {
+  id: string;
+  title: string;
+  description?: string;
+  toolCalls: PendingMcpToolCall[];
+}
+
+export interface PendingMcpToolCall {
+  callId: string;
+  serverId: string;
+  serverName: string;
+  serverDisplayName?: string;
+  toolName: string;
+  toolDescription?: string;
+  arguments: any;
+}
+
+// 消息工具数据 - 直接存储 DeltaToolCall 对象
+export interface MessageTools {
+  pendingMcpCall?: PendingMcpCall;
+  toolCallDeltas?: ToolCallDelta[];
+}
+
+// 工具调用增量数据 - 匹配后端的 ChatToolCallDelta
+export interface ToolCallDelta {
+  index: number;
+  id?: string;
+  toolType?: string;
+  name?: string;
+  arguments?: string;
 }
 
 // 流式消息事件

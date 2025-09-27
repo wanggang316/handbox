@@ -24,7 +24,10 @@ impl McpClientFactory {
         tracing::info!("Creating MCP client for server: {}", server.name);
 
         if !server.enabled {
-            return Err(anyhow::anyhow!("MCP server '{}' is not enabled", server.name));
+            return Err(anyhow::anyhow!(
+                "MCP server '{}' is not enabled",
+                server.name
+            ));
         }
 
         // Validate the configuration
@@ -113,7 +116,9 @@ impl McpClientManager {
     /// Remove and shutdown a client
     pub async fn remove_client(&mut self, server_id: &str) -> Result<()> {
         if let Some(client) = self.clients.remove(server_id) {
-            client.shutdown().await
+            client
+                .shutdown()
+                .await
                 .with_context(|| format!("Failed to shutdown client for server '{}'", server_id))?;
         }
         Ok(())
@@ -131,12 +136,14 @@ impl McpClientManager {
 
     /// Shutdown all clients
     pub async fn shutdown_all(self) -> Vec<Result<()>> {
-        let futures = self.clients.into_iter().map(|(server_id, client)| {
-            async move {
-                client.shutdown().await
-                    .with_context(|| format!("Failed to shutdown client for server '{}'", server_id))
-            }
-        });
+        let futures = self
+            .clients
+            .into_iter()
+            .map(|(server_id, client)| async move {
+                client.shutdown().await.with_context(|| {
+                    format!("Failed to shutdown client for server '{}'", server_id)
+                })
+            });
 
         futures::future::join_all(futures).await
     }
@@ -148,14 +155,18 @@ impl McpClientManager {
 
     /// Get all client statistics
     pub fn get_all_stats(&self) -> HashMap<&String, crate::mcp_client::types::ClientStats> {
-        self.clients.iter()
+        self.clients
+            .iter()
             .map(|(id, client)| (id, client.stats()))
             .collect()
     }
 
     /// Get all server info
-    pub fn get_all_server_info(&self) -> HashMap<&String, &rmcp::service::Peer<rmcp::service::RoleClient>> {
-        self.clients.iter()
+    pub fn get_all_server_info(
+        &self,
+    ) -> HashMap<&String, &rmcp::service::Peer<rmcp::service::RoleClient>> {
+        self.clients
+            .iter()
             .map(|(id, client)| (id, client.server_info()))
             .collect()
     }
@@ -193,7 +204,9 @@ mod tests {
 
     #[test]
     fn is_sse_endpoint_identifies_http_urls() {
-        assert!(McpClientFactory::is_sse_endpoint("http://localhost:8000/sse"));
+        assert!(McpClientFactory::is_sse_endpoint(
+            "http://localhost:8000/sse"
+        ));
         assert!(McpClientFactory::is_sse_endpoint("https://example.com/mcp"));
         assert!(McpClientFactory::is_sse_endpoint("localhost:3000"));
     }

@@ -17,7 +17,7 @@ use crate::models::McpTool;
 use super::{
     process::ProcessTransport,
     types::{ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig},
-    utils::convert_tool
+    utils::convert_tool,
 };
 
 /// High-level MCP client that can connect via different transports
@@ -31,23 +31,23 @@ impl McpClient {
     /// Connect to an MCP server using the provided configuration
     pub async fn connect(config: ConnectionConfig) -> Result<Self> {
         match config {
-            ConnectionConfig::Process(process_config) => Self::connect_process(process_config).await,
-            ConnectionConfig::Sse(_sse_config) => {
-                Err(anyhow::anyhow!("SSE transport is temporarily disabled due to dependency conflicts"))
+            ConnectionConfig::Process(process_config) => {
+                Self::connect_process(process_config).await
             }
+            ConnectionConfig::Sse(_sse_config) => Err(anyhow::anyhow!(
+                "SSE transport is temporarily disabled due to dependency conflicts"
+            )),
         }
     }
 
     /// Connect to an MCP server using process transport
     pub async fn connect_process(config: ProcessConfig) -> Result<Self> {
         let mut stats = ClientStats::new();
-        let mut status = ConnectionStatus::Connecting;
 
-        let transport = ProcessTransport::new(config).await
-            .map_err(|e| {
-                tracing::error!("Failed to create process transport: {}", e);
-                e
-            })?;
+        let transport = ProcessTransport::new(config).await.map_err(|e| {
+            tracing::error!("Failed to create process transport: {}", e);
+            e
+        })?;
 
         let client_info = create_client_info();
         let service = client_info
@@ -61,18 +61,19 @@ impl McpClient {
 
         // Update stats and status
         stats.set_connected(chrono::Utc::now().timestamp_millis());
-        status = ConnectionStatus::Connected;
 
         Ok(Self {
             service,
             stats: Arc::new(Mutex::new(stats)),
-            status: Arc::new(Mutex::new(status)),
+            status: Arc::new(Mutex::new(ConnectionStatus::Connected)),
         })
     }
 
     /// Connect to an MCP server using SSE transport (currently disabled)
     pub async fn connect_sse(_config: SseConfig) -> Result<Self> {
-        Err(anyhow::anyhow!("SSE transport is temporarily disabled due to dependency conflicts"))
+        Err(anyhow::anyhow!(
+            "SSE transport is temporarily disabled due to dependency conflicts"
+        ))
     }
 
     /// List all tools exposed by the connected MCP server

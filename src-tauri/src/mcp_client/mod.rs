@@ -72,9 +72,7 @@ mod utils;
 // Re-export the main interfaces
 pub use client::McpClient;
 pub use factory::{McpClientFactory, McpClientManager};
-pub use types::{
-    ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig,
-};
+pub use types::{ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig};
 
 // Re-export utilities that might be useful for advanced users
-pub use utils::{resolve_command_path, validate_server_config, create_server_display_name};
+pub use utils::{create_server_display_name, resolve_command_path, validate_server_config};
