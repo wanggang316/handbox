@@ -2,12 +2,12 @@
 
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{
-    ChatFunction, ChatMessage, ChatRequest, ChatResponse, ChatTool,
-    ChatToolCall, ChatToolChoice, ChatUsage,
+    ChatMessage, ChatRequest, ChatResponse,
+    ChatToolCall, ChatToolChoice, ChatUsage, ChatToolFunction,
 };
 use crate::mcp_client::McpClientFactory;
 use crate::models::{
-    AppError, McpServer, McpServerStatus, McpTool, Message, MessageConfig, MessageRequest,
+    AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest,
     MessageResponse, MessageRole, PendingMcpCall, PendingMcpToolCall, UUID,
 };
 use crate::services::{ChatService, Database, McpService, ProviderService};
@@ -26,33 +26,28 @@ pub struct StreamChunk {
 }
 
 
-#[derive(Clone)]
-struct PendingToolCallState {
-    message_id: String,
-    chat_id: String,
-    provider_id: String,
-    model_id: String,
-    api_request: ChatRequest,
-    tool_calls: Vec<ChatToolCall>,
-}
+// #[derive(Clone)]
+// struct PendingToolCallState {
+//     message_id: String,
+//     chat_id: String,
+//     provider_id: String,
+//     model_id: String,
+//     api_request: ChatRequest,
+//     tool_calls: Vec<ChatToolCall>,
+// }
 
-struct PendingCallResult {
-    pending_id: String,
-    state: PendingToolCallState,
-    placeholder_content: String,
-    placeholder_reasoning: Option<String>,
-    pending_call: PendingMcpCall,
-}
+// struct PendingCallResult {
+//     pending_id: String,
+//     state: PendingToolCallState,
+//     placeholder_content: String,
+//     placeholder_reasoning: Option<String>,
+//     pending_call: PendingMcpCall,
+// }
 
-enum ToolCallOutcome {
-    Final(ChatResponse),
-    Pending(PendingCallResult),
-}
-
-enum LlmCallResult {
-    Final(LlmApiResponse),
-    Pending(MessageResponse),
-}
+// enum ToolCallOutcome {
+//     Final(ChatResponse),
+//     Pending(PendingCallResult),
+// }
 
 /// LLM API 响应结构
 #[derive(Debug)]
@@ -112,7 +107,7 @@ impl MessageService {
             return Err(AppError::validation_error(error));
         }
 
-        // 获取最后一条用户消息
+        // 验证最后一条消息
         let last_message = &request.messages[request.messages.len() - 1];
         if last_message.role != MessageRole::User {
             let error = "Last message must be from user";
@@ -196,7 +191,7 @@ impl MessageService {
                     output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
                     total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
                     duration: llm_response.duration.map(|d| d as i64),
-                    pending_mcp_call: None,
+                    tool_calls: None,
                 };
 
                 tracing::info!(
@@ -365,8 +360,10 @@ impl MessageService {
                         Some(crate::llm_client::types::ChatToolCall {
                             id: id.clone(),
                             tool_type: delta.tool_type.clone(),
-                            name: name.clone(),
-                            arguments: arguments.clone(),
+                            function: Some(crate::llm_client::types::ChatToolFunction {
+                                name: Some(name.clone()),
+                                arguments: Some(arguments.clone()),
+                            }),
                         })
                     }
                     _ => {
@@ -434,8 +431,7 @@ impl MessageService {
                 content: result.clone(),
                 reasoning: None,
                 tool_calls: None,
-                tool_call_deltas: None,
-                tool_call_id: Some(call.id.clone()),
+                tool_call_id: call.id.clone(),
             });
         }
 
@@ -472,7 +468,7 @@ impl MessageService {
             output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
             total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
             duration: llm_response.duration.map(|d| d as i64),
-            pending_mcp_call: None,
+            tool_calls: None,
         })
     }
 
@@ -559,8 +555,7 @@ impl MessageService {
                 content: result.clone(),
                 reasoning: None,
                 tool_calls: None,
-                tool_call_deltas: None,
-                tool_call_id: Some(call.id.clone()),
+                tool_call_id: call.id.clone(),
             });
         }
 
@@ -605,7 +600,7 @@ impl MessageService {
                     output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
                     total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
                     duration: llm_response.duration.map(|d| d as i64),
-                    pending_mcp_call: None,
+                    tool_calls: None,
                 })
             }
             ToolCallOutcome::Pending(new_pending) => {
@@ -642,7 +637,7 @@ impl MessageService {
                     output_tokens: None,
                     total_tokens: None,
                     duration: Some(duration_ms),
-                    pending_mcp_call: Some(pending_call),
+                    tool_calls: None,
                 })
             }
         };
@@ -674,7 +669,6 @@ impl MessageService {
                 content: msg.content.clone(),
                 reasoning: msg.reasoning.clone(),
                 tool_calls: None,
-                tool_call_deltas: None,
                 tool_call_id: None,
             })
             .collect();
@@ -694,331 +688,331 @@ impl MessageService {
     }
 
 
-    async fn process_tool_calls_with_state(
-        &self,
-        chat_id: &str,
-        provider_id: &str,
-        model_id: &str,
-        mut api_request: ChatRequest,
-        api_response: ChatResponse,
-        existing_message_id: Option<String>,
-    ) -> Result<ToolCallOutcome, AppError> {
-        let tool_calls = Self::extract_tool_calls(&api_response);
-        if tool_calls.is_empty() {
-            return Ok(ToolCallOutcome::Final(api_response));
-        }
+    // async fn process_tool_calls_with_state(
+    //     &self,
+    //     chat_id: &str,
+    //     provider_id: &str,
+    //     model_id: &str,
+    //     mut api_request: ChatRequest,
+    //     api_response: ChatResponse,
+    //     existing_message_id: Option<String>,
+    // ) -> Result<ToolCallOutcome, AppError> {
+    //     let tool_calls = Self::extract_tool_calls(&api_response);
+    //     if tool_calls.is_empty() {
+    //         return Ok(ToolCallOutcome::Final(api_response));
+    //     }
 
-        let assistant_message = Self::build_assistant_tool_message(&api_response, &tool_calls);
-        api_request.messages.push(assistant_message.clone());
+    //     let assistant_message = Self::build_assistant_tool_message(&api_response, &tool_calls);
+    //     api_request.messages.push(assistant_message.clone());
 
-        let pending_id = uuid::Uuid::new_v4().to_string();
-        let is_update = existing_message_id.is_some();
-        let message_id = existing_message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    //     let pending_id = uuid::Uuid::new_v4().to_string();
+    //     let is_update = existing_message_id.is_some();
+    //     let message_id = existing_message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        // 保存包含工具调用的 assistant 消息到数据库
-        self.save_assistant_tool_call_message(
-            chat_id,
-            &message_id,
-            &assistant_message,
-            provider_id,
-            model_id,
-            is_update, // 如果有现有的 message_id，则是更新操作
-        ).await?;
+    //     // 保存包含工具调用的 assistant 消息到数据库
+    //     self.save_assistant_tool_call_message(
+    //         chat_id,
+    //         &message_id,
+    //         &assistant_message,
+    //         provider_id,
+    //         model_id,
+    //         is_update, // 如果有现有的 message_id，则是更新操作
+    //     ).await?;
 
-        let (pending_call, placeholder_content) =
-            self.build_pending_call(&pending_id, &assistant_message, &tool_calls).await?;
+    //     let (pending_call, placeholder_content) =
+    //         self.build_pending_call(&pending_id, &assistant_message, &tool_calls).await?;
 
-        let state = PendingToolCallState {
-            message_id,
-            chat_id: chat_id.to_string(),
-            provider_id: provider_id.to_string(),
-            model_id: model_id.to_string(),
-            api_request,
-            tool_calls: tool_calls.clone(),
-        };
+    //     let state = PendingToolCallState {
+    //         message_id,
+    //         chat_id: chat_id.to_string(),
+    //         provider_id: provider_id.to_string(),
+    //         model_id: model_id.to_string(),
+    //         api_request,
+    //         tool_calls: tool_calls.clone(),
+    //     };
 
-        let result = PendingCallResult {
-            pending_id,
-            state,
-            placeholder_content,
-            placeholder_reasoning: assistant_message.reasoning.clone(),
-            pending_call,
-        };
+    //     let result = PendingCallResult {
+    //         pending_id,
+    //         state,
+    //         placeholder_content,
+    //         placeholder_reasoning: assistant_message.reasoning.clone(),
+    //         pending_call,
+    //     };
 
-        Ok(ToolCallOutcome::Pending(result))
-    }
+    //     Ok(ToolCallOutcome::Pending(result))
+    // }
 
-    async fn build_pending_call(
-        &self,
-        pending_id: &str,
-        assistant_message: &ChatMessage,
-        tool_calls: &[ChatToolCall],
-    ) -> Result<(PendingMcpCall, String), AppError> {
-        let mut display_calls = Vec::new();
+    // async fn build_pending_call(
+    //     &self,
+    //     pending_id: &str,
+    //     assistant_message: &ChatMessage,
+    //     tool_calls: &[ChatToolCall],
+    // ) -> Result<(PendingMcpCall, String), AppError> {
+    //     let mut display_calls = Vec::new();
 
-        // 获取活跃的 MCP 服务器
-        let servers = self.mcp_service.list_servers().await
-            .map_err(|e| AppError::internal_error(&format!("Failed to get servers: {}", e)))?
-            .into_iter()
-            .filter(|s| s.enabled)
-            .collect::<Vec<_>>();
+    //     // 获取活跃的 MCP 服务器
+    //     let servers = self.mcp_service.list_servers().await
+    //         .map_err(|e| AppError::internal_error(&format!("Failed to get servers: {}", e)))?
+    //         .into_iter()
+    //         .filter(|s| s.enabled)
+    //         .collect::<Vec<_>>();
 
-        for call in tool_calls {
-            // 在所有服务器中查找工具
-            let mut found = false;
-            for server in &servers {
-                if let Some(tool) = server.tools.iter().find(|t| {
-                    let function_name = format!("{}_{}", server.name, t.name);
-                    function_name == call.name
-                }) {
-                    let display = PendingMcpToolCall {
-                        call_id: call.id.clone(),
-                        server_id: server.id.clone(),
-                        server_name: server.name.clone(),
-                        server_display_name: server.display_name.clone(),
-                        tool_name: tool.name.clone(),
-                        tool_description: tool.description.clone(),
-                        arguments: Self::parse_tool_arguments_value(&call.arguments),
-                    };
+    //     for call in tool_calls {
+    //         // 在所有服务器中查找工具
+    //         let mut found = false;
+    //         for server in &servers {
+    //             if let Some(tool) = server.tools.iter().find(|t| {
+    //                 let function_name = format!("{}_{}", server.name, t.name);
+    //                 function_name == call.name
+    //             }) {
+    //                 let display = PendingMcpToolCall {
+    //                     call_id: call.id.clone().unwrap_or_default(),
+    //                     server_id: server.id.clone(),
+    //                     server_name: server.name.clone(),
+    //                     server_display_name: server.display_name.clone(),
+    //                     tool_name: tool.name.clone(),
+    //                     tool_description: tool.description.clone(),
+    //                     arguments: Self::parse_tool_arguments_value(&call.arguments),
+    //                 };
 
-                    display_calls.push(display);
-                    found = true;
-                    break;
-                }
-            }
+    //                 display_calls.push(display);
+    //                 found = true;
+    //                 break;
+    //             }
+    //         }
 
-            if !found {
-                return Err(AppError::internal_error(&format!(
-                    "Tool {} not found in any MCP server",
-                    call.name
-                )));
-            }
-        }
+    //         if !found {
+    //             return Err(AppError::internal_error(&format!(
+    //                 "Tool {} not found in any MCP server",
+    //                 call.name
+    //             )));
+    //         }
+    //     }
 
-        let title = if display_calls.len() == 1 {
-            format!("模型请求执行 MCP 工具 {}", display_calls[0].tool_name)
-        } else {
-            format!("模型请求执行 {} 个 MCP 工具", display_calls.len())
-        };
+    //     let title = if display_calls.len() == 1 {
+    //         format!("模型请求执行 MCP 工具 {}", display_calls[0].tool_name)
+    //     } else {
+    //         format!("模型请求执行 {} 个 MCP 工具", display_calls.len())
+    //     };
 
-        let description = assistant_message.content.trim().to_string();
-        let description = if description.is_empty() {
-            None
-        } else {
-            Some(description)
-        };
+    //     let description = assistant_message.content.trim().to_string();
+    //     let description = if description.is_empty() {
+    //         None
+    //     } else {
+    //         Some(description)
+    //     };
 
-        let placeholder_content = description.clone().unwrap_or_else(|| title.clone());
+    //     let placeholder_content = description.clone().unwrap_or_else(|| title.clone());
 
-        Ok((
-            PendingMcpCall {
-                id: pending_id.to_string(),
-                title,
-                description,
-                tool_calls: display_calls,
-            },
-            placeholder_content,
-        ))
-    }
+    //     Ok((
+    //         PendingMcpCall {
+    //             id: pending_id.to_string(),
+    //             title,
+    //             description,
+    //             tool_calls: display_calls,
+    //         },
+    //         placeholder_content,
+    //     ))
+    // }
 
-    fn parse_tool_arguments_value(arguments: &str) -> Value {
-        if arguments.trim().is_empty() {
-            return Value::Object(Map::new());
-        }
+    // fn parse_tool_arguments_value(arguments: &str) -> Value {
+    //     if arguments.trim().is_empty() {
+    //         return Value::Object(Map::new());
+    //     }
 
-        serde_json::from_str(arguments).unwrap_or_else(|_| Value::String(arguments.to_string()))
-    }
+    //     serde_json::from_str(arguments).unwrap_or_else(|_| Value::String(arguments.to_string()))
+    // }
 
-    async fn store_pending_call_and_build_response(
-        &self,
-        chat: &crate::models::Chat,
-        request: &MessageRequest,
-        pending: PendingCallResult,
-        duration: f64,
-        reuse_existing_message: bool,
-    ) -> Result<MessageResponse, AppError> {
-        let now = chrono::Utc::now().timestamp_millis();
+    // async fn store_pending_call_and_build_response(
+    //     &self,
+    //     chat: &crate::models::Chat,
+    //     request: &MessageRequest,
+    //     pending: PendingCallResult,
+    //     duration: f64,
+    //     reuse_existing_message: bool,
+    // ) -> Result<MessageResponse, AppError> {
+    //     let now = chrono::Utc::now().timestamp_millis();
 
-        let PendingCallResult {
-            pending_id,
-            state,
-            placeholder_content,
-            placeholder_reasoning,
-            pending_call,
-        } = pending;
+    //     let PendingCallResult {
+    //         pending_id,
+    //         state,
+    //         placeholder_content,
+    //         placeholder_reasoning,
+    //         pending_call: _,
+    //     } = pending;
 
-        let config = MessageConfig {
-            temperature: chat.temperature,
-            top_p: chat.top_p,
-            max_tokens: chat.max_tokens,
-            stream: chat.stream,
-            model_id: Some(request.model_id.clone()),
-            provider_id: Some(request.provider_id.clone()),
-            system_prompt: chat.system_prompt.clone(),
-            mcp_servers: Some(chat.mcp_servers.clone()),
-        };
+    //     let config = MessageConfig {
+    //         temperature: chat.temperature,
+    //         top_p: chat.top_p,
+    //         max_tokens: chat.max_tokens,
+    //         stream: chat.stream,
+    //         model_id: Some(request.model_id.clone()),
+    //         provider_id: Some(request.provider_id.clone()),
+    //         system_prompt: chat.system_prompt.clone(),
+    //         mcp_servers: Some(chat.mcp_servers.clone()),
+    //     };
 
-        let tools = crate::models::MessageTools {
-            pending_mcp_call: Some(pending_call.clone()),
-            tool_call_deltas: None,
-        };
+    //     let tools = crate::models::MessageTools {
+    //         pending_mcp_call: None,
+    //         tool_call_deltas: None,
+    //     };
 
-        if reuse_existing_message {
-            self.repository
-                .update_message_content(&state.message_id, &placeholder_content, now)
-                .await?;
-            self.repository
-                .update_message_reasoning(&state.message_id, placeholder_reasoning.as_deref(), now)
-                .await?;
-            self.repository
-                .update_message_config(&state.message_id, Some(&config), now)
-                .await?;
-            self.repository
-                .update_message_tools(&state.message_id, Some(&tools), now)
-                .await?;
-        } else {
-            let message = Message {
-                id: state.message_id.clone(),
-                chat_id: chat.id.clone(),
-                role: MessageRole::Assistant,
-                content: placeholder_content.clone(),
-                reasoning: placeholder_reasoning.clone(),
-                config: Some(config),
-                tools: Some(tools),
-                attachments: None,
-                input_tokens: None,
-                output_tokens: None,
-                total_tokens: None,
-                start_time: Some(now),
-                end_time: Some(now),
-                duration: None,
-                created_at: now,
-                updated_at: now,
-            };
+    //     if reuse_existing_message {
+    //         self.repository
+    //             .update_message_content(&state.message_id, &placeholder_content, now)
+    //             .await?;
+    //         self.repository
+    //             .update_message_reasoning(&state.message_id, placeholder_reasoning.as_deref(), now)
+    //             .await?;
+    //         self.repository
+    //             .update_message_config(&state.message_id, Some(&config), now)
+    //             .await?;
+    //         self.repository
+    //             .update_message_tools(&state.message_id, Some(&tools), now)
+    //             .await?;
+    //     } else {
+    //         let message = Message {
+    //             id: state.message_id.clone(),
+    //             chat_id: chat.id.clone(),
+    //             role: MessageRole::Assistant,
+    //             content: placeholder_content.clone(),
+    //             reasoning: placeholder_reasoning.clone(),
+    //             config: Some(config),
+    //             tools: Some(tools),
+    //             attachments: None,
+    //             input_tokens: None,
+    //             output_tokens: None,
+    //             total_tokens: None,
+    //             start_time: Some(now),
+    //             end_time: Some(now),
+    //             duration: None,
+    //             created_at: now,
+    //             updated_at: now,
+    //         };
 
-            self.repository.create_message(&message).await?;
-        }
+    //         self.repository.create_message(&message).await?;
+    //     }
 
-        let message_id = state.message_id.clone();
-        let chat_id = chat.id.clone();
-        let model_id = request.model_id.clone();
-        let provider_id = request.provider_id.clone();
+    //     let message_id = state.message_id.clone();
+    //     let chat_id = chat.id.clone();
+    //     let model_id = request.model_id.clone();
+    //     let provider_id = request.provider_id.clone();
 
-        {
-            let mut pending_map = self.pending_calls.lock().await;
-            pending_map.insert(pending_id.clone(), state);
-        }
+    //     {
+    //         let mut pending_map = self.pending_calls.lock().await;
+    //         pending_map.insert(pending_id.clone(), state);
+    //     }
 
-        Ok(MessageResponse {
-            chat_id,
-            message_id,
-            content: placeholder_content,
-            reasoning: placeholder_reasoning,
-            model_id,
-            provider_id,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            duration: Some(duration as i64),
-            pending_mcp_call: Some(pending_call),
-        })
-    }
+    //     Ok(MessageResponse {
+    //         chat_id,
+    //         message_id,
+    //         content: placeholder_content,
+    //         reasoning: placeholder_reasoning,
+    //         model_id,
+    //         provider_id,
+    //         input_tokens: None,
+    //         output_tokens: None,
+    //         total_tokens: None,
+    //         duration: Some(duration as i64),
+    //         tool_calls: None,
+    //     })
+    // }
 
-    async fn finalize_pending_message(
-        &self,
-        state: &PendingToolCallState,
-        chat: &crate::models::Chat,
-        llm_response: &LlmApiResponse,
-        duration_ms: i64,
-    ) -> Result<(), AppError> {
-        let now = chrono::Utc::now().timestamp_millis();
+    // async fn finalize_pending_message(
+    //     &self,
+    //     state: &PendingToolCallState,
+    //     chat: &crate::models::Chat,
+    //     llm_response: &LlmApiResponse,
+    //     duration_ms: i64,
+    // ) -> Result<(), AppError> {
+    //     let now = chrono::Utc::now().timestamp_millis();
 
-        self.repository
-            .update_message_content(&state.message_id, &llm_response.content, now)
-            .await?;
+    //     self.repository
+    //         .update_message_content(&state.message_id, &llm_response.content, now)
+    //         .await?;
 
-        self.repository
-            .update_message_reasoning(&state.message_id, llm_response.reasoning.as_deref(), now)
-            .await?;
+    //     self.repository
+    //         .update_message_reasoning(&state.message_id, llm_response.reasoning.as_deref(), now)
+    //         .await?;
 
-        self.repository
-            .update_message_stats(
-                &state.message_id,
-                llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-                llm_response.usage.as_ref().map(|u| u.completion_tokens),
-                llm_response.usage.as_ref().map(|u| u.total_tokens),
-                None,
-                Some(now),
-                Some(if duration_ms > i64::from(i32::MAX) {
-                    i32::MAX
-                } else {
-                    duration_ms as i32
-                }),
-                now,
-            )
-            .await?;
+    //     self.repository
+    //         .update_message_stats(
+    //             &state.message_id,
+    //             llm_response.usage.as_ref().map(|u| u.prompt_tokens),
+    //             llm_response.usage.as_ref().map(|u| u.completion_tokens),
+    //             llm_response.usage.as_ref().map(|u| u.total_tokens),
+    //             None,
+    //             Some(now),
+    //             Some(if duration_ms > i64::from(i32::MAX) {
+    //                 i32::MAX
+    //             } else {
+    //                 duration_ms as i32
+    //             }),
+    //             now,
+    //         )
+    //         .await?;
 
-        let config = MessageConfig {
-            temperature: chat.temperature,
-            top_p: chat.top_p,
-            max_tokens: chat.max_tokens,
-            stream: chat.stream,
-            model_id: Some(state.model_id.clone()),
-            provider_id: Some(state.provider_id.clone()),
-            system_prompt: chat.system_prompt.clone(),
-            mcp_servers: Some(chat.mcp_servers.clone()),
-                    };
+    //     let config = MessageConfig {
+    //         temperature: chat.temperature,
+    //         top_p: chat.top_p,
+    //         max_tokens: chat.max_tokens,
+    //         stream: chat.stream,
+    //         model_id: Some(state.model_id.clone()),
+    //         provider_id: Some(state.provider_id.clone()),
+    //         system_prompt: chat.system_prompt.clone(),
+    //         mcp_servers: Some(chat.mcp_servers.clone()),
+    //                 };
 
-        self.repository
-            .update_message_config(&state.message_id, Some(&config), now)
-            .await?;
+    //     self.repository
+    //         .update_message_config(&state.message_id, Some(&config), now)
+    //         .await?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    async fn update_pending_message(
-        &self,
-        new_state: &PendingToolCallState,
-        chat: &crate::models::Chat,
-        placeholder_content: &str,
-        placeholder_reasoning: &Option<String>,
-        pending_call: &PendingMcpCall,
-    ) -> Result<(), AppError> {
-        let now = chrono::Utc::now().timestamp_millis();
+    // async fn update_pending_message(
+    //     &self,
+    //     new_state: &PendingToolCallState,
+    //     chat: &crate::models::Chat,
+    //     placeholder_content: &str,
+    //     placeholder_reasoning: &Option<String>,
+    //     _pending_call: &PendingMcpCall,
+    // ) -> Result<(), AppError> {
+    //     let now = chrono::Utc::now().timestamp_millis();
 
-        self.repository
-            .update_message_content(&new_state.message_id, placeholder_content, now)
-            .await?;
+    //     self.repository
+    //         .update_message_content(&new_state.message_id, placeholder_content, now)
+    //         .await?;
 
-        self.repository
-            .update_message_reasoning(&new_state.message_id, placeholder_reasoning.as_deref(), now)
-            .await?;
+    //     self.repository
+    //         .update_message_reasoning(&new_state.message_id, placeholder_reasoning.as_deref(), now)
+    //         .await?;
 
-        let config = MessageConfig {
-            temperature: chat.temperature,
-            top_p: chat.top_p,
-            max_tokens: chat.max_tokens,
-            stream: chat.stream,
-            model_id: Some(new_state.model_id.clone()),
-            provider_id: Some(new_state.provider_id.clone()),
-            system_prompt: chat.system_prompt.clone(),
-            mcp_servers: Some(chat.mcp_servers.clone()),
-        };
+    //     let config = MessageConfig {
+    //         temperature: chat.temperature,
+    //         top_p: chat.top_p,
+    //         max_tokens: chat.max_tokens,
+    //         stream: chat.stream,
+    //         model_id: Some(new_state.model_id.clone()),
+    //         provider_id: Some(new_state.provider_id.clone()),
+    //         system_prompt: chat.system_prompt.clone(),
+    //         mcp_servers: Some(chat.mcp_servers.clone()),
+    //     };
 
-        let tools = crate::models::MessageTools {
-            pending_mcp_call: Some(pending_call.clone()),
-            tool_call_deltas: None,
-        };
+    //     let tools = crate::models::MessageTools {
+    //         pending_mcp_call: None,
+    //         tool_call_deltas: None,
+    //     };
 
-        self.repository
-            .update_message_config(&new_state.message_id, Some(&config), now)
-            .await?;
-        self.repository
-            .update_message_tools(&new_state.message_id, Some(&tools), now)
-            .await?;
+    //     self.repository
+    //         .update_message_config(&new_state.message_id, Some(&config), now)
+    //         .await?;
+    //     self.repository
+    //         .update_message_tools(&new_state.message_id, Some(&tools), now)
+    //         .await?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     async fn prepare_tools(
         &self,
@@ -1417,7 +1411,7 @@ impl MessageService {
             output_tokens: None,
             total_tokens: None,
             duration: Some(duration),
-            pending_mcp_call: None,
+            tool_calls: None,
         };
 
         tracing::info!(
@@ -1894,30 +1888,6 @@ impl MessageService {
                 self.repository
                     .update_message_content(&message_id, &response.content, now)
                     .await?;
-                if let Some(pending) = response.pending_mcp_call.clone() {
-                    let config = MessageConfig {
-                        temperature: chat.temperature,
-                        top_p: chat.top_p,
-                        max_tokens: chat.max_tokens,
-                        stream: chat.stream,
-                        model_id: Some(regenerate_request.model_id.clone()),
-                        provider_id: Some(regenerate_request.provider_id.clone()),
-                        system_prompt: chat.system_prompt.clone(),
-                        mcp_servers: Some(chat.mcp_servers.clone()),
-                    };
-
-                    let tools = crate::models::MessageTools {
-                        pending_mcp_call: Some(pending.clone()),
-                        tool_call_deltas: None,
-                    };
-
-                    self.repository
-                        .update_message_config(&message_id, Some(&config), now)
-                        .await?;
-                    self.repository
-                        .update_message_tools(&message_id, Some(&tools), now)
-                        .await?;
-                }
 
                 return Ok(response);
             }
@@ -1975,7 +1945,7 @@ impl MessageService {
             output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
             total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
             duration: llm_response.duration.map(|d| d as i64),
-            pending_mcp_call: None,
+            tool_calls: None,
         })
     }
 }

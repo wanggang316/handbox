@@ -204,7 +204,7 @@ pub async fn message_send_stream(
                         "chatId": response.chat_id,
                         "modelId": response.model_id,
                         "providerId": response.provider_id,
-                        "pendingMcpCall": response.pending_mcp_call
+                        "toolCalls": response.tool_calls
                     }),
                 );
             }

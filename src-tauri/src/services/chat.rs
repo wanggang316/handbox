@@ -1,7 +1,7 @@
 // 聊天服务实现
 
 use crate::llm_client::create_llm_client;
-use crate::llm_client::types::{ChatMessage, ChatRequest};
+use crate::llm_client::types::{ChatMessage, ChatRequest, ChatMessageRole};
 use crate::models::{AppError, Chat, MessageRole, UUID};
 use crate::services::{Database, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
@@ -208,11 +208,10 @@ impl ChatService {
         let api_request = ChatRequest {
             model: model_id,
             messages: vec![ChatMessage {
-                role: "user".to_string(),
+                role: ChatMessageRole::User,
                 content: title_prompt,
                 reasoning: None,
                 tool_calls: None,
-                tool_call_deltas: None,
                 tool_call_id: None,
             }],
             temperature: Some(0.1), // 使用低温度确保稳定输出
@@ -232,7 +231,7 @@ impl ChatService {
 
         // 11. 提取并清理标题
         let generated_title = if let Some(choice) = response.choices.first() {
-            if let Some(message) = &choice.message {
+            if let Some(message) = &choice.delta {
                 message.content.trim()
             } else {
                 return Err(AppError::internal_error("No message in response"));

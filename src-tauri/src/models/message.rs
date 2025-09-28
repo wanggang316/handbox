@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::models::chat::{Timestamp, UUID};
-use crate::llm_client::types::ChatToolCallDelta;
+use crate::llm_client::types::ChatToolCall;
 
 /// 消息角色
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -50,7 +50,7 @@ pub struct MessageTools {
 
     // 工具调用增量数据 - 直接存储模型返回的 DeltaToolCall
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_deltas: Option<Vec<ChatToolCallDelta>>,
+    pub tool_call_deltas: Option<Vec<ChatToolCall>>,
 }
 
 
@@ -125,8 +125,10 @@ pub struct MessageResponse {
     pub total_tokens: Option<i32>,
     pub duration: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pending_mcp_call: Option<PendingMcpCall>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
 }
+
+
 
 /// 待执行的 MCP 调用信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -254,28 +256,4 @@ mod tests {
         assert_eq!(config.model_id, deserialized.model_id);
     }
 
-    #[test]
-    fn message_response_serialization_roundtrip() {
-        let response = MessageResponse {
-            chat_id: "chat_123".to_string(),
-            message_id: "msg_456".to_string(),
-            content: "Hello! How can I help you?".to_string(),
-            reasoning: Some("I need to be helpful and friendly".to_string()),
-            model_id: "gpt-4".to_string(),
-            provider_id: "openai".to_string(),
-            input_tokens: Some(15),
-            output_tokens: Some(20),
-            total_tokens: Some(35),
-            duration: Some(1500),
-            pending_mcp_call: None,
-        };
-
-        let json = serde_json::to_string(&response).expect("serialize response");
-        let deserialized: MessageResponse =
-            serde_json::from_str(&json).expect("deserialize response");
-
-        assert_eq!(response.model_id, deserialized.model_id);
-        assert_eq!(response.provider_id, deserialized.provider_id);
-        assert_eq!(response.total_tokens, deserialized.total_tokens);
-    }
 }

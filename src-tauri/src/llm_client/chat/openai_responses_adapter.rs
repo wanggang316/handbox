@@ -2,7 +2,7 @@
 // 使用 openai-rust SDK 进行通信
 
 use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{ChatChoice, ChatMessage, ChatRequest, ChatResponse, ChatUsage};
+use crate::llm_client::types::{ChatChoice, ChatDeltaMessage, ChatMessage, ChatRequest, ChatResponse, ChatUsage, ChatMessageRole, ChatChunkResponse, ChatChunkChoice };
 use crate::models::{AppError, Provider};
 use async_stream::stream;
 use async_trait::async_trait;
@@ -29,7 +29,7 @@ impl OpenAIResponsesChatClient {
             .messages
             .iter()
             .map(|msg| InputItem::Message {
-                role: msg.role.clone(),
+                role: msg.role.clone().as_str().to_string(),
                 content: MessageContent::Text(msg.content.clone()),
             })
             .collect();
@@ -37,7 +37,7 @@ impl OpenAIResponsesChatClient {
         let instructions = request
             .messages
             .iter()
-            .find(|msg| msg.role == "system")
+            .find(|msg| msg.role == ChatMessageRole::System)
             .map(|msg| msg.content.clone());
 
         CreateResponseRequest {
@@ -67,16 +67,13 @@ impl OpenAIResponsesChatClient {
 
             let choice = ChatChoice {
                 index: index as i32,
-                message: Some(ChatMessage {
-                    role: item.role.clone().unwrap_or_else(|| "assistant".to_string()),
+                delta: Some(ChatMessage {
+                    role: ChatMessageRole::Assistant,
                     content,
                     reasoning: None,
                     tool_calls: None,
-                    tool_call_deltas: None,
                     tool_call_id: None,
                 }),
-                delta: None,
-                tool_calls_delta: None,
                 finish_reason: if response.status == "completed" {
                     Some("stop".to_string())
                 } else {
@@ -101,7 +98,7 @@ impl OpenAIResponsesChatClient {
         &self,
         event: ResponseStreamEvent,
         state: &mut StreamState,
-    ) -> Option<Result<ChatResponse, AppError>> {
+    ) -> Option<Result<ChatChunkResponse, AppError>> {
         match event {
             ResponseStreamEvent::ResponseCreated { response, .. }
             | ResponseStreamEvent::ResponseInProgress { response, .. } => {
@@ -130,6 +127,7 @@ impl OpenAIResponsesChatClient {
             | ResponseStreamEvent::Unknown => None,
         }
     }
+
 }
 
 #[async_trait]
@@ -170,7 +168,7 @@ impl ChatClient for OpenAIResponsesChatClient {
         provider: &Provider,
         mut request: ChatRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         request.stream = Some(true);
@@ -192,7 +190,7 @@ impl ChatClient for OpenAIResponsesChatClient {
             serde_json::to_string_pretty(&openai_request).unwrap_or_default()
         );
 
-        let (tx, mut rx) = mpsc::channel::<Result<ChatResponse, AppError>>(100);
+        let (tx, mut rx) = mpsc::channel::<Result<ChatChunkResponse, AppError>>(100);
         let model_name = request.model.clone();
         let handler = OpenAIResponsesChatClient::new();
 
@@ -254,7 +252,7 @@ impl ChatClient for OpenAIResponsesChatClient {
 
         Ok(Box::new(Box::pin(response_stream))
             as Box<
-                dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin,
             >)
     }
 
@@ -291,46 +289,38 @@ impl StreamState {
         }
     }
 
-    fn delta_chunk(&self, index: i32, content: String) -> ChatResponse {
-        ChatResponse {
+    fn delta_chunk(&self, index: i32, content: String) -> ChatChunkResponse {
+        ChatChunkResponse {
             id: self.response_id.clone(),
             object: "chat.completion.chunk".to_string(),
             model: self.model.clone(),
-            choices: vec![ChatChoice {
+            choices: vec![ChatChunkChoice {
                 index,
-                message: None,
-                delta: Some(ChatMessage {
-                    role: "assistant".to_string(),
-                    content,
+                delta: Some(ChatDeltaMessage {
+                    role: Some(ChatMessageRole::Assistant),
+                    content: Some(content),
                     reasoning: None,
                     tool_calls: None,
-                    tool_call_deltas: None,
-                    tool_call_id: None,
                 }),
-                tool_calls_delta: None,
                 finish_reason: None,
             }],
             usage: None,
         }
     }
 
-    fn finish_chunk(&self, usage: Option<ChatUsage>) -> ChatResponse {
-        ChatResponse {
+    fn finish_chunk(&self, usage: Option<ChatUsage>) -> ChatChunkResponse {
+        ChatChunkResponse {
             id: self.response_id.clone(),
             object: "chat.completion.chunk".to_string(),
             model: self.model.clone(),
-            choices: vec![ChatChoice {
+            choices: vec![ChatChunkChoice {
                 index: 0,
-                message: None,
-                delta: Some(ChatMessage {
-                    role: "assistant".to_string(),
-                    content: String::new(),
+                delta: Some(ChatDeltaMessage {
+                    role: Some(ChatMessageRole::Assistant),
+                    content: Some(String::new()),
                     reasoning: None,
                     tool_calls: None,
-                    tool_call_deltas: None,
-                    tool_call_id: None,
                 }),
-                tool_calls_delta: None,
                 finish_reason: Some("stop".to_string()),
             }],
             usage,
