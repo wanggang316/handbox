@@ -183,6 +183,9 @@ pub struct ChatDeltaToolCall {
     pub function: Option<ChatDeltaToolFunction>,
 }
 
+// Type alias for backward compatibility
+pub type ChatToolCallDelta = ChatDeltaToolCall;
+
 /// 工具函数-增量
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

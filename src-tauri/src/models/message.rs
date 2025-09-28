@@ -40,19 +40,6 @@ pub struct MessageConfig {
     pub mcp_servers: Option<Vec<String>>,
 }
 
-/// 消息工具数据 - 直接存储 DeltaToolCall 对象
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageTools {
-    // 待执行的 MCP 调用信息
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pending_mcp_call: Option<PendingMcpCall>,
-
-    // 工具调用增量数据 - 直接存储模型返回的 DeltaToolCall
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_deltas: Option<Vec<ChatToolCall>>,
-}
-
 
 /// 消息实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,13 +49,11 @@ pub struct Message {
     pub chat_id: UUID,
     pub role: MessageRole,
     pub content: String,
-    pub reasoning: Option<String>, // 推理过程内容
+    pub reasoning: Option<String>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
 
     // Per-message configuration stored as JSON
     pub config: Option<MessageConfig>,
-
-    // Tool-related data stored as JSON
-    pub tools: Option<MessageTools>,
 
     pub attachments: Option<Vec<MessageAttachment>>,
 
@@ -117,18 +102,16 @@ pub struct MessageResponse {
     pub chat_id: UUID,
     pub message_id: UUID,
     pub content: String,
-    pub reasoning: Option<String>, // 推理过程内容
+    pub reasoning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChatToolCall>>,
     pub model_id: String,
     pub provider_id: String,
     pub input_tokens: Option<i32>,
     pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
     pub duration: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatToolCall>>,
 }
-
-
 
 /// 待执行的 MCP 调用信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -181,8 +164,8 @@ mod tests {
             content: "Hello, world!".to_string(),
             reasoning: None,
             config: None,
-            tools: None,
             attachments: None,
+            tool_calls: None,
             input_tokens: Some(10),
             output_tokens: Some(20),
             total_tokens: Some(30),
@@ -218,7 +201,7 @@ mod tests {
             content: "Here's a file".to_string(),
             reasoning: None,
             config: None,
-            tools: None,
+            tool_calls: None,
             attachments: Some(vec![attachment]),
             input_tokens: None,
             output_tokens: None,

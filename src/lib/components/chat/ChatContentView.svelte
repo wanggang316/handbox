@@ -85,6 +85,7 @@
   let isLoading = $derived(messageStore.isLoading);
   let streamingContent = $derived(messageStore.streamingContent);
   let streamingReasoning = $derived(messageStore.streamingReasoning);
+  let streamingToolCalls = $derived(messageStore.streamingToolCalls);
   let streamingMessageId = $derived(messageStore.streamingMessageId);
   let isReasoning = $derived(messageStore.isReasoning);
   let isMessageLoading = $derived(messageStore.isMessageLoading);
@@ -96,6 +97,12 @@
           role: 'assistant' as const,
           content: streamingContent ?? '',
           reasoning: streamingReasoning,
+          toolCalls: streamingToolCalls ? streamingToolCalls.map((call, index) => ({
+            index: call.index || index,
+            id: call.id,
+            toolType: call.toolType,
+            function: call.function
+          })) : undefined,
           createdAt: Date.now(),
           config: {
             modelId: chatState.currentChat?.modelId,
@@ -151,7 +158,7 @@
   
   // 监听流式内容变化，自动滚动
   $effect(() => {
-    if (streamingContent) {
+    if (streamingContent || streamingToolCalls) {
       setTimeout(scrollToBottom, 50);
     }
   });
@@ -205,7 +212,7 @@
         {/each}
 
         <!-- 消息加载状态或流式响应中的消息 -->
-        {#if isMessageLoading || (streamingMessageId && (streamingContent || streamingReasoning))}
+        {#if isMessageLoading || (streamingMessageId && (streamingContent || streamingReasoning || streamingToolCalls))}
           <AssistantMessageView
             message={streamingMessage ?? undefined}
             isStreaming={!!streamingMessage}

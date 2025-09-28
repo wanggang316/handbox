@@ -93,8 +93,8 @@ export async function sendStreamMessage(request: MessageRequest): Promise<string
  */
 export interface StreamEventHandlers {
   onStart?: (data: { streamId: string; messageId: string }) => void;
-  onChunk?: (data: { streamId: string; content: string; reasoning?: string; chunk: string; index: number }) => void;
-  onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string; pendingMcpCall?: any; messageId?: string }) => void;
+  onChunk?: (data: { streamId: string; content: string; reasoning?: string; toolCalls?: any[]; chunk: string; index: number }) => void;
+  onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string; toolCalls?: any[]; messageId?: string }) => void;
   onError?: (error: any) => void;
 }
 
@@ -119,14 +119,10 @@ export async function listenToStreamEvents(handlers: StreamEventHandlers) {
   };
 }
 
-export async function executePendingMcpCall(pendingId: string): Promise<MessageResponse> {
-  return await apiCall<MessageResponse>('message_execute_mcp_call', { pendingId: pendingId });
-}
-
-export async function executeToolCalls(messageId: string, toolCallDeltas: any[]): Promise<MessageResponse> {
+export async function executeToolCalls(messageId: string, toolCalls: any[]): Promise<MessageResponse> {
   return await apiCall<MessageResponse>('message_execute_tool_calls', {
     messageId: messageId,
-    toolCallDeltas: toolCallDeltas
+    toolCalls: toolCalls
   });
 }
 

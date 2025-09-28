@@ -1,5 +1,6 @@
 // Message 数据访问层
 
+use crate::llm_client::ChatToolCall;
 use crate::models::{AppError, Message, MessageConfig, MessageRole, Timestamp, UUID};
 use crate::storage::Database;
 use serde_json;
@@ -37,7 +38,7 @@ impl MessageRepository {
             None
         };
 
-        let tools_json = if let Some(tools) = &message.tools {
+        let tools_json = if let Some(tools) = &message.tool_calls {
             Some(
                 serde_json::to_string(tools)
                     .map_err(|e| AppError::validation_error(&format!("Invalid tools: {}", e)))?,
@@ -263,7 +264,7 @@ impl MessageRepository {
     pub async fn update_message_tools(
         &self,
         message_id: &UUID,
-        tools: Option<&crate::models::MessageTools>,
+        tools: Option<&Vec<ChatToolCall>>,
         updated_at: Timestamp,
     ) -> Result<(), AppError> {
         let tools_json = if let Some(tools) = tools {
@@ -375,7 +376,7 @@ impl MessageRepository {
             None
         };
 
-        let tools: Option<crate::models::MessageTools> = if let Ok(tools_json) = row.try_get::<String, _>("tools") {
+        let tool_calls: Option<Vec<ChatToolCall>> = if let Ok(tools_json) = row.try_get::<String, _>("tools") {
             serde_json::from_str(&tools_json).ok()
         } else {
             None
@@ -388,7 +389,7 @@ impl MessageRepository {
             content: row.try_get("content").unwrap_or_default(),
             reasoning: row.try_get("reasoning").ok(),
             config,
-            tools,
+            tool_calls,
             attachments,
             input_tokens: row.try_get("input_tokens").ok(),
             output_tokens: row.try_get("output_tokens").ok(),
@@ -460,7 +461,7 @@ mod tests {
                 system_prompt: None,
                 mcp_servers: None,
             }),
-            tools: None,
+            tool_calls: None,
             attachments: None,
             input_tokens: None,
             output_tokens: None,

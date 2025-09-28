@@ -17,7 +17,6 @@ export interface MessageConfig {
   providerId?: string;
   systemPrompt?: string;
   mcpServers?: string[];
-  pendingMcpCall?: PendingMcpCall;
 }
 
 // 消息类型
@@ -26,18 +25,16 @@ export interface Message extends BaseEntity {
   role: MessageRole;
   content: string;
   reasoning?: string; // 推理过程内容
-  
+
   // 每条消息的配置参数
   config?: MessageConfig;
 
-  // 工具相关数据
-  tools?: MessageTools;
+  // 工具调用数据
+  toolCalls?: ToolCall[];
 
-  pendingMcpCall?: PendingMcpCall;
-  
   // 附件
   attachments?: MessageAttachment[];
-  
+
   // 使用统计和时序信息
   inputTokens?: number;
   outputTokens?: number;
@@ -120,45 +117,28 @@ export interface MessageResponse {
   messageId: UUID;
   content: string;
   reasoning?: string;
+  toolCalls?: ToolCall[];
   modelId: string;
   providerId: string;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
   duration?: number;
-  pendingMcpCall?: PendingMcpCall;
 }
 
-export interface PendingMcpCall {
-  id: string;
-  title: string;
-  description?: string;
-  toolCalls: PendingMcpToolCall[];
+
+// 工具函数信息
+export interface ToolFunction {
+  name: string;
+  arguments: string;
 }
 
-export interface PendingMcpToolCall {
-  callId: string;
-  serverId: string;
-  serverName: string;
-  serverDisplayName?: string;
-  toolName: string;
-  toolDescription?: string;
-  arguments: any;
-}
-
-// 消息工具数据 - 直接存储 DeltaToolCall 对象
-export interface MessageTools {
-  pendingMcpCall?: PendingMcpCall;
-  toolCallDeltas?: ToolCallDelta[];
-}
-
-// 工具调用增量数据 - 匹配后端的 ChatToolCallDelta
-export interface ToolCallDelta {
+// 工具调用数据
+export interface ToolCall {
   index: number;
   id?: string;
   toolType?: string;
-  name?: string;
-  arguments?: string;
+  function?: ToolFunction;
 }
 
 // 流式消息事件

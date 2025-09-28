@@ -2,7 +2,7 @@
  * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage } from '$lib/types/chat';
+import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage, ToolCall } from '$lib/types/chat';
 import type { FrontendProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
@@ -20,6 +20,7 @@ interface MessageState {
   streamingMessageId: string | null;
   streamingContent: string;
   streamingReasoning: string;
+  streamingToolCalls: ToolCall[] | null;
 }
 
 class MessageStore {
@@ -32,6 +33,7 @@ class MessageStore {
     streamingMessageId: null,
     streamingContent: '',
     streamingReasoning: '',
+    streamingToolCalls: null,
   });
 
   // 当前流式事件监听器的清理函数
@@ -60,6 +62,10 @@ class MessageStore {
 
   get streamingReasoning() {
     return this.state.streamingReasoning;
+  }
+
+  get streamingToolCalls() {
+    return this.state.streamingToolCalls;
   }
 
   // 判断是否正在推理中（有推理内容但还没有最终内容）
@@ -129,56 +135,37 @@ class MessageStore {
     }
 
     const messages = this.state.messagesByChat[chatId];
-    const pending = response.pendingMcpCall;
     const index = messages.findIndex(message => message.id === response.messageId);
 
     if (index !== -1) {
       const existing = messages[index];
-      const updatedConfig: NonNullable<Message['config']> = {
-        ...(existing.config ?? {}),
-      };
-
-      if (pending) {
-        updatedConfig.pendingMcpCall = pending;
-      } else {
-        delete updatedConfig.pendingMcpCall;
-      }
-
-      const finalConfig = Object.keys(updatedConfig).length ? updatedConfig : undefined;
 
       const updated: Message = {
         ...existing,
         content: response.content,
         reasoning: response.reasoning,
+        toolCalls: response.toolCalls,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,
         duration: response.duration,
-        config: finalConfig,
-        pendingMcpCall: pending ?? undefined,
         updatedAt: Date.now(),
       };
 
       messages[index] = updated;
     } else {
-      const baseConfig: NonNullable<Message['config']> = {
-        modelId: response.modelId,
-        providerId: response.providerId,
-        stream: false,
-      };
-
-      if (pending) {
-        baseConfig.pendingMcpCall = pending;
-      }
-
       const newMessage: Message = {
         id: response.messageId,
         chatId,
         role: 'assistant',
         content: response.content,
         reasoning: response.reasoning,
-        config: baseConfig,
-        pendingMcpCall: pending ?? undefined,
+        toolCalls: response.toolCalls,
+        config: {
+          modelId: response.modelId,
+          providerId: response.providerId,
+          stream: false,
+        },
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,
@@ -262,6 +249,7 @@ class MessageStore {
     this.state.streamingMessageId = messageId;
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
   }
 
   // 更新流式内容
@@ -279,6 +267,11 @@ class MessageStore {
     this.state.streamingReasoning = reasoning;
   }
 
+  // 设置流式工具调用
+  setStreamingToolCalls(toolCalls: ToolCall[] | null) {
+    this.state.streamingToolCalls = toolCalls;
+  }
+
   // 完成流式响应
   finishStreaming(chatId: string, response: MessageResponse) {
     this.applyMessageResponse(chatId, response);
@@ -287,6 +280,7 @@ class MessageStore {
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
   }
 
   // 清理指定聊天的消息
@@ -300,6 +294,7 @@ class MessageStore {
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
   }
 
 
@@ -395,6 +390,10 @@ class MessageStore {
             // 累积推理过程内容，因为后端发送的是增量内容
             this.state.streamingReasoning += data.reasoning;
           }
+          console.log('Streaming tool calls:', data.toolCalls);
+          if (data.toolCalls) {
+            this.setStreamingToolCalls(data.toolCalls);
+          }
         },
         onEnd: (data) => {
           console.log('Stream ended:', data);
@@ -404,9 +403,9 @@ class MessageStore {
             messageId: data.messageId ?? data.streamId,
             content: data.finalContent,
             reasoning: data.finalReasoning,
+            toolCalls: data.toolCalls,
             modelId: data.modelId,
             providerId: data.providerId,
-            pendingMcpCall: data.pendingMcpCall,
           };
           this.finishStreaming(currentChat.id!, response);
           this.setSending(false);
@@ -477,21 +476,10 @@ class MessageStore {
     this.state.error = null;
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
+    this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
   }
 
-  async executePendingMcpCall(pendingId: string): Promise<void> {
-    try {
-      this.setSending(true);
-      this.setError(null);
-      const response = await messageApi.executePendingMcpCall(pendingId);
-      this.applyMessageResponse(response.chatId, response);
-    } catch (error) {
-      this.setError(error instanceof Error ? error.message : '执行 MCP 工具失败');
-      throw error;
-    } finally {
-      this.setSending(false);
-    }
-  }
 }
 
 // Export singleton instance

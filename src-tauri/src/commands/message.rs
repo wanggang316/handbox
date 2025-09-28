@@ -180,6 +180,7 @@ pub async fn message_send_stream(
                         "streamId": stream_id,
                         "content": chunk.content,
                         "reasoning": chunk.reasoning,
+                        "toolCalls": chunk.tool_calls,
                         "chunk": "",  // 这里可以改为增量内容
                         "index": 0
                     }),
@@ -225,30 +226,8 @@ pub async fn message_send_stream(
     Ok(stream_id)
 }
 
-/// 执行待确认的 MCP 工具调用
-#[tauri::command]
-pub async fn message_execute_mcp_call(
-    pending_id: String,
-    message_service: State<'_, MessageService>,
-) -> Result<MessageResponse, AppError> {
-    tracing::info!(
-        "[message_execute_mcp_call] IPC command called for pending_id: {}",
-        pending_id
-    );
-    message_service.execute_pending_mcp_call(pending_id).await
-}
+// TODO: Implement execute_mcp_call if needed
+// This method was removed as part of simplifying the MCP tool call handling
 
-/// 直接执行工具调用（从 toolCallDeltas 创建并执行）
-#[tauri::command]
-pub async fn message_execute_tool_calls(
-    message_id: UUID,
-    tool_call_deltas: Vec<crate::llm_client::types::ChatToolCallDelta>,
-    message_service: State<'_, MessageService>,
-) -> Result<MessageResponse, AppError> {
-    tracing::info!(
-        "[message_execute_tool_calls] IPC command called for message_id: {}, {} tool calls",
-        message_id,
-        tool_call_deltas.len()
-    );
-    message_service.execute_tool_calls_directly(message_id, tool_call_deltas).await
-}
+// TODO: Implement execute_tool_calls if needed
+// This method was removed as part of simplifying the MCP tool call handling

@@ -43,15 +43,8 @@
     return undefined;
   });
 
-  const pendingCall = $derived(() =>
-    message?.tools?.pendingMcpCall ??
-    message?.config?.pendingMcpCall ??
-    message?.pendingMcpCall
-  );
-
-  // 获取工具调用增量数据
-  const toolCallDeltas = $derived(() => message?.tools?.toolCallDeltas ?? []);
-  let executingPending = $state(false);
+  // 获取工具调用数据
+  const toolCalls = $derived(() => message?.toolCalls || []);
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -92,8 +85,8 @@
   }
 
   async function handleExecuteToolCalls() {
-    const deltas = toolCallDeltas();
-    if (deltas.length === 0) {
+    const calls = toolCalls();
+    if (calls.length === 0) {
       console.warn('没有找到工具调用');
       return;
     }
@@ -104,13 +97,13 @@
     }
 
     try {
-      console.log('执行工具调用:', deltas);
+      console.log('执行工具调用:', calls);
 
       // 导入新的 API 函数
       const { executeToolCalls } = await import('$lib/api/message');
 
       // 直接调用新的 API 执行工具调用
-      const response = await executeToolCalls(message.id, deltas);
+      const response = await executeToolCalls(message.id, calls);
 
       console.log('工具调用执行完成:', response);
 
@@ -230,29 +223,6 @@
   function toggleReasoning() {
     reasoningExpanded = !reasoningExpanded;
   }
-
-  async function handleExecutePendingCall() {
-    console.log('-----handleExecutePendingCall-----');
-    const call = pendingCall();
-    if (!call) return;
-    if (executingPending) {
-      console.log('Already executing pending call, ignoring duplicate click');
-      return;
-    }
-    try {
-      executingPending = true;
-      await messageStore.executePendingMcpCall(call.id);
-    } catch (error) {
-      console.error('Failed to execute MCP call', error);
-      // 如果是已经执行的错误，可以静默处理
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes('already been executed')) {
-        console.log('MCP tool call was already executed');
-      }
-    } finally {
-      executingPending = false;
-    }
-  }
 </script>
 
 <div class="group relative">
@@ -317,72 +287,41 @@
             </div>
           {/if}
 
-          {#if pendingCall()}
-            {@const call = pendingCall()!}
-            <div class="mb-4 rounded-lg border border-amber-400/40 bg-amber-50/80 p-3 text-sm text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
-              <div class="flex flex-col gap-2">
-                <div class="flex items-start justify-between gap-3">
-                  <div class="font-medium leading-tight">{call.title}</div>
-                  <button
-                    class="px-3 py-1 text-xs font-medium rounded-md bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-60 disabled:cursor-not-allowed"
-                    onclick={handleExecutePendingCall}
-                    disabled={executingPending}
-                  >
-                    {executingPending ? '执行中…' : '执行 MCP 工具'}
-                  </button>
-                </div>
-                {#if call.description}
-                  <p class="text-xs text-amber-800/80 dark:text-amber-200/80 whitespace-pre-wrap">
-                    {call.description}
-                  </p>
-                {/if}
-                <div class="space-y-2">
-                  {#each call.toolCalls as tool}
-                    <div class="rounded-md border border-amber-400/30 bg-white/80 dark:bg-amber-900/50 p-2 text-xs text-amber-900 dark:text-amber-100">
-                      <div class="font-semibold">{tool.toolName}</div>
-                      <div class="text-amber-800/70 dark:text-amber-200/80">
-                        {tool.serverDisplayName ?? tool.serverName}
-                        {#if tool.toolDescription}
-                          · {tool.toolDescription}
-                        {/if}
-                      </div>
-                      <pre class="mt-2 max-h-48 overflow-auto rounded bg-base-200/70 dark:bg-black/30 p-2 text-[11px] text-base-content/80">
-{JSON.stringify(tool.arguments, null, 2)}
-                      </pre>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            </div>
-          {/if}
+          <!-- 消息内容 -->
+          <div
+            class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+            use:markdownInteractions
+          >
+            {@html renderMarkdown(message?.content || "")}
+          </div>
 
           <!-- 工具调用记录 -->
-          {#if toolCallDeltas().length > 0}
+          {#if toolCalls().length > 0}
             <div class="mb-4 rounded-lg border border-blue-400/40 bg-blue-50/80 p-3 text-sm text-blue-900 dark:bg-blue-900/40 dark:text-blue-100">
               <div class="mb-2 font-medium flex items-center justify-between">
                 <span>模型返回的工具调用</span>
                 <button
                   class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
                   onclick={handleExecuteToolCalls}
-                  disabled={toolCallDeltas().length === 0}
+                  disabled={toolCalls().length === 0}
                 >
                   执行工具调用
                 </button>
               </div>
               <div class="space-y-2">
-                {#each toolCallDeltas() as tool}
+                {#each toolCalls() as tool}
                   <div class="rounded-md border border-blue-400/30 bg-white/80 dark:bg-blue-900/50 p-2 text-xs">
                     <div class="flex items-center justify-between">
-                      <div class="font-semibold">{tool.name || `工具 ${tool.index}`}</div>
+                      <div class="font-semibold">{tool.function?.name || `工具 ${tool.index}`}</div>
                       <div class="text-gray-500 text-[10px]">
                         ID: {tool.id || 'N/A'} | 类型: {tool.toolType || 'function'}
                       </div>
                     </div>
-                    {#if tool.arguments}
+                    {#if tool.function?.arguments}
                       <div class="mt-2">
                         <div class="mb-1 text-[10px] text-gray-600 dark:text-gray-400 font-medium">参数:</div>
                         <pre class="max-h-32 overflow-auto rounded bg-base-200/70 dark:bg-black/30 p-2 text-[10px] text-base-content/80">
-{tool.arguments}
+{tool.function.arguments}
                         </pre>
                       </div>
                     {/if}
@@ -391,14 +330,6 @@
               </div>
             </div>
           {/if}
-
-          <!-- 消息内容 -->
-          <div
-            class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-            use:markdownInteractions
-          >
-            {@html renderMarkdown(message?.content || "")}
-          </div>
 
           {#if !isStreaming && !isMessageLoading}
           <!-- 性能信息 -->

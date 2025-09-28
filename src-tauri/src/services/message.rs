@@ -1,59 +1,36 @@
 // 消息服务实现
 
-use crate::llm_client::create_llm_client;
+use crate::llm_client::{create_llm_client};
 use crate::llm_client::types::{
-    ChatMessage, ChatRequest, ChatResponse,
-    ChatToolCall, ChatToolChoice, ChatUsage, ChatToolFunction,
+    ChatMessage as LlmChatMessage, ChatRequest,
+    ChatToolCall, ChatToolChoice, ChatUsage, RequestTool, RequestToolFunction,
+    ChatMessageRole, ChatResponse,
 };
 use crate::mcp_client::McpClientFactory;
 use crate::models::{
     AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest,
-    MessageResponse, MessageRole, PendingMcpCall, PendingMcpToolCall, UUID,
+    MessageResponse, MessageRole, UUID,
 };
 use crate::services::{ChatService, Database, McpService, ProviderService};
 use crate::storage::MessageRepository;
 use rmcp::model::CallToolResult;
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// 流式数据结构
 #[derive(Debug, Clone)]
 pub struct StreamChunk {
     pub content: String,
     pub reasoning: Option<String>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
 }
-
-
-// #[derive(Clone)]
-// struct PendingToolCallState {
-//     message_id: String,
-//     chat_id: String,
-//     provider_id: String,
-//     model_id: String,
-//     api_request: ChatRequest,
-//     tool_calls: Vec<ChatToolCall>,
-// }
-
-// struct PendingCallResult {
-//     pending_id: String,
-//     state: PendingToolCallState,
-//     placeholder_content: String,
-//     placeholder_reasoning: Option<String>,
-//     pending_call: PendingMcpCall,
-// }
-
-// enum ToolCallOutcome {
-//     Final(ChatResponse),
-//     Pending(PendingCallResult),
-// }
 
 /// LLM API 响应结构
 #[derive(Debug)]
 struct LlmApiResponse {
     content: String,
-    reasoning: Option<String>, // 推理过程内容
+    reasoning: Option<String>,
+    tool_calls: Option<Vec<ChatToolCall>>,
     usage: Option<ChatUsage>,
     duration: Option<f64>,
 }
@@ -65,8 +42,6 @@ pub struct MessageService {
     provider_service: Arc<ProviderService>,
     chat_service: Arc<ChatService>,
     mcp_service: Arc<McpService>,
-    pending_calls: Arc<Mutex<HashMap<String, PendingToolCallState>>>,
-    executing_calls: Arc<Mutex<HashSet<String>>>,
 }
 
 impl MessageService {
@@ -81,8 +56,6 @@ impl MessageService {
             provider_service,
             chat_service,
             mcp_service,
-            pending_calls: Arc::new(Mutex::new(HashMap::new())),
-            executing_calls: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -137,7 +110,7 @@ impl MessageService {
 
         let config = Self::extract_message_config_from_chat(&request, &chat);
         let user_message_id = self
-            .save_user_message(chat_id, &last_message.content, config)
+            .save_user_message(chat_id, &last_message.content, config.clone())
             .await
             .map_err(|e| {
                 let error = format!("Failed to save user message: {}", e);
@@ -151,71 +124,62 @@ impl MessageService {
         );
 
         // 3. 调用实际的 LLM API
-        match self.call_llm_api(&request, None).await? {
-            LlmCallResult::Final(llm_response) => {
-                // 4. 保存助手消息到数据库
-                let config = Self::extract_message_config_from_chat(&request, &chat);
-                let now = chrono::Utc::now().timestamp_millis();
-                let assistant_message_id = self
-                    .save_assistant_message(
-                        chat_id,
-                        &llm_response.content,
-                        llm_response.reasoning.clone(),
-                        config,
-                        now,
-                        llm_response.duration.unwrap_or(0.0) as i64,
-                        llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-                        llm_response.usage.as_ref().map(|u| u.completion_tokens),
-                        llm_response.usage.as_ref().map(|u| u.total_tokens),
-                    )
-                    .await
-                    .map_err(|e| {
-                        let error = format!("Failed to save assistant message: {}", e);
-                        tracing::error!("[MessageService::send_message] Database error: {}", error);
-                        e
-                    })?;
+        let llm_response = self.call_llm_api(&request).await?;
 
-                tracing::info!(
-                    "[MessageService::send_message] Assistant message saved with ID: {}",
-                    assistant_message_id
-                );
+        // 4. 保存助手消息到数据库
+        // let config = Self::extract_message_config_from_chat(&request, &chat);
+        let now = chrono::Utc::now().timestamp_millis();
+        let assistant_message_id = self
+            .save_assistant_message(
+                chat_id,
+                &llm_response.content,
+                llm_response.reasoning.clone(),
+                llm_response.tool_calls.clone(),
+                config.clone(),
+                now,
+                llm_response.duration.unwrap_or(0.0) as i64,
+                llm_response.usage.as_ref().map(|u| u.prompt_tokens),
+                llm_response.usage.as_ref().map(|u| u.completion_tokens),
+                llm_response.usage.as_ref().map(|u| u.total_tokens),
+            )
+            .await
+            .map_err(|e| {
+                let error = format!("Failed to save assistant message: {}", e);
+                tracing::error!("[MessageService::send_message] Database error: {}", error);
+                e
+            })?;
 
-                let response = MessageResponse {
-                    chat_id: chat_id.clone(),
-                    message_id: assistant_message_id.clone(),
-                    content: llm_response.content,
-                    reasoning: llm_response.reasoning,
-                    model_id: request.model_id,
-                    provider_id: request.provider_id,
-                    input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-                    output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
-                    total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
-                    duration: llm_response.duration.map(|d| d as i64),
-                    tool_calls: None,
-                };
+        tracing::info!(
+            "[MessageService::send_message] Assistant message saved with ID: {}",
+            assistant_message_id
+        );
 
-                tracing::info!(
-                    "[MessageService::send_message] Successfully completed for chat_id: {:?}, message_id: {}",
-                    chat_id, assistant_message_id
-                );
-                Ok(response)
-            }
-            LlmCallResult::Pending(response) => {
-                tracing::info!(
-                    "[MessageService::send_message] Pending MCP confirmation for chat_id: {:?}",
-                    chat_id
-                );
-                Ok(response)
-            }
-        }
+        let response = MessageResponse {
+            chat_id: chat_id.clone(),
+            message_id: assistant_message_id.clone(),
+            content: llm_response.content,
+            reasoning: llm_response.reasoning,
+            model_id: request.model_id,
+            provider_id: request.provider_id,
+            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
+            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
+            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
+            duration: llm_response.duration.map(|d| d as i64),
+            tool_calls: None,
+        };
+
+        tracing::info!(
+            "[MessageService::send_message] Successfully completed for chat_id: {:?}, message_id: {}",
+            chat_id, assistant_message_id
+        );
+        Ok(response)
     }
 
     /// 调用 LLM API
     async fn call_llm_api(
         &self,
         request: &MessageRequest,
-        reuse_message_id: Option<String>,
-    ) -> Result<LlmCallResult, AppError> {
+    ) -> Result<LlmApiResponse, AppError> {
         tracing::info!(
             "[MessageService::call_llm_api] Calling LLM API with provider: {}, model: {}",
             request.provider_id,
@@ -244,7 +208,7 @@ impl MessageService {
                 AppError::validation_error(&error)
             })?;
 
-        // 调试：检查 API Key 是否存在
+        // 检查 API Key 是否存在
         if provider.api_key.is_empty() {
             tracing::error!(
                 "[MessageService::call_llm_api] Provider {} has empty API key",
@@ -253,23 +217,7 @@ impl MessageService {
             return Err(AppError::validation_error(
                 "Provider has no API key configured",
             ));
-        } else {
-            let api_key_preview = if provider.api_key.len() > 8 {
-                format!(
-                    "{}...{}",
-                    &provider.api_key[..4],
-                    &provider.api_key[provider.api_key.len() - 4..]
-                )
-            } else {
-                "***".to_string()
-            };
-            tracing::info!(
-                "[MessageService::call_llm_api] Using provider: {} ({}), API key: {}",
-                provider.name,
-                provider.provider_type,
-                api_key_preview
-            );
-        }
+        } 
 
         // 3. 创建 LLM 客户端
         let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
@@ -289,7 +237,7 @@ impl MessageService {
         // 5. 调用 API
         let start_time = std::time::Instant::now();
         let api_response = llm_client
-            .chat(&provider, api_request.clone())
+            .chat(&provider, api_request)
             .await
             .map_err(|e| {
                 let error = format!("LLM API call failed: {}", e);
@@ -297,359 +245,18 @@ impl MessageService {
                 e
             })?;
 
-        let outcome = self.process_tool_calls_with_state(
-            &chat.id,
-            &request.provider_id,
-            &request.model_id,
-            api_request,
-            api_response,
-            reuse_message_id.clone(),
-        )
-        .await?;
-
         let duration = start_time.elapsed().as_millis() as f64;
+        let llm_response = self.convert_from_api_response(api_response, duration)?;
 
-        match outcome {
-            ToolCallOutcome::Final(api_response) => {
-                let llm_response = self.convert_from_api_response(api_response, duration)?;
-                tracing::info!(
-                    "[MessageService::call_llm_api] API call successful, duration: {}ms",
-                    duration
-                );
-                Ok(LlmCallResult::Final(llm_response))
-            }
-            ToolCallOutcome::Pending(pending) => {
-                let response = self
-                    .store_pending_call_and_build_response(
-                        &chat,
-                        request,
-                        pending,
-                        duration,
-                        reuse_message_id.is_some(),
-                    )
-                    .await?;
-                Ok(LlmCallResult::Pending(response))
-            }
-        }
-    }
-
-    /// 直接执行工具调用（从 toolCallDeltas 创建）
-    pub async fn execute_tool_calls_directly(
-        &self,
-        message_id: String,
-        tool_call_deltas: Vec<crate::llm_client::types::ChatToolCallDelta>,
-    ) -> Result<MessageResponse, AppError> {
         tracing::info!(
-            "[MessageService::execute_tool_calls_directly] Executing {} tool calls for message: {}",
-            tool_call_deltas.len(),
-            message_id
+            "[MessageService::call_llm_api] API call successful, duration: {}ms",
+            duration
         );
 
-        // 获取消息以获取聊天配置
-        let message = self.repository.get_message_by_id(&message_id).await?
-            .ok_or_else(|| AppError::validation_error("Message not found"))?;
-
-        let chat = self.get_chat_config(&message.chat_id).await?;
-
-        // 将 ChatToolCallDelta 转换为 ChatToolCall
-        let tool_calls: Vec<crate::llm_client::types::ChatToolCall> = tool_call_deltas
-            .into_iter()
-            .filter_map(|delta| {
-                match (&delta.id, &delta.name, &delta.arguments) {
-                    (Some(id), Some(name), Some(arguments)) => {
-                        Some(crate::llm_client::types::ChatToolCall {
-                            id: id.clone(),
-                            tool_type: delta.tool_type.clone(),
-                            function: Some(crate::llm_client::types::ChatToolFunction {
-                                name: Some(name.clone()),
-                                arguments: Some(arguments.clone()),
-                            }),
-                        })
-                    }
-                    _ => {
-                        tracing::warn!("Skipping incomplete tool call delta: {:?}", delta);
-                        None
-                    }
-                }
-            })
-            .collect();
-
-        if tool_calls.is_empty() {
-            return Err(AppError::validation_error("No valid tool calls found"));
-        }
-
-        // 获取 LLM 客户端和提供商
-        let provider_id = message.config.as_ref()
-            .and_then(|c| c.provider_id.as_ref())
-            .cloned()
-            .or_else(|| chat.provider_id.clone())
-            .unwrap_or_default();
-
-        let provider = self.provider_service
-            .get_provider(&provider_id)
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to get provider {}: {}", provider_id, e))
-            })?;
-
-        let llm_client = create_llm_client(&provider.provider_type)
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create LLM client for provider type {}: {}",
-                    provider.provider_type, e))
-            })?;
-
-        // 执行工具调用
-        let mut results = Vec::new();
-        for call in &tool_calls {
-            let start_time = std::time::Instant::now();
-            let result = self.execute_tool_call_direct(&call).await;
-            let _execution_time = start_time.elapsed().as_millis() as i64;
-            results.push(result);
-        }
-
-        // 构建包含工具执行结果的新消息
-        let model_id = message.config.as_ref()
-            .and_then(|c| c.model_id.clone())
-            .or_else(|| chat.model_id.clone())
-            .unwrap_or_default();
-
-        let mut api_request = ChatRequest {
-            model: model_id.clone(),
-            messages: vec![],
-            temperature: None,
-            max_tokens: None,
-            stream: Some(false),
-            tools: None,
-            tool_choice: None,
-            parallel_tool_calls: None,
-        };
-
-        // 添加工具执行结果到消息中
-        for (call, result) in tool_calls.iter().zip(results.iter()) {
-            api_request.messages.push(ChatMessage {
-                role: "tool".to_string(),
-                content: result.clone(),
-                reasoning: None,
-                tool_calls: None,
-                tool_call_id: call.id.clone(),
-            });
-        }
-
-        // 调用 LLM 获取最终响应
-        let start_time = std::time::Instant::now();
-        let final_response = llm_client
-            .chat(&provider, api_request)
-            .await
-            .map_err(|e| AppError::internal_error(&format!("LLM API call failed: {}", e)))?;
-
-        let duration_ms = start_time.elapsed().as_millis() as f64;
-        let llm_response = self.convert_from_api_response(final_response, duration_ms)?;
-
-        // 更新原消息的内容
-        let now = chrono::Utc::now().timestamp_millis();
-        self.repository
-            .update_message_content(&message_id, &llm_response.content, now)
-            .await?;
-
-        if let Some(reasoning) = &llm_response.reasoning {
-            self.repository
-                .update_message_reasoning(&message_id, Some(reasoning), now)
-                .await?;
-        }
-
-        Ok(MessageResponse {
-            chat_id: message.chat_id,
-            message_id,
-            content: llm_response.content,
-            reasoning: llm_response.reasoning,
-            model_id,
-            provider_id,
-            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
-            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
-            duration: llm_response.duration.map(|d| d as i64),
-            tool_calls: None,
-        })
+        Ok(llm_response)
     }
 
-    /// 执行待确认的 MCP 工具调用
-    pub async fn execute_pending_mcp_call(
-        &self,
-        pending_id: String,
-    ) -> Result<MessageResponse, AppError> {
-        tracing::info!(
-            "[MessageService::execute_pending_mcp_call] Executing pending MCP call: {}",
-            pending_id
-        );
 
-        // 检查是否已经在执行中
-        {
-            let mut executing_map = self.executing_calls.lock().await;
-            if executing_map.contains(&pending_id) {
-                tracing::warn!(
-                    "[MessageService::execute_pending_mcp_call] Pending call {} is already being executed",
-                    pending_id
-                );
-                return Err(AppError::validation_error("This MCP tool call is already being executed"));
-            }
-            executing_map.insert(pending_id.clone());
-        }
-
-        // 在函数结束时清理执行状态
-        let executing_calls_cleanup = self.executing_calls.clone();
-        let pending_id_cleanup = pending_id.clone();
-
-        let state = {
-            let mut pending_map = self.pending_calls.lock().await;
-            pending_map.remove(&pending_id).ok_or_else(|| {
-                tracing::warn!(
-                    "[MessageService::execute_pending_mcp_call] Pending call {} not found - it may have already been processed",
-                    pending_id
-                );
-                AppError::validation_error("This MCP tool call has already been executed or is no longer available")
-            })?
-        };
-
-        let chat = self.get_chat_config(&state.chat_id).await?;
-
-        let provider = self
-            .provider_service
-            .get_provider(&state.provider_id)
-            .await
-            .map_err(|e| {
-                AppError::validation_error(&format!(
-                    "Failed to get provider {}: {}",
-                    state.provider_id, e
-                ))
-            })?;
-
-        if provider.api_key.is_empty() {
-            tracing::error!(
-                "[MessageService::execute_pending_mcp_call] Provider {} has empty API key",
-                state.provider_id
-            );
-            return Err(AppError::validation_error(
-                "Provider has no API key configured",
-            ));
-        }
-
-        let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
-            AppError::internal_error(&format!(
-                "Failed to create LLM client for provider type {}: {}",
-                provider.provider_type, e
-            ))
-        })?;
-
-        // 附加工具执行结果
-        let mut api_request = state.api_request.clone();
-
-        for call in &state.tool_calls {
-            let start_time = std::time::Instant::now();
-            let result = self.execute_tool_call_direct(call).await;
-            let _execution_time = start_time.elapsed().as_millis() as i64;
-
-            // 简化版本，不再跟踪复杂的工具执行结果
-
-            api_request.messages.push(ChatMessage {
-                role: "tool".to_string(),
-                content: result.clone(),
-                reasoning: None,
-                tool_calls: None,
-                tool_call_id: call.id.clone(),
-            });
-        }
-
-        // 简化版本，不再需要复杂的工具执行结果跟踪
-        api_request.stream = Some(false);
-
-        let start_time = std::time::Instant::now();
-        let followup_response = llm_client
-            .chat(&provider, api_request.clone())
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("LLM API call failed after MCP execution: {}", e))
-            })?;
-        let duration_ms = start_time.elapsed().as_millis() as i64;
-
-        let outcome = self
-            .process_tool_calls_with_state(
-                &state.chat_id,
-                &state.provider_id,
-                &state.model_id,
-                api_request,
-                followup_response,
-                None, // 不复用消息ID，创建新的消息记录
-            )
-            .await?;
-
-        let result = match outcome {
-            ToolCallOutcome::Final(final_response) => {
-                let llm_response =
-                    self.convert_from_api_response(final_response, duration_ms as f64)?;
-                self.finalize_pending_message(&state, &chat, &llm_response, duration_ms)
-                    .await?;
-
-                Ok(MessageResponse {
-                    chat_id: state.chat_id.clone(),
-                    message_id: state.message_id.clone(),
-                    content: llm_response.content,
-                    reasoning: llm_response.reasoning,
-                    model_id: state.model_id,
-                    provider_id: state.provider_id,
-                    input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-                    output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
-                    total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
-                    duration: llm_response.duration.map(|d| d as i64),
-                    tool_calls: None,
-                })
-            }
-            ToolCallOutcome::Pending(new_pending) => {
-                let PendingCallResult {
-                    pending_id: new_pending_id,
-                    state: new_state,
-                    placeholder_content,
-                    placeholder_reasoning,
-                    pending_call,
-                } = new_pending;
-
-                self.update_pending_message(
-                    &new_state,
-                    &chat,
-                    &placeholder_content,
-                    &placeholder_reasoning,
-                    &pending_call,
-                )
-                .await?;
-
-                {
-                    let mut pending_map = self.pending_calls.lock().await;
-                    pending_map.insert(new_pending_id.clone(), new_state);
-                }
-
-                Ok(MessageResponse {
-                    chat_id: state.chat_id,
-                    message_id: state.message_id,
-                    content: placeholder_content,
-                    reasoning: placeholder_reasoning,
-                    model_id: state.model_id,
-                    provider_id: state.provider_id,
-                    input_tokens: None,
-                    output_tokens: None,
-                    total_tokens: None,
-                    duration: Some(duration_ms),
-                    tool_calls: None,
-                })
-            }
-        };
-
-        // 清理执行状态
-        {
-            let mut executing_map = executing_calls_cleanup.lock().await;
-            executing_map.remove(&pending_id_cleanup);
-        }
-
-        result
-    }
 
     /// 转换为 API 请求格式
     async fn convert_to_api_request(
@@ -657,14 +264,14 @@ impl MessageService {
         request: &MessageRequest,
         chat: &crate::models::Chat
     ) -> Result<ChatRequest, AppError> {
-        let messages: Vec<ChatMessage> = request
+        let messages: Vec<LlmChatMessage> = request
             .messages
             .iter()
-            .map(|msg| ChatMessage {
+            .map(|msg| LlmChatMessage {
                 role: match msg.role {
-                    MessageRole::User => "user".to_string(),
-                    MessageRole::Assistant => "assistant".to_string(),
-                    MessageRole::System => "system".to_string(),
+                    MessageRole::User => ChatMessageRole::User,
+                    MessageRole::Assistant => ChatMessageRole::Assistant,
+                    MessageRole::System => ChatMessageRole::System,
                 },
                 content: msg.content.clone(),
                 reasoning: msg.reasoning.clone(),
@@ -674,350 +281,23 @@ impl MessageService {
             .collect();
 
         let tools = self.prepare_tools(&chat).await?;
-            
+
         Ok(ChatRequest {
             model: request.model_id.clone(),
             messages,
             temperature: chat.temperature,
             max_tokens: chat.max_tokens,
             stream: Some(false),
-            tools: if tools.is_empty() { None } else { Some(tools.to_vec()) },
+            tools: if tools.is_empty() { None } else { Some(tools.clone()) },
             tool_choice: if tools.is_empty() { None } else { Some(ChatToolChoice::Auto) },
             parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
         })
     }
 
-
-    // async fn process_tool_calls_with_state(
-    //     &self,
-    //     chat_id: &str,
-    //     provider_id: &str,
-    //     model_id: &str,
-    //     mut api_request: ChatRequest,
-    //     api_response: ChatResponse,
-    //     existing_message_id: Option<String>,
-    // ) -> Result<ToolCallOutcome, AppError> {
-    //     let tool_calls = Self::extract_tool_calls(&api_response);
-    //     if tool_calls.is_empty() {
-    //         return Ok(ToolCallOutcome::Final(api_response));
-    //     }
-
-    //     let assistant_message = Self::build_assistant_tool_message(&api_response, &tool_calls);
-    //     api_request.messages.push(assistant_message.clone());
-
-    //     let pending_id = uuid::Uuid::new_v4().to_string();
-    //     let is_update = existing_message_id.is_some();
-    //     let message_id = existing_message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-    //     // 保存包含工具调用的 assistant 消息到数据库
-    //     self.save_assistant_tool_call_message(
-    //         chat_id,
-    //         &message_id,
-    //         &assistant_message,
-    //         provider_id,
-    //         model_id,
-    //         is_update, // 如果有现有的 message_id，则是更新操作
-    //     ).await?;
-
-    //     let (pending_call, placeholder_content) =
-    //         self.build_pending_call(&pending_id, &assistant_message, &tool_calls).await?;
-
-    //     let state = PendingToolCallState {
-    //         message_id,
-    //         chat_id: chat_id.to_string(),
-    //         provider_id: provider_id.to_string(),
-    //         model_id: model_id.to_string(),
-    //         api_request,
-    //         tool_calls: tool_calls.clone(),
-    //     };
-
-    //     let result = PendingCallResult {
-    //         pending_id,
-    //         state,
-    //         placeholder_content,
-    //         placeholder_reasoning: assistant_message.reasoning.clone(),
-    //         pending_call,
-    //     };
-
-    //     Ok(ToolCallOutcome::Pending(result))
-    // }
-
-    // async fn build_pending_call(
-    //     &self,
-    //     pending_id: &str,
-    //     assistant_message: &ChatMessage,
-    //     tool_calls: &[ChatToolCall],
-    // ) -> Result<(PendingMcpCall, String), AppError> {
-    //     let mut display_calls = Vec::new();
-
-    //     // 获取活跃的 MCP 服务器
-    //     let servers = self.mcp_service.list_servers().await
-    //         .map_err(|e| AppError::internal_error(&format!("Failed to get servers: {}", e)))?
-    //         .into_iter()
-    //         .filter(|s| s.enabled)
-    //         .collect::<Vec<_>>();
-
-    //     for call in tool_calls {
-    //         // 在所有服务器中查找工具
-    //         let mut found = false;
-    //         for server in &servers {
-    //             if let Some(tool) = server.tools.iter().find(|t| {
-    //                 let function_name = format!("{}_{}", server.name, t.name);
-    //                 function_name == call.name
-    //             }) {
-    //                 let display = PendingMcpToolCall {
-    //                     call_id: call.id.clone().unwrap_or_default(),
-    //                     server_id: server.id.clone(),
-    //                     server_name: server.name.clone(),
-    //                     server_display_name: server.display_name.clone(),
-    //                     tool_name: tool.name.clone(),
-    //                     tool_description: tool.description.clone(),
-    //                     arguments: Self::parse_tool_arguments_value(&call.arguments),
-    //                 };
-
-    //                 display_calls.push(display);
-    //                 found = true;
-    //                 break;
-    //             }
-    //         }
-
-    //         if !found {
-    //             return Err(AppError::internal_error(&format!(
-    //                 "Tool {} not found in any MCP server",
-    //                 call.name
-    //             )));
-    //         }
-    //     }
-
-    //     let title = if display_calls.len() == 1 {
-    //         format!("模型请求执行 MCP 工具 {}", display_calls[0].tool_name)
-    //     } else {
-    //         format!("模型请求执行 {} 个 MCP 工具", display_calls.len())
-    //     };
-
-    //     let description = assistant_message.content.trim().to_string();
-    //     let description = if description.is_empty() {
-    //         None
-    //     } else {
-    //         Some(description)
-    //     };
-
-    //     let placeholder_content = description.clone().unwrap_or_else(|| title.clone());
-
-    //     Ok((
-    //         PendingMcpCall {
-    //             id: pending_id.to_string(),
-    //             title,
-    //             description,
-    //             tool_calls: display_calls,
-    //         },
-    //         placeholder_content,
-    //     ))
-    // }
-
-    // fn parse_tool_arguments_value(arguments: &str) -> Value {
-    //     if arguments.trim().is_empty() {
-    //         return Value::Object(Map::new());
-    //     }
-
-    //     serde_json::from_str(arguments).unwrap_or_else(|_| Value::String(arguments.to_string()))
-    // }
-
-    // async fn store_pending_call_and_build_response(
-    //     &self,
-    //     chat: &crate::models::Chat,
-    //     request: &MessageRequest,
-    //     pending: PendingCallResult,
-    //     duration: f64,
-    //     reuse_existing_message: bool,
-    // ) -> Result<MessageResponse, AppError> {
-    //     let now = chrono::Utc::now().timestamp_millis();
-
-    //     let PendingCallResult {
-    //         pending_id,
-    //         state,
-    //         placeholder_content,
-    //         placeholder_reasoning,
-    //         pending_call: _,
-    //     } = pending;
-
-    //     let config = MessageConfig {
-    //         temperature: chat.temperature,
-    //         top_p: chat.top_p,
-    //         max_tokens: chat.max_tokens,
-    //         stream: chat.stream,
-    //         model_id: Some(request.model_id.clone()),
-    //         provider_id: Some(request.provider_id.clone()),
-    //         system_prompt: chat.system_prompt.clone(),
-    //         mcp_servers: Some(chat.mcp_servers.clone()),
-    //     };
-
-    //     let tools = crate::models::MessageTools {
-    //         pending_mcp_call: None,
-    //         tool_call_deltas: None,
-    //     };
-
-    //     if reuse_existing_message {
-    //         self.repository
-    //             .update_message_content(&state.message_id, &placeholder_content, now)
-    //             .await?;
-    //         self.repository
-    //             .update_message_reasoning(&state.message_id, placeholder_reasoning.as_deref(), now)
-    //             .await?;
-    //         self.repository
-    //             .update_message_config(&state.message_id, Some(&config), now)
-    //             .await?;
-    //         self.repository
-    //             .update_message_tools(&state.message_id, Some(&tools), now)
-    //             .await?;
-    //     } else {
-    //         let message = Message {
-    //             id: state.message_id.clone(),
-    //             chat_id: chat.id.clone(),
-    //             role: MessageRole::Assistant,
-    //             content: placeholder_content.clone(),
-    //             reasoning: placeholder_reasoning.clone(),
-    //             config: Some(config),
-    //             tools: Some(tools),
-    //             attachments: None,
-    //             input_tokens: None,
-    //             output_tokens: None,
-    //             total_tokens: None,
-    //             start_time: Some(now),
-    //             end_time: Some(now),
-    //             duration: None,
-    //             created_at: now,
-    //             updated_at: now,
-    //         };
-
-    //         self.repository.create_message(&message).await?;
-    //     }
-
-    //     let message_id = state.message_id.clone();
-    //     let chat_id = chat.id.clone();
-    //     let model_id = request.model_id.clone();
-    //     let provider_id = request.provider_id.clone();
-
-    //     {
-    //         let mut pending_map = self.pending_calls.lock().await;
-    //         pending_map.insert(pending_id.clone(), state);
-    //     }
-
-    //     Ok(MessageResponse {
-    //         chat_id,
-    //         message_id,
-    //         content: placeholder_content,
-    //         reasoning: placeholder_reasoning,
-    //         model_id,
-    //         provider_id,
-    //         input_tokens: None,
-    //         output_tokens: None,
-    //         total_tokens: None,
-    //         duration: Some(duration as i64),
-    //         tool_calls: None,
-    //     })
-    // }
-
-    // async fn finalize_pending_message(
-    //     &self,
-    //     state: &PendingToolCallState,
-    //     chat: &crate::models::Chat,
-    //     llm_response: &LlmApiResponse,
-    //     duration_ms: i64,
-    // ) -> Result<(), AppError> {
-    //     let now = chrono::Utc::now().timestamp_millis();
-
-    //     self.repository
-    //         .update_message_content(&state.message_id, &llm_response.content, now)
-    //         .await?;
-
-    //     self.repository
-    //         .update_message_reasoning(&state.message_id, llm_response.reasoning.as_deref(), now)
-    //         .await?;
-
-    //     self.repository
-    //         .update_message_stats(
-    //             &state.message_id,
-    //             llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-    //             llm_response.usage.as_ref().map(|u| u.completion_tokens),
-    //             llm_response.usage.as_ref().map(|u| u.total_tokens),
-    //             None,
-    //             Some(now),
-    //             Some(if duration_ms > i64::from(i32::MAX) {
-    //                 i32::MAX
-    //             } else {
-    //                 duration_ms as i32
-    //             }),
-    //             now,
-    //         )
-    //         .await?;
-
-    //     let config = MessageConfig {
-    //         temperature: chat.temperature,
-    //         top_p: chat.top_p,
-    //         max_tokens: chat.max_tokens,
-    //         stream: chat.stream,
-    //         model_id: Some(state.model_id.clone()),
-    //         provider_id: Some(state.provider_id.clone()),
-    //         system_prompt: chat.system_prompt.clone(),
-    //         mcp_servers: Some(chat.mcp_servers.clone()),
-    //                 };
-
-    //     self.repository
-    //         .update_message_config(&state.message_id, Some(&config), now)
-    //         .await?;
-
-    //     Ok(())
-    // }
-
-    // async fn update_pending_message(
-    //     &self,
-    //     new_state: &PendingToolCallState,
-    //     chat: &crate::models::Chat,
-    //     placeholder_content: &str,
-    //     placeholder_reasoning: &Option<String>,
-    //     _pending_call: &PendingMcpCall,
-    // ) -> Result<(), AppError> {
-    //     let now = chrono::Utc::now().timestamp_millis();
-
-    //     self.repository
-    //         .update_message_content(&new_state.message_id, placeholder_content, now)
-    //         .await?;
-
-    //     self.repository
-    //         .update_message_reasoning(&new_state.message_id, placeholder_reasoning.as_deref(), now)
-    //         .await?;
-
-    //     let config = MessageConfig {
-    //         temperature: chat.temperature,
-    //         top_p: chat.top_p,
-    //         max_tokens: chat.max_tokens,
-    //         stream: chat.stream,
-    //         model_id: Some(new_state.model_id.clone()),
-    //         provider_id: Some(new_state.provider_id.clone()),
-    //         system_prompt: chat.system_prompt.clone(),
-    //         mcp_servers: Some(chat.mcp_servers.clone()),
-    //     };
-
-    //     let tools = crate::models::MessageTools {
-    //         pending_mcp_call: None,
-    //         tool_call_deltas: None,
-    //     };
-
-    //     self.repository
-    //         .update_message_config(&new_state.message_id, Some(&config), now)
-    //         .await?;
-    //     self.repository
-    //         .update_message_tools(&new_state.message_id, Some(&tools), now)
-    //         .await?;
-
-    //     Ok(())
-    // }
-
     async fn prepare_tools(
         &self,
         chat: &crate::models::Chat,
-    ) -> Result<Vec<ChatTool>, AppError> {
+    ) -> Result<Vec<RequestTool>, AppError> {
         if chat.mcp_servers.is_empty() {
             return Ok(Vec::new());
         }
@@ -1054,9 +334,9 @@ impl MessageService {
                         format!("MCP 服务器 {} 的工具 {}", display_name, tool.name)
                     });
 
-                tools.push(ChatTool {
+                tools.push(RequestTool {
                     tool_type: "function".to_string(),
-                    function: ChatFunction {
+                    function: RequestToolFunction {
                         name: tool.name.clone(),
                         description,
                         parameters: tool.input_schema.clone(),
@@ -1067,38 +347,6 @@ impl MessageService {
 
         Ok(tools)
     }
-
-    fn extract_tool_calls(response: &crate::llm_client::types::ChatResponse) -> Vec<ChatToolCall> {
-        response
-            .choices
-            .iter()
-            .filter_map(|choice| choice.message.as_ref())
-            .filter_map(|message| message.tool_calls.clone())
-            .next()
-            .unwrap_or_default()
-    }
-
-    fn build_assistant_tool_message(
-        response: &crate::llm_client::types::ChatResponse,
-        tool_calls: &[ChatToolCall],
-    ) -> ChatMessage {
-        let (content, reasoning) = response
-            .choices
-            .iter()
-            .find_map(|choice| choice.message.as_ref())
-            .map(|message| (message.content.clone(), message.reasoning.clone()))
-            .unwrap_or_else(|| (String::new(), None));
-
-        ChatMessage {
-            role: "assistant".to_string(),
-            content,
-            reasoning,
-            tool_calls: Some(tool_calls.to_vec()),
-            tool_call_deltas: None,
-            tool_call_id: None,
-        }
-    }
-
 
     /// 直接执行工具调用，不依赖复杂的 MCP 上下文
     async fn execute_tool_call_direct(&self, call: &ChatToolCall) -> String {
@@ -1115,19 +363,19 @@ impl MessageService {
         for server in servers {
             if let Some(tool) = server.tools.iter().find(|t| {
                 let function_name = format!("{}_{}", server.name, t.name);
-                function_name == call.name
+                function_name == call.function.name
             }) {
-                let arguments = Self::parse_tool_arguments(&call.arguments);
+                let arguments = Self::parse_tool_arguments(&call.function.arguments);
 
                 match self.invoke_mcp_tool(&server, &tool.name, arguments).await {
                     Ok(result) => return Self::format_mcp_tool_result(&result),
                     Err(error) => {
                         tracing::error!(
                             "[MessageService::execute_tool_call_direct] Tool {} failed: {}",
-                            call.name,
+                            call.function.name,
                             error
                         );
-                        return format!("调用工具 {} 失败: {}", call.name, error.message);
+                        return format!("调用工具 {} 失败: {}", call.function.name, error.message);
                     }
                 }
             }
@@ -1136,9 +384,9 @@ impl MessageService {
         // 如果没有找到工具
         tracing::warn!(
             "[MessageService::execute_tool_call_direct] Tool {} not found in any MCP server",
-            call.name
+            call.function.name
         );
-        format!("工具 {} 未在任何 MCP 服务器中找到", call.name)
+        format!("工具 {} 未在任何 MCP 服务器中找到", call.function.name)
     }
 
     async fn invoke_mcp_tool(
@@ -1339,6 +587,7 @@ impl MessageService {
 
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
+        let mut all_tool_calls: Vec<ChatToolCall> = Vec::new();
         let mut chunk_count = 0;
 
         // 7. 处理真实的流式响应
@@ -1350,24 +599,64 @@ impl MessageService {
                     if let Some(choice) = chunk_response.choices.first() {
                         if let Some(delta) = &choice.delta {
                             // 处理内容
-                            let chunk = &delta.content;
-                            accumulated_content.push_str(chunk);
+                            if let Some(chunk) = &delta.content {
+                                accumulated_content.push_str(chunk);
+                            }
 
                             // 处理推理过程
                             if let Some(reasoning_chunk) = &delta.reasoning {
                                 accumulated_reasoning.push_str(reasoning_chunk);
                             }
 
+                            // 积累工具调用信息
+                            if let Some(tool_calls) = &delta.tool_calls {
+                                for tool_call_delta in tool_calls {
+                                    let index = tool_call_delta.index as usize;
+
+                                    // 确保有足够的空间
+                                    while all_tool_calls.len() <= index {
+                                        all_tool_calls.push(ChatToolCall {
+                                            id: String::new(),
+                                            tool_type: String::new(),
+                                            function: crate::llm_client::types::ChatToolFunction {
+                                                name: String::new(),
+                                                arguments: String::new(),
+                                            },
+                                        });
+                                    }
+
+                                    let tool_call = &mut all_tool_calls[index];
+
+                                    // 更新工具调用信息
+                                    if let Some(id) = &tool_call_delta.id {
+                                        tool_call.id = id.clone();
+                                    }
+                                    if let Some(tool_type) = &tool_call_delta.tool_type {
+                                        tool_call.tool_type = tool_type.clone();
+                                    }
+                                    if let Some(function) = &tool_call_delta.function {
+                                        if let Some(name) = &function.name {
+                                            tool_call.function.name = name.clone();
+                                        }
+                                        if let Some(arguments) = &function.arguments {
+                                            tool_call.function.arguments.push_str(arguments);
+                                        }
+                                    }
+                                }
+                            }
+
+
                             callback(StreamChunk {
                                 content: accumulated_content.clone(),
                                 reasoning: delta.reasoning.clone(),
+                                tool_calls: Some(all_tool_calls.clone()),
                             });
                             chunk_count += 1;
 
                             tracing::debug!(
                                 "[MessageService::call_llm_api_stream] Real streaming chunk {}: content='{}', reasoning='{}'",
                                 chunk_count,
-                                &delta.content,
+                                delta.content.as_deref().unwrap_or(""),
                                 delta.reasoning.as_deref().unwrap_or("")
                             );
 
@@ -1405,13 +694,13 @@ impl MessageService {
             } else {
                 Some(accumulated_reasoning.clone())
             },
+            tool_calls: Some(all_tool_calls.clone()),
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
             input_tokens: None, // 流式API通常不返回token统计
             output_tokens: None,
             total_tokens: None,
             duration: Some(duration),
-            tool_calls: None,
         };
 
         tracing::info!(
@@ -1445,6 +734,7 @@ impl MessageService {
                     } else {
                         Some(accumulated_reasoning)
                     },
+                    Some(all_tool_calls.clone()),
                     config,
                     start_time_millis,
                     duration,
@@ -1483,7 +773,7 @@ impl MessageService {
             content: content.to_string(),
             reasoning: None, // 用户消息没有推理过程
             config,
-            tools: None,
+            tool_calls: None,
             attachments: None,
             input_tokens: None,
             output_tokens: None,
@@ -1506,6 +796,7 @@ impl MessageService {
         chat_id: &str,
         content: &str,
         reasoning: Option<String>,
+        tool_calls: Option<Vec<ChatToolCall>>,
         config: Option<MessageConfig>,
         start_time_millis: i64,
         duration_ms: i64,
@@ -1522,8 +813,8 @@ impl MessageService {
             role: crate::models::MessageRole::Assistant,
             content: content.to_string(),
             reasoning,
+            tool_calls,
             config,
-            tools: None,
             attachments: None,
             input_tokens,
             output_tokens,
@@ -1540,97 +831,6 @@ impl MessageService {
         Ok(message_id)
     }
 
-    /// 保存包含工具调用的 assistant 消息
-    async fn save_assistant_tool_call_message(
-        &self,
-        chat_id: &str,
-        message_id: &str,
-        assistant_message: &crate::llm_client::types::ChatMessage,
-        provider_id: &str,
-        model_id: &str,
-        is_update: bool, // 新增参数：是否是更新现有消息
-    ) -> Result<(), AppError> {
-        let now = chrono::Utc::now().timestamp_millis();
-
-        // 创建消息配置
-        let config = MessageConfig {
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stream: None,
-            model_id: Some(model_id.to_string()),
-            provider_id: Some(provider_id.to_string()),
-            system_prompt: None,
-            mcp_servers: None,
-        };
-
-        // 从 assistant_message 中提取工具调用增量数据
-        let tool_call_deltas = assistant_message.tool_call_deltas.clone()
-            .or_else(|| {
-                // 如果没有 tool_call_deltas，尝试从 tool_calls 转换
-                assistant_message.tool_calls.as_ref().map(|calls| {
-                    calls.iter().enumerate().map(|(index, call)| {
-                        crate::llm_client::types::ChatToolCallDelta {
-                            index: index as u32,
-                            id: Some(call.id.clone()),
-                            tool_type: call.tool_type.clone(),
-                            name: Some(call.name.clone()),
-                            arguments: Some(call.arguments.clone()),
-                        }
-                    }).collect()
-                })
-            });
-
-        // 创建工具数据
-        let tools = tool_call_deltas.map(|deltas| crate::models::MessageTools {
-            pending_mcp_call: None,
-            tool_call_deltas: Some(deltas),
-        });
-
-        // 创建消息实体
-        let message = Message {
-            id: message_id.to_string(),
-            chat_id: chat_id.to_string(),
-            role: crate::models::MessageRole::Assistant,
-            content: assistant_message.content.clone(),
-            reasoning: assistant_message.reasoning.clone(),
-            config: Some(config),
-            tools,
-            attachments: None,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            start_time: Some(now),
-            end_time: Some(now),
-            duration: Some(0), // 工具调用消息本身没有执行时间
-            created_at: now,
-            updated_at: now,
-        };
-
-        // 保存到数据库
-        if is_update {
-            // 更新现有消息
-            let message_id_string = message_id.to_string();
-            self.repository.update_message_content(&message_id_string, &message.content, now).await?;
-            self.repository.update_message_reasoning(&message_id_string, message.reasoning.as_deref(), now).await?;
-            if let Some(ref tools) = message.tools {
-                self.repository.update_message_tools(&message_id_string, Some(tools), now).await?;
-            }
-            if let Some(ref config) = message.config {
-                self.repository.update_message_config(&message_id_string, Some(config), now).await?;
-            }
-        } else {
-            // 创建新消息
-            self.repository.create_message(&message).await?;
-        }
-
-        tracing::info!(
-            "[MessageService] Assistant tool call message saved: {}",
-            message_id
-        );
-
-        Ok(())
-    }
 
 
     /// 获取聊天配置
@@ -1658,7 +858,7 @@ impl MessageService {
     /// 从 API 响应格式转换
     fn convert_from_api_response(
         &self,
-        api_response: crate::llm_client::types::ChatResponse,
+        api_response: ChatResponse,
         duration: f64,
     ) -> Result<LlmApiResponse, AppError> {
         let choice = api_response
@@ -1668,12 +868,13 @@ impl MessageService {
             .ok_or_else(|| AppError::internal_error("No choices in API response"))?;
 
         let message = choice
-            .message
+            .delta
             .ok_or_else(|| AppError::internal_error("No message in API choice"))?;
 
         Ok(LlmApiResponse {
             content: message.content,
             reasoning: message.reasoning,
+            tool_calls: message.tool_calls,
             usage: api_response.usage,
             duration: Some(duration),
         })
@@ -1875,23 +1076,9 @@ impl MessageService {
         };
 
         // 调用 LLM API 重新生成
-        let llm_result = self
-            .call_llm_api(&regenerate_request, Some(message_id.clone()))
+        let llm_response = self
+            .call_llm_api(&regenerate_request)
             .await?;
-        let llm_response = match llm_result {
-            LlmCallResult::Final(response) => response,
-            LlmCallResult::Pending(response) => {
-                // 更新消息为待执行状态
-                self.repository
-                    .update_message_reasoning(&message_id, response.reasoning.as_deref(), now)
-                    .await?;
-                self.repository
-                    .update_message_content(&message_id, &response.content, now)
-                    .await?;
-
-                return Ok(response);
-            }
-        };
         let new_content = llm_response.content.clone();
 
         // 4. 更新消息内容
@@ -1956,8 +1143,7 @@ mod tests {
     use crate::models::{ChatMessage, MessageConfig, MessageRequest, MessageRole, ModelParameters};
     use crate::services::{ChatService, McpService, ProviderService};
     use crate::storage::Database;
-    use std::collections::HashMap;
-    use std::sync::Arc;
+        use std::sync::Arc;
     use tempfile::TempDir;
 
     async fn create_test_database() -> Arc<Database> {
