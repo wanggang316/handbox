@@ -2,7 +2,7 @@
 
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{ChatMessage, ChatRequest, ChatMessageRole};
-use crate::models::{AppError, Chat, MessageRole, UUID};
+use crate::models::{AppError, Chat, UUID};
 use crate::services::{Database, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
 use std::sync::Arc;
@@ -171,7 +171,7 @@ impl ChatService {
         // 4. 只获取用户发送的消息
         let user_messages: Vec<String> = messages
             .iter()
-            .filter(|msg| matches!(msg.role, MessageRole::User))
+            .filter(|msg| matches!(msg.role, ChatMessageRole::User))
             .take(20)
             .map(|msg| msg.content.clone())
             .collect();

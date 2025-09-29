@@ -4,16 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::models::chat::{Timestamp, UUID};
-use crate::llm_client::types::ChatToolCall;
+use crate::llm_client::types::{ChatToolCall, ChatMessageRole, ChatMessage};
 
-/// 消息角色
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    User,
-    Assistant,
-    System,
-}
 
 /// 消息附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,7 +39,7 @@ pub struct MessageConfig {
 pub struct Message {
     pub id: UUID,
     pub chat_id: UUID,
-    pub role: MessageRole,
+    pub role: ChatMessageRole,
     pub content: String,
     pub reasoning: Option<String>,
     pub tool_calls: Option<Vec<ChatToolCall>>,
@@ -69,13 +61,6 @@ pub struct Message {
     pub updated_at: Timestamp,
 }
 
-/// 聊天消息（请求中使用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: MessageRole,
-    pub content: String,
-    pub reasoning: Option<String>,
-}
 
 /// 消息请求附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,7 +145,7 @@ mod tests {
         let message = Message {
             id: "msg_123".to_string(),
             chat_id: "chat_456".to_string(),
-            role: MessageRole::User,
+            role: ChatMessageRole::User,
             content: "Hello, world!".to_string(),
             reasoning: None,
             config: None,
@@ -197,7 +182,7 @@ mod tests {
         let message = Message {
             id: "msg_123".to_string(),
             chat_id: "chat_456".to_string(),
-            role: MessageRole::User,
+            role: ChatMessageRole::User,
             content: "Here's a file".to_string(),
             reasoning: None,
             config: None,

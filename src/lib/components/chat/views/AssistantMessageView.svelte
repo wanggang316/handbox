@@ -84,6 +84,19 @@
     }
   }
 
+  // 检查是否有任何工具调用正在执行
+  function isAnyToolCallExecuting(): boolean {
+    if (!message?.id) return false;
+
+    const calls = toolCalls();
+    return calls.some(call => {
+      if (call.id && message.id) {
+        return messageStore.isToolCallExecuting(message.id, call.id);
+      }
+      return false;
+    });
+  }
+
   async function handleExecuteToolCalls() {
     const calls = toolCalls();
     if (calls.length === 0) {
@@ -99,16 +112,8 @@
     try {
       console.log('执行工具调用:', calls);
 
-      // 导入新的 API 函数
-      const { executeToolCalls } = await import('$lib/api/message');
-
-      // 直接调用新的 API 执行工具调用
-      const response = await executeToolCalls(message.id, calls);
-
-      console.log('工具调用执行完成:', response);
-
-      // 可以触发消息更新或其他 UI 更新
-      // 这里可以通过事件或状态管理来更新消息内容
+      // 使用消息状态管理来执行工具调用
+      await messageStore.executeAllToolCalls(message.id, calls);
 
     } catch (error) {
       console.error('执行工具调用失败:', error);
@@ -303,9 +308,16 @@
                 <button
                   class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
                   onclick={handleExecuteToolCalls}
-                  disabled={toolCalls().length === 0}
+                  disabled={toolCalls().length === 0 || isAnyToolCallExecuting()}
                 >
-                  执行工具调用
+                  {#if isAnyToolCallExecuting()}
+                    <div class="flex items-center gap-1">
+                      <div class="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+                      执行中...
+                    </div>
+                  {:else}
+                    执行工具调用
+                  {/if}
                 </button>
               </div>
               <div class="space-y-2">

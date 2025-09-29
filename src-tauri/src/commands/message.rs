@@ -226,8 +226,27 @@ pub async fn message_send_stream(
     Ok(stream_id)
 }
 
-// TODO: Implement execute_mcp_call if needed
-// This method was removed as part of simplifying the MCP tool call handling
+/// 执行工具调用
+#[tauri::command]
+pub async fn message_execute_tool_calls(
+    message_id: String,
+    tool_call_id: String,
+    message_service: State<'_, MessageService>,
+) -> Result<MessageResponse, AppError> {
+    tracing::info!(
+        "[message_execute_tool_calls] IPC command called for message_id: {} with tool call ID: {}",
+        message_id,
+        tool_call_id
+    );
 
-// TODO: Implement execute_tool_calls if needed
-// This method was removed as part of simplifying the MCP tool call handling
+    match message_service.execute_tool_calls(message_id, tool_call_id).await {
+        Ok(response) => {
+            tracing::info!("[message_execute_tool_calls] Command completed successfully");
+            Ok(response)
+        }
+        Err(e) => {
+            tracing::error!("[message_execute_tool_calls] Command failed: {:?}", e);
+            Err(e)
+        }
+    }
+}

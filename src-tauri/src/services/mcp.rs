@@ -313,4 +313,132 @@ impl McpService {
 
         Ok(tools)
     }
+
+    /// 执行工具调用（通过工具名称和参数）
+    pub async fn execute_tool(
+        &self,
+        tool_name: &str,
+        arguments: &str,
+    ) -> Result<String, AppError> {
+        // 获取活跃的 MCP 服务器
+        let servers = self.list_servers().await?
+            .into_iter()
+            .filter(|s| s.enabled)
+            .collect::<Vec<_>>();
+
+        // 在所有服务器中查找工具
+        for server in &servers {
+            if let Some(tool) = server.tools.iter().find(|t| {
+                t.name == tool_name
+            }) {
+                let arguments = Self::parse_tool_arguments(arguments);
+
+                match self.invoke_tool(&server, &tool.name, arguments).await {
+                    Ok(result) => return Ok(Self::format_tool_result(&result)),
+                    Err(error) => {
+                        tracing::error!(
+                            "[McpService::execute_tool] Tool {} failed: {}",
+                            tool_name,
+                            error
+                        );
+                        return Err(AppError::internal_error(&format!(
+                            "调用工具 {} 失败: {}",
+                            tool_name,
+                            error.message
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 如果没有找到工具
+        tracing::warn!(
+            "[McpService::execute_tool] Tool {} not found in any MCP server",
+            tool_name
+        );
+        Err(AppError::not_found(&format!(
+            "工具 {} 未在任何 MCP 服务器中找到",
+            tool_name
+        )))
+    }
+
+    /// 调用特定服务器上的工具
+    async fn invoke_tool(
+        &self,
+        server: &McpServer,
+        tool_name: &str,
+        arguments: Option<serde_json::Value>,
+    ) -> Result<rmcp::model::CallToolResult, AppError> {
+        let client = McpClientFactory::create_client(server).await.map_err(|e| {
+            AppError::internal_error(&format!(
+                "Failed to connect to MCP server {}: {}",
+                server.name, e
+            ))
+        })?;
+
+        let call_result = client.call_tool(tool_name, arguments).await.map_err(|e| {
+            AppError::internal_error(&format!(
+                "Failed to call MCP tool {} on {}: {}",
+                tool_name, server.name, e
+            ))
+        });
+
+        if let Err(e) = client.shutdown().await {
+            tracing::warn!(
+                "[McpService::invoke_tool] Failed to shutdown MCP client {}: {}",
+                server.name,
+                e
+            );
+        }
+
+        call_result
+    }
+
+    /// 解析工具参数
+    fn parse_tool_arguments(arguments: &str) -> Option<serde_json::Value> {
+        if arguments.trim().is_empty() {
+            return None;
+        }
+
+        match serde_json::from_str::<serde_json::Value>(arguments) {
+            Ok(serde_json::Value::Object(map)) => Some(serde_json::Value::Object(map)),
+            Ok(other) => {
+                let mut wrapper = serde_json::Map::new();
+                wrapper.insert("value".to_string(), other);
+                Some(serde_json::Value::Object(wrapper))
+            }
+            Err(_) => {
+                let mut wrapper = serde_json::Map::new();
+                wrapper.insert(
+                    "raw".to_string(),
+                    serde_json::Value::String(arguments.trim().to_string()),
+                );
+                Some(serde_json::Value::Object(wrapper))
+            }
+        }
+    }
+
+    /// 格式化工具调用结果
+    fn format_tool_result(result: &rmcp::model::CallToolResult) -> String {
+        if let Some(structured) = &result.structured_content {
+            return serde_json::to_string_pretty(structured)
+                .unwrap_or_else(|_| structured.to_string());
+        }
+
+        let mut pieces = Vec::new();
+        for content in &result.content {
+            match &content.raw {
+                rmcp::model::RawContent::Text(text) => pieces.push(text.text.clone()),
+                _ => pieces.push(
+                    serde_json::to_string(&content).unwrap_or_else(|_| format!("{:?}", content)),
+                ),
+            }
+        }
+
+        if pieces.is_empty() {
+            "工具未返回任何内容".to_string()
+        } else {
+            pieces.join("\n")
+        }
+    }
 }

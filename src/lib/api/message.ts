@@ -119,10 +119,10 @@ export async function listenToStreamEvents(handlers: StreamEventHandlers) {
   };
 }
 
-export async function executeToolCalls(messageId: string, toolCalls: any[]): Promise<MessageResponse> {
+export async function executeToolCall(messageId: string, toolCallId: string): Promise<MessageResponse> {
   return await apiCall<MessageResponse>('message_execute_tool_calls', {
     messageId: messageId,
-    toolCalls: toolCalls
+    toolCallId: toolCallId
   });
 }
 

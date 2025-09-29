@@ -21,6 +21,8 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
+  // 工具执行状态 - 记录哪些工具调用正在执行
+  executingToolCalls: Set<string>; // 存储 messageId:toolCallId 的组合
 }
 
 class MessageStore {
@@ -34,6 +36,7 @@ class MessageStore {
     streamingContent: '',
     streamingReasoning: '',
     streamingToolCalls: null,
+    executingToolCalls: new Set(),
   });
 
   // 当前流式事件监听器的清理函数
@@ -76,6 +79,12 @@ class MessageStore {
   // 判断是否在等待消息响应（发送中但还没有任何流式内容）
   get isMessageLoading() {
     return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
+  }
+
+  // 检查特定工具调用是否正在执行
+  isToolCallExecuting(messageId: string, toolCallId: string): boolean {
+    const key = `${messageId}:${toolCallId}`;
+    return this.state.executingToolCalls.has(key);
   }
 
   // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
@@ -467,6 +476,51 @@ class MessageStore {
     }
   }
 
+  /**
+   * 执行工具调用
+   */
+  async executeToolCall(messageId: string, toolCallId: string): Promise<void> {
+    const key = `${messageId}:${toolCallId}`;
+
+    try {
+      // 设置执行状态
+      this.state.executingToolCalls.add(key);
+      this.setError(null);
+
+      // 调用后端 API
+      const response = await messageApi.executeToolCall(messageId, toolCallId);
+
+      // 找到对应的聊天ID
+      const chatId = response.chatId;
+
+      // 将响应添加到消息列表
+      this.applyMessageResponse(chatId, response);
+
+    } catch (error) {
+      this.setError(error instanceof Error ? error.message : '工具执行失败');
+      throw error;
+    } finally {
+      // 清除执行状态
+      this.state.executingToolCalls.delete(key);
+    }
+  }
+
+  /**
+   * 批量执行消息中的所有工具调用
+   */
+  async executeAllToolCalls(messageId: string, toolCalls: ToolCall[]): Promise<void> {
+    try {
+      for (const toolCall of toolCalls) {
+        if (toolCall.id) {
+          await this.executeToolCall(messageId, toolCall.id);
+        }
+      }
+    } catch (error) {
+      console.error('批量执行工具调用失败:', error);
+      throw error;
+    }
+  }
+
   // 清理所有状态
   clear() {
     this.state.messagesByChat = {};
@@ -478,6 +532,7 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
+    this.state.executingToolCalls.clear();
   }
 
 }

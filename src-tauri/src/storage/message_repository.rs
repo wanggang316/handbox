@@ -1,7 +1,8 @@
 // Message 数据访问层
 
 use crate::llm_client::ChatToolCall;
-use crate::models::{AppError, Message, MessageConfig, MessageRole, Timestamp, UUID};
+use crate::models::{AppError, Message, MessageConfig, Timestamp, UUID};
+use crate::llm_client::types::ChatMessageRole;
 use crate::storage::Database;
 use serde_json;
 use sqlx::Row;
@@ -47,11 +48,7 @@ impl MessageRepository {
             None
         };
 
-        let role_str = match message.role {
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
-        };
+        let role_str = message.role.as_str();
 
         let query = r#"
             INSERT INTO messages (id, chat_id, role, content, reasoning, config, tools, attachments,
@@ -84,23 +81,55 @@ impl MessageRepository {
         Ok(())
     }
 
-    /// 获取聊天的消息列表
-    pub async fn get_messages_by_chat(
+    /// 获取聊天的消息列表（主方法）
+    pub async fn get_messages(
         &self,
         chat_id: &UUID,
         limit: i32,
         offset: i32,
+        roles: Option<Vec<ChatMessageRole>>,  // 指定要包含的角色，None表示包含所有角色
+        order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
-        let query = r#"
+        let order_direction = if order_by_desc { "DESC" } else { "ASC" };
+
+        // 构建WHERE条件
+        let mut where_conditions = vec!["chat_id = $1".to_string()];
+        let mut bind_values = vec![chat_id.as_str()];
+
+        // 如果指定了角色过滤
+        if let Some(role_list) = roles {
+            if !role_list.is_empty() {
+                let role_placeholders: Vec<String> = role_list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("${}", bind_values.len() + i + 1))
+                    .collect();
+
+                where_conditions.push(format!("role IN ({})", role_placeholders.join(", ")));
+
+                for role in role_list {
+                    bind_values.push(role.as_str());
+                }
+            }
+        }
+
+        let where_clause = where_conditions.join(" AND ");
+        let limit_param = format!("${}", bind_values.len() + 1);
+        let offset_param = format!("${}", bind_values.len() + 2);
+
+        let query = format!(r#"
             SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
                    total_tokens, start_time, end_time, duration, created_at, updated_at
-            FROM messages WHERE chat_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3
-        "#;
+            FROM messages WHERE {} ORDER BY created_at {} LIMIT {} OFFSET {}
+        "#, where_clause, order_direction, limit_param, offset_param);
 
-        let rows = sqlx::query(query)
-            .bind(chat_id)
-            .bind(limit)
-            .bind(offset)
+        let mut sqlx_query = sqlx::query(&query);
+        for value in &bind_values {
+            sqlx_query = sqlx_query.bind(value);
+        }
+        sqlx_query = sqlx_query.bind(limit).bind(offset);
+
+        let rows = sqlx_query
             .fetch_all(self.db.pool())
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to get messages: {}", e)))?;
@@ -113,8 +142,74 @@ impl MessageRepository {
         Ok(messages)
     }
 
+    /// 获取聊天的消息列表（不包含工具角色消息）- 用于前端显示
+    pub async fn get_messages_by_chat(
+        &self,
+        chat_id: &UUID,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<Message>, AppError> {
+        self.get_messages(
+            chat_id,
+            limit,
+            offset,
+            Some(vec![ChatMessageRole::User, ChatMessageRole::Assistant, ChatMessageRole::System]),  // 排除 Tool 角色
+            false,  // 升序排列
+        ).await
+    }
+
+    /// 获取聊天的消息列表（包含所有角色）- 用于内部处理
+    pub async fn get_all_messages_by_chat(
+        &self,
+        chat_id: &UUID,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<Message>, AppError> {
+        self.get_messages(
+            chat_id,
+            limit,
+            offset,
+            None,  // 包含所有角色
+            false,  // 升序排列
+        ).await
+    }
+
+    /// 获取聊天的消息列表（带角色筛选和排序）
+    pub async fn get_messages_by_chat_with_filters(
+        &self,
+        chat_id: &UUID,
+        limit: i32,
+        offset: i32,
+        role_filter: Option<&ChatMessageRole>,
+        order_by_desc: bool,
+    ) -> Result<Vec<Message>, AppError> {
+        let roles = role_filter.map(|role| vec![role.clone()]);
+        self.get_messages(
+            chat_id,
+            limit,
+            offset,
+            roles,
+            order_by_desc,
+        ).await
+    }
+
+    /// 获取最新的指定角色消息
+    pub async fn get_latest_message_by_role(
+        &self,
+        chat_id: &UUID,
+        role: &ChatMessageRole,
+    ) -> Result<Option<Message>, AppError> {
+        let messages = self
+            .get_messages(chat_id, 1, 0, Some(vec![role.clone()]), true)
+            .await?;
+
+        Ok(messages.into_iter().next())
+    }
+
     /// 根据 ID 获取消息
     pub async fn get_message_by_id(&self, message_id: &UUID) -> Result<Option<Message>, AppError> {
+        tracing::debug!("[MessageRepository::get_message_by_id] Querying message with ID: {}", message_id);
+
         let query = r#"
             SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
                    total_tokens, start_time, end_time, duration, created_at, updated_at
@@ -125,11 +220,16 @@ impl MessageRepository {
             .bind(message_id)
             .fetch_optional(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to get message: {}", e)))?;
+            .map_err(|e| {
+                tracing::error!("[MessageRepository::get_message_by_id] Database error for message_id {}: {}", message_id, e);
+                AppError::internal_error(&format!("Failed to get message: {}", e))
+            })?;
 
         if let Some(row) = row {
+            tracing::debug!("[MessageRepository::get_message_by_id] Found message: {}", message_id);
             Ok(Some(self.row_to_message(row)?))
         } else {
+            tracing::warn!("[MessageRepository::get_message_by_id] Message not found: {}", message_id);
             Ok(None)
         }
     }
@@ -355,12 +455,7 @@ impl MessageRepository {
     // 辅助方法：将数据库行转换为 Message
     fn row_to_message(&self, row: sqlx::sqlite::SqliteRow) -> Result<Message, AppError> {
         let role_str: String = row.try_get("role").unwrap_or_default();
-        let role = match role_str.as_str() {
-            "user" => MessageRole::User,
-            "assistant" => MessageRole::Assistant,
-            "system" => MessageRole::System,
-            _ => MessageRole::User,
-        };
+        let role = role_str.parse::<ChatMessageRole>().unwrap_or(ChatMessageRole::User);
 
         let attachments_json: Option<String> = row.try_get("attachments").ok();
         let attachments = if let Some(json) = attachments_json {
@@ -448,7 +543,7 @@ mod tests {
         let message = Message {
             id: uuid::Uuid::new_v4().to_string(),
             chat_id: chat_id.clone(),
-            role: MessageRole::User,
+            role: ChatMessageRole::User,
             content: "Hello, world!".to_string(),
             reasoning: None, // 用户消息没有推理过程
             config: Some(MessageConfig {
@@ -481,7 +576,7 @@ mod tests {
         assert!(fetched.is_some());
         let fetched_message = fetched.unwrap();
         assert_eq!(fetched_message.content, message.content);
-        assert_eq!(fetched_message.role, MessageRole::User);
+        assert_eq!(fetched_message.role, ChatMessageRole::User);
 
         // Get by chat
         let messages = repo.get_messages_by_chat(&chat_id, 10, 0).await.unwrap();
