@@ -557,19 +557,65 @@ impl MessageService {
         }
 
         let duration = start_time.elapsed().as_millis() as i64;
-        let message_id = uuid::Uuid::new_v4().to_string();
+        tracing::info!(
+            "[MessageService::call_llm_api_stream] Real streaming API call completed, chunks: {}, total_content_length: {}, duration: {}ms",
+            chunk_count, accumulated_content.len(), duration
+        );
 
-        // 7. 创建最终响应 (使用流式内容)
+        // 7. 先保存到数据库获取 assistant_message_id
+        let assistant_message_id = if !accumulated_content.is_empty() && request.chat_id.is_some() {
+            // 从 chats 表获取配置参数
+            let chat = self
+                .get_chat_config(&request.chat_id.clone().unwrap())
+                .await
+                .map_err(|e| {
+                    tracing::error!("[MessageService::call_llm_api_stream] Failed to get chat config for saving: {}", e);
+                    e
+                })?;
+
+            let config = Self::extract_message_config_from_chat(&request, &chat);
+            let start_time_millis = chrono::Utc::now().timestamp_millis() - duration;
+
+            self.save_assistant_message(
+                &request.chat_id.clone().unwrap(),
+                &accumulated_content,
+                if accumulated_reasoning.is_empty() {
+                    None
+                } else {
+                    Some(accumulated_reasoning.clone())
+                },
+                Some(all_tool_calls.clone()),
+                config,
+                start_time_millis,
+                duration,
+                None, // 流式API通常不返回token统计
+                None,
+                None,
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "[MessageService::call_llm_api_stream] Failed to save assistant message: {}",
+                    e
+                );
+                e
+            })?
+        } else {
+            // 如果没有内容或没有chat_id，返回错误
+            return Err(AppError::validation_error("No content to save or missing chat_id"));
+        };
+
+        // 8. 使用数据库返回的 assistant_message_id 创建响应
         let response = MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
-            message_id: message_id.clone(),
-            content: accumulated_content.clone(), // 使用流式累积的内容
+            message_id: assistant_message_id,
+            content: accumulated_content, // 使用流式累积的内容
             reasoning: if accumulated_reasoning.is_empty() {
                 None
             } else {
-                Some(accumulated_reasoning.clone())
+                Some(accumulated_reasoning)
             },
-            tool_calls: Some(all_tool_calls.clone()),
+            tool_calls: Some(all_tool_calls),
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
             input_tokens: None, // 流式API通常不返回token统计
@@ -577,56 +623,6 @@ impl MessageService {
             total_tokens: None,
             duration: Some(duration),
         };
-
-        tracing::info!(
-            "[MessageService::call_llm_api_stream] Real streaming API call completed, chunks: {}, total_content_length: {}, duration: {}ms",
-            chunk_count, accumulated_content.len(), duration
-        );
-
-        // 8. 流式输出完成后，保存完整的AI响应消息到数据库
-        if !accumulated_content.is_empty() && request.chat_id.is_some() {
-            // 从 chats 表获取配置参数
-            let chat = match self
-                .get_chat_config(&request.chat_id.clone().unwrap())
-                .await
-            {
-                Ok(chat) => chat,
-                Err(e) => {
-                    tracing::error!("[MessageService::call_llm_api_stream] Failed to get chat config for saving: {}", e);
-                    return Err(e);
-                }
-            };
-
-            let config = Self::extract_message_config_from_chat(&request, &chat);
-            let start_time_millis = chrono::Utc::now().timestamp_millis() - duration;
-
-            if let Err(e) = self
-                .save_assistant_message(
-                    &request.chat_id.clone().unwrap(),
-                    &accumulated_content,
-                    if accumulated_reasoning.is_empty() {
-                        None
-                    } else {
-                        Some(accumulated_reasoning)
-                    },
-                    Some(all_tool_calls.clone()),
-                    config,
-                    start_time_millis,
-                    duration,
-                    None, // 流式API通常不返回token统计
-                    None,
-                    None,
-                )
-                .await
-            {
-                tracing::error!(
-                    "[MessageService::call_llm_api_stream] Failed to save assistant message: {}",
-                    e
-                );
-                // 注意：这里不返回错误，因为流式输出已经完成，用户已经看到了响应
-                // 只是数据库保存失败，不应该影响用户体验
-            }
-        }
 
         Ok(response)
     }
