@@ -131,6 +131,7 @@ pub fn run() {
             message_regenerate,
             // message_execute_mcp_call, // Temporarily removed
             message_execute_tool_calls,
+            message_execute_tool_calls_stream,
             // 窗口管理命令
             open_settings_window,
             close_settings_window,

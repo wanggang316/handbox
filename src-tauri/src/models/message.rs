@@ -43,6 +43,8 @@ pub struct Message {
     pub content: String,
     pub reasoning: Option<String>,
     pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub turn_id: Option<i32>,
+    pub tool_call_id: Option<String>, // 用于 Tool 角色消息，关联对应的工具调用
 
     // Per-message configuration stored as JSON
     pub config: Option<MessageConfig>,
@@ -151,6 +153,8 @@ mod tests {
             config: None,
             attachments: None,
             tool_calls: None,
+            turn_id: Some(1),
+            tool_call_id: None,
             input_tokens: Some(10),
             output_tokens: Some(20),
             total_tokens: Some(30),
@@ -187,6 +191,8 @@ mod tests {
             reasoning: None,
             config: None,
             tool_calls: None,
+            turn_id: None,
+            tool_call_id: None,
             attachments: Some(vec![attachment]),
             input_tokens: None,
             output_tokens: None,

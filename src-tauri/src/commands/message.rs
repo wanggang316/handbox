@@ -1,7 +1,7 @@
 // 消息相关 IPC 命令
 
 use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
-use crate::services::MessageService;
+use crate::services::{MessageService, message::StreamChunk};
 use serde_json::json;
 use tauri::{Emitter, State, Window};
 
@@ -190,7 +190,7 @@ pub async fn message_send_stream(
 
         // 调用真实的流式API
         match service_clone
-            .call_llm_api_stream(&request_clone, stream_callback)
+            .send_message_stream(request_clone, stream_callback)
             .await
         {
             Ok(response) => {
@@ -239,7 +239,10 @@ pub async fn message_execute_tool_calls(
         tool_call_id
     );
 
-    match message_service.execute_tool_calls(message_id, tool_call_id).await {
+    match message_service.execute_tool_calls(message_id, tool_call_id, |_chunk| {
+        // 工具调用执行的流式输出，暂时不需要特别处理
+        // 可以在这里添加日志或进度追踪
+    }).await {
         Ok(response) => {
             tracing::info!("[message_execute_tool_calls] Command completed successfully");
             Ok(response)
@@ -249,4 +252,100 @@ pub async fn message_execute_tool_calls(
             Err(e)
         }
     }
+}
+
+/// 流式执行工具调用
+#[tauri::command]
+pub async fn message_execute_tool_calls_stream(
+    message_id: String,
+    tool_call_id: String,
+    window: Window,
+    message_service: State<'_, MessageService>,
+) -> Result<String, AppError> {
+    tracing::info!(
+        "[message_execute_tool_calls_stream] IPC command called for message_id: {} with tool call ID: {}",
+        message_id,
+        tool_call_id
+    );
+
+    // 生成流式消息ID
+    let stream_id = uuid::Uuid::new_v4().to_string();
+
+    // 克隆必要的数据和窗口引用
+    let window_clone = window.clone();
+    let stream_id_clone = stream_id.clone();
+    let message_id_clone = message_id.clone();
+    let tool_call_id_clone = tool_call_id.clone();
+    let service_clone = message_service.inner().clone();
+
+    // 在后台任务中处理流式响应
+    tokio::spawn(async move {
+        // 发送开始事件
+        let response_message_id = uuid::Uuid::new_v4().to_string();
+        let _ = window_clone.emit(
+            "tool_execute_stream_start",
+            json!({
+                "streamId": stream_id_clone,
+                "messageId": response_message_id,
+                "originalMessageId": message_id_clone,
+                "toolCallId": tool_call_id_clone
+            }),
+        );
+
+        // 使用流式回调处理工具执行
+        let stream_callback = {
+            let window_clone = window_clone.clone();
+            let stream_id_clone = stream_id_clone.clone();
+            move |chunk: StreamChunk| {
+                let _ = window_clone.emit(
+                    "tool_execute_stream_chunk",
+                    json!({
+                        "streamId": stream_id_clone,
+                        "content": chunk.content,
+                        "reasoning": chunk.reasoning,
+                        "toolCalls": chunk.tool_calls,
+                        "chunk": "",  // 可以改为增量内容
+                        "index": 0
+                    }),
+                );
+            }
+        };
+
+        // 调用真实的工具执行流式API
+        match service_clone
+            .execute_tool_calls(message_id_clone, tool_call_id_clone, stream_callback)
+            .await
+        {
+            Ok(response) => {
+                // 发送完成事件
+                let _ = window_clone.emit(
+                    "tool_execute_stream_end",
+                    json!({
+                        "streamId": stream_id_clone,
+                        "messageId": response.message_id,
+                        "finalContent": response.content,
+                        "finalReasoning": response.reasoning,
+                        "chatId": response.chat_id,
+                        "modelId": response.model_id,
+                        "providerId": response.provider_id,
+                        "toolCalls": response.tool_calls
+                    }),
+                );
+            }
+            Err(error) => {
+                tracing::error!("[message_execute_tool_calls_stream] Tool execution error: {:?}", error);
+                let _ = window_clone.emit(
+                    "tool_execute_stream_error",
+                    json!({
+                        "streamId": stream_id_clone,
+                        "error": error.to_string(),
+                        "code": error.code
+                    }),
+                );
+            }
+        }
+    });
+
+    // 立即返回流式ID
+    Ok(stream_id)
 }

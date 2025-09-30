@@ -98,18 +98,22 @@ export interface StreamEventHandlers {
   onError?: (error: any) => void;
 }
 
-export async function listenToStreamEvents(handlers: StreamEventHandlers) {
+export async function listenToStreamEvents(handlers: StreamEventHandlers, eventPrefix: string = 'message_stream') {
   const unlisten = await Promise.all([
-    listen('message_stream_start', (event) => {
+    listen(`${eventPrefix}_start`, (event) => {
       handlers.onStart?.(event.payload as any);
     }),
-    
-    listen('message_stream_chunk', (event) => {
+
+    listen(`${eventPrefix}_chunk`, (event) => {
       handlers.onChunk?.(event.payload as any);
     }),
-    
-    listen('message_stream_end', (event) => {
+
+    listen(`${eventPrefix}_end`, (event) => {
       handlers.onEnd?.(event.payload as any);
+    }),
+
+    listen(`${eventPrefix}_error`, (event) => {
+      handlers.onError?.(event.payload as any);
     })
   ]);
 
@@ -125,4 +129,15 @@ export async function executeToolCall(messageId: string, toolCallId: string): Pr
     toolCallId: toolCallId
   });
 }
+
+/**
+ * 流式执行工具调用
+ */
+export async function executeToolCallStream(messageId: string, toolCallId: string): Promise<string> {
+  return await apiCall<string>('message_execute_tool_calls_stream', {
+    messageId: messageId,
+    toolCallId: toolCallId
+  });
+}
+
 

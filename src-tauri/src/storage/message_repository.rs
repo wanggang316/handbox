@@ -53,8 +53,8 @@ impl MessageRepository {
         let query = r#"
             INSERT INTO messages (id, chat_id, role, content, reasoning, config, tools, attachments,
                                 input_tokens, output_tokens, total_tokens, start_time,
-                                end_time, duration, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                                end_time, duration, turn_id, tool_call_id, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
         sqlx::query(query)
@@ -72,6 +72,8 @@ impl MessageRepository {
             .bind(message.start_time)
             .bind(message.end_time)
             .bind(message.duration)
+            .bind(&message.turn_id)
+            .bind(&message.tool_call_id)
             .bind(message.created_at)
             .bind(message.updated_at)
             .execute(self.db.pool())
@@ -119,7 +121,7 @@ impl MessageRepository {
 
         let query = format!(r#"
             SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
-                   total_tokens, start_time, end_time, duration, created_at, updated_at
+                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE {} ORDER BY created_at {} LIMIT {} OFFSET {}
         "#, where_clause, order_direction, limit_param, offset_param);
 
@@ -212,7 +214,7 @@ impl MessageRepository {
 
         let query = r#"
             SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
-                   total_tokens, start_time, end_time, duration, created_at, updated_at
+                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE id = $1
         "#;
 
@@ -452,6 +454,71 @@ impl MessageRepository {
         Ok(last_time)
     }
 
+    /// 根据 turn_id 获取所有相关消息
+    pub async fn get_messages_by_turn_id(&self, turn_id: i32) -> Result<Vec<Message>, AppError> {
+        let query = r#"
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
+                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            FROM messages WHERE turn_id = $1 ORDER BY created_at ASC
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(turn_id)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to get messages by turn_id: {}", e)))?;
+
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(self.row_to_message(row)?);
+        }
+
+        Ok(messages)
+    }
+
+    /// 根据聊天 ID 和 turn_id 获取消息
+    pub async fn get_messages_by_chat_and_turn(
+        &self,
+        chat_id: &UUID,
+        turn_id: i32,
+    ) -> Result<Vec<Message>, AppError> {
+        let query = r#"
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
+                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            FROM messages WHERE chat_id = $1 AND turn_id = $2 ORDER BY created_at ASC
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(chat_id)
+            .bind(turn_id)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to get messages by chat and turn: {}", e)))?;
+
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(self.row_to_message(row)?);
+        }
+
+        Ok(messages)
+    }
+
+    /// 获取聊天的下一个 turn_id
+    pub async fn get_next_turn_id(&self, chat_id: &UUID) -> Result<i32, AppError> {
+        let query = "SELECT COALESCE(MAX(turn_id), 0) + 1 as next_turn_id FROM messages WHERE chat_id = $1";
+
+        let row = sqlx::query(query)
+            .bind(chat_id)
+            .fetch_one(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to get next turn_id: {}", e)))?;
+
+        let next_turn_id: i32 = row.try_get("next_turn_id")
+            .map_err(|e| AppError::internal_error(&format!("Failed to parse next_turn_id: {}", e)))?;
+
+        Ok(next_turn_id)
+    }
+
     // 辅助方法：将数据库行转换为 Message
     fn row_to_message(&self, row: sqlx::sqlite::SqliteRow) -> Result<Message, AppError> {
         let role_str: String = row.try_get("role").unwrap_or_default();
@@ -485,6 +552,8 @@ impl MessageRepository {
             reasoning: row.try_get("reasoning").ok(),
             config,
             tool_calls,
+            turn_id: row.try_get("turn_id").ok(),
+            tool_call_id: row.try_get("tool_call_id").ok(),
             attachments,
             input_tokens: row.try_get("input_tokens").ok(),
             output_tokens: row.try_get("output_tokens").ok(),
@@ -557,6 +626,8 @@ mod tests {
                 mcp_servers: None,
             }),
             tool_calls: None,
+            turn_id: Some(1),
+            tool_call_id: None,
             attachments: None,
             input_tokens: None,
             output_tokens: None,
@@ -598,5 +669,67 @@ mod tests {
         repo.delete_message(&message.id).await.unwrap();
         let deleted = repo.get_message_by_id(&message.id).await.unwrap();
         assert!(deleted.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_next_turn_id() {
+        let (db_service, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db_service);
+        let repo = MessageRepository::new(db_arc.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let chat_id = uuid::Uuid::new_v4().to_string();
+
+        // 先创建一个 chat 以满足外键约束
+        let chat_query = r#"
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#;
+        sqlx::query(chat_query)
+            .bind(&chat_id)
+            .bind("Test Chat")
+            .bind(Option::<String>::None)
+            .bind("[]")
+            .bind(now)
+            .bind(now)
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // 第一次调用应该返回 1
+        let next_turn_id = repo.get_next_turn_id(&chat_id).await.unwrap();
+        assert_eq!(next_turn_id, 1);
+
+        // 创建一条消息
+        let message = Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            chat_id: chat_id.clone(),
+            role: ChatMessageRole::User,
+            content: "Hello".to_string(),
+            reasoning: None,
+            config: None,
+            tool_calls: None,
+            turn_id: Some(1),
+            tool_call_id: None,
+            attachments: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            start_time: None,
+            end_time: None,
+            duration: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_message(&message).await.unwrap();
+
+        // 第二次调用应该返回 2
+        let next_turn_id = repo.get_next_turn_id(&chat_id).await.unwrap();
+        assert_eq!(next_turn_id, 2);
     }
 }

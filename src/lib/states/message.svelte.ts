@@ -5,6 +5,7 @@
 import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage, ToolCall } from '$lib/types/chat';
 import type { FrontendProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
+import { listenToStreamEvents } from '$lib/api/message';
 import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
 import { chatState } from './chat.svelte';
 
@@ -292,6 +293,82 @@ class MessageStore {
     this.state.streamingToolCalls = null;
   }
 
+  /**
+   * 通用的流式事件处理器
+   */
+  private createStreamEventHandlers(
+    onComplete?: (response: MessageResponse) => void,
+    onError?: (error: any) => void
+  ) {
+    return {
+      onStart: (data: any) => {
+        console.log('流式开始:', data);
+        this.startStreaming(data.messageId);
+      },
+
+      onChunk: (data: any) => {
+        console.log('流式数据:', data);
+        this.setStreamingContent(data.content);
+        if (data.reasoning) {
+          // 累积推理过程内容，因为后端发送的是增量内容
+          this.state.streamingReasoning += data.reasoning;
+        }
+        if (data.toolCalls) {
+          this.setStreamingToolCalls(data.toolCalls);
+        }
+      },
+
+      onEnd: (data: any) => {
+        console.log('流式完成:', data);
+
+        // 构造 MessageResponse 对象
+        const response: MessageResponse = {
+          chatId: data.chatId,
+          messageId: data.messageId || '',
+          content: data.finalContent,
+          reasoning: data.finalReasoning,
+          modelId: data.modelId,
+          providerId: data.providerId,
+          toolCalls: data.toolCalls,
+          inputTokens: undefined,
+          outputTokens: undefined,
+          totalTokens: undefined,
+          duration: undefined
+        };
+
+        // 使用统一的流式完成方法
+        this.finishStreaming(data.chatId, response);
+
+        // 执行自定义完成回调
+        if (onComplete) {
+          onComplete(response);
+        }
+
+        // 清理监听器
+        if (this.currentStreamUnlisten) {
+          this.currentStreamUnlisten();
+          this.currentStreamUnlisten = null;
+        }
+      },
+
+      onError: (error: any) => {
+        console.error('流式错误:', error);
+        this.setError(error.error || error.message || '流式响应错误');
+
+        // 执行自定义错误回调
+        if (onError) {
+          onError(error);
+        }
+
+        // 错误时也清理监听器
+        if (this.currentStreamUnlisten) {
+          this.currentStreamUnlisten();
+          this.currentStreamUnlisten = null;
+        }
+      }
+    };
+  }
+
   // 清理指定聊天的消息
   clearMessages(chatId: string) {
     delete this.state.messagesByChat[chatId];
@@ -388,53 +465,18 @@ class MessageStore {
       }
 
       // 先设置流式事件监听器，确保在发送消息前完全就绪
-      this.currentStreamUnlisten = await messageApi.listenToStreamEvents({
-        onStart: (data) => {
-          console.log('Stream started:', data);
-          this.startStreaming(data.messageId);
-        },
-        onChunk: (data) => {
-          this.setStreamingContent(data.content);
-          if (data.reasoning) {
-            // 累积推理过程内容，因为后端发送的是增量内容
-            this.state.streamingReasoning += data.reasoning;
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
+        this.createStreamEventHandlers(
+          // onComplete callback
+          () => {
+            this.setSending(false);
+          },
+          // onError callback
+          () => {
+            this.setSending(false);
           }
-          console.log('Streaming tool calls:', data.toolCalls);
-          if (data.toolCalls) {
-            this.setStreamingToolCalls(data.toolCalls);
-          }
-        },
-        onEnd: (data) => {
-          console.log('Stream ended:', data);
-          // 创建响应对象
-          const response: MessageResponse = {
-            chatId: data.chatId,
-            messageId: data.messageId ?? data.streamId,
-            content: data.finalContent,
-            reasoning: data.finalReasoning,
-            toolCalls: data.toolCalls,
-            modelId: data.modelId,
-            providerId: data.providerId,
-          };
-          this.finishStreaming(currentChat.id!, response);
-          this.setSending(false);
-          // 流式完成后清理监听器
-          if (this.currentStreamUnlisten) {
-            this.currentStreamUnlisten();
-            this.currentStreamUnlisten = null;
-          }
-        },
-        onError: (error) => {
-          console.error('Stream error:', error);
-          this.setError('流式响应错误');
-          this.setSending(false);
-          // 错误时也清理监听器
-          if (this.currentStreamUnlisten) {
-            this.currentStreamUnlisten();
-            this.currentStreamUnlisten = null;
-          }
-        }
-      });
+        )
+      );
 
       // 事件监听器设置完成后，再发送流式消息
       const streamId = await messageApi.sendStreamMessage(streamRequest);
@@ -477,7 +519,7 @@ class MessageStore {
   }
 
   /**
-   * 执行工具调用
+   * 执行工具调用 - 使用流式API
    */
   async executeToolCall(messageId: string, toolCallId: string): Promise<void> {
     const key = `${messageId}:${toolCallId}`;
@@ -487,21 +529,40 @@ class MessageStore {
       this.state.executingToolCalls.add(key);
       this.setError(null);
 
-      // 调用后端 API
-      const response = await messageApi.executeToolCall(messageId, toolCallId);
+      // 清理之前的监听器（如果存在）
+      if (this.currentStreamUnlisten) {
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
 
-      // 找到对应的聊天ID
-      const chatId = response.chatId;
+      // 监听工具执行流式事件
+      this.currentStreamUnlisten = await listenToStreamEvents(
+        this.createStreamEventHandlers(
+          // onComplete callback
+          () => {
+            // 清除执行状态
+            this.state.executingToolCalls.delete(key);
+          },
+          // onError callback
+          () => {
+            // 清除执行状态
+            this.state.executingToolCalls.delete(key);
+          }
+        ),
+        'tool_execute_stream'
+      );
 
-      // 将响应添加到消息列表
-      this.applyMessageResponse(chatId, response);
+      // 调用流式工具执行API
+      const streamId = await messageApi.executeToolCallStream(messageId, toolCallId);
+      console.log('工具执行流式ID:', streamId);
 
     } catch (error) {
+      console.error('启动工具执行失败:', error);
       this.setError(error instanceof Error ? error.message : '工具执行失败');
       throw error;
     } finally {
-      // 清除执行状态
-      this.state.executingToolCalls.delete(key);
+      // 注意：执行状态的清除现在在 onEnd 或 onError 中处理
+      // 这里不再立即清除，因为流式执行是异步的
     }
   }
 
