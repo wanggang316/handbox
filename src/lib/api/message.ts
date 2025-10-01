@@ -73,7 +73,7 @@ export async function regenerateMessage(messageId: UUID): Promise<MessageRespons
 /**
  * 发送流式消息
  */
-export async function sendStreamMessage(request: MessageRequest): Promise<string> {
+export async function sendStreamMessage(request: MessageRequest): Promise<void> {
   // Tauri 命令期望参数名与函数参数名匹配
   const payload = {
     request: {
@@ -84,8 +84,8 @@ export async function sendStreamMessage(request: MessageRequest): Promise<string
       attachments: request.attachments
     }
   };
-  
-  return await apiCall<string>('message_send_stream', payload);
+
+  await apiCall<void>('message_send_stream', payload);
 }
 
 /**
@@ -133,8 +133,8 @@ export async function executeToolCall(messageId: string, toolCallId: string): Pr
 /**
  * 流式执行工具调用
  */
-export async function executeToolCallStream(messageId: string, toolCallId: string): Promise<string> {
-  return await apiCall<string>('message_execute_tool_calls_stream', {
+export async function executeToolCallStream(messageId: string, toolCallId: string): Promise<void> {
+  await apiCall<void>('message_execute_tool_calls_stream', {
     messageId: messageId,
     toolCallId: toolCallId
   });

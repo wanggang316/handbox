@@ -479,9 +479,8 @@ class MessageStore {
       );
 
       // 事件监听器设置完成后，再发送流式消息
-      const streamId = await messageApi.sendStreamMessage(streamRequest);
-      console.log('Stream ID:', streamId);
-      
+      await messageApi.sendStreamMessage(streamRequest);
+
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '发送消息失败');
       this.setSending(false);
@@ -553,8 +552,7 @@ class MessageStore {
       );
 
       // 调用流式工具执行API
-      const streamId = await messageApi.executeToolCallStream(messageId, toolCallId);
-      console.log('工具执行流式ID:', streamId);
+      await messageApi.executeToolCallStream(messageId, toolCallId);
 
     } catch (error) {
       console.error('启动工具执行失败:', error);
