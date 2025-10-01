@@ -1,8 +1,8 @@
 // Message 数据访问层
 
+use crate::llm_client::types::ChatMessageRole;
 use crate::llm_client::ChatToolCall;
 use crate::models::{AppError, Message, MessageConfig, Timestamp, UUID};
-use crate::llm_client::types::ChatMessageRole;
 use crate::storage::Database;
 use serde_json;
 use sqlx::Row;
@@ -89,7 +89,7 @@ impl MessageRepository {
         chat_id: &UUID,
         limit: i32,
         offset: i32,
-        roles: Option<Vec<ChatMessageRole>>,  // 指定要包含的角色，None表示包含所有角色
+        roles: Option<Vec<ChatMessageRole>>, // 指定要包含的角色，None表示包含所有角色
         order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
         let order_direction = if order_by_desc { "DESC" } else { "ASC" };
@@ -119,11 +119,14 @@ impl MessageRepository {
         let limit_param = format!("${}", bind_values.len() + 1);
         let offset_param = format!("${}", bind_values.len() + 2);
 
-        let query = format!(r#"
+        let query = format!(
+            r#"
             SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
                    total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE {} ORDER BY created_at {} LIMIT {} OFFSET {}
-        "#, where_clause, order_direction, limit_param, offset_param);
+        "#,
+            where_clause, order_direction, limit_param, offset_param
+        );
 
         let mut sqlx_query = sqlx::query(&query);
         for value in &bind_values {
@@ -155,9 +158,14 @@ impl MessageRepository {
             chat_id,
             limit,
             offset,
-            Some(vec![ChatMessageRole::User, ChatMessageRole::Assistant, ChatMessageRole::System]),  // 排除 Tool 角色
-            false,  // 升序排列
-        ).await
+            Some(vec![
+                ChatMessageRole::User,
+                ChatMessageRole::Assistant,
+                ChatMessageRole::System,
+            ]), // 排除 Tool 角色
+            false, // 升序排列
+        )
+        .await
     }
 
     /// 获取聊天的消息列表（包含所有角色）- 用于内部处理
@@ -168,12 +176,10 @@ impl MessageRepository {
         offset: i32,
     ) -> Result<Vec<Message>, AppError> {
         self.get_messages(
-            chat_id,
-            limit,
-            offset,
-            None,  // 包含所有角色
-            false,  // 升序排列
-        ).await
+            chat_id, limit, offset, None,  // 包含所有角色
+            false, // 升序排列
+        )
+        .await
     }
 
     /// 获取聊天的消息列表（带角色筛选和排序）
@@ -186,13 +192,8 @@ impl MessageRepository {
         order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
         let roles = role_filter.map(|role| vec![role.clone()]);
-        self.get_messages(
-            chat_id,
-            limit,
-            offset,
-            roles,
-            order_by_desc,
-        ).await
+        self.get_messages(chat_id, limit, offset, roles, order_by_desc)
+            .await
     }
 
     /// 获取最新的指定角色消息
@@ -210,7 +211,10 @@ impl MessageRepository {
 
     /// 根据 ID 获取消息
     pub async fn get_message_by_id(&self, message_id: &UUID) -> Result<Option<Message>, AppError> {
-        tracing::debug!("[MessageRepository::get_message_by_id] Querying message with ID: {}", message_id);
+        tracing::debug!(
+            "[MessageRepository::get_message_by_id] Querying message with ID: {}",
+            message_id
+        );
 
         let query = r#"
             SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
@@ -223,15 +227,25 @@ impl MessageRepository {
             .fetch_optional(self.db.pool())
             .await
             .map_err(|e| {
-                tracing::error!("[MessageRepository::get_message_by_id] Database error for message_id {}: {}", message_id, e);
+                tracing::error!(
+                    "[MessageRepository::get_message_by_id] Database error for message_id {}: {}",
+                    message_id,
+                    e
+                );
                 AppError::internal_error(&format!("Failed to get message: {}", e))
             })?;
 
         if let Some(row) = row {
-            tracing::debug!("[MessageRepository::get_message_by_id] Found message: {}", message_id);
+            tracing::debug!(
+                "[MessageRepository::get_message_by_id] Found message: {}",
+                message_id
+            );
             Ok(Some(self.row_to_message(row)?))
         } else {
-            tracing::warn!("[MessageRepository::get_message_by_id] Message not found: {}", message_id);
+            tracing::warn!(
+                "[MessageRepository::get_message_by_id] Message not found: {}",
+                message_id
+            );
             Ok(None)
         }
     }
@@ -370,9 +384,10 @@ impl MessageRepository {
         updated_at: Timestamp,
     ) -> Result<(), AppError> {
         let tools_json = if let Some(tools) = tools {
-            Some(serde_json::to_string(tools).map_err(|e| {
-                AppError::validation_error(&format!("Invalid tools: {}", e))
-            })?)
+            Some(
+                serde_json::to_string(tools)
+                    .map_err(|e| AppError::validation_error(&format!("Invalid tools: {}", e)))?,
+            )
         } else {
             None
         };
@@ -384,7 +399,9 @@ impl MessageRepository {
             .bind(message_id)
             .execute(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to update message tools: {}", e)))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to update message tools: {}", e))
+            })?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::not_found(&format!(
@@ -466,7 +483,9 @@ impl MessageRepository {
             .bind(turn_id)
             .fetch_all(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to get messages by turn_id: {}", e)))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to get messages by turn_id: {}", e))
+            })?;
 
         let mut messages = Vec::new();
         for row in rows {
@@ -493,7 +512,9 @@ impl MessageRepository {
             .bind(turn_id)
             .fetch_all(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to get messages by chat and turn: {}", e)))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to get messages by chat and turn: {}", e))
+            })?;
 
         let mut messages = Vec::new();
         for row in rows {
@@ -505,7 +526,8 @@ impl MessageRepository {
 
     /// 获取聊天的下一个 turn_id
     pub async fn get_next_turn_id(&self, chat_id: &UUID) -> Result<i32, AppError> {
-        let query = "SELECT COALESCE(MAX(turn_id), 0) + 1 as next_turn_id FROM messages WHERE chat_id = $1";
+        let query =
+            "SELECT COALESCE(MAX(turn_id), 0) + 1 as next_turn_id FROM messages WHERE chat_id = $1";
 
         let row = sqlx::query(query)
             .bind(chat_id)
@@ -513,8 +535,9 @@ impl MessageRepository {
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to get next turn_id: {}", e)))?;
 
-        let next_turn_id: i32 = row.try_get("next_turn_id")
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse next_turn_id: {}", e)))?;
+        let next_turn_id: i32 = row.try_get("next_turn_id").map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse next_turn_id: {}", e))
+        })?;
 
         Ok(next_turn_id)
     }
@@ -522,7 +545,9 @@ impl MessageRepository {
     // 辅助方法：将数据库行转换为 Message
     fn row_to_message(&self, row: sqlx::sqlite::SqliteRow) -> Result<Message, AppError> {
         let role_str: String = row.try_get("role").unwrap_or_default();
-        let role = role_str.parse::<ChatMessageRole>().unwrap_or(ChatMessageRole::User);
+        let role = role_str
+            .parse::<ChatMessageRole>()
+            .unwrap_or(ChatMessageRole::User);
 
         let attachments_json: Option<String> = row.try_get("attachments").ok();
         let attachments = if let Some(json) = attachments_json {
@@ -538,11 +563,12 @@ impl MessageRepository {
             None
         };
 
-        let tool_calls: Option<Vec<ChatToolCall>> = if let Ok(tools_json) = row.try_get::<String, _>("tools") {
-            serde_json::from_str(&tools_json).ok()
-        } else {
-            None
-        };
+        let tool_calls: Option<Vec<ChatToolCall>> =
+            if let Ok(tools_json) = row.try_get::<String, _>("tools") {
+                serde_json::from_str(&tools_json).ok()
+            } else {
+                None
+            };
 
         Ok(Message {
             id: row.try_get("id").unwrap_or_default(),

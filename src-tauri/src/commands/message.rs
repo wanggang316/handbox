@@ -1,7 +1,7 @@
 // 消息相关 IPC 命令
 
 use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
-use crate::services::{MessageService, message::StreamChunk};
+use crate::services::{message::StreamChunk, MessageService};
 use serde_json::json;
 use tauri::{Emitter, State, Window};
 
@@ -29,15 +29,16 @@ fn create_stream_start_callback(
         }
 
         let _ = window.emit(event_name, payload);
-        tracing::info!("[{}] Stream started for stream {}", event_name, returned_stream_id);
+        tracing::info!(
+            "[{}] Stream started for stream {}",
+            event_name,
+            returned_stream_id
+        );
     }
 }
 
 /// 创建流式数据回调
-fn create_streaming_callback(
-    window: Window,
-    event_name: &'static str,
-) -> impl FnMut(StreamChunk) {
+fn create_streaming_callback(window: Window, event_name: &'static str) -> impl FnMut(StreamChunk) {
     move |chunk: StreamChunk| {
         let _ = window.emit(
             event_name,
@@ -90,7 +91,12 @@ fn create_stream_error_callback(
                 "code": error.code
             }),
         );
-        tracing::error!("[{}] Stream error for stream {}: {:?}", event_name, stream_id, error);
+        tracing::error!(
+            "[{}] Stream error for stream {}: {:?}",
+            event_name,
+            stream_id,
+            error
+        );
     }
 }
 
@@ -243,26 +249,16 @@ pub async fn message_send_stream(
 
     // 在后台任务中处理流式响应
     tokio::spawn(async move {
-        let start_callback = create_stream_start_callback(
-            window_clone.clone(),
-            "message_stream_start",
-            None
-        );
+        let start_callback =
+            create_stream_start_callback(window_clone.clone(), "message_stream_start", None);
 
-        let streaming_callback = create_streaming_callback(
-            window_clone.clone(),
-            "message_stream_chunk"
-        );
+        let streaming_callback =
+            create_streaming_callback(window_clone.clone(), "message_stream_chunk");
 
-        let end_callback = create_stream_end_callback(
-            window_clone.clone(),
-            "message_stream_end"
-        );
+        let end_callback = create_stream_end_callback(window_clone.clone(), "message_stream_end");
 
-        let error_callback = create_stream_error_callback(
-            window_clone.clone(),
-            "message_stream_error"
-        );
+        let error_callback =
+            create_stream_error_callback(window_clone.clone(), "message_stream_error");
 
         // 调用真实的流式API
         service_clone
@@ -284,35 +280,37 @@ pub async fn message_send_stream(
 #[tauri::command]
 pub async fn message_execute_tool_calls(
     message_id: String,
-    tool_call_id: String,
+    tool_call_ids: Vec<String>,
     message_service: State<'_, MessageService>,
 ) -> Result<(), AppError> {
     tracing::info!(
-        "[message_execute_tool_calls] IPC command called for message_id: {} with tool call ID: {}",
+        "[message_execute_tool_calls] IPC command called for message_id: {} with tool call IDs: {:?}",
         message_id,
-        tool_call_id
+        tool_call_ids
     );
 
-    message_service.execute_tool_calls(
-        message_id,
-        tool_call_id,
-        |_stream_id, _message_id| {
-            // 开始回调
-            tracing::info!("[message_execute_tool_calls] Execution started");
-        },
-        |_chunk| {
-            // 工具调用执行的流式输出，暂时不需要特别处理
-            // 可以在这里添加日志或进度追踪
-        },
-        |_stream_id, _response| {
-            // 结束回调
-            tracing::info!("[message_execute_tool_calls] Execution completed");
-        },
-        |_stream_id, error| {
-            // 错误回调
-            tracing::error!("[message_execute_tool_calls] Execution failed: {:?}", error);
-        },
-    ).await;
+    message_service
+        .execute_tool_calls(
+            message_id,
+            tool_call_ids,
+            |_stream_id, _message_id| {
+                // 开始回调
+                tracing::info!("[message_execute_tool_calls] Execution started");
+            },
+            |_chunk| {
+                // 工具调用执行的流式输出，暂时不需要特别处理
+                // 可以在这里添加日志或进度追踪
+            },
+            |_stream_id, _response| {
+                // 结束回调
+                tracing::info!("[message_execute_tool_calls] Execution completed");
+            },
+            |_stream_id, error| {
+                // 错误回调
+                tracing::error!("[message_execute_tool_calls] Execution failed: {:?}", error);
+            },
+        )
+        .await;
 
     tracing::info!("[message_execute_tool_calls] Command completed successfully");
     Ok(())
@@ -322,48 +320,41 @@ pub async fn message_execute_tool_calls(
 #[tauri::command]
 pub async fn message_execute_tool_calls_stream(
     message_id: String,
-    tool_call_id: String,
+    tool_call_ids: Vec<String>,
     window: Window,
     message_service: State<'_, MessageService>,
 ) -> Result<(), AppError> {
     tracing::info!(
-        "[message_execute_tool_calls_stream] IPC command called for message_id: {} with tool call ID: {}",
+        "[message_execute_tool_calls_stream] IPC command called for message_id: {} with tool call IDs: {:?}",
         message_id,
-        tool_call_id
+        tool_call_ids
     );
 
     // 克隆必要的数据和窗口引用
     let window_clone = window.clone();
     let service_clone = message_service.inner().clone();
+    let message_id_clone = message_id.clone();
+    let tool_call_ids_clone = tool_call_ids.clone();
 
     // 在后台任务中处理流式响应
     tokio::spawn(async move {
-        let start_callback = create_stream_start_callback(
-            window_clone.clone(),
-            "tool_execute_stream_start",
-            None
-        );
+        let start_callback =
+            create_stream_start_callback(window_clone.clone(), "tool_execute_stream_start", None);
 
-        let streaming_callback = create_streaming_callback(
-            window_clone.clone(),
-            "tool_execute_stream_chunk"
-        );
+        let streaming_callback =
+            create_streaming_callback(window_clone.clone(), "tool_execute_stream_chunk");
 
-        let end_callback = create_stream_end_callback(
-            window_clone.clone(),
-            "tool_execute_stream_end"
-        );
+        let end_callback =
+            create_stream_end_callback(window_clone.clone(), "tool_execute_stream_end");
 
-        let error_callback = create_stream_error_callback(
-            window_clone.clone(),
-            "tool_execute_stream_error"
-        );
+        let error_callback =
+            create_stream_error_callback(window_clone.clone(), "tool_execute_stream_error");
 
         // 调用真实的工具执行流式API
         service_clone
             .execute_tool_calls(
-                message_id,
-                tool_call_id,
+                message_id_clone,
+                tool_call_ids_clone,
                 start_callback,
                 streaming_callback,
                 end_callback,

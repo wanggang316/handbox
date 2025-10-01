@@ -3,9 +3,9 @@
 
 use crate::llm_client::chat::ChatClient;
 use crate::llm_client::types::{
-    ChatChoice, ChatResponse, ChatToolCall, ChatToolFunction, ChatMessage,
-    ChatToolChoice, ChatUsage, ChatRequest, ChatDeltaToolCall, ChatMessageRole,
-    ChatChunkResponse, ChatChunkChoice, ChatDeltaMessage,ChatDeltaToolFunction,
+    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatDeltaToolCall,
+    ChatDeltaToolFunction, ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall,
+    ChatToolChoice, ChatToolFunction, ChatUsage,
 };
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
@@ -32,7 +32,8 @@ impl OpenAICompletionsChatClient {
                 let mut message = RequestMessage::new(map_role(&msg.role), msg.content.clone());
 
                 if let Some(tool_calls) = &msg.tool_calls {
-                    message.tool_calls = Some(tool_calls.iter().filter_map(convert_tool_call).collect());
+                    message.tool_calls =
+                        Some(tool_calls.iter().filter_map(convert_tool_call).collect());
                 }
 
                 if let Some(tool_call_id) = &msg.tool_call_id {

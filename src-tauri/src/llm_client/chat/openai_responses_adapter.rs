@@ -2,7 +2,10 @@
 // 使用 openai-rust SDK 进行通信
 
 use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{ChatChoice, ChatDeltaMessage, ChatMessage, ChatRequest, ChatResponse, ChatUsage, ChatMessageRole, ChatChunkResponse, ChatChunkChoice };
+use crate::llm_client::types::{
+    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatMessage, ChatMessageRole,
+    ChatRequest, ChatResponse, ChatUsage,
+};
 use crate::models::{AppError, Provider};
 use async_stream::stream;
 use async_trait::async_trait;
@@ -127,7 +130,6 @@ impl OpenAIResponsesChatClient {
             | ResponseStreamEvent::Unknown => None,
         }
     }
-
 }
 
 #[async_trait]

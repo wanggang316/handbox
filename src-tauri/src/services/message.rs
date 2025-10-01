@@ -1,14 +1,13 @@
 // 消息服务实现
 
-use crate::llm_client::{create_llm_client};
+use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{
-    ChatMessage, ChatRequest,
-    ChatToolCall, ChatToolChoice, RequestTool, RequestToolFunction,
-    ChatMessageRole, ChatResponse,
+    ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall, ChatToolChoice,
+    RequestTool, RequestToolFunction,
 };
 use crate::models::{
-    AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest,
-    MessageResponse, UUID,
+    AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest, MessageResponse,
+    UUID,
 };
 use crate::services::{ChatService, Database, McpService, ProviderService};
 use crate::storage::MessageRepository;
@@ -141,13 +140,23 @@ impl MessageService {
 
         let config = Self::extract_message_config_from_chat(&request, &chat);
         // 获取下一个 turn_id 用于这轮对话
-        let turn_id = Some(self.repository.get_next_turn_id(chat_id).await.map_err(|e| {
-            let error = format!("Failed to get next turn_id: {}", e);
-            tracing::error!("[MessageService::send_message] Database error: {}", error);
-            e
-        })?);
+        let turn_id = Some(
+            self.repository
+                .get_next_turn_id(chat_id)
+                .await
+                .map_err(|e| {
+                    let error = format!("Failed to get next turn_id: {}", e);
+                    tracing::error!("[MessageService::send_message] Database error: {}", error);
+                    e
+                })?,
+        );
         let user_message_id = self
-            .save_user_message(chat_id, &last_message.content, config.clone(), turn_id.clone())
+            .save_user_message(
+                chat_id,
+                &last_message.content,
+                config.clone(),
+                turn_id.clone(),
+            )
             .await
             .map_err(|e| {
                 let error = format!("Failed to save user message: {}", e);
@@ -275,7 +284,10 @@ impl MessageService {
             Ok(chat) => chat,
             Err(e) => {
                 let error = format!("Failed to get chat config: {}", e);
-                tracing::error!("[MessageService::send_message_stream] Database error: {}", error);
+                tracing::error!(
+                    "[MessageService::send_message_stream] Database error: {}",
+                    error
+                );
                 error_callback(error_stream_id.clone(), e);
                 return;
             }
@@ -287,20 +299,31 @@ impl MessageService {
             Ok(id) => Some(id),
             Err(e) => {
                 let error = format!("Failed to get next turn_id: {}", e);
-                tracing::error!("[MessageService::send_message_stream] Database error: {}", error);
+                tracing::error!(
+                    "[MessageService::send_message_stream] Database error: {}",
+                    error
+                );
                 error_callback(error_stream_id.clone(), e);
                 return;
             }
         };
 
         let user_message_id = match self
-            .save_user_message(chat_id, &last_message.content, config.clone(), turn_id.clone())
+            .save_user_message(
+                chat_id,
+                &last_message.content,
+                config.clone(),
+                turn_id.clone(),
+            )
             .await
         {
             Ok(id) => id,
             Err(e) => {
                 let error = format!("Failed to save user message: {}", e);
-                tracing::error!("[MessageService::send_message_stream] Database error: {}", error);
+                tracing::error!(
+                    "[MessageService::send_message_stream] Database error: {}",
+                    error
+                );
                 error_callback(error_stream_id.clone(), e);
                 return;
             }
@@ -328,26 +351,29 @@ impl MessageService {
 
             tokio::spawn(async move {
                 let now = chrono::Utc::now().timestamp_millis();
-                match repository.create_message(&Message {
-                    id: response_clone.message_id.clone(),
-                    chat_id: chat_id.to_string(),
-                    role: ChatMessageRole::Assistant,
-                    content: response_clone.content.clone(),
-                    reasoning: response_clone.reasoning.clone(),
-                    tool_calls: response_clone.tool_calls.clone(),
-                    config,
-                    turn_id,
-                    tool_call_id: None,
-                    attachments: None,
-                    input_tokens: response_clone.input_tokens,
-                    output_tokens: response_clone.output_tokens,
-                    total_tokens: response_clone.total_tokens,
-                    start_time: Some(now),
-                    end_time: Some(now),
-                    duration: response_clone.duration,
-                    created_at: now,
-                    updated_at: now,
-                }).await {
+                match repository
+                    .create_message(&Message {
+                        id: response_clone.message_id.clone(),
+                        chat_id: chat_id.to_string(),
+                        role: ChatMessageRole::Assistant,
+                        content: response_clone.content.clone(),
+                        reasoning: response_clone.reasoning.clone(),
+                        tool_calls: response_clone.tool_calls.clone(),
+                        config,
+                        turn_id,
+                        tool_call_id: None,
+                        attachments: None,
+                        input_tokens: response_clone.input_tokens,
+                        output_tokens: response_clone.output_tokens,
+                        total_tokens: response_clone.total_tokens,
+                        start_time: Some(now),
+                        end_time: Some(now),
+                        duration: response_clone.duration,
+                        created_at: now,
+                        updated_at: now,
+                    })
+                    .await
+                {
                     Ok(_) => {
                         tracing::info!(
                             "[MessageService::send_message_stream] Assistant message saved with ID: {}",
@@ -368,14 +394,18 @@ impl MessageService {
         };
 
         // 4. 调用流式 LLM API（不再返回值，通过回调处理）
-        self.call_llm_api_stream(&request, start_callback, streaming_callback, end_callback_wrapper, error_callback).await;
+        self.call_llm_api_stream(
+            &request,
+            start_callback,
+            streaming_callback,
+            end_callback_wrapper,
+            error_callback,
+        )
+        .await;
     }
 
     /// 调用 LLM API
-    async fn call_llm_api(
-        &self,
-        request: &MessageRequest,
-    ) -> Result<MessageResponse, AppError> {
+    async fn call_llm_api(&self, request: &MessageRequest) -> Result<MessageResponse, AppError> {
         tracing::info!(
             "[MessageService::call_llm_api] Calling LLM API with provider: {}, model: {}",
             request.provider_id,
@@ -413,7 +443,7 @@ impl MessageService {
             return Err(AppError::validation_error(
                 "Provider has no API key configured",
             ));
-        } 
+        }
 
         // 3. 创建 LLM 客户端
         let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
@@ -426,20 +456,15 @@ impl MessageService {
         })?;
 
         // 4. 转换请求格式
-        let api_request = self
-            .convert_to_api_request(request, &chat)
-            .await?;
+        let api_request = self.convert_to_api_request(request, &chat).await?;
 
         // 5. 调用 API
         let start_time = std::time::Instant::now();
-        let api_response = llm_client
-            .chat(&provider, api_request)
-            .await
-            .map_err(|e| {
-                let error = format!("LLM API call failed: {}", e);
-                tracing::error!("[MessageService::call_llm_api] {}", error);
-                e
-            })?;
+        let api_response = llm_client.chat(&provider, api_request).await.map_err(|e| {
+            let error = format!("LLM API call failed: {}", e);
+            tracing::error!("[MessageService::call_llm_api] {}", error);
+            e
+        })?;
 
         let duration = start_time.elapsed().as_millis() as f64;
         let llm_response = self.convert_from_api_response(api_response, duration, request)?;
@@ -452,13 +477,11 @@ impl MessageService {
         Ok(llm_response)
     }
 
-
-
     /// 转换为 API 请求格式
     async fn convert_to_api_request(
         &self,
         request: &MessageRequest,
-        chat: &crate::models::Chat
+        chat: &crate::models::Chat,
     ) -> Result<ChatRequest, AppError> {
         let messages: Vec<ChatMessage> = request
             .messages
@@ -480,8 +503,16 @@ impl MessageService {
             temperature: chat.temperature,
             max_tokens: chat.max_tokens,
             stream: Some(false),
-            tools: if tools.is_empty() { None } else { Some(tools.clone()) },
-            tool_choice: if tools.is_empty() { None } else { Some(ChatToolChoice::Auto) },
+            tools: if tools.is_empty() {
+                None
+            } else {
+                Some(tools.clone())
+            },
+            tool_choice: if tools.is_empty() {
+                None
+            } else {
+                Some(ChatToolChoice::Auto)
+            },
             parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
         })
     }
@@ -512,7 +543,6 @@ impl MessageService {
 
         for server in active_servers {
             for tool in &server.tools {
-
                 let description = tool
                     .description
                     .clone()
@@ -715,7 +745,6 @@ impl MessageService {
                                 }
                             }
 
-
                             streaming_callback(StreamChunk {
                                 stream_id: stream_id.clone(),
                                 content: accumulated_content.clone(),
@@ -866,8 +895,6 @@ impl MessageService {
         tracing::info!("[MessageService] Assistant message saved: {}", message_id);
         Ok(message_id)
     }
-
-
 
     /// 获取聊天配置
     async fn get_chat_config(&self, chat_id: &str) -> Result<crate::models::Chat, AppError> {
@@ -1070,20 +1097,26 @@ impl MessageService {
     pub async fn execute_tool_calls(
         &self,
         message_id: String,
-        tool_call_id: String,
+        tool_call_ids: Vec<String>,
         start_callback: impl StreamStartCallback,
         streaming_callback: impl StreamingCallback,
         end_callback: impl StreamEndCallback,
         mut error_callback: impl StreamErrorCallback,
     ) {
         tracing::info!(
-            "[MessageService::execute_tool_calls] Executing tool call {} for message: {}",
-            tool_call_id,
+            "[MessageService::execute_tool_calls] Executing tool calls {:?} for message: {}",
+            tool_call_ids,
             message_id
         );
 
         // 为早期错误生成一个临时 stream_id
         let error_stream_id = uuid::Uuid::new_v4().to_string();
+
+        if tool_call_ids.is_empty() {
+            let err = AppError::validation_error("At least one tool_call_id is required");
+            error_callback(error_stream_id, err);
+            return;
+        }
 
         // 1. 获取消息
         tracing::debug!(
@@ -1095,7 +1128,8 @@ impl MessageService {
             Err(e) => {
                 tracing::error!(
                     "[MessageService::execute_tool_calls] Failed to get message {}: {}",
-                    message_id, e
+                    message_id,
+                    e
                 );
                 error_callback(error_stream_id, e);
                 return;
@@ -1104,9 +1138,8 @@ impl MessageService {
 
         // 2. 验证消息是否为 assistant消息且包含工具调用
         if message.role != ChatMessageRole::Assistant {
-            let err = AppError::validation_error(
-                "Can only execute tool calls on assistant messages"
-            );
+            let err =
+                AppError::validation_error("Can only execute tool calls on assistant messages");
             error_callback(error_stream_id, err);
             return;
         }
@@ -1121,60 +1154,80 @@ impl MessageService {
             }
         };
 
-        // 4. 根据 tool_call_id 找到要执行的工具调用
-        let tool_call = match stored_tool_calls
-            .iter()
-            .find(|tc| tc.id == tool_call_id)
-        {
-            Some(call) => call.clone(),
-            None => {
-                let err = AppError::validation_error(&format!(
-                    "Tool call with ID {} not found in message",
-                    tool_call_id
-                ));
-                error_callback(error_stream_id, err);
+        // 4. 根据 tool_call_ids 找到要执行的工具调用
+        let mut selected_tool_calls = Vec::new();
+        for tool_call_id in &tool_call_ids {
+            match stored_tool_calls.iter().find(|tc| &tc.id == tool_call_id) {
+                Some(call) => selected_tool_calls.push(call.clone()),
+                None => {
+                    let err = AppError::validation_error(&format!(
+                        "Tool call with ID {} not found in message",
+                        tool_call_id
+                    ));
+                    error_callback(error_stream_id.clone(), err);
+                    return;
+                }
+            }
+        }
+
+        // 5. 执行所有工具调用并构造工具结果消息
+        let mut created_tool_message_ids = Vec::new();
+        for tool_call in selected_tool_calls {
+            tracing::info!(
+                "[MessageService::execute_tool_calls] Executing tool {} for message {}",
+                tool_call.id,
+                message.id
+            );
+
+            let result = match self
+                .mcp_service
+                .execute_tool(&tool_call.function.name, &tool_call.function.arguments)
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    tracing::error!(
+                        "[MessageService::execute_tool_calls] Tool execution failed: {}",
+                        error
+                    );
+                    format!("工具执行失败: {}", error.message)
+                }
+            };
+
+            let timestamp = chrono::Utc::now().timestamp_millis();
+            let tool_result_message = Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: message.chat_id.clone(),
+                role: ChatMessageRole::Tool,
+                content: result,
+                reasoning: None,
+                tool_calls: None,
+                turn_id: message.turn_id.clone(),
+                tool_call_id: Some(tool_call.id.clone()),
+                config: None,
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: timestamp,
+                updated_at: timestamp,
+            };
+
+            if let Err(e) = self.repository.create_message(&tool_result_message).await {
+                error_callback(error_stream_id.clone(), e);
                 return;
             }
-        };
 
-        // 5. 执行工具调用并构造工具结果消息
-        let result = match self.mcp_service.execute_tool(&tool_call.function.name, &tool_call.function.arguments).await {
-            Ok(result) => result,
-            Err(error) => {
-                tracing::error!(
-                    "[MessageService::execute_tool_calls] Tool execution failed: {}",
-                    error
-                );
-                format!("工具执行失败: {}", error.message)
-            }
-        };
-
-        // 5. 先将工具调用结果作为消息保存到数据库
-        let tool_result_message = Message {
-            id: uuid::Uuid::new_v4().to_string(),
-            chat_id: message.chat_id.clone(),
-            role: ChatMessageRole::Tool,
-            content: result,
-            reasoning: None,
-            tool_calls: None,
-            turn_id: message.turn_id.clone(), // 使用原始消息的 turn_id 保持在同一轮对话
-            tool_call_id: Some(tool_call_id.clone()), // 关联对应的工具调用 ID
-            config: None,
-            attachments: None,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            start_time: None,
-            end_time: None,
-            duration: None,
-            created_at: chrono::Utc::now().timestamp_millis(),
-            updated_at: chrono::Utc::now().timestamp_millis(),
-        };
-
-        if let Err(e) = self.repository.create_message(&tool_result_message).await {
-            error_callback(error_stream_id.clone(), e);
-            return;
+            created_tool_message_ids.push(tool_result_message.id.clone());
         }
+
+        tracing::info!(
+            "[MessageService::execute_tool_calls] Saved tool result messages: {:?}",
+            created_tool_message_ids
+        );
 
         // 6. 获取 chat 配置
         let chat = match self.get_chat_config(&message.chat_id).await {
@@ -1203,7 +1256,8 @@ impl MessageService {
 
         // 添加当前 turn_id 的所有消息（按时间顺序）
         if let Some(turn_id) = message.turn_id {
-            if let Ok(turn_messages) = self.repository
+            if let Ok(turn_messages) = self
+                .repository
                 .get_messages_by_chat_and_turn(&message.chat_id, turn_id)
                 .await
             {
@@ -1268,26 +1322,29 @@ impl MessageService {
                 };
 
                 let now = chrono::Utc::now().timestamp_millis();
-                match repository.create_message(&Message {
-                    id: response_clone.message_id.clone(),
-                    chat_id: chat_id.to_string(),
-                    role: ChatMessageRole::Assistant,
-                    content: response_clone.content.clone(),
-                    reasoning: response_clone.reasoning.clone(),
-                    tool_calls: response_clone.tool_calls.clone(),
-                    config,
-                    turn_id,
-                    tool_call_id: None,
-                    attachments: None,
-                    input_tokens: response_clone.input_tokens,
-                    output_tokens: response_clone.output_tokens,
-                    total_tokens: response_clone.total_tokens,
-                    start_time: Some(now),
-                    end_time: Some(now),
-                    duration: response_clone.duration,
-                    created_at: now,
-                    updated_at: now,
-                }).await {
+                match repository
+                    .create_message(&Message {
+                        id: response_clone.message_id.clone(),
+                        chat_id: chat_id.to_string(),
+                        role: ChatMessageRole::Assistant,
+                        content: response_clone.content.clone(),
+                        reasoning: response_clone.reasoning.clone(),
+                        tool_calls: response_clone.tool_calls.clone(),
+                        config,
+                        turn_id,
+                        tool_call_id: None,
+                        attachments: None,
+                        input_tokens: response_clone.input_tokens,
+                        output_tokens: response_clone.output_tokens,
+                        total_tokens: response_clone.total_tokens,
+                        start_time: Some(now),
+                        end_time: Some(now),
+                        duration: response_clone.duration,
+                        created_at: now,
+                        updated_at: now,
+                    })
+                    .await
+                {
                     Ok(_) => {
                         tracing::info!(
                             "[MessageService::execute_tool_calls] Assistant message saved with ID: {}",
@@ -1308,7 +1365,14 @@ impl MessageService {
         };
 
         // 调用流式 LLM API 处理响应（不再返回值，通过回调处理）
-        self.call_llm_api_stream(&request, start_callback, streaming_callback, end_callback_wrapper, error_callback).await;
+        self.call_llm_api_stream(
+            &request,
+            start_callback,
+            streaming_callback,
+            end_callback_wrapper,
+            error_callback,
+        )
+        .await;
     }
 
     /// 重新生成消息
@@ -1386,9 +1450,7 @@ impl MessageService {
         };
 
         // 调用 LLM API 重新生成
-        let llm_response = self
-            .call_llm_api(&regenerate_request)
-            .await?;
+        let llm_response = self.call_llm_api(&regenerate_request).await?;
         let new_content = llm_response.content.clone();
 
         // 4. 更新消息内容
@@ -1419,7 +1481,7 @@ impl MessageService {
             provider_id: Some(regenerate_request.provider_id.clone()),
             system_prompt: chat.system_prompt.clone(),
             mcp_servers: Some(chat.mcp_servers.clone()),
-                    };
+        };
         self.repository
             .update_message_config(&message_id, Some(&final_config), now)
             .await?;
@@ -1450,12 +1512,12 @@ impl MessageService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{MessageConfig, MessageRequest, ModelParameters};
     use crate::llm_client::types::ChatMessage;
     use crate::llm_client::types::ChatMessageRole;
+    use crate::models::{MessageConfig, MessageRequest, ModelParameters};
     use crate::services::{ChatService, McpService, ProviderService};
     use crate::storage::Database;
-        use std::sync::Arc;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     async fn create_test_database() -> Arc<Database> {
@@ -1493,7 +1555,6 @@ mod tests {
 
         (chat_service, message_service, chat.id)
     }
-
 
     #[tokio::test]
     async fn creates_service_successfully() {
@@ -1559,7 +1620,7 @@ mod tests {
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant".to_string()),
             mcp_servers: Some(vec!["server1".to_string()]),
-                    };
+        };
 
         let json = serde_json::to_string(&config).unwrap();
         let roundtrip: MessageConfig = serde_json::from_str(&json).unwrap();

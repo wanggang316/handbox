@@ -3,9 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::llm_client::types::{ChatMessage, ChatMessageRole, ChatToolCall};
 use crate::models::chat::{Timestamp, UUID};
-use crate::llm_client::types::{ChatToolCall, ChatMessageRole, ChatMessage};
-
 
 /// 消息附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,7 +30,6 @@ pub struct MessageConfig {
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<String>>,
 }
-
 
 /// 消息实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,7 +60,6 @@ pub struct Message {
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
-
 
 /// 消息请求附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,5 +226,4 @@ mod tests {
         assert_eq!(config.temperature, deserialized.temperature);
         assert_eq!(config.model_id, deserialized.model_id);
     }
-
 }

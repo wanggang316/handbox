@@ -2,7 +2,10 @@
 // 使用 google-genai-rust SDK 进行通信
 
 use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{ChatChoice, ChatMessage, ChatRequest, ChatResponse, ChatChunkResponse, ChatChunkChoice, ChatDeltaMessage,  ChatUsage, ChatMessageRole};
+use crate::llm_client::types::{
+    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatMessage, ChatMessageRole,
+    ChatRequest, ChatResponse, ChatUsage,
+};
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use futures::StreamExt;

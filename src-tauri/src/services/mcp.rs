@@ -315,22 +315,18 @@ impl McpService {
     }
 
     /// 执行工具调用（通过工具名称和参数）
-    pub async fn execute_tool(
-        &self,
-        tool_name: &str,
-        arguments: &str,
-    ) -> Result<String, AppError> {
+    pub async fn execute_tool(&self, tool_name: &str, arguments: &str) -> Result<String, AppError> {
         // 获取活跃的 MCP 服务器
-        let servers = self.list_servers().await?
+        let servers = self
+            .list_servers()
+            .await?
             .into_iter()
             .filter(|s| s.enabled)
             .collect::<Vec<_>>();
 
         // 在所有服务器中查找工具
         for server in &servers {
-            if let Some(tool) = server.tools.iter().find(|t| {
-                t.name == tool_name
-            }) {
+            if let Some(tool) = server.tools.iter().find(|t| t.name == tool_name) {
                 let arguments = Self::parse_tool_arguments(arguments);
 
                 match self.invoke_tool(&server, &tool.name, arguments).await {
@@ -343,8 +339,7 @@ impl McpService {
                         );
                         return Err(AppError::internal_error(&format!(
                             "调用工具 {} 失败: {}",
-                            tool_name,
-                            error.message
+                            tool_name, error.message
                         )));
                     }
                 }

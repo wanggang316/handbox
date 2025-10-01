@@ -35,7 +35,6 @@ pub struct ChatToolFunction {
     pub arguments: String,
 }
 
-
 /// 聊天消息角色枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -143,7 +142,6 @@ pub struct ChatUsage {
     pub total_tokens: i32,
 }
 
-
 // 响应-增量
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatChunkResponse {
@@ -153,7 +151,6 @@ pub struct ChatChunkResponse {
     pub choices: Vec<ChatChunkChoice>,
     pub usage: Option<ChatUsage>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatChunkChoice {

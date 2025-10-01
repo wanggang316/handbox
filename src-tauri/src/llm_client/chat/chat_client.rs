@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::Stream;
 
-use crate::llm_client::types::{ChatApiType, ChatRequest, ChatResponse, ChatChunkResponse};
+use crate::llm_client::types::{ChatApiType, ChatChunkResponse, ChatRequest, ChatResponse};
 use crate::models::{AppError, Provider};
 
 use super::{

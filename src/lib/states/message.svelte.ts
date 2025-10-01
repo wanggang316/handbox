@@ -518,14 +518,29 @@ class MessageStore {
   }
 
   /**
-   * 执行工具调用 - 使用流式API
+   * 执行多个工具调用 - 使用流式API
    */
-  async executeToolCall(messageId: string, toolCallId: string): Promise<void> {
-    const key = `${messageId}:${toolCallId}`;
+  async executeToolCalls(messageId: string, toolCallIds: string[]): Promise<void> {
+    if (toolCallIds.length === 0) {
+      return;
+    }
+
+    const keys = toolCallIds.map((toolCallId) => `${messageId}:${toolCallId}`);
+    let cleaned = false;
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      for (const key of keys) {
+        this.state.executingToolCalls.delete(key);
+      }
+    };
 
     try {
       // 设置执行状态
-      this.state.executingToolCalls.add(key);
+      for (const key of keys) {
+        this.state.executingToolCalls.add(key);
+      }
       this.setError(null);
 
       // 清理之前的监听器（如果存在）
@@ -539,29 +554,33 @@ class MessageStore {
         this.createStreamEventHandlers(
           // onComplete callback
           () => {
-            // 清除执行状态
-            this.state.executingToolCalls.delete(key);
+            cleanup();
           },
           // onError callback
           () => {
-            // 清除执行状态
-            this.state.executingToolCalls.delete(key);
+            cleanup();
           }
         ),
         'tool_execute_stream'
       );
 
       // 调用流式工具执行API
-      await messageApi.executeToolCallStream(messageId, toolCallId);
+      await messageApi.executeToolCallsStream(messageId, toolCallIds);
 
     } catch (error) {
+      cleanup();
+      if (this.currentStreamUnlisten) {
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
       console.error('启动工具执行失败:', error);
       this.setError(error instanceof Error ? error.message : '工具执行失败');
       throw error;
-    } finally {
-      // 注意：执行状态的清除现在在 onEnd 或 onError 中处理
-      // 这里不再立即清除，因为流式执行是异步的
     }
+  }
+
+  async executeToolCall(messageId: string, toolCallId: string): Promise<void> {
+    await this.executeToolCalls(messageId, [toolCallId]);
   }
 
   /**
@@ -569,11 +588,16 @@ class MessageStore {
    */
   async executeAllToolCalls(messageId: string, toolCalls: ToolCall[]): Promise<void> {
     try {
-      for (const toolCall of toolCalls) {
-        if (toolCall.id) {
-          await this.executeToolCall(messageId, toolCall.id);
-        }
+      const toolCallIds = toolCalls
+        .map(toolCall => toolCall.id)
+        .filter((id): id is string => Boolean(id));
+
+      if (toolCallIds.length === 0) {
+        console.warn('executeAllToolCalls: 未找到有效的工具调用 ID');
+        return;
       }
+
+      await this.executeToolCalls(messageId, toolCallIds);
     } catch (error) {
       console.error('批量执行工具调用失败:', error);
       throw error;
