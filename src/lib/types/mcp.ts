@@ -2,6 +2,8 @@ import type { Timestamp } from './index';
 
 export type McpServerStatus = 'inactive' | 'ready' | 'error' | 'unknown';
 
+export type McpConnectionType = 'stdio' | 'sse' | 'http';
+
 export interface McpTool {
   name: string;
   description?: string;
@@ -14,10 +16,14 @@ export interface McpServer {
   name: string;
   displayName?: string;
   description?: string;
+  connectionType: McpConnectionType;
   command: string;
   args: string[];
   workingDir?: string;
   env: Record<string, string>;
+  endpoint?: string;
+  headers: Record<string, string>;
+  timeoutMs?: number;
   enabled: boolean;
   status: McpServerStatus;
   tools: McpTool[];
@@ -31,10 +37,14 @@ export interface CreateMcpServerRequest {
   name: string;
   displayName?: string;
   description?: string;
+  connectionType?: McpConnectionType;
   command: string;
   args?: string[];
   workingDir?: string;
   env?: Record<string, string>;
+  endpoint?: string;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
   enabled?: boolean;
 }
 
@@ -42,10 +52,14 @@ export interface UpdateMcpServerRequest {
   name?: string;
   displayName?: string;
   description?: string;
+  connectionType?: McpConnectionType;
   command?: string;
   args?: string[];
   workingDir?: string;
   env?: Record<string, string>;
+  endpoint?: string;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
   enabled?: boolean;
 }
 

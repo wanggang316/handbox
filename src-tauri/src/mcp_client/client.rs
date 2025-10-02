@@ -16,6 +16,7 @@ use crate::models::McpTool;
 
 use super::{
     process::ProcessTransport,
+    sse::SseTransport,
     types::{ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig},
     utils::convert_tool,
 };
@@ -34,9 +35,9 @@ impl McpClient {
             ConnectionConfig::Process(process_config) => {
                 Self::connect_process(process_config).await
             }
-            ConnectionConfig::Sse(_sse_config) => Err(anyhow::anyhow!(
-                "SSE transport is temporarily disabled due to dependency conflicts"
-            )),
+            ConnectionConfig::Sse(sse_config) => {
+                Self::connect_sse(sse_config).await
+            }
         }
     }
 
@@ -69,11 +70,25 @@ impl McpClient {
         })
     }
 
-    /// Connect to an MCP server using SSE transport (currently disabled)
-    pub async fn connect_sse(_config: SseConfig) -> Result<Self> {
-        Err(anyhow::anyhow!(
-            "SSE transport is temporarily disabled due to dependency conflicts"
-        ))
+    /// Connect to an MCP server using SSE transport (not yet implemented)
+    pub async fn connect_sse(config: SseConfig) -> Result<Self> {
+        tracing::info!("Attempting SSE connection to: {}", config.endpoint);
+
+        // For now, we validate the endpoint and return a descriptive error
+        SseTransport::validate_endpoint(&config.endpoint)
+            .context("Invalid SSE endpoint")?;
+
+        // Try to create the transport to provide better error messages
+        SseTransport::new(config).await.map_err(|e| {
+            tracing::error!("SSE transport failed: {}", e);
+            anyhow::anyhow!(
+                "SSE/HTTP transport is not yet implemented. Please use 'stdio' connection type for process-based MCP servers. Error: {}",
+                e
+            )
+        })?;
+
+        // This line will never be reached due to the error above, but is needed for type checking
+        unreachable!()
     }
 
     /// List all tools exposed by the connected MCP server

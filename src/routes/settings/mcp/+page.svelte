@@ -207,19 +207,39 @@
           >
             <div class="space-y-3 text-sm text-base-content/80">
               <div class="flex flex-wrap gap-2 text-xs">
-                <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
-                  命令: <span class="font-mono text-base-content">{item.server.command}</span>
+                <span class="px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium">
+                  {item.server.connectionType === 'stdio' ? '进程连接' :
+                   item.server.connectionType === 'sse' ? 'SSE连接' :
+                   item.server.connectionType === 'http' ? 'HTTP连接' : '未知连接'}
                 </span>
-                {#if item.server.args.length}
+
+                {#if item.server.connectionType === 'stdio'}
                   <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
-                    参数: {item.server.args.join(', ')}
+                    命令: <span class="font-mono text-base-content">{item.server.command}</span>
                   </span>
+                  {#if item.server.args.length}
+                    <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
+                      参数: {item.server.args.join(', ')}
+                    </span>
+                  {/if}
+                  {#if item.server.workingDir}
+                    <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
+                      工作目录: {item.server.workingDir}
+                    </span>
+                  {/if}
+                {:else}
+                  {#if item.server.endpoint}
+                    <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
+                      端点: <span class="font-mono text-base-content">{item.server.endpoint}</span>
+                    </span>
+                  {/if}
+                  {#if item.server.timeoutMs}
+                    <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
+                      超时: {item.server.timeoutMs}ms
+                    </span>
+                  {/if}
                 {/if}
-                {#if item.server.workingDir}
-                  <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
-                    工作目录: {item.server.workingDir}
-                  </span>
-                {/if}
+
                 <span class="px-2 py-0.5 rounded-md bg-base-200 text-base-content/70">
                   最近同步: {formatLastSync(item.server.lastSyncAt)}
                 </span>
@@ -238,7 +258,13 @@
                 {#if expandedStates[item.server.id]}
                   <div class="flex flex-wrap gap-2">
                     {#if item.server.tools.length === 0}
-                      <span class="text-xs text-base-content/60">尚未同步到任何工具</span>
+                      {#if item.server.connectionType === 'stdio'}
+                        <span class="text-xs text-base-content/60">尚未同步到任何工具</span>
+                      {:else}
+                        <span class="text-xs text-base-content/60">
+                          {item.server.connectionType.toUpperCase()} 连接尚未实现，工具列表暂时不可用
+                        </span>
+                      {/if}
                     {:else}
                       {#each item.server.tools as tool (tool.name)}
                         <span class="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content">

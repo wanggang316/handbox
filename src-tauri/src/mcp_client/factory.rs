@@ -7,11 +7,11 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 
-use crate::models::McpServer;
+use crate::models::{McpConnectionType, McpServer};
 
 use super::{
     client::McpClient,
-    types::{ConnectionConfig, ProcessConfig},
+    types::{ConnectionConfig, ProcessConfig, SseConfig},
     utils::validate_server_config,
 };
 
@@ -30,9 +30,21 @@ impl McpClientFactory {
             ));
         }
 
-        // Validate the configuration
-        validate_server_config(&server.command, &server.working_dir, &server.env)
-            .with_context(|| format!("Invalid configuration for MCP server '{}'", server.name))?;
+        // Validate the configuration based on connection type
+        match server.connection_type {
+            McpConnectionType::Stdio => {
+                validate_server_config(&server.command, &server.working_dir, &server.env)
+                    .with_context(|| format!("Invalid stdio configuration for MCP server '{}'", server.name))?;
+            }
+            McpConnectionType::Sse | McpConnectionType::Http => {
+                if server.endpoint.is_none() || server.endpoint.as_ref().unwrap().trim().is_empty() {
+                    return Err(anyhow::anyhow!(
+                        "Endpoint is required for {} connection type",
+                        server.connection_type.as_str()
+                    ));
+                }
+            }
+        }
 
         // Determine connection type and create config
         let config = Self::create_connection_config(server)?;
@@ -59,20 +71,43 @@ impl McpClientFactory {
 
     /// Create connection configuration from server definition
     fn create_connection_config(server: &McpServer) -> Result<ConnectionConfig> {
-        if Self::is_sse_endpoint(&server.command) {
-            // SSE endpoint configuration (currently disabled)
-            Err(anyhow::anyhow!("SSE endpoints are temporarily disabled"))
-        } else {
-            // Process configuration
-            let mut config = ProcessConfig::new(&server.command)
-                .with_args(server.args.clone())
-                .with_env(server.env.clone());
+        match server.connection_type {
+            McpConnectionType::Stdio => {
+                // Process configuration
+                let mut config = ProcessConfig::new(&server.command)
+                    .with_args(server.args.clone())
+                    .with_env(server.env.clone());
 
-            if let Some(ref working_dir) = server.working_dir {
-                config = config.with_working_dir(working_dir.clone());
+                if let Some(ref working_dir) = server.working_dir {
+                    config = config.with_working_dir(working_dir.clone());
+                }
+
+                Ok(ConnectionConfig::Process(config))
             }
+            McpConnectionType::Sse => {
+                // SSE endpoint configuration
+                let endpoint = server.endpoint.as_ref().unwrap();
+                let mut config = SseConfig::new(endpoint.clone())
+                    .with_headers(server.headers.clone());
 
-            Ok(ConnectionConfig::Process(config))
+                if let Some(timeout_ms) = server.timeout_ms {
+                    config = config.with_timeout(timeout_ms);
+                }
+
+                Ok(ConnectionConfig::Sse(config))
+            }
+            McpConnectionType::Http => {
+                // HTTP endpoint configuration (treat as SSE for now)
+                let endpoint = server.endpoint.as_ref().unwrap();
+                let mut config = SseConfig::new(endpoint.clone())
+                    .with_headers(server.headers.clone());
+
+                if let Some(timeout_ms) = server.timeout_ms {
+                    config = config.with_timeout(timeout_ms);
+                }
+
+                Ok(ConnectionConfig::Sse(config))
+            }
         }
     }
 

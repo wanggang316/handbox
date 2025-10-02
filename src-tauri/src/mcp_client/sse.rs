@@ -5,15 +5,27 @@
 
 use anyhow::Result;
 
+use super::types::SseConfig;
+
 /// SSE transport for MCP servers
 pub struct SseTransport;
 
 impl SseTransport {
     /// Create a new SSE transport connecting to the given endpoint
-    /// Currently disabled due to dependency conflicts
-    pub async fn new(_endpoint: String) -> Result<()> {
+    /// Currently returns a placeholder implementation
+    pub async fn new(config: SseConfig) -> Result<()> {
+        tracing::info!("Creating MCP SSE transport");
+        tracing::info!("> endpoint: {}", config.endpoint);
+        tracing::info!("> headers: {:?}", config.headers);
+        tracing::info!("> timeout_ms: {:?}", config.timeout_ms);
+
+        // Validate endpoint
+        Self::validate_endpoint(&config.endpoint)?;
+
+        // TODO: Implement actual SSE transport once rmcp supports it
+        // For now, return an error indicating it's not implemented
         Err(anyhow::anyhow!(
-            "SSE transport is temporarily disabled due to dependency conflicts"
+            "SSE transport is not yet implemented - please use stdio transport for now"
         ))
     }
 

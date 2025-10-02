@@ -72,6 +72,7 @@ impl OpenAICompletionsChatClient {
             tools,
             tool_choice,
             parallel_tool_calls: request.parallel_tool_calls,
+            ..Default::default()
         }
     }
 

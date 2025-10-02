@@ -56,10 +56,14 @@ impl McpService {
             name: request.name,
             display_name: request.display_name,
             description: request.description,
+            connection_type: request.connection_type,
             command: request.command,
             args: request.args,
             working_dir: request.working_dir,
             env: request.env,
+            endpoint: request.endpoint,
+            headers: request.headers,
+            timeout_ms: request.timeout_ms,
             enabled: request.enabled,
             status: if request.enabled {
                 McpServerStatus::Ready
@@ -74,7 +78,7 @@ impl McpService {
         };
 
         if server.enabled {
-            self.populate_server_metadata(&mut server).await;
+            self.update_server_status(&mut server).await;
         }
 
         self.repository.create_server(&server).await?;
@@ -104,8 +108,9 @@ impl McpService {
             existing.description = request.description.take();
         }
         if let Some(command) = request.command.take() {
-            if command.is_empty() {
-                return Err(AppError::validation_error("MCP 服务器命令不能为空"));
+            // 只有 stdio 连接类型才需要验证 command 不为空
+            if existing.connection_type == crate::models::McpConnectionType::Stdio && command.is_empty() {
+                return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
             }
             existing.command = command;
         }
@@ -117,6 +122,36 @@ impl McpService {
         }
         if let Some(env) = request.env.take() {
             existing.env = env;
+        }
+        if let Some(connection_type) = request.connection_type.take() {
+            existing.connection_type = connection_type;
+        }
+        if request.endpoint.is_some() {
+            existing.endpoint = request.endpoint.take();
+        }
+        if let Some(headers) = request.headers.take() {
+            existing.headers = headers;
+        }
+        if let Some(timeout_ms) = request.timeout_ms {
+            existing.timeout_ms = Some(timeout_ms);
+        }
+
+        // 更新完字段后，验证配置的完整性
+        match existing.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                if existing.command.trim().is_empty() {
+                    return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
+                }
+            }
+            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+                if let Some(ref endpoint) = existing.endpoint {
+                    if endpoint.trim().is_empty() {
+                        return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL 不能为空"));
+                    }
+                } else {
+                    return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL"));
+                }
+            }
         }
 
         let mut should_refresh = false;
@@ -136,7 +171,7 @@ impl McpService {
         existing.updated_at = Self::current_timestamp();
 
         if should_refresh {
-            self.populate_server_metadata(&mut existing).await;
+            self.update_server_status(&mut existing).await;
         }
 
         self.repository.update_server(&existing).await?;
@@ -157,7 +192,7 @@ impl McpService {
         server.updated_at = Self::current_timestamp();
         if request.enabled {
             server.status = McpServerStatus::Ready;
-            self.populate_server_metadata(&mut server).await;
+            self.update_server_status(&mut server).await;
         } else {
             server.status = McpServerStatus::Inactive;
             server.last_error = None;
@@ -173,7 +208,7 @@ impl McpService {
         request: RefreshMcpServerRequest,
     ) -> Result<McpServer, AppError> {
         let mut server = self.get_server(&request.server_id).await?;
-        self.populate_server_metadata(&mut server).await;
+        self.update_server_status(&mut server).await;
         server.updated_at = Self::current_timestamp();
         self.repository.update_server(&server).await?;
         Ok(server)
@@ -184,23 +219,48 @@ impl McpService {
         self.repository.delete_server(&server_id).await
     }
 
-    /// Attach metadata (tools, status) by querying the MCP server. Errors are captured in status.
-    async fn populate_server_metadata(&self, server: &mut McpServer) {
-        match self.fetch_server_tools(server).await {
-            Ok(tools) => {
-                server.tools = tools;
-                server.status = McpServerStatus::Ready;
-                server.last_error = None;
-                server.last_sync_at = Some(Self::current_timestamp());
+
+    /// Update server status and metadata based on connection type
+    async fn update_server_status(&self, server: &mut McpServer) {
+        match server.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                // stdio 类型尝试连接获取工具
+                match self.fetch_server_tools(server).await {
+                    Ok(tools) => {
+                        server.tools = tools;
+                        server.status = McpServerStatus::Ready;
+                        server.last_error = None;
+                        server.last_sync_at = Some(Self::current_timestamp());
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            "Failed to fetch MCP metadata for {}: {}",
+                            server.name,
+                            error
+                        );
+                        server.status = McpServerStatus::Error;
+                        server.last_error = Some(error.to_string());
+                    }
+                }
             }
-            Err(error) => {
-                tracing::error!(
-                    "Failed to fetch MCP metadata for {}: {}",
+            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+                // SSE/HTTP 类型设为未激活状态，不尝试连接
+                server.tools = Vec::new();
+                server.status = McpServerStatus::Inactive;
+                server.last_error = Some(format!(
+                    "{} 传输协议尚未实现。配置已保存，功能开发完成后将自动可用。",
+                    match server.connection_type {
+                        crate::models::McpConnectionType::Sse => "SSE",
+                        crate::models::McpConnectionType::Http => "HTTP",
+                        _ => "未知"
+                    }
+                ));
+                server.last_sync_at = Some(Self::current_timestamp());
+                tracing::info!(
+                    "MCP server '{}' configured with {} transport (not yet implemented). Configuration saved successfully.",
                     server.name,
-                    error
+                    server.connection_type.as_str()
                 );
-                server.status = McpServerStatus::Error;
-                server.last_error = Some(error.to_string());
             }
         }
     }
@@ -209,9 +269,25 @@ impl McpService {
         if request.name.trim().is_empty() {
             return Err(AppError::validation_error("MCP 服务器名称不能为空"));
         }
-        if request.command.trim().is_empty() {
-            return Err(AppError::validation_error("MCP 服务器命令不能为空"));
+
+        // 根据连接类型验证必填字段
+        match request.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                if request.command.trim().is_empty() {
+                    return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
+                }
+            }
+            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+                if let Some(ref endpoint) = request.endpoint {
+                    if endpoint.trim().is_empty() {
+                        return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL 不能为空"));
+                    }
+                } else {
+                    return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL"));
+                }
+            }
         }
+
         Ok(())
     }
 
