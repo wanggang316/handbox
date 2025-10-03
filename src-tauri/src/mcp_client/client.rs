@@ -1,7 +1,7 @@
 //! High-level MCP client interface.
 //!
 //! This module provides a clean, modern client interface for connecting to MCP servers
-//! using either process-based or SSE transports.
+//! over stdio child processes, SSE endpoints, or streamable HTTP transports.
 
 use std::sync::{Arc, Mutex};
 
@@ -17,7 +17,11 @@ use crate::models::McpTool;
 use super::{
     process::ProcessTransport,
     sse::SseTransport,
-    types::{ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig},
+    streamable_http::StreamableHttpTransport,
+    types::{
+        ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig,
+        StreamableHttpConfig,
+    },
     utils::convert_tool,
 };
 
@@ -35,15 +39,14 @@ impl McpClient {
             ConnectionConfig::Process(process_config) => {
                 Self::connect_process(process_config).await
             }
-            ConnectionConfig::Sse(sse_config) => {
-                Self::connect_sse(sse_config).await
-            }
+            ConnectionConfig::Sse(sse_config) => Self::connect_sse(sse_config).await,
+            ConnectionConfig::Http(http_config) => Self::connect_http(http_config).await,
         }
     }
 
     /// Connect to an MCP server using process transport
     pub async fn connect_process(config: ProcessConfig) -> Result<Self> {
-        let mut stats = ClientStats::new();
+        let stats = ClientStats::new();
 
         let transport = ProcessTransport::new(config).await.map_err(|e| {
             tracing::error!("Failed to create process transport: {}", e);
@@ -60,24 +63,17 @@ impl McpClient {
         let server_info = service.peer();
         tracing::info!("Connected to MCP server: {:#?}", server_info);
 
-        // Update stats and status
-        stats.set_connected(chrono::Utc::now().timestamp_millis());
-
-        Ok(Self {
-            service,
-            stats: Arc::new(Mutex::new(stats)),
-            status: Arc::new(Mutex::new(ConnectionStatus::Connected)),
-        })
+        Ok(Self::from_service(service, stats))
     }
 
     /// Connect to an MCP server using SSE transport
     pub async fn connect_sse(config: SseConfig) -> Result<Self> {
         tracing::info!("Attempting SSE connection to: {}", config.endpoint);
 
-        let mut stats = ClientStats::new();
+        let stats = ClientStats::new();
 
         // Create the SSE transport
-        let transport = SseTransport::new(config).await.map_err(|e| {
+        let transport = SseTransport::connect(&config).await.map_err(|e| {
             tracing::error!("Failed to create SSE transport: {}", e);
             e
         })?;
@@ -92,14 +88,33 @@ impl McpClient {
         let server_info = service.peer();
         tracing::info!("Connected to MCP server via SSE: {:#?}", server_info);
 
-        // Update stats and status
-        stats.set_connected(chrono::Utc::now().timestamp_millis());
+        Ok(Self::from_service(service, stats))
+    }
 
-        Ok(Self {
-            service,
-            stats: Arc::new(Mutex::new(stats)),
-            status: Arc::new(Mutex::new(ConnectionStatus::Connected)),
-        })
+    /// Connect to an MCP server using streamable HTTP transport
+    pub async fn connect_http(config: StreamableHttpConfig) -> Result<Self> {
+        tracing::info!(
+            "Attempting streamable HTTP connection to: {}",
+            config.endpoint
+        );
+
+        let stats = ClientStats::new();
+
+        let transport = StreamableHttpTransport::connect(&config).map_err(|e| {
+            tracing::error!("Failed to create streamable HTTP transport: {}", e);
+            e
+        })?;
+
+        let client_info = create_client_info();
+        let service = client_info
+            .serve(transport)
+            .await
+            .context("Failed to establish MCP HTTP connection")?;
+
+        let server_info = service.peer();
+        tracing::info!("Connected to MCP server via HTTP: {:#?}", server_info);
+
+        Ok(Self::from_service(service, stats))
     }
 
     /// List all tools exposed by the connected MCP server
@@ -242,6 +257,21 @@ impl McpClient {
     }
 
     // Private helper methods for stats tracking
+    fn from_service(
+        service: RunningService<RoleClient, ClientInfo>,
+        mut stats: ClientStats,
+    ) -> Self {
+        if stats.connected_since.is_none() {
+            stats.set_connected(chrono::Utc::now().timestamp_millis());
+        }
+
+        Self {
+            service,
+            stats: Arc::new(Mutex::new(stats)),
+            status: Arc::new(Mutex::new(ConnectionStatus::Connected)),
+        }
+    }
+
     fn record_tool_call(&self) {
         if let Ok(mut stats) = self.stats.lock() {
             stats.tool_called();

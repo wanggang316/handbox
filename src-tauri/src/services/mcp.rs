@@ -2,7 +2,12 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use crate::mcp_client::McpClientFactory;
+use anyhow::{anyhow, bail, Context};
+
+use crate::mcp_client::{
+    validate_server_config, ConnectionConfig, McpClient, ProcessConfig, SseConfig,
+    StreamableHttpConfig,
+};
 use crate::models::{
     AppError, CreateMcpServerRequest, McpServer, McpServerStatus, McpTool, RefreshMcpServerRequest,
     ToggleMcpServerRequest, UpdateMcpServerRequest,
@@ -109,7 +114,9 @@ impl McpService {
         }
         if let Some(command) = request.command.take() {
             // 只有 stdio 连接类型才需要验证 command 不为空
-            if existing.connection_type == crate::models::McpConnectionType::Stdio && command.is_empty() {
+            if existing.connection_type == crate::models::McpConnectionType::Stdio
+                && command.is_empty()
+            {
                 return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
             }
             existing.command = command;
@@ -146,7 +153,9 @@ impl McpService {
             crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
                 if let Some(ref endpoint) = existing.endpoint {
                     if endpoint.trim().is_empty() {
-                        return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL 不能为空"));
+                        return Err(AppError::validation_error(
+                            "SSE/HTTP 连接类型需要端点 URL 不能为空",
+                        ));
                     }
                 } else {
                     return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL"));
@@ -219,7 +228,6 @@ impl McpService {
         self.repository.delete_server(&server_id).await
     }
 
-
     /// Update server status and metadata based on connection type
     async fn update_server_status(&self, server: &mut McpServer) {
         // All connection types now work the same way - try to connect and fetch tools
@@ -257,7 +265,9 @@ impl McpService {
             crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
                 if let Some(ref endpoint) = request.endpoint {
                     if endpoint.trim().is_empty() {
-                        return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL 不能为空"));
+                        return Err(AppError::validation_error(
+                            "SSE/HTTP 连接类型需要端点 URL 不能为空",
+                        ));
                     }
                 } else {
                     return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL"));
@@ -350,8 +360,7 @@ impl McpService {
     }
 
     async fn fetch_server_tools(&self, server: &McpServer) -> anyhow::Result<Vec<McpTool>> {
-        // Use the new factory to create the client
-        let client = McpClientFactory::create_client(server).await?;
+        let client = Self::connect_client(server).await?;
 
         let tools = client.list_tools().await?;
 
@@ -365,6 +374,93 @@ impl McpService {
         }
 
         Ok(tools)
+    }
+
+    async fn connect_client(server: &McpServer) -> anyhow::Result<McpClient> {
+        if !server.enabled {
+            bail!("MCP server '{}' is not enabled", server.name);
+        }
+
+        Self::validate_server_configuration(server)?;
+        let config = Self::build_connection_config(server)?;
+
+        McpClient::connect(config)
+            .await
+            .with_context(|| format!("Failed to connect to MCP server '{}'", server.name))
+    }
+
+    fn validate_server_configuration(server: &McpServer) -> anyhow::Result<()> {
+        match server.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                validate_server_config(&server.command, &server.working_dir, &server.env)
+                    .with_context(|| {
+                        format!(
+                            "Invalid stdio configuration for MCP server '{}'",
+                            server.name
+                        )
+                    })?;
+            }
+            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+                let endpoint = server.endpoint.as_ref().ok_or_else(|| {
+                    anyhow!("Endpoint is required for {}", server.connection_type)
+                })?;
+
+                if endpoint.trim().is_empty() {
+                    bail!(
+                        "Endpoint is required for {} connection type",
+                        server.connection_type.as_str()
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn build_connection_config(server: &McpServer) -> anyhow::Result<ConnectionConfig> {
+        match server.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                let mut config = ProcessConfig::new(&server.command)
+                    .with_args(server.args.clone())
+                    .with_env(server.env.clone());
+
+                if let Some(ref working_dir) = server.working_dir {
+                    config = config.with_working_dir(working_dir.clone());
+                }
+
+                Ok(ConnectionConfig::Process(config))
+            }
+            crate::models::McpConnectionType::Sse => {
+                let endpoint = server
+                    .endpoint
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Endpoint is required for SSE connection"))?;
+
+                let mut config =
+                    SseConfig::new(endpoint.clone()).with_headers(server.headers.clone());
+
+                if let Some(timeout_ms) = server.timeout_ms {
+                    config = config.with_timeout(timeout_ms);
+                }
+
+                Ok(ConnectionConfig::Sse(config))
+            }
+            crate::models::McpConnectionType::Http => {
+                let endpoint = server
+                    .endpoint
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Endpoint is required for HTTP connection"))?;
+
+                let mut config = StreamableHttpConfig::new(endpoint.clone())
+                    .with_headers(server.headers.clone());
+
+                if let Some(timeout_ms) = server.timeout_ms {
+                    config = config.with_timeout(timeout_ms);
+                }
+
+                Ok(ConnectionConfig::Http(config))
+            }
+        }
     }
 
     /// 执行工具调用（通过工具名称和参数）
@@ -417,7 +513,7 @@ impl McpService {
         tool_name: &str,
         arguments: Option<serde_json::Value>,
     ) -> Result<rmcp::model::CallToolResult, AppError> {
-        let client = McpClientFactory::create_client(server).await.map_err(|e| {
+        let client = Self::connect_client(server).await.map_err(|e| {
             AppError::internal_error(&format!(
                 "Failed to connect to MCP server {}: {}",
                 server.name, e

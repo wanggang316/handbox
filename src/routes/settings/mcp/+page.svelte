@@ -258,13 +258,7 @@
                 {#if expandedStates[item.server.id]}
                   <div class="flex flex-wrap gap-2">
                     {#if item.server.tools.length === 0}
-                      {#if item.server.connectionType === 'stdio'}
-                        <span class="text-xs text-base-content/60">尚未同步到任何工具</span>
-                      {:else}
-                        <span class="text-xs text-base-content/60">
-                          {item.server.connectionType.toUpperCase()} 连接尚未实现，工具列表暂时不可用
-                        </span>
-                      {/if}
+                      <span class="text-xs text-base-content/60">尚未同步到任何工具</span>
                     {:else}
                       {#each item.server.tools as tool (tool.name)}
                         <span class="px-2 py-0.5 rounded bg-base-300/60 text-xs text-base-content">

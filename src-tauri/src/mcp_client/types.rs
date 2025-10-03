@@ -50,6 +50,7 @@ pub struct SseConfig {
     pub endpoint: String,
     pub headers: HashMap<String, String>,
     pub timeout_ms: Option<u64>,
+    pub message_endpoint: Option<String>,
 }
 
 impl SseConfig {
@@ -59,6 +60,7 @@ impl SseConfig {
             endpoint: endpoint.into(),
             headers: HashMap::new(),
             timeout_ms: None,
+            message_endpoint: None,
         }
     }
 
@@ -73,6 +75,51 @@ impl SseConfig {
         self.timeout_ms = Some(timeout_ms);
         self
     }
+
+    /// Override the message endpoint advertised by the server
+    pub fn with_message_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.message_endpoint = Some(endpoint.into());
+        self
+    }
+}
+
+/// Configuration for streamable HTTP MCP connections
+#[derive(Debug, Clone)]
+pub struct StreamableHttpConfig {
+    pub endpoint: String,
+    pub headers: HashMap<String, String>,
+    pub timeout_ms: Option<u64>,
+    pub allow_stateless: bool,
+}
+
+impl StreamableHttpConfig {
+    /// Create a new HTTP configuration with the given endpoint
+    pub fn new(endpoint: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            headers: HashMap::new(),
+            timeout_ms: None,
+            allow_stateless: true,
+        }
+    }
+
+    /// Add HTTP headers
+    pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    /// Set request timeout
+    pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
+    }
+
+    /// Control whether requests can be stateless
+    pub fn with_allow_stateless(mut self, allow_stateless: bool) -> Self {
+        self.allow_stateless = allow_stateless;
+        self
+    }
 }
 
 /// Connection type for MCP servers
@@ -82,6 +129,8 @@ pub enum ConnectionConfig {
     Process(ProcessConfig),
     /// Server-Sent Events connection
     Sse(SseConfig),
+    /// Streamable HTTP connection
+    Http(StreamableHttpConfig),
 }
 
 impl ConnectionConfig {
@@ -93,6 +142,11 @@ impl ConnectionConfig {
     /// Create an SSE connection config
     pub fn sse(endpoint: impl Into<String>) -> Self {
         Self::Sse(SseConfig::new(endpoint))
+    }
+
+    /// Create a streamable HTTP connection config
+    pub fn http(endpoint: impl Into<String>) -> Self {
+        Self::Http(StreamableHttpConfig::new(endpoint))
     }
 }
 
@@ -178,7 +232,8 @@ mod tests {
                 "Authorization".to_string(),
                 "Bearer token".to_string(),
             )]))
-            .with_timeout(5000);
+            .with_timeout(5000)
+            .with_message_endpoint("/custom-message");
 
         assert_eq!(config.endpoint, "http://localhost:8000/sse");
         assert_eq!(
@@ -186,12 +241,33 @@ mod tests {
             Some(&"Bearer token".to_string())
         );
         assert_eq!(config.timeout_ms, Some(5000));
+        assert_eq!(config.message_endpoint, Some("/custom-message".to_string()));
+    }
+
+    #[test]
+    fn streamable_http_config_builder_works() {
+        let config = StreamableHttpConfig::new("http://localhost:8000/mcp")
+            .with_headers(HashMap::from([(
+                "Authorization".to_string(),
+                "Bearer token".to_string(),
+            )]))
+            .with_timeout(3000)
+            .with_allow_stateless(false);
+
+        assert_eq!(config.endpoint, "http://localhost:8000/mcp");
+        assert_eq!(
+            config.headers.get("Authorization"),
+            Some(&"Bearer token".to_string())
+        );
+        assert_eq!(config.timeout_ms, Some(3000));
+        assert!(!config.allow_stateless);
     }
 
     #[test]
     fn connection_config_variants_work() {
         let process = ConnectionConfig::process("npx");
         let sse = ConnectionConfig::sse("http://localhost:8000/sse");
+        let http = ConnectionConfig::http("http://localhost:8000/mcp");
 
         match process {
             ConnectionConfig::Process(config) => assert_eq!(config.command, "npx"),
@@ -203,6 +279,13 @@ mod tests {
                 assert_eq!(config.endpoint, "http://localhost:8000/sse")
             }
             _ => panic!("Expected SSE config"),
+        }
+
+        match http {
+            ConnectionConfig::Http(config) => {
+                assert_eq!(config.endpoint, "http://localhost:8000/mcp")
+            }
+            _ => panic!("Expected HTTP config"),
         }
     }
 

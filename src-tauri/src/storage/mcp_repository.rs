@@ -311,7 +311,9 @@ impl McpRepository {
             .unwrap_or_default();
 
         let status_value: String = row.try_get("status")?;
-        let connection_type_value: String = row.try_get("connection_type").unwrap_or_else(|_| "stdio".to_string());
+        let connection_type_value: String = row
+            .try_get("connection_type")
+            .unwrap_or_else(|_| "stdio".to_string());
 
         Ok(McpServer {
             id: row.try_get("id")?,
@@ -325,7 +327,9 @@ impl McpRepository {
             env,
             endpoint: row.try_get("endpoint").ok(),
             headers,
-            timeout_ms: row.try_get::<Option<i64>, _>("timeout_ms")?.map(|t| t as u64),
+            timeout_ms: row
+                .try_get::<Option<i64>, _>("timeout_ms")?
+                .map(|t| t as u64),
             enabled: row.try_get::<i64, _>("enabled")? != 0,
             status: McpServerStatus::from(status_value.as_str()),
             tools,

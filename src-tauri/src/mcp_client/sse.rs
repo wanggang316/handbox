@@ -1,56 +1,73 @@
 //! SSE (Server-Sent Events) MCP transport implementation.
 //!
-//! This module handles connecting to MCP servers that expose SSE endpoints
-//! for real-time communication.
+//! Provides an rmcp-compatible SSE client transport built on top of reqwest.
+
+use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use rmcp::transport::TokioChildProcess;
-use std::process::Stdio;
-use tokio::process::Command;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use rmcp::transport::sse_client::SseClientConfig;
+use rmcp::transport::SseClientTransport;
 
 use super::types::SseConfig;
 
-/// SSE transport for MCP servers (currently implemented using HTTP proxy)
+/// SSE transport for MCP servers powered by reqwest
+#[allow(clippy::module_name_repetitions)]
 pub struct SseTransport;
 
 impl SseTransport {
     /// Create a new SSE transport connecting to the given endpoint
-    /// For now, this creates a simple HTTP client to test connectivity
-    pub async fn new(config: SseConfig) -> Result<TokioChildProcess> {
-        tracing::info!("Creating MCP SSE transport (HTTP-based)");
+    pub async fn connect(config: &SseConfig) -> Result<SseClientTransport<reqwest::Client>> {
+        tracing::info!("Creating MCP SSE transport");
         tracing::info!("> endpoint: {}", config.endpoint);
-        tracing::info!("> headers: {:?}", config.headers);
-        tracing::info!("> timeout_ms: {:?}", config.timeout_ms);
 
-        // Validate endpoint
         Self::validate_endpoint(&config.endpoint)?;
 
-        // For now, create a simple curl-based proxy to the SSE endpoint
-        // This is a temporary solution until rmcp SSE transport issues are resolved
-        let mut cmd = Command::new("curl");
-        cmd.arg("-N") // No buffering
-            .arg("-H")
-            .arg("Accept: text/event-stream")
-            .arg("-H")
-            .arg("Cache-Control: no-cache");
+        let client = Self::build_http_client(config)
+            .context("Failed to build HTTP client for SSE transport")?;
 
-        // Add custom headers
-        for (key, value) in &config.headers {
-            cmd.arg("-H").arg(format!("{}: {}", key, value));
+        let mut transport_config = SseClientConfig {
+            sse_endpoint: config.endpoint.clone().into(),
+            ..Default::default()
+        };
+
+        if let Some(message_endpoint) = &config.message_endpoint {
+            transport_config.use_message_endpoint = Some(message_endpoint.clone());
         }
 
-        // Add timeout if specified
+        SseClientTransport::start_with_client(client, transport_config)
+            .await
+            .context("Failed to start SSE client transport")
+    }
+
+    fn build_http_client(config: &SseConfig) -> Result<reqwest::Client> {
+        let mut builder = reqwest::Client::builder();
+
         if let Some(timeout_ms) = config.timeout_ms {
-            cmd.arg("--max-time").arg((timeout_ms / 1000).to_string());
+            builder = builder.timeout(Duration::from_millis(timeout_ms));
         }
 
-        cmd.arg(&config.endpoint)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        if !config.headers.is_empty() {
+            let headers = Self::build_header_map(&config.headers)?;
+            builder = builder.default_headers(headers);
+        }
 
-        TokioChildProcess::new(cmd)
-            .context("Failed to start SSE transport via curl")
+        builder
+            .build()
+            .context("Failed to build reqwest client for SSE transport")
+    }
+
+    fn build_header_map(headers: &HashMap<String, String>) -> Result<HeaderMap> {
+        let mut header_map = HeaderMap::new();
+        for (key, value) in headers {
+            let name = HeaderName::from_bytes(key.as_bytes())
+                .with_context(|| format!("Invalid header name: {}", key))?;
+            let header_value = HeaderValue::from_str(value)
+                .with_context(|| format!("Invalid header value for header '{}': {}", key, value))?;
+            header_map.insert(name, header_value);
+        }
+        Ok(header_map)
     }
 
     /// Validate that the endpoint URL is well-formed
@@ -59,7 +76,6 @@ impl SseTransport {
             return Err(anyhow::anyhow!("SSE endpoint cannot be empty"));
         }
 
-        // Basic URL validation - reject non-HTTP(S) protocols
         if endpoint.starts_with("ftp://") || endpoint.starts_with("file://") {
             return Err(anyhow::anyhow!(
                 "Unsupported protocol for SSE endpoint: {}",
@@ -67,7 +83,6 @@ impl SseTransport {
             ));
         }
 
-        // Must have some form of URL structure
         if !endpoint.contains("://")
             && !endpoint.starts_with("localhost")
             && !endpoint.contains(':')
