@@ -2,30 +2,68 @@
 
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{
-    ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest, ChatUsage,
+    ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall, ChatToolChoice,
+    RequestTool, RequestToolFunction,
 };
 use crate::models::{
-    AppError, Message, MessageConfig, MessageRequest, MessageResponse, MessageRole, UUID,
+    AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest, MessageResponse,
+    UUID,
 };
-use crate::services::{ChatService, Database, ProviderService};
+use crate::services::{ChatService, Database, McpService, ProviderService};
 use crate::storage::MessageRepository;
 use std::sync::Arc;
 
 /// 流式数据结构
 #[derive(Debug, Clone)]
 pub struct StreamChunk {
+    pub stream_id: String,
     pub content: String,
     pub reasoning: Option<String>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
 }
 
-/// LLM API 响应结构
-#[derive(Debug)]
-struct LlmApiResponse {
-    content: String,
-    reasoning: Option<String>, // 推理过程内容
-    usage: Option<ChatUsage>,
-    duration: Option<f64>,
-}
+/// 流式回调 trait 定义
+///
+/// 这些 trait 用于统一流式消息处理的回调接口
+///
+/// # 回调执行顺序
+/// 1. `StreamStartCallback` - 流式开始时触发
+/// 2. `StreamingCallback` - 每次接收到数据块时触发（可多次）
+/// 3. `StreamEndCallback` - 流式成功完成时触发
+/// 4. `StreamErrorCallback` - 任何阶段发生错误时触发
+///
+/// 注意：`StreamEndCallback` 和 `StreamErrorCallback` 是互斥的，只会触发其中一个
+
+/// 开始回调：当流式处理开始时调用
+///
+/// 参数:
+/// - `stream_id`: 流式会话的唯一标识符
+/// - `message_id`: 消息的唯一标识符
+pub trait StreamStartCallback: FnMut(String, String) + Send + 'static {}
+impl<T> StreamStartCallback for T where T: FnMut(String, String) + Send + 'static {}
+
+/// 流式数据回调：每次接收到数据块时调用
+///
+/// 参数:
+/// - `chunk`: 包含内容、推理过程和工具调用的数据块
+pub trait StreamingCallback: FnMut(StreamChunk) + Send + 'static {}
+impl<T> StreamingCallback for T where T: FnMut(StreamChunk) + Send + 'static {}
+
+/// 结束回调：当流式处理成功完成时调用
+///
+/// 参数:
+/// - `stream_id`: 流式会话的唯一标识符
+/// - `response`: 完整的消息响应，包含最终内容、token统计等
+pub trait StreamEndCallback: FnMut(String, MessageResponse) + Send + 'static {}
+impl<T> StreamEndCallback for T where T: FnMut(String, MessageResponse) + Send + 'static {}
+
+/// 错误回调：当流式处理发生错误时调用
+///
+/// 参数:
+/// - `stream_id`: 流式会话的唯一标识符
+/// - `error`: 应用错误，包含错误码、消息和提示
+pub trait StreamErrorCallback: FnMut(String, AppError) + Send + 'static {}
+impl<T> StreamErrorCallback for T where T: FnMut(String, AppError) + Send + 'static {}
 
 /// 消息服务
 #[derive(Clone)]
@@ -33,14 +71,21 @@ pub struct MessageService {
     repository: MessageRepository,
     provider_service: Arc<ProviderService>,
     chat_service: Arc<ChatService>,
+    mcp_service: Arc<McpService>,
 }
 
 impl MessageService {
-    pub fn new(db: Arc<Database>) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        provider_service: Arc<ProviderService>,
+        chat_service: Arc<ChatService>,
+        mcp_service: Arc<McpService>,
+    ) -> Self {
         Self {
-            repository: MessageRepository::new(db.clone()),
-            provider_service: Arc::new(ProviderService::new(db.clone())),
-            chat_service: Arc::new(ChatService::new(db)),
+            repository: MessageRepository::new(db),
+            provider_service,
+            chat_service,
+            mcp_service,
         }
     }
 
@@ -65,9 +110,9 @@ impl MessageService {
             return Err(AppError::validation_error(error));
         }
 
-        // 获取最后一条用户消息
+        // 验证最后一条消息
         let last_message = &request.messages[request.messages.len() - 1];
-        if last_message.role != MessageRole::User {
+        if last_message.role != ChatMessageRole::User {
             let error = "Last message must be from user";
             tracing::error!(
                 "[MessageService::send_message] Validation failed: {}",
@@ -94,8 +139,24 @@ impl MessageService {
         })?;
 
         let config = Self::extract_message_config_from_chat(&request, &chat);
+        // 获取下一个 turn_id 用于这轮对话
+        let turn_id = Some(
+            self.repository
+                .get_next_turn_id(chat_id)
+                .await
+                .map_err(|e| {
+                    let error = format!("Failed to get next turn_id: {}", e);
+                    tracing::error!("[MessageService::send_message] Database error: {}", error);
+                    e
+                })?,
+        );
         let user_message_id = self
-            .save_user_message(chat_id, &last_message.content, config)
+            .save_user_message(
+                chat_id,
+                &last_message.content,
+                config.clone(),
+                turn_id.clone(),
+            )
             .await
             .map_err(|e| {
                 let error = format!("Failed to save user message: {}", e);
@@ -112,19 +173,21 @@ impl MessageService {
         let llm_response = self.call_llm_api(&request).await?;
 
         // 4. 保存助手消息到数据库
-        let config = Self::extract_message_config_from_chat(&request, &chat);
+        // let config = Self::extract_message_config_from_chat(&request, &chat);
         let now = chrono::Utc::now().timestamp_millis();
         let assistant_message_id = self
             .save_assistant_message(
                 chat_id,
                 &llm_response.content,
                 llm_response.reasoning.clone(),
-                config,
+                llm_response.tool_calls.clone(),
+                config.clone(),
                 now,
-                llm_response.duration.unwrap_or(0.0) as i64,
-                llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-                llm_response.usage.as_ref().map(|u| u.completion_tokens),
-                llm_response.usage.as_ref().map(|u| u.total_tokens),
+                llm_response.duration.unwrap_or(0),
+                llm_response.input_tokens,
+                llm_response.output_tokens,
+                llm_response.total_tokens,
+                turn_id.clone(),
             )
             .await
             .map_err(|e| {
@@ -145,18 +208,204 @@ impl MessageService {
             reasoning: llm_response.reasoning,
             model_id: request.model_id,
             provider_id: request.provider_id,
-            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
-            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
-            duration: llm_response.duration.map(|d| d as i64),
+            input_tokens: llm_response.input_tokens,
+            output_tokens: llm_response.output_tokens,
+            total_tokens: llm_response.total_tokens,
+            duration: llm_response.duration,
+            tool_calls: llm_response.tool_calls,
         };
 
-        tracing::info!("[MessageService::send_message] Successfully completed for chat_id: {:?}, message_id: {}", chat_id, assistant_message_id);
+        tracing::info!(
+            "[MessageService::send_message] Successfully completed for chat_id: {:?}, message_id: {}",
+            chat_id, assistant_message_id
+        );
         Ok(response)
     }
 
+    /// 发送流式消息 - 处理完整的聊天逻辑包括消息保存
+    pub async fn send_message_stream(
+        &self,
+        request: MessageRequest,
+        start_callback: impl StreamStartCallback,
+        streaming_callback: impl StreamingCallback,
+        end_callback: impl StreamEndCallback,
+        mut error_callback: impl StreamErrorCallback,
+    ) {
+        tracing::info!(
+            "[MessageService::send_message_stream] Starting to send streaming message for chat_id: {:?}",
+            request.chat_id
+        );
+
+        // 为早期错误生成一个临时 stream_id
+        let error_stream_id = uuid::Uuid::new_v4().to_string();
+
+        // 1. 验证请求参数
+        if request.messages.is_empty() {
+            let error = "No messages provided";
+            tracing::error!(
+                "[MessageService::send_message_stream] Validation failed: {}",
+                error
+            );
+            let err = AppError::validation_error(error);
+            error_callback(error_stream_id, err);
+            return;
+        }
+
+        // 验证最后一条消息
+        let last_message = &request.messages[request.messages.len() - 1];
+        if last_message.role != ChatMessageRole::User {
+            let error = "Last message must be from user";
+            tracing::error!(
+                "[MessageService::send_message_stream] Validation failed: {}",
+                error
+            );
+            let err = AppError::validation_error(error);
+            error_callback(error_stream_id, err);
+            return;
+        }
+
+        // 2. 保存用户消息到数据库
+        let chat_id = match request.chat_id.as_ref() {
+            Some(id) => id,
+            None => {
+                let error = "Chat ID is required";
+                tracing::error!(
+                    "[MessageService::send_message_stream] Validation failed: {}",
+                    error
+                );
+                let err = AppError::validation_error(error);
+                error_callback(error_stream_id, err);
+                return;
+            }
+        };
+
+        // 从 chats 表获取配置参数
+        let chat = match self.get_chat_config(chat_id).await {
+            Ok(chat) => chat,
+            Err(e) => {
+                let error = format!("Failed to get chat config: {}", e);
+                tracing::error!(
+                    "[MessageService::send_message_stream] Database error: {}",
+                    error
+                );
+                error_callback(error_stream_id.clone(), e);
+                return;
+            }
+        };
+
+        let config = Self::extract_message_config_from_chat(&request, &chat);
+        // 获取下一个 turn_id 用于这轮对话
+        let turn_id = match self.repository.get_next_turn_id(chat_id).await {
+            Ok(id) => Some(id),
+            Err(e) => {
+                let error = format!("Failed to get next turn_id: {}", e);
+                tracing::error!(
+                    "[MessageService::send_message_stream] Database error: {}",
+                    error
+                );
+                error_callback(error_stream_id.clone(), e);
+                return;
+            }
+        };
+
+        let user_message_id = match self
+            .save_user_message(
+                chat_id,
+                &last_message.content,
+                config.clone(),
+                turn_id.clone(),
+            )
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                let error = format!("Failed to save user message: {}", e);
+                tracing::error!(
+                    "[MessageService::send_message_stream] Database error: {}",
+                    error
+                );
+                error_callback(error_stream_id.clone(), e);
+                return;
+            }
+        };
+
+        tracing::info!(
+            "[MessageService::send_message_stream] User message saved with ID: {}",
+            user_message_id
+        );
+
+        // 3. 创建包装的 end_callback，在保存消息后调用原始回调
+        let chat_id_clone = chat_id.clone();
+        let config_clone = config.clone();
+        let turn_id_clone = turn_id.clone();
+        let repository = self.repository.clone();
+        let mut end_callback = end_callback;
+        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
+            // 保存助手消息到数据库
+            let chat_id = chat_id_clone.clone();
+            let config = config_clone.clone();
+            let turn_id = turn_id_clone.clone();
+            let repository = repository.clone();
+            let response_clone = response.clone();
+            let stream_id_clone = stream_id.clone();
+
+            tokio::spawn(async move {
+                let now = chrono::Utc::now().timestamp_millis();
+                match repository
+                    .create_message(&Message {
+                        id: response_clone.message_id.clone(),
+                        chat_id: chat_id.to_string(),
+                        role: ChatMessageRole::Assistant,
+                        content: response_clone.content.clone(),
+                        reasoning: response_clone.reasoning.clone(),
+                        tool_calls: response_clone.tool_calls.clone(),
+                        config,
+                        turn_id,
+                        tool_call_id: None,
+                        attachments: None,
+                        input_tokens: response_clone.input_tokens,
+                        output_tokens: response_clone.output_tokens,
+                        total_tokens: response_clone.total_tokens,
+                        start_time: Some(now),
+                        end_time: Some(now),
+                        duration: response_clone.duration,
+                        created_at: now,
+                        updated_at: now,
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            "[MessageService::send_message_stream] Assistant message saved with ID: {}",
+                            response_clone.message_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "[MessageService::send_message_stream] Failed to save assistant message: {}",
+                            e
+                        );
+                    }
+                }
+            });
+
+            // 调用原始的 end_callback
+            end_callback(stream_id_clone, response);
+        };
+
+        // 4. 调用流式 LLM API（不再返回值，通过回调处理）
+        self.call_llm_api_stream(
+            &request,
+            start_callback,
+            streaming_callback,
+            end_callback_wrapper,
+            error_callback,
+        )
+        .await;
+    }
+
     /// 调用 LLM API
-    async fn call_llm_api(&self, request: &MessageRequest) -> Result<LlmApiResponse, AppError> {
+    async fn call_llm_api(&self, request: &MessageRequest) -> Result<MessageResponse, AppError> {
         tracing::info!(
             "[MessageService::call_llm_api] Calling LLM API with provider: {}, model: {}",
             request.provider_id,
@@ -185,7 +434,7 @@ impl MessageService {
                 AppError::validation_error(&error)
             })?;
 
-        // 调试：检查 API Key 是否存在
+        // 检查 API Key 是否存在
         if provider.api_key.is_empty() {
             tracing::error!(
                 "[MessageService::call_llm_api] Provider {} has empty API key",
@@ -194,22 +443,6 @@ impl MessageService {
             return Err(AppError::validation_error(
                 "Provider has no API key configured",
             ));
-        } else {
-            let api_key_preview = if provider.api_key.len() > 8 {
-                format!(
-                    "{}...{}",
-                    &provider.api_key[..4],
-                    &provider.api_key[provider.api_key.len() - 4..]
-                )
-            } else {
-                "***".to_string()
-            };
-            tracing::info!(
-                "[MessageService::call_llm_api] Using provider: {} ({}), API key: {}",
-                provider.name,
-                provider.provider_type,
-                api_key_preview
-            );
         }
 
         // 3. 创建 LLM 客户端
@@ -223,7 +456,7 @@ impl MessageService {
         })?;
 
         // 4. 转换请求格式
-        let api_request = self.convert_to_api_request(request, &chat)?;
+        let api_request = self.convert_to_api_request(request, &chat).await?;
 
         // 5. 调用 API
         let start_time = std::time::Instant::now();
@@ -232,82 +465,159 @@ impl MessageService {
             tracing::error!("[MessageService::call_llm_api] {}", error);
             e
         })?;
-        let duration = start_time.elapsed().as_millis() as f64;
 
-        // 5. 转换响应格式
-        let llm_response = self.convert_from_api_response(api_response, duration)?;
+        let duration = start_time.elapsed().as_millis() as f64;
+        let llm_response = self.convert_from_api_response(api_response, duration, request)?;
 
         tracing::info!(
             "[MessageService::call_llm_api] API call successful, duration: {}ms",
             duration
         );
+
         Ok(llm_response)
     }
 
     /// 转换为 API 请求格式
-    fn convert_to_api_request(
+    async fn convert_to_api_request(
         &self,
         request: &MessageRequest,
         chat: &crate::models::Chat,
-    ) -> Result<ApiChatRequest, AppError> {
-        let messages: Vec<ApiChatMessage> = request
+    ) -> Result<ChatRequest, AppError> {
+        let messages: Vec<ChatMessage> = request
             .messages
             .iter()
-            .map(|msg| ApiChatMessage {
-                role: match msg.role {
-                    MessageRole::User => "user".to_string(),
-                    MessageRole::Assistant => "assistant".to_string(),
-                    MessageRole::System => "system".to_string(),
-                },
+            .map(|msg| ChatMessage {
+                role: msg.role.clone(),
                 content: msg.content.clone(),
                 reasoning: msg.reasoning.clone(),
+                tool_calls: msg.tool_calls.clone(),
+                tool_call_id: msg.tool_call_id.clone(),
             })
             .collect();
 
-        Ok(ApiChatRequest {
+        let tools = self.prepare_tools(&chat).await?;
+
+        Ok(ChatRequest {
             model: request.model_id.clone(),
             messages,
             temperature: chat.temperature,
             max_tokens: chat.max_tokens,
-            stream: chat.stream,
+            stream: Some(false),
+            tools: if tools.is_empty() {
+                None
+            } else {
+                Some(tools.clone())
+            },
+            tool_choice: if tools.is_empty() {
+                None
+            } else {
+                Some(ChatToolChoice::Auto)
+            },
+            parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
         })
     }
 
+    async fn prepare_tools(
+        &self,
+        chat: &crate::models::Chat,
+    ) -> Result<Vec<RequestTool>, AppError> {
+        if chat.mcp_servers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let servers = self
+            .mcp_service
+            .get_servers_by_ids(&chat.mcp_servers)
+            .await?;
+
+        let active_servers: Vec<McpServer> = servers
+            .into_iter()
+            .filter(|server| server.enabled && matches!(server.status, McpServerStatus::Ready))
+            .collect();
+
+        if active_servers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut tools = Vec::new();
+
+        for server in active_servers {
+            for tool in &server.tools {
+                let description = tool
+                    .description
+                    .clone()
+                    .filter(|desc| !desc.is_empty())
+                    .unwrap_or_else(|| {
+                        let display_name = server
+                            .display_name
+                            .as_deref()
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or(&server.name);
+                        format!("MCP 服务器 {} 的工具 {}", display_name, tool.name)
+                    });
+
+                tools.push(RequestTool {
+                    tool_type: "function".to_string(),
+                    function: RequestToolFunction {
+                        name: tool.name.clone(),
+                        description,
+                        parameters: tool.input_schema.clone(),
+                    },
+                });
+            }
+        }
+
+        Ok(tools)
+    }
+
     /// 流式调用 LLM API
-    pub async fn call_llm_api_stream<F>(
+    pub async fn call_llm_api_stream(
         &self,
         request: &MessageRequest,
-        mut callback: F,
-    ) -> Result<MessageResponse, AppError>
-    where
-        F: FnMut(StreamChunk) + Send + 'static,
-    {
-        tracing::info!("[MessageService::call_llm_api_stream] Starting stream call with provider: {}, model: {}", 
+        mut start_callback: impl StreamStartCallback,
+        mut streaming_callback: impl StreamingCallback,
+        mut end_callback: impl StreamEndCallback,
+        mut error_callback: impl StreamErrorCallback,
+    ) {
+        tracing::info!("[MessageService::call_llm_api_stream] Starting stream call with provider: {}, model: {}",
             request.provider_id, request.model_id);
+
+        // 生成 streamId 和 messageId
+        let stream_id = uuid::Uuid::new_v4().to_string();
+        let message_id = uuid::Uuid::new_v4().to_string();
 
         // 1. 获取聊天配置
         let chat = if let Some(chat_id) = &request.chat_id {
-            self.get_chat_config(chat_id).await.map_err(|e| {
-                let error = format!("Failed to get chat config: {}", e);
-                tracing::error!("[MessageService::call_llm_api_stream] {}", error);
-                e
-            })?
+            match self.get_chat_config(chat_id).await {
+                Ok(chat) => chat,
+                Err(e) => {
+                    let error = format!("Failed to get chat config: {}", e);
+                    tracing::error!("[MessageService::call_llm_api_stream] {}", error);
+                    error_callback(stream_id.clone(), e);
+                    return;
+                }
+            }
         } else {
-            return Err(AppError::validation_error(
-                "Chat ID is required for streaming",
-            ));
+            let err = AppError::validation_error("Chat ID is required for streaming");
+            error_callback(stream_id.clone(), err);
+            return;
         };
 
         // 2. 获取供应商配置
-        let provider = self
+        let provider = match self
             .provider_service
             .get_provider(&request.provider_id)
             .await
-            .map_err(|e| {
+        {
+            Ok(p) => p,
+            Err(e) => {
                 let error = format!("Failed to get provider {}: {}", request.provider_id, e);
                 tracing::error!("[MessageService::call_llm_api_stream] {}", error);
-                AppError::validation_error(&error)
-            })?;
+                let err = AppError::validation_error(&error);
+                error_callback(stream_id.clone(), err);
+                return;
+            }
+        };
 
         // 验证API Key
         if provider.api_key.is_empty() {
@@ -315,9 +625,9 @@ impl MessageService {
                 "[MessageService::call_llm_api_stream] Provider {} has empty API key",
                 request.provider_id
             );
-            return Err(AppError::validation_error(
-                "Provider has no API key configured",
-            ));
+            let err = AppError::validation_error("Provider has no API key configured");
+            error_callback(stream_id.clone(), err);
+            return;
         }
 
         let api_key_preview = if provider.api_key.len() > 8 {
@@ -337,61 +647,47 @@ impl MessageService {
         );
 
         // 3. 创建 LLM 客户端
-        let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
-            let error = format!(
-                "Failed to create LLM client for provider type {}: {}",
-                provider.provider_type, e
-            );
-            tracing::error!("[MessageService::call_llm_api_stream] {}", error);
-            e
-        })?;
+        let llm_client = match create_llm_client(&provider.provider_type) {
+            Ok(client) => client,
+            Err(e) => {
+                let error = format!(
+                    "Failed to create LLM client for provider type {}: {}",
+                    provider.provider_type, e
+                );
+                tracing::error!("[MessageService::call_llm_api_stream] {}", error);
+                error_callback(stream_id.clone(), e);
+                return;
+            }
+        };
 
         // 4. 转换请求格式
-        let mut api_request = self.convert_to_api_request(request, &chat)?;
+        let mut api_request = match self.convert_to_api_request(request, &chat).await {
+            Ok(req) => req,
+            Err(e) => {
+                error_callback(stream_id.clone(), e);
+                return;
+            }
+        };
         api_request.stream = Some(true); // 强制启用流式
 
-        // 5. 保存用户输入消息到数据库（如果有chat_id）
-        if let Some(chat_id) = &request.chat_id {
-            // 从消息列表中找到最后一条用户消息进行保存
-            if let Some(last_user_message) = request
-                .messages
-                .iter()
-                .rev()
-                .find(|m| matches!(m.role, crate::models::MessageRole::User))
-            {
-                // 从 chats 表获取配置参数
-                let chat = match self.get_chat_config(chat_id).await {
-                    Ok(chat) => chat,
-                    Err(e) => {
-                        tracing::error!(
-                            "[MessageService::call_llm_api_stream] Failed to get chat config: {}",
-                            e
-                        );
-                        return Err(e);
-                    }
-                };
+        // 5. 调用开始回调
+        start_callback(stream_id.clone(), message_id.clone());
 
-                let config = Self::extract_message_config_from_chat(&request, &chat);
-                if let Err(e) = self
-                    .save_user_message(chat_id, &last_user_message.content, config)
-                    .await
-                {
-                    tracing::error!(
-                        "[MessageService::call_llm_api_stream] Failed to save user message: {}",
-                        e
-                    );
-                }
-            }
-        }
-
-        // 6. 调用真实的 LLM 流式 API
+        // 6. 调用 LLM 流式 API
         let start_time = std::time::Instant::now();
 
         tracing::info!("[MessageService::call_llm_api_stream] Calling real LLM streaming API...");
-        let mut stream = llm_client.chat_stream(&provider, api_request).await?;
+        let mut stream = match llm_client.chat_stream(&provider, api_request).await {
+            Ok(s) => s,
+            Err(e) => {
+                error_callback(stream_id.clone(), e);
+                return;
+            }
+        };
 
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
+        let mut all_tool_calls: Vec<ChatToolCall> = Vec::new();
         let mut chunk_count = 0;
 
         // 7. 处理真实的流式响应
@@ -403,24 +699,64 @@ impl MessageService {
                     if let Some(choice) = chunk_response.choices.first() {
                         if let Some(delta) = &choice.delta {
                             // 处理内容
-                            let chunk = &delta.content;
-                            accumulated_content.push_str(chunk);
+                            if let Some(chunk) = &delta.content {
+                                accumulated_content.push_str(chunk);
+                            }
 
                             // 处理推理过程
                             if let Some(reasoning_chunk) = &delta.reasoning {
                                 accumulated_reasoning.push_str(reasoning_chunk);
                             }
 
-                            callback(StreamChunk {
+                            // 积累工具调用信息
+                            if let Some(tool_calls) = &delta.tool_calls {
+                                for tool_call_delta in tool_calls {
+                                    let index = tool_call_delta.index as usize;
+
+                                    // 确保有足够的空间
+                                    while all_tool_calls.len() <= index {
+                                        all_tool_calls.push(ChatToolCall {
+                                            id: String::new(),
+                                            tool_type: String::new(),
+                                            function: crate::llm_client::types::ChatToolFunction {
+                                                name: String::new(),
+                                                arguments: String::new(),
+                                            },
+                                        });
+                                    }
+
+                                    let tool_call = &mut all_tool_calls[index];
+
+                                    // 更新工具调用信息
+                                    if let Some(id) = &tool_call_delta.id {
+                                        tool_call.id = id.clone();
+                                    }
+                                    if let Some(tool_type) = &tool_call_delta.tool_type {
+                                        tool_call.tool_type = tool_type.clone();
+                                    }
+                                    if let Some(function) = &tool_call_delta.function {
+                                        if let Some(name) = &function.name {
+                                            tool_call.function.name = name.clone();
+                                        }
+                                        if let Some(arguments) = &function.arguments {
+                                            tool_call.function.arguments.push_str(arguments);
+                                        }
+                                    }
+                                }
+                            }
+
+                            streaming_callback(StreamChunk {
+                                stream_id: stream_id.clone(),
                                 content: accumulated_content.clone(),
                                 reasoning: delta.reasoning.clone(),
+                                tool_calls: Some(all_tool_calls.clone()),
                             });
                             chunk_count += 1;
 
                             tracing::debug!(
                                 "[MessageService::call_llm_api_stream] Real streaming chunk {}: content='{}', reasoning='{}'",
                                 chunk_count,
-                                &delta.content,
+                                delta.content.as_deref().unwrap_or(""),
                                 delta.reasoning.as_deref().unwrap_or("")
                             );
 
@@ -440,23 +776,32 @@ impl MessageService {
                 }
                 Err(e) => {
                     tracing::error!("[MessageService::call_llm_api_stream] Stream error: {}", e);
-                    return Err(e);
+                    error_callback(stream_id.clone(), e);
+                    return;
                 }
             }
         }
 
         let duration = start_time.elapsed().as_millis() as i64;
-        let message_id = uuid::Uuid::new_v4().to_string();
+        tracing::info!(
+            "[MessageService::call_llm_api_stream] Real streaming API call completed, chunks: {}, total_content_length: {}, duration: {}ms",
+            chunk_count, accumulated_content.len(), duration
+        );
 
-        // 7. 创建最终响应 (使用流式内容)
+        // 7. 构造 MessageResponse
         let response = MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: message_id.clone(),
-            content: accumulated_content.clone(), // 使用流式累积的内容
+            content: accumulated_content,
             reasoning: if accumulated_reasoning.is_empty() {
                 None
             } else {
-                Some(accumulated_reasoning.clone())
+                Some(accumulated_reasoning)
+            },
+            tool_calls: if all_tool_calls.is_empty() {
+                None
+            } else {
+                Some(all_tool_calls)
             },
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
@@ -466,56 +811,8 @@ impl MessageService {
             duration: Some(duration),
         };
 
-        tracing::info!(
-            "[MessageService::call_llm_api_stream] Real streaming API call completed, chunks: {}, total_content_length: {}, duration: {}ms",
-            chunk_count, accumulated_content.len(), duration
-        );
-
-        // 8. 流式输出完成后，保存完整的AI响应消息到数据库
-        if !accumulated_content.is_empty() && request.chat_id.is_some() {
-            // 从 chats 表获取配置参数
-            let chat = match self
-                .get_chat_config(&request.chat_id.clone().unwrap())
-                .await
-            {
-                Ok(chat) => chat,
-                Err(e) => {
-                    tracing::error!("[MessageService::call_llm_api_stream] Failed to get chat config for saving: {}", e);
-                    return Err(e);
-                }
-            };
-
-            let config = Self::extract_message_config_from_chat(&request, &chat);
-            let start_time_millis = chrono::Utc::now().timestamp_millis() - duration;
-
-            if let Err(e) = self
-                .save_assistant_message(
-                    &request.chat_id.clone().unwrap(),
-                    &accumulated_content,
-                    if accumulated_reasoning.is_empty() {
-                        None
-                    } else {
-                        Some(accumulated_reasoning)
-                    },
-                    config,
-                    start_time_millis,
-                    duration,
-                    None, // 流式API通常不返回token统计
-                    None,
-                    None,
-                )
-                .await
-            {
-                tracing::error!(
-                    "[MessageService::call_llm_api_stream] Failed to save assistant message: {}",
-                    e
-                );
-                // 注意：这里不返回错误，因为流式输出已经完成，用户已经看到了响应
-                // 只是数据库保存失败，不应该影响用户体验
-            }
-        }
-
-        Ok(response)
+        // 调用结束回调，传递 stream_id
+        end_callback(stream_id, response);
     }
 
     /// 构造并保存用户消息
@@ -524,6 +821,7 @@ impl MessageService {
         chat_id: &str,
         content: &str,
         config: Option<MessageConfig>,
+        turn_id: Option<i32>,
     ) -> Result<String, AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp_millis();
@@ -531,10 +829,13 @@ impl MessageService {
         let message = Message {
             id: message_id.clone(),
             chat_id: chat_id.to_string(),
-            role: crate::models::MessageRole::User,
+            role: ChatMessageRole::User,
             content: content.to_string(),
             reasoning: None, // 用户消息没有推理过程
             config,
+            tool_calls: None,
+            turn_id,
+            tool_call_id: None, // 用户消息没有关联的工具调用
             attachments: None,
             input_tokens: None,
             output_tokens: None,
@@ -557,12 +858,14 @@ impl MessageService {
         chat_id: &str,
         content: &str,
         reasoning: Option<String>,
+        tool_calls: Option<Vec<ChatToolCall>>,
         config: Option<MessageConfig>,
         start_time_millis: i64,
         duration_ms: i64,
         input_tokens: Option<i32>,
         output_tokens: Option<i32>,
         total_tokens: Option<i32>,
+        turn_id: Option<i32>,
     ) -> Result<String, AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp_millis();
@@ -570,10 +873,13 @@ impl MessageService {
         let message = Message {
             id: message_id.clone(),
             chat_id: chat_id.to_string(),
-            role: crate::models::MessageRole::Assistant,
+            role: ChatMessageRole::Assistant,
             content: content.to_string(),
             reasoning,
+            tool_calls,
             config,
+            turn_id,
+            tool_call_id: None, // 助手消息没有关联的工具调用ID（工具调用本身在tool_calls字段中）
             attachments: None,
             input_tokens,
             output_tokens,
@@ -612,12 +918,30 @@ impl MessageService {
         })
     }
 
+    /// 从消息和聊天配置中提取消息配置
+    fn extract_message_config_from_request_and_chat(
+        message: &Message,
+        chat: &crate::models::Chat,
+    ) -> Option<MessageConfig> {
+        Some(MessageConfig {
+            model_id: message.config.as_ref().and_then(|c| c.model_id.clone()),
+            provider_id: message.config.as_ref().and_then(|c| c.provider_id.clone()),
+            temperature: chat.temperature,
+            top_p: chat.top_p,
+            max_tokens: chat.max_tokens,
+            stream: chat.stream,
+            system_prompt: chat.system_prompt.clone(),
+            mcp_servers: Some(chat.mcp_servers.clone()),
+        })
+    }
+
     /// 从 API 响应格式转换
     fn convert_from_api_response(
         &self,
-        api_response: crate::llm_client::types::ChatResponse,
+        api_response: ChatResponse,
         duration: f64,
-    ) -> Result<LlmApiResponse, AppError> {
+        request: &MessageRequest,
+    ) -> Result<MessageResponse, AppError> {
         let choice = api_response
             .choices
             .into_iter()
@@ -625,14 +949,21 @@ impl MessageService {
             .ok_or_else(|| AppError::internal_error("No choices in API response"))?;
 
         let message = choice
-            .message
+            .delta
             .ok_or_else(|| AppError::internal_error("No message in API choice"))?;
 
-        Ok(LlmApiResponse {
+        Ok(MessageResponse {
+            chat_id: request.chat_id.clone().unwrap_or_default(),
+            message_id: uuid::Uuid::new_v4().to_string(), // 临时ID，实际使用时会被覆盖
             content: message.content,
             reasoning: message.reasoning,
-            usage: api_response.usage,
-            duration: Some(duration),
+            tool_calls: message.tool_calls,
+            model_id: request.model_id.clone(),
+            provider_id: request.provider_id.clone(),
+            input_tokens: api_response.usage.as_ref().map(|u| u.prompt_tokens),
+            output_tokens: api_response.usage.as_ref().map(|u| u.completion_tokens),
+            total_tokens: api_response.usage.as_ref().map(|u| u.total_tokens),
+            duration: Some(duration as i64),
         })
     }
 
@@ -647,7 +978,7 @@ impl MessageService {
             "[MessageService::get_messages] Getting messages for chat_id: {}",
             chat_id
         );
-        let limit = limit.unwrap_or(50);
+        let limit = limit.unwrap_or(500);
         let offset = offset.unwrap_or(0);
 
         let messages = self
@@ -762,6 +1093,288 @@ impl MessageService {
         Ok(())
     }
 
+    /// 执行工具调用并发送结果给模型继续对话
+    pub async fn execute_tool_calls(
+        &self,
+        message_id: String,
+        tool_call_ids: Vec<String>,
+        start_callback: impl StreamStartCallback,
+        streaming_callback: impl StreamingCallback,
+        end_callback: impl StreamEndCallback,
+        mut error_callback: impl StreamErrorCallback,
+    ) {
+        tracing::info!(
+            "[MessageService::execute_tool_calls] Executing tool calls {:?} for message: {}",
+            tool_call_ids,
+            message_id
+        );
+
+        // 为早期错误生成一个临时 stream_id
+        let error_stream_id = uuid::Uuid::new_v4().to_string();
+
+        if tool_call_ids.is_empty() {
+            let err = AppError::validation_error("At least one tool_call_id is required");
+            error_callback(error_stream_id, err);
+            return;
+        }
+
+        // 1. 获取消息
+        tracing::debug!(
+            "[MessageService::execute_tool_calls] Attempting to get message with ID: {}",
+            message_id
+        );
+        let message = match self.get_message(message_id.clone()).await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::execute_tool_calls] Failed to get message {}: {}",
+                    message_id,
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
+
+        // 2. 验证消息是否为 assistant消息且包含工具调用
+        if message.role != ChatMessageRole::Assistant {
+            let err =
+                AppError::validation_error("Can only execute tool calls on assistant messages");
+            error_callback(error_stream_id, err);
+            return;
+        }
+
+        // 3. 从数据库中获取工具调用信息
+        let stored_tool_calls = match message.tool_calls.as_ref() {
+            Some(calls) => calls,
+            None => {
+                let err = AppError::validation_error("Message does not contain any tool calls");
+                error_callback(error_stream_id, err);
+                return;
+            }
+        };
+
+        // 4. 根据 tool_call_ids 找到要执行的工具调用
+        let mut selected_tool_calls = Vec::new();
+        for tool_call_id in &tool_call_ids {
+            match stored_tool_calls.iter().find(|tc| &tc.id == tool_call_id) {
+                Some(call) => selected_tool_calls.push(call.clone()),
+                None => {
+                    let err = AppError::validation_error(&format!(
+                        "Tool call with ID {} not found in message",
+                        tool_call_id
+                    ));
+                    error_callback(error_stream_id.clone(), err);
+                    return;
+                }
+            }
+        }
+
+        // 5. 执行所有工具调用并构造工具结果消息
+        let mut created_tool_message_ids = Vec::new();
+        for tool_call in selected_tool_calls {
+            tracing::info!(
+                "[MessageService::execute_tool_calls] Executing tool {} for message {}",
+                tool_call.id,
+                message.id
+            );
+
+            let result = match self
+                .mcp_service
+                .execute_tool(&tool_call.function.name, &tool_call.function.arguments)
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    tracing::error!(
+                        "[MessageService::execute_tool_calls] Tool execution failed: {}",
+                        error
+                    );
+                    format!("工具执行失败: {}", error.message)
+                }
+            };
+
+            let timestamp = chrono::Utc::now().timestamp_millis();
+            let tool_result_message = Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: message.chat_id.clone(),
+                role: ChatMessageRole::Tool,
+                content: result,
+                reasoning: None,
+                tool_calls: None,
+                turn_id: message.turn_id.clone(),
+                tool_call_id: Some(tool_call.id.clone()),
+                config: None,
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: timestamp,
+                updated_at: timestamp,
+            };
+
+            if let Err(e) = self.repository.create_message(&tool_result_message).await {
+                error_callback(error_stream_id.clone(), e);
+                return;
+            }
+
+            created_tool_message_ids.push(tool_result_message.id.clone());
+        }
+
+        tracing::info!(
+            "[MessageService::execute_tool_calls] Saved tool result messages: {:?}",
+            created_tool_message_ids
+        );
+
+        // 6. 获取 chat 配置
+        let chat = match self.get_chat_config(&message.chat_id).await {
+            Ok(chat) => chat,
+            Err(e) => {
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
+
+        // 7. 构建包含工具调用结果的新请求，调用 send_message
+        let mut request_messages = Vec::new();
+
+        // 添加 system 消息（如果有系统提示词）
+        if let Some(system_prompt) = &chat.system_prompt {
+            if !system_prompt.trim().is_empty() {
+                request_messages.push(ChatMessage {
+                    role: ChatMessageRole::System,
+                    content: system_prompt.clone(),
+                    reasoning: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+            }
+        }
+
+        // 添加当前 turn_id 的所有消息（按时间顺序）
+        if let Some(turn_id) = message.turn_id {
+            if let Ok(turn_messages) = self
+                .repository
+                .get_messages_by_chat_and_turn(&message.chat_id, turn_id)
+                .await
+            {
+                for turn_message in turn_messages {
+                    request_messages.push(ChatMessage {
+                        role: turn_message.role,
+                        content: turn_message.content,
+                        reasoning: None,
+                        tool_calls: turn_message.tool_calls,
+                        tool_call_id: turn_message.tool_call_id,
+                    });
+                }
+            }
+        }
+
+        let request = MessageRequest {
+            chat_id: Some(message.chat_id.clone()),
+            model_id: chat.model_id.unwrap_or_default(),
+            provider_id: chat.provider_id.unwrap_or_default(),
+            messages: request_messages,
+            attachments: None,
+        };
+
+        tracing::info!(
+            "[MessageService::execute_tool_calls] Request: {:?}",
+            request
+        );
+
+        // 创建包装的 end_callback，在保存消息后调用原始回调
+        let chat_id_clone = message.chat_id.clone();
+        let turn_id_clone = message.turn_id.clone();
+        let repository = self.repository.clone();
+        let chat_service = self.chat_service.clone();
+        let request_clone = request.clone();
+        let mut end_callback = end_callback;
+
+        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
+            // 保存助手消息到数据库
+            let chat_id = chat_id_clone.clone();
+            let turn_id = turn_id_clone.clone();
+            let repository = repository.clone();
+            let chat_service = chat_service.clone();
+            let request = request_clone.clone();
+            let response_clone = response.clone();
+            let stream_id_clone = stream_id.clone();
+
+            tokio::spawn(async move {
+                // 获取 chat 配置以构建消息配置
+                let config = if let Ok(chat) = chat_service.get_chat(chat_id.clone()).await {
+                    Some(MessageConfig {
+                        temperature: chat.temperature,
+                        top_p: chat.top_p,
+                        max_tokens: chat.max_tokens,
+                        stream: chat.stream,
+                        model_id: Some(request.model_id.clone()),
+                        provider_id: Some(request.provider_id.clone()),
+                        system_prompt: chat.system_prompt.clone(),
+                        mcp_servers: Some(chat.mcp_servers.clone()),
+                    })
+                } else {
+                    None
+                };
+
+                let now = chrono::Utc::now().timestamp_millis();
+                match repository
+                    .create_message(&Message {
+                        id: response_clone.message_id.clone(),
+                        chat_id: chat_id.to_string(),
+                        role: ChatMessageRole::Assistant,
+                        content: response_clone.content.clone(),
+                        reasoning: response_clone.reasoning.clone(),
+                        tool_calls: response_clone.tool_calls.clone(),
+                        config,
+                        turn_id,
+                        tool_call_id: None,
+                        attachments: None,
+                        input_tokens: response_clone.input_tokens,
+                        output_tokens: response_clone.output_tokens,
+                        total_tokens: response_clone.total_tokens,
+                        start_time: Some(now),
+                        end_time: Some(now),
+                        duration: response_clone.duration,
+                        created_at: now,
+                        updated_at: now,
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            "[MessageService::execute_tool_calls] Assistant message saved with ID: {}",
+                            response_clone.message_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "[MessageService::execute_tool_calls] Failed to save assistant message: {}",
+                            e
+                        );
+                    }
+                }
+            });
+
+            // 调用原始的 end_callback
+            end_callback(stream_id_clone, response);
+        };
+
+        // 调用流式 LLM API 处理响应（不再返回值，通过回调处理）
+        self.call_llm_api_stream(
+            &request,
+            start_callback,
+            streaming_callback,
+            end_callback_wrapper,
+            error_callback,
+        )
+        .await;
+    }
+
     /// 重新生成消息
     pub async fn regenerate_message(&self, message_id: UUID) -> Result<MessageResponse, AppError> {
         tracing::info!(
@@ -777,7 +1390,7 @@ impl MessageService {
         let message = self.get_message(message_id.clone()).await?;
 
         // 2. 验证消息是否为助手消息
-        if message.role != MessageRole::Assistant {
+        if message.role != ChatMessageRole::Assistant {
             let error = "Can only regenerate assistant messages";
             tracing::error!(
                 "[MessageService::regenerate_message] Validation failed for message_id {}: {}",
@@ -787,9 +1400,10 @@ impl MessageService {
             return Err(AppError::validation_error(error));
         }
 
-        // 3. 获取聊天的历史消息，重新调用 LLM API
+        // 3. 获取聊天的历史消息（包含所有角色），重新调用 LLM API
         let chat_messages = self
-            .get_messages(message.chat_id.clone(), None, None)
+            .repository
+            .get_all_messages_by_chat(&message.chat_id, 100, 0)
             .await?;
 
         // 构造重新生成请求（使用原始请求参数）
@@ -801,10 +1415,12 @@ impl MessageService {
         let mut request_messages = Vec::new();
         if let Some(system_prompt) = &chat.system_prompt {
             if !system_prompt.trim().is_empty() {
-                request_messages.push(crate::models::ChatMessage {
-                    role: crate::models::MessageRole::System,
+                request_messages.push(ChatMessage {
+                    role: ChatMessageRole::System,
                     content: system_prompt.clone(),
                     reasoning: None,
+                    tool_calls: None,
+                    tool_call_id: None,
                 });
             }
         }
@@ -813,11 +1429,13 @@ impl MessageService {
         request_messages.extend(
             chat_messages
                 .iter()
-                .filter(|m| m.role != MessageRole::Assistant || m.id != message_id)
-                .map(|m| crate::models::ChatMessage {
+                .filter(|m| m.role != ChatMessageRole::Assistant || m.id != message_id)
+                .map(|m| ChatMessage {
                     role: m.role.clone(),
                     content: m.content.clone(),
-                    reasoning: None, // 历史消息没有推理过程
+                    reasoning: m.reasoning.clone(),
+                    tool_calls: m.tool_calls.clone(),
+                    tool_call_id: None,
                 }),
         );
 
@@ -833,7 +1451,7 @@ impl MessageService {
 
         // 调用 LLM API 重新生成
         let llm_response = self.call_llm_api(&regenerate_request).await?;
-        let new_content = llm_response.content;
+        let new_content = llm_response.content.clone();
 
         // 4. 更新消息内容
         self.repository
@@ -849,6 +1467,25 @@ impl MessageService {
                 e
             })?;
 
+        self.repository
+            .update_message_reasoning(&message_id, llm_response.reasoning.as_deref(), now)
+            .await?;
+
+        // 清理配置中的待执行状态
+        let final_config = MessageConfig {
+            temperature: chat.temperature,
+            top_p: chat.top_p,
+            max_tokens: chat.max_tokens,
+            stream: chat.stream,
+            model_id: Some(regenerate_request.model_id.clone()),
+            provider_id: Some(regenerate_request.provider_id.clone()),
+            system_prompt: chat.system_prompt.clone(),
+            mcp_servers: Some(chat.mcp_servers.clone()),
+        };
+        self.repository
+            .update_message_config(&message_id, Some(&final_config), now)
+            .await?;
+
         tracing::info!(
             "[MessageService::regenerate_message] Successfully regenerated message: {}",
             message_id
@@ -857,16 +1494,17 @@ impl MessageService {
         Ok(MessageResponse {
             chat_id: message.chat_id,
             message_id,
-            content: new_content,
+            content: llm_response.content,
             reasoning: llm_response.reasoning,
             model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
             provider_id: config
                 .and_then(|c| c.provider_id.clone())
                 .unwrap_or_default(),
-            input_tokens: llm_response.usage.as_ref().map(|u| u.prompt_tokens),
-            output_tokens: llm_response.usage.as_ref().map(|u| u.completion_tokens),
-            total_tokens: llm_response.usage.as_ref().map(|u| u.total_tokens),
-            duration: llm_response.duration.map(|d| d as i64),
+            input_tokens: llm_response.input_tokens,
+            output_tokens: llm_response.output_tokens,
+            total_tokens: llm_response.total_tokens,
+            duration: llm_response.duration,
+            tool_calls: llm_response.tool_calls,
         })
     }
 }
@@ -874,8 +1512,10 @@ impl MessageService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ChatMessage, MessageConfig, MessageRequest, MessageRole, ModelParameters};
-    use crate::services::ChatService;
+    use crate::llm_client::types::ChatMessage;
+    use crate::llm_client::types::ChatMessageRole;
+    use crate::models::{MessageConfig, MessageRequest, ModelParameters};
+    use crate::services::{ChatService, McpService, ProviderService};
     use crate::storage::Database;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -890,10 +1530,13 @@ mod tests {
         )
     }
 
-    async fn setup_services() -> (ChatService, MessageService, String) {
+    async fn setup_services() -> (Arc<ChatService>, MessageService, String) {
         let db = create_test_database().await;
-        let chat_service = ChatService::new(db.clone());
-        let message_service = MessageService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let mcp_service = Arc::new(McpService::new(db.clone()));
+        let chat_service = Arc::new(ChatService::new(db.clone(), provider_service.clone()));
+        let message_service =
+            MessageService::new(db, provider_service, chat_service.clone(), mcp_service);
 
         let chat = chat_service
             .create_chat(
@@ -916,7 +1559,10 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let _service = MessageService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let mcp_service = Arc::new(McpService::new(db.clone()));
+        let chat_service = Arc::new(ChatService::new(db.clone(), provider_service.clone()));
+        let _service = MessageService::new(db, provider_service, chat_service, mcp_service);
     }
 
     #[tokio::test]
@@ -928,9 +1574,11 @@ mod tests {
             model_id: "gpt-4".to_string(),
             provider_id: "openai".to_string(),
             messages: vec![ChatMessage {
-                role: MessageRole::User,
+                role: ChatMessageRole::User,
                 content: "Hello".to_string(),
                 reasoning: None,
+                tool_calls: None,
+                tool_call_id: None,
             }],
             attachments: None,
         };

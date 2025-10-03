@@ -1,13 +1,14 @@
 // 聊天服务实现
 
 use crate::llm_client::create_llm_client;
-use crate::llm_client::types::{ChatMessage as ApiChatMessage, ChatRequest as ApiChatRequest};
-use crate::models::{AppError, Chat, MessageRole, UUID};
+use crate::llm_client::types::{ChatMessage, ChatMessageRole, ChatRequest};
+use crate::models::{AppError, Chat, UUID};
 use crate::services::{Database, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
 use std::sync::Arc;
 
 /// 聊天服务
+#[derive(Clone)]
 pub struct ChatService {
     repository: ChatRepository,
     message_repository: MessageRepository,
@@ -15,11 +16,11 @@ pub struct ChatService {
 }
 
 impl ChatService {
-    pub fn new(db: Arc<Database>) -> Self {
+    pub fn new(db: Arc<Database>, provider_service: Arc<ProviderService>) -> Self {
         Self {
             repository: ChatRepository::new(db.clone()),
-            message_repository: MessageRepository::new(db.clone()),
-            provider_service: Arc::new(ProviderService::new(db)),
+            message_repository: MessageRepository::new(db),
+            provider_service,
         }
     }
 
@@ -170,7 +171,7 @@ impl ChatService {
         // 4. 只获取用户发送的消息
         let user_messages: Vec<String> = messages
             .iter()
-            .filter(|msg| matches!(msg.role, MessageRole::User))
+            .filter(|msg| matches!(msg.role, ChatMessageRole::User))
             .take(20)
             .map(|msg| msg.content.clone())
             .collect();
@@ -204,16 +205,21 @@ impl ChatService {
         })?;
 
         // 9. 构建API请求
-        let api_request = ApiChatRequest {
+        let api_request = ChatRequest {
             model: model_id,
-            messages: vec![ApiChatMessage {
-                role: "user".to_string(),
+            messages: vec![ChatMessage {
+                role: ChatMessageRole::User,
                 content: title_prompt,
                 reasoning: None,
+                tool_calls: None,
+                tool_call_id: None,
             }],
             temperature: Some(0.1), // 使用低温度确保稳定输出
             max_tokens: Some(50),   // 限制输出长度
             stream: Some(false),
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
         };
 
         // 10. 调用LLM API
@@ -225,7 +231,7 @@ impl ChatService {
 
         // 11. 提取并清理标题
         let generated_title = if let Some(choice) = response.choices.first() {
-            if let Some(message) = &choice.message {
+            if let Some(message) = &choice.delta {
                 message.content.trim()
             } else {
                 return Err(AppError::internal_error("No message in response"));
@@ -258,6 +264,7 @@ impl ChatService {
 mod tests {
     use super::*;
     use crate::models::ModelParameters;
+    use crate::services::ProviderService;
     use crate::storage::Database;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -275,13 +282,15 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let _service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let _service = ChatService::new(db, provider_service);
     }
 
     #[tokio::test]
     async fn creates_chat_with_all_fields() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let chat = service
             .create_chat(
@@ -314,7 +323,8 @@ mod tests {
     #[tokio::test]
     async fn lists_chats_sorted_by_updated_at() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         service
             .create_chat(
@@ -361,7 +371,8 @@ mod tests {
     #[tokio::test]
     async fn fetches_chat_by_id() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -390,7 +401,8 @@ mod tests {
     #[tokio::test]
     async fn get_chat_returns_not_found_error() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let err = service
             .get_chat("nonexistent_chat".to_string())
@@ -403,7 +415,8 @@ mod tests {
     #[tokio::test]
     async fn updates_existing_chat() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -450,7 +463,8 @@ mod tests {
     #[tokio::test]
     async fn delete_chat_removes_record() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -483,7 +497,8 @@ mod tests {
     #[tokio::test]
     async fn generate_title_requires_messages() {
         let db = create_test_database().await;
-        let service = ChatService::new(db);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = ChatService::new(db, provider_service);
 
         let chat = service
             .create_chat(

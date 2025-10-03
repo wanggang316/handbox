@@ -8,7 +8,7 @@
   } from "lucide-svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states";
-  import { renderMarkdown } from "$lib/utils";
+  import { openInBrowser, renderMarkdown } from "$lib/utils";
 
   interface Props {
     message?: Message;
@@ -42,6 +42,9 @@
     }
     return undefined;
   });
+
+  // 获取工具调用数据
+  const toolCalls = $derived(() => message?.toolCalls || []);
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -81,9 +84,70 @@
     }
   }
 
+  // 检查是否有任何工具调用正在执行
+  function isAnyToolCallExecuting(): boolean {
+    if (!message?.id) return false;
+
+    const calls = toolCalls();
+    return calls.some(call => {
+      if (call.id && message.id) {
+        return messageStore.isToolCallExecuting(message.id, call.id);
+      }
+      return false;
+    });
+  }
+
+  async function handleExecuteToolCalls() {
+    const calls = toolCalls();
+    if (calls.length === 0) {
+      console.warn('没有找到工具调用');
+      return;
+    }
+
+    if (!message?.id) {
+      console.error('消息 ID 不存在');
+      return;
+    }
+
+    try {
+      console.log('执行工具调用:', calls);
+
+      // 使用消息状态管理来执行工具调用
+      await messageStore.executeAllToolCalls(message.id, calls);
+
+    } catch (error) {
+      console.error('执行工具调用失败:', error);
+    }
+  }
+
   function closestButton(target: EventTarget | null): HTMLButtonElement | null {
     if (!(target instanceof Element)) return null;
     return target.closest<HTMLButtonElement>(".markdown-code-block__copy");
+  }
+
+  function closestLink(target: EventTarget | null): HTMLAnchorElement | null {
+    if (!(target instanceof Element)) return null;
+    return target.closest<HTMLAnchorElement>("a[href]");
+  }
+
+  function isExternalLink(link: HTMLAnchorElement): boolean {
+    const href = link.getAttribute("href")?.trim();
+    if (!href) return false;
+
+    const lowerHref = href.toLowerCase();
+    if (lowerHref.startsWith("http://") || lowerHref.startsWith("https://")) {
+      return true;
+    }
+
+    return lowerHref.startsWith("mailto:") || lowerHref.startsWith("tel:");
+  }
+
+  async function openMarkdownLink(link: HTMLAnchorElement) {
+    try {
+      await openInBrowser(link.href);
+    } catch (error) {
+      console.error("Failed to open markdown link", error);
+    }
   }
 
   async function copyText(content: string) {
@@ -106,41 +170,49 @@
     }
   }
 
-  function markdownCopy(node: HTMLElement) {
+  function markdownInteractions(node: HTMLElement) {
     const handleClick = async (event: MouseEvent) => {
       const button = closestButton(event.target);
-      if (!button) return;
+      if (button) {
+        event.preventDefault();
+        event.stopPropagation();
 
-      event.preventDefault();
-      event.stopPropagation();
+        const block = button.closest<HTMLElement>(".markdown-code-block");
+        const codeElement = block?.querySelector("code");
+        const codeContent = codeElement?.textContent ?? "";
 
-      const block = button.closest<HTMLElement>(".markdown-code-block");
-      const codeElement = block?.querySelector("code");
-      const codeContent = codeElement?.textContent ?? "";
+        if (!codeContent) return;
 
-      if (!codeContent) return;
+        if (onCopy) {
+          onCopy(codeContent);
+        } else {
+          await copyText(codeContent);
+        }
 
-      if (onCopy) {
-        onCopy(codeContent);
-      } else {
-        await copyText(codeContent);
+        button.classList.add("copied");
+
+        const timerId = button.dataset.copyTimeout
+          ? Number(button.dataset.copyTimeout)
+          : undefined;
+        if (timerId) {
+          window.clearTimeout(timerId);
+        }
+
+        const timeoutHandle = window.setTimeout(() => {
+          button.classList.remove("copied");
+          delete button.dataset.copyTimeout;
+        }, 1500);
+
+        button.dataset.copyTimeout = String(timeoutHandle);
+        return;
       }
 
-      button.classList.add("copied");
-
-      const timerId = button.dataset.copyTimeout
-        ? Number(button.dataset.copyTimeout)
-        : undefined;
-      if (timerId) {
-        window.clearTimeout(timerId);
+      const link = closestLink(event.target);
+      if (link && isExternalLink(link)) {
+        event.preventDefault();
+        event.stopPropagation();
+        await openMarkdownLink(link);
       }
-
-      const timeoutHandle = window.setTimeout(() => {
-        button.classList.remove("copied");
-        delete button.dataset.copyTimeout;
-      }, 1500);
-
-      button.dataset.copyTimeout = String(timeoutHandle);
     };
 
     node.addEventListener("click", handleClick);
@@ -212,7 +284,7 @@
               {#if reasoningExpanded}
                 <div
                   class="mt-2 mb-6 px-4 text-sm border-l border-base-300 text-base-content/80 break-words leading-relaxed reasoning-content markdown-content"
-                  use:markdownCopy
+                  use:markdownInteractions
                 >
                   {@html renderMarkdown(message.reasoning)}
                 </div>
@@ -223,10 +295,53 @@
           <!-- 消息内容 -->
           <div
             class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-            use:markdownCopy
+            use:markdownInteractions
           >
             {@html renderMarkdown(message?.content || "")}
           </div>
+
+          <!-- 工具调用记录 -->
+          {#if toolCalls().length > 0}
+            <div class="mb-4 rounded-lg border border-blue-400/40 bg-blue-50/80 p-3 text-sm text-blue-900 dark:bg-blue-900/40 dark:text-blue-100">
+              <div class="mb-2 font-medium flex items-center justify-between">
+                <span>模型返回的工具调用</span>
+                <button
+                  class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
+                  onclick={handleExecuteToolCalls}
+                  disabled={toolCalls().length === 0 || isAnyToolCallExecuting()}
+                >
+                  {#if isAnyToolCallExecuting()}
+                    <div class="flex items-center gap-1">
+                      <div class="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+                      执行中...
+                    </div>
+                  {:else}
+                    执行工具调用
+                  {/if}
+                </button>
+              </div>
+              <div class="space-y-2">
+                {#each toolCalls() as tool}
+                  <div class="rounded-md border border-blue-400/30 bg-white/80 dark:bg-blue-900/50 p-2 text-xs">
+                    <div class="flex items-center justify-between">
+                      <div class="font-semibold">{tool.function?.name || `工具 ${tool.index}`}</div>
+                      <div class="text-gray-500 text-[10px]">
+                        ID: {tool.id || 'N/A'} | 类型: {tool.toolType || 'function'}
+                      </div>
+                    </div>
+                    {#if tool.function?.arguments}
+                      <div class="mt-2">
+                        <div class="mb-1 text-[10px] text-gray-600 dark:text-gray-400 font-medium">参数:</div>
+                        <pre class="max-h-32 overflow-auto rounded bg-base-200/70 dark:bg-black/30 p-2 text-[10px] text-base-content/80">
+{tool.function.arguments}
+                        </pre>
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
 
           {#if !isStreaming && !isMessageLoading}
           <!-- 性能信息 -->

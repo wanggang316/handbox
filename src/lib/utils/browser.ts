@@ -2,7 +2,8 @@
  * 浏览器相关工具函数
  */
 
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { browser } from "$app/environment";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 /**
  * 在系统默认浏览器中打开URL
@@ -11,8 +12,14 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 export async function openInBrowser(url: string): Promise<void> {
   try {
     await openUrl(url);
+    return;
   } catch (error) {
-    console.error('Failed to open URL in browser:', error);
+    if (browser) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    console.error("Failed to open URL in browser:", error);
     throw error;
   }
 }

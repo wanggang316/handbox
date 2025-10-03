@@ -2,7 +2,7 @@ use crate::config::llm_config::get_global_llm_config;
 use crate::llm_client::chat::{self, ChatClient};
 use crate::llm_client::model::{create_model_client, ModelClient};
 use crate::llm_client::types::{
-    ChatApiType, ChatRequest, ChatResponse, ModelApiType, StandardModel,
+    ChatApiType, ChatChunkResponse, ChatRequest, ChatResponse, ModelApiType, StandardModel,
 };
 use crate::models::{AppError, Provider};
 
@@ -56,7 +56,7 @@ impl LlmClient {
         provider: &Provider,
         request: ChatRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         self.chat_api_client.chat_stream(provider, request).await

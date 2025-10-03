@@ -25,13 +25,16 @@ export interface Message extends BaseEntity {
   role: MessageRole;
   content: string;
   reasoning?: string; // 推理过程内容
-  
+
   // 每条消息的配置参数
   config?: MessageConfig;
-  
+
+  // 工具调用数据
+  toolCalls?: ToolCall[];
+
   // 附件
   attachments?: MessageAttachment[];
-  
+
   // 使用统计和时序信息
   inputTokens?: number;
   outputTokens?: number;
@@ -114,12 +117,28 @@ export interface MessageResponse {
   messageId: UUID;
   content: string;
   reasoning?: string;
+  toolCalls?: ToolCall[];
   modelId: string;
   providerId: string;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
   duration?: number;
+}
+
+
+// 工具函数信息
+export interface ToolFunction {
+  name: string;
+  arguments: string;
+}
+
+// 工具调用数据
+export interface ToolCall {
+  index: number;
+  id?: string;
+  toolType?: string;
+  function?: ToolFunction;
 }
 
 // 流式消息事件

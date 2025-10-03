@@ -2,6 +2,7 @@
 
 pub mod artifact;
 pub mod chat;
+pub mod mcp;
 pub mod message;
 pub mod provider;
 pub mod search;
@@ -12,6 +13,7 @@ pub mod storage;
 pub use crate::storage::Database;
 pub use artifact::ArtifactService;
 pub use chat::ChatService;
+pub use mcp::McpService;
 pub use message::MessageService;
 pub use provider::ProviderService;
 pub use search::SearchService;

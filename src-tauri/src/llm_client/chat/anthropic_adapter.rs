@@ -2,7 +2,10 @@
 // 使用 reqwest 进行 HTTP 通信
 
 use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{ChatChoice, ChatMessage, ChatRequest, ChatResponse, ChatUsage};
+use crate::llm_client::types::{
+    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatMessage, ChatMessageRole,
+    ChatRequest, ChatResponse, ChatUsage,
+};
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use futures::TryStreamExt;
@@ -97,12 +100,13 @@ impl AnthropicChatClient {
             model: model.to_string(),
             choices: vec![ChatChoice {
                 index: 0,
-                message: Some(ChatMessage {
-                    role: "assistant".to_string(),
+                delta: Some(ChatMessage {
+                    role: ChatMessageRole::Assistant,
                     content,
                     reasoning: None, // Anthropic API 不支持推理过程
+                    tool_calls: None,
+                    tool_call_id: None,
                 }),
-                delta: None,
                 finish_reason,
             }],
             usage,
@@ -155,7 +159,7 @@ impl ChatClient for AnthropicChatClient {
         provider: &Provider,
         request: ChatRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         let url = format!("{}/messages", provider.base_url);
@@ -225,17 +229,17 @@ impl ChatClient for AnthropicChatClient {
                                         .and_then(|delta| delta.get("text"))
                                         .and_then(|text| text.as_str())
                                     {
-                                        let chat_response = ChatResponse {
+                                        let chat_response = ChatChunkResponse {
                                             id: response_id.clone(),
                                             object: "chat.completion.chunk".to_string(),
                                             model: model_name.clone(),
-                                            choices: vec![ChatChoice {
+                                            choices: vec![ChatChunkChoice {
                                                 index: 0,
-                                                message: None,
-                                                delta: Some(ChatMessage {
-                                                    role: "assistant".to_string(),
-                                                    content: delta.to_string(),
+                                                delta: Some(ChatDeltaMessage {
+                                                    role: Some(ChatMessageRole::Assistant),
+                                                    content: Some(delta.to_string()),
                                                     reasoning: None, // Anthropic API 不支持推理过程
+                                                    tool_calls: None,
                                                 }),
                                                 finish_reason: None,
                                             }],
@@ -249,17 +253,17 @@ impl ChatClient for AnthropicChatClient {
                                     }
                                 } else if event_type == "message_stop" {
                                     // 流结束事件
-                                    let chat_response = ChatResponse {
+                                    let chat_response = ChatChunkResponse {
                                         id: response_id.clone(),
                                         object: "chat.completion.chunk".to_string(),
                                         model: model_name.clone(),
-                                        choices: vec![ChatChoice {
+                                        choices: vec![ChatChunkChoice {
                                             index: 0,
-                                            message: None,
-                                            delta: Some(ChatMessage {
-                                                role: "assistant".to_string(),
-                                                content: "".to_string(),
+                                            delta: Some(ChatDeltaMessage {
+                                                role: Some(ChatMessageRole::Assistant),
+                                                content: Some("".to_string()),
                                                 reasoning: None, // Anthropic API 不支持推理过程
+                                                tool_calls: None,
                                             }),
                                             finish_reason: Some("stop".to_string()),
                                         }],
@@ -285,7 +289,7 @@ impl ChatClient for AnthropicChatClient {
 
         Ok(Box::new(Box::pin(stream))
             as Box<
-                dyn futures::Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin,
             >)
     }
 

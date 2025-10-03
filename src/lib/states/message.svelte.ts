@@ -2,9 +2,10 @@
  * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage } from '$lib/types/chat';
-import type { FrontendProviderConfig } from '$lib/types';
+import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage, ToolCall } from '$lib/types/chat';
+import type { FrontendProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
+import { listenToStreamEvents } from '$lib/api/message';
 import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
 import { chatState } from './chat.svelte';
 
@@ -20,6 +21,9 @@ interface MessageState {
   streamingMessageId: string | null;
   streamingContent: string;
   streamingReasoning: string;
+  streamingToolCalls: ToolCall[] | null;
+  // 工具执行状态 - 记录哪些工具调用正在执行
+  executingToolCalls: Set<string>; // 存储 messageId:toolCallId 的组合
 }
 
 class MessageStore {
@@ -32,6 +36,8 @@ class MessageStore {
     streamingMessageId: null,
     streamingContent: '',
     streamingReasoning: '',
+    streamingToolCalls: null,
+    executingToolCalls: new Set(),
   });
 
   // 当前流式事件监听器的清理函数
@@ -62,6 +68,10 @@ class MessageStore {
     return this.state.streamingReasoning;
   }
 
+  get streamingToolCalls() {
+    return this.state.streamingToolCalls;
+  }
+
   // 判断是否正在推理中（有推理内容但还没有最终内容）
   get isReasoning() {
     return this.state.streamingReasoning && !this.state.streamingContent;
@@ -70,6 +80,12 @@ class MessageStore {
   // 判断是否在等待消息响应（发送中但还没有任何流式内容）
   get isMessageLoading() {
     return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
+  }
+
+  // 检查特定工具调用是否正在执行
+  isToolCallExecuting(messageId: string, toolCallId: string): boolean {
+    const key = `${messageId}:${toolCallId}`;
+    return this.state.executingToolCalls.has(key);
   }
 
   // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
@@ -120,6 +136,55 @@ class MessageStore {
           this.state.providerConfigsCache[providerId] = config;
         }
       }
+    }
+  }
+
+  private applyMessageResponse(chatId: string, response: MessageResponse): void {
+    if (!this.state.messagesByChat[chatId]) {
+      this.state.messagesByChat[chatId] = [];
+    }
+
+    const messages = this.state.messagesByChat[chatId];
+    const index = messages.findIndex(message => message.id === response.messageId);
+
+    if (index !== -1) {
+      const existing = messages[index];
+
+      const updated: Message = {
+        ...existing,
+        content: response.content,
+        reasoning: response.reasoning,
+        toolCalls: response.toolCalls,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        totalTokens: response.totalTokens,
+        duration: response.duration,
+        updatedAt: Date.now(),
+      };
+
+      messages[index] = updated;
+    } else {
+      const newMessage: Message = {
+        id: response.messageId,
+        chatId,
+        role: 'assistant',
+        content: response.content,
+        reasoning: response.reasoning,
+        toolCalls: response.toolCalls,
+        config: {
+          modelId: response.modelId,
+          providerId: response.providerId,
+          stream: false,
+        },
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        totalTokens: response.totalTokens,
+        duration: response.duration,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      this.addMessage(chatId, newMessage);
     }
   }
 
@@ -194,6 +259,7 @@ class MessageStore {
     this.state.streamingMessageId = messageId;
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
   }
 
   // 更新流式内容
@@ -211,51 +277,96 @@ class MessageStore {
     this.state.streamingReasoning = reasoning;
   }
 
+  // 设置流式工具调用
+  setStreamingToolCalls(toolCalls: ToolCall[] | null) {
+    this.state.streamingToolCalls = toolCalls;
+  }
+
   // 完成流式响应
   finishStreaming(chatId: string, response: MessageResponse) {
-    // 更新或创建消息
-    const messages = this.state.messagesByChat[chatId] || [];
-    const existingIndex = messages.findIndex(m => m.id === response.messageId);
-
-    if (existingIndex !== -1) {
-      // 更新现有消息
-      messages[existingIndex] = {
-        ...messages[existingIndex],
-        content: response.content,
-        reasoning: response.reasoning,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        totalTokens: response.totalTokens,
-        duration: response.duration,
-        updatedAt: Date.now(),
-      };
-    } else {
-      // 创建新消息
-      const newMessage: Message = {
-        id: response.messageId,
-        chatId: response.chatId,
-        role: 'assistant',
-        content: response.content,
-        reasoning: response.reasoning,
-        config: {
-          modelId: response.modelId,
-          providerId: response.providerId,
-          stream: false,
-        },
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        totalTokens: response.totalTokens,
-        duration: response.duration,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      this.addMessage(chatId, newMessage);
-    }
+    this.applyMessageResponse(chatId, response);
 
     // 清理流式状态
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
+  }
+
+  /**
+   * 通用的流式事件处理器
+   */
+  private createStreamEventHandlers(
+    onComplete?: (response: MessageResponse) => void,
+    onError?: (error: any) => void
+  ) {
+    return {
+      onStart: (data: any) => {
+        console.log('流式开始:', data);
+        this.startStreaming(data.messageId);
+      },
+
+      onChunk: (data: any) => {
+        console.log('流式数据:', data);
+        this.setStreamingContent(data.content);
+        if (data.reasoning) {
+          // 累积推理过程内容，因为后端发送的是增量内容
+          this.state.streamingReasoning += data.reasoning;
+        }
+        if (data.toolCalls) {
+          this.setStreamingToolCalls(data.toolCalls);
+        }
+      },
+
+      onEnd: (data: any) => {
+        console.log('流式完成:', data);
+
+        // 构造 MessageResponse 对象
+        const response: MessageResponse = {
+          chatId: data.chatId,
+          messageId: data.messageId || '',
+          content: data.finalContent,
+          reasoning: data.finalReasoning,
+          modelId: data.modelId,
+          providerId: data.providerId,
+          toolCalls: data.toolCalls,
+          inputTokens: undefined,
+          outputTokens: undefined,
+          totalTokens: undefined,
+          duration: undefined
+        };
+
+        // 使用统一的流式完成方法
+        this.finishStreaming(data.chatId, response);
+
+        // 执行自定义完成回调
+        if (onComplete) {
+          onComplete(response);
+        }
+
+        // 清理监听器
+        if (this.currentStreamUnlisten) {
+          this.currentStreamUnlisten();
+          this.currentStreamUnlisten = null;
+        }
+      },
+
+      onError: (error: any) => {
+        console.error('流式错误:', error);
+        this.setError(error.error || error.message || '流式响应错误');
+
+        // 执行自定义错误回调
+        if (onError) {
+          onError(error);
+        }
+
+        // 错误时也清理监听器
+        if (this.currentStreamUnlisten) {
+          this.currentStreamUnlisten();
+          this.currentStreamUnlisten = null;
+        }
+      }
+    };
   }
 
   // 清理指定聊天的消息
@@ -269,6 +380,7 @@ class MessageStore {
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
   }
 
 
@@ -353,53 +465,22 @@ class MessageStore {
       }
 
       // 先设置流式事件监听器，确保在发送消息前完全就绪
-      this.currentStreamUnlisten = await messageApi.listenToStreamEvents({
-        onStart: (data) => {
-          console.log('Stream started:', data);
-          this.startStreaming(data.messageId);
-        },
-        onChunk: (data) => {
-          this.setStreamingContent(data.content);
-          if (data.reasoning) {
-            // 累积推理过程内容，因为后端发送的是增量内容
-            this.state.streamingReasoning += data.reasoning;
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
+        this.createStreamEventHandlers(
+          // onComplete callback
+          () => {
+            this.setSending(false);
+          },
+          // onError callback
+          () => {
+            this.setSending(false);
           }
-        },
-        onEnd: (data) => {
-          console.log('Stream ended:', data);
-          // 创建响应对象
-          const response: MessageResponse = {
-            chatId: data.chatId,
-            messageId: data.streamId, // 使用 streamId 作为 messageId
-            content: data.finalContent,
-            reasoning: data.finalReasoning,
-            modelId: data.modelId,
-            providerId: data.providerId,
-          };
-          this.finishStreaming(currentChat.id!, response);
-          this.setSending(false);
-          // 流式完成后清理监听器
-          if (this.currentStreamUnlisten) {
-            this.currentStreamUnlisten();
-            this.currentStreamUnlisten = null;
-          }
-        },
-        onError: (error) => {
-          console.error('Stream error:', error);
-          this.setError('流式响应错误');
-          this.setSending(false);
-          // 错误时也清理监听器
-          if (this.currentStreamUnlisten) {
-            this.currentStreamUnlisten();
-            this.currentStreamUnlisten = null;
-          }
-        }
-      });
+        )
+      );
 
       // 事件监听器设置完成后，再发送流式消息
-      const streamId = await messageApi.sendStreamMessage(streamRequest);
-      console.log('Stream ID:', streamId);
-      
+      await messageApi.sendStreamMessage(streamRequest);
+
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '发送消息失败');
       this.setSending(false);
@@ -426,12 +507,100 @@ class MessageStore {
   async regenerateMessage(messageId: string): Promise<void> {
     try {
       this.setSending(true);
-      await messageApi.regenerateMessage(messageId);
+      const response = await messageApi.regenerateMessage(messageId as UUID);
+      this.applyMessageResponse(response.chatId, response);
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '重新生成失败');
       throw error;
     } finally {
       this.setSending(false);
+    }
+  }
+
+  /**
+   * 执行多个工具调用 - 使用流式API
+   */
+  async executeToolCalls(messageId: string, toolCallIds: string[]): Promise<void> {
+    if (toolCallIds.length === 0) {
+      return;
+    }
+
+    const keys = toolCallIds.map((toolCallId) => `${messageId}:${toolCallId}`);
+    let cleaned = false;
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      for (const key of keys) {
+        this.state.executingToolCalls.delete(key);
+      }
+    };
+
+    try {
+      // 设置执行状态
+      for (const key of keys) {
+        this.state.executingToolCalls.add(key);
+      }
+      this.setError(null);
+
+      // 清理之前的监听器（如果存在）
+      if (this.currentStreamUnlisten) {
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+
+      // 监听工具执行流式事件
+      this.currentStreamUnlisten = await listenToStreamEvents(
+        this.createStreamEventHandlers(
+          // onComplete callback
+          () => {
+            cleanup();
+          },
+          // onError callback
+          () => {
+            cleanup();
+          }
+        ),
+        'tool_execute_stream'
+      );
+
+      // 调用流式工具执行API
+      await messageApi.executeToolCallsStream(messageId, toolCallIds);
+
+    } catch (error) {
+      cleanup();
+      if (this.currentStreamUnlisten) {
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+      console.error('启动工具执行失败:', error);
+      this.setError(error instanceof Error ? error.message : '工具执行失败');
+      throw error;
+    }
+  }
+
+  async executeToolCall(messageId: string, toolCallId: string): Promise<void> {
+    await this.executeToolCalls(messageId, [toolCallId]);
+  }
+
+  /**
+   * 批量执行消息中的所有工具调用
+   */
+  async executeAllToolCalls(messageId: string, toolCalls: ToolCall[]): Promise<void> {
+    try {
+      const toolCallIds = toolCalls
+        .map(toolCall => toolCall.id)
+        .filter((id): id is string => Boolean(id));
+
+      if (toolCallIds.length === 0) {
+        console.warn('executeAllToolCalls: 未找到有效的工具调用 ID');
+        return;
+      }
+
+      await this.executeToolCalls(messageId, toolCallIds);
+    } catch (error) {
+      console.error('批量执行工具调用失败:', error);
+      throw error;
     }
   }
 
@@ -444,7 +613,11 @@ class MessageStore {
     this.state.error = null;
     this.state.streamingMessageId = null;
     this.state.streamingContent = '';
+    this.state.streamingReasoning = '';
+    this.state.streamingToolCalls = null;
+    this.state.executingToolCalls.clear();
   }
+
 }
 
 // Export singleton instance

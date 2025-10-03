@@ -24,6 +24,9 @@ export { artifactState } from './artifact.svelte';
 // 设置相关
 export { settingsState } from './settings.svelte';
 
+// MCP 相关
+export { mcpState, mcpActions } from './mcp.svelte';
+
 // 搜索相关
 export { searchState } from './search.svelte';
 

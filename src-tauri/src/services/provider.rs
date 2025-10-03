@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// 供应商服务
+#[derive(Clone)]
 pub struct ProviderService {
     repository: ProviderRepository,
 }

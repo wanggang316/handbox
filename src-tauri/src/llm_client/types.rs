@@ -1,16 +1,82 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt;
 use std::str::FromStr;
 
 use crate::models::AppError;
 
+/// 通用-消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub role: String,
+    pub role: ChatMessageRole,
     pub content: String,
     pub reasoning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
+/// 通用-工具调用信息
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: ChatToolFunction,
+}
+
+/// 通用-工具函数信息
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatToolFunction {
+    pub name: String,
+    pub arguments: String,
+}
+
+/// 聊天消息角色枚举
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatMessageRole {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+impl ChatMessageRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChatMessageRole::System => "system",
+            ChatMessageRole::User => "user",
+            ChatMessageRole::Assistant => "assistant",
+            ChatMessageRole::Tool => "tool",
+        }
+    }
+}
+
+impl std::fmt::Display for ChatMessageRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for ChatMessageRole {
+    type Err = AppError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "system" => Ok(ChatMessageRole::System),
+            "user" => Ok(ChatMessageRole::User),
+            "assistant" => Ok(ChatMessageRole::Assistant),
+            "tool" => Ok(ChatMessageRole::Tool),
+            _ => Err(AppError::validation_error(&format!("Invalid role: {}", s))),
+        }
+    }
+}
+
+// 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub model: String,
@@ -18,8 +84,41 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     pub max_tokens: Option<i32>,
     pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<RequestTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ChatToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ChatToolChoice {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "required")]
+    Required,
+}
+
+// 请求-工具
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestTool {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: RequestToolFunction,
+}
+
+// 请求-工具函数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestToolFunction {
+    pub name: String,
+    pub description: String,
+    pub parameters: Value,
+}
+
+// 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub id: String,
@@ -32,7 +131,6 @@ pub struct ChatResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatChoice {
     pub index: i32,
-    pub message: Option<ChatMessage>,
     pub delta: Option<ChatMessage>,
     pub finish_reason: Option<String>,
 }
@@ -42,6 +140,55 @@ pub struct ChatUsage {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
     pub total_tokens: i32,
+}
+
+// 响应-增量
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatChunkResponse {
+    pub id: String,
+    pub object: String,
+    pub model: String,
+    pub choices: Vec<ChatChunkChoice>,
+    pub usage: Option<ChatUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatChunkChoice {
+    pub index: i32,
+    pub delta: Option<ChatDeltaMessage>,
+    pub finish_reason: Option<String>,
+}
+
+// 响应-消息-增量
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatDeltaMessage {
+    pub role: Option<ChatMessageRole>,
+    pub content: Option<String>,
+    pub reasoning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChatDeltaToolCall>>,
+}
+
+/// 工具调用-增量
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatDeltaToolCall {
+    pub index: u32,
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub tool_type: Option<String>,
+    pub function: Option<ChatDeltaToolFunction>,
+}
+
+// Type alias for backward compatibility
+pub type ChatToolCallDelta = ChatDeltaToolCall;
+
+/// 工具函数-增量
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatDeltaToolFunction {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

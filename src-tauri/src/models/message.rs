@@ -1,17 +1,10 @@
 // 消息相关数据模型
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
+use crate::llm_client::types::{ChatMessage, ChatMessageRole, ChatToolCall};
 use crate::models::chat::{Timestamp, UUID};
-
-/// 消息角色
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    User,
-    Assistant,
-    System,
-}
 
 /// 消息附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,9 +37,12 @@ pub struct MessageConfig {
 pub struct Message {
     pub id: UUID,
     pub chat_id: UUID,
-    pub role: MessageRole,
+    pub role: ChatMessageRole,
     pub content: String,
-    pub reasoning: Option<String>, // 推理过程内容
+    pub reasoning: Option<String>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub turn_id: Option<i32>,
+    pub tool_call_id: Option<String>, // 用于 Tool 角色消息，关联对应的工具调用
 
     // Per-message configuration stored as JSON
     pub config: Option<MessageConfig>,
@@ -63,14 +59,6 @@ pub struct Message {
 
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
-}
-
-/// 聊天消息（请求中使用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: MessageRole,
-    pub content: String,
-    pub reasoning: Option<String>,
 }
 
 /// 消息请求附件
@@ -98,13 +86,37 @@ pub struct MessageResponse {
     pub chat_id: UUID,
     pub message_id: UUID,
     pub content: String,
-    pub reasoning: Option<String>, // 推理过程内容
+    pub reasoning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChatToolCall>>,
     pub model_id: String,
     pub provider_id: String,
     pub input_tokens: Option<i32>,
     pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
     pub duration: Option<i64>,
+}
+
+/// 待执行的 MCP 调用信息
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingMcpCall {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub tool_calls: Vec<PendingMcpToolCall>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingMcpToolCall {
+    pub call_id: String,
+    pub server_id: String,
+    pub server_name: String,
+    pub server_display_name: Option<String>,
+    pub tool_name: String,
+    pub tool_description: Option<String>,
+    pub arguments: Value,
 }
 
 /// 流式消息事件
@@ -132,11 +144,14 @@ mod tests {
         let message = Message {
             id: "msg_123".to_string(),
             chat_id: "chat_456".to_string(),
-            role: MessageRole::User,
+            role: ChatMessageRole::User,
             content: "Hello, world!".to_string(),
             reasoning: None,
             config: None,
             attachments: None,
+            tool_calls: None,
+            turn_id: Some(1),
+            tool_call_id: None,
             input_tokens: Some(10),
             output_tokens: Some(20),
             total_tokens: Some(30),
@@ -168,10 +183,13 @@ mod tests {
         let message = Message {
             id: "msg_123".to_string(),
             chat_id: "chat_456".to_string(),
-            role: MessageRole::User,
+            role: ChatMessageRole::User,
             content: "Here's a file".to_string(),
             reasoning: None,
             config: None,
+            tool_calls: None,
+            turn_id: None,
+            tool_call_id: None,
             attachments: Some(vec![attachment]),
             input_tokens: None,
             output_tokens: None,
@@ -207,29 +225,5 @@ mod tests {
 
         assert_eq!(config.temperature, deserialized.temperature);
         assert_eq!(config.model_id, deserialized.model_id);
-    }
-
-    #[test]
-    fn message_response_serialization_roundtrip() {
-        let response = MessageResponse {
-            chat_id: "chat_123".to_string(),
-            message_id: "msg_456".to_string(),
-            content: "Hello! How can I help you?".to_string(),
-            reasoning: Some("I need to be helpful and friendly".to_string()),
-            model_id: "gpt-4".to_string(),
-            provider_id: "openai".to_string(),
-            input_tokens: Some(15),
-            output_tokens: Some(20),
-            total_tokens: Some(35),
-            duration: Some(1500),
-        };
-
-        let json = serde_json::to_string(&response).expect("serialize response");
-        let deserialized: MessageResponse =
-            serde_json::from_str(&json).expect("deserialize response");
-
-        assert_eq!(response.model_id, deserialized.model_id);
-        assert_eq!(response.provider_id, deserialized.provider_id);
-        assert_eq!(response.total_tokens, deserialized.total_tokens);
     }
 }

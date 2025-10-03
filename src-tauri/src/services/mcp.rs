@@ -1,0 +1,588 @@
+// MCP service: manages Model Context Protocol server configurations
+
+use std::{collections::HashMap, sync::Arc};
+
+use anyhow::{anyhow, bail, Context};
+
+use crate::mcp_client::{
+    validate_server_config, ConnectionConfig, McpClient, ProcessConfig, SseConfig,
+    StreamableHttpConfig,
+};
+use crate::models::{
+    AppError, CreateMcpServerRequest, McpServer, McpServerStatus, McpTool, RefreshMcpServerRequest,
+    ToggleMcpServerRequest, UpdateMcpServerRequest,
+};
+use crate::services::Database;
+use crate::storage::McpRepository;
+
+/// Service orchestrating MCP server lifecycle and metadata
+#[derive(Clone)]
+pub struct McpService {
+    repository: McpRepository,
+}
+
+impl McpService {
+    pub fn new(db: Arc<Database>) -> Self {
+        Self {
+            repository: McpRepository::new(db),
+        }
+    }
+
+    /// List all MCP servers
+    pub async fn list_servers(&self) -> Result<Vec<McpServer>, AppError> {
+        self.repository.list_servers().await
+    }
+
+    /// Get a server by id
+    pub async fn get_server(&self, id: &str) -> Result<McpServer, AppError> {
+        self.repository
+            .get_server(id)
+            .await?
+            .ok_or_else(|| AppError::not_found(&format!("MCP server not found: {}", id)))
+    }
+
+    /// Get multiple servers preserving requested order
+    pub async fn get_servers_by_ids(&self, ids: &[String]) -> Result<Vec<McpServer>, AppError> {
+        self.repository.get_servers_by_ids(ids).await
+    }
+
+    /// Create a new MCP server configuration
+    pub async fn create_server(
+        &self,
+        mut request: CreateMcpServerRequest,
+    ) -> Result<McpServer, AppError> {
+        Self::validate_create_request(&request)?;
+
+        Self::normalize_create_request(&mut request);
+
+        let now = Self::current_timestamp();
+        let mut server = McpServer {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: request.name,
+            display_name: request.display_name,
+            description: request.description,
+            connection_type: request.connection_type,
+            command: request.command,
+            args: request.args,
+            working_dir: request.working_dir,
+            env: request.env,
+            endpoint: request.endpoint,
+            headers: request.headers,
+            timeout_ms: request.timeout_ms,
+            enabled: request.enabled,
+            status: if request.enabled {
+                McpServerStatus::Ready
+            } else {
+                McpServerStatus::Inactive
+            },
+            tools: Vec::new(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        if server.enabled {
+            self.update_server_status(&mut server).await;
+        }
+
+        self.repository.create_server(&server).await?;
+        Ok(server)
+    }
+
+    /// Update server attributes
+    pub async fn update_server(
+        &self,
+        server_id: String,
+        mut request: UpdateMcpServerRequest,
+    ) -> Result<McpServer, AppError> {
+        let mut existing = self.get_server(&server_id).await?;
+
+        Self::normalize_update_request(&mut request);
+
+        if let Some(name) = request.name.take() {
+            if name.is_empty() {
+                return Err(AppError::validation_error("MCP 服务器名称不能为空"));
+            }
+            existing.name = name;
+        }
+        if request.display_name.is_some() {
+            existing.display_name = request.display_name.take();
+        }
+        if request.description.is_some() {
+            existing.description = request.description.take();
+        }
+        if let Some(command) = request.command.take() {
+            // 只有 stdio 连接类型才需要验证 command 不为空
+            if existing.connection_type == crate::models::McpConnectionType::Stdio
+                && command.is_empty()
+            {
+                return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
+            }
+            existing.command = command;
+        }
+        if let Some(args) = request.args.take() {
+            existing.args = args;
+        }
+        if request.working_dir.is_some() {
+            existing.working_dir = request.working_dir.take();
+        }
+        if let Some(env) = request.env.take() {
+            existing.env = env;
+        }
+        if let Some(connection_type) = request.connection_type.take() {
+            existing.connection_type = connection_type;
+        }
+        if request.endpoint.is_some() {
+            existing.endpoint = request.endpoint.take();
+        }
+        if let Some(headers) = request.headers.take() {
+            existing.headers = headers;
+        }
+        if let Some(timeout_ms) = request.timeout_ms {
+            existing.timeout_ms = Some(timeout_ms);
+        }
+
+        // 更新完字段后，验证配置的完整性
+        match existing.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                if existing.command.trim().is_empty() {
+                    return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
+                }
+            }
+            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+                if let Some(ref endpoint) = existing.endpoint {
+                    if endpoint.trim().is_empty() {
+                        return Err(AppError::validation_error(
+                            "SSE/HTTP 连接类型需要端点 URL 不能为空",
+                        ));
+                    }
+                } else {
+                    return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL"));
+                }
+            }
+        }
+
+        let mut should_refresh = false;
+        if let Some(enabled) = request.enabled {
+            existing.enabled = enabled;
+            should_refresh = enabled;
+            existing.status = if enabled {
+                McpServerStatus::Ready
+            } else {
+                McpServerStatus::Inactive
+            };
+            if !enabled {
+                existing.last_error = None;
+            }
+        }
+
+        existing.updated_at = Self::current_timestamp();
+
+        if should_refresh {
+            self.update_server_status(&mut existing).await;
+        }
+
+        self.repository.update_server(&existing).await?;
+        Ok(existing)
+    }
+
+    /// Toggle enabled state
+    pub async fn toggle_server(
+        &self,
+        request: ToggleMcpServerRequest,
+    ) -> Result<McpServer, AppError> {
+        let mut server = self.get_server(&request.server_id).await?;
+        if server.enabled == request.enabled {
+            return Ok(server);
+        }
+
+        server.enabled = request.enabled;
+        server.updated_at = Self::current_timestamp();
+        if request.enabled {
+            server.status = McpServerStatus::Ready;
+            self.update_server_status(&mut server).await;
+        } else {
+            server.status = McpServerStatus::Inactive;
+            server.last_error = None;
+        }
+
+        self.repository.update_server(&server).await?;
+        Ok(server)
+    }
+
+    /// Refresh metadata (tools, status) for a server
+    pub async fn refresh_server(
+        &self,
+        request: RefreshMcpServerRequest,
+    ) -> Result<McpServer, AppError> {
+        let mut server = self.get_server(&request.server_id).await?;
+        self.update_server_status(&mut server).await;
+        server.updated_at = Self::current_timestamp();
+        self.repository.update_server(&server).await?;
+        Ok(server)
+    }
+
+    /// Delete a server definition
+    pub async fn delete_server(&self, server_id: String) -> Result<(), AppError> {
+        self.repository.delete_server(&server_id).await
+    }
+
+    /// Update server status and metadata based on connection type
+    async fn update_server_status(&self, server: &mut McpServer) {
+        // All connection types now work the same way - try to connect and fetch tools
+        match self.fetch_server_tools(server).await {
+            Ok(tools) => {
+                server.tools = tools;
+                server.status = McpServerStatus::Ready;
+                server.last_error = None;
+                server.last_sync_at = Some(Self::current_timestamp());
+            }
+            Err(error) => {
+                tracing::error!(
+                    "Failed to fetch MCP metadata for {}: {}",
+                    server.name,
+                    error
+                );
+                server.status = McpServerStatus::Error;
+                server.last_error = Some(error.to_string());
+            }
+        }
+    }
+
+    fn validate_create_request(request: &CreateMcpServerRequest) -> Result<(), AppError> {
+        if request.name.trim().is_empty() {
+            return Err(AppError::validation_error("MCP 服务器名称不能为空"));
+        }
+
+        // 根据连接类型验证必填字段
+        match request.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                if request.command.trim().is_empty() {
+                    return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
+                }
+            }
+            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+                if let Some(ref endpoint) = request.endpoint {
+                    if endpoint.trim().is_empty() {
+                        return Err(AppError::validation_error(
+                            "SSE/HTTP 连接类型需要端点 URL 不能为空",
+                        ));
+                    }
+                } else {
+                    return Err(AppError::validation_error("SSE/HTTP 连接类型需要端点 URL"));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn normalize_create_request(request: &mut CreateMcpServerRequest) {
+        request.name = request.name.trim().to_string();
+        request.display_name = request
+            .display_name
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        request.description = request
+            .description
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        request.command = request.command.trim().to_string();
+        request.args = Self::normalize_args(std::mem::take(&mut request.args));
+        request.working_dir = request
+            .working_dir
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        request.env = Self::normalize_env(std::mem::take(&mut request.env));
+    }
+
+    fn normalize_update_request(request: &mut UpdateMcpServerRequest) {
+        if let Some(name) = request.name.as_mut() {
+            *name = name.trim().to_string();
+        }
+        if let Some(display_name) = request.display_name.as_mut() {
+            *display_name = display_name.trim().to_string();
+            if display_name.is_empty() {
+                request.display_name = None;
+            }
+        }
+        if let Some(description) = request.description.as_mut() {
+            *description = description.trim().to_string();
+            if description.is_empty() {
+                request.description = None;
+            }
+        }
+        if let Some(command) = request.command.as_mut() {
+            *command = command.trim().to_string();
+        }
+        if let Some(args) = request.args.as_mut() {
+            *args = Self::normalize_args(std::mem::take(args));
+        }
+        if let Some(working_dir) = request.working_dir.as_mut() {
+            *working_dir = working_dir.trim().to_string();
+            if working_dir.is_empty() {
+                request.working_dir = None;
+            }
+        }
+        if let Some(env) = request.env.as_mut() {
+            *env = Self::normalize_env(std::mem::take(env));
+        }
+    }
+
+    fn normalize_args(args: Vec<String>) -> Vec<String> {
+        args.into_iter()
+            .map(|arg| arg.trim().to_string())
+            .filter(|arg| !arg.is_empty())
+            .collect()
+    }
+
+    fn normalize_env(env: HashMap<String, String>) -> HashMap<String, String> {
+        env.into_iter()
+            .filter_map(|(key, value)| {
+                let trimmed_key = key.trim();
+                if trimmed_key.is_empty() {
+                    return None;
+                }
+                Some((trimmed_key.to_string(), value))
+            })
+            .collect()
+    }
+
+    fn current_timestamp() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64
+    }
+
+    async fn fetch_server_tools(&self, server: &McpServer) -> anyhow::Result<Vec<McpTool>> {
+        let client = Self::connect_client(server).await?;
+
+        let tools = client.list_tools().await?;
+
+        // Gracefully shutdown the client
+        if let Err(e) = client.shutdown().await {
+            tracing::warn!(
+                "Failed to gracefully shutdown MCP client for {}: {}",
+                server.name,
+                e
+            );
+        }
+
+        Ok(tools)
+    }
+
+    async fn connect_client(server: &McpServer) -> anyhow::Result<McpClient> {
+        if !server.enabled {
+            bail!("MCP server '{}' is not enabled", server.name);
+        }
+
+        Self::validate_server_configuration(server)?;
+        let config = Self::build_connection_config(server)?;
+
+        McpClient::connect(config)
+            .await
+            .with_context(|| format!("Failed to connect to MCP server '{}'", server.name))
+    }
+
+    fn validate_server_configuration(server: &McpServer) -> anyhow::Result<()> {
+        match server.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                validate_server_config(&server.command, &server.working_dir, &server.env)
+                    .with_context(|| {
+                        format!(
+                            "Invalid stdio configuration for MCP server '{}'",
+                            server.name
+                        )
+                    })?;
+            }
+            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+                let endpoint = server.endpoint.as_ref().ok_or_else(|| {
+                    anyhow!("Endpoint is required for {}", server.connection_type)
+                })?;
+
+                if endpoint.trim().is_empty() {
+                    bail!(
+                        "Endpoint is required for {} connection type",
+                        server.connection_type.as_str()
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn build_connection_config(server: &McpServer) -> anyhow::Result<ConnectionConfig> {
+        match server.connection_type {
+            crate::models::McpConnectionType::Stdio => {
+                let mut config = ProcessConfig::new(&server.command)
+                    .with_args(server.args.clone())
+                    .with_env(server.env.clone());
+
+                if let Some(ref working_dir) = server.working_dir {
+                    config = config.with_working_dir(working_dir.clone());
+                }
+
+                Ok(ConnectionConfig::Process(config))
+            }
+            crate::models::McpConnectionType::Sse => {
+                let endpoint = server
+                    .endpoint
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Endpoint is required for SSE connection"))?;
+
+                let mut config =
+                    SseConfig::new(endpoint.clone()).with_headers(server.headers.clone());
+
+                if let Some(timeout_ms) = server.timeout_ms {
+                    config = config.with_timeout(timeout_ms);
+                }
+
+                Ok(ConnectionConfig::Sse(config))
+            }
+            crate::models::McpConnectionType::Http => {
+                let endpoint = server
+                    .endpoint
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Endpoint is required for HTTP connection"))?;
+
+                let mut config = StreamableHttpConfig::new(endpoint.clone())
+                    .with_headers(server.headers.clone());
+
+                if let Some(timeout_ms) = server.timeout_ms {
+                    config = config.with_timeout(timeout_ms);
+                }
+
+                Ok(ConnectionConfig::Http(config))
+            }
+        }
+    }
+
+    /// 执行工具调用（通过工具名称和参数）
+    pub async fn execute_tool(&self, tool_name: &str, arguments: &str) -> Result<String, AppError> {
+        // 获取活跃的 MCP 服务器
+        let servers = self
+            .list_servers()
+            .await?
+            .into_iter()
+            .filter(|s| s.enabled)
+            .collect::<Vec<_>>();
+
+        // 在所有服务器中查找工具
+        for server in &servers {
+            if let Some(tool) = server.tools.iter().find(|t| t.name == tool_name) {
+                let arguments = Self::parse_tool_arguments(arguments);
+
+                match self.invoke_tool(&server, &tool.name, arguments).await {
+                    Ok(result) => return Ok(Self::format_tool_result(&result)),
+                    Err(error) => {
+                        tracing::error!(
+                            "[McpService::execute_tool] Tool {} failed: {}",
+                            tool_name,
+                            error
+                        );
+                        return Err(AppError::internal_error(&format!(
+                            "调用工具 {} 失败: {}",
+                            tool_name, error.message
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 如果没有找到工具
+        tracing::warn!(
+            "[McpService::execute_tool] Tool {} not found in any MCP server",
+            tool_name
+        );
+        Err(AppError::not_found(&format!(
+            "工具 {} 未在任何 MCP 服务器中找到",
+            tool_name
+        )))
+    }
+
+    /// 调用特定服务器上的工具
+    async fn invoke_tool(
+        &self,
+        server: &McpServer,
+        tool_name: &str,
+        arguments: Option<serde_json::Value>,
+    ) -> Result<rmcp::model::CallToolResult, AppError> {
+        let client = Self::connect_client(server).await.map_err(|e| {
+            AppError::internal_error(&format!(
+                "Failed to connect to MCP server {}: {}",
+                server.name, e
+            ))
+        })?;
+
+        let call_result = client.call_tool(tool_name, arguments).await.map_err(|e| {
+            AppError::internal_error(&format!(
+                "Failed to call MCP tool {} on {}: {}",
+                tool_name, server.name, e
+            ))
+        });
+
+        if let Err(e) = client.shutdown().await {
+            tracing::warn!(
+                "[McpService::invoke_tool] Failed to shutdown MCP client {}: {}",
+                server.name,
+                e
+            );
+        }
+
+        call_result
+    }
+
+    /// 解析工具参数
+    fn parse_tool_arguments(arguments: &str) -> Option<serde_json::Value> {
+        if arguments.trim().is_empty() {
+            return None;
+        }
+
+        match serde_json::from_str::<serde_json::Value>(arguments) {
+            Ok(serde_json::Value::Object(map)) => Some(serde_json::Value::Object(map)),
+            Ok(other) => {
+                let mut wrapper = serde_json::Map::new();
+                wrapper.insert("value".to_string(), other);
+                Some(serde_json::Value::Object(wrapper))
+            }
+            Err(_) => {
+                let mut wrapper = serde_json::Map::new();
+                wrapper.insert(
+                    "raw".to_string(),
+                    serde_json::Value::String(arguments.trim().to_string()),
+                );
+                Some(serde_json::Value::Object(wrapper))
+            }
+        }
+    }
+
+    /// 格式化工具调用结果
+    fn format_tool_result(result: &rmcp::model::CallToolResult) -> String {
+        if let Some(structured) = &result.structured_content {
+            return serde_json::to_string_pretty(structured)
+                .unwrap_or_else(|_| structured.to_string());
+        }
+
+        let mut pieces = Vec::new();
+        for content in &result.content {
+            match &content.raw {
+                rmcp::model::RawContent::Text(text) => pieces.push(text.text.clone()),
+                _ => pieces.push(
+                    serde_json::to_string(&content).unwrap_or_else(|_| format!("{:?}", content)),
+                ),
+            }
+        }
+
+        if pieces.is_empty() {
+            "工具未返回任何内容".to_string()
+        } else {
+            pieces.join("\n")
+        }
+    }
+}

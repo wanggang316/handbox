@@ -73,7 +73,7 @@ export async function regenerateMessage(messageId: UUID): Promise<MessageRespons
 /**
  * 发送流式消息
  */
-export async function sendStreamMessage(request: MessageRequest): Promise<string> {
+export async function sendStreamMessage(request: MessageRequest): Promise<void> {
   // Tauri 命令期望参数名与函数参数名匹配
   const payload = {
     request: {
@@ -84,8 +84,8 @@ export async function sendStreamMessage(request: MessageRequest): Promise<string
       attachments: request.attachments
     }
   };
-  
-  return await apiCall<string>('message_send_stream', payload);
+
+  await apiCall<void>('message_send_stream', payload);
 }
 
 /**
@@ -93,23 +93,27 @@ export async function sendStreamMessage(request: MessageRequest): Promise<string
  */
 export interface StreamEventHandlers {
   onStart?: (data: { streamId: string; messageId: string }) => void;
-  onChunk?: (data: { streamId: string; content: string; reasoning?: string; chunk: string; index: number }) => void;
-  onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string }) => void;
+  onChunk?: (data: { streamId: string; content: string; reasoning?: string; toolCalls?: any[]; chunk: string; index: number }) => void;
+  onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string; toolCalls?: any[]; messageId?: string }) => void;
   onError?: (error: any) => void;
 }
 
-export async function listenToStreamEvents(handlers: StreamEventHandlers) {
+export async function listenToStreamEvents(handlers: StreamEventHandlers, eventPrefix: string = 'message_stream') {
   const unlisten = await Promise.all([
-    listen('message_stream_start', (event) => {
+    listen(`${eventPrefix}_start`, (event) => {
       handlers.onStart?.(event.payload as any);
     }),
-    
-    listen('message_stream_chunk', (event) => {
+
+    listen(`${eventPrefix}_chunk`, (event) => {
       handlers.onChunk?.(event.payload as any);
     }),
-    
-    listen('message_stream_end', (event) => {
+
+    listen(`${eventPrefix}_end`, (event) => {
       handlers.onEnd?.(event.payload as any);
+    }),
+
+    listen(`${eventPrefix}_error`, (event) => {
+      handlers.onError?.(event.payload as any);
     })
   ]);
 
@@ -119,4 +123,20 @@ export async function listenToStreamEvents(handlers: StreamEventHandlers) {
   };
 }
 
+export async function executeToolCalls(messageId: string, toolCallIds: string[]): Promise<void> {
+  await apiCall<void>('message_execute_tool_calls', {
+    messageId: messageId,
+    toolCallIds: toolCallIds
+  });
+}
+
+/**
+ * 流式执行工具调用
+ */
+export async function executeToolCallsStream(messageId: string, toolCallIds: string[]): Promise<void> {
+  await apiCall<void>('message_execute_tool_calls_stream', {
+    messageId: messageId,
+    toolCallIds: toolCallIds
+  });
+}
 

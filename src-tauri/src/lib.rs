@@ -4,6 +4,7 @@
 pub mod commands;
 pub mod config;
 pub mod llm_client;
+pub mod mcp_client;
 pub mod menu;
 pub mod models;
 pub mod services;
@@ -12,8 +13,8 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ArtifactService, ChatService, MessageService, ProviderService, SearchService, SettingsService,
-    StorageService,
+    ArtifactService, ChatService, McpService, MessageService, ProviderService, SearchService,
+    SettingsService, StorageService,
 };
 use crate::storage::Database;
 use crate::utils::logger;
@@ -42,9 +43,21 @@ async fn initialize_services(
     );
 
     // 初始化各个服务
-    let chat_service = ChatService::new(database_service.clone());
-    let message_service = MessageService::new(database_service.clone());
     let provider_service = ProviderService::new(database_service.clone());
+    let provider_service_shared = Arc::new(provider_service.clone());
+
+    let mcp_service = McpService::new(database_service.clone());
+    let mcp_service_shared = Arc::new(mcp_service.clone());
+
+    let chat_service = ChatService::new(database_service.clone(), provider_service_shared.clone());
+    let chat_service_shared = Arc::new(chat_service.clone());
+
+    let message_service = MessageService::new(
+        database_service.clone(),
+        provider_service_shared,
+        chat_service_shared,
+        mcp_service_shared,
+    );
     let artifact_service = ArtifactService::new(storage_service.clone());
     let settings_service = SettingsService::new(storage_service.clone());
     let search_service = SearchService::new(storage_service.clone());
@@ -54,6 +67,7 @@ async fn initialize_services(
     app.manage(chat_service);
     app.manage(message_service);
     app.manage(provider_service);
+    app.manage(mcp_service);
     app.manage(artifact_service);
     app.manage(settings_service);
     app.manage(search_service);
@@ -115,6 +129,9 @@ pub fn run() {
             message_update,
             message_delete,
             message_regenerate,
+            // message_execute_mcp_call, // Temporarily removed
+            message_execute_tool_calls,
+            message_execute_tool_calls_stream,
             // 窗口管理命令
             open_settings_window,
             close_settings_window,
@@ -132,6 +149,13 @@ pub fn run() {
             provider_toggle_model_favorite,
             provider_get_all_with_models,
             provider_get_favorite_models,
+            // MCP 管理命令
+            mcp_list_servers,
+            mcp_create_server,
+            mcp_update_server,
+            mcp_delete_server,
+            mcp_toggle_server,
+            mcp_refresh_server,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,

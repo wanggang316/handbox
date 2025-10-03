@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::Stream;
 
-use crate::llm_client::types::{ChatApiType, ChatRequest, ChatResponse};
+use crate::llm_client::types::{ChatApiType, ChatChunkResponse, ChatRequest, ChatResponse};
 use crate::models::{AppError, Provider};
 
 use super::{
@@ -22,7 +22,7 @@ pub trait ChatClient: Send + Sync {
         &self,
         provider: &Provider,
         request: ChatRequest,
-    ) -> Result<Box<dyn Stream<Item = Result<ChatResponse, AppError>> + Send + Unpin>, AppError>;
+    ) -> Result<Box<dyn Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>, AppError>;
 
     fn api_type(&self) -> &'static str;
 }

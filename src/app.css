@@ -29,7 +29,7 @@
   --color-base-100-dark: oklch(0.2308 0 0);
   --color-base-200-dark: oklch(0.2838 0.0047 247.99);
   --color-base-300-dark: oklch(0.3268 0.0055 236.68);
-  --color-base-content-dark: oklch(97.807% 0.029 256.847);
+  --color-base-content-dark: oklch(0.934 0 0);
   --color-primary-dark: oklch(58% 0.233 277.117);
   --color-primary-content-dark: oklch(96% 0.018 272.314);
   --color-secondary-dark: oklch(65% 0.241 354.308);
@@ -130,7 +130,7 @@ body {
 
 /* Markdown 样式 */
 .markdown-content {
-  line-height: 1.6;
+  line-height: 1.8;
   color: var(--base-content);
 }
 
@@ -145,7 +145,7 @@ body {
 
 .markdown-content h2 {
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 1.25rem 0 0.75rem 0;
   color: var(--base-content);
   border-bottom: 1px solid var(--base-300);
@@ -154,35 +154,36 @@ body {
 
 .markdown-content h3 {
   font-size: 1.125rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 1rem 0 0.5rem 0;
   color: var(--base-content);
 }
 
 .markdown-content h4 {
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0.75rem 0 0.5rem 0;
   color: var(--base-content);
 }
 
 .markdown-content h5 {
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0.5rem 0 0.25rem 0;
   color: var(--base-content);
 }
 
 .markdown-content h6 {
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0.5rem 0 0.25rem 0;
   color: color-mix(in oklch, var(--base-content) 80%, transparent);
 }
 
 .markdown-content p {
   margin: 0.5rem 0;
-  line-height: 1.6;
+  line-height: 1.8;
+  font-weight: 400;
 }
 
 .markdown-content strong {
@@ -196,8 +197,8 @@ body {
 }
 
 .markdown-content code:not(.hljs) {
-  background-color: var(--base-200);
-  color: var(--primary);
+  background-color: var(--base-300);
+  color: var(--base-content);
   padding: 0.125rem 0.25rem;
   border-radius: 0.25rem;
   font-family: "Fira Code", "Monaco", "Consolas", "Courier New", monospace;
@@ -281,8 +282,8 @@ body {
 }
 
 .markdown-content .markdown-code-block__copy:hover {
-  background-color: var(--base-300);
-  color: var(--primary);
+  background-color: var(--color-neutral);
+  color: var(--color-neutral-content);
 }
 
 .markdown-content .markdown-code-block__copy-icon {
@@ -308,7 +309,7 @@ body {
 
 .markdown-content .markdown-code-block__copy.copied {
   background-color: transparent;
-  color: var(--primary);
+  color: var(--color-base-content);
 }
 
 .markdown-content
@@ -348,7 +349,7 @@ body {
 
 .markdown-content li {
   margin: 0.25rem 0;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .markdown-content blockquote {
@@ -362,7 +363,7 @@ body {
 }
 
 .markdown-content a {
-  color: var(--primary);
+  color: var(--color-blue-500);
   text-decoration: underline;
   text-decoration-color: transparent;
   transition: text-decoration-color 0.2s;
