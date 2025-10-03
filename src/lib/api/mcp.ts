@@ -19,7 +19,7 @@ export async function updateMcpServer(
   serverId: string,
   request: UpdateMcpServerRequest
 ): Promise<McpServer> {
-  return apiCall<McpServer>('mcp_update_server', { server_id: serverId, request });
+  return apiCall<McpServer>('mcp_update_server', { serverId: serverId, request });
 }
 
 export async function deleteMcpServer(serverId: string): Promise<void> {

@@ -12,13 +12,11 @@
     UpdateMcpServerRequest,
   } from "$lib/types";
   interface EnvEntry {
-    id: number;
     key: string;
     value: string;
   }
 
   interface HeaderEntry {
-    id: number;
     key: string;
     value: string;
   }
@@ -47,19 +45,37 @@
   let envEntries = $state<EnvEntry[]>([]);
   let headerEntries = $state<HeaderEntry[]>([]);
 
-  // 表单数据
-  let formData = $state({
+  interface FormState {
+    name: string;
+    displayName: string;
+    description: string;
+    connectionType: McpConnectionType;
+    command: string;
+    argsText: string;
+    workingDir: string;
+    endpoint: string;
+    timeoutMs: string;
+    enabled: boolean;
+  }
+
+  const EMPTY_FORM: FormState = {
     name: "",
     displayName: "",
     description: "",
-    connectionType: "stdio" as McpConnectionType,
+    connectionType: "stdio",
     command: "",
     argsText: "",
     workingDir: "",
     endpoint: "",
     timeoutMs: "",
     enabled: true,
-  });
+  };
+
+  const BLANK_ENTRY = (): EnvEntry => ({ key: "", value: "" });
+  const BLANK_HEADER = (): HeaderEntry => ({ key: "", value: "" });
+
+  // 表单数据
+  let formData = $state<FormState>({ ...EMPTY_FORM });
 
   // 检查是否为编辑模式
   const isEditMode = $derived(server !== null);
@@ -73,56 +89,45 @@
     return hasName && hasValidConnection && !isSubmitting;
   });
 
-  // 使用$effect替代$: 响应式语句
-  $effect(() => {
-    if (server) {
-      // 编辑模式：填充表单数据
-      formData.name = server.name;
-      formData.displayName = server.displayName ?? "";
-      formData.description = server.description ?? "";
-      formData.connectionType = server.connectionType;
-      formData.command = server.command;
-      formData.argsText = server.args.join("\n");
-      formData.workingDir = server.workingDir ?? "";
-      formData.endpoint = server.endpoint ?? "";
-      formData.timeoutMs = server.timeoutMs?.toString() ?? "";
-      formData.enabled = server.enabled;
+  function buildEnvEntries(source: Record<string, string>): EnvEntry[] {
+    const entries = Object.entries(source).map(([key, value]) => ({ key, value }));
+    return entries.length > 0 ? entries : [BLANK_ENTRY()];
+  }
 
-      envEntries = Object.entries(server.env).map(([key, value], index) => ({
-        id: index,
-        key,
-        value,
-      }));
-      if (envEntries.length === 0) {
-        envEntries = [{ id: Date.now(), key: "", value: "" }];
-      }
+  function buildHeaderEntries(source: Record<string, string>): HeaderEntry[] {
+    const entries = Object.entries(source).map(([key, value]) => ({ key, value }));
+    return entries.length > 0 ? entries : [BLANK_HEADER()];
+  }
 
-      headerEntries = Object.entries(server.headers).map(([key, value], index) => ({
-        id: index,
-        key,
-        value,
-      }));
-      if (headerEntries.length === 0) {
-        headerEntries = [{ id: Date.now(), key: "", value: "" }];
-      }
-    } else {
-      // 创建模式：重置表单数据
+  function initialiseForm(current: McpServer | null) {
+    if (current) {
       formData = {
-        name: "",
-        displayName: "",
-        description: "",
-        connectionType: "stdio" as McpConnectionType,
-        command: "",
-        argsText: "",
-        workingDir: "",
-        endpoint: "",
-        timeoutMs: "",
-        enabled: true,
+        name: current.name,
+        displayName: current.displayName ?? "",
+        description: current.description ?? "",
+        connectionType: current.connectionType,
+        command: current.command,
+        argsText: current.args.join("\n"),
+        workingDir: current.workingDir ?? "",
+        endpoint: current.endpoint ?? "",
+        timeoutMs: current.timeoutMs?.toString() ?? "",
+        enabled: current.enabled,
       };
-      envEntries = [{ id: Date.now(), key: "", value: "" }];
-      headerEntries = [{ id: Date.now(), key: "", value: "" }];
+      envEntries = buildEnvEntries(current.env);
+      headerEntries = buildHeaderEntries(current.headers);
+    } else {
+      formData = { ...EMPTY_FORM };
+      envEntries = [BLANK_ENTRY()];
+      headerEntries = [BLANK_HEADER()];
     }
     errors = {};
+  }
+
+  // 当弹窗打开或 server 变化时，重新初始化表单
+  $effect(() => {
+    if (open) {
+      initialiseForm(server);
+    }
   });
 
   function closeModal() {
@@ -133,49 +138,49 @@
     onClose?.();
   }
 
+  // 环境变量操作
   function addEnvEntry() {
-    envEntries = [...envEntries, { id: Date.now(), key: "", value: "" }];
+    envEntries = [...envEntries, BLANK_ENTRY()];
   }
 
-  function removeEnvEntry(id: number) {
-    if (envEntries.length === 1) {
-      envEntries = [{ id: Date.now(), key: "", value: "" }];
-      return;
-    }
-    envEntries = envEntries.filter((entry) => entry.id !== id);
+  function removeEnvEntry(index: number) {
+    envEntries = envEntries.length === 1
+      ? [BLANK_ENTRY()]
+      : envEntries.filter((_, idx) => idx !== index);
   }
 
-  function updateEnvEntry(id: number, field: "key" | "value", value: string) {
-    envEntries = envEntries.map((entry) =>
-      entry.id === id ? { ...entry, [field]: value } : entry,
+  function updateEnvEntry(index: number, field: "key" | "value", value: string) {
+    envEntries = envEntries.map((entry, idx) =>
+      idx === index ? { ...entry, [field]: value } : entry
     );
   }
 
+  // HTTP 头部操作
   function addHeaderEntry() {
-    headerEntries = [...headerEntries, { id: Date.now(), key: "", value: "" }];
+    headerEntries = [...headerEntries, BLANK_HEADER()];
   }
 
-  function removeHeaderEntry(id: number) {
-    if (headerEntries.length === 1) {
-      headerEntries = [{ id: Date.now(), key: "", value: "" }];
-      return;
-    }
-    headerEntries = headerEntries.filter((entry) => entry.id !== id);
+  function removeHeaderEntry(index: number) {
+    headerEntries = headerEntries.length === 1
+      ? [BLANK_HEADER()]
+      : headerEntries.filter((_, idx) => idx !== index);
   }
 
-  function updateHeaderEntry(id: number, field: "key" | "value", value: string) {
-    headerEntries = headerEntries.map((entry) =>
-      entry.id === id ? { ...entry, [field]: value } : entry,
+  function updateHeaderEntry(index: number, field: "key" | "value", value: string) {
+    headerEntries = headerEntries.map((entry, idx) =>
+      idx === index ? { ...entry, [field]: value } : entry
     );
   }
 
   function validate(): boolean {
     const nextErrors: Record<string, string> = {};
 
+    // 验证名称
     if (!formData.name.trim()) {
       nextErrors.name = "请输入服务器名称";
     }
 
+    // 验证连接配置
     if (formData.connectionType === 'stdio') {
       if (!formData.command.trim()) {
         nextErrors.command = "请输入执行命令";
@@ -184,41 +189,40 @@
       if (!formData.endpoint.trim()) {
         nextErrors.endpoint = "请输入端点URL";
       }
-    }
-
-    if (formData.timeoutMs && isNaN(Number(formData.timeoutMs))) {
-      nextErrors.timeoutMs = "超时时间必须是数字";
+      // 验证超时时间
+      if (formData.timeoutMs && isNaN(Number(formData.timeoutMs))) {
+        nextErrors.timeoutMs = "超时时间必须是数字";
+      }
     }
 
     errors = nextErrors;
     return Object.keys(nextErrors).length === 0;
   }
 
+  // 解析参数（支持换行或逗号分隔）
   function parseArgs(): string[] {
     return formData.argsText
       .split(/\r?\n|,/)
-      .map((arg) => arg.trim())
+      .map(arg => arg.trim())
       .filter(Boolean);
   }
 
+  // 解析环境变量
   function parseEnv(): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const entry of envEntries) {
+    return envEntries.reduce<Record<string, string>>((acc, entry) => {
       const key = entry.key.trim();
-      if (!key) continue;
-      result[key] = entry.value;
-    }
-    return result;
+      if (key) acc[key] = entry.value;
+      return acc;
+    }, {});
   }
 
+  // 解析 HTTP 头部
   function parseHeaders(): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const entry of headerEntries) {
+    return headerEntries.reduce<Record<string, string>>((acc, entry) => {
       const key = entry.key.trim();
-      if (!key) continue;
-      result[key] = entry.value;
-    }
-    return result;
+      if (key) acc[key] = entry.value;
+      return acc;
+    }, {});
   }
 
   async function handleConfirm() {
@@ -227,39 +231,50 @@
     isSubmitting = true;
 
     try {
-      const base = {
-        displayName: formData.displayName.trim() || undefined,
-        description: formData.description.trim() || undefined,
-        connectionType: formData.connectionType,
-        ...(formData.connectionType === 'stdio' ? {
-          command: formData.command.trim(),
-          args: parseArgs(),
-          workingDir: formData.workingDir.trim() || undefined,
-          env: parseEnv(),
-        } : {
-          command: '', // 非 stdio 类型设为空字符串
-          args: [],
-          workingDir: undefined,
-          env: {},
-          endpoint: formData.endpoint.trim() || undefined,
-          headers: parseHeaders(),
-          timeoutMs: formData.timeoutMs ? Number(formData.timeoutMs) : undefined,
-        }),
-      };
-
       if (server) {
+        // 更新模式
         const updatePayload: UpdateMcpServerRequest = {
           name: formData.name.trim(),
-          ...base,
+          displayName: formData.displayName.trim() || undefined,
+          description: formData.description.trim() || undefined,
+          connectionType: formData.connectionType,
           enabled: formData.enabled,
         };
+
+        if (formData.connectionType === 'stdio') {
+          updatePayload.command = formData.command.trim();
+          updatePayload.args = parseArgs();
+          updatePayload.workingDir = formData.workingDir.trim() || undefined;
+          updatePayload.env = parseEnv();
+        } else {
+          updatePayload.command = '';
+          updatePayload.endpoint = formData.endpoint.trim() || undefined;
+          updatePayload.headers = parseHeaders();
+          updatePayload.timeoutMs = formData.timeoutMs ? Number(formData.timeoutMs) : undefined;
+        }
+
         onSave?.({ mode: "update", data: updatePayload });
       } else {
+        // 创建模式
         const createPayload: CreateMcpServerRequest = {
           name: formData.name.trim(),
-          ...base,
+          displayName: formData.displayName.trim() || undefined,
+          description: formData.description.trim() || undefined,
+          connectionType: formData.connectionType,
+          command: formData.connectionType === 'stdio' ? formData.command.trim() : '',
           enabled: formData.enabled,
         };
+
+        if (formData.connectionType === 'stdio') {
+          createPayload.args = parseArgs();
+          createPayload.workingDir = formData.workingDir.trim() || undefined;
+          createPayload.env = parseEnv();
+        } else {
+          createPayload.endpoint = formData.endpoint.trim() || undefined;
+          createPayload.headers = parseHeaders();
+          createPayload.timeoutMs = formData.timeoutMs ? Number(formData.timeoutMs) : undefined;
+        }
+
         onSave?.({ mode: "create", data: createPayload });
       }
 
@@ -363,26 +378,26 @@
             </div>
 
             <div class="space-y-2">
-              {#each envEntries as entry (entry.id)}
+              {#each envEntries as entry, index (index)}
                 <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
                     placeholder="键"
                     value={entry.key}
                     oninput={(e) =>
-                      updateEnvEntry(entry.id, "key", e.currentTarget.value)}
+                      updateEnvEntry(index, "key", e.currentTarget.value)}
                   />
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
                     placeholder="值"
                     value={entry.value}
                     oninput={(e) =>
-                      updateEnvEntry(entry.id, "value", e.currentTarget.value)}
+                      updateEnvEntry(index, "value", e.currentTarget.value)}
                   />
                   <button
                     class="text-error text-sm hover:text-error/80 px-2"
                     type="button"
-                    onclick={() => removeEnvEntry(entry.id)}
+                    onclick={() => removeEnvEntry(index)}
                   >
                     删除
                   </button>
@@ -409,26 +424,26 @@
             </div>
 
             <div class="space-y-2">
-              {#each headerEntries as entry (entry.id)}
+              {#each headerEntries as entry, index (index)}
                 <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
                     placeholder="头部名称"
                     value={entry.key}
                     oninput={(e) =>
-                      updateHeaderEntry(entry.id, "key", e.currentTarget.value)}
+                      updateHeaderEntry(index, "key", e.currentTarget.value)}
                   />
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
                     placeholder="头部值"
                     value={entry.value}
                     oninput={(e) =>
-                      updateHeaderEntry(entry.id, "value", e.currentTarget.value)}
+                      updateHeaderEntry(index, "value", e.currentTarget.value)}
                   />
                   <button
                     class="text-error text-sm hover:text-error/80 px-2"
                     type="button"
-                    onclick={() => removeHeaderEntry(entry.id)}
+                    onclick={() => removeHeaderEntry(index)}
                   >
                     删除
                   </button>

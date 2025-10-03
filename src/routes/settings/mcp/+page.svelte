@@ -48,7 +48,9 @@
   }
 
   function openEditModal(server: McpServer) {
+    console.log('openEditModal', server);
     editingServer = server;
+    // expandedStates = { ...expandedStates, [server.id]: true };
     showFormModal = true;
   }
 
@@ -140,12 +142,6 @@
     }
   }
 
-  $effect(() => {
-    // Ensure there is an entry in expanded state when editing resets
-    if (editingServer) {
-      expandedStates = { ...expandedStates, [editingServer.id]: true };
-    }
-  });
 </script>
 
 <div class="p-6 pr-8 flex flex-col gap-y-4">
