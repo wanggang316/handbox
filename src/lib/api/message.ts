@@ -96,10 +96,11 @@ export interface StreamEventHandlers {
   onChunk?: (data: { streamId: string; content: string; reasoning?: string; toolCalls?: any[]; chunk: string; index: number }) => void;
   onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string; toolCalls?: any[]; messageId?: string }) => void;
   onError?: (error: any) => void;
+  onToolExecute?: (data: { messageId: string; toolCallIds: string[]; status: 'executing' | 'finished' }) => void;
 }
 
 export async function listenToStreamEvents(handlers: StreamEventHandlers, eventPrefix: string = 'message_stream') {
-  const unlisten = await Promise.all([
+  const listeners = [
     listen(`${eventPrefix}_start`, (event) => {
       handlers.onStart?.(event.payload as any);
     }),
@@ -115,7 +116,22 @@ export async function listenToStreamEvents(handlers: StreamEventHandlers, eventP
     listen(`${eventPrefix}_error`, (event) => {
       handlers.onError?.(event.payload as any);
     })
-  ]);
+  ];
+
+  // 如果提供了 onToolExecute 处理器，添加工具执行事件监听
+  if (handlers.onToolExecute) {
+    console.log('[listenToStreamEvents] 注册 tool_execute 事件监听器');
+    listeners.push(
+      listen('tool_execute', (event) => {
+        console.log('[tool_execute 事件] 收到事件:', event.payload);
+        handlers.onToolExecute?.(event.payload as any);
+      })
+    );
+  } else {
+    console.warn('[listenToStreamEvents] 未提供 onToolExecute 处理器');
+  }
+
+  const unlisten = await Promise.all(listeners);
 
   // 返回取消监听的函数
   return () => {

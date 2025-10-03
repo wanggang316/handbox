@@ -22,8 +22,8 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
-  // 工具执行状态 - 记录哪些工具调用正在执行
-  executingToolCalls: Set<string>; // 存储 messageId:toolCallId 的组合
+  // 工具执行状态 - 记录哪些消息正在执行工具
+  executingMessages: Record<string, boolean>; // messageId -> true/false
 }
 
 class MessageStore {
@@ -37,7 +37,7 @@ class MessageStore {
     streamingContent: '',
     streamingReasoning: '',
     streamingToolCalls: null,
-    executingToolCalls: new Set(),
+    executingMessages: {},
   });
 
   // 当前流式事件监听器的清理函数
@@ -82,10 +82,9 @@ class MessageStore {
     return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
   }
 
-  // 检查特定工具调用是否正在执行
-  isToolCallExecuting(messageId: string, toolCallId: string): boolean {
-    const key = `${messageId}:${toolCallId}`;
-    return this.state.executingToolCalls.has(key);
+  // 暴露正在执行的消息集合（响应式）
+  get executingMessages() {
+    return this.state.executingMessages;
   }
 
   // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
@@ -521,54 +520,53 @@ class MessageStore {
    * 执行多个工具调用 - 使用流式API
    */
   async executeToolCalls(messageId: string, toolCallIds: string[]): Promise<void> {
+    console.log('[executeToolCalls] 开始执行工具调用:', { messageId, toolCallIds });
+
     if (toolCallIds.length === 0) {
+      console.warn('[executeToolCalls] 工具调用列表为空');
       return;
     }
 
-    const keys = toolCallIds.map((toolCallId) => `${messageId}:${toolCallId}`);
-    let cleaned = false;
-
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      for (const key of keys) {
-        this.state.executingToolCalls.delete(key);
-      }
-    };
-
     try {
-      // 设置执行状态
-      for (const key of keys) {
-        this.state.executingToolCalls.add(key);
-      }
       this.setError(null);
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
+        console.log('[executeToolCalls] 清理之前的监听器');
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
 
+      console.log('[executeToolCalls] 设置事件监听器...');
+
       // 监听工具执行流式事件
       this.currentStreamUnlisten = await listenToStreamEvents(
-        this.createStreamEventHandlers(
-          // onComplete callback
-          () => {
-            cleanup();
-          },
-          // onError callback
-          () => {
-            cleanup();
+        {
+          ...this.createStreamEventHandlers(),
+          // 添加工具执行状态回调
+          onToolExecute: (data) => {
+            if (data.status === 'executing') {
+              // 设置执行状态
+              this.state.executingMessages[data.messageId] = true;
+            } else if (data.status === 'finished') {
+              // 清除执行状态
+              delete this.state.executingMessages[data.messageId];
+            }
           }
-        ),
+        },
         'tool_execute_stream'
       );
+
+      console.log('[executeToolCalls] 事件监听器设置完成，调用后端API...');
 
       // 调用流式工具执行API
       await messageApi.executeToolCallsStream(messageId, toolCallIds);
 
+      console.log('[executeToolCalls] 后端API调用完成');
+
     } catch (error) {
-      cleanup();
+      // 出错时清除执行状态
+      delete this.state.executingMessages[messageId];
       if (this.currentStreamUnlisten) {
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
@@ -587,19 +585,25 @@ class MessageStore {
    * 批量执行消息中的所有工具调用
    */
   async executeAllToolCalls(messageId: string, toolCalls: ToolCall[]): Promise<void> {
+    console.log('[executeAllToolCalls] 开始:', { messageId, toolCallsCount: toolCalls.length });
+
     try {
       const toolCallIds = toolCalls
         .map(toolCall => toolCall.id)
         .filter((id): id is string => Boolean(id));
 
+      console.log('[executeAllToolCalls] 提取的工具调用IDs:', toolCallIds);
+
       if (toolCallIds.length === 0) {
-        console.warn('executeAllToolCalls: 未找到有效的工具调用 ID');
+        console.warn('[executeAllToolCalls] 未找到有效的工具调用 ID');
         return;
       }
 
+      console.log('[executeAllToolCalls] 调用 executeToolCalls...');
       await this.executeToolCalls(messageId, toolCallIds);
+      console.log('[executeAllToolCalls] executeToolCalls 完成');
     } catch (error) {
-      console.error('批量执行工具调用失败:', error);
+      console.error('[executeAllToolCalls] 批量执行工具调用失败:', error);
       throw error;
     }
   }
@@ -615,7 +619,7 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
-    this.state.executingToolCalls.clear();
+    this.state.executingMessages = {};
   }
 
 }

@@ -1,7 +1,7 @@
 // 消息相关 IPC 命令
 
 use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
-use crate::services::{message::StreamChunk, MessageService};
+use crate::services::{message::StreamChunk, MessageService, ToolExecuteStatus};
 use serde_json::json;
 use tauri::{Emitter, State, Window};
 
@@ -96,6 +96,30 @@ fn create_stream_error_callback(
             event_name,
             stream_id,
             error
+        );
+    }
+}
+
+/// 创建工具执行回调
+fn create_tool_execute_callback(
+    window: Window,
+    event_name: &'static str,
+) -> impl FnMut(String, Vec<String>, ToolExecuteStatus) {
+    move |message_id: String, tool_call_ids: Vec<String>, status: ToolExecuteStatus| {
+        let _ = window.emit(
+            event_name,
+            json!({
+                "messageId": message_id,
+                "toolCallIds": tool_call_ids,
+                "status": status
+            }),
+        );
+        tracing::info!(
+            "[{}] Tool execution status changed to {:?} for message {} with tool calls {:?}",
+            event_name,
+            status,
+            message_id,
+            tool_call_ids
         );
     }
 }
@@ -309,6 +333,10 @@ pub async fn message_execute_tool_calls(
                 // 错误回调
                 tracing::error!("[message_execute_tool_calls] Execution failed: {:?}", error);
             },
+            |_message_id, _tool_call_ids, status| {
+                // 工具执行状态回调
+                tracing::info!("[message_execute_tool_calls] Tool execution status: {:?}", status);
+            },
         )
         .await;
 
@@ -350,6 +378,9 @@ pub async fn message_execute_tool_calls_stream(
         let error_callback =
             create_stream_error_callback(window_clone.clone(), "tool_execute_stream_error");
 
+        let tool_execute_callback =
+            create_tool_execute_callback(window_clone.clone(), "tool_execute");
+
         // 调用真实的工具执行流式API
         service_clone
             .execute_tool_calls(
@@ -359,6 +390,7 @@ pub async fn message_execute_tool_calls_stream(
                 streaming_callback,
                 end_callback,
                 error_callback,
+                tool_execute_callback,
             )
             .await;
     });

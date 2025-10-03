@@ -65,6 +65,25 @@ impl<T> StreamEndCallback for T where T: FnMut(String, MessageResponse) + Send +
 pub trait StreamErrorCallback: FnMut(String, AppError) + Send + 'static {}
 impl<T> StreamErrorCallback for T where T: FnMut(String, AppError) + Send + 'static {}
 
+/// 工具执行状态
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolExecuteStatus {
+    /// 工具执行中
+    Executing,
+    /// 工具执行完成
+    Finished,
+}
+
+/// 工具执行回调：当工具执行状态变化时调用
+///
+/// 参数:
+/// - `message_id`: 消息的唯一标识符
+/// - `tool_call_ids`: 工具调用ID列表
+/// - `status`: 工具执行状态
+pub trait ToolExecuteCallback: FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static {}
+impl<T> ToolExecuteCallback for T where T: FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static {}
+
 /// 消息服务
 #[derive(Clone)]
 pub struct MessageService {
@@ -1102,6 +1121,7 @@ impl MessageService {
         streaming_callback: impl StreamingCallback,
         end_callback: impl StreamEndCallback,
         mut error_callback: impl StreamErrorCallback,
+        mut tool_execute_callback: impl ToolExecuteCallback,
     ) {
         tracing::info!(
             "[MessageService::execute_tool_calls] Executing tool calls {:?} for message: {}",
@@ -1170,7 +1190,14 @@ impl MessageService {
             }
         }
 
-        // 5. 执行所有工具调用并构造工具结果消息
+        // 5. 触发工具执行开始回调
+        tool_execute_callback(
+            message_id.clone(),
+            tool_call_ids.clone(),
+            ToolExecuteStatus::Executing,
+        );
+
+        // 6. 执行所有工具调用并构造工具结果消息
         let mut created_tool_message_ids = Vec::new();
         for tool_call in selected_tool_calls {
             tracing::info!(
@@ -1229,7 +1256,14 @@ impl MessageService {
             created_tool_message_ids
         );
 
-        // 6. 获取 chat 配置
+        // 触发工具执行完成回调
+        tool_execute_callback(
+            message_id.clone(),
+            tool_call_ids.clone(),
+            ToolExecuteStatus::Finished,
+        );
+
+        // 7. 获取 chat 配置
         let chat = match self.get_chat_config(&message.chat_id).await {
             Ok(chat) => chat,
             Err(e) => {

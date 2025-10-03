@@ -84,18 +84,10 @@
     }
   }
 
-  // 检查是否有任何工具调用正在执行
-  function isAnyToolCallExecuting(): boolean {
-    if (!message?.id) return false;
-
-    const calls = toolCalls();
-    return calls.some(call => {
-      if (call.id && message.id) {
-        return messageStore.isToolCallExecuting(message.id, call.id);
-      }
-      return false;
-    });
-  }
+  // 检查是否有任何工具调用正在执行 - 使用 getter 确保响应式追踪
+  const isExecuting = $derived(() => {
+    return message?.id ? !!messageStore.executingMessages[message.id] : false;
+  });
 
   async function handleExecuteToolCalls() {
     const calls = toolCalls();
@@ -304,19 +296,19 @@
           {#if toolCalls().length > 0}
             <div class="mb-4 rounded-lg border border-blue-400/40 bg-blue-50/80 p-3 text-sm text-blue-900 dark:bg-blue-900/40 dark:text-blue-100">
               <div class="mb-2 font-medium flex items-center justify-between">
-                <span>模型返回的工具调用</span>
+                <span>工具调用</span>
                 <button
                   class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
                   onclick={handleExecuteToolCalls}
-                  disabled={toolCalls().length === 0 || isAnyToolCallExecuting()}
+                  disabled={toolCalls().length === 0 || isExecuting()}
                 >
-                  {#if isAnyToolCallExecuting()}
+                  {#if isExecuting()}
                     <div class="flex items-center gap-1">
                       <div class="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
                       执行中...
                     </div>
                   {:else}
-                    执行工具调用
+                    执行
                   {/if}
                 </button>
               </div>
