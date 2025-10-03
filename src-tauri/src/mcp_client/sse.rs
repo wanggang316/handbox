@@ -3,18 +3,21 @@
 //! This module handles connecting to MCP servers that expose SSE endpoints
 //! for real-time communication.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use rmcp::transport::TokioChildProcess;
+use std::process::Stdio;
+use tokio::process::Command;
 
 use super::types::SseConfig;
 
-/// SSE transport for MCP servers
+/// SSE transport for MCP servers (currently implemented using HTTP proxy)
 pub struct SseTransport;
 
 impl SseTransport {
     /// Create a new SSE transport connecting to the given endpoint
-    /// Currently returns a placeholder implementation
-    pub async fn new(config: SseConfig) -> Result<()> {
-        tracing::info!("Creating MCP SSE transport");
+    /// For now, this creates a simple HTTP client to test connectivity
+    pub async fn new(config: SseConfig) -> Result<TokioChildProcess> {
+        tracing::info!("Creating MCP SSE transport (HTTP-based)");
         tracing::info!("> endpoint: {}", config.endpoint);
         tracing::info!("> headers: {:?}", config.headers);
         tracing::info!("> timeout_ms: {:?}", config.timeout_ms);
@@ -22,11 +25,32 @@ impl SseTransport {
         // Validate endpoint
         Self::validate_endpoint(&config.endpoint)?;
 
-        // TODO: Implement actual SSE transport once rmcp supports it
-        // For now, return an error indicating it's not implemented
-        Err(anyhow::anyhow!(
-            "SSE transport is not yet implemented - please use stdio transport for now"
-        ))
+        // For now, create a simple curl-based proxy to the SSE endpoint
+        // This is a temporary solution until rmcp SSE transport issues are resolved
+        let mut cmd = Command::new("curl");
+        cmd.arg("-N") // No buffering
+            .arg("-H")
+            .arg("Accept: text/event-stream")
+            .arg("-H")
+            .arg("Cache-Control: no-cache");
+
+        // Add custom headers
+        for (key, value) in &config.headers {
+            cmd.arg("-H").arg(format!("{}: {}", key, value));
+        }
+
+        // Add timeout if specified
+        if let Some(timeout_ms) = config.timeout_ms {
+            cmd.arg("--max-time").arg((timeout_ms / 1000).to_string());
+        }
+
+        cmd.arg(&config.endpoint)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        TokioChildProcess::new(cmd)
+            .context("Failed to start SSE transport via curl")
     }
 
     /// Validate that the endpoint URL is well-formed

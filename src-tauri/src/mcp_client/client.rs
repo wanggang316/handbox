@@ -70,25 +70,36 @@ impl McpClient {
         })
     }
 
-    /// Connect to an MCP server using SSE transport (not yet implemented)
+    /// Connect to an MCP server using SSE transport
     pub async fn connect_sse(config: SseConfig) -> Result<Self> {
         tracing::info!("Attempting SSE connection to: {}", config.endpoint);
 
-        // For now, we validate the endpoint and return a descriptive error
-        SseTransport::validate_endpoint(&config.endpoint)
-            .context("Invalid SSE endpoint")?;
+        let mut stats = ClientStats::new();
 
-        // Try to create the transport to provide better error messages
-        SseTransport::new(config).await.map_err(|e| {
-            tracing::error!("SSE transport failed: {}", e);
-            anyhow::anyhow!(
-                "SSE/HTTP transport is not yet implemented. Please use 'stdio' connection type for process-based MCP servers. Error: {}",
-                e
-            )
+        // Create the SSE transport
+        let transport = SseTransport::new(config).await.map_err(|e| {
+            tracing::error!("Failed to create SSE transport: {}", e);
+            e
         })?;
 
-        // This line will never be reached due to the error above, but is needed for type checking
-        unreachable!()
+        let client_info = create_client_info();
+        let service = client_info
+            .serve(transport)
+            .await
+            .context("Failed to establish MCP SSE connection")?;
+
+        // Log connection info
+        let server_info = service.peer();
+        tracing::info!("Connected to MCP server via SSE: {:#?}", server_info);
+
+        // Update stats and status
+        stats.set_connected(chrono::Utc::now().timestamp_millis());
+
+        Ok(Self {
+            service,
+            stats: Arc::new(Mutex::new(stats)),
+            status: Arc::new(Mutex::new(ConnectionStatus::Connected)),
+        })
     }
 
     /// List all tools exposed by the connected MCP server

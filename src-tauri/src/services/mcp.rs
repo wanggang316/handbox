@@ -222,45 +222,22 @@ impl McpService {
 
     /// Update server status and metadata based on connection type
     async fn update_server_status(&self, server: &mut McpServer) {
-        match server.connection_type {
-            crate::models::McpConnectionType::Stdio => {
-                // stdio 类型尝试连接获取工具
-                match self.fetch_server_tools(server).await {
-                    Ok(tools) => {
-                        server.tools = tools;
-                        server.status = McpServerStatus::Ready;
-                        server.last_error = None;
-                        server.last_sync_at = Some(Self::current_timestamp());
-                    }
-                    Err(error) => {
-                        tracing::error!(
-                            "Failed to fetch MCP metadata for {}: {}",
-                            server.name,
-                            error
-                        );
-                        server.status = McpServerStatus::Error;
-                        server.last_error = Some(error.to_string());
-                    }
-                }
-            }
-            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
-                // SSE/HTTP 类型设为未激活状态，不尝试连接
-                server.tools = Vec::new();
-                server.status = McpServerStatus::Inactive;
-                server.last_error = Some(format!(
-                    "{} 传输协议尚未实现。配置已保存，功能开发完成后将自动可用。",
-                    match server.connection_type {
-                        crate::models::McpConnectionType::Sse => "SSE",
-                        crate::models::McpConnectionType::Http => "HTTP",
-                        _ => "未知"
-                    }
-                ));
+        // All connection types now work the same way - try to connect and fetch tools
+        match self.fetch_server_tools(server).await {
+            Ok(tools) => {
+                server.tools = tools;
+                server.status = McpServerStatus::Ready;
+                server.last_error = None;
                 server.last_sync_at = Some(Self::current_timestamp());
-                tracing::info!(
-                    "MCP server '{}' configured with {} transport (not yet implemented). Configuration saved successfully.",
+            }
+            Err(error) => {
+                tracing::error!(
+                    "Failed to fetch MCP metadata for {}: {}",
                     server.name,
-                    server.connection_type.as_str()
+                    error
                 );
+                server.status = McpServerStatus::Error;
+                server.last_error = Some(error.to_string());
             }
         }
     }
