@@ -121,6 +121,38 @@ pub struct McpTool {
     pub annotations: HashMap<String, serde_json::Value>,
 }
 
+/// Prompt metadata returned from MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPrompt {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub arguments: Vec<McpPromptArgument>,
+}
+
+/// Prompt argument metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptArgument {
+    pub name: String,
+    pub description: Option<String>,
+    pub required: Option<bool>,
+}
+
+/// Resource metadata returned from MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpResource {
+    pub uri: String,
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub annotations: HashMap<String, serde_json::Value>,
+}
+
 /// MCP server definition stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +177,12 @@ pub struct McpServer {
     pub status: McpServerStatus,
     #[serde(default)]
     pub tools: Vec<McpTool>,
+    #[serde(default)]
+    pub prompts: Vec<McpPrompt>,
+    #[serde(default)]
+    pub resources: Vec<McpResource>,
+    #[serde(default)]
+    pub enabled_tools: Vec<String>,
     pub last_sync_at: Option<i64>,
     pub last_error: Option<String>,
     pub created_at: i64,
@@ -205,4 +243,13 @@ pub struct ToggleMcpServerRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RefreshMcpServerRequest {
     pub server_id: String,
+}
+
+/// Request payload for updating tool enabled status
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateToolEnabledRequest {
+    pub server_id: String,
+    pub tool_name: String,
+    pub enabled: bool,
 }

@@ -4,7 +4,8 @@ import type {
   McpServer,
   RefreshMcpServerRequest,
   ToggleMcpServerRequest,
-  UpdateMcpServerRequest
+  UpdateMcpServerRequest,
+  UpdateToolEnabledRequest
 } from '../types';
 
 export async function listMcpServers(): Promise<McpServer[]> {
@@ -32,4 +33,8 @@ export async function toggleMcpServer(request: ToggleMcpServerRequest): Promise<
 
 export async function refreshMcpServer(request: RefreshMcpServerRequest): Promise<McpServer> {
   return apiCall<McpServer>('mcp_refresh_server', { request });
+}
+
+export async function updateToolEnabled(request: UpdateToolEnabledRequest): Promise<McpServer> {
+  return apiCall<McpServer>('mcp_update_tool_enabled', { request });
 }

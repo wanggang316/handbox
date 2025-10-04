@@ -11,6 +11,26 @@ export interface McpTool {
   annotations?: Record<string, unknown>;
 }
 
+export interface McpPromptArgument {
+  name: string;
+  description?: string;
+  required?: boolean;
+}
+
+export interface McpPrompt {
+  name: string;
+  description?: string;
+  arguments: McpPromptArgument[];
+}
+
+export interface McpResource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+  annotations?: Record<string, unknown>;
+}
+
 export interface McpServer {
   id: string;
   name: string;
@@ -27,6 +47,9 @@ export interface McpServer {
   enabled: boolean;
   status: McpServerStatus;
   tools: McpTool[];
+  prompts: McpPrompt[];
+  resources: McpResource[];
+  enabledTools: string[];
   lastSyncAt?: Timestamp;
   lastError?: string;
   createdAt: Timestamp;
@@ -70,4 +93,10 @@ export interface ToggleMcpServerRequest {
 
 export interface RefreshMcpServerRequest {
   serverId: string;
+}
+
+export interface UpdateToolEnabledRequest {
+  serverId: string;
+  toolName: string;
+  enabled: boolean;
 }

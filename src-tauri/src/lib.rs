@@ -156,6 +156,7 @@ pub fn run() {
             mcp_delete_server,
             mcp_toggle_server,
             mcp_refresh_server,
+            mcp_update_tool_enabled,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,

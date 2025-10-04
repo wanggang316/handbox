@@ -9,8 +9,9 @@ use crate::mcp_client::{
     StreamableHttpConfig,
 };
 use crate::models::{
-    AppError, CreateMcpServerRequest, McpServer, McpServerStatus, McpTool, RefreshMcpServerRequest,
-    ToggleMcpServerRequest, UpdateMcpServerRequest,
+    AppError, CreateMcpServerRequest, McpPrompt, McpResource, McpServer, McpServerStatus, McpTool,
+    RefreshMcpServerRequest, ToggleMcpServerRequest, UpdateMcpServerRequest,
+    UpdateToolEnabledRequest,
 };
 use crate::services::Database;
 use crate::storage::McpRepository;
@@ -76,6 +77,9 @@ impl McpService {
                 McpServerStatus::Inactive
             },
             tools: Vec::new(),
+            prompts: Vec::new(),
+            resources: Vec::new(),
+            enabled_tools: Vec::new(),
             last_sync_at: None,
             last_error: None,
             created_at: now,
@@ -228,12 +232,42 @@ impl McpService {
         self.repository.delete_server(&server_id).await
     }
 
+    /// Update tool enabled status
+    pub async fn update_tool_enabled(
+        &self,
+        request: UpdateToolEnabledRequest,
+    ) -> Result<McpServer, AppError> {
+        let mut server = self.get_server(&request.server_id).await?;
+
+        // Update enabled_tools list
+        if request.enabled {
+            // Add tool if not already in list
+            if !server.enabled_tools.contains(&request.tool_name) {
+                server.enabled_tools.push(request.tool_name.clone());
+            }
+        } else {
+            // Remove tool from list
+            server.enabled_tools.retain(|name| name != &request.tool_name);
+        }
+
+        server.updated_at = Self::current_timestamp();
+        self.repository.update_server(&server).await?;
+        Ok(server)
+    }
+
     /// Update server status and metadata based on connection type
     async fn update_server_status(&self, server: &mut McpServer) {
-        // All connection types now work the same way - try to connect and fetch tools
-        match self.fetch_server_tools(server).await {
-            Ok(tools) => {
+        // All connection types now work the same way - try to connect and fetch metadata
+        match self.fetch_server_metadata(server).await {
+            Ok((tools, prompts, resources)) => {
+                // If enabled_tools is empty (new server), enable all tools by default
+                if server.enabled_tools.is_empty() && !tools.is_empty() {
+                    server.enabled_tools = tools.iter().map(|t| t.name.clone()).collect();
+                }
+
                 server.tools = tools;
+                server.prompts = prompts;
+                server.resources = resources;
                 server.status = McpServerStatus::Ready;
                 server.last_error = None;
                 server.last_sync_at = Some(Self::current_timestamp());
@@ -359,10 +393,16 @@ impl McpService {
             .as_millis() as i64
     }
 
-    async fn fetch_server_tools(&self, server: &McpServer) -> anyhow::Result<Vec<McpTool>> {
+    async fn fetch_server_metadata(
+        &self,
+        server: &McpServer,
+    ) -> anyhow::Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>)> {
         let client = Self::connect_client(server).await?;
 
-        let tools = client.list_tools().await?;
+        // Fetch all metadata concurrently
+        let tools_result = client.list_tools().await;
+        let prompts_result = client.list_prompts().await;
+        let resources_result = client.list_resources().await;
 
         // Gracefully shutdown the client
         if let Err(e) = client.shutdown().await {
@@ -373,7 +413,56 @@ impl McpService {
             );
         }
 
-        Ok(tools)
+        // Convert results
+        let tools = tools_result?;
+        let prompts = Self::convert_prompts(prompts_result?);
+        let resources = Self::convert_resources(resources_result?);
+
+        Ok((tools, prompts, resources))
+    }
+
+    fn convert_prompts(prompts: Vec<rmcp::model::Prompt>) -> Vec<McpPrompt> {
+        prompts
+            .into_iter()
+            .map(|p| McpPrompt {
+                name: p.name.to_string(),
+                description: p.description.map(|d| d.to_string()),
+                arguments: p
+                    .arguments
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|a| crate::models::McpPromptArgument {
+                        name: a.name.to_string(),
+                        description: a.description.map(|d| d.to_string()),
+                        required: a.required,
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    fn convert_resources(resources: Vec<rmcp::model::Resource>) -> Vec<McpResource> {
+        resources
+            .into_iter()
+            .map(|r| {
+                // Convert annotations to HashMap if present
+                let annotations = if let Some(ref annot) = r.annotations {
+                    // Try to serialize and deserialize to convert to HashMap
+                    serde_json::from_value(serde_json::to_value(annot).unwrap_or_default())
+                        .unwrap_or_default()
+                } else {
+                    HashMap::new()
+                };
+
+                McpResource {
+                    uri: r.uri.to_string(),
+                    name: r.name.to_string(),
+                    description: r.description.as_ref().map(|d| d.to_string()),
+                    mime_type: r.mime_type.as_ref().map(|m| m.to_string()),
+                    annotations,
+                }
+            })
+            .collect()
     }
 
     async fn connect_client(server: &McpServer) -> anyhow::Result<McpClient> {
