@@ -136,7 +136,7 @@ impl McpRepository {
             .bind(serde_json::to_string(&server.resources).unwrap_or_else(|_| "[]".to_string()))
             .bind(serde_json::to_string(&server.enabled_tools).unwrap_or_else(|_| "[]".to_string()))
             .bind(server.last_sync_at)
-            .bind(&server.last_error)
+            .bind(server.last_error.as_ref().and_then(|e| serde_json::to_string(e).ok()))
             .bind(server.created_at)
             .bind(server.updated_at)
             .execute(self.db.pool())
@@ -194,7 +194,7 @@ impl McpRepository {
             .bind(serde_json::to_string(&server.resources).unwrap_or_else(|_| "[]".to_string()))
             .bind(serde_json::to_string(&server.enabled_tools).unwrap_or_else(|_| "[]".to_string()))
             .bind(server.last_sync_at)
-            .bind(&server.last_error)
+            .bind(server.last_error.as_ref().and_then(|e| serde_json::to_string(e).ok()))
             .bind(server.updated_at)
             .bind(&server.id)
             .execute(self.db.pool())
@@ -363,7 +363,11 @@ impl McpRepository {
             resources,
             enabled_tools,
             last_sync_at: row.try_get("last_sync_at").ok(),
-            last_error: row.try_get("last_error").ok(),
+            last_error: row
+                .try_get::<Option<String>, _>("last_error")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

@@ -25,6 +25,7 @@
 //! ```
 //!
 mod client;
+mod error;
 mod process;
 mod sse;
 mod streamable_http;
@@ -33,6 +34,7 @@ mod utils;
 
 // Re-export the main interfaces
 pub use client::McpClient;
+pub use error::{McpClientError, McpClientResult};
 pub use types::{
     ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig, StreamableHttpConfig,
 };

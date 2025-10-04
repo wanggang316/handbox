@@ -8,14 +8,21 @@
   import TableBaseRow from '$lib/components/ui/table/TableBaseRow.svelte';
   import IconButton from '$lib/components/ui/IconButton.svelte';
   import Toggle from '$lib/components/ui/Toggle.svelte';
+  import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
+  import McpServerFormModal from '$lib/components/settings/McpServerFormModal.svelte';
   import { mcpState, mcpActions } from '$lib/states/mcp.svelte';
   import { updateToolEnabled } from '$lib/api';
   import type { McpServer } from '$lib/types';
+  import { getErrorTypeDisplayName } from '$lib/utils/mcpError';
+  import { formatDateTime } from '$lib/utils/date';
   import { ChevronLeft, RefreshCw, SquarePen, Trash2, ChevronDown, ChevronRight } from '@lucide/svelte';
 
   let serverId = $state('');
   let activeTab = $state('tools');
   let isRefreshing = $state(false);
+  let showDeleteConfirm = $state(false);
+  let showEditModal = $state(false);
+  let confirmModalRef: any;
 
   // 记录每个项目的展开状态
   let expandedTools = $state<Record<string, boolean>>({});
@@ -95,16 +102,40 @@
     }
   }
 
-  function handleEdit() {
-    // TODO: 实现编辑功能
-    console.log('Edit MCP server:', server);
+  function handleEdit(event: CustomEvent) {
+    console.log('Edit button clicked', event);
+    if (!server) return;
+    showEditModal = true;
   }
 
-  async function handleDelete() {
-    if (!server) return;
+  function closeEditModal() {
+    showEditModal = false;
+  }
 
-    const confirmed = confirm(`确定要删除 MCP 服务器 "${server.displayName || server.name}" 吗？\n\n此操作无法撤销。`);
-    if (!confirmed) return;
+  async function handleSaveServer(data: { mode: 'create' | 'update'; data: any }) {
+    try {
+      if (data.mode === 'update' && server) {
+        await mcpActions.updateServer(server.id, data.data);
+        console.log('MCP server updated successfully');
+        // 刷新服务器数据
+        await mcpActions.loadServers(true);
+      } else if (data.mode === 'create') {
+        await mcpActions.createServer(data.data);
+        console.log('MCP server created successfully');
+      }
+    } catch (error) {
+      console.error('Failed to save MCP server:', error);
+    }
+  }
+
+  function handleDelete(event: CustomEvent) {
+    console.log('Delete button clicked', event);
+    if (!server) return;
+    showDeleteConfirm = true;
+  }
+
+  async function confirmDelete() {
+    if (!server) return;
 
     try {
       await mcpActions.deleteServer(server.id);
@@ -112,7 +143,8 @@
       goto('/settings/mcp');
     } catch (error) {
       console.error('Failed to delete MCP server:', error);
-      alert('删除失败: ' + (error as Error).message);
+      // 删除失败时触发关闭动画
+      confirmModalRef?.modalRef?.handleClose();
     }
   }
 
@@ -124,11 +156,11 @@
     if (!server) return '';
     switch (server.connectionType) {
       case 'stdio':
-        return '标准输入输出 (stdio)';
+        return 'stdio';
       case 'sse':
-        return '服务器发送事件 (SSE)';
+        return 'SSE';
       case 'http':
-        return 'HTTP 端点';
+        return 'HTTP';
       default:
         return server.connectionType;
     }
@@ -156,8 +188,8 @@
         enabled
       });
 
-      // 手动更新状态
-      await mcpActions.loadServers();
+      // 强制刷新服务器列表，确保列表页和详情页数据同步
+      await mcpActions.loadServers(true);
     } catch (error) {
       console.error('Failed to update tool enabled status:', error);
     }
@@ -186,22 +218,53 @@
     {#if server}
       <!-- 基本信息卡片 -->
       <TableGroup>
-        <TableBaseRow label={server.displayName || server.name}>
-          <div class="flex flex-row items-center gap-4">
-            <IconButton icon={SquarePen} on:click={handleEdit} />
-            <IconButton icon={Trash2} on:click={handleDelete} />
-            <IconButton
-              icon={RefreshCw}
-              on:click={handleRefresh}
-              disabled={!server.enabled || isRefreshing}
-              customClass={isRefreshing ? 'animate-spin' : ''}
-            />
-            <Toggle checked={formData.enabled} onChange={handleToggle} />
+        <div class="px-6 py-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-base-content">{server.displayName || server.name}</span>
+              <span class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary">
+                {connectionTypeLabel()}
+              </span>
+            </div>
+            <div class="flex flex-row items-center gap-4">
+              <IconButton icon={SquarePen} on:click={handleEdit} />
+              <IconButton icon={Trash2} on:click={handleDelete} />
+              <IconButton
+                icon={RefreshCw}
+                on:click={handleRefresh}
+                disabled={!server.enabled || isRefreshing}
+                customClass={isRefreshing ? 'animate-spin' : ''}
+              />
+              <Toggle checked={formData.enabled} onChange={handleToggle} />
+            </div>
           </div>
-        </TableBaseRow>
+        </div>
       </TableGroup>
 
-      <!-- Tab 导航 -->
+      <!-- 同步时间信息 -->
+      {#if server.lastSyncAt}
+        <div class="px-6 mt-2 mb-4">
+          <span class="text-xs text-base-content/60">
+            最后同步: {formatDateTime(server.lastSyncAt)}
+          </span>
+        </div>
+      {/if}
+
+      <!-- 错误信息展示 -->
+      {#if server.status === 'error' && server.lastError}
+        <div class="mt-4 p-4 rounded-lg bg-error/10 border border-error/20">
+          <div class="text-sm text-error font-medium mb-2">
+            {getErrorTypeDisplayName(server.lastError.errorType)}
+          </div>
+          <div class="text-xs text-error/80 mb-1">{server.lastError.message}</div>
+          {#if server.lastError.details}
+            <div class="text-xs text-error/60 mt-2 font-mono">{server.lastError.details}</div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Tab 导航（仅在非错误状态时显示） -->
+      {#if server.status !== 'error'}
       <Tabs
         value={activeTab}
         items={[
@@ -233,6 +296,7 @@
                       checked={server.enabledTools.includes(tool.name)}
                       onChange={(enabled) => handleToolToggle(tool.name, enabled)}
                     />
+                    <!-- 工具开关不受服务器启用状态影响，可以随时配置 -->
                   </div>
 
                   {#if tool.inputSchema && typeof tool.inputSchema === 'object' && 'properties' in tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0}
@@ -299,10 +363,10 @@
                     >
                       {#if expandedPrompts[prompt.name]}
                         <ChevronDown size={14} />
-                        <span>隐藏参数</span>
+                        <span>参数</span>
                       {:else}
                         <ChevronRight size={14} />
-                        <span>显示参数 ({prompt.arguments.length})</span>
+                        <span>参数 ({prompt.arguments.length})</span>
                       {/if}
                     </button>
 
@@ -349,10 +413,10 @@
                   >
                     {#if expandedResources[resource.uri]}
                       <ChevronDown size={14} />
-                      <span>隐藏详情</span>
+                      <span>详情</span>
                     {:else}
                       <ChevronRight size={14} />
-                      <span>显示详情</span>
+                      <span>详情</span>
                     {/if}
                   </button>
 
@@ -376,6 +440,31 @@
           </div>
         {/if}
       {/if}
+      {/if}
     {/if}
   </main>
 </div>
+
+<!-- 编辑弹窗 -->
+<McpServerFormModal
+  open={showEditModal}
+  server={server}
+  onClose={closeEditModal}
+  onSave={handleSaveServer}
+/>
+
+<!-- 删除确认弹窗 -->
+<ConfirmModal
+  bind:this={confirmModalRef}
+  open={showDeleteConfirm}
+  title="删除 MCP 服务器"
+  message="确认要删除 <span class='font-medium'>{server?.displayName || server?.name}</span> 吗？<br/><br/>此操作无法撤销。"
+  confirmText="删除"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  isLoading={mcpState.isLoading}
+  autoCloseOnConfirm={false}
+  onClose={() => (showDeleteConfirm = false)}
+  onConfirm={confirmDelete}
+  onCancel={() => {}}
+/>

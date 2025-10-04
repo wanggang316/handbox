@@ -167,6 +167,16 @@ impl McpService {
             }
         }
 
+        // 检查是否需要重新连接刷新元数据
+        let connection_params_changed = request.command.is_some()
+            || request.args.is_some()
+            || request.working_dir.is_some()
+            || request.env.is_some()
+            || request.connection_type.is_some()
+            || request.endpoint.is_some()
+            || request.headers.is_some()
+            || request.timeout_ms.is_some();
+
         let mut should_refresh = false;
         if let Some(enabled) = request.enabled {
             existing.enabled = enabled;
@@ -179,6 +189,11 @@ impl McpService {
             if !enabled {
                 existing.last_error = None;
             }
+        }
+
+        // 如果连接参数发生变化且服务器是启用状态，需要重新连接
+        if connection_params_changed && existing.enabled {
+            should_refresh = true;
         }
 
         existing.updated_at = Self::current_timestamp();
@@ -278,8 +293,21 @@ impl McpService {
                     server.name,
                     error
                 );
+                // 连接失败时清空工具、提示、资源数据
+                server.tools = Vec::new();
+                server.prompts = Vec::new();
+                server.resources = Vec::new();
+                server.enabled_tools = Vec::new();
                 server.status = McpServerStatus::Error;
-                server.last_error = Some(error.to_string());
+
+                // 创建详细的错误信息
+                use crate::models::McpErrorDetail;
+                server.last_error = Some(McpErrorDetail {
+                    error_type: Self::classify_error(&error),
+                    message: error.to_string(),
+                    details: error.source().map(|s| s.to_string()),
+                    timestamp: Self::current_timestamp(),
+                });
             }
         }
     }
@@ -393,6 +421,96 @@ impl McpService {
             .as_millis() as i64
     }
 
+    /// 根据错误信息分类错误类型
+    ///
+    /// 基于 rmcp 库的错误类型和 reqwest 错误进行分类:
+    /// - ClientInitializeError: ExpectedInitResponse, ConflictInitResponseId, ConnectionClosed, Cancelled
+    /// - ServiceError: McpError, TransportSend, TransportClosed, UnexpectedResponse, Cancelled, Timeout
+    /// - reqwest::Error: kind (Request, Redirect, Status, Body, Decode, Upgrade, Builder)
+    fn classify_error(error: &anyhow::Error) -> crate::models::McpErrorType {
+        use crate::models::McpErrorType;
+
+        let error_msg = error.to_string().to_lowercase();
+        let error_chain = format!("{:?}", error).to_lowercase();
+
+        // 1. rmcp 传输层错误 (TransportSend, TransportClosed, ConnectionClosed)
+        // 包括 reqwest 连接错误: ConnectionRefused, ConnectError
+        if error_msg.contains("transport closed")
+            || error_msg.contains("connection closed")
+            || error_msg.contains("transport send")
+            || error_msg.contains("connection refused")
+            || error_msg.contains("connectionrefused")
+            || error_chain.contains("connectionrefused")
+            || error_chain.contains("connecterror")
+            || error_msg.contains("connect error")
+            || error_msg.contains("tcp connect")
+            || error_msg.contains("refused")
+            || error_msg.contains("unreachable")
+            || error_msg.contains("network")
+            || error_msg.contains("no route to host")
+            || error_msg.contains("host not found")
+            || error_msg.contains("dns")
+            || error_msg.contains("connection reset")
+            || error_msg.contains("broken pipe") {
+            return McpErrorType::ConnectionError;
+        }
+
+        // 2. 超时错误 (rmcp ServiceError::Timeout 或 reqwest timeout)
+        if error_msg.contains("timeout")
+            || error_msg.contains("timed out")
+            || error_msg.contains("deadline")
+            || error_msg.contains("time limit")
+            || error_msg.contains("request timeout") {
+            return McpErrorType::TimeoutError;
+        }
+
+        // 3. 认证错误 (HTTP 401, 403)
+        if error_msg.contains("auth")
+            || error_msg.contains("unauthorized")
+            || error_msg.contains("forbidden")
+            || error_msg.contains("401")
+            || error_msg.contains("403")
+            || error_msg.contains("permission denied") {
+            return McpErrorType::AuthenticationError;
+        }
+
+        // 4. 配置错误 (ClientInitializeError 初始化失败, 命令/文件不存在)
+        if error_msg.contains("invalid")
+            || error_msg.contains("missing")
+            || error_msg.contains("required")
+            || error_msg.contains("command not found")
+            || error_msg.contains("no such file")
+            || error_msg.contains("executable not found")
+            || error_msg.contains("expect initialized")
+            || error_msg.contains("conflict initialized")
+            || error_msg.contains("client initialize") {
+            return McpErrorType::ConfigurationError;
+        }
+
+        // 5. 协议错误 (rmcp ServiceError::McpError, UnexpectedResponse, 解析错误)
+        if error_msg.contains("protocol")
+            || error_msg.contains("mcp error")
+            || error_msg.contains("unexpected response")
+            || error_msg.contains("parse")
+            || error_msg.contains("decode")
+            || error_msg.contains("malformed")
+            || error_msg.contains("invalid response")
+            || error_msg.contains("unexpected eof")
+            || error_msg.contains("json")
+            || error_chain.contains("mcperror")
+            || error_chain.contains("unexpectedresponse") {
+            return McpErrorType::ProtocolError;
+        }
+
+        // 6. 取消操作 (虽然不算严格意义上的错误，但归为配置问题)
+        if error_msg.contains("cancelled") || error_msg.contains("canceled") {
+            return McpErrorType::ConfigurationError;
+        }
+
+        // 默认为未知错误
+        McpErrorType::UnknownError
+    }
+
     async fn fetch_server_metadata(
         &self,
         server: &McpServer,
@@ -415,8 +533,30 @@ impl McpService {
 
         // Convert results
         let tools = tools_result?;
-        let prompts = Self::convert_prompts(prompts_result?);
-        let resources = Self::convert_resources(resources_result?);
+
+        // Handle prompts - ignore "Method not found" error (-32601)
+        let prompts = match prompts_result {
+            Ok(p) => Self::convert_prompts(p),
+            Err(crate::mcp_client::McpClientError::ServiceError(
+                rmcp::service::ServiceError::McpError(ref error)
+            )) if error.code.0 == -32601 => {
+                tracing::debug!("list_prompts not supported by server {}, ignoring", server.name);
+                Vec::new()
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        // Handle resources - ignore "Method not found" error (-32601)
+        let resources = match resources_result {
+            Ok(r) => Self::convert_resources(r),
+            Err(crate::mcp_client::McpClientError::ServiceError(
+                rmcp::service::ServiceError::McpError(ref error)
+            )) if error.code.0 == -32601 => {
+                tracing::debug!("list_resources not supported by server {}, ignoring", server.name);
+                Vec::new()
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         Ok((tools, prompts, resources))
     }

@@ -24,7 +24,7 @@ export async function updateMcpServer(
 }
 
 export async function deleteMcpServer(serverId: string): Promise<void> {
-  await apiCall<void>('mcp_delete_server', { server_id: serverId });
+  await apiCall<void>('mcp_delete_server', { serverId: serverId });
 }
 
 export async function toggleMcpServer(request: ToggleMcpServerRequest): Promise<McpServer> {

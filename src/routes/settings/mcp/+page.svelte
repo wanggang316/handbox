@@ -1,28 +1,33 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
-  import TableGroup from '$lib/components/ui/table/TableGroup.svelte';
-  import StatusLabel from '$lib/components/ui/StatusLabel.svelte';
-  import Button from '$lib/components/ui/Button.svelte';
-  import McpServerFormModal from '$lib/components/settings/McpServerFormModal.svelte';
-  import { mcpState, mcpActions } from '$lib/states/mcp.svelte';
-  import type { McpServer, McpServerStatus } from '$lib/types';
-  import { LoaderCircle, Puzzle, ChevronRight } from '@lucide/svelte';
+  import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
+  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
+  import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
+  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
+  import type { McpServer, McpServerStatus } from "$lib/types";
+  import { getErrorTypeDisplayName } from "$lib/utils/mcpError";
+  import { formatDateTime } from "$lib/utils/date";
+  import {
+    LoaderCircle,
+    Puzzle,
+    ChevronsUpDown,
+    Settings2,
+  } from "@lucide/svelte";
 
   let showFormModal = $state(false);
   let editingServer = $state<McpServer | null>(null);
+  let expandedTools = $state<Record<string, boolean>>({});
 
   onMount(() => {
     if (!mcpState.initialized) {
-      mcpActions.loadServers().catch(error => {
-        console.error('Failed to load MCP servers:', error);
+      mcpActions.loadServers().catch((error) => {
+        console.error("Failed to load MCP servers:", error);
       });
     }
   });
-
-  function handleServerClick(server: McpServer) {
-    goto(`/settings/mcp/${server.id}`);
-  }
 
   function handleAddServer() {
     editingServer = null;
@@ -34,47 +39,33 @@
     editingServer = null;
   }
 
-  function getServerStatus(server: McpServer): 'enabled' | 'disabled' | 'idle' | 'error' {
-    if (!server.enabled) return 'disabled';
-
-    switch (server.status) {
-      case 'ready':
-        return 'enabled';
-      case 'error':
-        return 'error';
-      case 'inactive':
-        return 'idle';
-      default:
-        return 'idle';
-    }
-  }
-
-  function getServerStatusText(server: McpServer): string {
-    if (!server.enabled) return '已禁用';
-
-    switch (server.status) {
-      case 'ready':
-        return '就绪';
-      case 'error':
-        return '错误';
-      case 'inactive':
-        return '未激活';
-      default:
-        return '未知';
-    }
-  }
-
   function getConnectionTypeLabel(connectionType: string): string {
     switch (connectionType) {
-      case 'stdio':
-        return 'stdio';
-      case 'sse':
-        return 'SSE';
-      case 'http':
-        return 'HTTP';
+      case "stdio":
+        return "stdio";
+      case "sse":
+        return "SSE";
+      case "http":
+        return "HTTP";
       default:
         return connectionType;
     }
+  }
+
+  function toggleTools(serverId: string) {
+    expandedTools[serverId] = !expandedTools[serverId];
+  }
+
+  async function handleToggleServer(server: McpServer, enabled: boolean) {
+    try {
+      await mcpActions.toggleServer({ serverId: server.id, enabled });
+    } catch (error) {
+      console.error("Failed to toggle MCP server:", error);
+    }
+  }
+
+  function handleEditServer(server: McpServer, event: CustomEvent) {
+    goto(`/settings/mcp/${server.id}`);
   }
 </script>
 
@@ -83,7 +74,9 @@
   {#if mcpState.isLoading}
     <div class="flex items-center justify-center py-8">
       <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
-      <span class="ml-2 text-sm text-base-content/70">正在加载 MCP 服务器...</span>
+      <span class="ml-2 text-sm text-base-content/70"
+        >正在加载 MCP 服务器...</span
+      >
     </div>
   {/if}
 
@@ -91,29 +84,84 @@
     <!-- MCP 服务器列表 -->
     <TableGroup>
       {#each mcpState.servers as server (server.id)}
-        <button
-          class="w-full hover:bg-base-300 group px-6 py-4 border-b border-base-300 last:border-b-0"
-          onclick={() => handleServerClick(server)}
-        >
-          <div class="flex items-center justify-between">
-            <div class="flex-1 text-left">
-              <div class="flex items-center gap-2 mb-1">
-                <span class="text-sm font-medium text-base-content">{server.displayName || server.name}</span>
-                <span class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary">
-                  {getConnectionTypeLabel(server.connectionType)}
-                </span>
-              </div>
-              {#if server.description}
-                <p class="text-xs text-base-content/60">{server.description}</p>
-              {/if}
+        <div class="w-full px-6 py-4">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex flex-1 items-center gap-2">
+              <span class="text-sm font-medium text-base-content"
+                >{server.displayName || server.name}</span
+              >
+              <span
+                class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary"
+              >
+                {getConnectionTypeLabel(server.connectionType)}
+              </span>
             </div>
 
-            <div class="flex items-center gap-3">
-              <StatusLabel status={getServerStatus(server)} text={getServerStatusText(server)} />
-              <ChevronRight size={16} class="text-base-content/50 group-hover:text-base-content transition-colors" />
+            <div class="flex items-center gap-2">
+              <Toggle
+                checked={server.enabled}
+                onChange={(enabled) => handleToggleServer(server, enabled)}
+              />
+              <IconButton
+                icon={Settings2}
+                iconSize={16}
+                ariaLabel="编辑"
+                size="w-7 h-7"
+                on:click={(e) => handleEditServer(server, e)}
+              />
             </div>
           </div>
-        </button>
+          <div>
+            <!-- 工具统计信息或错误信息 -->
+            {#if server.status === 'error' && server.lastError}
+              <div class="text-xs text-error">
+                {getErrorTypeDisplayName(server.lastError.errorType)}: {server.lastError.message}
+              </div>
+            {:else if server.tools.length > 0}
+              <div class="flex items-center gap-2">
+                <button
+                  class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded px-1 -ml-1 py-0.5 transition-colors"
+                  onclick={() => toggleTools(server.id)}
+                >
+                  <span
+                    >{server.tools.length} tools, {server.enabledTools.length} enabled</span
+                  >
+                  <ChevronsUpDown size={12} />
+                </button>
+                {#if server.lastSyncAt}
+                  <span class="text-xs text-base-content/50">
+                    · {formatDateTime(server.lastSyncAt)}
+                  </span>
+                {/if}
+              </div>
+            {:else}
+              <div class="flex items-center gap-2">
+                <div class="text-xs text-base-content/60">0 tools, 0 enabled</div>
+                {#if server.lastSyncAt}
+                  <span class="text-xs text-base-content/50">
+                    · {formatDateTime(server.lastSyncAt)}
+                  </span>
+                {/if}
+              </div>
+            {/if}
+            <!-- 工具列表 -->
+            {#if expandedTools[server.id] && server.tools.length > 0}
+              <div class="flex flex-wrap gap-1 mt-2">
+                {#each server.tools as tool}
+                  <span
+                    class="px-2 py-0.5 text-xs rounded-full {server.enabledTools.includes(
+                      tool.name,
+                    )
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-base-300 text-base-content/60'}"
+                  >
+                    {tool.name}
+                  </span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
       {/each}
 
       <!-- 空状态 -->
@@ -135,7 +183,7 @@
   {#if mcpState.servers.length > 0}
     <div>
       <Button variant="gray" size="sm" on:click={handleAddServer}>
-        添加其它 MCP 服务器
+        添加 MCP 服务器
       </Button>
     </div>
   {/if}
