@@ -1547,6 +1547,121 @@ impl MessageService {
             tool_calls: llm_response.tool_calls,
         })
     }
+
+    /// 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
+    pub async fn resend_user_message(&self, message_id: UUID) -> Result<MessageResponse, AppError> {
+        tracing::info!(
+            "[MessageService::resend_user_message] Resending user message: {}",
+            message_id
+        );
+
+        // 1. 获取要重发的消息
+        let message = self.get_message(message_id.clone()).await?;
+
+        // 2. 验证消息是否为用户消息
+        if message.role != ChatMessageRole::User {
+            let error = "Can only resend user messages";
+            tracing::error!(
+                "[MessageService::resend_user_message] Validation failed for message_id {}: {}",
+                message_id,
+                error
+            );
+            return Err(AppError::validation_error(error));
+        }
+
+        // 3. 删除该消息之后的所有消息
+        let deleted_count = self
+            .repository
+            .delete_messages_after(&message.chat_id, &message_id)
+            .await?;
+
+        tracing::info!(
+            "[MessageService::resend_user_message] Deleted {} messages after message_id {}",
+            deleted_count,
+            message_id
+        );
+
+        // 4. 获取聊天的所有消息（现在不包含被删除的消息）
+        let chat_messages = self
+            .repository
+            .get_all_messages_by_chat(&message.chat_id, 100, 0)
+            .await?;
+
+        // 5. 获取聊天配置
+        let chat = self.chat_service.get_chat(message.chat_id.clone()).await?;
+
+        // 6. 构建消息数组
+        let mut request_messages = Vec::new();
+
+        // 添加系统提示词
+        if let Some(system_prompt) = &chat.system_prompt {
+            if !system_prompt.trim().is_empty() {
+                request_messages.push(ChatMessage {
+                    role: ChatMessageRole::System,
+                    content: system_prompt.clone(),
+                    reasoning: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+            }
+        }
+
+        // 添加历史消息
+        request_messages.extend(chat_messages.iter().map(|m| ChatMessage {
+            role: m.role.clone(),
+            content: m.content.clone(),
+            reasoning: m.reasoning.clone(),
+            tool_calls: m.tool_calls.clone(),
+            tool_call_id: None,
+        }));
+
+        // 7. 构建请求并发送
+        let resend_request = MessageRequest {
+            chat_id: Some(message.chat_id.clone()),
+            model_id: message
+                .config
+                .as_ref()
+                .and_then(|c| c.model_id.clone())
+                .or_else(|| chat.model_id.clone())
+                .unwrap_or_default(),
+            provider_id: message
+                .config
+                .as_ref()
+                .and_then(|c| c.provider_id.clone())
+                .or_else(|| chat.provider_id.clone())
+                .unwrap_or_default(),
+            messages: request_messages,
+            attachments: None,
+        };
+
+        // 8. 发送消息
+        self.send_message(resend_request).await
+    }
+
+    /// 删除消息之后的所有消息（用于手动工具执行前的清理）
+    pub async fn delete_messages_after(
+        &self,
+        chat_id: UUID,
+        message_id: UUID,
+    ) -> Result<u64, AppError> {
+        tracing::info!(
+            "[MessageService::delete_messages_after] Deleting messages after message_id {} in chat {}",
+            message_id,
+            chat_id
+        );
+
+        let deleted_count = self
+            .repository
+            .delete_messages_after(&chat_id, &message_id)
+            .await?;
+
+        tracing::info!(
+            "[MessageService::delete_messages_after] Deleted {} messages",
+            deleted_count
+        );
+
+        Ok(deleted_count)
+    }
 }
 
 #[cfg(test)]

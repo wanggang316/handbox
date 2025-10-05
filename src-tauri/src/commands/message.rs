@@ -257,6 +257,28 @@ pub async fn message_regenerate(
     }
 }
 
+/// 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
+#[tauri::command]
+pub async fn message_resend(
+    message_id: UUID,
+    message_service: State<'_, MessageService>,
+) -> Result<MessageResponse, AppError> {
+    tracing::info!(
+        "[message_resend] IPC command called for message_id: {}",
+        message_id
+    );
+    match message_service.resend_user_message(message_id).await {
+        Ok(response) => {
+            tracing::info!("[message_resend] Command completed successfully");
+            Ok(response)
+        }
+        Err(e) => {
+            tracing::error!("[message_resend] Command failed: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
 /// 发送流式消息
 #[tauri::command]
 pub async fn message_send_stream(

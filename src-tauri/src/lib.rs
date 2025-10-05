@@ -129,6 +129,7 @@ pub fn run() {
             message_update,
             message_delete,
             message_regenerate,
+            message_resend,
             // message_execute_mcp_call, // Temporarily removed
             message_execute_tool_calls,
             message_execute_tool_calls_stream,

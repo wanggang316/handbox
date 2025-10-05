@@ -444,6 +444,28 @@ impl MessageRepository {
         Ok(())
     }
 
+    /// 删除某个消息之后的所有消息（基于 created_at 时间戳）
+    pub async fn delete_messages_after(
+        &self,
+        chat_id: &UUID,
+        message_id: &UUID,
+    ) -> Result<u64, AppError> {
+        // 首先获取目标消息的创建时间
+        let target_message = self.get_message(message_id).await?;
+
+        // 删除该聊天下所有创建时间晚于目标消息的消息
+        let result = sqlx::query("DELETE FROM messages WHERE chat_id = $1 AND created_at > $2")
+            .bind(chat_id)
+            .bind(target_message.created_at)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to delete messages after: {}", e))
+            })?;
+
+        Ok(result.rows_affected())
+    }
+
     /// 获取聊天的消息数量
     pub async fn get_message_count_by_chat(&self, chat_id: &UUID) -> Result<i32, AppError> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM messages WHERE chat_id = $1")

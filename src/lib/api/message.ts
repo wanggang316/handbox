@@ -71,6 +71,13 @@ export async function regenerateMessage(messageId: UUID): Promise<MessageRespons
 }
 
 /**
+ * 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
+ */
+export async function resendMessage(messageId: UUID): Promise<MessageResponse> {
+  return await apiCall<any>('message_resend', { messageId: messageId });
+}
+
+/**
  * 发送流式消息
  */
 export async function sendStreamMessage(request: MessageRequest): Promise<void> {
