@@ -451,7 +451,8 @@ impl MessageRepository {
         message_id: &UUID,
     ) -> Result<u64, AppError> {
         // 首先获取目标消息的创建时间
-        let target_message = self.get_message(message_id).await?;
+        let target_message = self.get_message_by_id(message_id).await?
+            .ok_or_else(|| AppError::not_found(&format!("Message not found: {}", message_id)))?;
 
         // 删除该聊天下所有创建时间晚于目标消息的消息
         let result = sqlx::query("DELETE FROM messages WHERE chat_id = $1 AND created_at > $2")

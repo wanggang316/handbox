@@ -108,11 +108,11 @@ impl McpRepository {
             INSERT INTO mcps (
                 id, name, display_name, description, connection_type, command, args, working_dir, env,
                 endpoint, headers, timeout_ms, enabled, status, tools, prompts, resources, enabled_tools,
-                tool_execution_mode, last_sync_at, last_error, created_at, updated_at
+                last_sync_at, last_error, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9,
                 $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22, $23
+                $19, $20, $21, $22
             )
         "#;
 
@@ -135,10 +135,6 @@ impl McpRepository {
             .bind(serde_json::to_string(&server.prompts).unwrap_or_else(|_| "[]".to_string()))
             .bind(serde_json::to_string(&server.resources).unwrap_or_else(|_| "[]".to_string()))
             .bind(serde_json::to_string(&server.enabled_tools).unwrap_or_else(|_| "[]".to_string()))
-            .bind(
-                serde_json::to_string(&server.tool_execution_mode)
-                    .unwrap_or_else(|_| "{}".to_string()),
-            )
             .bind(server.last_sync_at)
             .bind(
                 server
@@ -178,11 +174,10 @@ impl McpRepository {
                 prompts = $15,
                 resources = $16,
                 enabled_tools = $17,
-                tool_execution_mode = $18,
-                last_sync_at = $19,
-                last_error = $20,
-                updated_at = $21
-            WHERE id = $22
+                last_sync_at = $18,
+                last_error = $19,
+                updated_at = $20
+            WHERE id = $21
         "#;
 
         let result = sqlx::query(query)
@@ -203,10 +198,6 @@ impl McpRepository {
             .bind(serde_json::to_string(&server.prompts).unwrap_or_else(|_| "[]".to_string()))
             .bind(serde_json::to_string(&server.resources).unwrap_or_else(|_| "[]".to_string()))
             .bind(serde_json::to_string(&server.enabled_tools).unwrap_or_else(|_| "[]".to_string()))
-            .bind(
-                serde_json::to_string(&server.tool_execution_mode)
-                    .unwrap_or_else(|_| "{}".to_string()),
-            )
             .bind(server.last_sync_at)
             .bind(
                 server
@@ -355,11 +346,6 @@ impl McpRepository {
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
 
-        let tool_execution_mode: HashMap<String, crate::models::ToolExecutionMode> = row
-            .try_get::<Option<String>, _>("tool_execution_mode")?
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default();
-
         let status_value: String = row.try_get("status")?;
         let connection_type_value: String = row
             .try_get("connection_type")
@@ -386,7 +372,6 @@ impl McpRepository {
             prompts,
             resources,
             enabled_tools,
-            tool_execution_mode,
             last_sync_at: row.try_get("last_sync_at").ok(),
             last_error: row
                 .try_get::<Option<String>, _>("last_error")

@@ -89,38 +89,8 @@
     return message?.id ? !!messageStore.executingMessages[message.id] : false;
   });
 
-  // 检查工具是否需要手动执行
-  const needsManualExecution = $derived(() => {
-    const calls = toolCalls();
-    if (calls.length === 0) return false;
-
-    // 获取当前 chat 的 MCP 服务器列表
-    const chatMcpServers = message?.config?.mcpServers || [];
-    if (chatMcpServers.length === 0) return false;
-
-    // 检查任何工具是否设置为手动执行
-    return calls.some(call => {
-      const toolName = call.function?.name;
-      if (!toolName) return false;
-
-      // 查找包含此工具的 MCP 服务器
-      for (const serverId of chatMcpServers) {
-        const server = mcpState.servers.find(s => s.id === serverId);
-        if (!server) continue;
-
-        // 检查服务器是否有此工具
-        const hasTool = server.tools.some(t => t.name === toolName);
-        if (!hasTool) continue;
-
-        // 检查工具执行模式
-        const executionMode = server.toolExecutionMode[toolName];
-        if (executionMode === 'manual') {
-          return true;
-        }
-      }
-      return false;
-    });
-  });
+  // 所有工具调用都自动执行
+  const needsManualExecution = $derived(() => false);
 
   async function handleExecuteToolCalls() {
     const calls = toolCalls();

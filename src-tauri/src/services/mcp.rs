@@ -10,8 +10,8 @@ use crate::mcp_client::{
 };
 use crate::models::{
     AppError, CreateMcpServerRequest, McpPrompt, McpResource, McpServer, McpServerStatus, McpTool,
-    RefreshMcpServerRequest, ToggleMcpServerRequest, ToolExecutionMode, UpdateMcpServerRequest,
-    UpdateToolEnabledRequest, UpdateToolExecutionModeRequest,
+    RefreshMcpServerRequest, ToggleMcpServerRequest, UpdateMcpServerRequest,
+    UpdateToolEnabledRequest,
 };
 use crate::services::Database;
 use crate::storage::McpRepository;
@@ -80,7 +80,6 @@ impl McpService {
             prompts: Vec::new(),
             resources: Vec::new(),
             enabled_tools: Vec::new(),
-            tool_execution_mode: HashMap::new(),
             last_sync_at: None,
             last_error: None,
             created_at: now,
@@ -275,23 +274,6 @@ impl McpService {
                 .enabled_tools
                 .retain(|name| name != &request.tool_name);
         }
-
-        server.updated_at = Self::current_timestamp();
-        self.repository.update_server(&server).await?;
-        Ok(server)
-    }
-
-    /// Update tool execution mode
-    pub async fn update_tool_execution_mode(
-        &self,
-        request: UpdateToolExecutionModeRequest,
-    ) -> Result<McpServer, AppError> {
-        let mut server = self.get_server(&request.server_id).await?;
-
-        // Update tool_execution_mode map
-        server
-            .tool_execution_mode
-            .insert(request.tool_name.clone(), request.execution_mode);
 
         server.updated_at = Self::current_timestamp();
         self.repository.update_server(&server).await?;
