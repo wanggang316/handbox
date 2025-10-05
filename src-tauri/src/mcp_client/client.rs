@@ -48,21 +48,16 @@ impl McpClient {
     pub async fn connect_process(config: ProcessConfig) -> McpClientResult<Self> {
         let stats = ClientStats::new();
 
-        let transport = ProcessTransport::new(config)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to create process transport: {}", e);
-                McpClientError::connection_failed(e.to_string())
-            })?;
+        let transport = ProcessTransport::new(config).await.map_err(|e| {
+            tracing::error!("Failed to create process transport: {}", e);
+            McpClientError::connection_failed(e.to_string())
+        })?;
 
         let client_info = create_client_info();
-        let service = client_info
-            .serve(transport)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to establish MCP connection: {}", e);
-                McpClientError::ClientInitializeError(e.to_string())
-            })?;
+        let service = client_info.serve(transport).await.map_err(|e| {
+            tracing::error!("Failed to establish MCP connection: {}", e);
+            McpClientError::ClientInitializeError(e.to_string())
+        })?;
 
         // Log connection info
         let server_info = service.peer();
@@ -78,21 +73,16 @@ impl McpClient {
         let stats = ClientStats::new();
 
         // Create the SSE transport
-        let transport = SseTransport::connect(&config)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to create SSE transport: {}", e);
-                McpClientError::connection_failed(e.to_string())
-            })?;
+        let transport = SseTransport::connect(&config).await.map_err(|e| {
+            tracing::error!("Failed to create SSE transport: {}", e);
+            McpClientError::connection_failed(e.to_string())
+        })?;
 
         let client_info = create_client_info();
-        let service = client_info
-            .serve(transport)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to establish MCP SSE connection: {}", e);
-                McpClientError::ClientInitializeError(e.to_string())
-            })?;
+        let service = client_info.serve(transport).await.map_err(|e| {
+            tracing::error!("Failed to establish MCP SSE connection: {}", e);
+            McpClientError::ClientInitializeError(e.to_string())
+        })?;
 
         // Log connection info
         let server_info = service.peer();
@@ -110,20 +100,16 @@ impl McpClient {
 
         let stats = ClientStats::new();
 
-        let transport = StreamableHttpTransport::connect(&config)
-            .map_err(|e| {
-                tracing::error!("Failed to create streamable HTTP transport: {}", e);
-                McpClientError::connection_failed(e.to_string())
-            })?;
+        let transport = StreamableHttpTransport::connect(&config).map_err(|e| {
+            tracing::error!("Failed to create streamable HTTP transport: {}", e);
+            McpClientError::connection_failed(e.to_string())
+        })?;
 
         let client_info = create_client_info();
-        let service = client_info
-            .serve(transport)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to establish MCP HTTP connection: {}", e);
-                McpClientError::ClientInitializeError(e.to_string())
-            })?;
+        let service = client_info.serve(transport).await.map_err(|e| {
+            tracing::error!("Failed to establish MCP HTTP connection: {}", e);
+            McpClientError::ClientInitializeError(e.to_string())
+        })?;
 
         let server_info = service.peer();
         tracing::info!("Connected to MCP server via HTTP: {:#?}", server_info);
@@ -133,20 +119,20 @@ impl McpClient {
 
     /// List all tools exposed by the connected MCP server
     pub async fn list_tools(&self) -> McpClientResult<Vec<McpTool>> {
-        let tools = self
-            .service
-            .list_all_tools()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to list MCP tools: {}", e);
-                McpClientError::ServiceError(e)
-            })?;
+        let tools = self.service.list_all_tools().await.map_err(|e| {
+            tracing::error!("Failed to list MCP tools: {}", e);
+            McpClientError::ServiceError(e)
+        })?;
 
         Ok(tools.into_iter().map(convert_tool).collect())
     }
 
     /// Call a tool by name with optional JSON arguments
-    pub async fn call_tool(&self, name: &str, arguments: Option<Value>) -> McpClientResult<CallToolResult> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: Option<Value>,
+    ) -> McpClientResult<CallToolResult> {
         let arguments = match arguments {
             Some(Value::Object(map)) => Some(map),
             Some(other) => {
@@ -164,15 +150,11 @@ impl McpClient {
             arguments,
         };
 
-        let result = self
-            .service
-            .call_tool(request)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to call MCP tool '{}': {}", name, e);
-                self.record_error();
-                McpClientError::ServiceError(e)
-            });
+        let result = self.service.call_tool(request).await.map_err(|e| {
+            tracing::error!("Failed to call MCP tool '{}': {}", name, e);
+            self.record_error();
+            McpClientError::ServiceError(e)
+        });
 
         if result.is_ok() {
             self.record_tool_call();
@@ -183,30 +165,26 @@ impl McpClient {
 
     /// List all resources exposed by the server
     pub async fn list_resources(&self) -> McpClientResult<Vec<rmcp::model::Resource>> {
-        self.service
-            .list_all_resources()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to list MCP resources: {}", e);
-                McpClientError::ServiceError(e)
-            })
+        self.service.list_all_resources().await.map_err(|e| {
+            tracing::error!("Failed to list MCP resources: {}", e);
+            McpClientError::ServiceError(e)
+        })
     }
 
     /// Read a specific resource
-    pub async fn read_resource(&self, uri: &str) -> McpClientResult<rmcp::model::ReadResourceResult> {
+    pub async fn read_resource(
+        &self,
+        uri: &str,
+    ) -> McpClientResult<rmcp::model::ReadResourceResult> {
         let request = rmcp::model::ReadResourceRequestParam {
             uri: uri.to_string().into(),
         };
 
-        let result = self
-            .service
-            .read_resource(request)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to read resource '{}': {}", uri, e);
-                self.record_error();
-                McpClientError::ServiceError(e)
-            });
+        let result = self.service.read_resource(request).await.map_err(|e| {
+            tracing::error!("Failed to read resource '{}': {}", uri, e);
+            self.record_error();
+            McpClientError::ServiceError(e)
+        });
 
         if result.is_ok() {
             self.record_resource_read();
@@ -217,13 +195,10 @@ impl McpClient {
 
     /// List all prompts exposed by the server
     pub async fn list_prompts(&self) -> McpClientResult<Vec<rmcp::model::Prompt>> {
-        self.service
-            .list_all_prompts()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to list MCP prompts: {}", e);
-                McpClientError::ServiceError(e)
-            })
+        self.service.list_all_prompts().await.map_err(|e| {
+            tracing::error!("Failed to list MCP prompts: {}", e);
+            McpClientError::ServiceError(e)
+        })
     }
 
     /// Get a specific prompt
@@ -237,15 +212,11 @@ impl McpClient {
             arguments,
         };
 
-        let result = self
-            .service
-            .get_prompt(request)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to get prompt '{}': {}", name, e);
-                self.record_error();
-                McpClientError::ServiceError(e)
-            });
+        let result = self.service.get_prompt(request).await.map_err(|e| {
+            tracing::error!("Failed to get prompt '{}': {}", name, e);
+            self.record_error();
+            McpClientError::ServiceError(e)
+        });
 
         if result.is_ok() {
             self.record_prompt_request();
@@ -273,13 +244,10 @@ impl McpClient {
     pub async fn shutdown(self) -> McpClientResult<()> {
         *self.status.lock().unwrap() = ConnectionStatus::Disconnected;
 
-        self.service
-            .cancel()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to shutdown MCP client: {}", e);
-                McpClientError::Other(format!("Shutdown error: {}", e))
-            })?;
+        self.service.cancel().await.map_err(|e| {
+            tracing::error!("Failed to shutdown MCP client: {}", e);
+            McpClientError::Other(format!("Shutdown error: {}", e))
+        })?;
         Ok(())
     }
 

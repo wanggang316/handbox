@@ -11,8 +11,8 @@
   import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
   import McpServerFormModal from '$lib/components/settings/McpServerFormModal.svelte';
   import { mcpState, mcpActions } from '$lib/states/mcp.svelte';
-  import { updateToolEnabled } from '$lib/api';
-  import type { McpServer } from '$lib/types';
+  import { updateToolEnabled, updateToolExecutionMode } from '$lib/api';
+  import type { McpServer, ToolExecutionMode } from '$lib/types';
   import { formatDateTime } from '$lib/utils/date';
   import { ChevronLeft, RefreshCw, SquarePen, Trash2, ChevronDown, ChevronRight } from '@lucide/svelte';
 
@@ -189,6 +189,23 @@
       console.error('Failed to update tool enabled status:', error);
     }
   }
+
+  async function handleExecutionModeChange(toolName: string, executionMode: ToolExecutionMode) {
+    if (!server) return;
+
+    try {
+      await updateToolExecutionMode({
+        serverId: server.id,
+        toolName,
+        executionMode
+      });
+
+      // 强制刷新服务器列表，确保列表页和详情页数据同步
+      await mcpActions.loadServers(true);
+    } catch (error) {
+      console.error('Failed to update tool execution mode:', error);
+    }
+  }
 </script>
 
 <!-- 页面布局：与 provider 详情页面一致 -->
@@ -293,6 +310,23 @@
                     />
                     <!-- 工具开关不受服务器启用状态影响，可以随时配置 -->
                   </div>
+
+                  <!-- 执行方式选择 -->
+                  {#if server.enabledTools.includes(tool.name)}
+                    <div class="mb-3">
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs text-base-content/60">执行方式:</span>
+                        <select
+                          class="text-xs px-2 py-1 rounded border border-base-300 bg-base-100 text-base-content"
+                          value={server.toolExecutionMode[tool.name] || 'auto'}
+                          onchange={(e) => handleExecutionModeChange(tool.name, (e.currentTarget as HTMLSelectElement).value as ToolExecutionMode)}
+                        >
+                          <option value="auto">自动执行</option>
+                          <option value="manual">手动执行</option>
+                        </select>
+                      </div>
+                    </div>
+                  {/if}
 
                   {#if tool.inputSchema && typeof tool.inputSchema === 'object' && 'properties' in tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0}
                     <button

@@ -2,7 +2,7 @@
 
 use crate::models::{
     AppError, CreateMcpServerRequest, McpServer, RefreshMcpServerRequest, ToggleMcpServerRequest,
-    UpdateMcpServerRequest, UpdateToolEnabledRequest,
+    UpdateMcpServerRequest, UpdateToolEnabledRequest, UpdateToolExecutionModeRequest,
 };
 use crate::services::McpService;
 use tauri::State;
@@ -68,4 +68,13 @@ pub async fn mcp_update_tool_enabled(
     mcp_service: State<'_, McpService>,
 ) -> Result<McpServer, AppError> {
     mcp_service.update_tool_enabled(request).await
+}
+
+/// 更新工具执行模式
+#[tauri::command]
+pub async fn mcp_update_tool_execution_mode(
+    request: UpdateToolExecutionModeRequest,
+    mcp_service: State<'_, McpService>,
+) -> Result<McpServer, AppError> {
+    mcp_service.update_tool_execution_mode(request).await
 }

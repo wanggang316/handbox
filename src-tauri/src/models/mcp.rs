@@ -209,6 +209,50 @@ pub struct McpErrorDetail {
     pub timestamp: i64,
 }
 
+/// Tool execution mode enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExecutionMode {
+    Auto,
+    Manual,
+}
+
+impl ToolExecutionMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ToolExecutionMode::Auto => "auto",
+            ToolExecutionMode::Manual => "manual",
+        }
+    }
+}
+
+impl std::fmt::Display for ToolExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ToolExecutionMode {
+    type Err = AppError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_lowercase().as_str() {
+            "auto" => Ok(ToolExecutionMode::Auto),
+            "manual" => Ok(ToolExecutionMode::Manual),
+            other => Err(AppError::validation_error(&format!(
+                "Unknown tool execution mode: {}",
+                other
+            ))),
+        }
+    }
+}
+
+impl Default for ToolExecutionMode {
+    fn default() -> Self {
+        ToolExecutionMode::Auto
+    }
+}
+
 /// MCP server definition stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -239,6 +283,8 @@ pub struct McpServer {
     pub resources: Vec<McpResource>,
     #[serde(default)]
     pub enabled_tools: Vec<String>,
+    #[serde(default)]
+    pub tool_execution_mode: HashMap<String, ToolExecutionMode>,
     pub last_sync_at: Option<i64>,
     pub last_error: Option<McpErrorDetail>,
     pub created_at: i64,
@@ -308,4 +354,13 @@ pub struct UpdateToolEnabledRequest {
     pub server_id: String,
     pub tool_name: String,
     pub enabled: bool,
+}
+
+/// Request payload for updating tool execution mode
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateToolExecutionModeRequest {
+    pub server_id: String,
+    pub tool_name: String,
+    pub execution_mode: ToolExecutionMode,
 }

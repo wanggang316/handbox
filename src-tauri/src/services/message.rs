@@ -81,8 +81,14 @@ pub enum ToolExecuteStatus {
 /// - `message_id`: 消息的唯一标识符
 /// - `tool_call_ids`: 工具调用ID列表
 /// - `status`: 工具执行状态
-pub trait ToolExecuteCallback: FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static {}
-impl<T> ToolExecuteCallback for T where T: FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static {}
+pub trait ToolExecuteCallback:
+    FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static
+{
+}
+impl<T> ToolExecuteCallback for T where
+    T: FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static
+{
+}
 
 /// 消息服务
 #[derive(Clone)]

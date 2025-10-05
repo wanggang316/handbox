@@ -335,7 +335,10 @@ pub async fn message_execute_tool_calls(
             },
             |_message_id, _tool_call_ids, status| {
                 // 工具执行状态回调
-                tracing::info!("[message_execute_tool_calls] Tool execution status: {:?}", status);
+                tracing::info!(
+                    "[message_execute_tool_calls] Tool execution status: {:?}",
+                    status
+                );
             },
         )
         .await;

@@ -10,8 +10,8 @@ use crate::mcp_client::{
 };
 use crate::models::{
     AppError, CreateMcpServerRequest, McpPrompt, McpResource, McpServer, McpServerStatus, McpTool,
-    RefreshMcpServerRequest, ToggleMcpServerRequest, UpdateMcpServerRequest,
-    UpdateToolEnabledRequest,
+    RefreshMcpServerRequest, ToggleMcpServerRequest, ToolExecutionMode, UpdateMcpServerRequest,
+    UpdateToolEnabledRequest, UpdateToolExecutionModeRequest,
 };
 use crate::services::Database;
 use crate::storage::McpRepository;
@@ -80,6 +80,7 @@ impl McpService {
             prompts: Vec::new(),
             resources: Vec::new(),
             enabled_tools: Vec::new(),
+            tool_execution_mode: HashMap::new(),
             last_sync_at: None,
             last_error: None,
             created_at: now,
@@ -88,7 +89,9 @@ impl McpService {
 
         if server.enabled {
             // 如果启用，尝试连接。连接失败则返回错误，不保存
-            self.update_server_status(&mut server).await;
+            self.update_server_status(&mut server)
+                .await
+                .map_err(|e| AppError::internal_error(&e.to_string()))?;
         }
 
         self.repository.create_server(&server).await?;
@@ -200,7 +203,10 @@ impl McpService {
         existing.updated_at = Self::current_timestamp();
 
         if should_refresh {
-            self.update_server_status(&mut existing).await;
+            // 如果需要刷新且连接失败，返回错误，不保存更新
+            self.update_server_status(&mut existing)
+                .await
+                .map_err(|e| AppError::internal_error(&e.to_string()))?;
         }
 
         self.repository.update_server(&existing).await?;
@@ -221,7 +227,8 @@ impl McpService {
         server.updated_at = Self::current_timestamp();
         if request.enabled {
             server.status = McpServerStatus::Ready;
-            self.update_server_status(&mut server).await;
+            // toggle 时即使连接失败也保存错误状态
+            let _ = self.update_server_status(&mut server).await;
         } else {
             server.status = McpServerStatus::Inactive;
             server.last_error = None;
@@ -237,7 +244,8 @@ impl McpService {
         request: RefreshMcpServerRequest,
     ) -> Result<McpServer, AppError> {
         let mut server = self.get_server(&request.server_id).await?;
-        self.update_server_status(&mut server).await;
+        // refresh 时即使连接失败也保存错误状态
+        let _ = self.update_server_status(&mut server).await;
         server.updated_at = Self::current_timestamp();
         self.repository.update_server(&server).await?;
         Ok(server)
@@ -263,8 +271,27 @@ impl McpService {
             }
         } else {
             // Remove tool from list
-            server.enabled_tools.retain(|name| name != &request.tool_name);
+            server
+                .enabled_tools
+                .retain(|name| name != &request.tool_name);
         }
+
+        server.updated_at = Self::current_timestamp();
+        self.repository.update_server(&server).await?;
+        Ok(server)
+    }
+
+    /// Update tool execution mode
+    pub async fn update_tool_execution_mode(
+        &self,
+        request: UpdateToolExecutionModeRequest,
+    ) -> Result<McpServer, AppError> {
+        let mut server = self.get_server(&request.server_id).await?;
+
+        // Update tool_execution_mode map
+        server
+            .tool_execution_mode
+            .insert(request.tool_name.clone(), request.execution_mode);
 
         server.updated_at = Self::current_timestamp();
         self.repository.update_server(&server).await?;
@@ -457,7 +484,8 @@ impl McpService {
             || error_msg.contains("host not found")
             || error_msg.contains("dns")
             || error_msg.contains("connection reset")
-            || error_msg.contains("broken pipe") {
+            || error_msg.contains("broken pipe")
+        {
             return McpErrorType::ConnectionError;
         }
 
@@ -466,7 +494,8 @@ impl McpService {
             || error_msg.contains("timed out")
             || error_msg.contains("deadline")
             || error_msg.contains("time limit")
-            || error_msg.contains("request timeout") {
+            || error_msg.contains("request timeout")
+        {
             return McpErrorType::TimeoutError;
         }
 
@@ -476,7 +505,8 @@ impl McpService {
             || error_msg.contains("forbidden")
             || error_msg.contains("401")
             || error_msg.contains("403")
-            || error_msg.contains("permission denied") {
+            || error_msg.contains("permission denied")
+        {
             return McpErrorType::AuthenticationError;
         }
 
@@ -489,7 +519,8 @@ impl McpService {
             || error_msg.contains("executable not found")
             || error_msg.contains("expect initialized")
             || error_msg.contains("conflict initialized")
-            || error_msg.contains("client initialize") {
+            || error_msg.contains("client initialize")
+        {
             return McpErrorType::ConfigurationError;
         }
 
@@ -504,7 +535,8 @@ impl McpService {
             || error_msg.contains("unexpected eof")
             || error_msg.contains("json")
             || error_chain.contains("mcperror")
-            || error_chain.contains("unexpectedresponse") {
+            || error_chain.contains("unexpectedresponse")
+        {
             return McpErrorType::ProtocolError;
         }
 
@@ -544,9 +576,12 @@ impl McpService {
         let prompts = match prompts_result {
             Ok(p) => Self::convert_prompts(p),
             Err(crate::mcp_client::McpClientError::ServiceError(
-                rmcp::service::ServiceError::McpError(ref error)
+                rmcp::service::ServiceError::McpError(ref error),
             )) if error.code.0 == -32601 => {
-                tracing::debug!("list_prompts not supported by server {}, ignoring", server.name);
+                tracing::debug!(
+                    "list_prompts not supported by server {}, ignoring",
+                    server.name
+                );
                 Vec::new()
             }
             Err(e) => return Err(e.into()),
@@ -556,9 +591,12 @@ impl McpService {
         let resources = match resources_result {
             Ok(r) => Self::convert_resources(r),
             Err(crate::mcp_client::McpClientError::ServiceError(
-                rmcp::service::ServiceError::McpError(ref error)
+                rmcp::service::ServiceError::McpError(ref error),
             )) if error.code.0 == -32601 => {
-                tracing::debug!("list_resources not supported by server {}, ignoring", server.name);
+                tracing::debug!(
+                    "list_resources not supported by server {}, ignoring",
+                    server.name
+                );
                 Vec::new()
             }
             Err(e) => return Err(e.into()),

@@ -4,6 +4,8 @@ export type McpServerStatus = 'inactive' | 'ready' | 'error' | 'unknown';
 
 export type McpConnectionType = 'stdio' | 'sse' | 'http';
 
+export type ToolExecutionMode = 'auto' | 'manual';
+
 export type McpErrorType =
   | 'connection_error'
   | 'authentication_error'
@@ -65,6 +67,7 @@ export interface McpServer {
   prompts: McpPrompt[];
   resources: McpResource[];
   enabledTools: string[];
+  toolExecutionMode: Record<string, ToolExecutionMode>;
   lastSyncAt?: Timestamp;
   lastError?: McpErrorDetail;
   createdAt: Timestamp;
@@ -114,4 +117,10 @@ export interface UpdateToolEnabledRequest {
   serverId: string;
   toolName: string;
   enabled: boolean;
+}
+
+export interface UpdateToolExecutionModeRequest {
+  serverId: string;
+  toolName: string;
+  executionMode: ToolExecutionMode;
 }

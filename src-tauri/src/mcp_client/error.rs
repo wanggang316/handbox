@@ -125,7 +125,8 @@ impl From<anyhow::Error> for McpClientError {
 
         if error_lower.contains("connection")
             || error_lower.contains("transport")
-            || error_lower.contains("refused") {
+            || error_lower.contains("refused")
+        {
             return Self::ConnectionFailed(error_str);
         }
 
