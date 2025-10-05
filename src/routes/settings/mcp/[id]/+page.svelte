@@ -13,7 +13,6 @@
   import { mcpState, mcpActions } from '$lib/states/mcp.svelte';
   import { updateToolEnabled } from '$lib/api';
   import type { McpServer } from '$lib/types';
-  import { getErrorTypeDisplayName } from '$lib/utils/mcpError';
   import { formatDateTime } from '$lib/utils/date';
   import { ChevronLeft, RefreshCw, SquarePen, Trash2, ChevronDown, ChevronRight } from '@lucide/svelte';
 
@@ -113,18 +112,14 @@
   }
 
   async function handleSaveServer(data: { mode: 'create' | 'update'; data: any }) {
-    try {
-      if (data.mode === 'update' && server) {
-        await mcpActions.updateServer(server.id, data.data);
-        console.log('MCP server updated successfully');
-        // 刷新服务器数据
-        await mcpActions.loadServers(true);
-      } else if (data.mode === 'create') {
-        await mcpActions.createServer(data.data);
-        console.log('MCP server created successfully');
-      }
-    } catch (error) {
-      console.error('Failed to save MCP server:', error);
+    if (data.mode === 'update' && server) {
+      await mcpActions.updateServer(server.id, data.data);
+      console.log('MCP server updated successfully');
+      // 刷新服务器数据
+      await mcpActions.loadServers(true);
+    } else if (data.mode === 'create') {
+      await mcpActions.createServer(data.data);
+      console.log('MCP server created successfully');
     }
   }
 
@@ -254,7 +249,7 @@
       {#if server.status === 'error' && server.lastError}
         <div class="mt-4 p-4 rounded-lg bg-error/10 border border-error/20">
           <div class="text-sm text-error font-medium mb-2">
-            {getErrorTypeDisplayName(server.lastError.errorType)}
+            {server.lastError.errorType}
           </div>
           <div class="text-xs text-error/80 mb-1">{server.lastError.message}</div>
           {#if server.lastError.details}

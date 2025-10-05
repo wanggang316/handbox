@@ -87,6 +87,7 @@ impl McpService {
         };
 
         if server.enabled {
+            // 如果启用，尝试连接。连接失败则返回错误，不保存
             self.update_server_status(&mut server).await;
         }
 
@@ -271,7 +272,9 @@ impl McpService {
     }
 
     /// Update server status and metadata based on connection type
-    async fn update_server_status(&self, server: &mut McpServer) {
+    ///
+    /// Returns Ok if connection succeeds, Err if connection fails
+    async fn update_server_status(&self, server: &mut McpServer) -> anyhow::Result<()> {
         // All connection types now work the same way - try to connect and fetch metadata
         match self.fetch_server_metadata(server).await {
             Ok((tools, prompts, resources)) => {
@@ -286,6 +289,7 @@ impl McpService {
                 server.status = McpServerStatus::Ready;
                 server.last_error = None;
                 server.last_sync_at = Some(Self::current_timestamp());
+                Ok(())
             }
             Err(error) => {
                 tracing::error!(
@@ -308,6 +312,8 @@ impl McpService {
                     details: error.source().map(|s| s.to_string()),
                     timestamp: Self::current_timestamp(),
                 });
+
+                Err(error)
             }
         }
     }

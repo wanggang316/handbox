@@ -6,6 +6,7 @@
   import TextRow from "$lib/components/ui/table/TextRow.svelte";
   import TextareaRow from "$lib/components/ui/table/TextareaRow.svelte";
   import DropDownRow from "$lib/components/ui/table/DropDownRow.svelte";
+  import { toastActions } from "$lib/states/toast.svelte";
   import type {
     CreateMcpServerRequest,
     McpConnectionType,
@@ -29,7 +30,7 @@
     onSave?: (data: {
       mode: "create" | "update";
       data: CreateMcpServerRequest | UpdateMcpServerRequest;
-    }) => void;
+    }) => Promise<void>;
   }
 
   let {
@@ -254,7 +255,7 @@
           updatePayload.timeoutMs = formData.timeoutMs ? Number(formData.timeoutMs) : undefined;
         }
 
-        onSave?.({ mode: "update", data: updatePayload });
+        await onSave?.({ mode: "update", data: updatePayload });
       } else {
         // 创建模式
         const createPayload: CreateMcpServerRequest = {
@@ -276,10 +277,15 @@
           createPayload.timeoutMs = formData.timeoutMs ? Number(formData.timeoutMs) : undefined;
         }
 
-        onSave?.({ mode: "create", data: createPayload });
+        await onSave?.({ mode: "create", data: createPayload });
       }
 
+      // 保存成功，关闭弹窗
       closeModal();
+    } catch (error) {
+      // 保存失败，显示错误提示（3秒自动消失）
+      const errorMessage = error instanceof Error ? error.message : '保存失败，请重试';
+      toastActions.error(errorMessage, 3000);
     } finally {
       isSubmitting = false;
     }
