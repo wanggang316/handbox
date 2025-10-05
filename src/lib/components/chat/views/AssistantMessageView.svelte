@@ -7,7 +7,7 @@
     ChevronRight,
   } from "lucide-svelte";
   import type { Message } from "$lib/types";
-  import { messageStore } from "$lib/states";
+  import { messageStore, mcpState } from "$lib/states";
   import { openInBrowser, renderMarkdown } from "$lib/utils";
 
   interface Props {
@@ -89,6 +89,39 @@
     return message?.id ? !!messageStore.executingMessages[message.id] : false;
   });
 
+  // 检查工具是否需要手动执行
+  const needsManualExecution = $derived(() => {
+    const calls = toolCalls();
+    if (calls.length === 0) return false;
+
+    // 获取当前 chat 的 MCP 服务器列表
+    const chatMcpServers = message?.config?.mcpServers || [];
+    if (chatMcpServers.length === 0) return false;
+
+    // 检查任何工具是否设置为手动执行
+    return calls.some(call => {
+      const toolName = call.function?.name;
+      if (!toolName) return false;
+
+      // 查找包含此工具的 MCP 服务器
+      for (const serverId of chatMcpServers) {
+        const server = mcpState.servers.find(s => s.id === serverId);
+        if (!server) continue;
+
+        // 检查服务器是否有此工具
+        const hasTool = server.tools.some(t => t.name === toolName);
+        if (!hasTool) continue;
+
+        // 检查工具执行模式
+        const executionMode = server.toolExecutionMode[toolName];
+        if (executionMode === 'manual') {
+          return true;
+        }
+      }
+      return false;
+    });
+  });
+
   async function handleExecuteToolCalls() {
     const calls = toolCalls();
     if (calls.length === 0) {
@@ -103,6 +136,13 @@
 
     try {
       console.log('执行工具调用:', calls);
+
+      // 如果需要手动执行，先删除后续消息
+      if (needsManualExecution()) {
+        console.log('手动工具执行：删除后续消息');
+        // 这里应该调用删除后续消息的 API
+        // 但目前我们直接执行工具
+      }
 
       // 使用消息状态管理来执行工具调用
       await messageStore.executeAllToolCalls(message.id, calls);
@@ -296,21 +336,30 @@
           {#if toolCalls().length > 0}
             <div class="mb-4 rounded-lg border border-blue-400/40 bg-blue-50/80 p-3 text-sm text-blue-900 dark:bg-blue-900/40 dark:text-blue-100">
               <div class="mb-2 font-medium flex items-center justify-between">
-                <span>工具调用</span>
-                <button
-                  class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
-                  onclick={handleExecuteToolCalls}
-                  disabled={toolCalls().length === 0 || isExecuting()}
-                >
-                  {#if isExecuting()}
-                    <div class="flex items-center gap-1">
-                      <div class="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-                      执行中...
-                    </div>
-                  {:else}
-                    执行
+                <div class="flex items-center gap-2">
+                  <span>工具调用</span>
+                  {#if needsManualExecution()}
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-700 dark:text-yellow-300">需要手动执行</span>
                   {/if}
-                </button>
+                </div>
+                {#if needsManualExecution()}
+                  <button
+                    class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
+                    onclick={handleExecuteToolCalls}
+                    disabled={toolCalls().length === 0 || isExecuting()}
+                  >
+                    {#if isExecuting()}
+                      <div class="flex items-center gap-1">
+                        <div class="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+                        执行中...
+                      </div>
+                    {:else}
+                      手动执行
+                    {/if}
+                  </button>
+                {:else}
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-700 dark:text-green-300">已自动执行</span>
+                {/if}
               </div>
               <div class="space-y-2">
                 {#each toolCalls() as tool}

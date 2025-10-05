@@ -517,6 +517,24 @@ class MessageStore {
   }
 
   /**
+   * 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
+   */
+  async resendMessage(messageId: string): Promise<void> {
+    try {
+      this.setSending(true);
+      const response = await messageApi.resendMessage(messageId as UUID);
+      this.applyMessageResponse(response.chatId, response);
+      // 重新加载消息列表以反映删除的消息
+      await this.loadMessages(response.chatId);
+    } catch (error) {
+      this.setError(error instanceof Error ? error.message : '重发消息失败');
+      throw error;
+    } finally {
+      this.setSending(false);
+    }
+  }
+
+  /**
    * 执行多个工具调用 - 使用流式API
    */
   async executeToolCalls(messageId: string, toolCallIds: string[]): Promise<void> {

@@ -77,6 +77,27 @@
     console.log('Editing message:', messageId);
   }
 
+  // 重发用户消息
+  async function resendMessage(messageId: string) {
+    if (operatingMessageId) return; // 防止重复操作
+
+    // 确认重发
+    if (!confirm('重发此消息将删除它之后的所有消息，确定要继续吗？')) {
+      return;
+    }
+
+    try {
+      operatingMessageId = messageId;
+      await messageStore.resendMessage(messageId);
+      console.log('Message resent successfully');
+    } catch (error) {
+      console.error('Failed to resend message:', error);
+      // TODO: 显示错误提示
+    } finally {
+      operatingMessageId = null;
+    }
+  }
+
   // 当前聊天ID的派生状态
   let currentChatId = $derived(chatState.currentChat?.id);
 
@@ -190,6 +211,8 @@
           {#if message.role === 'user'}
             <UserMessageView
               {message}
+              isOperating={operatingMessageId === message.id}
+              onResend={resendMessage}
             />
           {:else if message.role === 'assistant'}
             <AssistantMessageView
