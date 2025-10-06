@@ -35,7 +35,7 @@ impl ChatService {
         model_id: Option<String>,
         provider_id: Option<String>,
         system_prompt: Option<String>,
-        mcp_servers: Option<Vec<String>>,
+        mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
     ) -> Result<Chat, AppError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -96,7 +96,7 @@ impl ChatService {
         model_id: Option<String>,
         provider_id: Option<String>,
         system_prompt: Option<String>,
-        mcp_servers: Option<Vec<String>>,
+        mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
     ) -> Result<Chat, AppError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -302,7 +302,11 @@ mod tests {
                 Some("gpt-4o".to_string()),
                 Some("openai".to_string()),
                 Some("System prompt".to_string()),
-                Some(vec!["server1".to_string()]),
+                Some(vec![crate::models::McpServerConfig {
+                    server_id: "server1".to_string(),
+                    execution_mode: "auto".to_string(),
+                    enabled_tools: vec!["tool1".to_string()],
+                }]),
             )
             .await
             .expect("chat creation failed");
@@ -315,7 +319,14 @@ mod tests {
         assert_eq!(chat.model_id, Some("gpt-4o".to_string()));
         assert_eq!(chat.provider_id, Some("openai".to_string()));
         assert_eq!(chat.system_prompt, Some("System prompt".to_string()));
-        assert_eq!(chat.mcp_servers, vec!["server1".to_string()]);
+        assert_eq!(
+            chat.mcp_servers,
+            vec![crate::models::McpServerConfig {
+                server_id: "server1".to_string(),
+                execution_mode: "auto".to_string(),
+                enabled_tools: vec!["tool1".to_string()],
+            }]
+        );
         assert_eq!(chat.message_count, 0);
         assert!(chat.last_message_at.is_none());
     }
@@ -444,7 +455,18 @@ mod tests {
                 Some("claude-3".to_string()),
                 Some("anthropic".to_string()),
                 Some("Updated prompt".to_string()),
-                Some(vec!["server1".to_string(), "server2".to_string()]),
+                Some(vec![
+                    crate::models::McpServerConfig {
+                        server_id: "server1".to_string(),
+                        execution_mode: "auto".to_string(),
+                        enabled_tools: vec!["tool1".to_string(), "tool2".to_string()],
+                    },
+                    crate::models::McpServerConfig {
+                        server_id: "server2".to_string(),
+                        execution_mode: "manual".to_string(),
+                        enabled_tools: vec!["tool3".to_string()],
+                    },
+                ]),
             )
             .await
             .expect("update failed");
@@ -457,7 +479,21 @@ mod tests {
         assert_eq!(updated.model_id, Some("claude-3".to_string()));
         assert_eq!(updated.provider_id, Some("anthropic".to_string()));
         assert_eq!(updated.system_prompt, Some("Updated prompt".to_string()));
-        assert_eq!(updated.mcp_servers, vec!["server1", "server2"]);
+        assert_eq!(
+            updated.mcp_servers,
+            vec![
+                crate::models::McpServerConfig {
+                    server_id: "server1".to_string(),
+                    execution_mode: "auto".to_string(),
+                    enabled_tools: vec!["tool1".to_string(), "tool2".to_string()],
+                },
+                crate::models::McpServerConfig {
+                    server_id: "server2".to_string(),
+                    execution_mode: "manual".to_string(),
+                    enabled_tools: vec!["tool3".to_string()],
+                },
+            ]
+        );
     }
 
     #[tokio::test]

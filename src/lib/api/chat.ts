@@ -3,9 +3,10 @@
  */
 
 import { apiCall } from './index';
-import type { 
-  Chat, 
-  UUID 
+import type {
+  Chat,
+  UUID,
+  McpServerConfig
 } from '../types';
 
 /**
@@ -21,7 +22,7 @@ export async function createChat(
   modelId?: string,
   providerId?: string,
   systemPrompt?: string,
-  mcpServers?: string[]
+  mcpServers?: McpServerConfig[]
 ): Promise<Chat> {
   const payload = {
     name,
@@ -61,7 +62,7 @@ export async function getChat(chatId: UUID): Promise<Chat> {
  */
 export async function updateChat(
   chatId: UUID,
-  updates: Partial<Pick<Chat, 'name' | 'temperature' | 'topP' | 'maxTokens' | 'stream' | 'modelId' | 'providerId' | 'systemPrompt'>> & { mcpServers?: string[] }
+  updates: Partial<Pick<Chat, 'name' | 'temperature' | 'topP' | 'maxTokens' | 'stream' | 'modelId' | 'providerId' | 'systemPrompt' | 'mcpServers'>>
 ): Promise<Chat> {
   const payload = {
     chatId: chatId,

@@ -28,7 +28,7 @@ pub struct MessageConfig {
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
-    pub mcp_servers: Option<Vec<String>>,
+    pub mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
 }
 
 /// 消息实体
@@ -217,7 +217,11 @@ mod tests {
             model_id: Some("gpt-4".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant".to_string()),
-            mcp_servers: Some(vec!["server1".to_string()]),
+            mcp_servers: Some(vec![crate::models::McpServerConfig {
+                server_id: "server1".to_string(),
+                execution_mode: "auto".to_string(),
+                enabled_tools: vec!["tool1".to_string()],
+            }]),
         };
 
         let json = serde_json::to_string(&config).expect("serialize config");

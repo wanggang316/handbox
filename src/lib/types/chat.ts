@@ -7,6 +7,13 @@ import type { BaseEntity, UUID, Timestamp } from './index';
 // 消息角色
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+// MCP 服务器配置
+export interface McpServerConfig {
+  serverId: string;
+  executionMode: 'auto' | 'manual';
+  enabledTools: string[]; // List of enabled tool names for this server
+}
+
 // 消息配置 - 每条消息可以有独立的配置参数
 export interface MessageConfig {
   temperature?: number;
@@ -16,7 +23,7 @@ export interface MessageConfig {
   modelId?: string;
   providerId?: string;
   systemPrompt?: string;
-  mcpServers?: string[];
+  mcpServers?: McpServerConfig[];
 }
 
 // 消息类型
@@ -67,8 +74,8 @@ export interface Chat extends BaseEntity {
   modelId?: string;
   providerId?: string;
   systemPrompt?: string;
-  mcpServers: string[];
-  
+  mcpServers: McpServerConfig[];
+
   artifactId?: UUID;
 }
 

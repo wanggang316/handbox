@@ -169,8 +169,10 @@ impl ChatRepository {
 
     // 辅助方法：将数据库行转换为 Chat
     fn row_to_chat(&self, row: sqlx::sqlite::SqliteRow) -> Result<Chat, AppError> {
+        use crate::models::McpServerConfig;
+
         let mcp_servers_json: Option<String> = row.try_get("mcp_servers")?;
-        let mcp_servers: Vec<String> = if let Some(json) = mcp_servers_json {
+        let mcp_servers: Vec<McpServerConfig> = if let Some(json) = mcp_servers_json {
             serde_json::from_str(&json).unwrap_or_default()
         } else {
             Vec::new()
@@ -231,7 +233,18 @@ mod tests {
             model_id: Some("gpt-4o".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant.".to_string()),
-            mcp_servers: vec!["server1".to_string(), "server2".to_string()],
+            mcp_servers: vec![
+                crate::models::McpServerConfig {
+                    server_id: "server1".to_string(),
+                    execution_mode: "auto".to_string(),
+                    enabled_tools: vec!["tool1".to_string()],
+                },
+                crate::models::McpServerConfig {
+                    server_id: "server2".to_string(),
+                    execution_mode: "manual".to_string(),
+                    enabled_tools: vec![],
+                },
+            ],
             artifact_id: None,
             created_at: now,
             updated_at: now,

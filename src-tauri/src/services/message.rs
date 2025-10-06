@@ -550,9 +550,16 @@ impl MessageService {
             return Ok(Vec::new());
         }
 
+        // Extract server IDs from McpServerConfig
+        let server_ids: Vec<String> = chat
+            .mcp_servers
+            .iter()
+            .map(|config| config.server_id.clone())
+            .collect();
+
         let servers = self
             .mcp_service
-            .get_servers_by_ids(&chat.mcp_servers)
+            .get_servers_by_ids(&server_ids)
             .await?;
 
         let active_servers: Vec<McpServer> = servers
@@ -567,7 +574,30 @@ impl MessageService {
         let mut tools = Vec::new();
 
         for server in active_servers {
+            // Find the server config to get enabled tools
+            let server_config = chat
+                .mcp_servers
+                .iter()
+                .find(|config| config.server_id == server.id);
+
             for tool in &server.tools {
+                // Check if this tool is enabled for this server in the chat config
+                let is_tool_enabled = server_config
+                    .map(|config| {
+                        // If enabledTools is empty, use all tools enabled in server settings
+                        if config.enabled_tools.is_empty() {
+                            server.enabled_tools.contains(&tool.name)
+                        } else {
+                            // Otherwise use the chat's enabled tools list
+                            config.enabled_tools.contains(&tool.name)
+                        }
+                    })
+                    .unwrap_or(false);
+
+                if !is_tool_enabled {
+                    continue;
+                }
+
                 let description = tool
                     .description
                     .clone()
@@ -1774,7 +1804,11 @@ mod tests {
             model_id: Some("gpt-4".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant".to_string()),
-            mcp_servers: Some(vec!["server1".to_string()]),
+            mcp_servers: Some(vec![crate::models::McpServerConfig {
+                server_id: "server1".to_string(),
+                execution_mode: "auto".to_string(),
+                enabled_tools: vec!["tool1".to_string()],
+            }]),
         };
 
         let json = serde_json::to_string(&config).unwrap();

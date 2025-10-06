@@ -1,24 +1,34 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { Server, RefreshCw } from '@lucide/svelte';
-  import TableGroup from '$lib/components/ui/table/TableGroup.svelte';
-  import TableBaseRow from '$lib/components/ui/table/TableBaseRow.svelte';
-  import Button from '$lib/components/ui/Button.svelte';
-  import Toggle from '$lib/components/ui/Toggle.svelte';
-  import StatusLabel from '$lib/components/ui/StatusLabel.svelte';
-  import { chatState, chatActions } from '$lib/states/chat.svelte';
-  import { mcpState, mcpActions } from '$lib/states/mcp.svelte';
-  import type { McpServer, McpServerStatus } from '$lib/types';
+  import { onMount } from "svelte";
+  import { Server, RefreshCw, ChevronsUpDown } from "@lucide/svelte";
+  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
+  import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
+  import DropDown from "$lib/components/ui/DropDown.svelte";
+  import { chatState, chatActions } from "$lib/states/chat.svelte";
+  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
+  import type { McpServer, McpServerConfig } from "$lib/types";
 
-  let currentServers = $state<string[]>(chatState.currentChat?.mcpServers || []);
-  let originalServers = $state<string[]>(chatState.currentChat?.mcpServers || []);
+  let currentServers = $state<McpServerConfig[]>(
+    chatState.currentChat?.mcpServers || [],
+  );
+  let originalServers = $state<McpServerConfig[]>(
+    chatState.currentChat?.mcpServers || [],
+  );
   let saving = $state(false);
   let refreshing = $state(false);
+  let expandedTools = $state<Record<string, boolean>>({});
+
+  const executionModeOptions = [
+    { value: "auto", label: "自动执行" },
+    { value: "manual", label: "手动执行" },
+  ];
 
   onMount(() => {
     if (!mcpState.initialized) {
-      mcpActions.loadServers().catch(error => {
-        console.error('Failed to load MCP servers:', error);
+      mcpActions.loadServers().catch((error) => {
+        console.error("Failed to load MCP servers:", error);
       });
     }
   });
@@ -29,34 +39,68 @@
   });
 
   const hasChanges = $derived(() => {
-    const currentSorted = [...currentServers].sort();
-    const originalSorted = [...originalServers].sort();
-    return JSON.stringify(currentSorted) !== JSON.stringify(originalSorted);
+    return JSON.stringify(currentServers) !== JSON.stringify(originalServers);
   });
 
+  // Only show enabled servers with ready status and at least one enabled tool
   const availableServers = $derived(() =>
-    mcpState.servers.filter(server => server.enabled)
+    mcpState.servers.filter(
+      (server) =>
+        server.enabled &&
+        server.status === "ready" &&
+        server.enabledTools.length > 0,
+    ),
   );
 
-  const decoratedServers = $derived(() =>
-    availableServers().map(server => ({
-      server,
-      checked: currentServers.includes(server.id),
-      statusInfo: mapStatus(server)
-    }))
-  );
+  const decoratedServers = $derived(() => {
+    return availableServers().map((server) => {
+      const config = currentServers.find((s) => s.serverId === server.id);
+      return {
+        server,
+        checked: !!config,
+        executionMode: config?.executionMode || "auto",
+      };
+    });
+  });
 
-  function toggleSelection(serverId: string, selected: boolean) {
+  async function toggleSelection(serverId: string, selected: boolean) {
     if (selected) {
-      if (!currentServers.includes(serverId)) {
-        currentServers = [...currentServers, serverId];
+      const exists = currentServers.find((s) => s.serverId === serverId);
+      if (!exists) {
+        // Find the server to get its enabled tools from settings
+        const server = mcpState.servers.find((s) => s.id === serverId);
+        const enabledTools = server?.enabledTools || [];
+
+        currentServers = [
+          ...currentServers,
+          { serverId, executionMode: "auto", enabledTools },
+        ];
       }
     } else {
-      currentServers = currentServers.filter(id => id !== serverId);
+      currentServers = currentServers.filter((s) => s.serverId !== serverId);
     }
+
+    // Auto-save
+    await saveChanges();
   }
 
-  async function handleSave() {
+  async function handleExecutionModeChange(
+    serverId: string,
+    mode: "auto" | "manual",
+  ) {
+    currentServers = currentServers.map((s) =>
+      s.serverId === serverId ? { ...s, executionMode: mode } : s,
+    );
+
+    // Auto-save
+    await saveChanges();
+  }
+
+  function toggleTools(serverId: string) {
+    expandedTools[serverId] = !expandedTools[serverId];
+  }
+
+  async function saveChanges() {
     if (!chatState.currentChat?.id) {
       if (chatState.currentChat) {
         chatState.currentChat.mcpServers = currentServers;
@@ -70,15 +114,11 @@
       await chatActions.updateMcpServers(currentServers);
       originalServers = [...currentServers];
     } catch (error) {
-      console.error('Failed to update MCP servers:', error);
+      console.error("Failed to update MCP servers:", error);
       await chatActions.loadChats();
     } finally {
       saving = false;
     }
-  }
-
-  function handleReset() {
-    currentServers = [...originalServers];
   }
 
   async function handleRefresh() {
@@ -86,23 +126,9 @@
     try {
       await mcpActions.loadServers(true);
     } catch (error) {
-      console.error('Failed to refresh MCP servers:', error);
+      console.error("Failed to refresh MCP servers:", error);
     } finally {
       refreshing = false;
-    }
-  }
-
-  function mapStatus(server: McpServer): { status: 'enabled' | 'disabled' | 'idle' | 'error'; text: string } {
-    if (!server.enabled) {
-      return { status: 'disabled', text: '未启用' };
-    }
-    switch (server.status as McpServerStatus) {
-      case 'ready':
-        return { status: 'enabled', text: '可用' };
-      case 'error':
-        return { status: 'error', text: '异常' };
-      default:
-        return { status: 'idle', text: '同步中' };
     }
   }
 </script>
@@ -113,7 +139,7 @@
       {#if !chatState.currentChat}
         请先选择或创建聊天
       {:else}
-        已选择 {currentServers.length} 个服务器
+        已选中 {currentServers.length} 个服务器
       {/if}
     </div>
 
@@ -123,7 +149,7 @@
       size="sm"
       disabled={refreshing}
     >
-      <RefreshCw class={refreshing ? 'animate-spin' : ''} size={14} />
+      <RefreshCw class={refreshing ? "animate-spin" : ""} size={14} />
       刷新列表
     </Button>
   </div>
@@ -134,7 +160,7 @@
       <p class="mb-2">请先选择或创建聊天</p>
       <p class="text-sm">MCP 服务器配置将与聊天关联</p>
     </div>
-  {:else if mcpState.servers.length === 0}
+  {:else if availableServers().length === 0}
     <div class="text-center py-8 text-base-content/70">
       <Server size={48} class="mx-auto mb-4 text-base-content/40" />
       <p class="mb-2">暂无可用的 MCP 服务器</p>
@@ -143,62 +169,69 @@
   {:else}
     <TableGroup>
       {#each decoratedServers() as item (item.server.id)}
-        <TableBaseRow label={item.server.displayName ?? item.server.name} layout="vertical">
-            <div class="flex flex-col gap-3 text-sm text-base-content/80">
-              <div class="flex items-center gap-3 justify-between">
-                <StatusLabel status={item.statusInfo.status} text={item.statusInfo.text} />
-                <Toggle
-                  checked={item.checked}
-                  disabled={!item.server.enabled || item.server.status !== 'ready'}
-                  onChange={(value) => toggleSelection(item.server.id, value)}
-                />
+        <TableBaseRow
+          label={item.server.displayName ?? item.server.name}
+          layout="vertical"
+        >
+          {#snippet rightContent()}
+            <Toggle
+              checked={item.checked}
+              onChange={(value) => toggleSelection(item.server.id, value)}
+            />
+          {/snippet}
+
+          <div class="flex flex-col gap-3 text-sm text-base-content/80">
+            <!-- Execution mode and tools button -->
+            <div class="flex items-center gap-2 justify-between">
+              <div class="flex items-center gap-1">                
+                <button
+                  class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded py-0.5 transition-colors"
+                  onclick={() => toggleTools(item.server.id)}
+                >
+                  <span>{item.server.enabledTools.length} enabled tools</span>
+                  <ChevronsUpDown size={12} />
+                </button>
               </div>
-
-              <div class="flex flex-wrap gap-2 text-xs text-base-content/70">
-                <span class="px-2 py-0.5 rounded bg-base-200">工具 {item.server.tools.length}</span>
-                <span class="px-2 py-0.5 rounded bg-base-200">
-                  命令 {item.server.command}
-                </span>
-                {#if item.server.lastSyncAt}
-                  <span class="px-2 py-0.5 rounded bg-base-200">
-                    最近同步 {new Date(item.server.lastSyncAt).toLocaleString('zh-CN')}
-                  </span>
-                {/if}
-              </div>
-
-              {#if item.server.description}
-                <p class="text-xs leading-relaxed text-base-content/70">
-                  {item.server.description}
-                </p>
-              {/if}
-
-              {#if item.server.lastError && item.server.status === 'error'}
-                <div class="text-xs text-error bg-error/10 rounded-md px-3 py-2">
-                  {item.server.lastError}
+              {#if item.checked}
+                <div>
+                  <DropDown
+                    options={executionModeOptions}
+                    selectedValue={item.executionMode}
+                    disabled={!item.checked}
+                    onSelect={(value) =>
+                      handleExecutionModeChange(
+                        item.server.id,
+                        value as "auto" | "manual",
+                      )}
+                    minWidth="min-w-28"
+                    buttonClass="text-xs"
+                  />
                 </div>
               {/if}
             </div>
-          </TableBaseRow>
+
+            <!-- Expanded tools list -->
+            {#if expandedTools[item.server.id] && item.server.tools.length > 0}
+              <div class="flex flex-wrap gap-1">
+                {#each item.server.enabledTools as tool}
+                  <span
+                    class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary"
+                  >
+                    {tool}
+                  </span>
+                {/each}
+              </div>
+            {/if}
+
+            <!-- Description -->
+            {#if item.server.description}
+              <p class="text-xs leading-relaxed text-base-content/70">
+                {item.server.description}
+              </p>
+            {/if}
+          </div>
+        </TableBaseRow>
       {/each}
     </TableGroup>
-
-    <div class="flex gap-3 pt-4 justify-end">
-      <Button
-        variant="gray"
-        size="sm"
-        on:click={handleReset}
-        disabled={!hasChanges()}
-      >
-        重置
-      </Button>
-
-      <Button
-        size="sm"
-        on:click={handleSave}
-        disabled={!hasChanges() || saving}
-      >
-        {saving ? '保存中...' : '保存'}
-      </Button>
-    </div>
   {/if}
 </div>

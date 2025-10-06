@@ -21,7 +21,7 @@ pub async fn chat_create(
     model_id: Option<String>,
     provider_id: Option<String>,
     system_prompt: Option<String>,
-    mcp_servers: Option<Vec<String>>,
+    mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
     chat_service
@@ -70,7 +70,7 @@ pub async fn chat_update(
     model_id: Option<String>,
     provider_id: Option<String>,
     system_prompt: Option<String>,
-    mcp_servers: Option<Vec<String>>,
+    mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
     chat_service

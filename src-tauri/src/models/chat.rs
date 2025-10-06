@@ -28,6 +28,21 @@ impl Default for ModelParameters {
     }
 }
 
+/// MCP 服务器配置
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerConfig {
+    pub server_id: String,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String, // "auto" or "manual"
+    #[serde(default)]
+    pub enabled_tools: Vec<String>, // List of enabled tool names for this server
+}
+
+fn default_execution_mode() -> String {
+    "auto".to_string()
+}
+
 /// 聊天实体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +60,7 @@ pub struct Chat {
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
-    pub mcp_servers: Vec<String>,
+    pub mcp_servers: Vec<McpServerConfig>,
 
     pub artifact_id: Option<UUID>,
     pub created_at: Timestamp,
@@ -70,7 +85,11 @@ mod tests {
             model_id: Some("gpt-4".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant".to_string()),
-            mcp_servers: vec!["server1".to_string()],
+            mcp_servers: vec![McpServerConfig {
+                server_id: "server1".to_string(),
+                execution_mode: "auto".to_string(),
+                enabled_tools: vec!["tool1".to_string()],
+            }],
             artifact_id: None,
             created_at: 1000,
             updated_at: 2000,
@@ -82,6 +101,34 @@ mod tests {
         assert_eq!(chat.id, deserialized.id);
         assert_eq!(chat.name, deserialized.name);
         assert_eq!(chat.message_count, deserialized.message_count);
+    }
+
+    #[test]
+    fn mcp_server_config_default_execution_mode() {
+        let json = r#"{"serverId": "test-server"}"#;
+        let config: McpServerConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.execution_mode, "auto");
+    }
+
+    #[test]
+    fn mcp_server_config_with_execution_mode() {
+        let config = McpServerConfig {
+            server_id: "test-server".to_string(),
+            execution_mode: "manual".to_string(),
+            enabled_tools: vec!["tool1".to_string(), "tool2".to_string()],
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deserialized: McpServerConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.server_id, "test-server");
+        assert_eq!(deserialized.execution_mode, "manual");
+        assert_eq!(deserialized.enabled_tools, vec!["tool1".to_string(), "tool2".to_string()]);
+    }
+
+    #[test]
+    fn mcp_server_config_default_enabled_tools() {
+        let json = r#"{"serverId": "test-server", "executionMode": "auto"}"#;
+        let config: McpServerConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.enabled_tools, Vec::<String>::new());
     }
 
     #[test]

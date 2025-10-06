@@ -2,9 +2,10 @@
  * 聊天相关状态管理 - Svelte 5 状态管理
  */
 
-import type { 
-  Chat, 
-  UUID 
+import type {
+  Chat,
+  UUID,
+  McpServerConfig
 } from '../types';
 import type { ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
@@ -134,7 +135,7 @@ export const chatActions = {
   /**
    * 更新MCP服务器配置
    */
-  async updateMcpServers(mcpServers: string[]): Promise<void> {
+  async updateMcpServers(mcpServers: McpServerConfig[]): Promise<void> {
     return chatActions.updateChatSettings({ mcpServers });
   },
 
