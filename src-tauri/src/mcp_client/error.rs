@@ -1,168 +1,140 @@
 //! Error types for MCP client operations.
 
-use thiserror::Error;
+use std::fmt;
 
 /// Errors that can occur during MCP client operations.
-#[derive(Error, Debug)]
+///
+/// This error type wraps rmcp library errors and adds client-specific error variants.
+#[derive(Debug)]
 pub enum McpClientError {
-    /// Connection establishment failed
-    #[error("Connection failed: {0}")]
-    ConnectionFailed(String),
+    /// Transport creation failed (e.g., process spawn, HTTP connection)
+    TransportCreation(String),
 
-    /// Transport layer error
-    #[error("Transport error: {0}")]
-    TransportError(String),
+    /// Client initialization failed
+    ClientInitialize(rmcp::service::ClientInitializeError),
 
-    /// MCP protocol error
-    #[error("Protocol error: {0}")]
-    ProtocolError(String),
+    /// Service operation failed
+    Service(rmcp::service::ServiceError),
 
-    /// Request timeout
-    #[error("Request timeout after {0:?}")]
-    Timeout(std::time::Duration),
+    /// Runtime error (task join error)
+    Runtime(tokio::task::JoinError),
 
-    /// Authentication/authorization error
-    #[error("Authentication error: {0}")]
-    AuthenticationError(String),
-
-    /// Invalid configuration
-    #[error("Configuration error: {0}")]
-    ConfigurationError(String),
-
-    /// Tool not found
-    #[error("Tool '{0}' not found")]
-    ToolNotFound(String),
-
-    /// Invalid tool arguments
-    #[error("Invalid tool arguments: {0}")]
+    /// Invalid tool arguments provided
     InvalidToolArguments(String),
 
-    /// Resource not found
-    #[error("Resource '{0}' not found")]
-    ResourceNotFound(String),
+    /// Client shutdown failed
+    Shutdown(String),
+}
 
-    /// Prompt not found
-    #[error("Prompt '{0}' not found")]
-    PromptNotFound(String),
+impl std::error::Error for McpClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ClientInitialize(e) => Some(e),
+            Self::Service(e) => Some(e),
+            Self::Runtime(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
-    /// Service is disconnected
-    #[error("Service is disconnected")]
-    Disconnected,
+// Implement From traits for automatic conversion
+impl From<rmcp::service::ClientInitializeError> for McpClientError {
+    fn from(e: rmcp::service::ClientInitializeError) -> Self {
+        Self::ClientInitialize(e)
+    }
+}
 
-    /// Cancelled operation
-    #[error("Operation cancelled: {0}")]
-    Cancelled(String),
+impl From<rmcp::service::ServiceError> for McpClientError {
+    fn from(e: rmcp::service::ServiceError) -> Self {
+        Self::Service(e)
+    }
+}
 
-    /// Client initialization error from rmcp
-    #[error("Client initialization error: {0}")]
-    ClientInitializeError(String),
+impl From<tokio::task::JoinError> for McpClientError {
+    fn from(e: tokio::task::JoinError) -> Self {
+        Self::Runtime(e)
+    }
+}
 
-    /// Service error from rmcp
-    #[error("Service error: {0}")]
-    ServiceError(#[from] rmcp::service::ServiceError),
-
-    /// Other errors
-    #[error("Unknown error: {0}")]
-    Other(String),
+impl fmt::Display for McpClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TransportCreation(msg) => write!(f, "Transport creation failed: {}", msg),
+            Self::ClientInitialize(e) => {
+                match e {
+                    rmcp::service::ClientInitializeError::TransportError { error, context } => {
+                        // Replace DynamicTransportError with clean underlying error
+                        write!(f, "Send message error {}, when {}", error.error, context)
+                    }
+                    // For all other errors, use their Display implementation
+                    _ => write!(f, "{}", e),
+                }
+            }
+            Self::Service(e) => {
+                match e {
+                    rmcp::service::ServiceError::McpError(mcp_err) => {
+                        // MCP errors use their own message
+                        write!(f, "{}", mcp_err.message)
+                    }
+                    rmcp::service::ServiceError::TransportSend(dyn_err) => {
+                        // Replace DynamicTransportError with clean underlying error
+                        write!(f, "Transport send error: {}", dyn_err.error)
+                    }
+                    // For all other errors, use their Display implementation
+                    _ => write!(f, "{}", e),
+                }
+            }
+            Self::Runtime(e) => write!(f, "{}", e),
+            Self::InvalidToolArguments(msg) => write!(f, "Invalid tool arguments: {}", msg),
+            Self::Shutdown(msg) => write!(f, "Shutdown failed: {}", msg),
+        }
+    }
 }
 
 impl McpClientError {
-    /// Create a connection failed error
-    pub fn connection_failed(msg: impl Into<String>) -> Self {
-        Self::ConnectionFailed(msg.into())
-    }
-
-    /// Create a transport error
-    pub fn transport_error(msg: impl Into<String>) -> Self {
-        Self::TransportError(msg.into())
-    }
-
-    /// Create a protocol error
-    pub fn protocol_error(msg: impl Into<String>) -> Self {
-        Self::ProtocolError(msg.into())
-    }
-
-    /// Create a configuration error
-    pub fn config_error(msg: impl Into<String>) -> Self {
-        Self::ConfigurationError(msg.into())
-    }
-
-    /// Create an invalid tool arguments error
-    pub fn invalid_tool_args(msg: impl Into<String>) -> Self {
-        Self::InvalidToolArguments(msg.into())
-    }
-
-    /// Check if this is a connection-related error
-    pub fn is_connection_error(&self) -> bool {
-        matches!(
-            self,
-            Self::ConnectionFailed(_) | Self::TransportError(_) | Self::Disconnected
-        )
-    }
-
-    /// Check if this is a timeout error
-    pub fn is_timeout(&self) -> bool {
-        matches!(self, Self::Timeout(_))
-    }
-
-    /// Check if this is an authentication error
-    pub fn is_auth_error(&self) -> bool {
-        matches!(self, Self::AuthenticationError(_))
+    /// Get error type classification for database storage
+    pub fn error_type(&self) -> String {
+        match self {
+            Self::TransportCreation(_) => "Transport Creation".to_string(),
+            Self::ClientInitialize(e) => {
+                match e {
+                    rmcp::service::ClientInitializeError::ExpectedInitResponse(_) =>
+                        "Client Init: Expected Init Response".to_string(),
+                    rmcp::service::ClientInitializeError::ExpectedInitResult(_) =>
+                        "Client Init: Expected Init Result".to_string(),
+                    rmcp::service::ClientInitializeError::ConflictInitResponseId(_, _) =>
+                        "Client Init: Conflict Response ID".to_string(),
+                    rmcp::service::ClientInitializeError::ConnectionClosed(_) =>
+                        "Client Init: Connection Closed".to_string(),
+                    rmcp::service::ClientInitializeError::TransportError { .. } =>
+                        "Client Init: Transport Error".to_string(),
+                    rmcp::service::ClientInitializeError::Cancelled =>
+                        "Client Init: Cancelled".to_string(),
+                }
+            }
+            Self::Service(e) => {
+                match e {
+                    rmcp::service::ServiceError::McpError(mcp_err) =>
+                        format!("MCP Error: {}", mcp_err.code.0),
+                    rmcp::service::ServiceError::TransportSend(_) =>
+                        "Service: Transport Send".to_string(),
+                    rmcp::service::ServiceError::TransportClosed =>
+                        "Service: Transport Closed".to_string(),
+                    rmcp::service::ServiceError::UnexpectedResponse =>
+                        "Service: Unexpected Response".to_string(),
+                    rmcp::service::ServiceError::Cancelled { .. } =>
+                        "Service: Cancelled".to_string(),
+                    rmcp::service::ServiceError::Timeout { .. } =>
+                        "Service: Timeout".to_string(),
+                    _ => "Service: Unknown".to_string(),
+                }
+            }
+            Self::Runtime(_) => "Runtime Error".to_string(),
+            Self::InvalidToolArguments(_) => "Invalid Tool Arguments".to_string(),
+            Self::Shutdown(_) => "Shutdown Failed".to_string(),
+        }
     }
 }
 
 /// Result type for MCP client operations.
 pub type McpClientResult<T> = Result<T, McpClientError>;
-
-/// Convert anyhow::Error to McpClientError
-impl From<anyhow::Error> for McpClientError {
-    fn from(err: anyhow::Error) -> Self {
-        // Convert error to string representation
-        let error_str = err.to_string();
-
-        // Try to classify based on error message patterns
-        let error_lower = error_str.to_lowercase();
-
-        if error_lower.contains("connection")
-            || error_lower.contains("transport")
-            || error_lower.contains("refused")
-        {
-            return Self::ConnectionFailed(error_str);
-        }
-
-        if error_lower.contains("timeout") || error_lower.contains("timed out") {
-            return Self::Timeout(std::time::Duration::from_secs(30));
-        }
-
-        if error_lower.contains("auth") || error_lower.contains("unauthorized") {
-            return Self::AuthenticationError(error_str);
-        }
-
-        if error_lower.contains("protocol") || error_lower.contains("parse") {
-            return Self::ProtocolError(error_str);
-        }
-
-        // Otherwise, convert to Other
-        Self::Other(error_str)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_constructors() {
-        let err = McpClientError::connection_failed("test");
-        assert!(err.is_connection_error());
-
-        let err = McpClientError::config_error("invalid config");
-        assert!(!err.is_connection_error());
-    }
-
-    #[test]
-    fn test_error_display() {
-        let err = McpClientError::ToolNotFound("echo".to_string());
-        assert_eq!(err.to_string(), "Tool 'echo' not found");
-    }
-}

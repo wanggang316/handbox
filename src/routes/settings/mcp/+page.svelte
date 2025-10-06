@@ -114,7 +114,7 @@
             <!-- 工具统计信息或错误信息 -->
             {#if server.status === 'error' && server.lastError}
               <div class="text-xs text-error">
-                {server.lastError.errorType}: {server.lastError.message}
+                {server.lastError.message}
               </div>
             {:else if server.tools.length > 0}
               <div class="flex items-center gap-2">

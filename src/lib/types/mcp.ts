@@ -4,16 +4,7 @@ export type McpServerStatus = 'inactive' | 'ready' | 'error' | 'unknown';
 
 export type McpConnectionType = 'stdio' | 'sse' | 'http';
 
-export type McpErrorType =
-  | 'connection_error'
-  | 'authentication_error'
-  | 'timeout_error'
-  | 'configuration_error'
-  | 'protocol_error'
-  | 'unknown_error';
-
 export interface McpErrorDetail {
-  errorType: McpErrorType;
   message: string;
   details?: string;
   timestamp: Timestamp;

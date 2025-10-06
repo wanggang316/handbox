@@ -2,8 +2,6 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{anyhow, bail, Context};
-
 use crate::mcp_client::{
     validate_server_config, ConnectionConfig, McpClient, ProcessConfig, SseConfig,
     StreamableHttpConfig,
@@ -283,7 +281,7 @@ impl McpService {
     /// Update server status and metadata based on connection type
     ///
     /// Returns Ok if connection succeeds, Err if connection fails
-    async fn update_server_status(&self, server: &mut McpServer) -> anyhow::Result<()> {
+    async fn update_server_status(&self, server: &mut McpServer) -> Result<(), crate::mcp_client::McpClientError> {
         // All connection types now work the same way - try to connect and fetch metadata
         match self.fetch_server_metadata(server).await {
             Ok((tools, prompts, resources)) => {
@@ -315,10 +313,11 @@ impl McpService {
 
                 // 创建详细的错误信息
                 use crate::models::McpErrorDetail;
+
+                // 直接从 McpClientError 提取信息
                 server.last_error = Some(McpErrorDetail {
-                    error_type: Self::classify_error(&error),
+                    error_type: error.error_type(),
                     message: error.to_string(),
-                    details: error.source().map(|s| s.to_string()),
                     timestamp: Self::current_timestamp(),
                 });
 
@@ -436,105 +435,11 @@ impl McpService {
             .as_millis() as i64
     }
 
-    /// 根据错误信息分类错误类型
-    ///
-    /// 基于 rmcp 库的错误类型和 reqwest 错误进行分类:
-    /// - ClientInitializeError: ExpectedInitResponse, ConflictInitResponseId, ConnectionClosed, Cancelled
-    /// - ServiceError: McpError, TransportSend, TransportClosed, UnexpectedResponse, Cancelled, Timeout
-    /// - reqwest::Error: kind (Request, Redirect, Status, Body, Decode, Upgrade, Builder)
-    fn classify_error(error: &anyhow::Error) -> crate::models::McpErrorType {
-        use crate::models::McpErrorType;
-
-        let error_msg = error.to_string().to_lowercase();
-        let error_chain = format!("{:?}", error).to_lowercase();
-
-        // 1. rmcp 传输层错误 (TransportSend, TransportClosed, ConnectionClosed)
-        // 包括 reqwest 连接错误: ConnectionRefused, ConnectError
-        if error_msg.contains("transport closed")
-            || error_msg.contains("connection closed")
-            || error_msg.contains("transport send")
-            || error_msg.contains("connection refused")
-            || error_msg.contains("connectionrefused")
-            || error_chain.contains("connectionrefused")
-            || error_chain.contains("connecterror")
-            || error_msg.contains("connect error")
-            || error_msg.contains("tcp connect")
-            || error_msg.contains("refused")
-            || error_msg.contains("unreachable")
-            || error_msg.contains("network")
-            || error_msg.contains("no route to host")
-            || error_msg.contains("host not found")
-            || error_msg.contains("dns")
-            || error_msg.contains("connection reset")
-            || error_msg.contains("broken pipe")
-        {
-            return McpErrorType::ConnectionError;
-        }
-
-        // 2. 超时错误 (rmcp ServiceError::Timeout 或 reqwest timeout)
-        if error_msg.contains("timeout")
-            || error_msg.contains("timed out")
-            || error_msg.contains("deadline")
-            || error_msg.contains("time limit")
-            || error_msg.contains("request timeout")
-        {
-            return McpErrorType::TimeoutError;
-        }
-
-        // 3. 认证错误 (HTTP 401, 403)
-        if error_msg.contains("auth")
-            || error_msg.contains("unauthorized")
-            || error_msg.contains("forbidden")
-            || error_msg.contains("401")
-            || error_msg.contains("403")
-            || error_msg.contains("permission denied")
-        {
-            return McpErrorType::AuthenticationError;
-        }
-
-        // 4. 配置错误 (ClientInitializeError 初始化失败, 命令/文件不存在)
-        if error_msg.contains("invalid")
-            || error_msg.contains("missing")
-            || error_msg.contains("required")
-            || error_msg.contains("command not found")
-            || error_msg.contains("no such file")
-            || error_msg.contains("executable not found")
-            || error_msg.contains("expect initialized")
-            || error_msg.contains("conflict initialized")
-            || error_msg.contains("client initialize")
-        {
-            return McpErrorType::ConfigurationError;
-        }
-
-        // 5. 协议错误 (rmcp ServiceError::McpError, UnexpectedResponse, 解析错误)
-        if error_msg.contains("protocol")
-            || error_msg.contains("mcp error")
-            || error_msg.contains("unexpected response")
-            || error_msg.contains("parse")
-            || error_msg.contains("decode")
-            || error_msg.contains("malformed")
-            || error_msg.contains("invalid response")
-            || error_msg.contains("unexpected eof")
-            || error_msg.contains("json")
-            || error_chain.contains("mcperror")
-            || error_chain.contains("unexpectedresponse")
-        {
-            return McpErrorType::ProtocolError;
-        }
-
-        // 6. 取消操作 (虽然不算严格意义上的错误，但归为配置问题)
-        if error_msg.contains("cancelled") || error_msg.contains("canceled") {
-            return McpErrorType::ConfigurationError;
-        }
-
-        // 默认为未知错误
-        McpErrorType::UnknownError
-    }
 
     async fn fetch_server_metadata(
         &self,
         server: &McpServer,
-    ) -> anyhow::Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>)> {
+    ) -> Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>), crate::mcp_client::McpClientError> {
         let client = Self::connect_client(server).await?;
 
         // Fetch all metadata concurrently
@@ -557,7 +462,7 @@ impl McpService {
         // Handle prompts - ignore "Method not found" error (-32601)
         let prompts = match prompts_result {
             Ok(p) => Self::convert_prompts(p),
-            Err(crate::mcp_client::McpClientError::ServiceError(
+            Err(crate::mcp_client::McpClientError::Service(
                 rmcp::service::ServiceError::McpError(ref error),
             )) if error.code.0 == -32601 => {
                 tracing::debug!(
@@ -572,7 +477,7 @@ impl McpService {
         // Handle resources - ignore "Method not found" error (-32601)
         let resources = match resources_result {
             Ok(r) => Self::convert_resources(r),
-            Err(crate::mcp_client::McpClientError::ServiceError(
+            Err(crate::mcp_client::McpClientError::Service(
                 rmcp::service::ServiceError::McpError(ref error),
             )) if error.code.0 == -32601 => {
                 tracing::debug!(
@@ -631,40 +536,38 @@ impl McpService {
             .collect()
     }
 
-    async fn connect_client(server: &McpServer) -> anyhow::Result<McpClient> {
+    async fn connect_client(server: &McpServer) -> Result<McpClient, crate::mcp_client::McpClientError> {
         if !server.enabled {
-            bail!("MCP server '{}' is not enabled", server.name);
+            return Err(crate::mcp_client::McpClientError::TransportCreation(
+                format!("MCP server '{}' is not enabled", server.name)
+            ));
         }
 
         Self::validate_server_configuration(server)?;
         let config = Self::build_connection_config(server)?;
 
-        McpClient::connect(config)
-            .await
-            .with_context(|| format!("Failed to connect to MCP server '{}'", server.name))
+        McpClient::connect(config).await
     }
 
-    fn validate_server_configuration(server: &McpServer) -> anyhow::Result<()> {
+    fn validate_server_configuration(server: &McpServer) -> Result<(), crate::mcp_client::McpClientError> {
         match server.connection_type {
             crate::models::McpConnectionType::Stdio => {
                 validate_server_config(&server.command, &server.working_dir, &server.env)
-                    .with_context(|| {
-                        format!(
-                            "Invalid stdio configuration for MCP server '{}'",
-                            server.name
-                        )
-                    })?;
+                    .map_err(|e| crate::mcp_client::McpClientError::TransportCreation(
+                        format!("Invalid stdio configuration for MCP server '{}': {}", server.name, e)
+                    ))?;
             }
             crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
                 let endpoint = server.endpoint.as_ref().ok_or_else(|| {
-                    anyhow!("Endpoint is required for {}", server.connection_type)
+                    crate::mcp_client::McpClientError::TransportCreation(
+                        format!("Endpoint is required for {}", server.connection_type)
+                    )
                 })?;
 
                 if endpoint.trim().is_empty() {
-                    bail!(
-                        "Endpoint is required for {} connection type",
-                        server.connection_type.as_str()
-                    );
+                    return Err(crate::mcp_client::McpClientError::TransportCreation(
+                        format!("Endpoint is required for {} connection type", server.connection_type.as_str())
+                    ));
                 }
             }
         }
@@ -672,7 +575,7 @@ impl McpService {
         Ok(())
     }
 
-    fn build_connection_config(server: &McpServer) -> anyhow::Result<ConnectionConfig> {
+    fn build_connection_config(server: &McpServer) -> Result<ConnectionConfig, crate::mcp_client::McpClientError> {
         match server.connection_type {
             crate::models::McpConnectionType::Stdio => {
                 let mut config = ProcessConfig::new(&server.command)
@@ -689,7 +592,9 @@ impl McpService {
                 let endpoint = server
                     .endpoint
                     .as_ref()
-                    .ok_or_else(|| anyhow!("Endpoint is required for SSE connection"))?;
+                    .ok_or_else(|| crate::mcp_client::McpClientError::TransportCreation(
+                        "Endpoint is required for SSE connection".to_string()
+                    ))?;
 
                 let mut config =
                     SseConfig::new(endpoint.clone()).with_headers(server.headers.clone());
@@ -704,7 +609,9 @@ impl McpService {
                 let endpoint = server
                     .endpoint
                     .as_ref()
-                    .ok_or_else(|| anyhow!("Endpoint is required for HTTP connection"))?;
+                    .ok_or_else(|| crate::mcp_client::McpClientError::TransportCreation(
+                        "Endpoint is required for HTTP connection".to_string()
+                    ))?;
 
                 let mut config = StreamableHttpConfig::new(endpoint.clone())
                     .with_headers(server.headers.clone());
@@ -741,10 +648,8 @@ impl McpService {
                             tool_name,
                             error
                         );
-                        return Err(AppError::internal_error(&format!(
-                            "调用工具 {} 失败: {}",
-                            tool_name, error.message
-                        )));
+                        // McpClientError 会自动转换为 AppError
+                        return Err(error.into());
                     }
                 }
             }
@@ -767,20 +672,10 @@ impl McpService {
         server: &McpServer,
         tool_name: &str,
         arguments: Option<serde_json::Value>,
-    ) -> Result<rmcp::model::CallToolResult, AppError> {
-        let client = Self::connect_client(server).await.map_err(|e| {
-            AppError::internal_error(&format!(
-                "Failed to connect to MCP server {}: {}",
-                server.name, e
-            ))
-        })?;
+    ) -> Result<rmcp::model::CallToolResult, crate::mcp_client::McpClientError> {
+        let client = Self::connect_client(server).await?;
 
-        let call_result = client.call_tool(tool_name, arguments).await.map_err(|e| {
-            AppError::internal_error(&format!(
-                "Failed to call MCP tool {} on {}: {}",
-                tool_name, server.name, e
-            ))
-        });
+        let call_result = client.call_tool(tool_name, arguments).await;
 
         if let Err(e) = client.shutdown().await {
             tracing::warn!(

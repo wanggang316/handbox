@@ -153,58 +153,14 @@ pub struct McpResource {
     pub annotations: HashMap<String, serde_json::Value>,
 }
 
-/// MCP 错误类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum McpErrorType {
-    /// 连接错误（无法建立连接）
-    ConnectionError,
-    /// 认证错误
-    AuthenticationError,
-    /// 超时错误
-    TimeoutError,
-    /// 配置错误（参数无效等）
-    ConfigurationError,
-    /// 协议错误（MCP 协议层面的错误）
-    ProtocolError,
-    /// 未知错误
-    UnknownError,
-}
-
-impl McpErrorType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            McpErrorType::ConnectionError => "connection_error",
-            McpErrorType::AuthenticationError => "authentication_error",
-            McpErrorType::TimeoutError => "timeout_error",
-            McpErrorType::ConfigurationError => "configuration_error",
-            McpErrorType::ProtocolError => "protocol_error",
-            McpErrorType::UnknownError => "unknown_error",
-        }
-    }
-
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            McpErrorType::ConnectionError => "连接错误",
-            McpErrorType::AuthenticationError => "认证错误",
-            McpErrorType::TimeoutError => "超时",
-            McpErrorType::ConfigurationError => "配置错误",
-            McpErrorType::ProtocolError => "协议错误",
-            McpErrorType::UnknownError => "未知错误",
-        }
-    }
-}
-
 /// MCP 错误详情
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpErrorDetail {
-    /// 错误类型
-    pub error_type: McpErrorType,
-    /// 错误消息
+    /// 错误类型分类
+    pub error_type: String,
+    /// 错误消息（来自 McpClientError 的 Display 实现）
     pub message: String,
-    /// 详细描述（可选）
-    pub details: Option<String>,
     /// 错误时间戳
     pub timestamp: i64,
 }

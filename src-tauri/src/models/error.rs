@@ -105,6 +105,13 @@ impl From<sqlx::Error> for AppError {
     }
 }
 
+// MCP client 错误转换
+impl From<crate::mcp_client::McpClientError> for AppError {
+    fn from(error: crate::mcp_client::McpClientError) -> Self {
+        Self::new("MCP_ERROR", &error.to_string())
+    }
+}
+
 /// API 响应包装类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "success")]

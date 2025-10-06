@@ -249,13 +249,9 @@
       <!-- 错误信息展示 -->
       {#if server.status === 'error' && server.lastError}
         <div class="mt-4 p-4 rounded-lg bg-error/10 border border-error/20">
-          <div class="text-sm text-error font-medium mb-2">
-            {server.lastError.errorType}
+          <div class="text-sm text-error font-medium break-words whitespace-pre-wrap">
+            {server.lastError.message}
           </div>
-          <div class="text-xs text-error/80 mb-1">{server.lastError.message}</div>
-          {#if server.lastError.details}
-            <div class="text-xs text-error/60 mt-2 font-mono">{server.lastError.details}</div>
-          {/if}
         </div>
       {/if}
 
