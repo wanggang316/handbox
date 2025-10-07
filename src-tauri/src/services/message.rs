@@ -3,7 +3,7 @@
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{
     ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall, ChatToolChoice,
-    RequestTool, RequestToolFunction,
+    ChatToolFunction, RequestTool, RequestToolFunction, ToolExecutionMode, ToolExecutionStatus,
 };
 use crate::models::{
     AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest, MessageResponse,
@@ -72,11 +72,11 @@ impl<T> StreamErrorCallback for T where T: FnMut(String, AppError) + Send + 'sta
 /// - `tool_call_ids`: 工具调用ID列表
 /// - `status`: 工具执行状态
 pub trait ToolExecuteCallback:
-    FnMut(String, Vec<String>, crate::llm_client::types::ToolExecutionStatus) + Send + 'static
+    FnMut(String, Vec<String>, ToolExecutionStatus) + Send + 'static
 {
 }
 impl<T> ToolExecuteCallback for T where
-    T: FnMut(String, Vec<String>, crate::llm_client::types::ToolExecutionStatus) + Send + 'static
+    T: FnMut(String, Vec<String>, ToolExecutionStatus) + Send + 'static
 {
 }
 
@@ -763,7 +763,7 @@ impl MessageService {
                                         all_tool_calls.push(ChatToolCall {
                                             id: String::new(),
                                             tool_type: String::new(),
-                                            function: crate::llm_client::types::ChatToolFunction {
+                                            function: ChatToolFunction {
                                                 name: String::new(),
                                                 arguments: String::new(),
                                             },
@@ -835,7 +835,15 @@ impl MessageService {
             chunk_count, accumulated_content.len(), duration
         );
 
-        // 7. 构造 MessageResponse
+        // 7. 构造消息配置并处理工具调用的执行模式
+        let config = Self::extract_message_config_from_chat(request, &chat);
+        let processed_tool_calls = if all_tool_calls.is_empty() {
+            None
+        } else {
+            Self::prepare_tool_calls(Some(all_tool_calls), &config)
+        };
+
+        // 8. 构造 MessageResponse
         let response = MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: message_id.clone(),
@@ -845,11 +853,7 @@ impl MessageService {
             } else {
                 Some(accumulated_reasoning)
             },
-            tool_calls: if all_tool_calls.is_empty() {
-                None
-            } else {
-                Some(all_tool_calls)
-            },
+            tool_calls: processed_tool_calls,
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
             input_tokens: None, // 流式API通常不返回token统计
@@ -1194,7 +1198,7 @@ impl MessageService {
         &self,
         message_id: &str,
         tool_call_ids: &[String],
-        status: crate::llm_client::types::ToolExecutionStatus,
+        status: ToolExecutionStatus,
     ) -> Result<(), AppError> {
         // 1. 获取消息
         let mut message = self.get_message(message_id.to_string()).await?;
@@ -1303,7 +1307,7 @@ impl MessageService {
         }
 
         // 5. 更新工具调用状态为 Executing 并触发回调
-        let executing_status = crate::llm_client::types::ToolExecutionStatus::Executing;
+        let executing_status = ToolExecutionStatus::Executing;
         if let Err(e) = self
             .update_tool_call_status(&message_id, &tool_call_ids, executing_status.clone())
             .await
@@ -1384,9 +1388,9 @@ impl MessageService {
 
         // 7. 更新工具调用状态为 Completed 或 Failed
         let final_status = if has_error {
-            crate::llm_client::types::ToolExecutionStatus::Failed
+            ToolExecutionStatus::Failed
         } else {
-            crate::llm_client::types::ToolExecutionStatus::Completed
+            ToolExecutionStatus::Completed
         };
 
         if let Err(e) = self
@@ -1406,7 +1410,40 @@ impl MessageService {
             final_status,
         );
 
-        // 7. 获取 chat 配置
+        // 8. 检查同一消息中的所有工具调用是否都已完成
+        // 重新获取消息以获取最新的工具调用状态
+        let updated_message = match self.get_message(message_id.clone()).await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::execute_tool_calls] Failed to get updated message: {}",
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
+
+        // 检查是否还有未完成的工具调用（不论是自动还是手动执行模式）
+        if let Some(tool_calls) = &updated_message.tool_calls {
+            let has_pending_tools = tool_calls.iter().any(|call| {
+                call.execution_status == ToolExecutionStatus::Pending
+            });
+
+            if has_pending_tools {
+                tracing::info!(
+                    "[MessageService::execute_tool_calls] Still has pending tools, waiting for execution"
+                );
+                // 还有未完成的工具，直接返回，不继续调用模型
+                return;
+            }
+        }
+
+        tracing::info!(
+            "[MessageService::execute_tool_calls] All tools completed, continuing to call model"
+        );
+
+        // 9. 获取 chat 配置
         let chat = match self.get_chat_config(&message.chat_id).await {
             Ok(chat) => chat,
             Err(e) => {

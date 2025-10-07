@@ -5,6 +5,10 @@
     Trash2,
     ChevronDown,
     ChevronRight,
+    Pause,
+    Loader2,
+    CheckCircle2,
+    XCircle,
   } from "lucide-svelte";
   import type { Message } from "$lib/types";
   import { messageStore, mcpState } from "$lib/states";
@@ -100,19 +104,32 @@
     return calls.some(call => call.executionMode === 'manual');
   });
 
+  // 获取所有待执行的手动工具
+  const pendingManualTools = $derived(() => {
+    const calls = toolCalls();
+    return calls.filter(
+      call => call.executionMode === 'manual' && call.executionStatus === 'pending'
+    );
+  });
+
+  // 是否显示"全部执行"按钮（有多个待执行的手动工具时）
+  const showExecuteAllButton = $derived(() => {
+    return pendingManualTools().length > 1;
+  });
+
   // 获取工具调用的显示状态
   function getToolExecutionStatusDisplay(status?: string) {
     switch (status) {
       case 'pending':
-        return { text: '待执行', icon: '⏸️', color: 'text-gray-600' };
+        return { text: '待执行', icon: Pause, color: 'text-base-content/60' };
       case 'executing':
-        return { text: '执行中', icon: '⌛️', color: 'text-blue-600' };
+        return { text: '执行中', icon: Loader2, color: 'text-info', animate: true };
       case 'completed':
-        return { text: '完成', icon: '✅', color: 'text-green-600' };
+        return { text: '完成', icon: CheckCircle2, color: 'text-success' };
       case 'failed':
-        return { text: '失败', icon: '❌', color: 'text-red-600' };
+        return { text: '失败', icon: XCircle, color: 'text-error' };
       default:
-        return { text: '未知', icon: '❓', color: 'text-gray-400' };
+        return { text: '未知', icon: Pause, color: 'text-base-content/40' };
     }
   }
 
@@ -130,12 +147,13 @@
     if (autoExecuteCalls.length > 0) {
       // 延迟一小段时间后执行，确保消息已经完全渲染
       setTimeout(() => {
-        handleExecuteToolCalls();
+        handleExecuteAllToolCalls();
       }, 100);
     }
   });
 
-  async function handleExecuteToolCalls() {
+  // 执行所有待执行的工具
+  async function handleExecuteAllToolCalls() {
     const calls = toolCalls();
     if (calls.length === 0) {
       console.warn('没有找到工具调用');
@@ -148,20 +166,33 @@
     }
 
     try {
-      console.log('执行工具调用:', calls);
-
-      // 如果需要手动执行，先删除后续消息
-      if (needsManualExecution()) {
-        console.log('手动工具执行：删除后续消息');
-        // 这里应该调用删除后续消息的 API
-        // 但目前我们直接执行工具
-      }
+      console.log('执行所有工具调用:', calls);
 
       // 使用消息状态管理来执行工具调用
       await messageStore.executeAllToolCalls(message.id, calls);
 
     } catch (error) {
       console.error('执行工具调用失败:', error);
+    }
+  }
+
+  // 执行单个工具
+  async function handleExecuteSingleTool(toolCallId: string) {
+    if (!message?.id) {
+      console.error('消息 ID 不存在');
+      return;
+    }
+
+    if (!toolCallId) {
+      console.error('工具调用 ID 不存在');
+      return;
+    }
+
+    try {
+      console.log('执行单个工具调用:', toolCallId);
+      await messageStore.executeToolCall(message.id, toolCallId);
+    } catch (error) {
+      console.error('执行单个工具调用失败:', error);
     }
   }
 
@@ -348,11 +379,29 @@
           <!-- 工具调用记录 -->
           {#if toolCalls().length > 0}
             <div class="mb-4 rounded-lg border border-blue-400/40 bg-blue-50/80 p-3 text-sm text-blue-900 dark:bg-blue-900/40 dark:text-blue-100">
-              <div class="mb-2 font-medium flex items-center gap-2">
-                <span>工具调用</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20">
-                  {toolCalls().length} 个工具
-                </span>
+              <div class="mb-2 font-medium flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span>工具调用</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20">
+                    {toolCalls().length} 个工具
+                  </span>
+                </div>
+
+                <!-- 全部执行按钮 -->
+                {#if showExecuteAllButton()}
+                  <button
+                    class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 flex items-center gap-1"
+                    onclick={handleExecuteAllToolCalls}
+                    disabled={isExecuting()}
+                  >
+                    {#if isExecuting()}
+                      <Loader2 size={12} class="animate-spin" />
+                      <span>执行中...</span>
+                    {:else}
+                      <span>全部执行 ({pendingManualTools().length})</span>
+                    {/if}
+                  </button>
+                {/if}
               </div>
               <div class="space-y-2">
                 {#each toolCalls() as tool}
@@ -376,7 +425,12 @@
                       <!-- 执行状态和操作按钮 -->
                       <div class="flex items-center gap-2">
                         <span class="text-[10px] {statusDisplay.color} flex items-center gap-1">
-                          <span>{statusDisplay.icon}</span>
+                          {#if statusDisplay.icon}
+                            <statusDisplay.icon
+                              size={12}
+                              class={statusDisplay.animate ? 'animate-spin' : ''}
+                            />
+                          {/if}
                           <span>{statusDisplay.text}</span>
                         </span>
 
@@ -385,7 +439,7 @@
                           {#if tool.executionStatus === 'pending'}
                             <button
                               class="px-2 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
-                              onclick={() => handleExecuteToolCalls()}
+                              onclick={() => handleExecuteSingleTool(tool.id || '')}
                               disabled={isExecuting()}
                             >
                               执行
@@ -393,7 +447,7 @@
                           {:else if tool.executionStatus === 'failed' || tool.executionStatus === 'completed'}
                             <button
                               class="px-2 py-0.5 text-[10px] bg-gray-600 hover:bg-gray-700 text-white rounded disabled:opacity-50"
-                              onclick={() => handleExecuteToolCalls()}
+                              onclick={() => handleExecuteSingleTool(tool.id || '')}
                               disabled={isExecuting()}
                             >
                               重新执行
