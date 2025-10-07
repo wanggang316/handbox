@@ -4,7 +4,7 @@
 
 import { apiCall } from './index';
 import { listen } from '@tauri-apps/api/event';
-import type { MessageRequest, MessageResponse, Message, UUID, MessageStreamEvent } from '../types';
+import type { MessageRequest, MessageResponse, Message, UUID, MessageStreamEvent, ToolExecutionStatus } from '../types';
 
 /**
  * 发送消息
@@ -103,7 +103,7 @@ export interface StreamEventHandlers {
   onChunk?: (data: { streamId: string; content: string; reasoning?: string; toolCalls?: any[]; chunk: string; index: number }) => void;
   onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string; toolCalls?: any[]; messageId?: string }) => void;
   onError?: (error: any) => void;
-  onToolExecute?: (data: { messageId: string; toolCallIds: string[]; status: 'executing' | 'finished' }) => void;
+  onToolExecute?: (data: { messageId: string; toolCallIds: string[]; status: ToolExecutionStatus }) => void;
 }
 
 export async function listenToStreamEvents(handlers: StreamEventHandlers, eventPrefix: string = 'message_stream') {

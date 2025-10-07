@@ -14,7 +14,7 @@ pub use crate::storage::Database;
 pub use artifact::ArtifactService;
 pub use chat::ChatService;
 pub use mcp::McpService;
-pub use message::{MessageService, ToolExecuteStatus};
+pub use message::MessageService;
 pub use provider::ProviderService;
 pub use search::SearchService;
 pub use settings::SettingsService;

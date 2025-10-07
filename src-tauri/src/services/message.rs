@@ -65,16 +65,6 @@ impl<T> StreamEndCallback for T where T: FnMut(String, MessageResponse) + Send +
 pub trait StreamErrorCallback: FnMut(String, AppError) + Send + 'static {}
 impl<T> StreamErrorCallback for T where T: FnMut(String, AppError) + Send + 'static {}
 
-/// 工具执行状态
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolExecuteStatus {
-    /// 工具执行中
-    Executing,
-    /// 工具执行完成
-    Finished,
-}
-
 /// 工具执行回调：当工具执行状态变化时调用
 ///
 /// 参数:
@@ -82,11 +72,11 @@ pub enum ToolExecuteStatus {
 /// - `tool_call_ids`: 工具调用ID列表
 /// - `status`: 工具执行状态
 pub trait ToolExecuteCallback:
-    FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static
+    FnMut(String, Vec<String>, crate::llm_client::types::ToolExecutionStatus) + Send + 'static
 {
 }
 impl<T> ToolExecuteCallback for T where
-    T: FnMut(String, Vec<String>, ToolExecuteStatus) + Send + 'static
+    T: FnMut(String, Vec<String>, crate::llm_client::types::ToolExecutionStatus) + Send + 'static
 {
 }
 
@@ -200,7 +190,7 @@ impl MessageService {
         // 4. 保存助手消息到数据库
         // let config = Self::extract_message_config_from_chat(&request, &chat);
         let now = chrono::Utc::now().timestamp_millis();
-        let assistant_message_id = self
+        let (assistant_message_id, processed_tool_calls) = self
             .save_assistant_message(
                 chat_id,
                 &llm_response.content,
@@ -237,7 +227,7 @@ impl MessageService {
             output_tokens: llm_response.output_tokens,
             total_tokens: llm_response.total_tokens,
             duration: llm_response.duration,
-            tool_calls: llm_response.tool_calls,
+            tool_calls: processed_tool_calls.clone(),
         };
 
         tracing::info!(
@@ -777,6 +767,8 @@ impl MessageService {
                                                 name: String::new(),
                                                 arguments: String::new(),
                                             },
+                                            execution_mode: Default::default(),
+                                            execution_status: Default::default(),
                                         });
                                     }
 
@@ -907,7 +899,53 @@ impl MessageService {
         Ok(message_id)
     }
 
+    /// 处理工具调用的执行模式和状态
+    /// 根据消息配置中的 MCP 服务器设置，为每个工具调用设置执行模式和初始状态
+    fn prepare_tool_calls(
+        tool_calls: Option<Vec<ChatToolCall>>,
+        config: &Option<MessageConfig>,
+    ) -> Option<Vec<ChatToolCall>> {
+        use crate::llm_client::types::{ToolExecutionMode, ToolExecutionStatus};
+
+        tool_calls.map(|calls| {
+            calls
+                .into_iter()
+                .map(|mut call| {
+                    // 默认为自动执行模式
+                    let mut execution_mode = ToolExecutionMode::Auto;
+
+                    // 根据配置查找工具所属的 MCP 服务器及其执行模式
+                    if let Some(cfg) = config {
+                        if let Some(mcp_servers) = &cfg.mcp_servers {
+                            let tool_name = &call.function.name;
+
+                            // 查找包含此工具的 MCP 服务器
+                            for server in mcp_servers {
+                                if server.enabled_tools.contains(tool_name) {
+                                    // 根据服务器的执行模式设置工具的执行模式
+                                    execution_mode = if server.execution_mode == "manual" {
+                                        ToolExecutionMode::Manual
+                                    } else {
+                                        ToolExecutionMode::Auto
+                                    };
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // 设置执行模式和初始状态
+                    call.execution_mode = execution_mode;
+                    call.execution_status = ToolExecutionStatus::Pending;
+
+                    call
+                })
+                .collect()
+        })
+    }
+
     /// 构造并保存AI响应消息
+    /// 返回 (message_id, processed_tool_calls)
     async fn save_assistant_message(
         &self,
         chat_id: &str,
@@ -921,9 +959,12 @@ impl MessageService {
         output_tokens: Option<i32>,
         total_tokens: Option<i32>,
         turn_id: Option<i32>,
-    ) -> Result<String, AppError> {
+    ) -> Result<(String, Option<Vec<ChatToolCall>>), AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp_millis();
+
+        // 处理工具调用的执行模式和状态
+        let processed_tool_calls = Self::prepare_tool_calls(tool_calls, &config);
 
         let message = Message {
             id: message_id.clone(),
@@ -931,7 +972,7 @@ impl MessageService {
             role: ChatMessageRole::Assistant,
             content: content.to_string(),
             reasoning,
-            tool_calls,
+            tool_calls: processed_tool_calls.clone(),
             config,
             turn_id,
             tool_call_id: None, // 助手消息没有关联的工具调用ID（工具调用本身在tool_calls字段中）
@@ -948,7 +989,7 @@ impl MessageService {
 
         self.repository.create_message(&message).await?;
         tracing::info!("[MessageService] Assistant message saved: {}", message_id);
-        Ok(message_id)
+        Ok((message_id, processed_tool_calls))
     }
 
     /// 获取聊天配置
@@ -1148,6 +1189,41 @@ impl MessageService {
         Ok(())
     }
 
+    /// 更新消息中指定工具调用的执行状态
+    async fn update_tool_call_status(
+        &self,
+        message_id: &str,
+        tool_call_ids: &[String],
+        status: crate::llm_client::types::ToolExecutionStatus,
+    ) -> Result<(), AppError> {
+        // 1. 获取消息
+        let mut message = self.get_message(message_id.to_string()).await?;
+
+        // 2. 更新工具调用状态
+        if let Some(tool_calls) = &mut message.tool_calls {
+            for tool_call in tool_calls.iter_mut() {
+                if tool_call_ids.contains(&tool_call.id) {
+                    tool_call.execution_status = status.clone();
+                }
+            }
+        }
+
+        // 3. 保存更新后的工具调用
+        let now = chrono::Utc::now().timestamp_millis();
+        self.repository
+            .update_message_tools(&message.id, message.tool_calls.as_ref(), now)
+            .await?;
+
+        tracing::debug!(
+            "[MessageService::update_tool_call_status] Updated status for tool calls {:?} in message {} to {:?}",
+            tool_call_ids,
+            message_id,
+            status
+        );
+
+        Ok(())
+    }
+
     /// 执行工具调用并发送结果给模型继续对话
     pub async fn execute_tool_calls(
         &self,
@@ -1226,15 +1302,28 @@ impl MessageService {
             }
         }
 
-        // 5. 触发工具执行开始回调
+        // 5. 更新工具调用状态为 Executing 并触发回调
+        let executing_status = crate::llm_client::types::ToolExecutionStatus::Executing;
+        if let Err(e) = self
+            .update_tool_call_status(&message_id, &tool_call_ids, executing_status.clone())
+            .await
+        {
+            tracing::error!(
+                "[MessageService::execute_tool_calls] Failed to update tool status to executing: {}",
+                e
+            );
+        }
+
         tool_execute_callback(
             message_id.clone(),
             tool_call_ids.clone(),
-            ToolExecuteStatus::Executing,
+            executing_status,
         );
 
         // 6. 执行所有工具调用并构造工具结果消息
         let mut created_tool_message_ids = Vec::new();
+        let mut has_error = false;
+
         for tool_call in selected_tool_calls {
             tracing::info!(
                 "[MessageService::execute_tool_calls] Executing tool {} for message {}",
@@ -1253,6 +1342,7 @@ impl MessageService {
                         "[MessageService::execute_tool_calls] Tool execution failed: {}",
                         error
                     );
+                    has_error = true;
                     format!("工具执行失败: {}", error.message)
                 }
             };
@@ -1292,11 +1382,28 @@ impl MessageService {
             created_tool_message_ids
         );
 
+        // 7. 更新工具调用状态为 Completed 或 Failed
+        let final_status = if has_error {
+            crate::llm_client::types::ToolExecutionStatus::Failed
+        } else {
+            crate::llm_client::types::ToolExecutionStatus::Completed
+        };
+
+        if let Err(e) = self
+            .update_tool_call_status(&message_id, &tool_call_ids, final_status.clone())
+            .await
+        {
+            tracing::error!(
+                "[MessageService::execute_tool_calls] Failed to update tool status to completed/failed: {}",
+                e
+            );
+        }
+
         // 触发工具执行完成回调
         tool_execute_callback(
             message_id.clone(),
             tool_call_ids.clone(),
-            ToolExecuteStatus::Finished,
+            final_status,
         );
 
         // 7. 获取 chat 配置

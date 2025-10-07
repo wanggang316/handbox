@@ -1,7 +1,8 @@
 // 消息相关 IPC 命令
 
 use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
-use crate::services::{message::StreamChunk, MessageService, ToolExecuteStatus};
+use crate::services::{message::StreamChunk, MessageService};
+use crate::llm_client::types::ToolExecutionStatus;
 use serde_json::json;
 use tauri::{Emitter, State, Window};
 
@@ -104,8 +105,8 @@ fn create_stream_error_callback(
 fn create_tool_execute_callback(
     window: Window,
     event_name: &'static str,
-) -> impl FnMut(String, Vec<String>, ToolExecuteStatus) {
-    move |message_id: String, tool_call_ids: Vec<String>, status: ToolExecuteStatus| {
+) -> impl FnMut(String, Vec<String>, ToolExecutionStatus) {
+    move |message_id: String, tool_call_ids: Vec<String>, status: ToolExecutionStatus| {
         let _ = window.emit(
             event_name,
             json!({

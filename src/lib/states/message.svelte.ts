@@ -22,8 +22,6 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
-  // 工具执行状态 - 记录哪些消息正在执行工具
-  executingMessages: Record<string, boolean>; // messageId -> true/false
 }
 
 class MessageStore {
@@ -37,7 +35,6 @@ class MessageStore {
     streamingContent: '',
     streamingReasoning: '',
     streamingToolCalls: null,
-    executingMessages: {},
   });
 
   // 当前流式事件监听器的清理函数
@@ -80,11 +77,6 @@ class MessageStore {
   // 判断是否在等待消息响应（发送中但还没有任何流式内容）
   get isMessageLoading() {
     return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
-  }
-
-  // 暴露正在执行的消息集合（响应式）
-  get executingMessages() {
-    return this.state.executingMessages;
   }
 
   // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
@@ -232,6 +224,15 @@ class MessageStore {
     this.state.messagesByChat[chatId].push(message);
     // 缓存新消息的 providerConfig
     this.cacheProviderConfigs([message]);
+  }
+
+  // 根据ID获取消息
+  getMessageById(chatId: string, messageId: string): Message | undefined {
+    const messages = this.state.messagesByChat[chatId];
+    if (messages) {
+      return messages.find(m => m.id === messageId);
+    }
+    return undefined;
   }
 
   // 更新消息
@@ -563,12 +564,40 @@ class MessageStore {
           ...this.createStreamEventHandlers(),
           // 添加工具执行状态回调
           onToolExecute: (data) => {
-            if (data.status === 'executing') {
-              // 设置执行状态
-              this.state.executingMessages[data.messageId] = true;
-            } else if (data.status === 'finished') {
-              // 清除执行状态
-              delete this.state.executingMessages[data.messageId];
+            console.log('[onToolExecute] 工具执行状态变化:', data);
+
+            // 查找消息所属的 chatId
+            let foundChatId: string | undefined;
+            let foundMessage: Message | undefined;
+
+            for (const [cid, messages] of Object.entries(this.state.messagesByChat)) {
+              const msg = messages.find(m => m.id === data.messageId);
+              if (msg) {
+                foundChatId = cid;
+                foundMessage = msg;
+                break;
+              }
+            }
+
+            if (!foundChatId || !foundMessage) {
+              console.warn('[onToolExecute] 未找到消息:', data.messageId);
+              return;
+            }
+
+            // 更新消息中工具调用的状态
+            if (foundMessage.toolCalls) {
+              const updatedToolCalls = foundMessage.toolCalls.map(call => {
+                // 如果这个工具调用在更新列表中，更新其状态
+                if (data.toolCallIds.includes(call.id || '')) {
+                  return { ...call, executionStatus: data.status };
+                }
+                return call;
+              });
+
+              // 更新消息
+              this.updateMessage(foundChatId, data.messageId, {
+                toolCalls: updatedToolCalls
+              });
             }
           }
         },
@@ -583,8 +612,7 @@ class MessageStore {
       console.log('[executeToolCalls] 后端API调用完成');
 
     } catch (error) {
-      // 出错时清除执行状态
-      delete this.state.executingMessages[messageId];
+      // 清理监听器
       if (this.currentStreamUnlisten) {
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
@@ -637,7 +665,6 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
-    this.state.executingMessages = {};
   }
 
 }

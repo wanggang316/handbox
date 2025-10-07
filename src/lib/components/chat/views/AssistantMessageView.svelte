@@ -84,13 +84,56 @@
     }
   }
 
-  // 检查是否有任何工具调用正在执行 - 使用 getter 确保响应式追踪
+  // 检查是否有任何工具调用正在执行
   const isExecuting = $derived(() => {
-    return message?.id ? !!messageStore.executingMessages[message.id] : false;
+    const calls = toolCalls();
+    // 检查是否有任何工具调用的状态为 executing
+    return calls.some(call => call.executionStatus === 'executing');
   });
 
-  // 所有工具调用都自动执行
-  const needsManualExecution = $derived(() => false);
+  // 检查是否有工具调用需要手动执行
+  const needsManualExecution = $derived(() => {
+    const calls = toolCalls();
+    if (calls.length === 0) return false;
+
+    // 直接从工具调用的 executionMode 字段判断
+    return calls.some(call => call.executionMode === 'manual');
+  });
+
+  // 获取工具调用的显示状态
+  function getToolExecutionStatusDisplay(status?: string) {
+    switch (status) {
+      case 'pending':
+        return { text: '待执行', icon: '⏸️', color: 'text-gray-600' };
+      case 'executing':
+        return { text: '执行中', icon: '⌛️', color: 'text-blue-600' };
+      case 'completed':
+        return { text: '完成', icon: '✅', color: 'text-green-600' };
+      case 'failed':
+        return { text: '失败', icon: '❌', color: 'text-red-600' };
+      default:
+        return { text: '未知', icon: '❓', color: 'text-gray-400' };
+    }
+  }
+
+  // 自动执行工具调用
+  // 当消息有自动执行模式的工具调用且状态为 pending 时，自动触发执行
+  $effect(() => {
+    const calls = toolCalls();
+    if (!message?.id || calls.length === 0 || isStreaming) return;
+
+    // 检查是否有需要自动执行的工具调用
+    const autoExecuteCalls = calls.filter(
+      call => call.executionMode === 'auto' && call.executionStatus === 'pending'
+    );
+
+    if (autoExecuteCalls.length > 0) {
+      // 延迟一小段时间后执行，确保消息已经完全渲染
+      setTimeout(() => {
+        handleExecuteToolCalls();
+      }, 100);
+    }
+  });
 
   async function handleExecuteToolCalls() {
     const calls = toolCalls();
@@ -305,41 +348,67 @@
           <!-- 工具调用记录 -->
           {#if toolCalls().length > 0}
             <div class="mb-4 rounded-lg border border-blue-400/40 bg-blue-50/80 p-3 text-sm text-blue-900 dark:bg-blue-900/40 dark:text-blue-100">
-              <div class="mb-2 font-medium flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span>工具调用</span>
-                  {#if needsManualExecution()}
-                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-700 dark:text-yellow-300">需要手动执行</span>
-                  {/if}
-                </div>
-                {#if needsManualExecution()}
-                  <button
-                    class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
-                    onclick={handleExecuteToolCalls}
-                    disabled={toolCalls().length === 0 || isExecuting()}
-                  >
-                    {#if isExecuting()}
-                      <div class="flex items-center gap-1">
-                        <div class="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-                        执行中...
-                      </div>
-                    {:else}
-                      手动执行
-                    {/if}
-                  </button>
-                {:else}
-                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-700 dark:text-green-300">已自动执行</span>
-                {/if}
+              <div class="mb-2 font-medium flex items-center gap-2">
+                <span>工具调用</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20">
+                  {toolCalls().length} 个工具
+                </span>
               </div>
               <div class="space-y-2">
                 {#each toolCalls() as tool}
+                  {@const statusDisplay = getToolExecutionStatusDisplay(tool.executionStatus)}
                   <div class="rounded-md border border-blue-400/30 bg-white/80 dark:bg-blue-900/50 p-2 text-xs">
-                    <div class="flex items-center justify-between">
-                      <div class="font-semibold">{tool.function?.name || `工具 ${tool.index}`}</div>
-                      <div class="text-gray-500 text-[10px]">
-                        ID: {tool.id || 'N/A'} | 类型: {tool.toolType || 'function'}
+                    <!-- 工具信息头部 -->
+                    <div class="flex items-center justify-between mb-2">
+                      <div class="flex items-center gap-2">
+                        <div class="font-semibold">{tool.function?.name || `工具 ${tool.index}`}</div>
+                        <!-- 执行模式标签 -->
+                        {#if tool.executionMode === 'manual'}
+                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-700 dark:text-yellow-300">
+                            手动
+                          </span>
+                        {:else}
+                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-700 dark:text-green-300">
+                            自动
+                          </span>
+                        {/if}
+                      </div>
+                      <!-- 执行状态和操作按钮 -->
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] {statusDisplay.color} flex items-center gap-1">
+                          <span>{statusDisplay.icon}</span>
+                          <span>{statusDisplay.text}</span>
+                        </span>
+
+                        <!-- 手动执行或重新执行按钮 -->
+                        {#if tool.executionMode === 'manual'}
+                          {#if tool.executionStatus === 'pending'}
+                            <button
+                              class="px-2 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
+                              onclick={() => handleExecuteToolCalls()}
+                              disabled={isExecuting()}
+                            >
+                              执行
+                            </button>
+                          {:else if tool.executionStatus === 'failed' || tool.executionStatus === 'completed'}
+                            <button
+                              class="px-2 py-0.5 text-[10px] bg-gray-600 hover:bg-gray-700 text-white rounded disabled:opacity-50"
+                              onclick={() => handleExecuteToolCalls()}
+                              disabled={isExecuting()}
+                            >
+                              重新执行
+                            </button>
+                          {/if}
+                        {/if}
                       </div>
                     </div>
+
+                    <!-- 工具ID和类型 -->
+                    <div class="text-gray-500 text-[10px] mb-2">
+                      ID: {tool.id || 'N/A'} | 类型: {tool.toolType || 'function'}
+                    </div>
+
+                    <!-- 工具参数 -->
                     {#if tool.function?.arguments}
                       <div class="mt-2">
                         <div class="mb-1 text-[10px] text-gray-600 dark:text-gray-400 font-medium">参数:</div>

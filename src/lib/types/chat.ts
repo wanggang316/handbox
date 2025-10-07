@@ -134,6 +134,12 @@ export interface MessageResponse {
 }
 
 
+// 工具调用执行模式
+export type ToolExecutionMode = 'auto' | 'manual';
+
+// 工具调用执行状态
+export type ToolExecutionStatus = 'pending' | 'executing' | 'completed' | 'failed';
+
 // 工具函数信息
 export interface ToolFunction {
   name: string;
@@ -146,6 +152,8 @@ export interface ToolCall {
   id?: string;
   toolType?: string;
   function?: ToolFunction;
+  executionMode?: ToolExecutionMode;
+  executionStatus?: ToolExecutionStatus;
 }
 
 // 流式消息事件

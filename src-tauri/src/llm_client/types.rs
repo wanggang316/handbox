@@ -17,6 +17,36 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
 }
 
+/// 工具调用执行模式
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolExecutionMode {
+    Auto,
+    Manual,
+}
+
+impl Default for ToolExecutionMode {
+    fn default() -> Self {
+        ToolExecutionMode::Auto
+    }
+}
+
+/// 工具调用执行状态
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExecutionStatus {
+    Pending,    // 待执行
+    Executing,  // 执行中
+    Completed,  // 已执行
+    Failed,     // 执行错误
+}
+
+impl Default for ToolExecutionStatus {
+    fn default() -> Self {
+        ToolExecutionStatus::Pending
+    }
+}
+
 /// 通用-工具调用信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +55,10 @@ pub struct ChatToolCall {
     #[serde(rename = "type")]
     pub tool_type: String,
     pub function: ChatToolFunction,
+    #[serde(default)]
+    pub execution_mode: ToolExecutionMode,
+    #[serde(default)]
+    pub execution_status: ToolExecutionStatus,
 }
 
 /// 通用-工具函数信息
