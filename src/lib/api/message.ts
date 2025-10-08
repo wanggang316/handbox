@@ -71,10 +71,10 @@ export async function regenerateMessage(messageId: UUID): Promise<MessageRespons
 }
 
 /**
- * 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
+ * 流式重发用户消息 - 删除该消息之后的所有消息，然后重新发送（流式）
  */
-export async function resendMessage(messageId: UUID): Promise<MessageResponse> {
-  return await apiCall<any>('message_resend', { messageId: messageId });
+export async function resendMessageStream(messageId: UUID): Promise<void> {
+  await apiCall<void>('message_resend_stream', { messageId: messageId });
 }
 
 /**
@@ -104,6 +104,7 @@ export interface StreamEventHandlers {
   onEnd?: (data: { streamId: string; finalContent: string; finalReasoning?: string; chatId: string; modelId: string; providerId: string; toolCalls?: any[]; messageId?: string }) => void;
   onError?: (error: any) => void;
   onToolExecute?: (data: { messageId: string; toolCallIds: string[]; status: ToolExecutionStatus }) => void;
+  onMessagesDelete?: (data: { chatId: string; messageIds: string[] }) => void;
 }
 
 export async function listenToStreamEvents(handlers: StreamEventHandlers, eventPrefix: string = 'message_stream') {
@@ -136,6 +137,17 @@ export async function listenToStreamEvents(handlers: StreamEventHandlers, eventP
     );
   } else {
     console.warn('[listenToStreamEvents] 未提供 onToolExecute 处理器');
+  }
+
+  // 如果提供了 onMessagesDelete 处理器，添加消息删除事件监听
+  if (handlers.onMessagesDelete) {
+    console.log('[listenToStreamEvents] 注册 messages_deleted 事件监听器');
+    listeners.push(
+      listen('messages_deleted', (event) => {
+        console.log('[messages_deleted 事件] 收到事件:', event.payload);
+        handlers.onMessagesDelete?.(event.payload as any);
+      })
+    );
   }
 
   const unlisten = await Promise.all(listeners);

@@ -125,6 +125,27 @@ fn create_tool_execute_callback(
     }
 }
 
+fn create_messages_delete_callback(
+    window: Window,
+    event_name: &'static str,
+) -> impl FnMut(String, Vec<String>) {
+    move |chat_id: String, message_ids: Vec<String>| {
+        let _ = window.emit(
+            event_name,
+            json!({
+                "chatId": chat_id,
+                "messageIds": message_ids
+            }),
+        );
+        tracing::info!(
+            "[{}] {} messages deleted for chat {}",
+            event_name,
+            message_ids.len(),
+            chat_id
+        );
+    }
+}
+
 /// 发送聊天消息
 #[tauri::command]
 pub async fn message_send(
@@ -258,26 +279,56 @@ pub async fn message_regenerate(
     }
 }
 
-/// 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
+/// 流式重发用户消息
 #[tauri::command]
-pub async fn message_resend(
+pub async fn message_resend_stream(
     message_id: UUID,
+    window: Window,
     message_service: State<'_, MessageService>,
-) -> Result<MessageResponse, AppError> {
+) -> Result<(), AppError> {
     tracing::info!(
-        "[message_resend] IPC command called for message_id: {}",
+        "[message_resend_stream] IPC command called for message_id: {}",
         message_id
     );
-    match message_service.resend_user_message(message_id).await {
-        Ok(response) => {
-            tracing::info!("[message_resend] Command completed successfully");
-            Ok(response)
-        }
-        Err(e) => {
-            tracing::error!("[message_resend] Command failed: {:?}", e);
-            Err(e)
-        }
-    }
+
+    // 克隆必要的数据
+    let window_clone = window.clone();
+    let service_clone = message_service.inner().clone();
+    let message_id_clone = message_id.clone();
+
+    // 在后台任务中执行
+    tauri::async_runtime::spawn(async move {
+        // 创建事件回调
+        let start_callback =
+            create_stream_start_callback(window_clone.clone(), "message_stream_start", None);
+
+        let streaming_callback =
+            create_streaming_callback(window_clone.clone(), "message_stream_chunk");
+
+        let end_callback =
+            create_stream_end_callback(window_clone.clone(), "message_stream_end");
+
+        let error_callback =
+            create_stream_error_callback(window_clone.clone(), "message_stream_error");
+
+        let messages_delete_callback =
+            create_messages_delete_callback(window_clone.clone(), "messages_deleted");
+
+        // 调用服务方法
+        service_clone
+            .resend_message_stream(
+                message_id_clone,
+                start_callback,
+                streaming_callback,
+                end_callback,
+                error_callback,
+                messages_delete_callback,
+            )
+            .await;
+    });
+
+    tracing::info!("[message_resend_stream] Command started in background");
+    Ok(())
 }
 
 /// 发送流式消息
@@ -363,6 +414,10 @@ pub async fn message_execute_tool_calls(
                     status
                 );
             },
+            |_chat_id, _deleted_message_ids| {
+                // 消息删除回调
+                tracing::info!("[message_execute_tool_calls] Messages deleted before re-execution");
+            },
         )
         .await;
 
@@ -407,6 +462,9 @@ pub async fn message_execute_tool_calls_stream(
         let tool_execute_callback =
             create_tool_execute_callback(window_clone.clone(), "tool_execute");
 
+        let messages_delete_callback =
+            create_messages_delete_callback(window_clone.clone(), "messages_deleted");
+
         // 调用真实的工具执行流式API
         service_clone
             .execute_tool_calls(
@@ -417,6 +475,7 @@ pub async fn message_execute_tool_calls_stream(
                 end_callback,
                 error_callback,
                 tool_execute_callback,
+                messages_delete_callback,
             )
             .await;
     });

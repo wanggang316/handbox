@@ -80,6 +80,14 @@ impl<T> ToolExecuteCallback for T where
 {
 }
 
+/// 消息删除回调：当消息被删除时调用
+///
+/// 参数:
+/// - `chat_id`: 聊天的唯一标识符
+/// - `message_ids`: 被删除的消息ID列表
+pub trait MessagesDeleteCallback: FnMut(String, Vec<String>) + Send + 'static {}
+impl<T> MessagesDeleteCallback for T where T: FnMut(String, Vec<String>) + Send + 'static {}
+
 /// 消息服务
 #[derive(Clone)]
 pub struct MessageService {
@@ -1258,6 +1266,7 @@ impl MessageService {
         end_callback: impl StreamEndCallback,
         mut error_callback: impl StreamErrorCallback,
         mut tool_execute_callback: impl ToolExecuteCallback,
+        mut messages_delete_callback: impl MessagesDeleteCallback,
     ) {
         tracing::info!(
             "[MessageService::execute_tool_calls] Executing tool calls {:?} for message: {}",
@@ -1291,6 +1300,29 @@ impl MessageService {
                 return;
             }
         };
+
+        // 删除之前执行产生的后续消息（Tool 消息和 Assistant 响应），避免重复追加
+        let deleted_message_ids = match self
+            .repository
+            .delete_messages_after(&message.chat_id, &message_id)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::execute_tool_calls] Failed to delete messages after {}: {}",
+                    message_id,
+                    e
+                );
+                error_callback(error_stream_id.clone(), e);
+                return;
+            }
+        };
+
+        // 通知前端消息已被删除
+        if !deleted_message_ids.is_empty() {
+            messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
+        }
 
         // 2. 验证消息是否为 assistant消息且包含工具调用
         if message.role != ChatMessageRole::Assistant {
@@ -1773,47 +1805,132 @@ impl MessageService {
         })
     }
 
-    /// 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
-    pub async fn resend_user_message(&self, message_id: UUID) -> Result<MessageResponse, AppError> {
+    /// 删除消息之后的所有消息（用于手动工具执行前的清理）
+    pub async fn delete_messages_after(
+        &self,
+        chat_id: UUID,
+        message_id: UUID,
+    ) -> Result<Vec<String>, AppError> {
         tracing::info!(
-            "[MessageService::resend_user_message] Resending user message: {}",
+            "[MessageService::delete_messages_after] Deleting messages after message_id {} in chat {}",
+            message_id,
+            chat_id
+        );
+
+        let deleted_message_ids = self
+            .repository
+            .delete_messages_after(&chat_id, &message_id)
+            .await?;
+
+        tracing::info!(
+            "[MessageService::delete_messages_after] Deleted {} messages",
+            deleted_message_ids.len()
+        );
+
+        Ok(deleted_message_ids)
+    }
+
+    /// 流式重发用户消息 - 删除该消息之后的所有消息，然后重新发送（流式）
+    pub async fn resend_message_stream(
+        &self,
+        message_id: UUID,
+        start_callback: impl StreamStartCallback,
+        streaming_callback: impl StreamingCallback,
+        end_callback: impl StreamEndCallback,
+        mut error_callback: impl StreamErrorCallback,
+        mut messages_delete_callback: impl MessagesDeleteCallback,
+    ) {
+        tracing::info!(
+            "[MessageService::resend_message_stream] Resending user message (stream): {}",
             message_id
         );
 
+        // 为早期错误生成一个临时 stream_id
+        let error_stream_id = uuid::Uuid::new_v4().to_string();
+
         // 1. 获取要重发的消息
-        let message = self.get_message(message_id.clone()).await?;
+        let message = match self.get_message(message_id.clone()).await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::resend_message_stream] Failed to get message {}: {}",
+                    message_id,
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
 
         // 2. 验证消息是否为用户消息
         if message.role != ChatMessageRole::User {
-            let error = "Can only resend user messages";
+            let err = AppError::validation_error("Can only resend user messages");
             tracing::error!(
-                "[MessageService::resend_user_message] Validation failed for message_id {}: {}",
-                message_id,
-                error
+                "[MessageService::resend_message_stream] Validation failed for message_id {}: not a user message",
+                message_id
             );
-            return Err(AppError::validation_error(error));
+            error_callback(error_stream_id, err);
+            return;
         }
 
         // 3. 删除该消息之后的所有消息
-        let deleted_count = self
+        let deleted_message_ids = match self
             .repository
             .delete_messages_after(&message.chat_id, &message_id)
-            .await?;
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::resend_message_stream] Failed to delete messages after {}: {}",
+                    message_id,
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
 
         tracing::info!(
-            "[MessageService::resend_user_message] Deleted {} messages after message_id {}",
-            deleted_count,
+            "[MessageService::resend_message_stream] Deleted {} messages after message_id {}",
+            deleted_message_ids.len(),
             message_id
         );
 
+        // 通知前端消息已被删除
+        if !deleted_message_ids.is_empty() {
+            messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
+        }
+
         // 4. 获取聊天的所有消息（现在不包含被删除的消息）
-        let chat_messages = self
+        let chat_messages = match self
             .repository
             .get_all_messages_by_chat(&message.chat_id, 100, 0)
-            .await?;
+            .await
+        {
+            Ok(msgs) => msgs,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::resend_message_stream] Failed to get chat messages: {}",
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
 
         // 5. 获取聊天配置
-        let chat = self.chat_service.get_chat(message.chat_id.clone()).await?;
+        let chat = match self.chat_service.get_chat(message.chat_id.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::resend_message_stream] Failed to get chat config: {}",
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
 
         // 6. 构建消息数组
         let mut request_messages = Vec::new();
@@ -1837,10 +1954,13 @@ impl MessageService {
             content: m.content.clone(),
             reasoning: m.reasoning.clone(),
             tool_calls: m.tool_calls.clone(),
-            tool_call_id: None,
+            tool_call_id: m.tool_call_id.clone(),
         }));
 
-        // 7. 构建请求并发送
+        // 7. 获取 turn_id（使用原消息的 turn_id）
+        let turn_id = message.turn_id;
+
+        // 8. 构建请求
         let resend_request = MessageRequest {
             chat_id: Some(message.chat_id.clone()),
             model_id: message
@@ -1859,33 +1979,79 @@ impl MessageService {
             attachments: None,
         };
 
-        // 8. 发送消息
-        self.send_message(resend_request).await
-    }
-
-    /// 删除消息之后的所有消息（用于手动工具执行前的清理）
-    pub async fn delete_messages_after(
-        &self,
-        chat_id: UUID,
-        message_id: UUID,
-    ) -> Result<u64, AppError> {
         tracing::info!(
-            "[MessageService::delete_messages_after] Deleting messages after message_id {} in chat {}",
-            message_id,
-            chat_id
+            "[MessageService::resend_message_stream] Sending stream request for chat {}",
+            message.chat_id
         );
 
-        let deleted_count = self
-            .repository
-            .delete_messages_after(&chat_id, &message_id)
-            .await?;
+        // 9. 包装 end_callback 以保存助手消息
+        let chat_id_clone = message.chat_id.clone();
+        let config_clone = message.config.clone();
+        let turn_id_clone = turn_id.clone();
+        let repository = self.repository.clone();
+        let mut end_callback = end_callback;
 
-        tracing::info!(
-            "[MessageService::delete_messages_after] Deleted {} messages",
-            deleted_count
-        );
+        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
+            let chat_id = chat_id_clone.clone();
+            let config = config_clone.clone();
+            let turn_id = turn_id_clone.clone();
+            let repository = repository.clone();
+            let response_clone = response.clone();
+            let stream_id_clone = stream_id.clone();
 
-        Ok(deleted_count)
+            tokio::spawn(async move {
+                let now = chrono::Utc::now().timestamp_millis();
+                match repository
+                    .create_message(&Message {
+                        id: response_clone.message_id.clone(),
+                        chat_id: chat_id.to_string(),
+                        role: ChatMessageRole::Assistant,
+                        content: response_clone.content.clone(),
+                        reasoning: response_clone.reasoning.clone(),
+                        tool_calls: response_clone.tool_calls.clone(),
+                        config,
+                        turn_id,
+                        tool_call_id: None,
+                        attachments: None,
+                        input_tokens: response_clone.input_tokens,
+                        output_tokens: response_clone.output_tokens,
+                        total_tokens: response_clone.total_tokens,
+                        start_time: Some(now),
+                        end_time: Some(now),
+                        duration: response_clone.duration,
+                        created_at: now,
+                        updated_at: now,
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            "[MessageService::resend_message_stream] Assistant message saved with ID: {}",
+                            response_clone.message_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "[MessageService::resend_message_stream] Failed to save assistant message: {}",
+                            e
+                        );
+                    }
+                }
+            });
+
+            // 调用原始的 end_callback
+            end_callback(stream_id_clone, response);
+        };
+
+        // 10. 直接调用 LLM API 流式方法
+        self.call_llm_api_stream(
+            &resend_request,
+            start_callback,
+            streaming_callback,
+            end_callback_wrapper,
+            error_callback,
+        )
+        .await;
     }
 }
 

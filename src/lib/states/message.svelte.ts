@@ -369,6 +369,29 @@ class MessageStore {
     };
   }
 
+  /**
+   * 处理消息删除 - 从状态中移除指定的消息
+   */
+  private handleMessagesDelete(chatId: string, messageIds: string[], source: string = 'unknown') {
+    console.log(`[${source}] 消息被删除:`, { chatId, messageIds });
+
+    // 从状态中删除这些消息
+    const messages = this.state.messagesByChat[chatId] || [];
+    const filteredMessages = messages.filter((m: Message) => m.id && !messageIds.includes(m.id));
+    this.state.messagesByChat[chatId] = filteredMessages;
+
+    console.log(`[${source}] 已从 chat ${chatId} 删除 ${messageIds.length} 条消息`);
+  }
+
+  /**
+   * 创建消息删除回调
+   */
+  private createMessagesDeleteCallback(source: string = 'unknown') {
+    return (data: { chatId: string; messageIds: string[] }) => {
+      this.handleMessagesDelete(data.chatId, data.messageIds, source);
+    };
+  }
+
   // 清理指定聊天的消息
   clearMessages(chatId: string) {
     delete this.state.messagesByChat[chatId];
@@ -518,20 +541,57 @@ class MessageStore {
   }
 
   /**
-   * 重发用户消息 - 删除该消息之后的所有消息，然后重新发送
+   * 重发用户消息 - 删除该消息之后的所有消息，然后重新发送（流式）
    */
   async resendMessage(messageId: string): Promise<void> {
+    console.log('[resendMessage] 开始重发消息:', messageId);
+
     try {
       this.setSending(true);
-      const response = await messageApi.resendMessage(messageId as UUID);
-      this.applyMessageResponse(response.chatId, response);
-      // 重新加载消息列表以反映删除的消息
-      await this.loadMessages(response.chatId);
+
+      // 清理之前的监听器（如果存在）
+      if (this.currentStreamUnlisten) {
+        console.log('[resendMessage] 清理之前的监听器');
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+
+      console.log('[resendMessage] 设置事件监听器...');
+
+      // 设置流式事件监听器
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
+        {
+          ...this.createStreamEventHandlers(
+            // onComplete callback
+            () => {
+              this.setSending(false);
+            },
+            // onError callback
+            () => {
+              this.setSending(false);
+            }
+          ),
+          // 添加消息删除回调
+          onMessagesDelete: this.createMessagesDeleteCallback('resendMessage')
+        }
+      );
+
+      console.log('[resendMessage] 调用 resendMessageStream API...');
+
+      // 调用流式重发API
+      await messageApi.resendMessageStream(messageId as UUID);
+
+      console.log('[resendMessage] API 调用成功');
     } catch (error) {
+      // 清理监听器
+      if (this.currentStreamUnlisten) {
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+      console.error('重发消息失败:', error);
       this.setError(error instanceof Error ? error.message : '重发消息失败');
-      throw error;
-    } finally {
       this.setSending(false);
+      throw error;
     }
   }
 
@@ -562,6 +622,8 @@ class MessageStore {
       this.currentStreamUnlisten = await listenToStreamEvents(
         {
           ...this.createStreamEventHandlers(),
+          // 添加消息删除回调
+          onMessagesDelete: this.createMessagesDeleteCallback('executeToolCalls'),
           // 添加工具执行状态回调
           onToolExecute: (data) => {
             console.log('[onToolExecute] 工具执行状态变化:', data);

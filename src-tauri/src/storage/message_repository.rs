@@ -519,22 +519,54 @@ impl MessageRepository {
         &self,
         chat_id: &UUID,
         message_id: &UUID,
-    ) -> Result<u64, AppError> {
+    ) -> Result<Vec<String>, AppError> {
         // 首先获取目标消息的创建时间
         let target_message = self.get_message_by_id(message_id).await?
             .ok_or_else(|| AppError::not_found(&format!("Message not found: {}", message_id)))?;
 
-        // 删除该聊天下所有创建时间晚于目标消息的消息
-        let result = sqlx::query("DELETE FROM messages WHERE chat_id = $1 AND created_at > $2")
+        // 先查询要删除的消息ID列表
+        let rows = sqlx::query("SELECT id FROM messages WHERE chat_id = $1 AND created_at > $2")
             .bind(chat_id)
             .bind(target_message.created_at)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to query messages to delete: {}", e))
+            })?;
+
+        let message_ids: Vec<String> = rows
+            .iter()
+            .map(|row| row.get::<String, _>("id"))
+            .collect();
+
+        // 如果没有要删除的消息，直接返回
+        if message_ids.is_empty() {
+            return Ok(message_ids);
+        }
+
+        // 直接按 ID 删除（避免重复条件查询）
+        let placeholders = message_ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("${}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let delete_query = format!("DELETE FROM messages WHERE id IN ({})", placeholders);
+
+        let mut query = sqlx::query(&delete_query);
+        for id in &message_ids {
+            query = query.bind(id);
+        }
+
+        query
             .execute(self.db.pool())
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to delete messages after: {}", e))
+                AppError::internal_error(&format!("Failed to delete messages: {}", e))
             })?;
 
-        Ok(result.rows_affected())
+        Ok(message_ids)
     }
 
     /// 获取聊天的消息数量

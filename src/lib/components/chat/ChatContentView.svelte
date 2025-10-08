@@ -7,6 +7,7 @@
   // Import child components
   import UserMessageView from './views/UserMessageView.svelte';
   import AssistantMessageView from './views/AssistantMessageView.svelte';
+  import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 
   // 复制消息内容
   async function copyMessage(content: string) {
@@ -34,6 +35,11 @@
   // 操作状态
   let operatingMessageId = $state<string | null>(null);
 
+  // 确认对话框状态
+  let showDeleteConfirm = $state(false);
+  let showResendConfirm = $state(false);
+  let pendingMessageId = $state<string | null>(null);
+
   // 重新生成消息
   async function regenerateMessage(messageId: string) {
     if (operatingMessageId) return; // 防止重复操作
@@ -50,25 +56,33 @@
     }
   }
 
-  // 删除消息
-  async function deleteMessage(messageId: string) {
+  // 删除消息 - 显示确认对话框
+  function deleteMessage(messageId: string) {
     if (operatingMessageId || !chatState.currentChat?.id) return; // 防止重复操作
+    pendingMessageId = messageId;
+    showDeleteConfirm = true;
+  }
 
-    // 确认删除
-    if (!confirm('确定要删除这条消息吗？')) {
-      return;
-    }
+  // 确认删除消息
+  async function confirmDeleteMessage() {
+    if (!pendingMessageId || !chatState.currentChat?.id) return;
 
     try {
-      operatingMessageId = messageId;
-      await messageStore.removeMessage(chatState.currentChat.id, messageId);
+      operatingMessageId = pendingMessageId;
+      await messageStore.removeMessage(chatState.currentChat.id, pendingMessageId);
       console.log('Message deleted successfully');
     } catch (error) {
       console.error('Failed to delete message:', error);
       // TODO: 显示错误提示
     } finally {
       operatingMessageId = null;
+      pendingMessageId = null;
     }
+  }
+
+  // 取消删除
+  function cancelDelete() {
+    pendingMessageId = null;
   }
 
   // 编辑消息
@@ -77,25 +91,34 @@
     console.log('Editing message:', messageId);
   }
 
-  // 重发用户消息
-  async function resendMessage(messageId: string) {
+  // 重发用户消息 - 显示确认对话框
+  function resendMessage(messageId: string) {
     if (operatingMessageId) return; // 防止重复操作
+    console.log("-----------> handleResend --------");
+    pendingMessageId = messageId;
+    showResendConfirm = true;
+  }
 
-    // 确认重发
-    if (!confirm('重发此消息将删除它之后的所有消息，确定要继续吗？')) {
-      return;
-    }
+  // 确认重发消息
+  async function confirmResendMessage() {
+    if (!pendingMessageId) return;
 
     try {
-      operatingMessageId = messageId;
-      await messageStore.resendMessage(messageId);
+      operatingMessageId = pendingMessageId;
+      await messageStore.resendMessage(pendingMessageId);
       console.log('Message resent successfully');
     } catch (error) {
       console.error('Failed to resend message:', error);
       // TODO: 显示错误提示
     } finally {
       operatingMessageId = null;
+      pendingMessageId = null;
     }
+  }
+
+  // 取消重发
+  function cancelResend() {
+    pendingMessageId = null;
   }
 
   // 当前聊天ID的派生状态
@@ -247,6 +270,32 @@
     {/if}
   </div>
 </div>
+
+<!-- 删除消息确认对话框 -->
+<ConfirmModal
+  open={showDeleteConfirm}
+  title="确认删除"
+  message="确定要删除这条消息吗？"
+  confirmText="删除"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  onConfirm={confirmDeleteMessage}
+  onCancel={cancelDelete}
+  onClose={() => showDeleteConfirm = false}
+/>
+
+<!-- 重发消息确认对话框 -->
+<ConfirmModal
+  open={showResendConfirm}
+  title="确认重发"
+  message="重发此消息将删除它之后的所有消息，确定要继续吗？"
+  confirmText="重发"
+  cancelText="取消"
+  confirmButtonStyle="accent"
+  onConfirm={confirmResendMessage}
+  onCancel={cancelResend}
+  onClose={() => showResendConfirm = false}
+/>
 
 <style>
   /* 自定义滚动条 */
