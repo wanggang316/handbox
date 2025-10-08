@@ -146,6 +146,28 @@ fn create_messages_delete_callback(
     }
 }
 
+/// 创建用户消息已保存回调 - 通知前端临时ID和真实ID的映射
+fn create_user_message_saved_callback(
+    window: Window,
+    event_name: &'static str,
+) -> impl FnMut(String, String) {
+    move |temp_message_id: String, saved_message_id: String| {
+        let _ = window.emit(
+            event_name,
+            json!({
+                "tempMessageId": temp_message_id,
+                "savedMessageId": saved_message_id
+            }),
+        );
+        tracing::info!(
+            "[{}] User message ID mapped: {} -> {}",
+            event_name,
+            temp_message_id,
+            saved_message_id
+        );
+    }
+}
+
 /// 发送聊天消息
 #[tauri::command]
 pub async fn message_send(
@@ -358,6 +380,9 @@ pub async fn message_send_stream(
         let error_callback =
             create_stream_error_callback(window_clone.clone(), "message_stream_error");
 
+        let user_message_saved_callback =
+            create_user_message_saved_callback(window_clone.clone(), "user_message_saved");
+
         // 调用真实的流式API
         service_clone
             .send_message_stream(
@@ -366,6 +391,7 @@ pub async fn message_send_stream(
                 streaming_callback,
                 end_callback,
                 error_callback,
+                user_message_saved_callback,
             )
             .await;
     });

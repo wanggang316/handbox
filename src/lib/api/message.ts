@@ -88,6 +88,7 @@ export async function sendStreamMessage(request: MessageRequest): Promise<void> 
       model_id: request.modelId,
       provider_id: request.providerId,
       messages: request.messages,
+      temp_user_message_id: request.tempUserMessageId,
       attachments: request.attachments
     }
   };
@@ -105,6 +106,7 @@ export interface StreamEventHandlers {
   onError?: (error: any) => void;
   onToolExecute?: (data: { messageId: string; toolCallIds: string[]; status: ToolExecutionStatus }) => void;
   onMessagesDelete?: (data: { chatId: string; messageIds: string[] }) => void;
+  onUserMessageSaved?: (data: { tempMessageId: string; savedMessageId: string }) => void;
 }
 
 export async function listenToStreamEvents(handlers: StreamEventHandlers, eventPrefix: string = 'message_stream') {
@@ -146,6 +148,17 @@ export async function listenToStreamEvents(handlers: StreamEventHandlers, eventP
       listen('messages_deleted', (event) => {
         console.log('[messages_deleted 事件] 收到事件:', event.payload);
         handlers.onMessagesDelete?.(event.payload as any);
+      })
+    );
+  }
+
+  // 如果提供了 onUserMessageSaved 处理器，添加用户消息保存事件监听
+  if (handlers.onUserMessageSaved) {
+    console.log('[listenToStreamEvents] 注册 user_message_saved 事件监听器');
+    listeners.push(
+      listen('user_message_saved', (event) => {
+        console.log('[user_message_saved 事件] 收到事件:', event.payload);
+        handlers.onUserMessageSaved?.(event.payload as any);
       })
     );
   }

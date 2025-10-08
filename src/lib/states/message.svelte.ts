@@ -392,6 +392,36 @@ class MessageStore {
     };
   }
 
+  /**
+   * 处理用户消息保存 - 替换临时ID为真实ID
+   */
+  private handleUserMessageSaved(tempMessageId: string, savedMessageId: string, chatId: string, source: string = 'unknown') {
+    console.log(`[${source}] 用户消息已保存，替换ID:`, { tempMessageId, savedMessageId, chatId });
+
+    const messages = this.state.messagesByChat[chatId] || [];
+    const messageIndex = messages.findIndex((m: Message) => m.id === tempMessageId);
+
+    if (messageIndex !== -1) {
+      messages[messageIndex] = {
+        ...messages[messageIndex],
+        id: savedMessageId
+      };
+      this.state.messagesByChat[chatId] = [...messages];
+      console.log(`[${source}] 已替换 chat ${chatId} 中的消息ID: ${tempMessageId} -> ${savedMessageId}`);
+    } else {
+      console.warn(`[${source}] 未找到临时消息ID: ${tempMessageId} in chat ${chatId}`);
+    }
+  }
+
+  /**
+   * 创建用户消息保存回调
+   */
+  private createUserMessageSavedCallback(chatId: string, source: string = 'unknown') {
+    return (data: { tempMessageId: string; savedMessageId: string }) => {
+      this.handleUserMessageSaved(data.tempMessageId, data.savedMessageId, chatId, source);
+    };
+  }
+
   // 清理指定聊天的消息
   clearMessages(chatId: string) {
     delete this.state.messagesByChat[chatId];
@@ -475,6 +505,7 @@ class MessageStore {
         modelId: currentChat.modelId,
         providerId: currentChat.providerId,
         messages: messages,
+        tempUserMessageId: userMessage.id,
         attachments: attachments
       };
 
@@ -488,8 +519,8 @@ class MessageStore {
       }
 
       // 先设置流式事件监听器，确保在发送消息前完全就绪
-      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
-        this.createStreamEventHandlers(
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents({
+        ...this.createStreamEventHandlers(
           // onComplete callback
           () => {
             this.setSending(false);
@@ -498,8 +529,9 @@ class MessageStore {
           () => {
             this.setSending(false);
           }
-        )
-      );
+        ),
+        onUserMessageSaved: this.createUserMessageSavedCallback(currentChat.id, 'sendMessage')
+      });
 
       // 事件监听器设置完成后，再发送流式消息
       await messageApi.sendStreamMessage(streamRequest);

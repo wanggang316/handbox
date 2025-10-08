@@ -76,6 +76,7 @@ pub struct MessageRequest {
     pub model_id: String,
     pub provider_id: String,
     pub messages: Vec<ChatMessage>,
+    pub temp_user_message_id: Option<String>,
     pub attachments: Option<Vec<MessageRequestAttachment>>,
 }
 

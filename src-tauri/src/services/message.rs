@@ -88,6 +88,14 @@ impl<T> ToolExecuteCallback for T where
 pub trait MessagesDeleteCallback: FnMut(String, Vec<String>) + Send + 'static {}
 impl<T> MessagesDeleteCallback for T where T: FnMut(String, Vec<String>) + Send + 'static {}
 
+/// 用户消息已保存回调：当用户消息保存到数据库后调用
+///
+/// 参数:
+/// - `temp_message_id`: 前端临时消息ID（从 ChatMessage.id 中提取）
+/// - `saved_message_id`: 数据库保存后的真实消息ID
+pub trait UserMessageSavedCallback: FnMut(String, String) + Send + 'static {}
+impl<T> UserMessageSavedCallback for T where T: FnMut(String, String) + Send + 'static {}
+
 /// 消息服务
 #[derive(Clone)]
 pub struct MessageService {
@@ -253,6 +261,7 @@ impl MessageService {
         streaming_callback: impl StreamingCallback,
         end_callback: impl StreamEndCallback,
         mut error_callback: impl StreamErrorCallback,
+        mut user_message_saved_callback: impl UserMessageSavedCallback,
     ) {
         tracing::info!(
             "[MessageService::send_message_stream] Starting to send streaming message for chat_id: {:?}",
@@ -356,6 +365,16 @@ impl MessageService {
             "[MessageService::send_message_stream] User message saved with ID: {}",
             user_message_id
         );
+
+        // 如果前端在最后一条消息中提供了临时消息ID，通知前端替换为真实ID
+        if let Some(temp_id) = &request.temp_user_message_id {
+            user_message_saved_callback(temp_id.clone(), user_message_id.clone());
+            tracing::info!(
+                "[MessageService::send_message_stream] User message ID mapping: {} -> {}",
+                temp_id,
+                user_message_id
+            );
+        }
 
         // 3. 创建包装的 end_callback，在保存消息后调用原始回调
         let chat_id_clone = chat_id.clone();
@@ -1575,6 +1594,7 @@ impl MessageService {
             model_id: chat.model_id.unwrap_or_default(),
             provider_id: chat.provider_id.unwrap_or_default(),
             messages: request_messages,
+            temp_user_message_id: None,
             attachments: None,
         };
 
@@ -1743,6 +1763,7 @@ impl MessageService {
                 .and_then(|c| c.provider_id.clone())
                 .unwrap_or_default(),
             messages: request_messages,
+            temp_user_message_id: None,
             attachments: None,
         };
 
@@ -1976,6 +1997,7 @@ impl MessageService {
                 .or_else(|| chat.provider_id.clone())
                 .unwrap_or_default(),
             messages: request_messages,
+            temp_user_message_id: None,
             attachments: None,
         };
 
@@ -2126,6 +2148,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
             }],
+            temp_user_message_id: None,
             attachments: None,
         };
 

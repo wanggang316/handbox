@@ -95,6 +95,7 @@ export interface MessageRequest {
   modelId: string;
   providerId: string;
   messages: ChatMessage[];
+  tempUserMessageId?: string;
   attachments?: ChatAttachment[];
 }
 
@@ -109,6 +110,7 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   reasoning?: string; // 推理过程内容
+  id?: string; // 临时消息ID，仅用于前端发送消息时标识用户消息
 }
 
 // 聊天附件（请求中使用）
