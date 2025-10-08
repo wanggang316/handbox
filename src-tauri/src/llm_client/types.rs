@@ -59,6 +59,8 @@ pub struct ChatToolCall {
     pub execution_mode: ToolExecutionMode,
     #[serde(default)]
     pub execution_status: ToolExecutionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
 }
 
 /// 通用-工具函数信息

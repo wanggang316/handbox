@@ -5,7 +5,9 @@ use crate::llm_client::ChatToolCall;
 use crate::models::{AppError, Message, MessageConfig, Timestamp, UUID};
 use crate::storage::Database;
 use serde_json;
-use sqlx::Row;
+use sqlx::query::Query;
+use sqlx::sqlite::SqliteArguments;
+use sqlx::{Row, Sqlite};
 use std::sync::Arc;
 
 /// Message 仓储层
@@ -19,53 +21,73 @@ impl MessageRepository {
         Self { db }
     }
 
-    /// 创建消息
-    pub async fn create_message(&self, message: &Message) -> Result<(), AppError> {
-        let attachments_json =
-            if let Some(attachments) = &message.attachments {
-                Some(serde_json::to_string(attachments).map_err(|e| {
-                    AppError::validation_error(&format!("Invalid attachments: {}", e))
-                })?)
-            } else {
-                None
-            };
+    /// 序列化 attachments 字段
+    fn serialize_attachments(message: &Message) -> Result<Option<String>, AppError> {
+        message
+            .attachments
+            .as_ref()
+            .map(|attachments| {
+                serde_json::to_string(attachments)
+                    .map_err(|e| AppError::validation_error(&format!("Invalid attachments: {}", e)))
+            })
+            .transpose()
+    }
 
-        let config_json = if let Some(config) = &message.config {
-            Some(
+    /// 序列化 config 字段
+    fn serialize_config(message: &Message) -> Result<Option<String>, AppError> {
+        message
+            .config
+            .as_ref()
+            .map(|config| {
                 serde_json::to_string(config)
-                    .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))?,
-            )
-        } else {
-            None
-        };
+                    .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))
+            })
+            .transpose()
+    }
 
-        let tools_json = if let Some(tools) = &message.tool_calls {
-            Some(
+    /// 序列化 tool_calls 字段
+    fn serialize_tool_calls(message: &Message) -> Result<Option<String>, AppError> {
+        message
+            .tool_calls
+            .as_ref()
+            .map(|tools| {
                 serde_json::to_string(tools)
-                    .map_err(|e| AppError::validation_error(&format!("Invalid tools: {}", e)))?,
-            )
-        } else {
-            None
-        };
+                    .map_err(|e| AppError::validation_error(&format!("Invalid tools: {}", e)))
+            })
+            .transpose()
+    }
 
+    /// 创建并绑定插入消息的 SQL 查询
+    ///
+    /// # 为什么要分离序列化和绑定？
+    ///
+    /// 由于 Rust 的生命周期限制，我们不能在函数内部创建 JSON 字符串、
+    /// 借用它们给 Query、然后返回 Query 和字符串的所有权。
+    /// 因此必须让调用方持有 JSON 字符串，Query 只借用它们的引用。
+    fn create_insert_query<'a>(
+        message: &'a Message,
+        attachments_json: &'a Option<String>,
+        config_json: &'a Option<String>,
+        tools_json: &'a Option<String>,
+    ) -> Query<'a, Sqlite, SqliteArguments<'a>> {
         let role_str = message.role.as_str();
 
-        let query = r#"
+        let sql = r#"
             INSERT INTO messages (id, chat_id, role, content, reasoning, config, tools, attachments,
                                 input_tokens, output_tokens, total_tokens, start_time,
                                 end_time, duration, turn_id, tool_call_id, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
-        sqlx::query(query)
+        sqlx::query(sql)
             .bind(&message.id)
             .bind(&message.chat_id)
             .bind(role_str)
             .bind(&message.content)
             .bind(&message.reasoning)
-            .bind(&config_json)
-            .bind(&tools_json)
-            .bind(&attachments_json)
+            .bind(config_json)
+            .bind(tools_json)
+            .bind(attachments_json)
             .bind(message.input_tokens)
             .bind(message.output_tokens)
             .bind(message.total_tokens)
@@ -76,9 +98,57 @@ impl MessageRepository {
             .bind(&message.tool_call_id)
             .bind(message.created_at)
             .bind(message.updated_at)
+    }
+
+    /// 创建消息
+    pub async fn create_message(&self, message: &Message) -> Result<(), AppError> {
+        // 序列化 JSON 字段
+        let attachments_json = Self::serialize_attachments(message)?;
+        let config_json = Self::serialize_config(message)?;
+        let tools_json = Self::serialize_tool_calls(message)?;
+
+        // 创建并执行查询
+        Self::create_insert_query(message, &attachments_json, &config_json, &tools_json)
             .execute(self.db.pool())
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to create message: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 批量创建消息（在一个事务中）
+    pub async fn create_messages_batch(&self, messages: &[Message]) -> Result<(), AppError> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        // 开始事务
+        let mut tx = self
+            .db
+            .pool()
+            .begin()
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to begin transaction: {}", e)))?;
+
+        for message in messages {
+            // 序列化 JSON 字段
+            let attachments_json = Self::serialize_attachments(message)?;
+            let config_json = Self::serialize_config(message)?;
+            let tools_json = Self::serialize_tool_calls(message)?;
+
+            // 创建并执行查询
+            Self::create_insert_query(message, &attachments_json, &config_json, &tools_json)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to create message in batch: {}", e))
+                })?;
+        }
+
+        // 提交事务
+        tx.commit()
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to commit transaction: {}", e)))?;
 
         Ok(())
     }
@@ -780,5 +850,130 @@ mod tests {
         // 第二次调用应该返回 2
         let next_turn_id = repo.get_next_turn_id(&chat_id).await.unwrap();
         assert_eq!(next_turn_id, 2);
+    }
+
+    #[tokio::test]
+    async fn test_create_messages_batch() {
+        let (db_service, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db_service);
+        let repo = MessageRepository::new(db_arc.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let chat_id = uuid::Uuid::new_v4().to_string();
+
+        // 先创建一个 chat 以满足外键约束
+        let chat_query = r#"
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#;
+        sqlx::query(chat_query)
+            .bind(&chat_id)
+            .bind("Test Chat")
+            .bind(Option::<String>::None)
+            .bind("[]")
+            .bind(now)
+            .bind(now)
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // 创建多条消息
+        let messages = vec![
+            Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: ChatMessageRole::Tool,
+                content: "Tool result 1".to_string(),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(1),
+                tool_call_id: Some("tool_1".to_string()),
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now,
+                updated_at: now,
+            },
+            Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: ChatMessageRole::Tool,
+                content: "Tool result 2".to_string(),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(1),
+                tool_call_id: Some("tool_2".to_string()),
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + 1,
+                updated_at: now + 1,
+            },
+            Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: ChatMessageRole::Tool,
+                content: "Tool result 3".to_string(),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(1),
+                tool_call_id: Some("tool_3".to_string()),
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + 2,
+                updated_at: now + 2,
+            },
+        ];
+
+        // 批量创建
+        repo.create_messages_batch(&messages).await.unwrap();
+
+        // 验证所有消息都已创建
+        let all_messages = repo
+            .get_all_messages_by_chat(&chat_id, 100, 0)
+            .await
+            .unwrap();
+        assert_eq!(all_messages.len(), 3);
+        assert_eq!(all_messages[0].content, "Tool result 1");
+        assert_eq!(all_messages[1].content, "Tool result 2");
+        assert_eq!(all_messages[2].content, "Tool result 3");
+
+        // 验证每条消息都可以单独获取
+        for msg in &messages {
+            let fetched = repo.get_message_by_id(&msg.id).await.unwrap();
+            assert!(fetched.is_some());
+            assert_eq!(fetched.unwrap().content, msg.content);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_messages_batch_empty() {
+        let (db_service, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db_service);
+        let repo = MessageRepository::new(db_arc);
+
+        // 测试空数组不会报错
+        let result = repo.create_messages_batch(&[]).await;
+        assert!(result.is_ok());
     }
 }

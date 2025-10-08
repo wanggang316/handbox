@@ -134,7 +134,7 @@ impl OpenAICompletionsChatClient {
                         role: delta_role,
                         content: choice.delta.content.clone(),
                         reasoning: choice.delta.reasoning.clone(),
-                        tool_calls: tool_calls,
+                        tool_calls,
                     }),
                     finish_reason: choice.finish_reason,
                 }
@@ -321,6 +321,7 @@ fn convert_openai_tool_call(call: OpenAIToolCall) -> ChatToolCall {
         },
         execution_mode: Default::default(),
         execution_status: Default::default(),
+        result: None,
     }
 }
 

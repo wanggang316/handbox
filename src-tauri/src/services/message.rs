@@ -3,7 +3,7 @@
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{
     ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall, ChatToolChoice,
-    ChatToolFunction, RequestTool, RequestToolFunction, ToolExecutionMode, ToolExecutionStatus,
+    ChatToolFunction, RequestTool, RequestToolFunction, ToolExecutionStatus,
 };
 use crate::models::{
     AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest, MessageResponse,
@@ -769,6 +769,7 @@ impl MessageService {
                                             },
                                             execution_mode: Default::default(),
                                             execution_status: Default::default(),
+                                            result: None,
                                         });
                                     }
 
@@ -1200,14 +1201,33 @@ impl MessageService {
         tool_call_ids: &[String],
         status: ToolExecutionStatus,
     ) -> Result<(), AppError> {
+        self.update_tool_call_status_with_results(message_id, tool_call_ids, status, None)
+            .await
+    }
+
+    /// 更新消息中指定工具调用的执行状态和结果
+    async fn update_tool_call_status_with_results(
+        &self,
+        message_id: &str,
+        tool_call_ids: &[String],
+        status: ToolExecutionStatus,
+        results: Option<&[(String, String)]>, // (tool_call_id, result)
+    ) -> Result<(), AppError> {
         // 1. 获取消息
         let mut message = self.get_message(message_id.to_string()).await?;
 
-        // 2. 更新工具调用状态
+        // 2. 更新工具调用状态和结果
         if let Some(tool_calls) = &mut message.tool_calls {
             for tool_call in tool_calls.iter_mut() {
                 if tool_call_ids.contains(&tool_call.id) {
                     tool_call.execution_status = status.clone();
+
+                    // 如果提供了结果，更新对应的结果
+                    if let Some(results) = results {
+                        if let Some((_, result)) = results.iter().find(|(id, _)| id == &tool_call.id) {
+                            tool_call.result = Some(result.clone());
+                        }
+                    }
                 }
             }
         }
@@ -1219,7 +1239,7 @@ impl MessageService {
             .await?;
 
         tracing::debug!(
-            "[MessageService::update_tool_call_status] Updated status for tool calls {:?} in message {} to {:?}",
+            "[MessageService::update_tool_call_status_with_results] Updated status for tool calls {:?} in message {} to {:?}",
             tool_call_ids,
             message_id,
             status
@@ -1324,8 +1344,8 @@ impl MessageService {
             executing_status,
         );
 
-        // 6. 执行所有工具调用并构造工具结果消息
-        let mut created_tool_message_ids = Vec::new();
+        // 6. 执行所有工具调用并收集结果
+        let mut tool_results = Vec::new();
         let mut has_error = false;
 
         for tool_call in selected_tool_calls {
@@ -1351,42 +1371,15 @@ impl MessageService {
                 }
             };
 
-            let timestamp = chrono::Utc::now().timestamp_millis();
-            let tool_result_message = Message {
-                id: uuid::Uuid::new_v4().to_string(),
-                chat_id: message.chat_id.clone(),
-                role: ChatMessageRole::Tool,
-                content: result,
-                reasoning: None,
-                tool_calls: None,
-                turn_id: message.turn_id.clone(),
-                tool_call_id: Some(tool_call.id.clone()),
-                config: None,
-                attachments: None,
-                input_tokens: None,
-                output_tokens: None,
-                total_tokens: None,
-                start_time: None,
-                end_time: None,
-                duration: None,
-                created_at: timestamp,
-                updated_at: timestamp,
-            };
-
-            if let Err(e) = self.repository.create_message(&tool_result_message).await {
-                error_callback(error_stream_id.clone(), e);
-                return;
-            }
-
-            created_tool_message_ids.push(tool_result_message.id.clone());
+            tool_results.push((tool_call.id.clone(), result));
         }
 
         tracing::info!(
-            "[MessageService::execute_tool_calls] Saved tool result messages: {:?}",
-            created_tool_message_ids
+            "[MessageService::execute_tool_calls] Collected {} tool results",
+            tool_results.len()
         );
 
-        // 7. 更新工具调用状态为 Completed 或 Failed
+        // 7. 更新工具调用状态为 Completed 或 Failed，并保存结果到数据库
         let final_status = if has_error {
             ToolExecutionStatus::Failed
         } else {
@@ -1394,7 +1387,12 @@ impl MessageService {
         };
 
         if let Err(e) = self
-            .update_tool_call_status(&message_id, &tool_call_ids, final_status.clone())
+            .update_tool_call_status_with_results(
+                &message_id,
+                &tool_call_ids,
+                final_status.clone(),
+                Some(&tool_results),
+            )
             .await
         {
             tracing::error!(
@@ -1407,7 +1405,7 @@ impl MessageService {
         tool_execute_callback(
             message_id.clone(),
             tool_call_ids.clone(),
-            final_status,
+            final_status.clone(),
         );
 
         // 8. 检查同一消息中的所有工具调用是否都已完成
@@ -1419,7 +1417,7 @@ impl MessageService {
                     "[MessageService::execute_tool_calls] Failed to get updated message: {}",
                     e
                 );
-                error_callback(error_stream_id, e);
+                error_callback(error_stream_id.clone(), e);
                 return;
             }
         };
@@ -1443,7 +1441,60 @@ impl MessageService {
             "[MessageService::execute_tool_calls] All tools completed, continuing to call model"
         );
 
-        // 9. 获取 chat 配置
+        // 9. 所有工具执行完成后，根据工具调用结果批量创建 Tool 消息
+        // 使用 updated_message 中的 tool_calls（包含已存储的结果）
+        if let Some(tool_calls) = &updated_message.tool_calls {
+            let timestamp = chrono::Utc::now().timestamp_millis();
+            let mut tool_result_messages = Vec::new();
+
+            // 遍历所有已完成的工具调用，创建对应的 Tool 消息
+            for tool_call in tool_calls {
+                if tool_call.execution_status == ToolExecutionStatus::Completed {
+                    if let Some(result) = &tool_call.result {
+                        let tool_result_message = Message {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            chat_id: message.chat_id.clone(),
+                            role: ChatMessageRole::Tool,
+                            content: result.clone(),
+                            reasoning: None,
+                            tool_calls: None,
+                            turn_id: message.turn_id.clone(),
+                            tool_call_id: Some(tool_call.id.clone()),
+                            config: None,
+                            attachments: None,
+                            input_tokens: None,
+                            output_tokens: None,
+                            total_tokens: None,
+                            start_time: None,
+                            end_time: None,
+                            duration: None,
+                            created_at: timestamp,
+                            updated_at: timestamp,
+                        };
+                        tool_result_messages.push(tool_result_message);
+                    }
+                }
+            }
+
+            // 批量保存工具结果消息
+            if !tool_result_messages.is_empty() {
+                if let Err(e) = self
+                    .repository
+                    .create_messages_batch(&tool_result_messages)
+                    .await
+                {
+                    error_callback(error_stream_id.clone(), e);
+                    return;
+                }
+
+                tracing::info!(
+                    "[MessageService::execute_tool_calls] Saved {} tool result messages",
+                    tool_result_messages.len()
+                );
+            }
+        }
+
+        // 10. 获取 chat 配置
         let chat = match self.get_chat_config(&message.chat_id).await {
             Ok(chat) => chat,
             Err(e) => {
@@ -1452,7 +1503,7 @@ impl MessageService {
             }
         };
 
-        // 7. 构建包含工具调用结果的新请求，调用 send_message
+        // 11. 构建包含工具调用结果的新请求，调用 send_message
         let mut request_messages = Vec::new();
 
         // 添加 system 消息（如果有系统提示词）
