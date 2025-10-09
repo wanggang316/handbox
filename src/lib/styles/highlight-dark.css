@@ -6,6 +6,8 @@
 
 [data-theme="dark"] code.hljs {
   padding: 3px 5px;
+  color: #c9d1d9;
+  background: #0d1117;
 }
 
 [data-theme="dark"] /*!
