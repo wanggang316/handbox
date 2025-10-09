@@ -121,7 +121,10 @@ mod tests {
         let deserialized: McpServerConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.server_id, "test-server");
         assert_eq!(deserialized.execution_mode, "manual");
-        assert_eq!(deserialized.enabled_tools, vec!["tool1".to_string(), "tool2".to_string()]);
+        assert_eq!(
+            deserialized.enabled_tools,
+            vec!["tool1".to_string(), "tool2".to_string()]
+        );
     }
 
     #[test]

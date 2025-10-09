@@ -2,7 +2,15 @@
  * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage, ToolCall } from '$lib/types/chat';
+import type {
+  Message,
+  MessageResponse,
+  MessageRequest,
+  ChatAttachment,
+  ChatMessage,
+  ToolCall,
+  ToolExecutionStatus,
+} from '$lib/types/chat';
 import type { FrontendProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { listenToStreamEvents } from '$lib/api/message';
@@ -22,6 +30,11 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
+}
+
+interface ToolExecuteEventPayload {
+  messageId: string;
+  toolCalls?: Record<string, Partial<ToolCall>>;
 }
 
 class MessageStore {
@@ -657,7 +670,7 @@ class MessageStore {
           // 添加消息删除回调
           onMessagesDelete: this.createMessagesDeleteCallback('executeToolCalls'),
           // 添加工具执行状态回调
-          onToolExecute: (data) => {
+          onToolExecute: (data: ToolExecuteEventPayload) => {
             console.log('[onToolExecute] 工具执行状态变化:', data);
 
             // 查找消息所属的 chatId
@@ -679,16 +692,35 @@ class MessageStore {
             }
 
             // 更新消息中工具调用的状态
-            if (foundMessage.toolCalls) {
+            if (foundMessage.toolCalls && data.toolCalls && typeof data.toolCalls === 'object') {
+              const updatesMap = new Map<string, Partial<ToolCall>>(
+                Object.entries(data.toolCalls).filter(([key, value]) => typeof value === 'object' && value !== null)
+              );
+
               const updatedToolCalls = foundMessage.toolCalls.map(call => {
-                // 如果这个工具调用在更新列表中，更新其状态
-                if (data.toolCallIds.includes(call.id || '')) {
-                  return { ...call, executionStatus: data.status };
+                const callId = call.id || '';
+                const update = callId ? updatesMap.get(callId) : undefined;
+
+                if (update) {
+                  const executionStatus = update.executionStatus ?? call.executionStatus;
+                  const isFinalStatus = executionStatus === 'completed' || executionStatus === 'failed';
+                  const functionUpdate = update.function;
+
+                  return {
+                    ...call,
+                    executionStatus,
+                    executionMode: update.executionMode ?? call.executionMode,
+                    toolType: update.toolType ?? call.toolType,
+                    function: functionUpdate ? { ...call.function, ...functionUpdate } : call.function,
+                    result: isFinalStatus
+                      ? (typeof update.result === 'string' ? update.result : call.result)
+                      : undefined
+                  };
                 }
+
                 return call;
               });
 
-              // 更新消息
               this.updateMessage(foundChatId, data.messageId, {
                 toolCalls: updatedToolCalls
               });

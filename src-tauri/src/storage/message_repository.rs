@@ -123,12 +123,9 @@ impl MessageRepository {
         }
 
         // 开始事务
-        let mut tx = self
-            .db
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to begin transaction: {}", e)))?;
+        let mut tx = self.db.pool().begin().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to begin transaction: {}", e))
+        })?;
 
         for message in messages {
             // 序列化 JSON 字段
@@ -146,9 +143,9 @@ impl MessageRepository {
         }
 
         // 提交事务
-        tx.commit()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to commit transaction: {}", e))
+        })?;
 
         Ok(())
     }
@@ -521,7 +518,9 @@ impl MessageRepository {
         message_id: &UUID,
     ) -> Result<Vec<String>, AppError> {
         // 首先获取目标消息的创建时间
-        let target_message = self.get_message_by_id(message_id).await?
+        let target_message = self
+            .get_message_by_id(message_id)
+            .await?
             .ok_or_else(|| AppError::not_found(&format!("Message not found: {}", message_id)))?;
 
         // 先查询要删除的消息ID列表
@@ -534,10 +533,7 @@ impl MessageRepository {
                 AppError::internal_error(&format!("Failed to query messages to delete: {}", e))
             })?;
 
-        let message_ids: Vec<String> = rows
-            .iter()
-            .map(|row| row.get::<String, _>("id"))
-            .collect();
+        let message_ids: Vec<String> = rows.iter().map(|row| row.get::<String, _>("id")).collect();
 
         // 如果没有要删除的消息，直接返回
         if message_ids.is_empty() {
@@ -562,9 +558,7 @@ impl MessageRepository {
         query
             .execute(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to delete messages: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to delete messages: {}", e)))?;
 
         Ok(message_ids)
     }

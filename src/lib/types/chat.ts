@@ -156,6 +156,7 @@ export interface ToolCall {
   function?: ToolFunction;
   executionMode?: ToolExecutionMode;
   executionStatus?: ToolExecutionStatus;
+  result?: string;
 }
 
 // 流式消息事件

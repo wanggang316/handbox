@@ -35,10 +35,10 @@ impl Default for ToolExecutionMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolExecutionStatus {
-    Pending,    // 待执行
-    Executing,  // 执行中
-    Completed,  // 已执行
-    Failed,     // 执行错误
+    Pending,   // 待执行
+    Executing, // 执行中
+    Completed, // 已执行
+    Failed,    // 执行错误
 }
 
 impl Default for ToolExecutionStatus {

@@ -11,6 +11,7 @@ use crate::models::{
 };
 use crate::services::{ChatService, Database, McpService, ProviderService};
 use crate::storage::MessageRepository;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// 流式数据结构
@@ -67,16 +68,12 @@ impl<T> StreamErrorCallback for T where T: FnMut(String, AppError) + Send + 'sta
 
 /// 工具执行回调：当工具执行状态变化时调用
 ///
-/// 参数:
-/// - `message_id`: 消息的唯一标识符
-/// - `tool_call_ids`: 工具调用ID列表
-/// - `status`: 工具执行状态
 pub trait ToolExecuteCallback:
-    FnMut(String, Vec<String>, ToolExecutionStatus) + Send + 'static
+    FnMut(String, HashMap<String, ChatToolCall>) + Send + 'static
 {
 }
 impl<T> ToolExecuteCallback for T where
-    T: FnMut(String, Vec<String>, ToolExecutionStatus) + Send + 'static
+    T: FnMut(String, HashMap<String, ChatToolCall>) + Send + 'static
 {
 }
 
@@ -574,10 +571,7 @@ impl MessageService {
             .map(|config| config.server_id.clone())
             .collect();
 
-        let servers = self
-            .mcp_service
-            .get_servers_by_ids(&server_ids)
-            .await?;
+        let servers = self.mcp_service.get_servers_by_ids(&server_ids).await?;
 
         let active_servers: Vec<McpServer> = servers
             .into_iter()
@@ -1225,38 +1219,34 @@ impl MessageService {
     async fn update_tool_call_status(
         &self,
         message_id: &str,
-        tool_call_ids: &[String],
-        status: ToolExecutionStatus,
-    ) -> Result<(), AppError> {
-        self.update_tool_call_status_with_results(message_id, tool_call_ids, status, None)
-            .await
-    }
-
-    /// 更新消息中指定工具调用的执行状态和结果
-    async fn update_tool_call_status_with_results(
-        &self,
-        message_id: &str,
-        tool_call_ids: &[String],
-        status: ToolExecutionStatus,
-        results: Option<&[(String, String)]>, // (tool_call_id, result)
-    ) -> Result<(), AppError> {
+        status_map: &HashMap<String, ToolExecutionStatus>,
+    ) -> Result<Vec<ChatToolCall>, AppError> {
         // 1. 获取消息
         let mut message = self.get_message(message_id.to_string()).await?;
 
-        // 2. 更新工具调用状态和结果
+        let mut updated_calls = Vec::new();
+
+        // 2. 更新工具调用状态
         if let Some(tool_calls) = &mut message.tool_calls {
             for tool_call in tool_calls.iter_mut() {
-                if tool_call_ids.contains(&tool_call.id) {
+                if let Some(status) = status_map.get(&tool_call.id) {
                     tool_call.execution_status = status.clone();
 
-                    // 如果提供了结果，更新对应的结果
-                    if let Some(results) = results {
-                        if let Some((_, result)) = results.iter().find(|(id, _)| id == &tool_call.id) {
-                            tool_call.result = Some(result.clone());
-                        }
+                    // 非完成状态时清除旧结果，避免残留
+                    if !matches!(
+                        status,
+                        ToolExecutionStatus::Completed | ToolExecutionStatus::Failed
+                    ) {
+                        tool_call.result = None;
                     }
+
+                    updated_calls.push(tool_call.clone());
                 }
             }
+        }
+
+        if updated_calls.is_empty() {
+            return Ok(updated_calls);
         }
 
         // 3. 保存更新后的工具调用
@@ -1266,13 +1256,60 @@ impl MessageService {
             .await?;
 
         tracing::debug!(
-            "[MessageService::update_tool_call_status_with_results] Updated status for tool calls {:?} in message {} to {:?}",
-            tool_call_ids,
-            message_id,
-            status
+            "[MessageService::update_tool_call_status] Updated {} tool calls in message {}",
+            updated_calls.len(),
+            message_id
         );
 
-        Ok(())
+        Ok(updated_calls)
+    }
+
+    /// 更新消息中指定工具调用的执行结果，并根据结果调整状态
+    async fn update_tool_call_results(
+        &self,
+        message_id: &str,
+        results: &HashMap<String, String>,
+    ) -> Result<Vec<ChatToolCall>, AppError> {
+        let mut message = self.get_message(message_id.to_string()).await?;
+        let mut updated_calls = Vec::new();
+
+        if let Some(tool_calls) = &mut message.tool_calls {
+            for tool_call in tool_calls.iter_mut() {
+                if let Some(result) = results.get(&tool_call.id) {
+                    tool_call.result = Some(result.clone());
+                    tool_call.execution_status = if Self::is_failure_result(result) {
+                        ToolExecutionStatus::Failed
+                    } else {
+                        ToolExecutionStatus::Completed
+                    };
+                    updated_calls.push(tool_call.clone());
+                }
+            }
+        }
+
+        if updated_calls.is_empty() {
+            return Ok(updated_calls);
+        }
+
+        let now = chrono::Utc::now().timestamp_millis();
+        self.repository
+            .update_message_tools(&message.id, message.tool_calls.as_ref(), now)
+            .await?;
+
+        tracing::debug!(
+            "[MessageService::update_tool_call_results] Updated {} tool results in message {}",
+            updated_calls.len(),
+            message_id
+        );
+
+        Ok(updated_calls)
+    }
+
+    fn is_failure_result(result: &str) -> bool {
+        let lowered = result.to_ascii_lowercase();
+        lowered.starts_with("工具执行失败")
+            || lowered.starts_with("tool execution failed")
+            || lowered.starts_with("error:")
     }
 
     /// 执行工具调用并发送结果给模型继续对话
@@ -1378,28 +1415,37 @@ impl MessageService {
         }
 
         // 5. 更新工具调用状态为 Executing 并触发回调
-        let executing_status = ToolExecutionStatus::Executing;
-        if let Err(e) = self
-            .update_tool_call_status(&message_id, &tool_call_ids, executing_status.clone())
+        let executing_status_map: HashMap<String, ToolExecutionStatus> = selected_tool_calls
+            .iter()
+            .map(|tool_call| (tool_call.id.clone(), ToolExecutionStatus::Executing))
+            .collect();
+
+        let executing_updates = match self
+            .update_tool_call_status(&message_id, &executing_status_map)
             .await
         {
-            tracing::error!(
-                "[MessageService::execute_tool_calls] Failed to update tool status to executing: {}",
-                e
-            );
-        }
+            Ok(calls) => calls,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::execute_tool_calls] Failed to update tool status to executing: {}",
+                    e
+                );
+                Vec::new()
+            }
+        };
 
-        tool_execute_callback(
-            message_id.clone(),
-            tool_call_ids.clone(),
-            executing_status,
-        );
+        if !executing_updates.is_empty() {
+            let executing_map: HashMap<_, _> = executing_updates
+                .into_iter()
+                .map(|call| (call.id.clone(), call))
+                .collect();
+            tool_execute_callback(message_id.clone(), executing_map);
+        }
 
         // 6. 执行所有工具调用并收集结果
         let mut tool_results = Vec::new();
-        let mut has_error = false;
 
-        for tool_call in selected_tool_calls {
+        for tool_call in &selected_tool_calls {
             tracing::info!(
                 "[MessageService::execute_tool_calls] Executing tool {} for message {}",
                 tool_call.id,
@@ -1417,7 +1463,6 @@ impl MessageService {
                         "[MessageService::execute_tool_calls] Tool execution failed: {}",
                         error
                     );
-                    has_error = true;
                     format!("工具执行失败: {}", error.message)
                 }
             };
@@ -1430,34 +1475,30 @@ impl MessageService {
             tool_results.len()
         );
 
-        // 7. 更新工具调用状态为 Completed 或 Failed，并保存结果到数据库
-        let final_status = if has_error {
-            ToolExecutionStatus::Failed
-        } else {
-            ToolExecutionStatus::Completed
-        };
+        // 7. 保存工具执行结果并触发回调
+        let results_map: HashMap<String, String> = tool_results.iter().cloned().collect();
 
-        if let Err(e) = self
-            .update_tool_call_status_with_results(
-                &message_id,
-                &tool_call_ids,
-                final_status.clone(),
-                Some(&tool_results),
-            )
+        let completed_updates = match self
+            .update_tool_call_results(&message_id, &results_map)
             .await
         {
-            tracing::error!(
-                "[MessageService::execute_tool_calls] Failed to update tool status to completed/failed: {}",
-                e
-            );
-        }
+            Ok(calls) => calls,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::execute_tool_calls] Failed to update tool results: {}",
+                    e
+                );
+                Vec::new()
+            }
+        };
 
-        // 触发工具执行完成回调
-        tool_execute_callback(
-            message_id.clone(),
-            tool_call_ids.clone(),
-            final_status.clone(),
-        );
+        if !completed_updates.is_empty() {
+            let completed_map: HashMap<_, _> = completed_updates
+                .into_iter()
+                .map(|call| (call.id.clone(), call))
+                .collect();
+            tool_execute_callback(message_id.clone(), completed_map);
+        }
 
         // 8. 检查同一消息中的所有工具调用是否都已完成
         // 重新获取消息以获取最新的工具调用状态
@@ -1475,9 +1516,9 @@ impl MessageService {
 
         // 检查是否还有未完成的工具调用（不论是自动还是手动执行模式）
         if let Some(tool_calls) = &updated_message.tool_calls {
-            let has_pending_tools = tool_calls.iter().any(|call| {
-                call.execution_status == ToolExecutionStatus::Pending
-            });
+            let has_pending_tools = tool_calls
+                .iter()
+                .any(|call| call.execution_status == ToolExecutionStatus::Pending);
 
             if has_pending_tools {
                 tracing::info!(

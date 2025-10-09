@@ -96,39 +96,43 @@ impl McpClientError {
     pub fn error_type(&self) -> String {
         match self {
             Self::TransportCreation(_) => "Transport Creation".to_string(),
-            Self::ClientInitialize(e) => {
-                match e {
-                    rmcp::service::ClientInitializeError::ExpectedInitResponse(_) =>
-                        "Client Init: Expected Init Response".to_string(),
-                    rmcp::service::ClientInitializeError::ExpectedInitResult(_) =>
-                        "Client Init: Expected Init Result".to_string(),
-                    rmcp::service::ClientInitializeError::ConflictInitResponseId(_, _) =>
-                        "Client Init: Conflict Response ID".to_string(),
-                    rmcp::service::ClientInitializeError::ConnectionClosed(_) =>
-                        "Client Init: Connection Closed".to_string(),
-                    rmcp::service::ClientInitializeError::TransportError { .. } =>
-                        "Client Init: Transport Error".to_string(),
-                    rmcp::service::ClientInitializeError::Cancelled =>
-                        "Client Init: Cancelled".to_string(),
+            Self::ClientInitialize(e) => match e {
+                rmcp::service::ClientInitializeError::ExpectedInitResponse(_) => {
+                    "Client Init: Expected Init Response".to_string()
                 }
-            }
-            Self::Service(e) => {
-                match e {
-                    rmcp::service::ServiceError::McpError(mcp_err) =>
-                        format!("MCP Error: {}", mcp_err.code.0),
-                    rmcp::service::ServiceError::TransportSend(_) =>
-                        "Service: Transport Send".to_string(),
-                    rmcp::service::ServiceError::TransportClosed =>
-                        "Service: Transport Closed".to_string(),
-                    rmcp::service::ServiceError::UnexpectedResponse =>
-                        "Service: Unexpected Response".to_string(),
-                    rmcp::service::ServiceError::Cancelled { .. } =>
-                        "Service: Cancelled".to_string(),
-                    rmcp::service::ServiceError::Timeout { .. } =>
-                        "Service: Timeout".to_string(),
-                    _ => "Service: Unknown".to_string(),
+                rmcp::service::ClientInitializeError::ExpectedInitResult(_) => {
+                    "Client Init: Expected Init Result".to_string()
                 }
-            }
+                rmcp::service::ClientInitializeError::ConflictInitResponseId(_, _) => {
+                    "Client Init: Conflict Response ID".to_string()
+                }
+                rmcp::service::ClientInitializeError::ConnectionClosed(_) => {
+                    "Client Init: Connection Closed".to_string()
+                }
+                rmcp::service::ClientInitializeError::TransportError { .. } => {
+                    "Client Init: Transport Error".to_string()
+                }
+                rmcp::service::ClientInitializeError::Cancelled => {
+                    "Client Init: Cancelled".to_string()
+                }
+            },
+            Self::Service(e) => match e {
+                rmcp::service::ServiceError::McpError(mcp_err) => {
+                    format!("MCP Error: {}", mcp_err.code.0)
+                }
+                rmcp::service::ServiceError::TransportSend(_) => {
+                    "Service: Transport Send".to_string()
+                }
+                rmcp::service::ServiceError::TransportClosed => {
+                    "Service: Transport Closed".to_string()
+                }
+                rmcp::service::ServiceError::UnexpectedResponse => {
+                    "Service: Unexpected Response".to_string()
+                }
+                rmcp::service::ServiceError::Cancelled { .. } => "Service: Cancelled".to_string(),
+                rmcp::service::ServiceError::Timeout { .. } => "Service: Timeout".to_string(),
+                _ => "Service: Unknown".to_string(),
+            },
             Self::Runtime(_) => "Runtime Error".to_string(),
             Self::InvalidToolArguments(_) => "Invalid Tool Arguments".to_string(),
             Self::Shutdown(_) => "Shutdown Failed".to_string(),

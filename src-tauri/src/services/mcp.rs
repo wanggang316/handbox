@@ -281,7 +281,10 @@ impl McpService {
     /// Update server status and metadata based on connection type
     ///
     /// Returns Ok if connection succeeds, Err if connection fails
-    async fn update_server_status(&self, server: &mut McpServer) -> Result<(), crate::mcp_client::McpClientError> {
+    async fn update_server_status(
+        &self,
+        server: &mut McpServer,
+    ) -> Result<(), crate::mcp_client::McpClientError> {
         // All connection types now work the same way - try to connect and fetch metadata
         match self.fetch_server_metadata(server).await {
             Ok((tools, prompts, resources)) => {
@@ -435,11 +438,11 @@ impl McpService {
             .as_millis() as i64
     }
 
-
     async fn fetch_server_metadata(
         &self,
         server: &McpServer,
-    ) -> Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>), crate::mcp_client::McpClientError> {
+    ) -> Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>), crate::mcp_client::McpClientError>
+    {
         let client = Self::connect_client(server).await?;
 
         // Fetch all metadata concurrently
@@ -536,10 +539,12 @@ impl McpService {
             .collect()
     }
 
-    async fn connect_client(server: &McpServer) -> Result<McpClient, crate::mcp_client::McpClientError> {
+    async fn connect_client(
+        server: &McpServer,
+    ) -> Result<McpClient, crate::mcp_client::McpClientError> {
         if !server.enabled {
             return Err(crate::mcp_client::McpClientError::TransportCreation(
-                format!("MCP server '{}' is not enabled", server.name)
+                format!("MCP server '{}' is not enabled", server.name),
             ));
         }
 
@@ -549,24 +554,34 @@ impl McpService {
         McpClient::connect(config).await
     }
 
-    fn validate_server_configuration(server: &McpServer) -> Result<(), crate::mcp_client::McpClientError> {
+    fn validate_server_configuration(
+        server: &McpServer,
+    ) -> Result<(), crate::mcp_client::McpClientError> {
         match server.connection_type {
             crate::models::McpConnectionType::Stdio => {
-                validate_server_config(&server.command, &server.working_dir, &server.env)
-                    .map_err(|e| crate::mcp_client::McpClientError::TransportCreation(
-                        format!("Invalid stdio configuration for MCP server '{}': {}", server.name, e)
-                    ))?;
+                validate_server_config(&server.command, &server.working_dir, &server.env).map_err(
+                    |e| {
+                        crate::mcp_client::McpClientError::TransportCreation(format!(
+                            "Invalid stdio configuration for MCP server '{}': {}",
+                            server.name, e
+                        ))
+                    },
+                )?;
             }
             crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
                 let endpoint = server.endpoint.as_ref().ok_or_else(|| {
-                    crate::mcp_client::McpClientError::TransportCreation(
-                        format!("Endpoint is required for {}", server.connection_type)
-                    )
+                    crate::mcp_client::McpClientError::TransportCreation(format!(
+                        "Endpoint is required for {}",
+                        server.connection_type
+                    ))
                 })?;
 
                 if endpoint.trim().is_empty() {
                     return Err(crate::mcp_client::McpClientError::TransportCreation(
-                        format!("Endpoint is required for {} connection type", server.connection_type.as_str())
+                        format!(
+                            "Endpoint is required for {} connection type",
+                            server.connection_type.as_str()
+                        ),
                     ));
                 }
             }
@@ -575,7 +590,9 @@ impl McpService {
         Ok(())
     }
 
-    fn build_connection_config(server: &McpServer) -> Result<ConnectionConfig, crate::mcp_client::McpClientError> {
+    fn build_connection_config(
+        server: &McpServer,
+    ) -> Result<ConnectionConfig, crate::mcp_client::McpClientError> {
         match server.connection_type {
             crate::models::McpConnectionType::Stdio => {
                 let mut config = ProcessConfig::new(&server.command)
@@ -589,12 +606,11 @@ impl McpService {
                 Ok(ConnectionConfig::Process(config))
             }
             crate::models::McpConnectionType::Sse => {
-                let endpoint = server
-                    .endpoint
-                    .as_ref()
-                    .ok_or_else(|| crate::mcp_client::McpClientError::TransportCreation(
-                        "Endpoint is required for SSE connection".to_string()
-                    ))?;
+                let endpoint = server.endpoint.as_ref().ok_or_else(|| {
+                    crate::mcp_client::McpClientError::TransportCreation(
+                        "Endpoint is required for SSE connection".to_string(),
+                    )
+                })?;
 
                 let mut config =
                     SseConfig::new(endpoint.clone()).with_headers(server.headers.clone());
@@ -606,12 +622,11 @@ impl McpService {
                 Ok(ConnectionConfig::Sse(config))
             }
             crate::models::McpConnectionType::Http => {
-                let endpoint = server
-                    .endpoint
-                    .as_ref()
-                    .ok_or_else(|| crate::mcp_client::McpClientError::TransportCreation(
-                        "Endpoint is required for HTTP connection".to_string()
-                    ))?;
+                let endpoint = server.endpoint.as_ref().ok_or_else(|| {
+                    crate::mcp_client::McpClientError::TransportCreation(
+                        "Endpoint is required for HTTP connection".to_string(),
+                    )
+                })?;
 
                 let mut config = StreamableHttpConfig::new(endpoint.clone())
                     .with_headers(server.headers.clone());

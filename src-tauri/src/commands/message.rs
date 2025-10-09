@@ -1,9 +1,10 @@
 // 消息相关 IPC 命令
 
+use crate::llm_client::types::ChatToolCall;
 use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
 use crate::services::{message::StreamChunk, MessageService};
-use crate::llm_client::types::ToolExecutionStatus;
 use serde_json::json;
+use std::collections::HashMap;
 use tauri::{Emitter, State, Window};
 
 /// 创建流式开始回调
@@ -105,22 +106,19 @@ fn create_stream_error_callback(
 fn create_tool_execute_callback(
     window: Window,
     event_name: &'static str,
-) -> impl FnMut(String, Vec<String>, ToolExecutionStatus) {
-    move |message_id: String, tool_call_ids: Vec<String>, status: ToolExecutionStatus| {
-        let _ = window.emit(
-            event_name,
-            json!({
-                "messageId": message_id,
-                "toolCallIds": tool_call_ids,
-                "status": status
-            }),
-        );
+) -> impl FnMut(String, HashMap<String, ChatToolCall>) {
+    move |message_id: String, tool_calls: HashMap<String, ChatToolCall>| {
+        let payload = json!({
+            "messageId": message_id,
+            "toolCalls": tool_calls
+        });
+
+        let _ = window.emit(event_name, payload);
+
         tracing::info!(
-            "[{}] Tool execution status changed to {:?} for message {} with tool calls {:?}",
+            "[{}] Tool execution status event for message {}",
             event_name,
-            status,
-            message_id,
-            tool_call_ids
+            message_id
         );
     }
 }
@@ -327,8 +325,7 @@ pub async fn message_resend_stream(
         let streaming_callback =
             create_streaming_callback(window_clone.clone(), "message_stream_chunk");
 
-        let end_callback =
-            create_stream_end_callback(window_clone.clone(), "message_stream_end");
+        let end_callback = create_stream_end_callback(window_clone.clone(), "message_stream_end");
 
         let error_callback =
             create_stream_error_callback(window_clone.clone(), "message_stream_error");
@@ -433,12 +430,9 @@ pub async fn message_execute_tool_calls(
                 // 错误回调
                 tracing::error!("[message_execute_tool_calls] Execution failed: {:?}", error);
             },
-            |_message_id, _tool_call_ids, status| {
+            |_message_id, _tool_calls| {
                 // 工具执行状态回调
-                tracing::info!(
-                    "[message_execute_tool_calls] Tool execution status: {:?}",
-                    status
-                );
+                tracing::info!("[message_execute_tool_calls] Tool execution calls: {:?}", _tool_calls);
             },
             |_chat_id, _deleted_message_ids| {
                 // 消息删除回调

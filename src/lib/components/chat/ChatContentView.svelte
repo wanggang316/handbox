@@ -94,7 +94,6 @@
   // 重发用户消息 - 显示确认对话框
   function resendMessage(messageId: string) {
     if (operatingMessageId) return; // 防止重复操作
-    console.log("-----------> handleResend --------");
     pendingMessageId = messageId;
     showResendConfirm = true;
   }
@@ -236,6 +235,7 @@
               {message}
               isOperating={operatingMessageId === message.id}
               onResend={resendMessage}
+              onCopy={copyMessage}
             />
           {:else if message.role === 'assistant'}
             <AssistantMessageView
