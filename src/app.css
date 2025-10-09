@@ -337,6 +337,34 @@ body {
   padding: 1.1rem 1.25rem;
 }
 
+pre.code-block {
+  margin: 0;
+  padding: 0;
+  font-family: "Fira Code", "Monaco", "Consolas", "Courier New", monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--base-content);
+  background-color: var(--base-200);
+  /* border: 1px solid var(--base-300); */
+  border-radius: 0.75rem;
+  /* overflow-x: auto; */
+  /* box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02); */
+}
+
+pre.code-block code {
+  display: block;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  /* white-space: pre; */
+}
+
+pre.code-block--compact {
+  /* padding: 0.6rem 0.85rem; */
+  font-size: 0.7rem;
+  border-radius: 0.65rem;
+}
+
 .markdown-content ul {
   margin: 0.75rem 0;
   padding-left: 1.5rem;

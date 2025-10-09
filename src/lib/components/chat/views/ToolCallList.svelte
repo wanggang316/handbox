@@ -9,6 +9,7 @@
   } from "lucide-svelte";
   import { messageStore } from "$lib/states";
   import type { ToolCall } from "$lib/types";
+  import { renderCodeBlock } from "$lib/utils/code";
 
   interface Props {
     toolCalls?: ToolCall[];
@@ -37,6 +38,19 @@
   function toggleTool(tool: ToolCall) {
     const key = getToolKey(tool);
     expandedTools[key] = !isExpanded(tool);
+  }
+
+  function renderJsonBlock(content?: string): string {
+    if (!content) return "";
+
+    let formatted = content;
+
+    try {
+      const parsed = JSON.parse(content);
+      formatted = JSON.stringify(parsed, null, 2);
+    } catch {}
+
+    return renderCodeBlock(formatted, { language: "json", variant: "compact" });
   }
 
   const isExecuting = $derived(() => {
@@ -204,22 +218,22 @@
           </div>
 
           {#if isExpanded(tool)}
-            <div class="px-2 my-3 space-y-2 text-[11px] leading-relaxed max-h-40 overflow-auto">
+            <div class="p-3 space-y-2 rounded-b-md text-[11px] leading-relaxed max-h-80 overflow-auto bg-base-100">
               {#if tool.function?.arguments}
-              <div class="p-2 bg-base-100 rounded">
-                <div class="mb-1 text-[10px] text-base-content/70">
-                  Request
+                <div class="">
+                  <div class="mb-1 text-[10px] text-base-content/70">Request</div>
+                  <div class="flex-1 break-words">
+                    {@html renderJsonBlock(tool.function.arguments)}
                   </div>
-                  <pre>{tool.function.arguments}</pre>
                 </div>
               {/if}
 
               {#if tool.result}
-                <div class="p-2 bg-base-100 rounded">
-                  <div class="mb-1 text-[10px] text-base-content/70">
-                    Response
+                <div class="">
+                  <div class="mb-1 text-[10px] text-base-content/70">Response</div>
+                  <div class="flex-1 break-words">
+                    {@html renderJsonBlock(tool.result)}
                   </div>
-                  <pre>{tool.result}</pre>
                 </div>
               {/if}
             </div>
