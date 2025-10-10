@@ -1,7 +1,7 @@
 // 聊天服务实现
 
 use crate::llm_client::create_llm_client;
-use crate::llm_client::types::{ChatMessage, ChatMessageRole, ChatRequest};
+use crate::llm_client::types::{LlmMessage, LlmMessageRole, LlmRequest};
 use crate::models::{AppError, Chat, UUID};
 use crate::services::{Database, ProviderService};
 use crate::storage::{ChatRepository, MessageRepository};
@@ -174,7 +174,7 @@ impl ChatService {
         // 4. 只获取用户发送的消息
         let user_messages: Vec<String> = messages
             .iter()
-            .filter(|msg| matches!(msg.role, ChatMessageRole::User))
+            .filter(|msg| matches!(msg.role, LlmMessageRole::User))
             .take(20)
             .map(|msg| msg.content.clone())
             .collect();
@@ -208,10 +208,10 @@ impl ChatService {
         })?;
 
         // 9. 构建API请求
-        let api_request = ChatRequest {
+        let api_request = LlmRequest {
             model: model_id,
-            messages: vec![ChatMessage {
-                role: ChatMessageRole::User,
+            messages: vec![LlmMessage {
+                role: LlmMessageRole::User,
                 content: title_prompt,
                 reasoning: None,
                 tool_calls: None,

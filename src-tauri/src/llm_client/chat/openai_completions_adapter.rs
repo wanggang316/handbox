@@ -3,9 +3,9 @@
 
 use crate::llm_client::chat::ChatClient;
 use crate::llm_client::types::{
-    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatDeltaToolCall,
-    ChatDeltaToolFunction, ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall,
-    ChatToolChoice, ChatToolFunction, ChatUsage,
+    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmDeltaToolCall,
+    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmRequest, LlmResponse, LlmToolCall,
+    LlmToolChoice, LlmToolFunction, LlmUsage,
 };
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
@@ -23,8 +23,8 @@ impl OpenAICompletionsChatClient {
         Self {}
     }
 
-    /// 转换我们的 ChatRequest 到 openai-rust 的 ChatCompletionRequest
-    fn convert_to_openai_request(&self, request: &ChatRequest) -> CompletionRequest {
+    /// 转换我们的 LlmRequest 到 openai-rust 的 ChatCompletionRequest
+    fn convert_to_openai_request(&self, request: &LlmRequest) -> CompletionRequest {
         let messages: Vec<RequestMessage> = request
             .messages
             .iter()
@@ -59,9 +59,9 @@ impl OpenAICompletionsChatClient {
         });
 
         let tool_choice = request.tool_choice.as_ref().map(|choice| match choice {
-            ChatToolChoice::Auto => ToolChoice::None("auto".to_string()),
-            ChatToolChoice::None => ToolChoice::None("none".to_string()),
-            ChatToolChoice::Required => ToolChoice::Required("required".to_string()),
+            LlmToolChoice::Auto => ToolChoice::None("auto".to_string()),
+            LlmToolChoice::None => ToolChoice::None("none".to_string()),
+            LlmToolChoice::Required => ToolChoice::Required("required".to_string()),
         });
 
         CompletionRequest {
@@ -76,16 +76,16 @@ impl OpenAICompletionsChatClient {
         }
     }
 
-    /// 转换 openai-rust 的 CompletionResponse 到我们的 ChatResponse
-    fn convert_from_openai_response(&self, response: CompletionResponse) -> ChatResponse {
-        let choices: Vec<ChatChoice> = response
+    /// 转换 openai-rust 的 CompletionResponse 到我们的 LlmResponse
+    fn convert_from_openai_response(&self, response: CompletionResponse) -> LlmResponse {
+        let choices: Vec<LlmChoice> = response
             .choices
             .into_iter()
             .map(|choice| {
                 let message = choice.message;
-                ChatChoice {
+                LlmChoice {
                     index: choice.index as i32,
-                    delta: Some(ChatMessage {
+                    delta: Some(LlmMessage {
                         role: map_role_to_chat_message_role(message.role),
                         content: message.content.unwrap_or_default(),
                         reasoning: message.reasoning,
@@ -99,13 +99,13 @@ impl OpenAICompletionsChatClient {
             })
             .collect();
 
-        let usage = Some(ChatUsage {
+        let usage = Some(LlmUsage {
             prompt_tokens: response.usage.prompt_tokens as i32,
             completion_tokens: response.usage.completion_tokens as i32,
             total_tokens: response.usage.total_tokens as i32,
         });
 
-        ChatResponse {
+        LlmResponse {
             id: response.id,
             object: response.object,
             model: response.model,
@@ -114,9 +114,9 @@ impl OpenAICompletionsChatClient {
         }
     }
 
-    /// 转换 openai-rust 的 ChatCompletionChunkResponse 到我们的 ChatChunkResponse
-    fn convert_from_openai_chunk(&self, chunk: CompletionChunkResponse) -> ChatChunkResponse {
-        let choices: Vec<ChatChunkChoice> = chunk
+    /// 转换 openai-rust 的 ChatCompletionChunkResponse 到我们的 LlmChunkResponse
+    fn convert_from_openai_chunk(&self, chunk: CompletionChunkResponse) -> LlmChunkResponse {
+        let choices: Vec<LlmChunkChoice> = chunk
             .choices
             .into_iter()
             .map(|choice| {
@@ -125,12 +125,12 @@ impl OpenAICompletionsChatClient {
                     calls
                         .into_iter()
                         .map(convert_openai_delta_tool_call)
-                        .collect::<Vec<ChatDeltaToolCall>>()
+                        .collect::<Vec<LlmDeltaToolCall>>()
                 });
 
-                ChatChunkChoice {
+                LlmChunkChoice {
                     index: choice.index as i32,
-                    delta: Some(ChatDeltaMessage {
+                    delta: Some(LlmDeltaMessage {
                         role: delta_role,
                         content: choice.delta.content.clone(),
                         reasoning: choice.delta.reasoning.clone(),
@@ -141,7 +141,7 @@ impl OpenAICompletionsChatClient {
             })
             .collect();
 
-        ChatChunkResponse {
+        LlmChunkResponse {
             id: chunk.id,
             object: chunk.object,
             model: chunk.model,
@@ -156,8 +156,8 @@ impl ChatClient for OpenAICompletionsChatClient {
     async fn chat(
         &self,
         provider: &Provider,
-        request: ChatRequest,
-    ) -> Result<ChatResponse, AppError> {
+        request: LlmRequest,
+    ) -> Result<LlmResponse, AppError> {
         tracing::info!("Sending OpenAI-style chat request using openai-rust library");
 
         // 创建 openai-rust 客户端
@@ -193,9 +193,9 @@ impl ChatClient for OpenAICompletionsChatClient {
     async fn chat_stream(
         &self,
         provider: &Provider,
-        mut request: ChatRequest,
+        mut request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         // 启用流式响应
@@ -223,7 +223,7 @@ impl ChatClient for OpenAICompletionsChatClient {
         // 使用 tokio::spawn 和 mpsc 来创建一个真正的流式传输
         use tokio::sync::mpsc;
 
-        let (tx, mut rx) = mpsc::channel::<Result<ChatChunkResponse, AppError>>(100);
+        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, AppError>>(100);
 
         // 在后台任务中处理流，将 openai_client 和 openai_request 的所有权转移进去
         tokio::spawn(async move {
@@ -267,7 +267,7 @@ impl ChatClient for OpenAICompletionsChatClient {
 
         Ok(Box::new(Box::pin(converted_stream))
             as Box<
-                dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
             >)
     }
 
@@ -282,25 +282,25 @@ impl Default for OpenAICompletionsChatClient {
     }
 }
 
-fn map_role(role: &ChatMessageRole) -> Role {
+fn map_role(role: &LlmMessageRole) -> Role {
     match role {
-        ChatMessageRole::System => Role::System,
-        ChatMessageRole::Assistant => Role::Assistant,
-        ChatMessageRole::Tool => Role::Tool,
-        ChatMessageRole::User => Role::User,
+        LlmMessageRole::System => Role::System,
+        LlmMessageRole::Assistant => Role::Assistant,
+        LlmMessageRole::Tool => Role::Tool,
+        LlmMessageRole::User => Role::User,
     }
 }
 
-fn map_role_to_chat_message_role(role: Role) -> ChatMessageRole {
+fn map_role_to_chat_message_role(role: Role) -> LlmMessageRole {
     match role {
-        Role::System => ChatMessageRole::System,
-        Role::Assistant => ChatMessageRole::Assistant,
-        Role::Tool => ChatMessageRole::Tool,
-        Role::User => ChatMessageRole::User,
+        Role::System => LlmMessageRole::System,
+        Role::Assistant => LlmMessageRole::Assistant,
+        Role::Tool => LlmMessageRole::Tool,
+        Role::User => LlmMessageRole::User,
     }
 }
 
-fn convert_tool_call(call: &ChatToolCall) -> Option<OpenAIToolCall> {
+fn convert_tool_call(call: &LlmToolCall) -> Option<OpenAIToolCall> {
     Some(OpenAIToolCall {
         id: call.id.clone(),
         tool_type: call.tool_type.clone(),
@@ -311,11 +311,11 @@ fn convert_tool_call(call: &ChatToolCall) -> Option<OpenAIToolCall> {
     })
 }
 
-fn convert_openai_tool_call(call: OpenAIToolCall) -> ChatToolCall {
-    ChatToolCall {
+fn convert_openai_tool_call(call: OpenAIToolCall) -> LlmToolCall {
+    LlmToolCall {
         id: call.id,
         tool_type: call.tool_type.clone(),
-        function: ChatToolFunction {
+        function: LlmToolFunction {
             name: call.function.name.clone(),
             arguments: call.function.arguments.clone(),
         },
@@ -325,12 +325,12 @@ fn convert_openai_tool_call(call: OpenAIToolCall) -> ChatToolCall {
     }
 }
 
-fn convert_openai_delta_tool_call(call: DeltaToolCall) -> ChatDeltaToolCall {
-    ChatDeltaToolCall {
+fn convert_openai_delta_tool_call(call: DeltaToolCall) -> LlmDeltaToolCall {
+    LlmDeltaToolCall {
         index: call.index,
         id: call.id,
         tool_type: call.tool_type.clone(),
-        function: call.function.as_ref().map(|f| ChatDeltaToolFunction {
+        function: call.function.as_ref().map(|f| LlmDeltaToolFunction {
             name: f.name.clone(),
             arguments: f.arguments.clone(),
         }),

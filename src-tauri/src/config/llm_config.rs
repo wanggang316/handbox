@@ -124,7 +124,7 @@ impl LlmConfig {
         None
     }
 
-    /// 转换特性字符串为ModelFeature枚举
+    /// 转换特性字符串为 ModelFeature 枚举
     pub fn convert_features(&self, features: &[String]) -> Vec<ModelFeature> {
         features
             .iter()

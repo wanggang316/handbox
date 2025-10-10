@@ -8,8 +8,8 @@ pub use chat::ChatClient;
 pub use client::{create_chat_client, create_client, create_llm_client, LlmClient};
 pub use model::ModelClient;
 pub use types::{
-    ChatApiType, ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage,
-    ChatDeltaToolCall, ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall,
-    ChatToolCallDelta, ChatToolChoice, ChatToolFunction, ChatUsage, ModelApiType, ModelFeature,
-    RequestTool, RequestToolFunction, StandardModel,
+    LlmApiType, LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage,
+    LlmDeltaToolCall, LlmMessage, LlmMessageRole, LlmRequest, LlmResponse, LlmToolCall,
+    LlmToolCallDelta, LlmToolChoice, LlmToolFunction, LlmUsage, LlmModelApiType, LlmModelFeature,
+    LlmRequestTool, LlmRequestToolFunction, LlmStandardModel,
 };

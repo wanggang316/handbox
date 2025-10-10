@@ -2,7 +2,7 @@ use crate::config::llm_config::get_global_llm_config;
 use crate::llm_client::chat::{self, ChatClient};
 use crate::llm_client::model::{create_model_client, ModelClient};
 use crate::llm_client::types::{
-    ChatApiType, ChatChunkResponse, ChatRequest, ChatResponse, ModelApiType, StandardModel,
+    LlmApiType, LlmChunkResponse, LlmRequest, LlmResponse, LlmModelApiType, LlmStandardModel,
 };
 use crate::models::{AppError, Provider};
 
@@ -17,8 +17,8 @@ impl LlmClient {
     /// 基于枚举类型构建客户端，减少对配置格式的耦合
     pub fn new(
         provider_type: String,
-        model_api_type: ModelApiType,
-        chat_api_type: ChatApiType,
+        model_api_type: LlmModelApiType,
+        chat_api_type: LlmApiType,
     ) -> Result<Self, AppError> {
         let model_api_client = create_model_client(model_api_type)?;
         let chat_api_client = chat::create_chat_client(chat_api_type)?;
@@ -46,23 +46,23 @@ impl LlmClient {
     pub async fn chat(
         &self,
         provider: &Provider,
-        request: ChatRequest,
-    ) -> Result<ChatResponse, AppError> {
+        request: LlmRequest,
+    ) -> Result<LlmResponse, AppError> {
         self.chat_api_client.chat(provider, request).await
     }
 
     pub async fn chat_stream(
         &self,
         provider: &Provider,
-        request: ChatRequest,
+        request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         self.chat_api_client.chat_stream(provider, request).await
     }
 
-    pub async fn list_models(&self, provider: &Provider) -> Result<Vec<StandardModel>, AppError> {
+    pub async fn list_models(&self, provider: &Provider) -> Result<Vec<LlmStandardModel>, AppError> {
         self.model_api_client
             .list_models(provider, &self.provider_type)
             .await
@@ -78,7 +78,7 @@ impl LlmClient {
 }
 
 /// 工厂方法：直接创建聊天客户端，便于复用
-pub fn create_chat_client(api_type: ChatApiType) -> Result<Box<dyn ChatClient>, AppError> {
+pub fn create_chat_client(api_type: LlmApiType) -> Result<Box<dyn ChatClient>, AppError> {
     chat::create_chat_client(api_type)
 }
 
@@ -89,8 +89,8 @@ pub fn create_llm_client(provider_type: &str) -> Result<LlmClient, AppError> {
         AppError::validation_error(&format!("Unknown provider type: {}", provider_type))
     })?;
 
-    let model_api_type = ModelApiType::try_from(provider_config.model_api_type.as_str())?;
-    let chat_api_type = ChatApiType::try_from(provider_config.chat_api_type.as_str())?;
+    let model_api_type = LlmModelApiType::try_from(provider_config.model_api_type.as_str())?;
+    let chat_api_type = LlmApiType::try_from(provider_config.chat_api_type.as_str())?;
 
     LlmClient::new(provider_type.to_string(), model_api_type, chat_api_type)
 }
@@ -117,8 +117,8 @@ mod tests {
     fn test_llm_client_creation_with_enums() {
         let client = LlmClient::new(
             "test".to_string(),
-            ModelApiType::OpenAI,
-            ChatApiType::OpenAICompletions,
+            LlmModelApiType::OpenAI,
+            LlmApiType::OpenAICompletions,
         )
         .unwrap();
 

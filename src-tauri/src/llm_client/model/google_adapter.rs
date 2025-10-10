@@ -1,7 +1,7 @@
 // Google 模型客户端实现
 
 use super::model_client::ModelClient;
-use crate::llm_client::types::{ModelFeature, StandardModel};
+use crate::llm_client::types::{LlmModelFeature, LlmStandardModel};
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -42,7 +42,7 @@ impl ModelClient for GoogleModelClient {
         &self,
         provider: &Provider,
         _provider_type: &str,
-    ) -> Result<Vec<StandardModel>, AppError> {
+    ) -> Result<Vec<LlmStandardModel>, AppError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
 
@@ -80,13 +80,13 @@ impl ModelClient for GoogleModelClient {
                 .unwrap_or(&api_model.name)
                 .to_string();
 
-            result_models.push(StandardModel {
+            result_models.push(LlmStandardModel {
                 id: model_id.clone(),
                 name: api_model.display_name,
                 context_length: api_model.input_token_limit,
                 input_cost: None,
                 output_cost: None,
-                supported_features: Some(vec![ModelFeature::Chat]),
+                supported_features: Some(vec![LlmModelFeature::Chat]),
             });
         }
 

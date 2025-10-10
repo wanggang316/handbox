@@ -3,8 +3,8 @@
 
 use crate::llm_client::chat::ChatClient;
 use crate::llm_client::types::{
-    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatMessage, ChatMessageRole,
-    ChatRequest, ChatResponse, ChatUsage,
+    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
+    LlmRequest, LlmResponse, LlmUsage,
 };
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
@@ -23,7 +23,7 @@ impl GoogleChatClient {
     /// 将通用请求转换为 Google SDK GenerateContentRequest
     fn convert_to_google_request(
         &self,
-        request: &ChatRequest,
+        request: &LlmRequest,
     ) -> google_genai_rust::types::GenerateContentRequest {
         use google_genai_rust::types::{Content, GenerationConfig};
 
@@ -38,7 +38,7 @@ impl GoogleChatClient {
                 }
                 "user" | "assistant" => {
                     // Google API 使用 "user" 和 "model" 角色
-                    let role = if msg.role == ChatMessageRole::Assistant {
+                    let role = if msg.role == LlmMessageRole::Assistant {
                         "model"
                     } else {
                         "user"
@@ -75,7 +75,7 @@ impl GoogleChatClient {
         &self,
         google_response: google_genai_rust::types::GenerateContentResponse,
         model: &str,
-    ) -> Result<ChatResponse, AppError> {
+    ) -> Result<LlmResponse, AppError> {
         let mut choices = Vec::new();
 
         for (index, candidate) in google_response.candidates.iter().enumerate() {
@@ -101,10 +101,10 @@ impl GoogleChatClient {
                 .to_string()
             });
 
-            choices.push(ChatChoice {
+            choices.push(LlmChoice {
                 index: index as i32,
-                delta: Some(ChatMessage {
-                    role: ChatMessageRole::Assistant,
+                delta: Some(LlmMessage {
+                    role: LlmMessageRole::Assistant,
                     content,
                     reasoning: None, // Google API 不支持推理过程
                     tool_calls: None,
@@ -118,13 +118,13 @@ impl GoogleChatClient {
         let usage = google_response
             .usage_metadata
             .as_ref()
-            .map(|usage| ChatUsage {
+            .map(|usage| LlmUsage {
                 prompt_tokens: usage.prompt_token_count.unwrap_or(0) as i32,
                 completion_tokens: usage.candidates_token_count.unwrap_or(0) as i32,
                 total_tokens: usage.total_token_count.unwrap_or(0) as i32,
             });
 
-        Ok(ChatResponse {
+        Ok(LlmResponse {
             id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),
             object: "chat.completion".to_string(),
             model: model.to_string(),
@@ -138,7 +138,7 @@ impl GoogleChatClient {
         stream_response: &google_genai_rust::types::StreamGenerateContentResponse,
         response_id: &str,
         model: &str,
-    ) -> Option<ChatChunkResponse> {
+    ) -> Option<LlmChunkResponse> {
         // 提取文本增量
         let mut delta_content = String::new();
         let mut finish_reason = None;
@@ -173,14 +173,14 @@ impl GoogleChatClient {
             return None;
         }
 
-        Some(ChatChunkResponse {
+        Some(LlmChunkResponse {
             id: response_id.to_string(),
             object: "chat.completion.chunk".to_string(),
             model: model.to_string(),
-            choices: vec![ChatChunkChoice {
+            choices: vec![LlmChunkChoice {
                 index: 0,
-                delta: Some(ChatDeltaMessage {
-                    role: Some(ChatMessageRole::Assistant),
+                delta: Some(LlmDeltaMessage {
+                    role: Some(LlmMessageRole::Assistant),
                     content: Some(delta_content),
                     reasoning: None,
                     tool_calls: None,
@@ -197,8 +197,8 @@ impl ChatClient for GoogleChatClient {
     async fn chat(
         &self,
         provider: &Provider,
-        request: ChatRequest,
-    ) -> Result<ChatResponse, AppError> {
+        request: LlmRequest,
+    ) -> Result<LlmResponse, AppError> {
         tracing::info!("Sending Google-style chat request using google-genai-rust SDK");
 
         // 创建 Google SDK 客户端
@@ -232,9 +232,9 @@ impl ChatClient for GoogleChatClient {
     async fn chat_stream(
         &self,
         provider: &Provider,
-        request: ChatRequest,
+        request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         tracing::info!("Sending Google-style streaming request using google-genai-rust SDK");
@@ -257,7 +257,7 @@ impl ChatClient for GoogleChatClient {
 
         // 使用 tokio::spawn 和 mpsc 来创建一个真正的流式传输
         use tokio::sync::mpsc;
-        let (tx, mut rx) = mpsc::channel::<Result<ChatChunkResponse, AppError>>(100);
+        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, AppError>>(100);
 
         let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
         let model_name = request.model.clone();
@@ -310,7 +310,7 @@ impl ChatClient for GoogleChatClient {
 
         Ok(Box::new(Box::pin(converted_stream))
             as Box<
-                dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
             >)
     }
 

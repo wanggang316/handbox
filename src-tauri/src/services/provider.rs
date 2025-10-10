@@ -393,7 +393,7 @@ impl ProviderService {
 
 /// 将标准模型适配为应用内部的 `Model`
 fn adapt_model(
-    standard_model: crate::llm_client::StandardModel,
+    standard_model: crate::llm_client::LlmStandardModel,
     provider_id: String,
     now: i64,
 ) -> Model {
@@ -401,22 +401,22 @@ fn adapt_model(
         features
             .into_iter()
             .map(|feature| match feature {
-                crate::llm_client::ModelFeature::Chat => {
+                crate::llm_client::LlmModelFeature::Chat => {
                     crate::models::provider::ModelFeature::Text
                 }
-                crate::llm_client::ModelFeature::Vision => {
+                crate::llm_client::LlmModelFeature::Vision => {
                     crate::models::provider::ModelFeature::Vision
                 }
-                crate::llm_client::ModelFeature::FunctionCalling => {
+                crate::llm_client::LlmModelFeature::FunctionCalling => {
                     crate::models::provider::ModelFeature::FunctionCalling
                 }
-                crate::llm_client::ModelFeature::Completion => {
+                crate::llm_client::LlmModelFeature::Completion => {
                     crate::models::provider::ModelFeature::Text
                 }
-                crate::llm_client::ModelFeature::Embedding => {
+                crate::llm_client::LlmModelFeature::Embedding => {
                     crate::models::provider::ModelFeature::Text
                 }
-                crate::llm_client::ModelFeature::Streaming => {
+                crate::llm_client::LlmModelFeature::Streaming => {
                     crate::models::provider::ModelFeature::Streaming
                 }
             })

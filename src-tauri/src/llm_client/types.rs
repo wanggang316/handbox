@@ -7,12 +7,12 @@ use crate::models::AppError;
 
 /// 通用-消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: ChatMessageRole,
+pub struct LlmMessage {
+    pub role: LlmMessageRole,
     pub content: String,
     pub reasoning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub tool_calls: Option<Vec<LlmToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
 }
@@ -20,45 +20,45 @@ pub struct ChatMessage {
 /// 工具调用执行模式
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum ToolExecutionMode {
+pub enum LlmToolExecutionMode {
     Auto,
     Manual,
 }
 
-impl Default for ToolExecutionMode {
+impl Default for LlmToolExecutionMode {
     fn default() -> Self {
-        ToolExecutionMode::Auto
+        LlmToolExecutionMode::Auto
     }
 }
 
 /// 工具调用执行状态
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum ToolExecutionStatus {
+pub enum LlmToolExecutionStatus {
     Pending,   // 待执行
     Executing, // 执行中
     Completed, // 已执行
     Failed,    // 执行错误
 }
 
-impl Default for ToolExecutionStatus {
+impl Default for LlmToolExecutionStatus {
     fn default() -> Self {
-        ToolExecutionStatus::Pending
+        LlmToolExecutionStatus::Pending
     }
 }
 
 /// 通用-工具调用信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatToolCall {
+pub struct LlmToolCall {
     pub id: String,
     #[serde(rename = "type")]
     pub tool_type: String,
-    pub function: ChatToolFunction,
+    pub function: LlmToolFunction,
     #[serde(default)]
-    pub execution_mode: ToolExecutionMode,
+    pub execution_mode: LlmToolExecutionMode,
     #[serde(default)]
-    pub execution_status: ToolExecutionStatus,
+    pub execution_status: LlmToolExecutionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
 }
@@ -66,7 +66,7 @@ pub struct ChatToolCall {
 /// 通用-工具函数信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatToolFunction {
+pub struct LlmToolFunction {
     pub name: String,
     pub arguments: String,
 }
@@ -74,39 +74,39 @@ pub struct ChatToolFunction {
 /// 聊天消息角色枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum ChatMessageRole {
+pub enum LlmMessageRole {
     System,
     User,
     Assistant,
     Tool,
 }
 
-impl ChatMessageRole {
+impl LlmMessageRole {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ChatMessageRole::System => "system",
-            ChatMessageRole::User => "user",
-            ChatMessageRole::Assistant => "assistant",
-            ChatMessageRole::Tool => "tool",
+            LlmMessageRole::System => "system",
+            LlmMessageRole::User => "user",
+            LlmMessageRole::Assistant => "assistant",
+            LlmMessageRole::Tool => "tool",
         }
     }
 }
 
-impl std::fmt::Display for ChatMessageRole {
+impl std::fmt::Display for LlmMessageRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
 
-impl std::str::FromStr for ChatMessageRole {
+impl std::str::FromStr for LlmMessageRole {
     type Err = AppError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "system" => Ok(ChatMessageRole::System),
-            "user" => Ok(ChatMessageRole::User),
-            "assistant" => Ok(ChatMessageRole::Assistant),
-            "tool" => Ok(ChatMessageRole::Tool),
+            "system" => Ok(LlmMessageRole::System),
+            "user" => Ok(LlmMessageRole::User),
+            "assistant" => Ok(LlmMessageRole::Assistant),
+            "tool" => Ok(LlmMessageRole::Tool),
             _ => Err(AppError::validation_error(&format!("Invalid role: {}", s))),
         }
     }
@@ -114,22 +114,22 @@ impl std::str::FromStr for ChatMessageRole {
 
 // 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatRequest {
+pub struct LlmRequest {
     pub model: String,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<LlmMessage>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<i32>,
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<RequestTool>>,
+    pub tools: Option<Vec<LlmRequestTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<ChatToolChoice>,
+    pub tool_choice: Option<LlmToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ChatToolChoice {
+pub enum LlmToolChoice {
     #[serde(rename = "auto")]
     Auto,
     #[serde(rename = "none")]
@@ -140,15 +140,15 @@ pub enum ChatToolChoice {
 
 // 请求-工具
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestTool {
+pub struct LlmRequestTool {
     #[serde(rename = "type")]
     pub tool_type: String,
-    pub function: RequestToolFunction,
+    pub function: LlmRequestToolFunction,
 }
 
 // 请求-工具函数
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestToolFunction {
+pub struct LlmRequestToolFunction {
     pub name: String,
     pub description: String,
     pub parameters: Value,
@@ -156,23 +156,23 @@ pub struct RequestToolFunction {
 
 // 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatResponse {
+pub struct LlmResponse {
     pub id: String,
     pub object: String,
     pub model: String,
-    pub choices: Vec<ChatChoice>,
-    pub usage: Option<ChatUsage>,
+    pub choices: Vec<LlmChoice>,
+    pub usage: Option<LlmUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatChoice {
+pub struct LlmChoice {
     pub index: i32,
-    pub delta: Option<ChatMessage>,
+    pub delta: Option<LlmMessage>,
     pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatUsage {
+pub struct LlmUsage {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
     pub total_tokens: i32,
@@ -180,55 +180,55 @@ pub struct ChatUsage {
 
 // 响应-增量
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatChunkResponse {
+pub struct LlmChunkResponse {
     pub id: String,
     pub object: String,
     pub model: String,
-    pub choices: Vec<ChatChunkChoice>,
-    pub usage: Option<ChatUsage>,
+    pub choices: Vec<LlmChunkChoice>,
+    pub usage: Option<LlmUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatChunkChoice {
+pub struct LlmChunkChoice {
     pub index: i32,
-    pub delta: Option<ChatDeltaMessage>,
+    pub delta: Option<LlmDeltaMessage>,
     pub finish_reason: Option<String>,
 }
 
 // 响应-消息-增量
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatDeltaMessage {
-    pub role: Option<ChatMessageRole>,
+pub struct LlmDeltaMessage {
+    pub role: Option<LlmMessageRole>,
     pub content: Option<String>,
     pub reasoning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatDeltaToolCall>>,
+    pub tool_calls: Option<Vec<LlmDeltaToolCall>>,
 }
 
 /// 工具调用-增量
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatDeltaToolCall {
+pub struct LlmDeltaToolCall {
     pub index: u32,
     pub id: Option<String>,
     #[serde(rename = "type")]
     pub tool_type: Option<String>,
-    pub function: Option<ChatDeltaToolFunction>,
+    pub function: Option<LlmDeltaToolFunction>,
 }
 
 // Type alias for backward compatibility
-pub type ChatToolCallDelta = ChatDeltaToolCall;
+pub type LlmToolCallDelta = LlmDeltaToolCall;
 
 /// 工具函数-增量
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatDeltaToolFunction {
+pub struct LlmDeltaToolFunction {
     pub name: Option<String>,
     pub arguments: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum ModelFeature {
+pub enum LlmModelFeature {
     #[serde(rename = "chat")]
     Chat,
     #[serde(rename = "completion")]
@@ -244,50 +244,50 @@ pub enum ModelFeature {
 }
 
 #[derive(Debug, Clone)]
-pub struct StandardModel {
+pub struct LlmStandardModel {
     pub id: String,
     pub name: String,
     pub context_length: Option<i32>,
     pub input_cost: Option<f32>,
     pub output_cost: Option<f32>,
-    pub supported_features: Option<Vec<ModelFeature>>,
+    pub supported_features: Option<Vec<LlmModelFeature>>,
 }
 
 /// 聊天 API 类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChatApiType {
+pub enum LlmApiType {
     OpenAICompletions,
     OpenAIResponses,
     Google,
     Anthropic,
 }
 
-impl ChatApiType {
+impl LlmApiType {
     pub fn as_str(self) -> &'static str {
         match self {
-            ChatApiType::OpenAICompletions => "openai-completions",
-            ChatApiType::OpenAIResponses => "openai-responses",
-            ChatApiType::Google => "google",
-            ChatApiType::Anthropic => "anthropic",
+            LlmApiType::OpenAICompletions => "openai-completions",
+            LlmApiType::OpenAIResponses => "openai-responses",
+            LlmApiType::Google => "google",
+            LlmApiType::Anthropic => "anthropic",
         }
     }
 }
 
-impl fmt::Display for ChatApiType {
+impl fmt::Display for LlmApiType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl FromStr for ChatApiType {
+impl FromStr for LlmApiType {
     type Err = AppError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "openai" | "openai-completions" => Ok(ChatApiType::OpenAICompletions),
-            "openai-responses" => Ok(ChatApiType::OpenAIResponses),
-            "google" => Ok(ChatApiType::Google),
-            "anthropic" => Ok(ChatApiType::Anthropic),
+            "openai" | "openai-completions" => Ok(LlmApiType::OpenAICompletions),
+            "openai-responses" => Ok(LlmApiType::OpenAIResponses),
+            "google" => Ok(LlmApiType::Google),
+            "anthropic" => Ok(LlmApiType::Anthropic),
             other => Err(AppError::validation_error(&format!(
                 "Unsupported chat API type: {}",
                 other
@@ -296,17 +296,17 @@ impl FromStr for ChatApiType {
     }
 }
 
-impl TryFrom<&str> for ChatApiType {
+impl TryFrom<&str> for LlmApiType {
     type Error = AppError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        ChatApiType::from_str(value)
+        LlmApiType::from_str(value)
     }
 }
 
 /// 模型 API 类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelApiType {
+pub enum LlmModelApiType {
     OpenAI,
     OpenAIWithLocal,
     Google,
@@ -314,34 +314,34 @@ pub enum ModelApiType {
     OpenRouter,
 }
 
-impl ModelApiType {
+impl LlmModelApiType {
     pub fn as_str(self) -> &'static str {
         match self {
-            ModelApiType::OpenAI => "openai",
-            ModelApiType::OpenAIWithLocal => "openai+local",
-            ModelApiType::Google => "google",
-            ModelApiType::Anthropic => "anthropic",
-            ModelApiType::OpenRouter => "openrouter",
+            LlmModelApiType::OpenAI => "openai",
+            LlmModelApiType::OpenAIWithLocal => "openai+local",
+            LlmModelApiType::Google => "google",
+            LlmModelApiType::Anthropic => "anthropic",
+            LlmModelApiType::OpenRouter => "openrouter",
         }
     }
 }
 
-impl fmt::Display for ModelApiType {
+impl fmt::Display for LlmModelApiType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl FromStr for ModelApiType {
+impl FromStr for LlmModelApiType {
     type Err = AppError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "openai" => Ok(ModelApiType::OpenAI),
-            "openai+local" => Ok(ModelApiType::OpenAIWithLocal),
-            "google" => Ok(ModelApiType::Google),
-            "anthropic" => Ok(ModelApiType::Anthropic),
-            "openrouter" => Ok(ModelApiType::OpenRouter),
+            "openai" => Ok(LlmModelApiType::OpenAI),
+            "openai+local" => Ok(LlmModelApiType::OpenAIWithLocal),
+            "google" => Ok(LlmModelApiType::Google),
+            "anthropic" => Ok(LlmModelApiType::Anthropic),
+            "openrouter" => Ok(LlmModelApiType::OpenRouter),
             other => Err(AppError::validation_error(&format!(
                 "Unsupported model API type: {}",
                 other
@@ -350,10 +350,10 @@ impl FromStr for ModelApiType {
     }
 }
 
-impl TryFrom<&str> for ModelApiType {
+impl TryFrom<&str> for LlmModelApiType {
     type Error = AppError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        ModelApiType::from_str(value)
+        LlmModelApiType::from_str(value)
     }
 }

@@ -3,8 +3,8 @@
 
 use crate::llm_client::chat::ChatClient;
 use crate::llm_client::types::{
-    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatMessage, ChatMessageRole,
-    ChatRequest, ChatResponse, ChatUsage,
+    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
+    LlmRequest, LlmResponse, LlmUsage,
 };
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
@@ -24,7 +24,7 @@ impl AnthropicChatClient {
     }
 
     /// 将通用请求转换为 Anthropic API 格式
-    fn convert_to_anthropic_request(&self, request: &ChatRequest) -> Value {
+    fn convert_to_anthropic_request(&self, request: &LlmRequest) -> Value {
         // Anthropic API 需要将系统消息分离
         let mut system_message = String::new();
         let mut user_messages = Vec::new();
@@ -69,7 +69,7 @@ impl AnthropicChatClient {
         &self,
         anthropic_response: Value,
         model: &str,
-    ) -> Result<ChatResponse, AppError> {
+    ) -> Result<LlmResponse, AppError> {
         let content = anthropic_response["content"][0]["text"]
             .as_str()
             .ok_or_else(|| AppError::internal_error("Invalid Anthropic API response format"))?
@@ -86,7 +86,7 @@ impl AnthropicChatClient {
 
         let usage = anthropic_response["usage"]
             .as_object()
-            .map(|usage_obj| ChatUsage {
+            .map(|usage_obj| LlmUsage {
                 prompt_tokens: usage_obj["input_tokens"].as_i64().unwrap_or(0) as i32,
                 completion_tokens: usage_obj["output_tokens"].as_i64().unwrap_or(0) as i32,
                 total_tokens: (usage_obj["input_tokens"].as_i64().unwrap_or(0)
@@ -94,14 +94,14 @@ impl AnthropicChatClient {
                     as i32,
             });
 
-        Ok(ChatResponse {
+        Ok(LlmResponse {
             id: anthropic_response["id"].as_str().unwrap_or("").to_string(),
             object: "chat.completion".to_string(),
             model: model.to_string(),
-            choices: vec![ChatChoice {
+            choices: vec![LlmChoice {
                 index: 0,
-                delta: Some(ChatMessage {
-                    role: ChatMessageRole::Assistant,
+                delta: Some(LlmMessage {
+                    role: LlmMessageRole::Assistant,
                     content,
                     reasoning: None, // Anthropic API 不支持推理过程
                     tool_calls: None,
@@ -119,8 +119,8 @@ impl ChatClient for AnthropicChatClient {
     async fn chat(
         &self,
         provider: &Provider,
-        request: ChatRequest,
-    ) -> Result<ChatResponse, AppError> {
+        request: LlmRequest,
+    ) -> Result<LlmResponse, AppError> {
         let url = format!("{}/messages", provider.base_url);
         let req_body = self.convert_to_anthropic_request(&request);
 
@@ -157,9 +157,9 @@ impl ChatClient for AnthropicChatClient {
     async fn chat_stream(
         &self,
         provider: &Provider,
-        request: ChatRequest,
+        request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         let url = format!("{}/messages", provider.base_url);
@@ -229,14 +229,14 @@ impl ChatClient for AnthropicChatClient {
                                         .and_then(|delta| delta.get("text"))
                                         .and_then(|text| text.as_str())
                                     {
-                                        let chat_response = ChatChunkResponse {
+                                        let chat_response = LlmChunkResponse {
                                             id: response_id.clone(),
                                             object: "chat.completion.chunk".to_string(),
                                             model: model_name.clone(),
-                                            choices: vec![ChatChunkChoice {
+                                            choices: vec![LlmChunkChoice {
                                                 index: 0,
-                                                delta: Some(ChatDeltaMessage {
-                                                    role: Some(ChatMessageRole::Assistant),
+                                                delta: Some(LlmDeltaMessage {
+                                                    role: Some(LlmMessageRole::Assistant),
                                                     content: Some(delta.to_string()),
                                                     reasoning: None, // Anthropic API 不支持推理过程
                                                     tool_calls: None,
@@ -253,14 +253,14 @@ impl ChatClient for AnthropicChatClient {
                                     }
                                 } else if event_type == "message_stop" {
                                     // 流结束事件
-                                    let chat_response = ChatChunkResponse {
+                                    let chat_response = LlmChunkResponse {
                                         id: response_id.clone(),
                                         object: "chat.completion.chunk".to_string(),
                                         model: model_name.clone(),
-                                        choices: vec![ChatChunkChoice {
+                                        choices: vec![LlmChunkChoice {
                                             index: 0,
-                                            delta: Some(ChatDeltaMessage {
-                                                role: Some(ChatMessageRole::Assistant),
+                                            delta: Some(LlmDeltaMessage {
+                                                role: Some(LlmMessageRole::Assistant),
                                                 content: Some("".to_string()),
                                                 reasoning: None, // Anthropic API 不支持推理过程
                                                 tool_calls: None,
@@ -289,7 +289,7 @@ impl ChatClient for AnthropicChatClient {
 
         Ok(Box::new(Box::pin(stream))
             as Box<
-                dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
             >)
     }
 

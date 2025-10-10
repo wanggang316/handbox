@@ -2,7 +2,7 @@
 
 use super::model_client::ModelClient;
 use crate::config::llm_config::{get_global_llm_config, ModelExtraInfo};
-use crate::llm_client::types::{ModelFeature, StandardModel};
+use crate::llm_client::types::{LlmModelFeature, LlmStandardModel};
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 
@@ -18,9 +18,9 @@ impl AnthropicModelClient {
         &self,
         model_id: &str,
         extra_info: &ModelExtraInfo,
-    ) -> StandardModel {
+    ) -> LlmStandardModel {
         let _config = get_global_llm_config();
-        StandardModel {
+        LlmStandardModel {
             id: model_id.to_string(),
             name: extra_info.name.clone(),
             context_length: extra_info.context_length,
@@ -31,14 +31,14 @@ impl AnthropicModelClient {
                     .features
                     .iter()
                     .map(|f| match f.as_str() {
-                        "text" => ModelFeature::Chat,
-                        "vision" => ModelFeature::Vision,
-                        "function_calling" => ModelFeature::FunctionCalling,
-                        "chat" => ModelFeature::Chat,
-                        "completion" => ModelFeature::Completion,
-                        "embedding" => ModelFeature::Embedding,
-                        "streaming" => ModelFeature::Streaming,
-                        _ => ModelFeature::Chat,
+                        "text" => LlmModelFeature::Chat,
+                        "vision" => LlmModelFeature::Vision,
+                        "function_calling" => LlmModelFeature::FunctionCalling,
+                        "chat" => LlmModelFeature::Chat,
+                        "completion" => LlmModelFeature::Completion,
+                        "embedding" => LlmModelFeature::Embedding,
+                        "streaming" => LlmModelFeature::Streaming,
+                        _ => LlmModelFeature::Chat,
                     })
                     .collect(),
             ),
@@ -52,7 +52,7 @@ impl ModelClient for AnthropicModelClient {
         &self,
         _provider: &Provider,
         provider_type: &str,
-    ) -> Result<Vec<StandardModel>, AppError> {
+    ) -> Result<Vec<LlmStandardModel>, AppError> {
         // Anthropic 不提供公开的模型列表 API，返回预定义的模型列表
         let config = get_global_llm_config();
         let provider_config = config.get_provider_config(provider_type);

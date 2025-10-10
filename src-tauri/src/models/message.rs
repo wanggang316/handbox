@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::llm_client::types::{ChatMessage, ChatMessageRole, ChatToolCall};
+use crate::llm_client::types::{LlmMessage, LlmMessageRole, LlmToolCall};
 use crate::models::chat::{Timestamp, UUID};
 
 /// 消息附件
@@ -39,10 +39,10 @@ pub struct MessageConfig {
 pub struct Message {
     pub id: UUID,
     pub chat_id: UUID,
-    pub role: ChatMessageRole,
+    pub role: LlmMessageRole,
     pub content: String,
     pub reasoning: Option<String>,
-    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub tool_calls: Option<Vec<LlmToolCall>>,
     pub turn_id: Option<i32>,
     pub tool_call_id: Option<String>, // 用于 Tool 角色消息，关联对应的工具调用
 
@@ -77,7 +77,7 @@ pub struct MessageRequest {
     pub chat_id: Option<UUID>,
     pub model_id: String,
     pub provider_id: String,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<LlmMessage>,
     pub temp_user_message_id: Option<String>,
     pub attachments: Option<Vec<MessageRequestAttachment>>,
 }
@@ -91,7 +91,7 @@ pub struct MessageResponse {
     pub content: String,
     pub reasoning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub tool_calls: Option<Vec<LlmToolCall>>,
     pub model_id: String,
     pub provider_id: String,
     pub input_tokens: Option<i32>,
@@ -147,7 +147,7 @@ mod tests {
         let message = Message {
             id: "msg_123".to_string(),
             chat_id: "chat_456".to_string(),
-            role: ChatMessageRole::User,
+            role: LlmMessageRole::User,
             content: "Hello, world!".to_string(),
             reasoning: None,
             config: None,
@@ -186,7 +186,7 @@ mod tests {
         let message = Message {
             id: "msg_123".to_string(),
             chat_id: "chat_456".to_string(),
-            role: ChatMessageRole::User,
+            role: LlmMessageRole::User,
             content: "Here's a file".to_string(),
             reasoning: None,
             config: None,

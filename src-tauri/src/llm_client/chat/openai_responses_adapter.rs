@@ -3,8 +3,8 @@
 
 use crate::llm_client::chat::ChatClient;
 use crate::llm_client::types::{
-    ChatChoice, ChatChunkChoice, ChatChunkResponse, ChatDeltaMessage, ChatMessage, ChatMessageRole,
-    ChatRequest, ChatResponse, ChatUsage,
+    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
+    LlmRequest, LlmResponse, LlmUsage,
 };
 use crate::models::{AppError, Provider};
 use async_stream::stream;
@@ -26,8 +26,8 @@ impl OpenAIResponsesChatClient {
         Self
     }
 
-    /// 转换我们的 ChatRequest 到 openai-rust 的 CreateResponseRequest
-    fn convert_to_openai_response_request(&self, request: &ChatRequest) -> CreateResponseRequest {
+    /// 转换我们的 LlmRequest 到 openai-rust 的 CreateResponseRequest
+    fn convert_to_openai_response_request(&self, request: &LlmRequest) -> CreateResponseRequest {
         let input_items: Vec<InputItem> = request
             .messages
             .iter()
@@ -40,7 +40,7 @@ impl OpenAIResponsesChatClient {
         let instructions = request
             .messages
             .iter()
-            .find(|msg| msg.role == ChatMessageRole::System)
+            .find(|msg| msg.role == LlmMessageRole::System)
             .map(|msg| msg.content.clone());
 
         CreateResponseRequest {
@@ -54,8 +54,8 @@ impl OpenAIResponsesChatClient {
         }
     }
 
-    /// 转换 openai-rust 的 Response 到我们的 ChatResponse
-    fn convert_from_openai_response(&self, response: OpenAIResponse) -> ChatResponse {
+    /// 转换 openai-rust 的 Response 到我们的 LlmResponse
+    fn convert_from_openai_response(&self, response: OpenAIResponse) -> LlmResponse {
         let mut choices = Vec::new();
 
         for (index, item) in response.output.iter().enumerate() {
@@ -68,10 +68,10 @@ impl OpenAIResponsesChatClient {
                 }
             }
 
-            let choice = ChatChoice {
+            let choice = LlmChoice {
                 index: index as i32,
-                delta: Some(ChatMessage {
-                    role: ChatMessageRole::Assistant,
+                delta: Some(LlmMessage {
+                    role: LlmMessageRole::Assistant,
                     content,
                     reasoning: None,
                     tool_calls: None,
@@ -88,7 +88,7 @@ impl OpenAIResponsesChatClient {
 
         let usage = response.usage.clone().map(map_usage);
 
-        ChatResponse {
+        LlmResponse {
             id: response.id,
             object: "chat.completion".to_string(),
             model: response.model,
@@ -101,7 +101,7 @@ impl OpenAIResponsesChatClient {
         &self,
         event: ResponseStreamEvent,
         state: &mut StreamState,
-    ) -> Option<Result<ChatChunkResponse, AppError>> {
+    ) -> Option<Result<LlmChunkResponse, AppError>> {
         match event {
             ResponseStreamEvent::ResponseCreated { response, .. }
             | ResponseStreamEvent::ResponseInProgress { response, .. } => {
@@ -137,8 +137,8 @@ impl ChatClient for OpenAIResponsesChatClient {
     async fn chat(
         &self,
         provider: &Provider,
-        request: ChatRequest,
-    ) -> Result<ChatResponse, AppError> {
+        request: LlmRequest,
+    ) -> Result<LlmResponse, AppError> {
         tracing::info!("Sending OpenAI-style response request using openai-rust library");
 
         let openai_client = openai_rust::client::Client::builder()
@@ -168,9 +168,9 @@ impl ChatClient for OpenAIResponsesChatClient {
     async fn chat_stream(
         &self,
         provider: &Provider,
-        mut request: ChatRequest,
+        mut request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin>,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
         AppError,
     > {
         request.stream = Some(true);
@@ -192,7 +192,7 @@ impl ChatClient for OpenAIResponsesChatClient {
             serde_json::to_string_pretty(&openai_request).unwrap_or_default()
         );
 
-        let (tx, mut rx) = mpsc::channel::<Result<ChatChunkResponse, AppError>>(100);
+        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, AppError>>(100);
         let model_name = request.model.clone();
         let handler = OpenAIResponsesChatClient::new();
 
@@ -254,7 +254,7 @@ impl ChatClient for OpenAIResponsesChatClient {
 
         Ok(Box::new(Box::pin(response_stream))
             as Box<
-                dyn futures::Stream<Item = Result<ChatChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
             >)
     }
 
@@ -291,15 +291,15 @@ impl StreamState {
         }
     }
 
-    fn delta_chunk(&self, index: i32, content: String) -> ChatChunkResponse {
-        ChatChunkResponse {
+    fn delta_chunk(&self, index: i32, content: String) -> LlmChunkResponse {
+        LlmChunkResponse {
             id: self.response_id.clone(),
             object: "chat.completion.chunk".to_string(),
             model: self.model.clone(),
-            choices: vec![ChatChunkChoice {
+            choices: vec![LlmChunkChoice {
                 index,
-                delta: Some(ChatDeltaMessage {
-                    role: Some(ChatMessageRole::Assistant),
+                delta: Some(LlmDeltaMessage {
+                    role: Some(LlmMessageRole::Assistant),
                     content: Some(content),
                     reasoning: None,
                     tool_calls: None,
@@ -310,15 +310,15 @@ impl StreamState {
         }
     }
 
-    fn finish_chunk(&self, usage: Option<ChatUsage>) -> ChatChunkResponse {
-        ChatChunkResponse {
+    fn finish_chunk(&self, usage: Option<LlmUsage>) -> LlmChunkResponse {
+        LlmChunkResponse {
             id: self.response_id.clone(),
             object: "chat.completion.chunk".to_string(),
             model: self.model.clone(),
-            choices: vec![ChatChunkChoice {
+            choices: vec![LlmChunkChoice {
                 index: 0,
-                delta: Some(ChatDeltaMessage {
-                    role: Some(ChatMessageRole::Assistant),
+                delta: Some(LlmDeltaMessage {
+                    role: Some(LlmMessageRole::Assistant),
                     content: Some(String::new()),
                     reasoning: None,
                     tool_calls: None,
@@ -330,15 +330,15 @@ impl StreamState {
     }
 }
 
-fn map_usage(usage: ResponseUsage) -> ChatUsage {
-    ChatUsage {
+fn map_usage(usage: ResponseUsage) -> LlmUsage {
+    LlmUsage {
         prompt_tokens: usage.input_tokens,
         completion_tokens: usage.output_tokens,
         total_tokens: usage.total_tokens,
     }
 }
 
-fn map_usage_ref(usage: &ResponseUsage) -> ChatUsage {
+fn map_usage_ref(usage: &ResponseUsage) -> LlmUsage {
     map_usage(usage.clone())
 }
 

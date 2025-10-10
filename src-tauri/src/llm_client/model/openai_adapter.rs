@@ -1,7 +1,7 @@
 // OpenAI 模型客户端实现
 
 use super::model_client::ModelClient;
-use crate::llm_client::types::{ModelFeature, StandardModel};
+use crate::llm_client::types::{LlmModelFeature, LlmStandardModel};
 use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -40,7 +40,7 @@ impl ModelClient for OpenAIModelClient {
         &self,
         provider: &Provider,
         _provider_type: &str,
-    ) -> Result<Vec<StandardModel>, AppError> {
+    ) -> Result<Vec<LlmStandardModel>, AppError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching OpenAI-style models from: {}", url);
 
@@ -70,13 +70,13 @@ impl ModelClient for OpenAIModelClient {
         let mut result_models = Vec::new();
 
         for api_model in models_response.data {
-            result_models.push(StandardModel {
+            result_models.push(LlmStandardModel {
                 id: api_model.id.clone(),
                 name: api_model.id.clone(),
                 context_length: None,
                 input_cost: None,
                 output_cost: None,
-                supported_features: Some(vec![ModelFeature::Chat]),
+                supported_features: Some(vec![LlmModelFeature::Chat]),
             });
         }
 

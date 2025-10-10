@@ -2,8 +2,8 @@
 
 use crate::llm_client::create_llm_client;
 use crate::llm_client::types::{
-    ChatMessage, ChatMessageRole, ChatRequest, ChatResponse, ChatToolCall, ChatToolChoice,
-    ChatToolFunction, RequestTool, RequestToolFunction, ToolExecutionStatus,
+    LlmMessage, LlmMessageRole, LlmRequest, LlmResponse, LlmToolCall, LlmToolChoice,
+    LlmToolFunction, LlmRequestTool, LlmRequestToolFunction, LlmToolExecutionStatus,
 };
 use crate::models::{
     AppError, McpServer, McpServerStatus, Message, MessageConfig, MessageRequest, MessageResponse,
@@ -20,7 +20,7 @@ pub struct StreamChunk {
     pub stream_id: String,
     pub content: String,
     pub reasoning: Option<String>,
-    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub tool_calls: Option<Vec<LlmToolCall>>,
 }
 
 /// 流式回调 trait 定义
@@ -69,11 +69,11 @@ impl<T> StreamErrorCallback for T where T: FnMut(String, AppError) + Send + 'sta
 /// 工具执行回调：当工具执行状态变化时调用
 ///
 pub trait ToolExecuteCallback:
-    FnMut(String, HashMap<String, ChatToolCall>) + Send + 'static
+    FnMut(String, HashMap<String, LlmToolCall>) + Send + 'static
 {
 }
 impl<T> ToolExecuteCallback for T where
-    T: FnMut(String, HashMap<String, ChatToolCall>) + Send + 'static
+    T: FnMut(String, HashMap<String, LlmToolCall>) + Send + 'static
 {
 }
 
@@ -88,7 +88,7 @@ impl<T> MessagesDeleteCallback for T where T: FnMut(String, Vec<String>) + Send 
 /// 用户消息已保存回调：当用户消息保存到数据库后调用
 ///
 /// 参数:
-/// - `temp_message_id`: 前端临时消息ID（从 ChatMessage.id 中提取）
+/// - `temp_message_id`: 前端临时消息ID（从 LlmMessage.id 中提取）
 /// - `saved_message_id`: 数据库保存后的真实消息ID
 pub trait UserMessageSavedCallback: FnMut(String, String) + Send + 'static {}
 impl<T> UserMessageSavedCallback for T where T: FnMut(String, String) + Send + 'static {}
@@ -140,7 +140,7 @@ impl MessageService {
 
         // 验证最后一条消息
         let last_message = &request.messages[request.messages.len() - 1];
-        if last_message.role != ChatMessageRole::User {
+        if last_message.role != LlmMessageRole::User {
             let error = "Last message must be from user";
             tracing::error!(
                 "[MessageService::send_message] Validation failed: {}",
@@ -282,7 +282,7 @@ impl MessageService {
 
         // 验证最后一条消息
         let last_message = &request.messages[request.messages.len() - 1];
-        if last_message.role != ChatMessageRole::User {
+        if last_message.role != LlmMessageRole::User {
             let error = "Last message must be from user";
             tracing::error!(
                 "[MessageService::send_message_stream] Validation failed: {}",
@@ -422,7 +422,7 @@ impl MessageService {
                     .create_message(&Message {
                         id: response_clone.message_id.clone(),
                         chat_id: chat_id.to_string(),
-                        role: ChatMessageRole::Assistant,
+                        role: LlmMessageRole::Assistant,
                         content: response_clone.content.clone(),
                         reasoning: response_clone.reasoning.clone(),
                         tool_calls: response_clone.tool_calls.clone(),
@@ -549,11 +549,11 @@ impl MessageService {
         &self,
         request: &MessageRequest,
         chat: &crate::models::Chat,
-    ) -> Result<ChatRequest, AppError> {
-        let messages: Vec<ChatMessage> = request
+    ) -> Result<LlmRequest, AppError> {
+        let messages: Vec<LlmMessage> = request
             .messages
             .iter()
-            .map(|msg| ChatMessage {
+            .map(|msg| LlmMessage {
                 role: msg.role.clone(),
                 content: msg.content.clone(),
                 reasoning: msg.reasoning.clone(),
@@ -564,7 +564,7 @@ impl MessageService {
 
         let tools = self.prepare_tools(&chat).await?;
 
-        Ok(ChatRequest {
+        Ok(LlmRequest {
             model: request.model_id.clone(),
             messages,
             temperature: chat.temperature,
@@ -578,7 +578,7 @@ impl MessageService {
             tool_choice: if tools.is_empty() {
                 None
             } else {
-                Some(ChatToolChoice::Auto)
+                Some(LlmToolChoice::Auto)
             },
             parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
         })
@@ -587,7 +587,7 @@ impl MessageService {
     async fn prepare_tools(
         &self,
         chat: &crate::models::Chat,
-    ) -> Result<Vec<RequestTool>, AppError> {
+    ) -> Result<Vec<LlmRequestTool>, AppError> {
         if chat.mcp_servers.is_empty() {
             return Ok(Vec::new());
         }
@@ -650,9 +650,9 @@ impl MessageService {
                         format!("MCP 服务器 {} 的工具 {}", display_name, tool.name)
                     });
 
-                tools.push(RequestTool {
+                tools.push(LlmRequestTool {
                     tool_type: "function".to_string(),
-                    function: RequestToolFunction {
+                    function: LlmRequestToolFunction {
                         name: tool.name.clone(),
                         description,
                         parameters: tool.input_schema.clone(),
@@ -781,7 +781,7 @@ impl MessageService {
 
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
-        let mut all_tool_calls: Vec<ChatToolCall> = Vec::new();
+        let mut all_tool_calls: Vec<LlmToolCall> = Vec::new();
         let mut chunk_count = 0;
 
         // 7. 处理真实的流式响应
@@ -809,10 +809,10 @@ impl MessageService {
 
                                     // 确保有足够的空间
                                     while all_tool_calls.len() <= index {
-                                        all_tool_calls.push(ChatToolCall {
+                                        all_tool_calls.push(LlmToolCall {
                                             id: String::new(),
                                             tool_type: String::new(),
-                                            function: ChatToolFunction {
+                                            function: LlmToolFunction {
                                                 name: String::new(),
                                                 arguments: String::new(),
                                             },
@@ -930,7 +930,7 @@ impl MessageService {
         let message = Message {
             id: message_id.clone(),
             chat_id: chat_id.to_string(),
-            role: ChatMessageRole::User,
+            role: LlmMessageRole::User,
             content: content.to_string(),
             reasoning: None, // 用户消息没有推理过程
             config,
@@ -956,17 +956,17 @@ impl MessageService {
     /// 处理工具调用的执行模式和状态
     /// 根据消息配置中的 MCP 服务器设置，为每个工具调用设置执行模式和初始状态
     fn prepare_tool_calls(
-        tool_calls: Option<Vec<ChatToolCall>>,
+        tool_calls: Option<Vec<LlmToolCall>>,
         config: &Option<MessageConfig>,
-    ) -> Option<Vec<ChatToolCall>> {
-        use crate::llm_client::types::{ToolExecutionMode, ToolExecutionStatus};
+    ) -> Option<Vec<LlmToolCall>> {
+        use crate::llm_client::types::{LlmToolExecutionMode, LlmToolExecutionStatus};
 
         tool_calls.map(|calls| {
             calls
                 .into_iter()
                 .map(|mut call| {
                     // 默认为自动执行模式
-                    let mut execution_mode = ToolExecutionMode::Auto;
+                    let mut execution_mode = LlmToolExecutionMode::Auto;
 
                     // 根据配置查找工具所属的 MCP 服务器及其执行模式
                     if let Some(cfg) = config {
@@ -978,9 +978,9 @@ impl MessageService {
                                 if server.enabled_tools.contains(tool_name) {
                                     // 根据服务器的执行模式设置工具的执行模式
                                     execution_mode = if server.execution_mode == "manual" {
-                                        ToolExecutionMode::Manual
+                                        LlmToolExecutionMode::Manual
                                     } else {
-                                        ToolExecutionMode::Auto
+                                        LlmToolExecutionMode::Auto
                                     };
                                     break;
                                 }
@@ -990,7 +990,7 @@ impl MessageService {
 
                     // 设置执行模式和初始状态
                     call.execution_mode = execution_mode;
-                    call.execution_status = ToolExecutionStatus::Pending;
+                    call.execution_status = LlmToolExecutionStatus::Pending;
 
                     call
                 })
@@ -1005,7 +1005,7 @@ impl MessageService {
         chat_id: &str,
         content: &str,
         reasoning: Option<String>,
-        tool_calls: Option<Vec<ChatToolCall>>,
+        tool_calls: Option<Vec<LlmToolCall>>,
         config: Option<MessageConfig>,
         start_time_millis: i64,
         duration_ms: i64,
@@ -1013,7 +1013,7 @@ impl MessageService {
         output_tokens: Option<i32>,
         total_tokens: Option<i32>,
         turn_id: Option<i32>,
-    ) -> Result<(String, Option<Vec<ChatToolCall>>), AppError> {
+    ) -> Result<(String, Option<Vec<LlmToolCall>>), AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -1023,7 +1023,7 @@ impl MessageService {
         let message = Message {
             id: message_id.clone(),
             chat_id: chat_id.to_string(),
-            role: ChatMessageRole::Assistant,
+            role: LlmMessageRole::Assistant,
             content: content.to_string(),
             reasoning,
             tool_calls: processed_tool_calls.clone(),
@@ -1085,8 +1085,8 @@ impl MessageService {
         // 添加系统提示词
         if let Some(system_prompt) = &chat.system_prompt {
             if !system_prompt.trim().is_empty() {
-                request_messages.push(ChatMessage {
-                    role: ChatMessageRole::System,
+                request_messages.push(LlmMessage {
+                    role: LlmMessageRole::System,
                     content: system_prompt.clone(),
                     reasoning: None,
                     tool_calls: None,
@@ -1126,7 +1126,7 @@ impl MessageService {
             .get_messages_by_turn_id_range(&chat_id.to_string(), min_turn_id, max_turn_id)
             .await?;
 
-        request_messages.extend(turn_messages.iter().map(|m| ChatMessage {
+        request_messages.extend(turn_messages.iter().map(|m| LlmMessage {
             role: m.role.clone(),
             content: m.content.clone(),
             reasoning: m.reasoning.clone(),
@@ -1184,7 +1184,7 @@ impl MessageService {
     /// 从 API 响应格式转换
     fn convert_from_api_response(
         &self,
-        api_response: ChatResponse,
+        api_response: LlmResponse,
         duration: f64,
         request: &MessageRequest,
     ) -> Result<MessageResponse, AppError> {
@@ -1343,8 +1343,8 @@ impl MessageService {
     async fn update_tool_call_status(
         &self,
         message_id: &str,
-        status_map: &HashMap<String, ToolExecutionStatus>,
-    ) -> Result<Vec<ChatToolCall>, AppError> {
+        status_map: &HashMap<String, LlmToolExecutionStatus>,
+    ) -> Result<Vec<LlmToolCall>, AppError> {
         // 1. 获取消息
         let mut message = self.get_message(message_id.to_string()).await?;
 
@@ -1359,7 +1359,7 @@ impl MessageService {
                     // 非完成状态时清除旧结果，避免残留
                     if !matches!(
                         status,
-                        ToolExecutionStatus::Completed | ToolExecutionStatus::Failed
+                        LlmToolExecutionStatus::Completed | LlmToolExecutionStatus::Failed
                     ) {
                         tool_call.result = None;
                     }
@@ -1393,7 +1393,7 @@ impl MessageService {
         &self,
         message_id: &str,
         results: &HashMap<String, String>,
-    ) -> Result<Vec<ChatToolCall>, AppError> {
+    ) -> Result<Vec<LlmToolCall>, AppError> {
         let mut message = self.get_message(message_id.to_string()).await?;
         let mut updated_calls = Vec::new();
 
@@ -1402,9 +1402,9 @@ impl MessageService {
                 if let Some(result) = results.get(&tool_call.id) {
                     tool_call.result = Some(result.clone());
                     tool_call.execution_status = if Self::is_failure_result(result) {
-                        ToolExecutionStatus::Failed
+                        LlmToolExecutionStatus::Failed
                     } else {
-                        ToolExecutionStatus::Completed
+                        LlmToolExecutionStatus::Completed
                     };
                     updated_calls.push(tool_call.clone());
                 }
@@ -1505,7 +1505,7 @@ impl MessageService {
         }
 
         // 2. 验证消息是否为 assistant消息且包含工具调用
-        if message.role != ChatMessageRole::Assistant {
+        if message.role != LlmMessageRole::Assistant {
             let err =
                 AppError::validation_error("Can only execute tool calls on assistant messages");
             error_callback(error_stream_id, err);
@@ -1539,9 +1539,9 @@ impl MessageService {
         }
 
         // 5. 更新工具调用状态为 Executing 并触发回调
-        let executing_status_map: HashMap<String, ToolExecutionStatus> = selected_tool_calls
+        let executing_status_map: HashMap<String, LlmToolExecutionStatus> = selected_tool_calls
             .iter()
-            .map(|tool_call| (tool_call.id.clone(), ToolExecutionStatus::Executing))
+            .map(|tool_call| (tool_call.id.clone(), LlmToolExecutionStatus::Executing))
             .collect();
 
         let executing_updates = match self
@@ -1642,7 +1642,7 @@ impl MessageService {
         if let Some(tool_calls) = &updated_message.tool_calls {
             let has_pending_tools = tool_calls
                 .iter()
-                .any(|call| call.execution_status == ToolExecutionStatus::Pending);
+                .any(|call| call.execution_status == LlmToolExecutionStatus::Pending);
 
             if has_pending_tools {
                 tracing::info!(
@@ -1665,12 +1665,12 @@ impl MessageService {
 
             // 遍历所有已完成的工具调用，创建对应的 Tool 消息
             for tool_call in tool_calls {
-                if tool_call.execution_status != ToolExecutionStatus::Pending {
+                if tool_call.execution_status != LlmToolExecutionStatus::Pending {
                     if let Some(result) = &tool_call.result {
                         let tool_result_message = Message {
                             id: uuid::Uuid::new_v4().to_string(),
                             chat_id: message.chat_id.clone(),
-                            role: ChatMessageRole::Tool,
+                            role: LlmMessageRole::Tool,
                             content: result.clone(),
                             reasoning: None,
                             tool_calls: None,
@@ -1788,7 +1788,7 @@ impl MessageService {
                     .create_message(&Message {
                         id: response_clone.message_id.clone(),
                         chat_id: chat_id.to_string(),
-                        role: ChatMessageRole::Assistant,
+                        role: LlmMessageRole::Assistant,
                         content: response_clone.content.clone(),
                         reasoning: response_clone.reasoning.clone(),
                         tool_calls: response_clone.tool_calls.clone(),
@@ -1870,7 +1870,7 @@ impl MessageService {
         };
 
         // 2. 验证消息是否为助手消息
-        if message.role != ChatMessageRole::Assistant {
+        if message.role != LlmMessageRole::Assistant {
             let err = AppError::validation_error("Can only regenerate assistant messages");
             tracing::error!(
                 "[MessageService::regenerate_message_stream] Validation failed for message_id {}: not an assistant message",
@@ -1967,7 +1967,7 @@ impl MessageService {
                     .create_message(&Message {
                         id: response_clone.message_id.clone(),
                         chat_id: chat_id.to_string(),
-                        role: ChatMessageRole::Assistant,
+                        role: LlmMessageRole::Assistant,
                         content: response_clone.content.clone(),
                         reasoning: response_clone.reasoning.clone(),
                         tool_calls: response_clone.tool_calls.clone(),
@@ -2074,7 +2074,7 @@ impl MessageService {
         };
 
         // 2. 验证消息是否为用户消息
-        if message.role != ChatMessageRole::User {
+        if message.role != LlmMessageRole::User {
             let err = AppError::validation_error("Can only resend user messages");
             tracing::error!(
                 "[MessageService::resend_message_stream] Validation failed for message_id {}: not a user message",
@@ -2213,7 +2213,7 @@ impl MessageService {
                     .create_message(&Message {
                         id: response_clone.message_id.clone(),
                         chat_id: chat_id.to_string(),
-                        role: ChatMessageRole::Assistant,
+                        role: LlmMessageRole::Assistant,
                         content: response_clone.content.clone(),
                         reasoning: response_clone.reasoning.clone(),
                         tool_calls: response_clone.tool_calls.clone(),
@@ -2266,8 +2266,8 @@ impl MessageService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm_client::types::ChatMessage;
-    use crate::llm_client::types::ChatMessageRole;
+    use crate::llm_client::types::LlmMessage;
+    use crate::llm_client::types::LlmMessageRole;
     use crate::models::{MessageConfig, MessageRequest, ModelParameters};
     use crate::services::{ChatService, McpService, ProviderService};
     use crate::storage::Database;
@@ -2327,8 +2327,8 @@ mod tests {
             chat_id: None,
             model_id: "gpt-4".to_string(),
             provider_id: "openai".to_string(),
-            messages: vec![ChatMessage {
-                role: ChatMessageRole::User,
+            messages: vec![LlmMessage {
+                role: LlmMessageRole::User,
                 content: "Hello".to_string(),
                 reasoning: None,
                 tool_calls: None,

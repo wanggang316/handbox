@@ -1,6 +1,6 @@
 // 消息相关 IPC 命令
 
-use crate::llm_client::types::ChatToolCall;
+use crate::llm_client::types::LlmToolCall;
 use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
 use crate::services::{message::StreamChunk, MessageService};
 use serde_json::json;
@@ -106,8 +106,8 @@ fn create_stream_error_callback(
 fn create_tool_execute_callback(
     window: Window,
     event_name: &'static str,
-) -> impl FnMut(String, HashMap<String, ChatToolCall>) {
-    move |message_id: String, tool_calls: HashMap<String, ChatToolCall>| {
+) -> impl FnMut(String, HashMap<String, LlmToolCall>) {
+    move |message_id: String, tool_calls: HashMap<String, LlmToolCall>| {
         let payload = json!({
             "messageId": message_id,
             "toolCalls": tool_calls

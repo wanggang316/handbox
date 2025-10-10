@@ -1,7 +1,7 @@
 // Message 数据访问层
 
-use crate::llm_client::types::ChatMessageRole;
-use crate::llm_client::ChatToolCall;
+use crate::llm_client::types::LlmMessageRole;
+use crate::llm_client::LlmToolCall;
 use crate::models::{AppError, Message, MessageConfig, Timestamp, UUID};
 use crate::storage::Database;
 use serde_json;
@@ -156,7 +156,7 @@ impl MessageRepository {
         chat_id: &UUID,
         limit: i32,
         offset: i32,
-        roles: Option<Vec<ChatMessageRole>>, // 指定要包含的角色，None表示包含所有角色
+        roles: Option<Vec<LlmMessageRole>>, // 指定要包含的角色，None表示包含所有角色
         order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
         let order_direction = if order_by_desc { "DESC" } else { "ASC" };
@@ -226,9 +226,9 @@ impl MessageRepository {
             limit,
             offset,
             Some(vec![
-                ChatMessageRole::User,
-                ChatMessageRole::Assistant,
-                ChatMessageRole::System,
+                LlmMessageRole::User,
+                LlmMessageRole::Assistant,
+                LlmMessageRole::System,
             ]), // 排除 Tool 角色
             false, // 升序排列
         )
@@ -255,7 +255,7 @@ impl MessageRepository {
         chat_id: &UUID,
         limit: i32,
         offset: i32,
-        role_filter: Option<&ChatMessageRole>,
+        role_filter: Option<&LlmMessageRole>,
         order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
         let roles = role_filter.map(|role| vec![role.clone()]);
@@ -267,7 +267,7 @@ impl MessageRepository {
     pub async fn get_latest_message_by_role(
         &self,
         chat_id: &UUID,
-        role: &ChatMessageRole,
+        role: &LlmMessageRole,
     ) -> Result<Option<Message>, AppError> {
         let messages = self
             .get_messages(chat_id, 1, 0, Some(vec![role.clone()]), true)
@@ -447,7 +447,7 @@ impl MessageRepository {
     pub async fn update_message_tools(
         &self,
         message_id: &UUID,
-        tools: Option<&Vec<ChatToolCall>>,
+        tools: Option<&Vec<LlmToolCall>>,
         updated_at: Timestamp,
     ) -> Result<(), AppError> {
         let tools_json = if let Some(tools) = tools {
@@ -766,8 +766,8 @@ impl MessageRepository {
     fn row_to_message(&self, row: sqlx::sqlite::SqliteRow) -> Result<Message, AppError> {
         let role_str: String = row.try_get("role").unwrap_or_default();
         let role = role_str
-            .parse::<ChatMessageRole>()
-            .unwrap_or(ChatMessageRole::User);
+            .parse::<LlmMessageRole>()
+            .unwrap_or(LlmMessageRole::User);
 
         let attachments_json: Option<String> = row.try_get("attachments").ok();
         let attachments = if let Some(json) = attachments_json {
@@ -783,7 +783,7 @@ impl MessageRepository {
             None
         };
 
-        let tool_calls: Option<Vec<ChatToolCall>> =
+        let tool_calls: Option<Vec<LlmToolCall>> =
             if let Ok(tools_json) = row.try_get::<String, _>("tools") {
                 serde_json::from_str(&tools_json).ok()
             } else {
@@ -858,7 +858,7 @@ mod tests {
         let message = Message {
             id: uuid::Uuid::new_v4().to_string(),
             chat_id: chat_id.clone(),
-            role: ChatMessageRole::User,
+            role: LlmMessageRole::User,
             content: "Hello, world!".to_string(),
             reasoning: None, // 用户消息没有推理过程
             config: Some(MessageConfig {
@@ -894,7 +894,7 @@ mod tests {
         assert!(fetched.is_some());
         let fetched_message = fetched.unwrap();
         assert_eq!(fetched_message.content, message.content);
-        assert_eq!(fetched_message.role, ChatMessageRole::User);
+        assert_eq!(fetched_message.role, LlmMessageRole::User);
 
         // Get by chat
         let messages = repo.get_messages_by_chat(&chat_id, 10, 0).await.unwrap();
@@ -955,7 +955,7 @@ mod tests {
         let message = Message {
             id: uuid::Uuid::new_v4().to_string(),
             chat_id: chat_id.clone(),
-            role: ChatMessageRole::User,
+            role: LlmMessageRole::User,
             content: "Hello".to_string(),
             reasoning: None,
             config: None,
@@ -1014,7 +1014,7 @@ mod tests {
             Message {
                 id: uuid::Uuid::new_v4().to_string(),
                 chat_id: chat_id.clone(),
-                role: ChatMessageRole::Tool,
+                role: LlmMessageRole::Tool,
                 content: "Tool result 1".to_string(),
                 reasoning: None,
                 config: None,
@@ -1034,7 +1034,7 @@ mod tests {
             Message {
                 id: uuid::Uuid::new_v4().to_string(),
                 chat_id: chat_id.clone(),
-                role: ChatMessageRole::Tool,
+                role: LlmMessageRole::Tool,
                 content: "Tool result 2".to_string(),
                 reasoning: None,
                 config: None,
@@ -1054,7 +1054,7 @@ mod tests {
             Message {
                 id: uuid::Uuid::new_v4().to_string(),
                 chat_id: chat_id.clone(),
-                role: ChatMessageRole::Tool,
+                role: LlmMessageRole::Tool,
                 content: "Tool result 3".to_string(),
                 reasoning: None,
                 config: None,
@@ -1143,7 +1143,7 @@ mod tests {
             messages.push(Message {
                 id: uuid::Uuid::new_v4().to_string(),
                 chat_id: chat_id.clone(),
-                role: ChatMessageRole::User,
+                role: LlmMessageRole::User,
                 content: format!("User message turn {}", turn),
                 reasoning: None,
                 config: None,
@@ -1164,7 +1164,7 @@ mod tests {
             messages.push(Message {
                 id: uuid::Uuid::new_v4().to_string(),
                 chat_id: chat_id.clone(),
-                role: ChatMessageRole::Assistant,
+                role: LlmMessageRole::Assistant,
                 content: format!("Assistant message turn {}", turn),
                 reasoning: None,
                 config: None,
