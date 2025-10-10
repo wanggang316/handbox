@@ -1541,7 +1541,7 @@ impl MessageService {
 
             // 遍历所有已完成的工具调用，创建对应的 Tool 消息
             for tool_call in tool_calls {
-                if tool_call.execution_status == ToolExecutionStatus::Completed {
+                if tool_call.execution_status != ToolExecutionStatus::Pending {
                     if let Some(result) = &tool_call.result {
                         let tool_result_message = Message {
                             id: uuid::Uuid::new_v4().to_string(),
@@ -1733,44 +1733,95 @@ impl MessageService {
         .await;
     }
 
-    /// 重新生成消息
-    pub async fn regenerate_message(&self, message_id: UUID) -> Result<MessageResponse, AppError> {
+    /// 流式重新生成消息 - 删除当前消息，根据本轮(turn_id)消息重新构建请求并发送给 LLM
+    pub async fn regenerate_message_stream(
+        &self,
+        message_id: UUID,
+        start_callback: impl StreamStartCallback,
+        streaming_callback: impl StreamingCallback,
+        end_callback: impl StreamEndCallback,
+        mut error_callback: impl StreamErrorCallback,
+        mut messages_delete_callback: impl MessagesDeleteCallback,
+    ) {
         tracing::info!(
-            "[MessageService::regenerate_message] Regenerating message: {}",
+            "[MessageService::regenerate_message_stream] Regenerating message (stream): {}",
             message_id
         );
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
+
+        // 为早期错误生成一个临时 stream_id
+        let error_stream_id = uuid::Uuid::new_v4().to_string();
 
         // 1. 获取要重新生成的消息
-        let message = self.get_message(message_id.clone()).await?;
+        let message = match self.get_message(message_id.clone()).await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::regenerate_message_stream] Failed to get message {}: {}",
+                    message_id,
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
 
         // 2. 验证消息是否为助手消息
         if message.role != ChatMessageRole::Assistant {
-            let error = "Can only regenerate assistant messages";
+            let err = AppError::validation_error("Can only regenerate assistant messages");
             tracing::error!(
-                "[MessageService::regenerate_message] Validation failed for message_id {}: {}",
-                message_id,
-                error
+                "[MessageService::regenerate_message_stream] Validation failed for message_id {}: not an assistant message",
+                message_id
             );
-            return Err(AppError::validation_error(error));
+            error_callback(error_stream_id, err);
+            return;
         }
 
-        // 3. 获取聊天的历史消息（包含所有角色），重新调用 LLM API
-        let chat_messages = self
+        // 3. 删除当前消息及之后的所有消息
+        let deleted_message_ids = match self
             .repository
-            .get_all_messages_by_chat(&message.chat_id, 100, 0)
-            .await?;
+            .delete_message_and_after(&message.chat_id, &message_id)
+            .await
+        {
+            Ok(ids) => {
+                tracing::info!(
+                    "[MessageService::regenerate_message_stream] Deleted {} messages (including current)",
+                    ids.len()
+                );
+                ids
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::regenerate_message_stream] Failed to delete message and after {}: {}",
+                    message_id,
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
 
-        // 构造重新生成请求（使用原始请求参数）
-        let config = message.config.as_ref();
-        // 获取聊天的系统提示词
-        let chat = self.chat_service.get_chat(message.chat_id.clone()).await?;
+        // 通知前端消息已被删除
+        if !deleted_message_ids.is_empty() {
+            messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
+        }
 
-        // 构建消息数组，如果有系统提示词则添加到开头
+        // 4. 获取聊天配置
+        let chat = match self.chat_service.get_chat(message.chat_id.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::regenerate_message_stream] Failed to get chat config: {}",
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
+
+        // 5. 根据本轮 turn_id 构建请求消息
         let mut request_messages = Vec::new();
+
+        // 添加系统提示词
         if let Some(system_prompt) = &chat.system_prompt {
             if !system_prompt.trim().is_empty() {
                 request_messages.push(ChatMessage {
@@ -1783,88 +1834,154 @@ impl MessageService {
             }
         }
 
-        // 添加历史消息（排除要重新生成的助手消息）
-        request_messages.extend(
-            chat_messages
-                .iter()
-                .filter(|m| m.role != ChatMessageRole::Assistant || m.id != message_id)
-                .map(|m| ChatMessage {
-                    role: m.role.clone(),
-                    content: m.content.clone(),
-                    reasoning: m.reasoning.clone(),
-                    tool_calls: m.tool_calls.clone(),
-                    tool_call_id: None,
-                }),
-        );
+        // 如果有 turn_id，则获取该 turn 的所有消息（不包括已删除的 assistant 消息）
+        if let Some(turn_id) = message.turn_id {
+            match self
+                .repository
+                .get_messages_by_chat_and_turn(&message.chat_id, turn_id)
+                .await
+            {
+                Ok(turn_messages) => {
+                    request_messages.extend(turn_messages.iter().map(|m| ChatMessage {
+                        role: m.role.clone(),
+                        content: m.content.clone(),
+                        reasoning: m.reasoning.clone(),
+                        tool_calls: m.tool_calls.clone(),
+                        tool_call_id: m.tool_call_id.clone(),
+                    }));
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "[MessageService::regenerate_message_stream] Failed to get turn messages: {}",
+                        e
+                    );
+                    error_callback(error_stream_id, e);
+                    return;
+                }
+            }
+        } else {
+            // 如果没有 turn_id，则获取所有历史消息
+            match self
+                .repository
+                .get_all_messages_by_chat(&message.chat_id, 100, 0)
+                .await
+            {
+                Ok(chat_messages) => {
+                    request_messages.extend(chat_messages.iter().map(|m| ChatMessage {
+                        role: m.role.clone(),
+                        content: m.content.clone(),
+                        reasoning: m.reasoning.clone(),
+                        tool_calls: m.tool_calls.clone(),
+                        tool_call_id: m.tool_call_id.clone(),
+                    }));
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "[MessageService::regenerate_message_stream] Failed to get chat messages: {}",
+                        e
+                    );
+                    error_callback(error_stream_id, e);
+                    return;
+                }
+            }
+        }
 
+        // 6. 获取 turn_id（使用原消息的 turn_id）
+        let turn_id = message.turn_id;
+
+        // 7. 构建请求
         let regenerate_request = MessageRequest {
             chat_id: Some(message.chat_id.clone()),
-            model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
-            provider_id: config
+            model_id: message
+                .config
+                .as_ref()
+                .and_then(|c| c.model_id.clone())
+                .or_else(|| chat.model_id.clone())
+                .unwrap_or_default(),
+            provider_id: message
+                .config
+                .as_ref()
                 .and_then(|c| c.provider_id.clone())
+                .or_else(|| chat.provider_id.clone())
                 .unwrap_or_default(),
             messages: request_messages,
             temp_user_message_id: None,
             attachments: None,
         };
 
-        // 调用 LLM API 重新生成
-        let llm_response = self.call_llm_api(&regenerate_request).await?;
-        let new_content = llm_response.content.clone();
-
-        // 4. 更新消息内容
-        self.repository
-            .update_message_content(&message_id, &new_content, now)
-            .await
-            .map_err(|e| {
-                let error = format!("Failed to update regenerated message: {}", e);
-                tracing::error!(
-                    "[MessageService::regenerate_message] Database error for message_id {}: {}",
-                    message_id,
-                    error
-                );
-                e
-            })?;
-
-        self.repository
-            .update_message_reasoning(&message_id, llm_response.reasoning.as_deref(), now)
-            .await?;
-
-        // 清理配置中的待执行状态
-        let final_config = MessageConfig {
-            temperature: chat.temperature,
-            top_p: chat.top_p,
-            max_tokens: chat.max_tokens,
-            stream: chat.stream,
-            model_id: Some(regenerate_request.model_id.clone()),
-            provider_id: Some(regenerate_request.provider_id.clone()),
-            system_prompt: chat.system_prompt.clone(),
-            mcp_servers: Some(chat.mcp_servers.clone()),
-        };
-        self.repository
-            .update_message_config(&message_id, Some(&final_config), now)
-            .await?;
-
         tracing::info!(
-            "[MessageService::regenerate_message] Successfully regenerated message: {}",
-            message_id
+            "[MessageService::regenerate_message_stream] Sending stream request for chat {}",
+            message.chat_id
         );
 
-        Ok(MessageResponse {
-            chat_id: message.chat_id,
-            message_id,
-            content: llm_response.content,
-            reasoning: llm_response.reasoning,
-            model_id: config.and_then(|c| c.model_id.clone()).unwrap_or_default(),
-            provider_id: config
-                .and_then(|c| c.provider_id.clone())
-                .unwrap_or_default(),
-            input_tokens: llm_response.input_tokens,
-            output_tokens: llm_response.output_tokens,
-            total_tokens: llm_response.total_tokens,
-            duration: llm_response.duration,
-            tool_calls: llm_response.tool_calls,
-        })
+        // 8. 包装 end_callback 以保存助手消息
+        let chat_id_clone = message.chat_id.clone();
+        let config_clone = message.config.clone();
+        let turn_id_clone = turn_id.clone();
+        let repository = self.repository.clone();
+        let mut end_callback = end_callback;
+
+        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
+            let chat_id = chat_id_clone.clone();
+            let config = config_clone.clone();
+            let turn_id = turn_id_clone.clone();
+            let repository = repository.clone();
+            let response_clone = response.clone();
+            let stream_id_clone = stream_id.clone();
+
+            tokio::spawn(async move {
+                let now = chrono::Utc::now().timestamp_millis();
+                match repository
+                    .create_message(&Message {
+                        id: response_clone.message_id.clone(),
+                        chat_id: chat_id.to_string(),
+                        role: ChatMessageRole::Assistant,
+                        content: response_clone.content.clone(),
+                        reasoning: response_clone.reasoning.clone(),
+                        tool_calls: response_clone.tool_calls.clone(),
+                        config,
+                        turn_id,
+                        tool_call_id: None,
+                        attachments: None,
+                        input_tokens: response_clone.input_tokens,
+                        output_tokens: response_clone.output_tokens,
+                        total_tokens: response_clone.total_tokens,
+                        start_time: Some(now),
+                        end_time: Some(now),
+                        duration: response_clone.duration,
+                        created_at: now,
+                        updated_at: now,
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            "[MessageService::regenerate_message_stream] Assistant message saved with ID: {}",
+                            response_clone.message_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "[MessageService::regenerate_message_stream] Failed to save assistant message: {}",
+                            e
+                        );
+                    }
+                }
+            });
+
+            // 调用原始的 end_callback
+            end_callback(stream_id_clone, response);
+        };
+
+        // 9. 直接调用 LLM API 流式方法
+        self.call_llm_api_stream(
+            &regenerate_request,
+            start_callback,
+            streaming_callback,
+            end_callback_wrapper,
+            error_callback,
+        )
+        .await;
     }
 
     /// 删除消息之后的所有消息（用于手动工具执行前的清理）

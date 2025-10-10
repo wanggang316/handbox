@@ -64,10 +64,10 @@ export async function deleteMessage(messageId: UUID): Promise<void> {
 }
 
 /**
- * 重新生成助手消息
+ * 流式重新生成助手消息 - 删除当前消息，根据本轮消息重新生成
  */
-export async function regenerateMessage(messageId: UUID): Promise<MessageResponse> {
-  return await apiCall<any>('message_regenerate', { messageId: messageId });
+export async function regenerateMessageStream(messageId: UUID): Promise<void> {
+  await apiCall<void>('message_regenerate_stream', { messageId: messageId });
 }
 
 /**

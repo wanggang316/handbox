@@ -570,18 +570,53 @@ class MessageStore {
   }
 
   /**
-   * 重新生成消息
+   * 流式重新生成消息 - 删除当前消息，根据本轮消息重新生成
    */
   async regenerateMessage(messageId: string): Promise<void> {
+    console.log('[regenerateMessage] 开始重新生成消息:', messageId);
+
     try {
       this.setSending(true);
-      const response = await messageApi.regenerateMessage(messageId as UUID);
-      this.applyMessageResponse(response.chatId, response);
+
+      // 清理之前的监听器（如果存在）
+      if (this.currentStreamUnlisten) {
+        console.log('[regenerateMessage] 清理之前的监听器');
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+
+      console.log('[regenerateMessage] 设置事件监听器...');
+
+      // 设置流式事件监听器
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
+        {
+          ...this.createStreamEventHandlers(
+            // onComplete callback
+            () => {
+              this.setSending(false);
+            },
+            // onError callback
+            () => {
+              this.setSending(false);
+            }
+          ),
+          // 添加消息删除回调
+          onMessagesDelete: this.createMessagesDeleteCallback('regenerateMessage')
+        },
+        'message_stream'
+      );
+
+      console.log('[regenerateMessage] 调用流式 API...');
+
+      // 调用流式 API
+      await messageApi.regenerateMessageStream(messageId as UUID);
+
+      console.log('[regenerateMessage] API 调用成功');
     } catch (error) {
+      console.error('[regenerateMessage] 重新生成失败:', error);
       this.setError(error instanceof Error ? error.message : '重新生成失败');
-      throw error;
-    } finally {
       this.setSending(false);
+      throw error;
     }
   }
 

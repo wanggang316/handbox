@@ -277,26 +277,55 @@ pub async fn message_delete(
     }
 }
 
-/// 重新生成助手消息
+/// 流式重新生成助手消息
 #[tauri::command]
-pub async fn message_regenerate(
+pub async fn message_regenerate_stream(
     message_id: UUID,
+    window: Window,
     message_service: State<'_, MessageService>,
-) -> Result<MessageResponse, AppError> {
+) -> Result<(), AppError> {
     tracing::info!(
-        "[message_regenerate] IPC command called for message_id: {}",
+        "[message_regenerate_stream] IPC command called for message_id: {}",
         message_id
     );
-    match message_service.regenerate_message(message_id).await {
-        Ok(response) => {
-            tracing::info!("[message_regenerate] Command completed successfully");
-            Ok(response)
-        }
-        Err(e) => {
-            tracing::error!("[message_regenerate] Command failed: {:?}", e);
-            Err(e)
-        }
-    }
+
+    // 克隆必要的数据
+    let window_clone = window.clone();
+    let service_clone = message_service.inner().clone();
+    let message_id_clone = message_id.clone();
+
+    // 在后台任务中执行
+    tauri::async_runtime::spawn(async move {
+        // 创建事件回调
+        let start_callback =
+            create_stream_start_callback(window_clone.clone(), "message_stream_start", None);
+
+        let streaming_callback =
+            create_streaming_callback(window_clone.clone(), "message_stream_chunk");
+
+        let end_callback = create_stream_end_callback(window_clone.clone(), "message_stream_end");
+
+        let error_callback =
+            create_stream_error_callback(window_clone.clone(), "message_stream_error");
+
+        let messages_delete_callback =
+            create_messages_delete_callback(window_clone.clone(), "messages_deleted");
+
+        // 调用服务方法
+        service_clone
+            .regenerate_message_stream(
+                message_id_clone,
+                start_callback,
+                streaming_callback,
+                end_callback,
+                error_callback,
+                messages_delete_callback,
+            )
+            .await;
+    });
+
+    tracing::info!("[message_regenerate_stream] Command started in background");
+    Ok(())
 }
 
 /// 流式重发用户消息
