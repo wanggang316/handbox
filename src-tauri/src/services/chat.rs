@@ -55,6 +55,7 @@ impl ChatService {
             provider_id,
             system_prompt,
             mcp_servers: mcp_servers.unwrap_or_default(),
+            turn_count: Some(5), // 默认值为 5
             artifact_id: None,
             created_at: now,
             updated_at: now,
@@ -97,6 +98,7 @@ impl ChatService {
         provider_id: Option<String>,
         system_prompt: Option<String>,
         mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
+        turn_count: Option<i32>,
     ) -> Result<Chat, AppError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -120,6 +122,7 @@ impl ChatService {
             provider_id: provider_id.or(existing_chat.provider_id),
             system_prompt: system_prompt.or(existing_chat.system_prompt),
             mcp_servers: mcp_servers.unwrap_or(existing_chat.mcp_servers),
+            turn_count: turn_count.or(existing_chat.turn_count),
             artifact_id: existing_chat.artifact_id,
             created_at: existing_chat.created_at,
             updated_at: now,
@@ -467,6 +470,7 @@ mod tests {
                         enabled_tools: vec!["tool3".to_string()],
                     },
                 ]),
+                Some(10),
             )
             .await
             .expect("update failed");

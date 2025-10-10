@@ -12,10 +12,7 @@ pub mod storage;
 pub mod utils;
 
 use crate::commands::*;
-use crate::services::{
-    ArtifactService, ChatService, McpService, MessageService, ProviderService, SearchService,
-    SettingsService, StorageService,
-};
+use crate::services::{ChatService, McpService, MessageService, ProviderService, StorageService};
 use crate::storage::Database;
 use crate::utils::logger;
 use std::sync::Arc;
@@ -58,9 +55,6 @@ async fn initialize_services(
         chat_service_shared,
         mcp_service_shared,
     );
-    let artifact_service = ArtifactService::new(storage_service.clone());
-    let settings_service = SettingsService::new(storage_service.clone());
-    let search_service = SearchService::new(storage_service.clone());
 
     // 将服务注册到应用状态
     app.manage(storage_service);
@@ -68,9 +62,6 @@ async fn initialize_services(
     app.manage(message_service);
     app.manage(provider_service);
     app.manage(mcp_service);
-    app.manage(artifact_service);
-    app.manage(settings_service);
-    app.manage(search_service);
 
     Ok(())
 }

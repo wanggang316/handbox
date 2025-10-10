@@ -373,7 +373,35 @@ impl MessageService {
             );
         }
 
-        // 3. 创建包装的 end_callback，在保存消息后调用原始回调
+        // 3. 获取 turn_id 并使用 build_request_from_turn 构建完整请求（包括 system message 和历史消息）
+        let turn_id_value = match turn_id {
+            Some(id) => id,
+            None => {
+                let err = AppError::internal_error("Failed to get turn_id for new message");
+                tracing::error!("[MessageService::send_message_stream] Missing turn_id");
+                error_callback(error_stream_id, err);
+                return;
+            }
+        };
+
+        let final_request = match self.build_request_from_turn(chat_id, turn_id_value).await {
+            Ok(req) => req,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::send_message_stream] Failed to build request: {}",
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+        };
+
+        tracing::info!(
+            "[MessageService::send_message_stream] Built request with {} messages",
+            final_request.messages.len()
+        );
+
+        // 4. 创建包装的 end_callback，在保存消息后调用原始回调
         let chat_id_clone = chat_id.clone();
         let config_clone = config.clone();
         let turn_id_clone = turn_id.clone();
@@ -432,9 +460,9 @@ impl MessageService {
             end_callback(stream_id_clone, response);
         };
 
-        // 4. 调用流式 LLM API（不再返回值，通过回调处理）
+        // 5. 调用流式 LLM API（使用构建好的完整请求）
         self.call_llm_api_stream(
-            &request,
+            &final_request,
             start_callback,
             streaming_callback,
             end_callback_wrapper,
@@ -1023,6 +1051,100 @@ impl MessageService {
         self.chat_service.get_chat(chat_id.to_string()).await
     }
 
+    /// 根据 chat_id 和 turn_id 构建 MessageRequest
+    ///
+    /// 用于重新生成消息或执行工具调用时，根据特定轮次的消息历史构建请求
+    ///
+    /// # 参数
+    /// - `chat_id`: 聊天 ID
+    /// - `turn_id`: 轮次 ID（最大轮次 ID）
+    async fn build_request_from_turn(
+        &self,
+        chat_id: &str,
+        turn_id: i32,
+    ) -> Result<MessageRequest, AppError> {
+        // 1. 获取聊天配置
+        let chat = self.get_chat_config(chat_id).await?;
+
+        // 2. 基于聊天配置构建消息配置
+        let message_config = MessageConfig {
+            model_id: chat.model_id.clone(),
+            provider_id: chat.provider_id.clone(),
+            temperature: chat.temperature,
+            top_p: chat.top_p,
+            max_tokens: chat.max_tokens,
+            stream: chat.stream,
+            system_prompt: chat.system_prompt.clone(),
+            mcp_servers: Some(chat.mcp_servers.clone()),
+            turn_count: chat.turn_count,
+        };
+
+        // 3. 构建消息数组
+        let mut request_messages = Vec::new();
+
+        // 添加系统提示词
+        if let Some(system_prompt) = &chat.system_prompt {
+            if !system_prompt.trim().is_empty() {
+                request_messages.push(ChatMessage {
+                    role: ChatMessageRole::System,
+                    content: system_prompt.clone(),
+                    reasoning: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+            }
+        }
+
+        // 4. 获取 turn_count，优先使用聊天配置中的值
+        let turn_count = message_config.turn_count.unwrap_or(5); // 默认 5 轮
+
+        // 5. 获取该聊天所有存在的 turn_id（去重排序）
+        let all_turn_ids = self
+            .repository
+            .get_turn_ids_by_chat(&chat_id.to_string())
+            .await?;
+
+        // 6. 找到 turn_id 在数组中的位置，计算要获取的 turn_id 范围
+        let (min_turn_id, max_turn_id) =
+            if let Some(pos) = all_turn_ids.iter().position(|&id| id == turn_id) {
+                // 计算起始位置：向前取 turn_count - 1 个轮次
+                let start_pos = pos.saturating_sub((turn_count - 1) as usize);
+                let min_id = all_turn_ids[start_pos];
+                let max_id = turn_id;
+                (min_id, max_id)
+            } else {
+                // 如果 turn_id 不在列表中（可能被删除），报错
+                return Err(AppError::not_found(&format!(
+                    "Turn {} not found in chat {}. Available turns: {:?}",
+                    turn_id, chat_id, all_turn_ids
+                )));
+            };
+
+        // 7. 根据计算出的 min 和 max turn_id 获取消息
+        let turn_messages = self
+            .repository
+            .get_messages_by_turn_id_range(&chat_id.to_string(), min_turn_id, max_turn_id)
+            .await?;
+
+        request_messages.extend(turn_messages.iter().map(|m| ChatMessage {
+            role: m.role.clone(),
+            content: m.content.clone(),
+            reasoning: m.reasoning.clone(),
+            tool_calls: m.tool_calls.clone(),
+            tool_call_id: m.tool_call_id.clone(),
+        }));
+
+        // 8. 构建请求
+        Ok(MessageRequest {
+            chat_id: Some(chat_id.to_string()),
+            model_id: message_config.model_id.clone().unwrap_or_default(),
+            provider_id: message_config.provider_id.clone().unwrap_or_default(),
+            messages: request_messages,
+            temp_user_message_id: None,
+            attachments: None,
+        })
+    }
+
     /// 从聊天信息中提取消息配置
     fn extract_message_config_from_chat(
         request: &MessageRequest,
@@ -1037,6 +1159,7 @@ impl MessageService {
             stream: chat.stream,
             system_prompt: chat.system_prompt.clone(),
             mcp_servers: Some(chat.mcp_servers.clone()),
+            turn_count: chat.turn_count,
         })
     }
 
@@ -1054,6 +1177,7 @@ impl MessageService {
             stream: chat.stream,
             system_prompt: chat.system_prompt.clone(),
             mcp_servers: Some(chat.mcp_servers.clone()),
+            turn_count: chat.turn_count,
         })
     }
 
@@ -1586,57 +1710,36 @@ impl MessageService {
             }
         }
 
-        // 10. 获取 chat 配置
-        let chat = match self.get_chat_config(&message.chat_id).await {
-            Ok(chat) => chat,
-            Err(e) => {
-                error_callback(error_stream_id, e);
+        // 10. 验证并获取 turn_id
+        let turn_id = match message.turn_id {
+            Some(id) => id,
+            None => {
+                let err = AppError::validation_error(
+                    "Cannot execute tool calls for message without turn_id",
+                );
+                tracing::error!(
+                    "[MessageService::execute_tool_calls] Message {} has no turn_id",
+                    message.id
+                );
+                error_callback(error_stream_id, err);
                 return;
             }
         };
 
-        // 11. 构建包含工具调用结果的新请求，调用 send_message
-        let mut request_messages = Vec::new();
-
-        // 添加 system 消息（如果有系统提示词）
-        if let Some(system_prompt) = &chat.system_prompt {
-            if !system_prompt.trim().is_empty() {
-                request_messages.push(ChatMessage {
-                    role: ChatMessageRole::System,
-                    content: system_prompt.clone(),
-                    reasoning: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                });
+        // 11. 构建包含工具调用结果的新请求
+        let request = match self
+            .build_request_from_turn(&message.chat_id, turn_id)
+            .await
+        {
+            Ok(req) => req,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::execute_tool_calls] Failed to build request: {}",
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
             }
-        }
-
-        // 添加当前 turn_id 的所有消息（按时间顺序）
-        if let Some(turn_id) = message.turn_id {
-            if let Ok(turn_messages) = self
-                .repository
-                .get_messages_by_chat_and_turn(&message.chat_id, turn_id)
-                .await
-            {
-                for turn_message in turn_messages {
-                    request_messages.push(ChatMessage {
-                        role: turn_message.role,
-                        content: turn_message.content,
-                        reasoning: None,
-                        tool_calls: turn_message.tool_calls,
-                        tool_call_id: turn_message.tool_call_id,
-                    });
-                }
-            }
-        }
-
-        let request = MessageRequest {
-            chat_id: Some(message.chat_id.clone()),
-            model_id: chat.model_id.unwrap_or_default(),
-            provider_id: chat.provider_id.unwrap_or_default(),
-            messages: request_messages,
-            temp_user_message_id: None,
-            attachments: None,
         };
 
         tracing::info!(
@@ -1674,6 +1777,7 @@ impl MessageService {
                         provider_id: Some(request.provider_id.clone()),
                         system_prompt: chat.system_prompt.clone(),
                         mcp_servers: Some(chat.mcp_servers.clone()),
+                        turn_count: chat.turn_count,
                     })
                 } else {
                     None
@@ -1805,108 +1909,36 @@ impl MessageService {
             messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
         }
 
-        // 4. 获取聊天配置
-        let chat = match self.chat_service.get_chat(message.chat_id.clone()).await {
-            Ok(c) => c,
+        // 4. 验证消息必须有 turn_id
+        let turn_id = match message.turn_id {
+            Some(id) => id,
+            None => {
+                let err = AppError::validation_error(
+                    "Cannot regenerate message without turn_id. This message may be from an older version.",
+                );
+                tracing::error!(
+                    "[MessageService::regenerate_message_stream] Message {} has no turn_id",
+                    message_id
+                );
+                error_callback(error_stream_id, err);
+                return;
+            }
+        };
+
+        // 5. 获取聊天配置并构建请求
+        let regenerate_request = match self
+            .build_request_from_turn(&message.chat_id, turn_id)
+            .await
+        {
+            Ok(req) => req,
             Err(e) => {
                 tracing::error!(
-                    "[MessageService::regenerate_message_stream] Failed to get chat config: {}",
+                    "[MessageService::regenerate_message_stream] Failed to build request: {}",
                     e
                 );
                 error_callback(error_stream_id, e);
                 return;
             }
-        };
-
-        // 5. 根据本轮 turn_id 构建请求消息
-        let mut request_messages = Vec::new();
-
-        // 添加系统提示词
-        if let Some(system_prompt) = &chat.system_prompt {
-            if !system_prompt.trim().is_empty() {
-                request_messages.push(ChatMessage {
-                    role: ChatMessageRole::System,
-                    content: system_prompt.clone(),
-                    reasoning: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                });
-            }
-        }
-
-        // 如果有 turn_id，则获取该 turn 的所有消息（不包括已删除的 assistant 消息）
-        if let Some(turn_id) = message.turn_id {
-            match self
-                .repository
-                .get_messages_by_chat_and_turn(&message.chat_id, turn_id)
-                .await
-            {
-                Ok(turn_messages) => {
-                    request_messages.extend(turn_messages.iter().map(|m| ChatMessage {
-                        role: m.role.clone(),
-                        content: m.content.clone(),
-                        reasoning: m.reasoning.clone(),
-                        tool_calls: m.tool_calls.clone(),
-                        tool_call_id: m.tool_call_id.clone(),
-                    }));
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "[MessageService::regenerate_message_stream] Failed to get turn messages: {}",
-                        e
-                    );
-                    error_callback(error_stream_id, e);
-                    return;
-                }
-            }
-        } else {
-            // 如果没有 turn_id，则获取所有历史消息
-            match self
-                .repository
-                .get_all_messages_by_chat(&message.chat_id, 100, 0)
-                .await
-            {
-                Ok(chat_messages) => {
-                    request_messages.extend(chat_messages.iter().map(|m| ChatMessage {
-                        role: m.role.clone(),
-                        content: m.content.clone(),
-                        reasoning: m.reasoning.clone(),
-                        tool_calls: m.tool_calls.clone(),
-                        tool_call_id: m.tool_call_id.clone(),
-                    }));
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "[MessageService::regenerate_message_stream] Failed to get chat messages: {}",
-                        e
-                    );
-                    error_callback(error_stream_id, e);
-                    return;
-                }
-            }
-        }
-
-        // 6. 获取 turn_id（使用原消息的 turn_id）
-        let turn_id = message.turn_id;
-
-        // 7. 构建请求
-        let regenerate_request = MessageRequest {
-            chat_id: Some(message.chat_id.clone()),
-            model_id: message
-                .config
-                .as_ref()
-                .and_then(|c| c.model_id.clone())
-                .or_else(|| chat.model_id.clone())
-                .unwrap_or_default(),
-            provider_id: message
-                .config
-                .as_ref()
-                .and_then(|c| c.provider_id.clone())
-                .or_else(|| chat.provider_id.clone())
-                .unwrap_or_default(),
-            messages: request_messages,
-            temp_user_message_id: None,
-            attachments: None,
         };
 
         tracing::info!(
@@ -1917,7 +1949,7 @@ impl MessageService {
         // 8. 包装 end_callback 以保存助手消息
         let chat_id_clone = message.chat_id.clone();
         let config_clone = message.config.clone();
-        let turn_id_clone = turn_id.clone();
+        let turn_id_clone = Some(turn_id);
         let repository = self.repository.clone();
         let mut end_callback = end_callback;
 
@@ -2028,7 +2060,7 @@ impl MessageService {
         let error_stream_id = uuid::Uuid::new_v4().to_string();
 
         // 1. 获取要重发的消息
-        let message = match self.get_message(message_id.clone()).await {
+        let mut message = match self.get_message(message_id.clone()).await {
             Ok(msg) => msg,
             Err(e) => {
                 tracing::error!(
@@ -2081,24 +2113,7 @@ impl MessageService {
             messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
         }
 
-        // 4. 获取聊天的所有消息（现在不包含被删除的消息）
-        let chat_messages = match self
-            .repository
-            .get_all_messages_by_chat(&message.chat_id, 100, 0)
-            .await
-        {
-            Ok(msgs) => msgs,
-            Err(e) => {
-                tracing::error!(
-                    "[MessageService::resend_message_stream] Failed to get chat messages: {}",
-                    e
-                );
-                error_callback(error_stream_id, e);
-                return;
-            }
-        };
-
-        // 5. 获取聊天配置
+        // 4. 获取聊天配置
         let chat = match self.chat_service.get_chat(message.chat_id.clone()).await {
             Ok(c) => c,
             Err(e) => {
@@ -2111,52 +2126,65 @@ impl MessageService {
             }
         };
 
-        // 6. 构建消息数组
-        let mut request_messages = Vec::new();
+        // 5. 使用最新聊天配置更新用户消息的配置
+        let updated_config = MessageConfig {
+            model_id: chat.model_id.clone(),
+            provider_id: chat.provider_id.clone(),
+            temperature: chat.temperature,
+            top_p: chat.top_p,
+            max_tokens: chat.max_tokens,
+            stream: chat.stream,
+            system_prompt: chat.system_prompt.clone(),
+            mcp_servers: Some(chat.mcp_servers.clone()),
+            turn_count: chat.turn_count,
+        };
 
-        // 添加系统提示词
-        if let Some(system_prompt) = &chat.system_prompt {
-            if !system_prompt.trim().is_empty() {
-                request_messages.push(ChatMessage {
-                    role: ChatMessageRole::System,
-                    content: system_prompt.clone(),
-                    reasoning: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                });
-            }
+        let update_time = chrono::Utc::now().timestamp_millis();
+        if let Err(e) = self
+            .repository
+            .update_message_config(&message_id, Some(&updated_config), update_time)
+            .await
+        {
+            tracing::error!(
+                "[MessageService::resend_message_stream] Failed to update message config: {}",
+                e
+            );
+            error_callback(error_stream_id, e);
+            return;
         }
 
-        // 添加历史消息
-        request_messages.extend(chat_messages.iter().map(|m| ChatMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
-            reasoning: m.reasoning.clone(),
-            tool_calls: m.tool_calls.clone(),
-            tool_call_id: m.tool_call_id.clone(),
-        }));
+        message.config = Some(updated_config.clone());
 
-        // 7. 获取 turn_id（使用原消息的 turn_id）
-        let turn_id = message.turn_id;
+        // 6. 获取 turn_id（使用原消息的 turn_id）
+        let turn_id = match message.turn_id {
+            Some(id) => id,
+            None => {
+                let err = AppError::validation_error(
+                    "Cannot resend message without turn_id. This message may be from an older version.",
+                );
+                tracing::error!(
+                    "[MessageService::resend_message_stream] Message {} has no turn_id",
+                    message_id
+                );
+                error_callback(error_stream_id, err);
+                return;
+            }
+        };
 
-        // 8. 构建请求
-        let resend_request = MessageRequest {
-            chat_id: Some(message.chat_id.clone()),
-            model_id: message
-                .config
-                .as_ref()
-                .and_then(|c| c.model_id.clone())
-                .or_else(|| chat.model_id.clone())
-                .unwrap_or_default(),
-            provider_id: message
-                .config
-                .as_ref()
-                .and_then(|c| c.provider_id.clone())
-                .or_else(|| chat.provider_id.clone())
-                .unwrap_or_default(),
-            messages: request_messages,
-            temp_user_message_id: None,
-            attachments: None,
+        // 7. 使用 build_request_from_turn 重新构建请求
+        let resend_request = match self
+            .build_request_from_turn(&message.chat_id, turn_id)
+            .await
+        {
+            Ok(req) => req,
+            Err(e) => {
+                tracing::error!(
+                    "[MessageService::resend_message_stream] Failed to build request: {}",
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
         };
 
         tracing::info!(
@@ -2164,10 +2192,10 @@ impl MessageService {
             message.chat_id
         );
 
-        // 9. 包装 end_callback 以保存助手消息
+        // 8. 包装 end_callback 以保存助手消息
         let chat_id_clone = message.chat_id.clone();
         let config_clone = message.config.clone();
-        let turn_id_clone = turn_id.clone();
+        let turn_id_clone = Some(turn_id);
         let repository = self.repository.clone();
         let mut end_callback = end_callback;
 
@@ -2223,7 +2251,7 @@ impl MessageService {
             end_callback(stream_id_clone, response);
         };
 
-        // 10. 直接调用 LLM API 流式方法
+        // 9. 直接调用 LLM API 流式方法
         self.call_llm_api_stream(
             &resend_request,
             start_callback,
@@ -2351,6 +2379,7 @@ mod tests {
                 execution_mode: "auto".to_string(),
                 enabled_tools: vec!["tool1".to_string()],
             }]),
+            turn_count: Some(5),
         };
 
         let json = serde_json::to_string(&config).unwrap();

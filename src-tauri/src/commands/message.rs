@@ -461,7 +461,10 @@ pub async fn message_execute_tool_calls(
             },
             |_message_id, _tool_calls| {
                 // 工具执行状态回调
-                tracing::info!("[message_execute_tool_calls] Tool execution calls: {:?}", _tool_calls);
+                tracing::info!(
+                    "[message_execute_tool_calls] Tool execution calls: {:?}",
+                    _tool_calls
+                );
             },
             |_chat_id, _deleted_message_ids| {
                 // 消息删除回调

@@ -102,7 +102,8 @@ export const chatActions = {
         maxTokens: currentChat.maxTokens,
         stream: currentChat.stream,
         systemPrompt: currentChat.systemPrompt,
-        mcpServers: currentChat.mcpServers
+        mcpServers: currentChat.mcpServers,
+        turnCount: currentChat.turnCount
       });
     } catch (error) {
       // 回滚本地状态
@@ -127,7 +128,7 @@ export const chatActions = {
     topP?: number;
     maxTokens?: number;
     stream?: boolean;
-    contextLength?: number;
+    turnCount?: number;
   }): Promise<void> {
     return chatActions.updateChatSettings(settings);
   },
@@ -183,7 +184,8 @@ export const chatActions = {
           maxTokens: currentChat.maxTokens,
           stream: currentChat.stream,
           systemPrompt: currentChat.systemPrompt,
-          mcpServers: currentChat.mcpServers
+          mcpServers: currentChat.mcpServers,
+          turnCount: currentChat.turnCount
         });
       } catch (error) {
         // 回滚本地状态

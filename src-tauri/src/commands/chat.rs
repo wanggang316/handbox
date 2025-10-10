@@ -71,6 +71,7 @@ pub async fn chat_update(
     provider_id: Option<String>,
     system_prompt: Option<String>,
     mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
+    turn_count: Option<i32>,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
     chat_service
@@ -85,6 +86,7 @@ pub async fn chat_update(
             provider_id,
             system_prompt,
             mcp_servers,
+            turn_count,
         )
         .await
 }

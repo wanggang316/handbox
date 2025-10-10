@@ -679,6 +679,71 @@ impl MessageRepository {
         Ok(messages)
     }
 
+    /// 获取聊天中存在的所有 turn_id（去重并排序）
+    ///
+    /// # 参数
+    /// - `chat_id`: 聊天 ID
+    pub async fn get_turn_ids_by_chat(&self, chat_id: &UUID) -> Result<Vec<i32>, AppError> {
+        let query = r#"
+            SELECT DISTINCT turn_id
+            FROM messages
+            WHERE chat_id = $1 AND turn_id IS NOT NULL
+            ORDER BY turn_id ASC
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(chat_id)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to get turn ids: {}", e)))?;
+
+        let turn_ids = rows
+            .iter()
+            .map(|row| row.try_get::<i32, _>("turn_id"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::internal_error(&format!("Failed to parse turn_id: {}", e)))?;
+
+        Ok(turn_ids)
+    }
+
+    /// 根据 turn_id 范围获取消息（使用最小和最大 turn_id）
+    ///
+    /// # 参数
+    /// - `chat_id`: 聊天 ID
+    /// - `min_turn_id`: 最小轮次 ID（包含）
+    /// - `max_turn_id`: 最大轮次 ID（包含）
+    pub async fn get_messages_by_turn_id_range(
+        &self,
+        chat_id: &UUID,
+        min_turn_id: i32,
+        max_turn_id: i32,
+    ) -> Result<Vec<Message>, AppError> {
+        let query = r#"
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
+                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            FROM messages
+            WHERE chat_id = $1 AND turn_id >= $2 AND turn_id <= $3
+            ORDER BY created_at ASC
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(chat_id)
+            .bind(min_turn_id)
+            .bind(max_turn_id)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to get messages by turn id range: {}", e))
+            })?;
+
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(self.row_to_message(row)?);
+        }
+
+        Ok(messages)
+    }
+
     /// 获取聊天的下一个 turn_id
     pub async fn get_next_turn_id(&self, chat_id: &UUID) -> Result<i32, AppError> {
         let query =
@@ -805,6 +870,7 @@ mod tests {
                 provider_id: Some("openai".to_string()),
                 system_prompt: None,
                 mcp_servers: None,
+                turn_count: Some(5),
             }),
             tool_calls: None,
             turn_id: Some(1),
@@ -1037,5 +1103,126 @@ mod tests {
         // 测试空数组不会报错
         let result = repo.create_messages_batch(&[]).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_turn_ids_and_range() {
+        let (db_service, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db_service);
+        let repo = MessageRepository::new(db_arc.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let chat_id = uuid::Uuid::new_v4().to_string();
+
+        // 创建 chat
+        let chat_query = r#"
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#;
+        sqlx::query(chat_query)
+            .bind(&chat_id)
+            .bind("Test Chat")
+            .bind(Option::<String>::None)
+            .bind("[]")
+            .bind(now)
+            .bind(now)
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // 创建不连续的 turn_id: 1, 2, 4, 6, 7（缺失 3 和 5）
+        // 每轮 2 条消息（user + assistant）
+        let mut messages = Vec::new();
+        let turns = vec![1, 2, 4, 6, 7];
+
+        for &turn in &turns {
+            messages.push(Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: ChatMessageRole::User,
+                content: format!("User message turn {}", turn),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(turn),
+                tool_call_id: None,
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + (turn as i64) * 1000,
+                updated_at: now + (turn as i64) * 1000,
+            });
+
+            messages.push(Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: ChatMessageRole::Assistant,
+                content: format!("Assistant message turn {}", turn),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(turn),
+                tool_call_id: None,
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + (turn as i64) * 1000 + 500,
+                updated_at: now + (turn as i64) * 1000 + 500,
+            });
+        }
+
+        repo.create_messages_batch(&messages).await.unwrap();
+
+        // 测试 1: 获取所有 turn_id
+        let turn_ids = repo.get_turn_ids_by_chat(&chat_id).await.unwrap();
+        assert_eq!(turn_ids, vec![1, 2, 4, 6, 7]);
+
+        // 测试 2: 根据 turn_id 范围获取消息（turn 2-6，应该包含 2, 4, 6）
+        let result = repo
+            .get_messages_by_turn_id_range(&chat_id, 2, 6)
+            .await
+            .unwrap();
+
+        // 应该返回 6 条消息（3 个 turn × 2 条）
+        assert_eq!(result.len(), 6);
+        assert_eq!(result[0].content, "User message turn 2");
+        assert_eq!(result[1].content, "Assistant message turn 2");
+        assert_eq!(result[2].content, "User message turn 4");
+        assert_eq!(result[3].content, "Assistant message turn 4");
+        assert_eq!(result[4].content, "User message turn 6");
+        assert_eq!(result[5].content, "Assistant message turn 6");
+
+        // 测试 3: 范围只包含一个 turn
+        let result = repo
+            .get_messages_by_turn_id_range(&chat_id, 4, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "User message turn 4");
+        assert_eq!(result[1].content, "Assistant message turn 4");
+
+        // 测试 4: 范围包含不存在的 turn（3, 5 不存在，但在范围内）
+        let result = repo
+            .get_messages_by_turn_id_range(&chat_id, 1, 7)
+            .await
+            .unwrap();
+
+        // 应该返回所有存在的消息（5 个 turn × 2 条 = 10 条）
+        assert_eq!(result.len(), 10);
+        assert_eq!(result[0].content, "User message turn 1");
+        assert_eq!(result[8].content, "User message turn 7");
     }
 }

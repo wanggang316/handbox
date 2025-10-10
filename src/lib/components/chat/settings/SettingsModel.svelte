@@ -14,7 +14,7 @@
     topP: chatState.currentChat?.topP || 1.0,
     streamResponse: chatState.currentChat?.stream ?? true,
     maxTokens: chatState.currentChat?.maxTokens || 4000,
-    contextLength: 10, // contextLength 目前不存储在 Chat 中，使用默认值
+    turnCount: chatState.currentChat?.turnCount || 5, // 对话回合数，默认值为 5
   });
 
   let currentSettings = $state(getInitialSettings());
@@ -44,7 +44,7 @@
             topP: currentSettings.topP,
             stream: currentSettings.streamResponse,
             maxTokens: currentSettings.maxTokens,
-            contextLength: currentSettings.contextLength,
+            turnCount: currentSettings.turnCount,
           });
 
           // 更新原始设置，表示已保存
@@ -64,7 +64,7 @@
       topP: 1.0,
       streamResponse: true,
       maxTokens: 4000,
-      contextLength: 10,
+      turnCount: 5,
     };
   }
 </script>
@@ -116,20 +116,20 @@
       label="最大输出长度"
       bind:value={currentSettings.maxTokens}
       defaultValue={4000}
-      placeholder="默认"
+      placeholder="4000 (默认)"
       min={100}
       max={10000000}
       step={100}
     />
 
-    <!-- 上下文长度 -->
+    <!-- 对话轮数 -->
     <NumberStepperRow
-      label="上下文数"
-      bind:value={currentSettings.contextLength}
-      defaultValue={10}
-      placeholder="默认"
-      min={0}
-      max={9999}
+      label="对话轮数"
+      bind:value={currentSettings.turnCount}
+      defaultValue={5}
+      placeholder="5 (默认)"
+      min={1}
+      max={100}
       step={1}
     />
   </TableGroup>

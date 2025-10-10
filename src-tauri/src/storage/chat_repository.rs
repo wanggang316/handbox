@@ -22,8 +22,8 @@ impl ChatRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
         let query = r#"
-            INSERT INTO chats (id, name, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            INSERT INTO chats (id, name, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         "#;
 
         sqlx::query(query)
@@ -37,6 +37,7 @@ impl ChatRepository {
             .bind(&chat.provider_id)
             .bind(&chat.system_prompt)
             .bind(&mcp_servers_json)
+            .bind(chat.turn_count)
             .bind(chat.created_at)
             .bind(chat.updated_at)
             .execute(self.db.pool())
@@ -49,7 +50,7 @@ impl ChatRepository {
     /// 获取聊天列表
     pub async fn list_chats(&self, limit: i32, offset: i32) -> Result<Vec<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
             FROM chats ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -71,7 +72,7 @@ impl ChatRepository {
     /// 根据 ID 获取聊天
     pub async fn get_chat_by_id(&self, chat_id: &UUID) -> Result<Option<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
             FROM chats WHERE id = $1
         "#;
 
@@ -94,8 +95,8 @@ impl ChatRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
         let query = r#"
-            UPDATE chats SET name = $1, temperature = $2, top_p = $3, max_tokens = $4, stream = $5, model_id = $6, provider_id = $7, system_prompt = $8, mcp_servers = $9, updated_at = $10
-            WHERE id = $11
+            UPDATE chats SET name = $1, temperature = $2, top_p = $3, max_tokens = $4, stream = $5, model_id = $6, provider_id = $7, system_prompt = $8, mcp_servers = $9, turn_count = $10, updated_at = $11
+            WHERE id = $12
         "#;
 
         let result = sqlx::query(query)
@@ -108,6 +109,7 @@ impl ChatRepository {
             .bind(&chat.provider_id)
             .bind(&chat.system_prompt)
             .bind(&mcp_servers_json)
+            .bind(chat.turn_count)
             .bind(chat.updated_at)
             .bind(&chat.id)
             .execute(self.db.pool())
@@ -191,6 +193,7 @@ impl ChatRepository {
             provider_id: row.try_get("provider_id").ok(),
             system_prompt: row.try_get("system_prompt").ok(),
             mcp_servers,
+            turn_count: row.try_get("turn_count").ok(),
             artifact_id: row.try_get("artifact_id").ok(),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -245,6 +248,7 @@ mod tests {
                     enabled_tools: vec![],
                 },
             ],
+            turn_count: Some(5),
             artifact_id: None,
             created_at: now,
             updated_at: now,

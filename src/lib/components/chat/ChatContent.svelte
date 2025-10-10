@@ -38,22 +38,14 @@
   // 确认对话框状态
   let showDeleteConfirm = $state(false);
   let showResendConfirm = $state(false);
+  let showRegenerateConfirm = $state(false);
   let pendingMessageId = $state<string | null>(null);
 
   // 重新生成消息
-  async function regenerateMessage(messageId: string) {
+  function regenerateMessage(messageId: string) {
     if (operatingMessageId) return; // 防止重复操作
-    
-    try {
-      operatingMessageId = messageId;
-      await messageStore.regenerateMessage(messageId);
-      console.log('Message regenerated successfully');
-    } catch (error) {
-      console.error('Failed to regenerate message:', error);
-      // TODO: 显示错误提示
-    } finally {
-      operatingMessageId = null;
-    }
+    pendingMessageId = messageId;
+    showRegenerateConfirm = true;
   }
 
   // 删除消息 - 显示确认对话框
@@ -112,12 +104,38 @@
     } finally {
       operatingMessageId = null;
       pendingMessageId = null;
+      showResendConfirm = false;
     }
   }
 
   // 取消重发
   function cancelResend() {
     pendingMessageId = null;
+    showResendConfirm = false;
+  }
+
+  // 确认重新生成消息
+  async function confirmRegenerateMessage() {
+    if (!pendingMessageId) return;
+
+    try {
+      operatingMessageId = pendingMessageId;
+      await messageStore.regenerateMessage(pendingMessageId);
+      console.log('Message regenerated successfully');
+    } catch (error) {
+      console.error('Failed to regenerate message:', error);
+      // TODO: 显示错误提示
+    } finally {
+      operatingMessageId = null;
+      pendingMessageId = null;
+      showRegenerateConfirm = false;
+    }
+  }
+
+  // 取消重新生成
+  function cancelRegenerate() {
+    pendingMessageId = null;
+    showRegenerateConfirm = false;
   }
 
   // 当前聊天ID的派生状态
@@ -295,6 +313,19 @@
   onConfirm={confirmResendMessage}
   onCancel={cancelResend}
   onClose={() => showResendConfirm = false}
+/>
+
+<!-- 重新生成消息确认对话框 -->
+<ConfirmModal
+  open={showRegenerateConfirm}
+  title="确认重新生成"
+  message="重新生成此回复将删除该消息及之后的所有消息，确定要继续吗？"
+  confirmText="重新生成"
+  cancelText="取消"
+  confirmButtonStyle="accent"
+  onConfirm={confirmRegenerateMessage}
+  onCancel={cancelRegenerate}
+  onClose={() => showRegenerateConfirm = false}
 />
 
 <style>

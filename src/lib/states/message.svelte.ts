@@ -7,7 +7,6 @@ import type {
   MessageResponse,
   MessageRequest,
   ChatAttachment,
-  ChatMessage,
   ToolCall,
   ToolExecutionStatus,
 } from '$lib/types/chat';
@@ -505,25 +504,15 @@ class MessageStore {
 
       this.addMessage(currentChat.id, userMessage);
 
-      // 构建消息数组，如果有系统提示词则添加到开头
-      const messages: ChatMessage[] = [];
-      if (currentChat.systemPrompt && currentChat.systemPrompt.trim()) {
-        messages.push({ role: 'system', content: currentChat.systemPrompt });
-      }
-      messages.push({ role: 'user', content: content });
-
-      // 构建完整的消息请求
-      const fullRequest: MessageRequest = {
+      // 构建完整的消息请求（不包含 system message，由后端构建）
+      const streamRequest: MessageRequest = {
         chatId: currentChat.id,
         modelId: currentChat.modelId,
         providerId: currentChat.providerId,
-        messages: messages,
+        messages: [{ role: 'user', content: content }],
         tempUserMessageId: userMessage.id,
         attachments: attachments
       };
-
-      // 设置流式响应参数
-      const streamRequest = { ...fullRequest };
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {

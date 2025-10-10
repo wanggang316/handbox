@@ -24,6 +24,7 @@ export interface MessageConfig {
   providerId?: string;
   systemPrompt?: string;
   mcpServers?: McpServerConfig[];
+  turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
 }
 
 // 消息类型
@@ -65,7 +66,7 @@ export interface Chat extends BaseEntity {
   name: string;
   lastMessageAt?: Timestamp;
   messageCount: number;
-  
+
   // Chat-level configuration (default values)
   temperature?: number;
   topP?: number;
@@ -75,6 +76,7 @@ export interface Chat extends BaseEntity {
   providerId?: string;
   systemPrompt?: string;
   mcpServers: McpServerConfig[];
+  turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
 
   artifactId?: UUID;
 }
@@ -85,7 +87,7 @@ export interface ModelParameters {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
-  contextLength?: number;
+  turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
   stream?: boolean;
 }
 

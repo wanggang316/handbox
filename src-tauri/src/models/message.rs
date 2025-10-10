@@ -29,6 +29,8 @@ pub struct MessageConfig {
     pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
+    /// 对话回合数 - 用于限制上下文中包含的历史对话轮数
+    pub turn_count: Option<i32>,
 }
 
 /// 消息实体
@@ -223,6 +225,7 @@ mod tests {
                 execution_mode: "auto".to_string(),
                 enabled_tools: vec!["tool1".to_string()],
             }]),
+            turn_count: Some(5),
         };
 
         let json = serde_json::to_string(&config).expect("serialize config");
@@ -230,5 +233,6 @@ mod tests {
 
         assert_eq!(config.temperature, deserialized.temperature);
         assert_eq!(config.model_id, deserialized.model_id);
+        assert_eq!(config.turn_count, deserialized.turn_count);
     }
 }

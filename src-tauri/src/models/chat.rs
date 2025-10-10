@@ -61,6 +61,7 @@ pub struct Chat {
     pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<McpServerConfig>,
+    pub turn_count: Option<i32>,
 
     pub artifact_id: Option<UUID>,
     pub created_at: Timestamp,
@@ -90,6 +91,7 @@ mod tests {
                 execution_mode: "auto".to_string(),
                 enabled_tools: vec!["tool1".to_string()],
             }],
+            turn_count: Some(5),
             artifact_id: None,
             created_at: 1000,
             updated_at: 2000,

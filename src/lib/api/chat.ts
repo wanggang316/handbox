@@ -58,11 +58,11 @@ export async function getChat(chatId: UUID): Promise<Chat> {
 
 /**
  * 更新聊天
- * 后端签名: chat_update(chat_id, name?, temperature?, top_p?, max_tokens?, stream?, model_id?, provider_id?, system_prompt?, mcp_servers?)
+ * 后端签名: chat_update(chat_id, name?, temperature?, top_p?, max_tokens?, stream?, model_id?, provider_id?, system_prompt?, mcp_servers?, turn_count?)
  */
 export async function updateChat(
   chatId: UUID,
-  updates: Partial<Pick<Chat, 'name' | 'temperature' | 'topP' | 'maxTokens' | 'stream' | 'modelId' | 'providerId' | 'systemPrompt' | 'mcpServers'>>
+  updates: Partial<Pick<Chat, 'name' | 'temperature' | 'topP' | 'maxTokens' | 'stream' | 'modelId' | 'providerId' | 'systemPrompt' | 'mcpServers' | 'turnCount'>>
 ): Promise<Chat> {
   const payload = {
     chatId: chatId,
@@ -75,6 +75,7 @@ export async function updateChat(
     providerId: updates.providerId,
     systemPrompt: updates.systemPrompt,
     mcpServers: updates.mcpServers,
+    turnCount: updates.turnCount,
   };
   return apiCall<Chat>('chat_update', payload);
 }
