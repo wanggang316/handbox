@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Ellipsis } from "@lucide/svelte";
     import IconButton from "../ui/IconButton.svelte";
-    import ChatSettings from "./settings/ChatSettings.svelte";
+    import ChatSettings from "./settings/Settings.svelte";
     import { uiState } from "$lib/states/ui.svelte";
     import Button from "../ui/Button.svelte";
     import { RefreshCw } from "@lucide/svelte";

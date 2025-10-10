@@ -1,7 +1,7 @@
 <script lang="ts">
-  import ChatHeaderView from '$lib/components/chat/ChatHeaderView.svelte';
-  import ChatContentView from '$lib/components/chat/ChatContentView.svelte';
-  import ChatInputView from '$lib/components/chat/ChatInputView.svelte';
+  import ChatHeaderView from '$lib/components/chat/ChatHeader.svelte';
+  import ChatContentView from '$lib/components/chat/ChatContent.svelte';
+  import ChatInputView from '$lib/components/chat/ChatInput.svelte';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { uiState } from '$lib/states/ui.svelte';

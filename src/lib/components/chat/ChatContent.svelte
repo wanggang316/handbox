@@ -5,8 +5,8 @@
   import type { Message } from '$lib/types';
 
   // Import child components
-  import UserMessageView from './views/UserMessageView.svelte';
-  import AssistantMessageView from './views/AssistantMessageView.svelte';
+  import UserMessageView from './messages/MessageUser.svelte';
+  import AssistantMessageView from './messages/MessageAssistant.svelte';
   import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 
   // 复制消息内容

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Copy, RotateCcw, Trash2, ChevronDown, ChevronRight } from "lucide-svelte";
-  import ToolCallList from "./ToolCallList.svelte";
+  import ToolCallList from "./ToolCallCard.svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states";
   import { openInBrowser, renderMarkdown } from "$lib/utils";

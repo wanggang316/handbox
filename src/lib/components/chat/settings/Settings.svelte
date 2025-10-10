@@ -1,9 +1,9 @@
 <script lang="ts">
   import Modal from '../../ui/Modal.svelte';
-  import ChatSettingSidebar from './ChatSettingSidebar.svelte';
-  import PromptSettings from './PromptSettings.svelte';
-  import ModelSettings from './ModelSettings.svelte';
-  import McpSettings from './McpSettings.svelte';
+  import ChatSettingSidebar from './SettingsSidebar.svelte';
+  import PromptSettings from './SettingsPrompt.svelte';
+  import ModelSettings from './SettingsModel.svelte';
+  import McpSettings from './SettingsMcp.svelte';
   import { chatState } from '$lib/states/chat.svelte';
 
   interface Props {
