@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RotateCcw, Copy } from "lucide-svelte";
+  import { RotateCcw, Copy, Pencil } from "lucide-svelte";
   import type { Message } from "$lib/types";
 
   interface Props {
@@ -7,9 +7,10 @@
     isOperating?: boolean;
     onCopy?: (content: string) => void;
     onResend?: (messageId: string) => void;
+    onEdit?: (messageId: string, content: string) => void;
   }
 
-  let { message, isOperating = false, onResend, onCopy }: Props = $props();
+  let { message, isOperating = false, onResend, onCopy, onEdit }: Props = $props();
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -30,6 +31,12 @@
       onResend?.(message.id);
     }
   }
+
+  function handleEdit() {
+    if (message?.id && message?.content) {
+      onEdit?.(message.id, message.content);
+    }
+  }
 </script>
 
 <div class="group relative">
@@ -47,14 +54,10 @@
         </div>
       </div>
 
-      <!-- 重发按钮 (hover显示) -->
+      <!-- 操作按钮 (hover显示) -->
       <div
         class="mt-2 gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex justify-end"
       >
-        <!-- 时间戳 -->
-        <!-- <div class="mt-2 text-xs text-base-content/60 text-right">
-          {formatTime(message.createdAt)}
-        </div> -->
         <!-- 复制按钮 -->
         <button
           class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"
@@ -63,6 +66,16 @@
         >
           <Copy class="w-3.5 h-3.5" />
         </button>
+        <!-- 编辑按钮 -->
+        <button
+          class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="编辑并重发"
+          disabled={isOperating}
+          onclick={handleEdit}
+        >
+          <Pencil class="w-3.5 h-3.5" />
+        </button>
+        <!-- 重发按钮 -->
         <button
           class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="重发消息"

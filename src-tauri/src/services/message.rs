@@ -5,7 +5,8 @@ use crate::models::{
 };
 use crate::services::{ChatService, Database, McpService, ProviderService};
 use crate::storage::types::{
-    Chat, McpServer, McpServerStatus, Message, MessageConfig, MessageToolCall, MessageToolExecutionMode, MessageToolExecutionStatus, Provider, UUID
+    Chat, McpServer, McpServerStatus, Message, MessageConfig, MessageToolCall,
+    MessageToolExecutionMode, MessageToolExecutionStatus, Provider, UUID,
 };
 use crate::storage::MessageRepository;
 use chrono::Utc;
@@ -383,6 +384,7 @@ impl MessageService {
     pub async fn resend_user_message_stream(
         &self,
         message_id: UUID,
+        content: Option<String>,
         start_callback: impl StreamStartCallback,
         streaming_callback: impl StreamingCallback,
         end_callback: impl StreamEndCallback,
@@ -422,7 +424,28 @@ impl MessageService {
             return;
         }
 
-        // 3. 删除该消息之后的所有消息
+        // 3. 更新消息内容（如果提供了新的内容）
+        if let Some(new_content) = content {
+            let update_time = Utc::now().timestamp_millis();
+            if let Err(e) = self
+                .repository
+                .update_message_content(&message_id, &new_content, update_time)
+                .await
+            {
+                tracing::error!(
+                    "[MessageService::resend_message_stream] Failed to update message content {}: {}",
+                    message_id,
+                    e
+                );
+                error_callback(error_stream_id, e);
+                return;
+            }
+
+            message.content = new_content;
+            message.updated_at = update_time;
+        }
+
+        // 4. 删除该消息之后的所有消息
         let deleted_message_ids = match self
             .repository
             .delete_messages_after(&message.chat_id, &message_id)
@@ -451,7 +474,7 @@ impl MessageService {
             messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
         }
 
-        // 4. 获取聊天配置
+        // 5. 获取聊天配置
         let chat = match self.chat_service.get_chat(message.chat_id.clone()).await {
             Ok(c) => c,
             Err(e) => {
@@ -464,7 +487,7 @@ impl MessageService {
             }
         };
 
-        // 5. 使用最新聊天配置更新用户消息的配置
+        // 6. 使用最新聊天配置更新用户消息的配置
         let updated_config = MessageConfig {
             model_id: chat.model_id.clone(),
             provider_id: chat.provider_id.clone(),
@@ -493,7 +516,7 @@ impl MessageService {
 
         message.config = Some(updated_config.clone());
 
-        // 6. 获取 turn_id（使用原消息的 turn_id）
+        // 7. 获取 turn_id（使用原消息的 turn_id）
         let turn_id = match message.turn_id {
             Some(id) => id,
             None => {
@@ -509,11 +532,8 @@ impl MessageService {
             }
         };
 
-        // 7. 使用 build_request_from_turn 重新构建请求
-        let resend_request = match self
-            .build_message_request(&message.chat_id, turn_id)
-            .await
-        {
+        // 8. 使用 build_request_from_turn 重新构建请求
+        let resend_request = match self.build_message_request(&message.chat_id, turn_id).await {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -530,7 +550,7 @@ impl MessageService {
             message.chat_id
         );
 
-        // 8. 包装 end_callback 以保存助手消息
+        // 9. 包装 end_callback 以保存助手消息
         let end_callback_wrapper = Self::wrap_end_callback_with_save(
             self.repository.clone(),
             message.chat_id.clone(),
@@ -539,7 +559,7 @@ impl MessageService {
             end_callback,
         );
 
-        // 9. 直接调用 LLM API 流式方法
+        // 10. 直接调用 LLM API 流式方法
         self.call_llm_api_stream(
             &resend_request,
             start_callback,
@@ -639,10 +659,7 @@ impl MessageService {
         };
 
         // 5. 获取聊天配置并构建请求
-        let regenerate_request = match self
-            .build_message_request(&message.chat_id, turn_id)
-            .await
-        {
+        let regenerate_request = match self.build_message_request(&message.chat_id, turn_id).await {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -970,10 +987,7 @@ impl MessageService {
         };
 
         // 11. 构建包含工具调用结果的新请求
-        let request = match self
-            .build_message_request(&message.chat_id, turn_id)
-            .await
-        {
+        let request = match self.build_message_request(&message.chat_id, turn_id).await {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -1696,18 +1710,18 @@ impl MessageService {
             .get_messages_by_turn_id_range(&chat_id.to_string(), min_turn_id, max_turn_id)
             .await?;
 
-        request_messages.extend(turn_messages.iter().map(|m| LlmMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
-            reasoning: m.reasoning.clone(),
-            // 转换 MessageToolCall 为 LlmToolCall (去除业务字段)
-            tool_calls: m.tool_calls.as_ref().map(|calls| {
-                calls
-                    .iter()
-                    .map(|tc| tc.to_llm_tool_call())
-                    .collect()
-            }),
-            tool_call_id: m.tool_call_id.clone(),
+        request_messages.extend(turn_messages.iter().map(|m| {
+            LlmMessage {
+                role: m.role.clone(),
+                content: m.content.clone(),
+                reasoning: m.reasoning.clone(),
+                // 转换 MessageToolCall 为 LlmToolCall (去除业务字段)
+                tool_calls: m
+                    .tool_calls
+                    .as_ref()
+                    .map(|calls| calls.iter().map(|tc| tc.to_llm_tool_call()).collect()),
+                tool_call_id: m.tool_call_id.clone(),
+            }
         }));
 
         // 8. 构建请求
@@ -2083,10 +2097,7 @@ impl MessageService {
                         );
                     }
                     Err(e) => {
-                        tracing::error!(
-                            "[MessageService] Failed to save assistant message: {}",
-                            e
-                        );
+                        tracing::error!("[MessageService] Failed to save assistant message: {}", e);
                     }
                 }
             });

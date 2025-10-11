@@ -12,6 +12,7 @@
 
   let chatId = $state('');
   let messageInput = $state('');
+  let editingMessageId = $state<string | null>(null);
 
   // 从 URL 参数获取聊天 ID
   onMount(async () => {
@@ -71,10 +72,36 @@
 
   // 当前聊天的模型信息已通过导入的 currentChatModel 提供
 
+  // 处理消息编辑
+  function handleEditMessage(messageId: string, content: string) {
+    console.log('handleEditMessage:', { messageId, content });
+    editingMessageId = messageId;
+    messageInput = content;
+  }
+
+  // 取消编辑
+  function handleCancelEdit() {
+    console.log('handleCancelEdit');
+    editingMessageId = null;
+    messageInput = '';
+  }
+
   // 处理消息发送
   async function handleSendMessage(message: string) {
-    console.log('handleSendMessage:', message);
+    console.log('handleSendMessage:', { message, editingMessageId });
     try {
+      // 如果是编辑模式，调用 resendMessage
+      if (editingMessageId) {
+        if (!chatId) {
+          throw new Error('未选择聊天会话');
+        }
+        await messageStore.resendMessage(chatId, editingMessageId, message);
+        // 清除编辑状态
+        editingMessageId = null;
+        return;
+      }
+
+      // 否则是新消息
       if (!hasActiveChat()) {
         console.log('No active chat, creating new chat');
         // 如果没有活跃聊天，创建新聊天
@@ -125,14 +152,16 @@
   
   <!-- 可滚动的聊天内容区域，占据剩余空间 -->
   <div class="flex-1 min-h-0">
-    <ChatContentView />
+    <ChatContentView onEditMessage={handleEditMessage} />
   </div>
-  
+
   <!-- 固定在底部的输入区域 -->
   <div class="flex-shrink-0 px-4 pb-4">
-    <ChatInputView 
+    <ChatInputView
       bind:messageInput={messageInput}
+      bind:editingMessageId={editingMessageId}
       onSendMessage={handleSendMessage}
+      onCancelEdit={handleCancelEdit}
     />
   </div>
 </div>

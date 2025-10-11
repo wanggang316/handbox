@@ -332,6 +332,7 @@ pub async fn message_assistant_regenerate_stream(
 #[tauri::command]
 pub async fn message_user_resend_stream(
     message_id: UUID,
+    content: Option<String>,
     window: Window,
     message_service: State<'_, MessageService>,
 ) -> Result<(), AppError> {
@@ -344,6 +345,7 @@ pub async fn message_user_resend_stream(
     let window_clone = window.clone();
     let service_clone = message_service.inner().clone();
     let message_id_clone = message_id.clone();
+    let content_clone = content.clone();
 
     // 在后台任务中执行
     tauri::async_runtime::spawn(async move {
@@ -366,6 +368,7 @@ pub async fn message_user_resend_stream(
         service_clone
             .resend_user_message_stream(
                 message_id_clone,
+                content_clone,
                 start_callback,
                 streaming_callback,
                 end_callback,

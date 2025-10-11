@@ -9,6 +9,12 @@
   import AssistantMessageView from './messages/MessageAssistant.svelte';
   import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 
+  interface Props {
+    onEditMessage?: (messageId: string, content: string) => void;
+  }
+
+  let { onEditMessage }: Props = $props();
+
   // 复制消息内容
   async function copyMessage(content: string) {
     try {
@@ -92,11 +98,11 @@
 
   // 确认重发消息
   async function confirmResendMessage() {
-    if (!pendingMessageId) return;
+    if (!pendingMessageId || !chatState.currentChat?.id) return;
 
     try {
       operatingMessageId = pendingMessageId;
-      await messageStore.resendMessage(pendingMessageId);
+      await messageStore.resendMessage(chatState.currentChat.id, pendingMessageId);
       console.log('Message resent successfully');
     } catch (error) {
       console.error('Failed to resend message:', error);
@@ -254,6 +260,7 @@
               isOperating={operatingMessageId === message.id}
               onResend={resendMessage}
               onCopy={copyMessage}
+              onEdit={onEditMessage}
             />
           {:else if message.role === 'assistant'}
             <AssistantMessageView

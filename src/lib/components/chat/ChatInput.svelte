@@ -1,6 +1,6 @@
 <script lang="ts">
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import { ChevronsUpDown, Plus, ArrowUp } from "@lucide/svelte";
+  import { ChevronsUpDown, Plus, ArrowUp, X, Pencil } from "@lucide/svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Button from "../ui/Button.svelte";
   import ChatModelSelectModal from "./ChatModelSelectModal.svelte";
@@ -9,13 +9,17 @@
 
   interface Props {
     messageInput?: string;
+    editingMessageId?: string | null;
     onSendMessage?: (message: string) => void;
+    onCancelEdit?: () => void;
   }
 
   let {
     messageInput = $bindable(""),
+    editingMessageId = $bindable(null),
     onSendMessage = (message: string) =>
       console.log("Sending message:", message),
+    onCancelEdit,
   }: Props = $props();
 
   let textareaRef: HTMLTextAreaElement;
@@ -23,6 +27,9 @@
 
   // 直接使用 chatState 中的显示模型
   const currentModel = $derived(currentChatModel().model);
+
+  // 判断是否处于编辑模式
+  const isEditing = $derived(editingMessageId !== null && editingMessageId !== undefined);
 
   // 自动调整 textarea 高度
   function adjustTextareaHeight() {
@@ -45,6 +52,9 @@
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendMessage();
+    } else if (event.key === "Escape" && isEditing) {
+      event.preventDefault();
+      handleCancelEdit();
     }
   }
 
@@ -52,6 +62,12 @@
     if (!messageInput.trim()) return;
     onSendMessage(messageInput);
     messageInput = "";
+  }
+
+  function handleCancelEdit() {
+    if (onCancelEdit) {
+      onCancelEdit();
+    }
   }
 
   function handleAddAttachment() {
@@ -62,10 +78,27 @@
 <div
   class="flex flex-col bg-base-200 rounded-xl border border-base-300 max-h-[300px] mx-auto w-full max-w-[800px]"
 >
+  <!-- 编辑模式提示 -->
+  {#if isEditing}
+    <div class="flex items-center justify-between px-4 pt-3 pb-2 border-b border-base-300">
+      <div class="flex items-center gap-2 text-sm text-base-content/70">
+        <Pencil size={14} />
+        <span>编辑消息</span>
+      </div>
+      <button
+        class="p-1 hover:bg-base-300 rounded transition-colors"
+        title="取消编辑"
+        onclick={handleCancelEdit}
+      >
+        <X size={16} />
+      </button>
+    </div>
+  {/if}
+
   <textarea
     bind:this={textareaRef}
     bind:value={messageInput}
-    placeholder="在这里输入消息，按 Enter 发送"
+    placeholder={isEditing ? "编辑消息内容..." : "在这里输入消息，按 Enter 发送"}
     onkeydown={handleKeydown}
     oninput={adjustTextareaHeight}
     rows="1"
@@ -92,7 +125,13 @@
         {currentModel ? currentModel.name : "选择模型"}
         <ChevronsUpDown size={14} />
       </Button>
-      <CircleButton icon={ArrowUp} iconSize={18} size="w-8 h-8" ariaLabel="发送" onclick={sendMessage} />
+      <CircleButton
+        icon={ArrowUp}
+        iconSize={18}
+        size="w-8 h-8"
+        ariaLabel={isEditing ? "更新消息" : "发送"}
+        onclick={sendMessage}
+      />
     </div>
   </div>
 </div>

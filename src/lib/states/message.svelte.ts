@@ -254,7 +254,10 @@ class MessageStore {
     if (messages) {
       const index = messages.findIndex(m => m.id === messageId);
       if (index !== -1) {
-        messages[index] = { ...messages[index], ...updates };
+        const updatedMessage = { ...messages[index], ...updates };
+        const nextMessages = [...messages];
+        nextMessages[index] = updatedMessage;
+        this.state.messagesByChat[chatId] = nextMessages;
       }
     }
   }
@@ -610,12 +613,21 @@ class MessageStore {
 
   /**
    * 重发用户消息 - 删除该消息之后的所有消息，然后重新发送（流式）
+   * @param messageId 消息ID
+   * @param content 可选的新消息内容，如果提供则更新消息内容后重新发送
    */
-  async resendMessage(messageId: string): Promise<void> {
-    console.log('[resendMessage] 开始重发消息:', messageId);
+  async resendMessage(chatId: string, messageId: string, content?: string): Promise<void> {
+    console.log('[resendMessage] 开始重发消息:', messageId, content ? '(带新内容)' : '');
 
     try {
       this.setSending(true);
+
+      if (typeof content === 'string') {
+        this.updateMessage(chatId, messageId, {
+          content,
+          updatedAt: Date.now()
+        });
+      }
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
@@ -646,8 +658,8 @@ class MessageStore {
 
       console.log('[resendMessage] 调用 resendMessageStream API...');
 
-      // 调用流式重发API
-      await messageApi.resendUserMessageStream(messageId as UUID);
+      // 调用流式重发API，传递可选的新内容
+      await messageApi.resendUserMessageStream(messageId as UUID, content);
 
       console.log('[resendMessage] API 调用成功');
     } catch (error) {

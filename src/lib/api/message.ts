@@ -72,9 +72,14 @@ export async function regenerateAssistantMessageStream(messageId: UUID): Promise
 
 /**
  * 流式重发用户消息 - 删除该消息之后的所有消息，然后重新发送（流式）
+ * @param messageId 消息ID
+ * @param content 可选的新消息内容，如果提供则更新消息内容后重新发送
  */
-export async function resendUserMessageStream(messageId: UUID): Promise<void> {
-  await apiCall<void>('message_user_resend_stream', { messageId: messageId });
+export async function resendUserMessageStream(messageId: UUID, content?: string): Promise<void> {
+  await apiCall<void>('message_user_resend_stream', {
+    messageId: messageId,
+    content: content
+  });
 }
 
 /**
