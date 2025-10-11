@@ -4,12 +4,12 @@
 
 import { apiCall } from './index';
 import { listen } from '@tauri-apps/api/event';
-import type { MessageRequest, MessageResponse, Message, UUID, MessageStreamEvent, ToolExecutionStatus } from '../types';
+import type { MessageRequest, MessageResponse, Message, UUID, MessageStreamEvent, ToolExecutionStatus, UserMessageSendRequest } from '../types';
 
 /**
  * 发送消息
  */
-export async function sendMessage(request: MessageRequest): Promise<MessageResponse> {
+export async function sendUserMessage(request: MessageRequest): Promise<MessageResponse> {
   // Tauri 命令期望参数名与函数参数名匹配
   const payload = {
     request: {
@@ -21,7 +21,7 @@ export async function sendMessage(request: MessageRequest): Promise<MessageRespo
     }
   };
   
-  return await apiCall<any>('message_send', payload);
+  return await apiCall<any>('message_user_send', payload);
 }
 
 /**
@@ -66,34 +66,32 @@ export async function deleteMessage(messageId: UUID): Promise<void> {
 /**
  * 流式重新生成助手消息 - 删除当前消息，根据本轮消息重新生成
  */
-export async function regenerateMessageStream(messageId: UUID): Promise<void> {
-  await apiCall<void>('message_regenerate_stream', { messageId: messageId });
+export async function regenerateAssistantMessageStream(messageId: UUID): Promise<void> {
+  await apiCall<void>('message_assistant_regenerate_stream', { messageId: messageId });
 }
 
 /**
  * 流式重发用户消息 - 删除该消息之后的所有消息，然后重新发送（流式）
  */
-export async function resendMessageStream(messageId: UUID): Promise<void> {
-  await apiCall<void>('message_resend_stream', { messageId: messageId });
+export async function resendUserMessageStream(messageId: UUID): Promise<void> {
+  await apiCall<void>('message_user_resend_stream', { messageId: messageId });
 }
 
 /**
  * 发送流式消息
  */
-export async function sendStreamMessage(request: MessageRequest): Promise<void> {
+export async function sendUserMessageStream(request: UserMessageSendRequest): Promise<void> {
   // Tauri 命令期望参数名与函数参数名匹配
   const payload = {
     request: {
       chat_id: request.chatId,
-      model_id: request.modelId,
-      provider_id: request.providerId,
-      messages: request.messages,
+      content: request.content,
       temp_user_message_id: request.tempUserMessageId,
       attachments: request.attachments
     }
   };
 
-  await apiCall<void>('message_send_stream', payload);
+  await apiCall<void>('message_user_send_stream', payload);
 }
 
 /**

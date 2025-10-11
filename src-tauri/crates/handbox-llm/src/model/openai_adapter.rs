@@ -1,8 +1,8 @@
 // OpenAI 模型客户端实现
 
 use super::model_client::ModelClient;
-use crate::llm_client::types::{LlmModelFeature, LlmStandardModel};
-use crate::models::{AppError, Provider};
+use crate::error::LlmClientError;
+use crate::types::{LlmModelFeature, LlmProvider, LlmStandardModel};
 use async_trait::async_trait;
 use serde::Deserialize;
 
@@ -38,9 +38,9 @@ impl OpenAIModelClient {
 impl ModelClient for OpenAIModelClient {
     async fn list_models(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         _provider_type: &str,
-    ) -> Result<Vec<LlmStandardModel>, AppError> {
+    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching OpenAI-style models from: {}", url);
 
@@ -51,12 +51,12 @@ impl ModelClient for OpenAIModelClient {
             .header("Content-Type", "application/json")
             .send()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to fetch models: {}", e)))?;
+            .map_err(|e| LlmClientError::transport(format!("Failed to fetch models: {}", e)))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::internal_error(&format!(
+            return Err(LlmClientError::api(format!(
                 "API returned error {}: {}",
                 status, error_text
             )));
@@ -65,7 +65,7 @@ impl ModelClient for OpenAIModelClient {
         let models_response: OpenAIModelsResponse = response
             .json()
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| LlmClientError::unexpected(format!("Failed to parse response: {}", e)))?;
 
         let mut result_models = Vec::new();
 

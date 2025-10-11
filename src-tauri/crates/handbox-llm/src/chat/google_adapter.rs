@@ -1,12 +1,12 @@
 // Google Gemini API 客户端
 // 使用 google-genai-rust SDK 进行通信
 
-use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{
+use crate::chat::ChatClient;
+use crate::error::LlmClientError;
+use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
-    LlmRequest, LlmResponse, LlmUsage,
+    LlmProvider, LlmRequest, LlmResponse, LlmUsage,
 };
-use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use futures::StreamExt;
 
@@ -75,7 +75,7 @@ impl GoogleChatClient {
         &self,
         google_response: google_genai_rust::types::GenerateContentResponse,
         model: &str,
-    ) -> Result<LlmResponse, AppError> {
+    ) -> Result<LlmResponse, LlmClientError> {
         let mut choices = Vec::new();
 
         for (index, candidate) in google_response.candidates.iter().enumerate() {
@@ -196,9 +196,9 @@ impl GoogleChatClient {
 impl ChatClient for GoogleChatClient {
     async fn chat(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
-    ) -> Result<LlmResponse, AppError> {
+    ) -> Result<LlmResponse, LlmClientError> {
         tracing::info!("Sending Google-style chat request using google-genai-rust SDK");
 
         // 创建 Google SDK 客户端
@@ -206,7 +206,9 @@ impl ChatClient for GoogleChatClient {
             .base_url(&provider.base_url)
             .build()
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create Google client: {e}"))
+                LlmClientError::client_initialization(format!(
+                    "Failed to create Google client: {e}"
+                ))
             })?;
 
         // 获取模型句柄
@@ -221,7 +223,7 @@ impl ChatClient for GoogleChatClient {
         let google_response = model
             .generate_content(google_request)
             .await
-            .map_err(|e| AppError::internal_error(&format!("Google API call failed: {e}")))?;
+            .map_err(|e| LlmClientError::api(format!("Google API call failed: {e}")))?;
 
         // 转换响应格式
         let chat_response = self.convert_google_response(google_response, &request.model);
@@ -231,11 +233,11 @@ impl ChatClient for GoogleChatClient {
 
     async fn chat_stream(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
-        AppError,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
+        LlmClientError,
     > {
         tracing::info!("Sending Google-style streaming request using google-genai-rust SDK");
 
@@ -244,7 +246,9 @@ impl ChatClient for GoogleChatClient {
             .base_url(&provider.base_url)
             .build()
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create Google client: {e}"))
+                LlmClientError::client_initialization(format!(
+                    "Failed to create Google client: {e}"
+                ))
             })?;
 
         // 获取模型句柄
@@ -257,7 +261,7 @@ impl ChatClient for GoogleChatClient {
 
         // 使用 tokio::spawn 和 mpsc 来创建一个真正的流式传输
         use tokio::sync::mpsc;
-        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, AppError>>(100);
+        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, LlmClientError>>(100);
 
         let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
         let model_name = request.model.clone();
@@ -278,7 +282,7 @@ impl ChatClient for GoogleChatClient {
                             &model_name,
                         )
                     })
-                    .map_err(|e| AppError::internal_error(&format!("Stream error: {e}")));
+                    .map_err(|e| LlmClientError::api(format!("Stream error: {e}")));
 
                 match converted_result {
                     Ok(Some(chat_response)) => {
@@ -310,7 +314,7 @@ impl ChatClient for GoogleChatClient {
 
         Ok(Box::new(Box::pin(converted_stream))
             as Box<
-                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin,
             >)
     }
 

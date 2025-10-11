@@ -1,9 +1,9 @@
 // MCP repository - data access for MCP server configurations
 
-use crate::models::{
-    AppError, McpConnectionType, McpPrompt, McpResource, McpServer, McpServerStatus, McpTool,
-};
+use crate::models::AppError;
+use crate::storage::types::{McpConnectionType, McpServer, McpServerStatus};
 use crate::storage::Database;
+use handbox_mcp::{McpPrompt, McpResource, McpTool};
 use sqlx::{sqlite::SqliteRow, Row};
 use std::collections::HashMap;
 use std::sync::Arc;

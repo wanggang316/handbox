@@ -3,6 +3,8 @@
 //! This module contains all the type definitions used by the MCP client,
 //! providing a clean separation between data types and implementation logic.
 
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// Configuration for process-based MCP connections
@@ -305,4 +307,56 @@ mod tests {
         assert_eq!(stats.errors, 1);
         assert_eq!(stats.connected_since, Some(1234567890));
     }
+}
+/// Tool metadata returned from MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpTool {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub input_schema: Value,
+    #[serde(default)]
+    pub annotations: HashMap<String, Value>,
+}
+
+/// Prompt metadata returned from MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPrompt {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub arguments: Vec<McpPromptArgument>,
+}
+
+/// Prompt argument metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptArgument {
+    pub name: String,
+    pub description: Option<String>,
+    pub required: Option<bool>,
+}
+
+/// Resource metadata returned from MCP servers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpResource {
+    pub uri: String,
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub annotations: HashMap<String, Value>,
+}
+
+/// MCP 错误详情
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpErrorDetail {
+    pub error_type: String,
+    pub message: String,
+    pub timestamp: i64,
 }

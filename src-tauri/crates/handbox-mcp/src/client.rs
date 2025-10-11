@@ -11,7 +11,7 @@ use rmcp::{
 };
 use serde_json::Value;
 
-use crate::models::McpTool;
+use crate::types::McpTool;
 
 use super::{
     error::{McpClientError, McpClientResult},

@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use rmcp::model::Tool as RmcpTool;
 use serde_json::Value;
 
-use crate::models::McpTool;
+use crate::types::McpTool;
 
 /// Common command paths to search for Node.js tools
 const NODE_COMMAND_PATHS: &[&str] = &["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"];

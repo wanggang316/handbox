@@ -2,17 +2,17 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use crate::mcp_client::{
-    validate_server_config, ConnectionConfig, McpClient, ProcessConfig, SseConfig,
-    StreamableHttpConfig,
-};
 use crate::models::{
-    AppError, CreateMcpServerRequest, McpPrompt, McpResource, McpServer, McpServerStatus, McpTool,
-    RefreshMcpServerRequest, ToggleMcpServerRequest, UpdateMcpServerRequest,
-    UpdateToolEnabledRequest,
+    AppError, CreateMcpServerRequest, RefreshMcpServerRequest, ToggleMcpServerRequest,
+    UpdateMcpServerRequest, UpdateToolEnabledRequest,
 };
 use crate::services::Database;
+use crate::storage::types::{McpServer, McpServerStatus};
 use crate::storage::McpRepository;
+use handbox_mcp::{
+    validate_server_config, ConnectionConfig, McpClient, McpClientError, McpPrompt,
+    McpPromptArgument, McpResource, McpTool, ProcessConfig, SseConfig, StreamableHttpConfig,
+};
 
 /// Service orchestrating MCP server lifecycle and metadata
 #[derive(Clone)]
@@ -119,7 +119,7 @@ impl McpService {
         }
         if let Some(command) = request.command.take() {
             // 只有 stdio 连接类型才需要验证 command 不为空
-            if existing.connection_type == crate::models::McpConnectionType::Stdio
+            if existing.connection_type == crate::storage::types::McpConnectionType::Stdio
                 && command.is_empty()
             {
                 return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
@@ -150,12 +150,13 @@ impl McpService {
 
         // 更新完字段后，验证配置的完整性
         match existing.connection_type {
-            crate::models::McpConnectionType::Stdio => {
+            crate::storage::types::McpConnectionType::Stdio => {
                 if existing.command.trim().is_empty() {
                     return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
                 }
             }
-            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+            crate::storage::types::McpConnectionType::Sse
+            | crate::storage::types::McpConnectionType::Http => {
                 if let Some(ref endpoint) = existing.endpoint {
                     if endpoint.trim().is_empty() {
                         return Err(AppError::validation_error(
@@ -281,10 +282,7 @@ impl McpService {
     /// Update server status and metadata based on connection type
     ///
     /// Returns Ok if connection succeeds, Err if connection fails
-    async fn update_server_status(
-        &self,
-        server: &mut McpServer,
-    ) -> Result<(), crate::mcp_client::McpClientError> {
+    async fn update_server_status(&self, server: &mut McpServer) -> Result<(), McpClientError> {
         // All connection types now work the same way - try to connect and fetch metadata
         match self.fetch_server_metadata(server).await {
             Ok((tools, prompts, resources)) => {
@@ -315,7 +313,7 @@ impl McpService {
                 server.status = McpServerStatus::Error;
 
                 // 创建详细的错误信息
-                use crate::models::McpErrorDetail;
+                use handbox_mcp::McpErrorDetail;
 
                 // 直接从 McpClientError 提取信息
                 server.last_error = Some(McpErrorDetail {
@@ -336,12 +334,13 @@ impl McpService {
 
         // 根据连接类型验证必填字段
         match request.connection_type {
-            crate::models::McpConnectionType::Stdio => {
+            crate::storage::types::McpConnectionType::Stdio => {
                 if request.command.trim().is_empty() {
                     return Err(AppError::validation_error("stdio 连接类型需要命令不能为空"));
                 }
             }
-            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+            crate::storage::types::McpConnectionType::Sse
+            | crate::storage::types::McpConnectionType::Http => {
                 if let Some(ref endpoint) = request.endpoint {
                     if endpoint.trim().is_empty() {
                         return Err(AppError::validation_error(
@@ -441,8 +440,7 @@ impl McpService {
     async fn fetch_server_metadata(
         &self,
         server: &McpServer,
-    ) -> Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>), crate::mcp_client::McpClientError>
-    {
+    ) -> Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>), McpClientError> {
         let client = Self::connect_client(server).await?;
 
         // Fetch all metadata concurrently
@@ -465,9 +463,9 @@ impl McpService {
         // Handle prompts - ignore "Method not found" error (-32601)
         let prompts = match prompts_result {
             Ok(p) => Self::convert_prompts(p),
-            Err(crate::mcp_client::McpClientError::Service(
-                rmcp::service::ServiceError::McpError(ref error),
-            )) if error.code.0 == -32601 => {
+            Err(McpClientError::Service(rmcp::service::ServiceError::McpError(ref error)))
+                if error.code.0 == -32601 =>
+            {
                 tracing::debug!(
                     "list_prompts not supported by server {}, ignoring",
                     server.name
@@ -480,9 +478,9 @@ impl McpService {
         // Handle resources - ignore "Method not found" error (-32601)
         let resources = match resources_result {
             Ok(r) => Self::convert_resources(r),
-            Err(crate::mcp_client::McpClientError::Service(
-                rmcp::service::ServiceError::McpError(ref error),
-            )) if error.code.0 == -32601 => {
+            Err(McpClientError::Service(rmcp::service::ServiceError::McpError(ref error)))
+                if error.code.0 == -32601 =>
+            {
                 tracing::debug!(
                     "list_resources not supported by server {}, ignoring",
                     server.name
@@ -505,7 +503,7 @@ impl McpService {
                     .arguments
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|a| crate::models::McpPromptArgument {
+                    .map(|a| McpPromptArgument {
                         name: a.name.to_string(),
                         description: a.description.map(|d| d.to_string()),
                         required: a.required,
@@ -539,13 +537,12 @@ impl McpService {
             .collect()
     }
 
-    async fn connect_client(
-        server: &McpServer,
-    ) -> Result<McpClient, crate::mcp_client::McpClientError> {
+    async fn connect_client(server: &McpServer) -> Result<McpClient, McpClientError> {
         if !server.enabled {
-            return Err(crate::mcp_client::McpClientError::TransportCreation(
-                format!("MCP server '{}' is not enabled", server.name),
-            ));
+            return Err(McpClientError::TransportCreation(format!(
+                "MCP server '{}' is not enabled",
+                server.name
+            )));
         }
 
         Self::validate_server_configuration(server)?;
@@ -554,35 +551,32 @@ impl McpService {
         McpClient::connect(config).await
     }
 
-    fn validate_server_configuration(
-        server: &McpServer,
-    ) -> Result<(), crate::mcp_client::McpClientError> {
+    fn validate_server_configuration(server: &McpServer) -> Result<(), McpClientError> {
         match server.connection_type {
-            crate::models::McpConnectionType::Stdio => {
+            crate::storage::types::McpConnectionType::Stdio => {
                 validate_server_config(&server.command, &server.working_dir, &server.env).map_err(
                     |e| {
-                        crate::mcp_client::McpClientError::TransportCreation(format!(
+                        McpClientError::TransportCreation(format!(
                             "Invalid stdio configuration for MCP server '{}': {}",
                             server.name, e
                         ))
                     },
                 )?;
             }
-            crate::models::McpConnectionType::Sse | crate::models::McpConnectionType::Http => {
+            crate::storage::types::McpConnectionType::Sse
+            | crate::storage::types::McpConnectionType::Http => {
                 let endpoint = server.endpoint.as_ref().ok_or_else(|| {
-                    crate::mcp_client::McpClientError::TransportCreation(format!(
+                    McpClientError::TransportCreation(format!(
                         "Endpoint is required for {}",
                         server.connection_type
                     ))
                 })?;
 
                 if endpoint.trim().is_empty() {
-                    return Err(crate::mcp_client::McpClientError::TransportCreation(
-                        format!(
-                            "Endpoint is required for {} connection type",
-                            server.connection_type.as_str()
-                        ),
-                    ));
+                    return Err(McpClientError::TransportCreation(format!(
+                        "Endpoint is required for {} connection type",
+                        server.connection_type.as_str()
+                    )));
                 }
             }
         }
@@ -590,11 +584,9 @@ impl McpService {
         Ok(())
     }
 
-    fn build_connection_config(
-        server: &McpServer,
-    ) -> Result<ConnectionConfig, crate::mcp_client::McpClientError> {
+    fn build_connection_config(server: &McpServer) -> Result<ConnectionConfig, McpClientError> {
         match server.connection_type {
-            crate::models::McpConnectionType::Stdio => {
+            crate::storage::types::McpConnectionType::Stdio => {
                 let mut config = ProcessConfig::new(&server.command)
                     .with_args(server.args.clone())
                     .with_env(server.env.clone());
@@ -605,9 +597,9 @@ impl McpService {
 
                 Ok(ConnectionConfig::Process(config))
             }
-            crate::models::McpConnectionType::Sse => {
+            crate::storage::types::McpConnectionType::Sse => {
                 let endpoint = server.endpoint.as_ref().ok_or_else(|| {
-                    crate::mcp_client::McpClientError::TransportCreation(
+                    McpClientError::TransportCreation(
                         "Endpoint is required for SSE connection".to_string(),
                     )
                 })?;
@@ -621,9 +613,9 @@ impl McpService {
 
                 Ok(ConnectionConfig::Sse(config))
             }
-            crate::models::McpConnectionType::Http => {
+            crate::storage::types::McpConnectionType::Http => {
                 let endpoint = server.endpoint.as_ref().ok_or_else(|| {
-                    crate::mcp_client::McpClientError::TransportCreation(
+                    McpClientError::TransportCreation(
                         "Endpoint is required for HTTP connection".to_string(),
                     )
                 })?;
@@ -687,7 +679,7 @@ impl McpService {
         server: &McpServer,
         tool_name: &str,
         arguments: Option<serde_json::Value>,
-    ) -> Result<rmcp::model::CallToolResult, crate::mcp_client::McpClientError> {
+    ) -> Result<rmcp::model::CallToolResult, McpClientError> {
         let client = Self::connect_client(server).await?;
 
         let call_result = client.call_tool(tool_name, arguments).await;

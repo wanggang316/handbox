@@ -3,65 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::llm_client::types::{LlmMessage, LlmMessageRole, LlmToolCall};
-use crate::models::chat::{Timestamp, UUID};
-
-/// 消息附件
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageAttachment {
-    pub id: UUID,
-    pub name: String,
-    pub mime_type: String,
-    pub size: i64,
-    pub path: String,
-}
-
-/// 消息配置 - 每条消息可以有独立的配置参数
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageConfig {
-    pub temperature: Option<f32>,
-    pub top_p: Option<f32>,
-    pub max_tokens: Option<i32>,
-    pub stream: Option<bool>,
-    pub model_id: Option<String>,
-    pub provider_id: Option<String>,
-    pub system_prompt: Option<String>,
-    pub mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
-    /// 对话回合数 - 用于限制上下文中包含的历史对话轮数
-    pub turn_count: Option<i32>,
-}
-
-/// 消息实体
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Message {
-    pub id: UUID,
-    pub chat_id: UUID,
-    pub role: LlmMessageRole,
-    pub content: String,
-    pub reasoning: Option<String>,
-    pub tool_calls: Option<Vec<LlmToolCall>>,
-    pub turn_id: Option<i32>,
-    pub tool_call_id: Option<String>, // 用于 Tool 角色消息，关联对应的工具调用
-
-    // Per-message configuration stored as JSON
-    pub config: Option<MessageConfig>,
-
-    pub attachments: Option<Vec<MessageAttachment>>,
-
-    // Usage and timing information
-    pub input_tokens: Option<i32>,
-    pub output_tokens: Option<i32>,
-    pub total_tokens: Option<i32>,
-    pub start_time: Option<Timestamp>,
-    pub end_time: Option<Timestamp>,
-    pub duration: Option<i64>,
-
-    pub created_at: Timestamp,
-    pub updated_at: Timestamp,
-}
+use crate::storage::types::UUID;
+use handbox_llm::types::{LlmMessage, LlmToolCall};
 
 /// 消息请求附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +23,24 @@ pub struct MessageRequest {
     pub messages: Vec<LlmMessage>,
     pub temp_user_message_id: Option<String>,
     pub attachments: Option<Vec<MessageRequestAttachment>>,
+}
+
+/// 用户消息流式发送请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserMessageSendRequest {
+    pub chat_id: UUID,
+    pub content: String,
+    pub temp_user_message_id: String,
+    pub attachments: Option<Vec<MessageRequestAttachment>>,
+}
+
+/// 流式消息块
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamChunk {
+    pub stream_id: String,
+    pub content: String,
+    pub reasoning: Option<String>,
+    pub tool_calls: Option<Vec<LlmToolCall>>,
 }
 
 /// 消息响应
@@ -141,98 +102,4 @@ pub enum MessageStreamEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn message_roundtrip_preserves_fields() {
-        let message = Message {
-            id: "msg_123".to_string(),
-            chat_id: "chat_456".to_string(),
-            role: LlmMessageRole::User,
-            content: "Hello, world!".to_string(),
-            reasoning: None,
-            config: None,
-            attachments: None,
-            tool_calls: None,
-            turn_id: Some(1),
-            tool_call_id: None,
-            input_tokens: Some(10),
-            output_tokens: Some(20),
-            total_tokens: Some(30),
-            start_time: Some(1000),
-            end_time: Some(2000),
-            duration: Some(1000),
-            created_at: 1000,
-            updated_at: 2000,
-        };
-
-        let json = serde_json::to_string(&message).expect("serialize message");
-        let deserialized: Message = serde_json::from_str(&json).expect("deserialize message");
-
-        assert_eq!(message.id, deserialized.id);
-        assert_eq!(message.chat_id, deserialized.chat_id);
-        assert_eq!(message.content, deserialized.content);
-    }
-
-    #[test]
-    fn message_with_attachments_roundtrip() {
-        let attachment = MessageAttachment {
-            id: "att_123".to_string(),
-            name: "test.txt".to_string(),
-            mime_type: "text/plain".to_string(),
-            size: 1024,
-            path: "/tmp/test.txt".to_string(),
-        };
-
-        let message = Message {
-            id: "msg_123".to_string(),
-            chat_id: "chat_456".to_string(),
-            role: LlmMessageRole::User,
-            content: "Here's a file".to_string(),
-            reasoning: None,
-            config: None,
-            tool_calls: None,
-            turn_id: None,
-            tool_call_id: None,
-            attachments: Some(vec![attachment]),
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            start_time: None,
-            end_time: None,
-            duration: None,
-            created_at: 1000,
-            updated_at: 1000,
-        };
-
-        let json = serde_json::to_string(&message).expect("serialize");
-        let deserialized: Message = serde_json::from_str(&json).expect("deserialize");
-
-        assert_eq!(deserialized.attachments.unwrap().len(), 1);
-    }
-
-    #[test]
-    fn message_config_serialization_roundtrip() {
-        let config = MessageConfig {
-            temperature: Some(0.8),
-            top_p: Some(0.9),
-            max_tokens: Some(1000),
-            stream: Some(true),
-            model_id: Some("gpt-4".to_string()),
-            provider_id: Some("openai".to_string()),
-            system_prompt: Some("You are a helpful assistant".to_string()),
-            mcp_servers: Some(vec![crate::models::McpServerConfig {
-                server_id: "server1".to_string(),
-                execution_mode: "auto".to_string(),
-                enabled_tools: vec!["tool1".to_string()],
-            }]),
-            turn_count: Some(5),
-        };
-
-        let json = serde_json::to_string(&config).expect("serialize config");
-        let deserialized: MessageConfig = serde_json::from_str(&json).expect("deserialize config");
-
-        assert_eq!(config.temperature, deserialized.temperature);
-        assert_eq!(config.model_id, deserialized.model_id);
-        assert_eq!(config.turn_count, deserialized.turn_count);
-    }
 }

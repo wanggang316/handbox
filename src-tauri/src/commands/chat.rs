@@ -1,7 +1,8 @@
 // 聊天相关 IPC 命令
 
-use crate::models::{AppError, Chat, UUID};
+use crate::models::AppError;
 use crate::services::ChatService;
+use crate::storage::types::{Chat, UUID};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -21,7 +22,7 @@ pub async fn chat_create(
     model_id: Option<String>,
     provider_id: Option<String>,
     system_prompt: Option<String>,
-    mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
+    mcp_servers: Option<Vec<crate::storage::types::McpServerConfig>>,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
     chat_service
@@ -70,7 +71,7 @@ pub async fn chat_update(
     model_id: Option<String>,
     provider_id: Option<String>,
     system_prompt: Option<String>,
-    mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
+    mcp_servers: Option<Vec<crate::storage::types::McpServerConfig>>,
     turn_count: Option<i32>,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {

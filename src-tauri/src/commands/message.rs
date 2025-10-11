@@ -1,8 +1,9 @@
 // 消息相关 IPC 命令
 
-use crate::llm_client::types::LlmToolCall;
-use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
-use crate::services::{message::StreamChunk, MessageService};
+use crate::models::{AppError, MessageResponse, StreamChunk, UserMessageSendRequest};
+use crate::services::MessageService;
+use crate::storage::types::{Message, UUID};
+use handbox_llm::types::LlmToolCall;
 use serde_json::json;
 use std::collections::HashMap;
 use tauri::{Emitter, State, Window};
@@ -168,12 +169,12 @@ fn create_user_message_saved_callback(
 
 /// 发送聊天消息
 #[tauri::command]
-pub async fn message_send(
-    request: MessageRequest,
+pub async fn message_user_send(
+    request: UserMessageSendRequest,
     message_service: State<'_, MessageService>,
 ) -> Result<MessageResponse, AppError> {
     tracing::info!("[message_send] IPC command called");
-    match message_service.send_message(request).await {
+    match message_service.send_user_message(request).await {
         Ok(response) => {
             tracing::info!("[message_send] Command completed successfully");
             Ok(response)
@@ -279,7 +280,7 @@ pub async fn message_delete(
 
 /// 流式重新生成助手消息
 #[tauri::command]
-pub async fn message_regenerate_stream(
+pub async fn message_assistant_regenerate_stream(
     message_id: UUID,
     window: Window,
     message_service: State<'_, MessageService>,
@@ -313,7 +314,7 @@ pub async fn message_regenerate_stream(
 
         // 调用服务方法
         service_clone
-            .regenerate_message_stream(
+            .regenerate_assistant_message_stream(
                 message_id_clone,
                 start_callback,
                 streaming_callback,
@@ -330,7 +331,7 @@ pub async fn message_regenerate_stream(
 
 /// 流式重发用户消息
 #[tauri::command]
-pub async fn message_resend_stream(
+pub async fn message_user_resend_stream(
     message_id: UUID,
     window: Window,
     message_service: State<'_, MessageService>,
@@ -364,7 +365,7 @@ pub async fn message_resend_stream(
 
         // 调用服务方法
         service_clone
-            .resend_message_stream(
+            .resend_user_message_stream(
                 message_id_clone,
                 start_callback,
                 streaming_callback,
@@ -381,8 +382,8 @@ pub async fn message_resend_stream(
 
 /// 发送流式消息
 #[tauri::command]
-pub async fn message_send_stream(
-    request: MessageRequest,
+pub async fn message_user_send_stream(
+    request: UserMessageSendRequest,
     window: Window,
     message_service: State<'_, MessageService>,
 ) -> Result<(), AppError> {
@@ -411,7 +412,7 @@ pub async fn message_send_stream(
 
         // 调用真实的流式API
         service_clone
-            .send_message_stream(
+            .send_user_message_stream(
                 request_clone,
                 start_callback,
                 streaming_callback,

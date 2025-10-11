@@ -1,11 +1,11 @@
 // 供应商相关 IPC 命令
 
 use crate::models::{
-    AddProviderRequest, AppError, ListModelsRequest, ListModelsResponse, Model, Provider,
-    ProviderWithModels, ToggleModelFavoriteRequest, ToggleModelRequest, ToggleProviderRequest,
-    UUID,
+    AddProviderRequest, AppError, ListModelsRequest, ListModelsResponse,
+    ToggleModelFavoriteRequest, ToggleModelRequest, ToggleProviderRequest,
 };
 use crate::services::ProviderService;
+use crate::storage::types::{Model, Provider, ProviderWithModels, UUID};
 use tauri::State;
 
 /// 获取供应商列表

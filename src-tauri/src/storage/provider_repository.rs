@@ -1,6 +1,7 @@
 // Provider 数据访问层 - 使用普通查询避免 sqlx 宏问题
 
-use crate::models::{AppError, Model, Provider, ProviderWithModels};
+use crate::models::AppError;
+use crate::storage::types::{Model, Provider, ProviderWithModels};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;

@@ -1,10 +1,11 @@
 // MCP management IPC commands
 
 use crate::models::{
-    AppError, CreateMcpServerRequest, McpServer, RefreshMcpServerRequest, ToggleMcpServerRequest,
+    AppError, CreateMcpServerRequest, RefreshMcpServerRequest, ToggleMcpServerRequest,
     UpdateMcpServerRequest, UpdateToolEnabledRequest,
 };
 use crate::services::McpService;
+use crate::storage::types::McpServer;
 use tauri::State;
 
 /// 获取 MCP 服务器列表

@@ -29,14 +29,15 @@ mod error;
 mod process;
 mod sse;
 mod streamable_http;
-mod types;
+pub mod types;
 mod utils;
 
 // Re-export the main interfaces
 pub use client::McpClient;
 pub use error::{McpClientError, McpClientResult};
 pub use types::{
-    ClientStats, ConnectionConfig, ConnectionStatus, ProcessConfig, SseConfig, StreamableHttpConfig,
+    ClientStats, ConnectionConfig, ConnectionStatus, McpErrorDetail, McpPrompt, McpPromptArgument,
+    McpResource, McpTool, ProcessConfig, SseConfig, StreamableHttpConfig,
 };
 
 // Re-export utilities that might be useful for advanced users

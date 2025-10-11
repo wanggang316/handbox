@@ -3,7 +3,14 @@ use serde_json::Value;
 use std::fmt;
 use std::str::FromStr;
 
-use crate::models::AppError;
+use crate::error::LlmClientError;
+
+/// Minimal provider context required by the LLM client layer.
+#[derive(Debug, Clone)]
+pub struct LlmProvider {
+    pub base_url: String,
+    pub api_key: String,
+}
 
 /// 通用-消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +106,7 @@ impl std::fmt::Display for LlmMessageRole {
 }
 
 impl std::str::FromStr for LlmMessageRole {
-    type Err = AppError;
+    type Err = LlmClientError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -107,7 +114,7 @@ impl std::str::FromStr for LlmMessageRole {
             "user" => Ok(LlmMessageRole::User),
             "assistant" => Ok(LlmMessageRole::Assistant),
             "tool" => Ok(LlmMessageRole::Tool),
-            _ => Err(AppError::validation_error(&format!("Invalid role: {}", s))),
+            _ => Err(LlmClientError::validation(format!("Invalid role: {}", s))),
         }
     }
 }
@@ -241,6 +248,8 @@ pub enum LlmModelFeature {
     Vision,
     #[serde(rename = "streaming")]
     Streaming,
+    #[serde(rename = "reasoning")]
+    Reasoning,
 }
 
 #[derive(Debug, Clone)]
@@ -280,7 +289,7 @@ impl fmt::Display for LlmApiType {
 }
 
 impl FromStr for LlmApiType {
-    type Err = AppError;
+    type Err = LlmClientError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
@@ -288,7 +297,7 @@ impl FromStr for LlmApiType {
             "openai-responses" => Ok(LlmApiType::OpenAIResponses),
             "google" => Ok(LlmApiType::Google),
             "anthropic" => Ok(LlmApiType::Anthropic),
-            other => Err(AppError::validation_error(&format!(
+            other => Err(LlmClientError::validation(format!(
                 "Unsupported chat API type: {}",
                 other
             ))),
@@ -297,7 +306,7 @@ impl FromStr for LlmApiType {
 }
 
 impl TryFrom<&str> for LlmApiType {
-    type Error = AppError;
+    type Error = LlmClientError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         LlmApiType::from_str(value)
@@ -333,7 +342,7 @@ impl fmt::Display for LlmModelApiType {
 }
 
 impl FromStr for LlmModelApiType {
-    type Err = AppError;
+    type Err = LlmClientError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
@@ -342,7 +351,7 @@ impl FromStr for LlmModelApiType {
             "google" => Ok(LlmModelApiType::Google),
             "anthropic" => Ok(LlmModelApiType::Anthropic),
             "openrouter" => Ok(LlmModelApiType::OpenRouter),
-            other => Err(AppError::validation_error(&format!(
+            other => Err(LlmClientError::validation(format!(
                 "Unsupported model API type: {}",
                 other
             ))),
@@ -351,7 +360,7 @@ impl FromStr for LlmModelApiType {
 }
 
 impl TryFrom<&str> for LlmModelApiType {
-    type Error = AppError;
+    type Error = LlmClientError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         LlmModelApiType::from_str(value)

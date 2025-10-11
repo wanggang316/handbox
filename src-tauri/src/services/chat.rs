@@ -1,10 +1,12 @@
 // 聊天服务实现
 
-use crate::llm_client::create_llm_client;
-use crate::llm_client::types::{LlmMessage, LlmMessageRole, LlmRequest};
-use crate::models::{AppError, Chat, UUID};
+use crate::models::AppError;
 use crate::services::{Database, ProviderService};
+use crate::storage::types::{Chat, McpServerConfig, Provider, UUID};
 use crate::storage::{ChatRepository, MessageRepository};
+use handbox_llm::config::LlmConfigProvider;
+use handbox_llm::types::{LlmMessage, LlmMessageRole, LlmRequest};
+use handbox_llm::{create_llm_client, LlmProvider};
 use std::sync::Arc;
 
 /// 聊天服务
@@ -13,14 +15,27 @@ pub struct ChatService {
     repository: ChatRepository,
     message_repository: MessageRepository,
     provider_service: Arc<ProviderService>,
+    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl ChatService {
-    pub fn new(db: Arc<Database>, provider_service: Arc<ProviderService>) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        provider_service: Arc<ProviderService>,
+        llm_config: Arc<dyn LlmConfigProvider>,
+    ) -> Self {
         Self {
             repository: ChatRepository::new(db.clone()),
             message_repository: MessageRepository::new(db),
             provider_service,
+            llm_config,
+        }
+    }
+
+    fn provider_context(provider: &Provider) -> LlmProvider {
+        LlmProvider {
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
         }
     }
 
@@ -35,7 +50,7 @@ impl ChatService {
         model_id: Option<String>,
         provider_id: Option<String>,
         system_prompt: Option<String>,
-        mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
+        mcp_servers: Option<Vec<McpServerConfig>>,
     ) -> Result<Chat, AppError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -97,7 +112,7 @@ impl ChatService {
         model_id: Option<String>,
         provider_id: Option<String>,
         system_prompt: Option<String>,
-        mcp_servers: Option<Vec<crate::models::McpServerConfig>>,
+        mcp_servers: Option<Vec<McpServerConfig>>,
         turn_count: Option<i32>,
     ) -> Result<Chat, AppError> {
         let now = std::time::SystemTime::now()
@@ -198,13 +213,18 @@ impl ChatService {
         let provider = self.provider_service.get_provider(&provider_id).await?;
 
         // 8. 创建LLM客户端
-        let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
-            let error = format!(
-                "Failed to create LLM client for provider type {}: {}",
-                provider.provider_type, e
+        let llm_client = create_llm_client(
+            &provider.provider_type,
+            Arc::clone(&self.llm_config),
+        )
+        .map_err(|e| {
+            let error: AppError = e.into();
+            tracing::error!(
+                "[ChatService::generate_title] Failed to create LLM client for provider type {}: {}",
+                provider.provider_type,
+                error.message
             );
-            tracing::error!("[ChatService::generate_title] {}", error);
-            AppError::internal_error(&error)
+            error
         })?;
 
         // 9. 构建API请求
@@ -226,11 +246,19 @@ impl ChatService {
         };
 
         // 10. 调用LLM API
-        let response = llm_client.chat(&provider, api_request).await.map_err(|e| {
-            let error = format!("Failed to call LLM API: {}", e);
-            tracing::error!("[ChatService::generate_title] {}", error);
-            AppError::internal_error(&error)
-        })?;
+        let provider_context = ChatService::provider_context(&provider);
+        let response = llm_client
+            .chat(&provider_context, api_request)
+            .await
+            .map_err(|e| {
+                let error: AppError = e.into();
+                tracing::error!(
+                    "[ChatService::generate_title] Failed to call LLM API for provider {}: {}",
+                    provider.provider_type,
+                    error.message
+                );
+                error
+            })?;
 
         // 11. 提取并清理标题
         let generated_title = if let Some(choice) = response.choices.first() {
@@ -266,6 +294,7 @@ impl ChatService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::llm_config::LlmConfig;
     use crate::models::ModelParameters;
     use crate::services::ProviderService;
     use crate::storage::Database;
@@ -285,15 +314,25 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let _service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let _service = ChatService::new(db, provider_service, llm_config_provider);
     }
 
     #[tokio::test]
     async fn creates_chat_with_all_fields() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let chat = service
             .create_chat(
@@ -305,7 +344,7 @@ mod tests {
                 Some("gpt-4o".to_string()),
                 Some("openai".to_string()),
                 Some("System prompt".to_string()),
-                Some(vec![crate::models::McpServerConfig {
+                Some(vec![McpServerConfig {
                     server_id: "server1".to_string(),
                     execution_mode: "auto".to_string(),
                     enabled_tools: vec!["tool1".to_string()],
@@ -324,7 +363,7 @@ mod tests {
         assert_eq!(chat.system_prompt, Some("System prompt".to_string()));
         assert_eq!(
             chat.mcp_servers,
-            vec![crate::models::McpServerConfig {
+            vec![McpServerConfig {
                 server_id: "server1".to_string(),
                 execution_mode: "auto".to_string(),
                 enabled_tools: vec!["tool1".to_string()],
@@ -337,8 +376,13 @@ mod tests {
     #[tokio::test]
     async fn lists_chats_sorted_by_updated_at() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         service
             .create_chat(
@@ -385,8 +429,13 @@ mod tests {
     #[tokio::test]
     async fn fetches_chat_by_id() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -415,8 +464,13 @@ mod tests {
     #[tokio::test]
     async fn get_chat_returns_not_found_error() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let err = service
             .get_chat("nonexistent_chat".to_string())
@@ -429,8 +483,13 @@ mod tests {
     #[tokio::test]
     async fn updates_existing_chat() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -459,12 +518,12 @@ mod tests {
                 Some("anthropic".to_string()),
                 Some("Updated prompt".to_string()),
                 Some(vec![
-                    crate::models::McpServerConfig {
+                    McpServerConfig {
                         server_id: "server1".to_string(),
                         execution_mode: "auto".to_string(),
                         enabled_tools: vec!["tool1".to_string(), "tool2".to_string()],
                     },
-                    crate::models::McpServerConfig {
+                    McpServerConfig {
                         server_id: "server2".to_string(),
                         execution_mode: "manual".to_string(),
                         enabled_tools: vec!["tool3".to_string()],
@@ -486,12 +545,12 @@ mod tests {
         assert_eq!(
             updated.mcp_servers,
             vec![
-                crate::models::McpServerConfig {
+                McpServerConfig {
                     server_id: "server1".to_string(),
                     execution_mode: "auto".to_string(),
                     enabled_tools: vec!["tool1".to_string(), "tool2".to_string()],
                 },
-                crate::models::McpServerConfig {
+                McpServerConfig {
                     server_id: "server2".to_string(),
                     execution_mode: "manual".to_string(),
                     enabled_tools: vec!["tool3".to_string()],
@@ -503,8 +562,13 @@ mod tests {
     #[tokio::test]
     async fn delete_chat_removes_record() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -537,8 +601,13 @@ mod tests {
     #[tokio::test]
     async fn generate_title_requires_messages() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let chat = service
             .create_chat(

@@ -5,6 +5,7 @@ pub mod database;
 pub mod mcp_repository;
 pub mod message_repository;
 pub mod provider_repository;
+pub mod types;
 
 pub use chat_repository::ChatRepository;
 pub use database::Database;

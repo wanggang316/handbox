@@ -102,8 +102,10 @@ export interface MessageRequest {
 }
 
 // 简化的发送消息请求
-export interface SendMessageRequest {
+export interface UserMessageSendRequest {
+  chatId: UUID;
   content: string;
+  tempUserMessageId: string;
   attachments?: ChatAttachment[];
 }
 

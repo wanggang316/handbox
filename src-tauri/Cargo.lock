@@ -1642,6 +1642,8 @@ dependencies = [
  "futures",
  "futures-util",
  "google-genai-rust",
+ "handbox-llm",
+ "handbox-mcp",
  "openai-rust",
  "rand 0.8.5",
  "reqwest",
@@ -1660,6 +1662,44 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "handbox-llm"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "chrono",
+ "futures",
+ "futures-util",
+ "google-genai-rust",
+ "openai-rust",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "handbox-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "shlex",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

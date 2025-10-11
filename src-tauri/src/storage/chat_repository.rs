@@ -1,6 +1,7 @@
 // Chat 数据访问层
 
-use crate::models::{AppError, Chat, UUID};
+use crate::models::AppError;
+use crate::storage::types::{Chat, UUID};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
@@ -171,7 +172,7 @@ impl ChatRepository {
 
     // 辅助方法：将数据库行转换为 Chat
     fn row_to_chat(&self, row: sqlx::sqlite::SqliteRow) -> Result<Chat, AppError> {
-        use crate::models::McpServerConfig;
+        use crate::storage::types::McpServerConfig;
 
         let mcp_servers_json: Option<String> = row.try_get("mcp_servers")?;
         let mcp_servers: Vec<McpServerConfig> = if let Some(json) = mcp_servers_json {
@@ -237,12 +238,12 @@ mod tests {
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a helpful assistant.".to_string()),
             mcp_servers: vec![
-                crate::models::McpServerConfig {
+                crate::storage::types::McpServerConfig {
                     server_id: "server1".to_string(),
                     execution_mode: "auto".to_string(),
                     enabled_tools: vec!["tool1".to_string()],
                 },
-                crate::models::McpServerConfig {
+                crate::storage::types::McpServerConfig {
                     server_id: "server2".to_string(),
                     execution_mode: "manual".to_string(),
                     enabled_tools: vec![],

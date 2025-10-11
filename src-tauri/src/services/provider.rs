@@ -1,11 +1,11 @@
 // 供应商服务实现
 
-use crate::llm_client::create_llm_client;
-use crate::models::{
-    AddProviderRequest, AppError, Model, Provider, ProviderWithModels, Timestamp, UUID,
-};
+use crate::models::{AddProviderRequest, AppError};
 use crate::services::Database;
+use crate::storage::types::{Model, ModelFeature, Provider, ProviderWithModels, Timestamp, UUID};
 use crate::storage::ProviderRepository;
+use handbox_llm::config::LlmConfigProvider;
+use handbox_llm::{create_llm_client, LlmModelFeature, LlmProvider, LlmStandardModel};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -14,13 +14,15 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ProviderService {
     repository: ProviderRepository,
+    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl ProviderService {
     /// 创建新的供应商服务实例
-    pub fn new(db: Arc<Database>) -> Self {
+    pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             repository: ProviderRepository::new(db),
+            llm_config,
         }
     }
 
@@ -33,6 +35,13 @@ impl ProviderService {
     /// 创建供应商
     pub async fn create_provider(&self, config: AddProviderRequest) -> Result<Provider, AppError> {
         self.create_provider_with_validation(config, true).await
+    }
+
+    fn provider_context(provider: &Provider) -> LlmProvider {
+        LlmProvider {
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
+        }
     }
 
     /// 创建供应商（可选择是否验证 API Key）
@@ -59,8 +68,10 @@ impl ProviderService {
                 provider.name
             );
             // 对于新供应商，直接获取模型用于验证，先不保存到数据库
-            let client = create_llm_client(&provider.provider_type)?;
-            match client.list_models(&provider).await {
+            let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
+                .map_err(AppError::from)?;
+            let context = ProviderService::provider_context(&provider);
+            match client.list_models(&context).await {
                 Ok(standard_models) => {
                     tracing::info!(
                         "API key validation successful, fetched {} models",
@@ -86,7 +97,8 @@ impl ProviderService {
                         provider.name
                     );
                 }
-                Err(e) => {
+                Err(err) => {
+                    let e: AppError = err.into();
                     tracing::warn!(
                         "Failed to validate API key for provider {}: {}",
                         provider.name,
@@ -168,8 +180,13 @@ impl ProviderService {
                 "Key configuration changed, validating API key for provider: {}",
                 updated_provider.name
             );
-            let client = create_llm_client(&updated_provider.provider_type)?;
-            match client.list_models(&updated_provider).await {
+            let client = create_llm_client(
+                &updated_provider.provider_type,
+                Arc::clone(&self.llm_config),
+            )
+            .map_err(AppError::from)?;
+            let context = ProviderService::provider_context(&updated_provider);
+            match client.list_models(&context).await {
                 Ok(standard_models) => {
                     tracing::info!(
                         "API key validation successful, fetched {} models",
@@ -197,7 +214,8 @@ impl ProviderService {
                         updated_provider.name
                     );
                 }
-                Err(e) => {
+                Err(err) => {
+                    let e: AppError = err.into();
                     tracing::warn!(
                         "Failed to validate API key for provider {}: {}",
                         updated_provider.name,
@@ -317,8 +335,10 @@ impl ProviderService {
         }
 
         // 使用新的客户端架构获取模型列表
-        let client = create_llm_client(&provider.provider_type)?;
-        let standard_models = client.list_models(&provider).await?;
+        let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
+            .map_err(AppError::from)?;
+        let context = ProviderService::provider_context(&provider);
+        let standard_models = client.list_models(&context).await.map_err(AppError::from)?;
 
         // 适配为我们的Model结构
         let now = self.current_timestamp();
@@ -392,33 +412,18 @@ impl ProviderService {
 }
 
 /// 将标准模型适配为应用内部的 `Model`
-fn adapt_model(
-    standard_model: crate::llm_client::LlmStandardModel,
-    provider_id: String,
-    now: i64,
-) -> Model {
+fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) -> Model {
     let supported_features = standard_model.supported_features.map(|features| {
         features
             .into_iter()
             .map(|feature| match feature {
-                crate::llm_client::LlmModelFeature::Chat => {
-                    crate::models::provider::ModelFeature::Text
-                }
-                crate::llm_client::LlmModelFeature::Vision => {
-                    crate::models::provider::ModelFeature::Vision
-                }
-                crate::llm_client::LlmModelFeature::FunctionCalling => {
-                    crate::models::provider::ModelFeature::FunctionCalling
-                }
-                crate::llm_client::LlmModelFeature::Completion => {
-                    crate::models::provider::ModelFeature::Text
-                }
-                crate::llm_client::LlmModelFeature::Embedding => {
-                    crate::models::provider::ModelFeature::Text
-                }
-                crate::llm_client::LlmModelFeature::Streaming => {
-                    crate::models::provider::ModelFeature::Streaming
-                }
+                LlmModelFeature::Chat => ModelFeature::Text,
+                LlmModelFeature::Vision => ModelFeature::Vision,
+                LlmModelFeature::FunctionCalling => ModelFeature::FunctionCalling,
+                LlmModelFeature::Completion => ModelFeature::Text,
+                LlmModelFeature::Embedding => ModelFeature::Text,
+                LlmModelFeature::Streaming => ModelFeature::Streaming,
+                LlmModelFeature::Reasoning => ModelFeature::Reasoning,
             })
             .collect()
     });
@@ -441,6 +446,7 @@ fn adapt_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::llm_config::LlmConfig;
     use crate::models::AddProviderRequest;
     use crate::storage::Database;
     use tempfile::tempdir;
@@ -449,7 +455,12 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let database = Database::new(&db_path).await.unwrap();
-        (ProviderService::new(Arc::new(database)), temp_dir)
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        (
+            ProviderService::new(Arc::new(database), llm_config_provider),
+            temp_dir,
+        )
     }
 
     #[tokio::test]

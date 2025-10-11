@@ -1,7 +1,11 @@
 // LLM 配置管理器
 // 从 llm_config.json 读取供应商和模型配置信息
 
-use crate::models::provider::ModelFeature;
+use crate::storage::types::ModelFeature;
+use handbox_llm::config::{
+    LlmConfigProvider, LlmModelExtraInfo as LlmClientModelExtraInfo, LlmProviderConfig,
+};
+use handbox_llm::types::{LlmApiType, LlmModelApiType, LlmModelFeature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -137,6 +141,66 @@ impl LlmConfig {
                 _ => None,
             })
             .collect()
+    }
+}
+
+fn map_model_feature(feature: ModelFeature) -> LlmModelFeature {
+    match feature {
+        ModelFeature::Text => LlmModelFeature::Chat,
+        ModelFeature::Vision => LlmModelFeature::Vision,
+        ModelFeature::FunctionCalling => LlmModelFeature::FunctionCalling,
+        ModelFeature::Streaming => LlmModelFeature::Streaming,
+        ModelFeature::Reasoning => LlmModelFeature::Reasoning,
+    }
+}
+
+fn to_llm_model_extra_info(
+    config: &LlmConfig,
+    extra_info: &ModelExtraInfo,
+) -> LlmClientModelExtraInfo {
+    let features = config
+        .convert_features(&extra_info.features)
+        .into_iter()
+        .map(map_model_feature)
+        .collect();
+
+    LlmClientModelExtraInfo {
+        name: extra_info.name.clone(),
+        context_length: extra_info.context_length,
+        input_cost_per_1k: extra_info.input_cost_per_1k,
+        output_cost_per_1k: extra_info.output_cost_per_1k,
+        features,
+    }
+}
+
+impl LlmConfigProvider for LlmConfig {
+    fn get_provider_config(&self, provider_type: &str) -> Option<LlmProviderConfig> {
+        self.get_provider_config(provider_type).and_then(|config| {
+            let chat_api_type = LlmApiType::try_from(config.chat_api_type.as_str()).ok()?;
+            let model_api_type = LlmModelApiType::try_from(config.model_api_type.as_str()).ok()?;
+
+            let model_local = config.model_local.as_ref().map(|map| {
+                map.iter()
+                    .map(|(model_id, info)| (model_id.clone(), to_llm_model_extra_info(self, info)))
+                    .collect()
+            });
+
+            Some(LlmProviderConfig {
+                provider_type: config.provider_type.clone(),
+                chat_api_type,
+                model_api_type,
+                model_local,
+            })
+        })
+    }
+
+    fn get_model_extra_info(
+        &self,
+        provider_type: &str,
+        model_id: &str,
+    ) -> Option<LlmClientModelExtraInfo> {
+        self.get_model_extra_info(provider_type, model_id)
+            .map(|info| to_llm_model_extra_info(self, info))
     }
 }
 

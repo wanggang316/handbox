@@ -1,10 +1,12 @@
-use crate::config::llm_config::get_global_llm_config;
-use crate::llm_client::chat::{self, ChatClient};
-use crate::llm_client::model::{create_model_client, ModelClient};
-use crate::llm_client::types::{
-    LlmApiType, LlmChunkResponse, LlmRequest, LlmResponse, LlmModelApiType, LlmStandardModel,
+use crate::chat::{self, ChatClient};
+use crate::config::LlmConfigProvider;
+use crate::error::LlmClientError;
+use crate::model::{create_model_client, ModelClient};
+use crate::types::{
+    LlmApiType, LlmChunkResponse, LlmModelApiType, LlmProvider, LlmRequest, LlmResponse,
+    LlmStandardModel,
 };
-use crate::models::{AppError, Provider};
+use std::sync::Arc;
 
 /// LLM 客户端入口 - 为外部调用提供统一接口
 pub struct LlmClient {
@@ -19,8 +21,9 @@ impl LlmClient {
         provider_type: String,
         model_api_type: LlmModelApiType,
         chat_api_type: LlmApiType,
-    ) -> Result<Self, AppError> {
-        let model_api_client = create_model_client(model_api_type)?;
+        config: Arc<dyn LlmConfigProvider>,
+    ) -> Result<Self, LlmClientError> {
+        let model_api_client = create_model_client(model_api_type, Arc::clone(&config))?;
         let chat_api_client = chat::create_chat_client(chat_api_type)?;
 
         Ok(Self {
@@ -45,24 +48,27 @@ impl LlmClient {
 
     pub async fn chat(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
-    ) -> Result<LlmResponse, AppError> {
+    ) -> Result<LlmResponse, LlmClientError> {
         self.chat_api_client.chat(provider, request).await
     }
 
     pub async fn chat_stream(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
-        AppError,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
+        LlmClientError,
     > {
         self.chat_api_client.chat_stream(provider, request).await
     }
 
-    pub async fn list_models(&self, provider: &Provider) -> Result<Vec<LlmStandardModel>, AppError> {
+    pub async fn list_models(
+        &self,
+        provider: &LlmProvider,
+    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
         self.model_api_client
             .list_models(provider, &self.provider_type)
             .await
@@ -78,26 +84,30 @@ impl LlmClient {
 }
 
 /// 工厂方法：直接创建聊天客户端，便于复用
-pub fn create_chat_client(api_type: LlmApiType) -> Result<Box<dyn ChatClient>, AppError> {
+pub fn create_chat_client(api_type: LlmApiType) -> Result<Box<dyn ChatClient>, LlmClientError> {
     chat::create_chat_client(api_type)
 }
 
 /// 工厂方法：从配置创建完整的 LLM 客户端
-pub fn create_llm_client(provider_type: &str) -> Result<LlmClient, AppError> {
-    let config = get_global_llm_config();
+pub fn create_llm_client(
+    provider_type: &str,
+    config: Arc<dyn LlmConfigProvider>,
+) -> Result<LlmClient, LlmClientError> {
     let provider_config = config.get_provider_config(provider_type).ok_or_else(|| {
-        AppError::validation_error(&format!("Unknown provider type: {}", provider_type))
+        LlmClientError::validation(format!("Unknown provider type: {}", provider_type))
     })?;
 
-    let model_api_type = LlmModelApiType::try_from(provider_config.model_api_type.as_str())?;
-    let chat_api_type = LlmApiType::try_from(provider_config.chat_api_type.as_str())?;
-
-    LlmClient::new(provider_type.to_string(), model_api_type, chat_api_type)
+    LlmClient::new(
+        provider_type.to_string(),
+        provider_config.model_api_type,
+        provider_config.chat_api_type,
+        config,
+    )
 }
 
 /// 非 fallible 的工厂方法，保留原有对外接口
-pub fn create_client(provider_type: &str) -> LlmClient {
-    match create_llm_client(provider_type) {
+pub fn create_client(provider_type: &str, config: Arc<dyn LlmConfigProvider>) -> LlmClient {
+    match create_llm_client(provider_type, config) {
         Ok(client) => client,
         Err(e) => {
             tracing::error!("Failed to create client for {}: {}", provider_type, e);
@@ -112,6 +122,35 @@ pub fn create_client(provider_type: &str) -> LlmClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{LlmModelExtraInfo, LlmProviderConfig};
+    use crate::types::LlmModelFeature;
+
+    struct TestConfigProvider;
+
+    impl LlmConfigProvider for TestConfigProvider {
+        fn get_provider_config(&self, provider_type: &str) -> Option<LlmProviderConfig> {
+            Some(LlmProviderConfig {
+                provider_type: provider_type.to_string(),
+                chat_api_type: LlmApiType::OpenAICompletions,
+                model_api_type: LlmModelApiType::OpenAI,
+                model_local: None,
+            })
+        }
+
+        fn get_model_extra_info(
+            &self,
+            _provider_type: &str,
+            _model_id: &str,
+        ) -> Option<LlmModelExtraInfo> {
+            Some(LlmModelExtraInfo {
+                name: "test".into(),
+                context_length: None,
+                input_cost_per_1k: None,
+                output_cost_per_1k: None,
+                features: vec![LlmModelFeature::Chat],
+            })
+        }
+    }
 
     #[test]
     fn test_llm_client_creation_with_enums() {
@@ -119,6 +158,7 @@ mod tests {
             "test".to_string(),
             LlmModelApiType::OpenAI,
             LlmApiType::OpenAICompletions,
+            Arc::new(TestConfigProvider),
         )
         .unwrap();
 
@@ -130,12 +170,8 @@ mod tests {
     fn test_llm_client_creation_with_custom_clients() {
         let client = LlmClient::with_clients(
             "custom".to_string(),
-            Box::new(
-                crate::llm_client::model::openai_adapter::OpenAIModelClient::new(),
-            ),
-            Box::new(
-                crate::llm_client::chat::openai_completions_adapter::OpenAICompletionsChatClient::new(),
-            ),
+            Box::new(crate::model::openai_adapter::OpenAIModelClient::new()),
+            Box::new(crate::chat::openai_completions_adapter::OpenAICompletionsChatClient::new()),
         );
 
         assert_eq!(client.provider_type(), "custom");
@@ -143,7 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_llm_client_from_config() {
-        match create_llm_client("openai") {
+        match create_llm_client("openai", Arc::new(TestConfigProvider)) {
             Ok(_client) => {
                 assert!(true);
             }

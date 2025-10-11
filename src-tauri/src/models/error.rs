@@ -106,9 +106,25 @@ impl From<sqlx::Error> for AppError {
 }
 
 // MCP client 错误转换
-impl From<crate::mcp_client::McpClientError> for AppError {
-    fn from(error: crate::mcp_client::McpClientError) -> Self {
+impl From<handbox_mcp::McpClientError> for AppError {
+    fn from(error: handbox_mcp::McpClientError) -> Self {
         Self::new("MCP_ERROR", &error.to_string())
+    }
+}
+
+// LLM client 错误转换
+impl From<handbox_llm::LlmClientError> for AppError {
+    fn from(error: handbox_llm::LlmClientError) -> Self {
+        use handbox_llm::LlmClientError;
+
+        match error {
+            LlmClientError::Validation(message) => Self::validation_error(&message),
+            LlmClientError::Configuration(message)
+            | LlmClientError::ClientInitialization(message)
+            | LlmClientError::Unexpected(message) => Self::internal_error(&message),
+            LlmClientError::Transport(message) => Self::network_error(&message),
+            LlmClientError::Api(message) => Self::internal_error(&message),
+        }
     }
 }
 

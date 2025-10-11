@@ -1,12 +1,12 @@
 // OpenAI Responses API 客户端
 // 使用 openai-rust SDK 进行通信
 
-use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{
+use crate::chat::ChatClient;
+use crate::error::LlmClientError;
+use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
-    LlmRequest, LlmResponse, LlmUsage,
+    LlmProvider, LlmRequest, LlmResponse, LlmUsage,
 };
-use crate::models::{AppError, Provider};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -101,7 +101,7 @@ impl OpenAIResponsesChatClient {
         &self,
         event: ResponseStreamEvent,
         state: &mut StreamState,
-    ) -> Option<Result<LlmChunkResponse, AppError>> {
+    ) -> Option<Result<LlmChunkResponse, LlmClientError>> {
         match event {
             ResponseStreamEvent::ResponseCreated { response, .. }
             | ResponseStreamEvent::ResponseInProgress { response, .. } => {
@@ -118,7 +118,7 @@ impl OpenAIResponsesChatClient {
                 let usage = response.usage.as_ref().map(map_usage_ref);
                 Some(Ok(state.finish_chunk(usage)))
             }
-            ResponseStreamEvent::Error { error } => Some(Err(AppError::internal_error(&format!(
+            ResponseStreamEvent::Error { error } => Some(Err(LlmClientError::api(format!(
                 "OpenAI Responses stream error: {} ({})",
                 error.message, error.code
             )))),
@@ -136,9 +136,9 @@ impl OpenAIResponsesChatClient {
 impl ChatClient for OpenAIResponsesChatClient {
     async fn chat(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
-    ) -> Result<LlmResponse, AppError> {
+    ) -> Result<LlmResponse, LlmClientError> {
         tracing::info!("Sending OpenAI-style response request using openai-rust library");
 
         let openai_client = openai_rust::client::Client::builder()
@@ -146,7 +146,9 @@ impl ChatClient for OpenAIResponsesChatClient {
             .base_url(provider.base_url.clone())
             .build()
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create OpenAI client: {e}"))
+                LlmClientError::client_initialization(format!(
+                    "Failed to create OpenAI client: {e}"
+                ))
             })?;
 
         let openai_request = self.convert_to_openai_response_request(&request);
@@ -167,11 +169,11 @@ impl ChatClient for OpenAIResponsesChatClient {
 
     async fn chat_stream(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         mut request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
-        AppError,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
+        LlmClientError,
     > {
         request.stream = Some(true);
 
@@ -182,7 +184,9 @@ impl ChatClient for OpenAIResponsesChatClient {
             .base_url(provider.base_url.clone())
             .build()
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create OpenAI client: {e}"))
+                LlmClientError::client_initialization(format!(
+                    "Failed to create OpenAI client: {e}"
+                ))
             })?;
 
         let openai_request = self.convert_to_openai_response_request(&request);
@@ -192,7 +196,7 @@ impl ChatClient for OpenAIResponsesChatClient {
             serde_json::to_string_pretty(&openai_request).unwrap_or_default()
         );
 
-        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, AppError>>(100);
+        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, LlmClientError>>(100);
         let model_name = request.model.clone();
         let handler = OpenAIResponsesChatClient::new();
 
@@ -254,7 +258,7 @@ impl ChatClient for OpenAIResponsesChatClient {
 
         Ok(Box::new(Box::pin(response_stream))
             as Box<
-                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin,
             >)
     }
 
@@ -342,14 +346,14 @@ fn map_usage_ref(usage: &ResponseUsage) -> LlmUsage {
     map_usage(usage.clone())
 }
 
-fn map_openai_error(context: &str, error: OpenAIError) -> AppError {
+fn map_openai_error(context: &str, error: OpenAIError) -> LlmClientError {
     match error {
         OpenAIError::ApiError(body) => {
             let message = provider_error_message(&body).unwrap_or(body);
-            AppError::internal_error(&format!("{context}: {message}"))
+            LlmClientError::api(format!("{context}: {message}"))
         }
-        OpenAIError::Reqwest(err) => AppError::internal_error(&format!("{context}: {err}")),
-        OpenAIError::JsonParser(err) => AppError::internal_error(&format!("{context}: {err}")),
+        OpenAIError::Reqwest(err) => LlmClientError::transport(format!("{context}: {err}")),
+        OpenAIError::JsonParser(err) => LlmClientError::unexpected(format!("{context}: {err}")),
     }
 }
 

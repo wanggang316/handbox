@@ -1,9 +1,10 @@
 // Message 数据访问层
 
-use crate::llm_client::types::LlmMessageRole;
-use crate::llm_client::LlmToolCall;
-use crate::models::{AppError, Message, MessageConfig, Timestamp, UUID};
+use crate::models::AppError;
+use crate::storage::types::{Message, MessageConfig, Timestamp, UUID};
 use crate::storage::Database;
+use handbox_llm::types::LlmMessageRole;
+use handbox_llm::LlmToolCall;
 use serde_json;
 use sqlx::query::Query;
 use sqlx::sqlite::SqliteArguments;
@@ -816,7 +817,7 @@ impl MessageRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{models::MessageConfig, storage::Database};
+    use crate::{storage::types::MessageConfig, storage::Database};
     use tempfile::tempdir;
 
     async fn create_test_db() -> (Database, tempfile::TempDir) {

@@ -1,8 +1,8 @@
 // Google 模型客户端实现
 
 use super::model_client::ModelClient;
-use crate::llm_client::types::{LlmModelFeature, LlmStandardModel};
-use crate::models::{AppError, Provider};
+use crate::error::LlmClientError;
+use crate::types::{LlmModelFeature, LlmProvider, LlmStandardModel};
 use async_trait::async_trait;
 use serde::Deserialize;
 
@@ -40,9 +40,9 @@ impl GoogleModelClient {
 impl ModelClient for GoogleModelClient {
     async fn list_models(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         _provider_type: &str,
-    ) -> Result<Vec<LlmStandardModel>, AppError> {
+    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
 
@@ -54,20 +54,20 @@ impl ModelClient for GoogleModelClient {
             .send()
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to fetch Google models: {}", e))
+                LlmClientError::transport(format!("Failed to fetch Google models: {}", e))
             })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::internal_error(&format!(
+            return Err(LlmClientError::api(format!(
                 "Google API returned error {}: {}",
                 status, error_text
             )));
         }
 
         let models_response: GoogleModelsResponse = response.json().await.map_err(|e| {
-            AppError::internal_error(&format!("Failed to parse Google response: {}", e))
+            LlmClientError::unexpected(format!("Failed to parse Google response: {}", e))
         })?;
 
         let mut result_models = Vec::new();

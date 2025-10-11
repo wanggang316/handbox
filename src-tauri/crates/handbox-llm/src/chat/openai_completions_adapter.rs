@@ -1,13 +1,13 @@
 // OpenAI Completions API 客户端
 // 使用 openai-rust SDK 进行通信
 
-use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{
+use crate::chat::ChatClient;
+use crate::error::LlmClientError;
+use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmDeltaToolCall,
-    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmRequest, LlmResponse, LlmToolCall,
-    LlmToolChoice, LlmToolFunction, LlmUsage,
+    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmProvider, LlmRequest, LlmResponse,
+    LlmToolCall, LlmToolChoice, LlmToolFunction, LlmUsage,
 };
-use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use futures::StreamExt;
 use openai_rust::types::{
@@ -155,9 +155,9 @@ impl OpenAICompletionsChatClient {
 impl ChatClient for OpenAICompletionsChatClient {
     async fn chat(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
-    ) -> Result<LlmResponse, AppError> {
+    ) -> Result<LlmResponse, LlmClientError> {
         tracing::info!("Sending OpenAI-style chat request using openai-rust library");
 
         // 创建 openai-rust 客户端
@@ -166,7 +166,9 @@ impl ChatClient for OpenAICompletionsChatClient {
             .base_url(provider.base_url.clone())
             .build()
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create OpenAI client: {e}"))
+                LlmClientError::client_initialization(format!(
+                    "Failed to create OpenAI client: {e}"
+                ))
             })?;
 
         // 转换请求格式
@@ -182,7 +184,7 @@ impl ChatClient for OpenAICompletionsChatClient {
             .completions()
             .create(&openai_request)
             .await
-            .map_err(|e| AppError::internal_error(&format!("OpenAI API call failed: {e}")))?;
+            .map_err(|e| LlmClientError::api(format!("OpenAI API call failed: {e}")))?;
 
         // 转换响应格式
         let chat_response = self.convert_from_openai_response(openai_response);
@@ -192,11 +194,11 @@ impl ChatClient for OpenAICompletionsChatClient {
 
     async fn chat_stream(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         mut request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
-        AppError,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
+        LlmClientError,
     > {
         // 启用流式响应
         request.stream = Some(true);
@@ -209,7 +211,9 @@ impl ChatClient for OpenAICompletionsChatClient {
             .base_url(provider.base_url.clone())
             .build()
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to create OpenAI client: {e}"))
+                LlmClientError::client_initialization(format!(
+                    "Failed to create OpenAI client: {e}"
+                ))
             })?;
 
         // 转换请求格式
@@ -223,7 +227,7 @@ impl ChatClient for OpenAICompletionsChatClient {
         // 使用 tokio::spawn 和 mpsc 来创建一个真正的流式传输
         use tokio::sync::mpsc;
 
-        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, AppError>>(100);
+        let (tx, mut rx) = mpsc::channel::<Result<LlmChunkResponse, LlmClientError>>(100);
 
         // 在后台任务中处理流，将 openai_client 和 openai_request 的所有权转移进去
         tokio::spawn(async move {
@@ -232,7 +236,7 @@ impl ChatClient for OpenAICompletionsChatClient {
                 Ok(stream) => stream,
                 Err(e) => {
                     let _ = tx
-                        .send(Err(AppError::internal_error(&format!(
+                        .send(Err(LlmClientError::api(format!(
                             "OpenAI streaming API call failed: {e}"
                         ))))
                         .await;
@@ -249,7 +253,7 @@ impl ChatClient for OpenAICompletionsChatClient {
                         let converter = OpenAICompletionsChatClient::new();
                         converter.convert_from_openai_chunk(chunk)
                     })
-                    .map_err(|e| AppError::internal_error(&format!("Stream error: {e}")));
+                    .map_err(|e| LlmClientError::api(format!("Stream error: {e}")));
 
                 if tx.send(converted_result).await.is_err() {
                     // 接收端已关闭，退出
@@ -267,7 +271,7 @@ impl ChatClient for OpenAICompletionsChatClient {
 
         Ok(Box::new(Box::pin(converted_stream))
             as Box<
-                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin,
             >)
     }
 

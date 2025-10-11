@@ -3,8 +3,6 @@
 // 声明模块
 pub mod commands;
 pub mod config;
-pub mod llm_client;
-pub mod mcp_client;
 pub mod menu;
 pub mod models;
 pub mod services;
@@ -15,6 +13,7 @@ use crate::commands::*;
 use crate::services::{ChatService, McpService, MessageService, ProviderService, StorageService};
 use crate::storage::Database;
 use crate::utils::logger;
+use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -39,14 +38,22 @@ async fn initialize_services(
             .map_err(|e| format!("Failed to initialize database: {e}"))?,
     );
 
+    let llm_config = Arc::new(crate::config::llm_config::LlmConfig::load());
+    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+
     // 初始化各个服务
-    let provider_service = ProviderService::new(database_service.clone());
+    let provider_service =
+        ProviderService::new(database_service.clone(), llm_config_provider.clone());
     let provider_service_shared = Arc::new(provider_service.clone());
 
     let mcp_service = McpService::new(database_service.clone());
     let mcp_service_shared = Arc::new(mcp_service.clone());
 
-    let chat_service = ChatService::new(database_service.clone(), provider_service_shared.clone());
+    let chat_service = ChatService::new(
+        database_service.clone(),
+        provider_service_shared.clone(),
+        llm_config_provider.clone(),
+    );
     let chat_service_shared = Arc::new(chat_service.clone());
 
     let message_service = MessageService::new(
@@ -54,6 +61,7 @@ async fn initialize_services(
         provider_service_shared,
         chat_service_shared,
         mcp_service_shared,
+        llm_config_provider,
     );
 
     // 将服务注册到应用状态
@@ -113,14 +121,14 @@ pub fn run() {
             chat_delete,
             chat_generate_title,
             // 消息相关命令
-            message_send,
-            message_send_stream,
+            message_user_send,
+            message_user_send_stream,
             message_list,
             message_get,
             message_update,
             message_delete,
-            message_regenerate_stream,
-            message_resend_stream,
+            message_assistant_regenerate_stream,
+            message_user_resend_stream,
             // message_execute_mcp_call, // Temporarily removed
             message_execute_tool_calls,
             message_execute_tool_calls_stream,

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use futures::Stream;
 
-use crate::llm_client::types::{LlmApiType, LlmChunkResponse, LlmRequest, LlmResponse};
-use crate::models::{AppError, Provider};
+use crate::error::LlmClientError;
+use crate::types::{LlmApiType, LlmChunkResponse, LlmProvider, LlmRequest, LlmResponse};
 
 use super::{
     anthropic_adapter::AnthropicChatClient, google_adapter::GoogleChatClient,
@@ -14,20 +14,23 @@ use super::{
 pub trait ChatClient: Send + Sync {
     async fn chat(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
-    ) -> Result<LlmResponse, AppError>;
+    ) -> Result<LlmResponse, LlmClientError>;
 
     async fn chat_stream(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
-    ) -> Result<Box<dyn Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>, AppError>;
+    ) -> Result<
+        Box<dyn Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
+        LlmClientError,
+    >;
 
     fn api_type(&self) -> &'static str;
 }
 
-pub fn create_chat_client(api_type: LlmApiType) -> Result<Box<dyn ChatClient>, AppError> {
+pub fn create_chat_client(api_type: LlmApiType) -> Result<Box<dyn ChatClient>, LlmClientError> {
     Ok(match api_type {
         LlmApiType::OpenAICompletions => Box::new(OpenAICompletionsChatClient::new()) as Box<_>,
         LlmApiType::OpenAIResponses => Box::new(OpenAIResponsesChatClient::new()) as Box<_>,
@@ -39,7 +42,7 @@ pub fn create_chat_client(api_type: LlmApiType) -> Result<Box<dyn ChatClient>, A
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm_client::types::LlmApiType;
+    use crate::types::LlmApiType;
 
     #[test]
     fn test_create_openai_completions_client() {

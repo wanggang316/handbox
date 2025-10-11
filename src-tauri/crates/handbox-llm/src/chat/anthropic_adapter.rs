@@ -1,12 +1,12 @@
 // Anthropic Claude API 客户端
 // 使用 reqwest 进行 HTTP 通信
 
-use crate::llm_client::chat::ChatClient;
-use crate::llm_client::types::{
+use crate::chat::ChatClient;
+use crate::error::LlmClientError;
+use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
-    LlmRequest, LlmResponse, LlmUsage,
+    LlmProvider, LlmRequest, LlmResponse, LlmUsage,
 };
-use crate::models::{AppError, Provider};
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use serde_json::Value;
@@ -69,10 +69,12 @@ impl AnthropicChatClient {
         &self,
         anthropic_response: Value,
         model: &str,
-    ) -> Result<LlmResponse, AppError> {
+    ) -> Result<LlmResponse, LlmClientError> {
         let content = anthropic_response["content"][0]["text"]
             .as_str()
-            .ok_or_else(|| AppError::internal_error("Invalid Anthropic API response format"))?
+            .ok_or_else(|| {
+                LlmClientError::unexpected("Invalid Anthropic API response format".to_string())
+            })?
             .to_string();
 
         let finish_reason = anthropic_response["stop_reason"]
@@ -118,9 +120,9 @@ impl AnthropicChatClient {
 impl ChatClient for AnthropicChatClient {
     async fn chat(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
-    ) -> Result<LlmResponse, AppError> {
+    ) -> Result<LlmResponse, LlmClientError> {
         let url = format!("{}/messages", provider.base_url);
         let req_body = self.convert_to_anthropic_request(&request);
 
@@ -136,19 +138,19 @@ impl ChatClient for AnthropicChatClient {
             .send()
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to send Anthropic chat request: {e}"))
+                LlmClientError::transport(format!("Failed to send Anthropic chat request: {e}"))
             })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::internal_error(&format!(
+            return Err(LlmClientError::api(format!(
                 "Anthropic API returned error {status}: {error_text}"
             )));
         }
 
         let anthropic_response: Value = response.json().await.map_err(|e| {
-            AppError::internal_error(&format!("Failed to parse Anthropic response: {e}"))
+            LlmClientError::unexpected(format!("Failed to parse Anthropic response: {e}"))
         })?;
 
         self.convert_anthropic_response(anthropic_response, &request.model)
@@ -156,11 +158,11 @@ impl ChatClient for AnthropicChatClient {
 
     async fn chat_stream(
         &self,
-        provider: &Provider,
+        provider: &LlmProvider,
         request: LlmRequest,
     ) -> Result<
-        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin>,
-        AppError,
+        Box<dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
+        LlmClientError,
     > {
         let url = format!("{}/messages", provider.base_url);
         let mut req_body = self.convert_to_anthropic_request(&request);
@@ -178,7 +180,7 @@ impl ChatClient for AnthropicChatClient {
             .send()
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!(
+                LlmClientError::transport(format!(
                     "Failed to send Anthropic streaming request: {e}"
                 ))
             })?;
@@ -186,7 +188,7 @@ impl ChatClient for AnthropicChatClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::internal_error(&format!(
+            return Err(LlmClientError::api(format!(
                 "Anthropic API returned error {status}: {error_text}"
             )));
         }
@@ -200,7 +202,7 @@ impl ChatClient for AnthropicChatClient {
         // Anthropic使用SSE格式的流式响应
         let stream = response
             .bytes_stream()
-            .map_err(|e| AppError::network_error(&format!("Stream error: {e}")))
+            .map_err(|e| LlmClientError::network(format!("Stream error: {e}")))
             .map_ok(move |bytes| {
                 let text = String::from_utf8_lossy(&bytes);
                 let mut responses = Vec::new();
@@ -289,7 +291,7 @@ impl ChatClient for AnthropicChatClient {
 
         Ok(Box::new(Box::pin(stream))
             as Box<
-                dyn futures::Stream<Item = Result<LlmChunkResponse, AppError>> + Send + Unpin,
+                dyn futures::Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin,
             >)
     }
 

@@ -9,6 +9,7 @@ import type {
   ChatAttachment,
   ToolCall,
   ToolExecutionStatus,
+  UserMessageSendRequest,
 } from '$lib/types/chat';
 import type { FrontendProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
@@ -505,12 +506,10 @@ class MessageStore {
       this.addMessage(currentChat.id, userMessage);
 
       // 构建完整的消息请求（不包含 system message，由后端构建）
-      const streamRequest: MessageRequest = {
+      const userMessageRequest: UserMessageSendRequest = {
         chatId: currentChat.id,
-        modelId: currentChat.modelId,
-        providerId: currentChat.providerId,
-        messages: [{ role: 'user', content: content }],
-        tempUserMessageId: userMessage.id,
+        content: content,
+        tempUserMessageId: userMessage.id || '',
         attachments: attachments
       };
 
@@ -536,7 +535,7 @@ class MessageStore {
       });
 
       // 事件监听器设置完成后，再发送流式消息
-      await messageApi.sendStreamMessage(streamRequest);
+      await messageApi.sendUserMessageStream(userMessageRequest);
 
     } catch (error) {
       this.setError(error instanceof Error ? error.message : '发送消息失败');
@@ -598,7 +597,7 @@ class MessageStore {
       console.log('[regenerateMessage] 调用流式 API...');
 
       // 调用流式 API
-      await messageApi.regenerateMessageStream(messageId as UUID);
+      await messageApi.regenerateAssistantMessageStream(messageId as UUID);
 
       console.log('[regenerateMessage] API 调用成功');
     } catch (error) {
@@ -648,7 +647,7 @@ class MessageStore {
       console.log('[resendMessage] 调用 resendMessageStream API...');
 
       // 调用流式重发API
-      await messageApi.resendMessageStream(messageId as UUID);
+      await messageApi.resendUserMessageStream(messageId as UUID);
 
       console.log('[resendMessage] API 调用成功');
     } catch (error) {
