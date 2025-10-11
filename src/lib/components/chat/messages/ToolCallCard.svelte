@@ -142,36 +142,15 @@
 
 {#if calls().length > 0}
   <div class="mb-4 border-base-300 bg-base-100 p-0 text-sm text-base-content">
-    <!-- <div class="mb-2 font-medium flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <span>工具调用</span>
-      </div>
-
-      {#if showExecuteAllButton()}
-        <button
-          class="px-2 py-1 text-xs btn btn-primary btn-sm normal-case flex items-center gap-1"
-          onclick={handleExecuteAllToolCalls}
-          disabled={isExecuting()}
-        >
-          {#if isExecuting()}
-            <Loader2 size={12} class="animate-spin" />
-            <span>执行中...</span>
-          {:else}
-            <span>全部执行 ({pendingManualTools().length})</span>
-          {/if}
-        </button>
-      {/if}
-    </div> -->
-
     <div class="space-y-2">
       {#each calls() as tool (tool.id || tool.index)}
         {@const statusDisplay = getToolExecutionStatusDisplay(tool.executionStatus)}
         <div class="rounded-md border border-base-300 bg-base-200 text-xs bg-base-100 hover:bg-base-300">
           <!-- header -->
-          <div class="flex items-center justify-between gap-2 p-2">
+          <div class="flex items-center justify-between gap-2">
             <button
               type="button"
-              class="flex flex-1 items-center gap-2 text-left"
+              class="flex flex-1 items-center gap-2 text-left p-2"
               onclick={() => toggleTool(tool)}
             >
               {#if isExpanded(tool)}
@@ -187,7 +166,7 @@
               </div>
             </button>
 
-            <div class="flex items-center gap-2">
+            <div class="flex items-center justify-end gap-2 px-2 py-1">
               <span class={`text-[10px] ${statusDisplay.color} flex items-center gap-1`}>
                 {#if statusDisplay.icon}
                   <statusDisplay.icon size={12} class={statusDisplay.animate ? "animate-spin" : ""} />
@@ -198,7 +177,7 @@
               {#if tool.executionMode === "manual"}
                 {#if tool.executionStatus === "pending"}
                   <button
-                    class="px-2 py-0.5 text-[10px] btn btn-primary btn-xs normal-case"
+                    class="px-2 py-0.5 text-[10px] text-base-content/80"
                     onclick={() => handleExecuteSingleTool(tool.id || "")}
                     disabled={isExecuting()}
                   >
@@ -206,7 +185,7 @@
                   </button>
                 {:else if tool.executionStatus === "failed" || tool.executionStatus === "completed"}
                   <button
-                    class="px-2 py-0.5 text-[10px] btn btn-ghost btn-xs normal-case"
+                    class="px-2 py-0.5 text-[10px] text-base-content/80"
                     onclick={() => handleExecuteSingleTool(tool.id || "")}
                     disabled={isExecuting()}
                   >
