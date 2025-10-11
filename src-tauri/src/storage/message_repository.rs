@@ -1,10 +1,9 @@
 // Message 数据访问层
 
 use crate::models::AppError;
-use crate::storage::types::{Message, MessageConfig, Timestamp, UUID};
+use crate::storage::types::{Message, MessageConfig, MessageToolCall, Timestamp, UUID};
 use crate::storage::Database;
 use handbox_llm::types::LlmMessageRole;
-use handbox_llm::LlmToolCall;
 use serde_json;
 use sqlx::query::Query;
 use sqlx::sqlite::SqliteArguments;
@@ -448,7 +447,7 @@ impl MessageRepository {
     pub async fn update_message_tools(
         &self,
         message_id: &UUID,
-        tools: Option<&Vec<LlmToolCall>>,
+        tools: Option<&Vec<MessageToolCall>>,
         updated_at: Timestamp,
     ) -> Result<(), AppError> {
         let tools_json = if let Some(tools) = tools {
@@ -784,7 +783,7 @@ impl MessageRepository {
             None
         };
 
-        let tool_calls: Option<Vec<LlmToolCall>> =
+        let tool_calls: Option<Vec<MessageToolCall>> =
             if let Ok(tools_json) = row.try_get::<String, _>("tools") {
                 serde_json::from_str(&tools_json).ok()
             } else {

@@ -2,8 +2,7 @@
 
 use crate::models::{AppError, MessageResponse, StreamChunk, UserMessageSendRequest};
 use crate::services::MessageService;
-use crate::storage::types::{Message, UUID};
-use handbox_llm::types::LlmToolCall;
+use crate::storage::types::{Message, MessageToolCall, UUID};
 use serde_json::json;
 use std::collections::HashMap;
 use tauri::{Emitter, State, Window};
@@ -107,8 +106,8 @@ fn create_stream_error_callback(
 fn create_tool_execute_callback(
     window: Window,
     event_name: &'static str,
-) -> impl FnMut(String, HashMap<String, LlmToolCall>) {
-    move |message_id: String, tool_calls: HashMap<String, LlmToolCall>| {
+) -> impl FnMut(String, HashMap<String, MessageToolCall>) {
+    move |message_id: String, tool_calls: HashMap<String, MessageToolCall>| {
         let payload = json!({
             "messageId": message_id,
             "toolCalls": tool_calls

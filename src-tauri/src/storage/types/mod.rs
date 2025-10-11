@@ -10,5 +10,8 @@ pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,
     McpServerStatus, McpTool,
 };
-pub use message::{Message, MessageAttachment, MessageConfig};
+pub use message::{
+    Message, MessageAttachment, MessageConfig, MessageToolCall, MessageToolExecutionMode,
+    MessageToolExecutionStatus,
+};
 pub use provider::{Model, ModelFeature, Provider, ProviderWithModels};

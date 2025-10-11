@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::storage::types::UUID;
-use handbox_llm::types::{LlmMessage, LlmToolCall};
+use crate::storage::types::{MessageToolCall, UUID};
+use handbox_llm::types::LlmMessage;
 
 /// 消息请求附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +21,6 @@ pub struct MessageRequest {
     pub model_id: String,
     pub provider_id: String,
     pub messages: Vec<LlmMessage>,
-    pub temp_user_message_id: Option<String>,
     pub attachments: Option<Vec<MessageRequestAttachment>>,
 }
 
@@ -40,7 +39,7 @@ pub struct StreamChunk {
     pub stream_id: String,
     pub content: String,
     pub reasoning: Option<String>,
-    pub tool_calls: Option<Vec<LlmToolCall>>,
+    pub tool_calls: Option<Vec<MessageToolCall>>,
 }
 
 /// 消息响应
@@ -52,7 +51,7 @@ pub struct MessageResponse {
     pub content: String,
     pub reasoning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<LlmToolCall>>,
+    pub tool_calls: Option<Vec<MessageToolCall>>,
     pub model_id: String,
     pub provider_id: String,
     pub input_tokens: Option<i32>,

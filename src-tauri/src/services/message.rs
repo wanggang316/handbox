@@ -4,13 +4,17 @@ use crate::models::{
     AppError, MessageRequest, MessageResponse, StreamChunk, UserMessageSendRequest,
 };
 use crate::services::{ChatService, Database, McpService, ProviderService};
-use crate::storage::types::{Chat, McpServer, McpServerStatus, Message, MessageConfig, UUID};
+use crate::storage::types::{
+    Chat, McpServer, McpServerStatus, Message, MessageConfig, MessageToolCall,
+    MessageToolExecutionMode, MessageToolExecutionStatus, UUID,
+};
 use crate::storage::MessageRepository;
+use chrono::Utc;
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::create_llm_client;
 use handbox_llm::types::{
     LlmMessage, LlmMessageRole, LlmProvider, LlmRequest, LlmRequestTool, LlmRequestToolFunction,
-    LlmResponse, LlmToolCall, LlmToolChoice, LlmToolExecutionStatus, LlmToolFunction,
+    LlmResponse, LlmToolChoice, LlmToolFunction,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,11 +65,11 @@ impl<T> StreamErrorCallback for T where T: FnMut(String, AppError) + Send + 'sta
 /// 工具执行回调：当工具执行状态变化时调用
 ///
 pub trait ToolExecuteCallback:
-    FnMut(String, HashMap<String, LlmToolCall>) + Send + 'static
+    FnMut(String, HashMap<String, MessageToolCall>) + Send + 'static
 {
 }
 impl<T> ToolExecuteCallback for T where
-    T: FnMut(String, HashMap<String, LlmToolCall>) + Send + 'static
+    T: FnMut(String, HashMap<String, MessageToolCall>) + Send + 'static
 {
 }
 
@@ -116,6 +120,72 @@ impl MessageService {
         LlmProvider {
             base_url: provider.base_url.clone(),
             api_key: provider.api_key.clone(),
+        }
+    }
+
+    /// 创建一个包装的 end_callback，在调用原始回调前先将消息保存到数据库
+    ///
+    /// 这个辅助方法用于在流式响应结束时：
+    /// 1. 异步保存助手消息到数据库
+    /// 2. 然后调用原始的 end_callback
+    fn wrap_end_callback_with_save(
+        repository: MessageRepository,
+        chat_id: String,
+        config: Option<MessageConfig>,
+        turn_id: Option<i32>,
+        mut end_callback: impl StreamEndCallback,
+    ) -> impl FnMut(String, MessageResponse) + Send + 'static {
+        move |stream_id: String, response: MessageResponse| {
+            // 保存助手消息到数据库
+            let repository = repository.clone();
+            let chat_id = chat_id.clone();
+            let config = config.clone();
+            let turn_id = turn_id.clone();
+            let response_clone = response.clone();
+            let stream_id_clone = stream_id.clone();
+
+            tokio::spawn(async move {
+                let now = Utc::now().timestamp_millis();
+                match repository
+                    .create_message(&Message {
+                        id: response_clone.message_id.clone(),
+                        chat_id: chat_id.to_string(),
+                        role: LlmMessageRole::Assistant,
+                        content: response_clone.content.clone(),
+                        reasoning: response_clone.reasoning.clone(),
+                        tool_calls: response_clone.tool_calls.clone(),
+                        config,
+                        turn_id,
+                        tool_call_id: None,
+                        attachments: None,
+                        input_tokens: response_clone.input_tokens,
+                        output_tokens: response_clone.output_tokens,
+                        total_tokens: response_clone.total_tokens,
+                        start_time: Some(now),
+                        end_time: Some(now),
+                        duration: response_clone.duration,
+                        created_at: now,
+                        updated_at: now,
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            "[MessageService] Assistant message saved with ID: {}",
+                            response_clone.message_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "[MessageService] Failed to save assistant message: {}",
+                            e
+                        );
+                    }
+                }
+            });
+
+            // 调用原始的 end_callback
+            end_callback(stream_id_clone, response);
         }
     }
 
@@ -184,7 +254,7 @@ impl MessageService {
 
         // 3. 基于 turn 构建完整请求
         let final_request = self
-            .build_request_from_turn(&chat_id, turn_id_value)
+            .build_message_request(&chat_id, turn_id_value)
             .await
             .map_err(|e| {
                 let error = format!("Failed to build request from turn: {}", e);
@@ -201,7 +271,7 @@ impl MessageService {
         let llm_response = self.call_llm_api(&final_request).await?;
 
         // 5. 保存助手消息到数据库
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = Utc::now().timestamp_millis();
         let (assistant_message_id, processed_tool_calls) = self
             .save_assistant_message(
                 &chat_id,
@@ -346,7 +416,7 @@ impl MessageService {
             }
         };
 
-        let final_request = match self.build_request_from_turn(chat_id, turn_id_value).await {
+        let final_request = match self.build_message_request(chat_id, turn_id_value).await {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -364,63 +434,13 @@ impl MessageService {
         );
 
         // 4. 创建包装的 end_callback，在保存消息后调用原始回调
-        let chat_id_clone = chat_id.clone();
-        let config_clone = config.clone();
-        let turn_id_clone = turn_id.clone();
-        let repository = self.repository.clone();
-        let mut end_callback = end_callback;
-        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
-            // 保存助手消息到数据库
-            let chat_id = chat_id_clone.clone();
-            let config = config_clone.clone();
-            let turn_id = turn_id_clone.clone();
-            let repository = repository.clone();
-            let response_clone = response.clone();
-            let stream_id_clone = stream_id.clone();
-
-            tokio::spawn(async move {
-                let now = chrono::Utc::now().timestamp_millis();
-                match repository
-                    .create_message(&Message {
-                        id: response_clone.message_id.clone(),
-                        chat_id: chat_id.to_string(),
-                        role: LlmMessageRole::Assistant,
-                        content: response_clone.content.clone(),
-                        reasoning: response_clone.reasoning.clone(),
-                        tool_calls: response_clone.tool_calls.clone(),
-                        config: Some(config),
-                        turn_id,
-                        tool_call_id: None,
-                        attachments: None,
-                        input_tokens: response_clone.input_tokens,
-                        output_tokens: response_clone.output_tokens,
-                        total_tokens: response_clone.total_tokens,
-                        start_time: Some(now),
-                        end_time: Some(now),
-                        duration: response_clone.duration,
-                        created_at: now,
-                        updated_at: now,
-                    })
-                    .await
-                {
-                    Ok(_) => {
-                        tracing::info!(
-                            "[MessageService::send_user_message_stream] Assistant message saved with ID: {}",
-                            response_clone.message_id
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[MessageService::send_user_message_stream] Failed to save assistant message: {}",
-                            e
-                        );
-                    }
-                }
-            });
-
-            // 调用原始的 end_callback
-            end_callback(stream_id_clone, response);
-        };
+        let end_callback_wrapper = Self::wrap_end_callback_with_save(
+            self.repository.clone(),
+            chat_id.clone(),
+            Some(config.clone()),
+            turn_id,
+            end_callback,
+        );
 
         // 5. 调用流式 LLM API（使用构建好的完整请求）
         self.call_llm_api_stream(
@@ -531,7 +551,7 @@ impl MessageService {
             turn_count: chat.turn_count,
         };
 
-        let update_time = chrono::Utc::now().timestamp_millis();
+        let update_time = Utc::now().timestamp_millis();
         if let Err(e) = self
             .repository
             .update_message_config(&message_id, Some(&updated_config), update_time)
@@ -565,7 +585,7 @@ impl MessageService {
 
         // 7. 使用 build_request_from_turn 重新构建请求
         let resend_request = match self
-            .build_request_from_turn(&message.chat_id, turn_id)
+            .build_message_request(&message.chat_id, turn_id)
             .await
         {
             Ok(req) => req,
@@ -585,63 +605,13 @@ impl MessageService {
         );
 
         // 8. 包装 end_callback 以保存助手消息
-        let chat_id_clone = message.chat_id.clone();
-        let config_clone = message.config.clone();
-        let turn_id_clone = Some(turn_id);
-        let repository = self.repository.clone();
-        let mut end_callback = end_callback;
-
-        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
-            let chat_id = chat_id_clone.clone();
-            let config = config_clone.clone();
-            let turn_id = turn_id_clone.clone();
-            let repository = repository.clone();
-            let response_clone = response.clone();
-            let stream_id_clone = stream_id.clone();
-
-            tokio::spawn(async move {
-                let now = chrono::Utc::now().timestamp_millis();
-                match repository
-                    .create_message(&Message {
-                        id: response_clone.message_id.clone(),
-                        chat_id: chat_id.to_string(),
-                        role: LlmMessageRole::Assistant,
-                        content: response_clone.content.clone(),
-                        reasoning: response_clone.reasoning.clone(),
-                        tool_calls: response_clone.tool_calls.clone(),
-                        config,
-                        turn_id,
-                        tool_call_id: None,
-                        attachments: None,
-                        input_tokens: response_clone.input_tokens,
-                        output_tokens: response_clone.output_tokens,
-                        total_tokens: response_clone.total_tokens,
-                        start_time: Some(now),
-                        end_time: Some(now),
-                        duration: response_clone.duration,
-                        created_at: now,
-                        updated_at: now,
-                    })
-                    .await
-                {
-                    Ok(_) => {
-                        tracing::info!(
-                            "[MessageService::resend_message_stream] Assistant message saved with ID: {}",
-                            response_clone.message_id
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[MessageService::resend_message_stream] Failed to save assistant message: {}",
-                            e
-                        );
-                    }
-                }
-            });
-
-            // 调用原始的 end_callback
-            end_callback(stream_id_clone, response);
-        };
+        let end_callback_wrapper = Self::wrap_end_callback_with_save(
+            self.repository.clone(),
+            message.chat_id.clone(),
+            message.config.clone(),
+            Some(turn_id),
+            end_callback,
+        );
 
         // 9. 直接调用 LLM API 流式方法
         self.call_llm_api_stream(
@@ -744,7 +714,7 @@ impl MessageService {
 
         // 5. 获取聊天配置并构建请求
         let regenerate_request = match self
-            .build_request_from_turn(&message.chat_id, turn_id)
+            .build_message_request(&message.chat_id, turn_id)
             .await
         {
             Ok(req) => req,
@@ -764,63 +734,13 @@ impl MessageService {
         );
 
         // 8. 包装 end_callback 以保存助手消息
-        let chat_id_clone = message.chat_id.clone();
-        let config_clone = message.config.clone();
-        let turn_id_clone = Some(turn_id);
-        let repository = self.repository.clone();
-        let mut end_callback = end_callback;
-
-        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
-            let chat_id = chat_id_clone.clone();
-            let config = config_clone.clone();
-            let turn_id = turn_id_clone.clone();
-            let repository = repository.clone();
-            let response_clone = response.clone();
-            let stream_id_clone = stream_id.clone();
-
-            tokio::spawn(async move {
-                let now = chrono::Utc::now().timestamp_millis();
-                match repository
-                    .create_message(&Message {
-                        id: response_clone.message_id.clone(),
-                        chat_id: chat_id.to_string(),
-                        role: LlmMessageRole::Assistant,
-                        content: response_clone.content.clone(),
-                        reasoning: response_clone.reasoning.clone(),
-                        tool_calls: response_clone.tool_calls.clone(),
-                        config,
-                        turn_id,
-                        tool_call_id: None,
-                        attachments: None,
-                        input_tokens: response_clone.input_tokens,
-                        output_tokens: response_clone.output_tokens,
-                        total_tokens: response_clone.total_tokens,
-                        start_time: Some(now),
-                        end_time: Some(now),
-                        duration: response_clone.duration,
-                        created_at: now,
-                        updated_at: now,
-                    })
-                    .await
-                {
-                    Ok(_) => {
-                        tracing::info!(
-                            "[MessageService::regenerate_message_stream] Assistant message saved with ID: {}",
-                            response_clone.message_id
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[MessageService::regenerate_message_stream] Failed to save assistant message: {}",
-                            e
-                        );
-                    }
-                }
-            });
-
-            // 调用原始的 end_callback
-            end_callback(stream_id_clone, response);
-        };
+        let end_callback_wrapper = Self::wrap_end_callback_with_save(
+            self.repository.clone(),
+            message.chat_id.clone(),
+            message.config.clone(),
+            Some(turn_id),
+            end_callback,
+        );
 
         // 9. 直接调用 LLM API 流式方法
         self.call_llm_api_stream(
@@ -936,9 +856,9 @@ impl MessageService {
         }
 
         // 5. 更新工具调用状态为 Executing 并触发回调
-        let executing_status_map: HashMap<String, LlmToolExecutionStatus> = selected_tool_calls
+        let executing_status_map: HashMap<String, MessageToolExecutionStatus> = selected_tool_calls
             .iter()
-            .map(|tool_call| (tool_call.id.clone(), LlmToolExecutionStatus::Executing))
+            .map(|tool_call| (tool_call.id.clone(), MessageToolExecutionStatus::Executing))
             .collect();
 
         let executing_updates = match self
@@ -1039,7 +959,7 @@ impl MessageService {
         if let Some(tool_calls) = &updated_message.tool_calls {
             let has_pending_tools = tool_calls
                 .iter()
-                .any(|call| call.execution_status == LlmToolExecutionStatus::Pending);
+                .any(|call| call.execution_status == MessageToolExecutionStatus::Pending);
 
             if has_pending_tools {
                 tracing::info!(
@@ -1057,12 +977,12 @@ impl MessageService {
         // 9. 所有工具执行完成后，根据工具调用结果批量创建 Tool 消息
         // 使用 updated_message 中的 tool_calls（包含已存储的结果）
         if let Some(tool_calls) = &updated_message.tool_calls {
-            let timestamp = chrono::Utc::now().timestamp_millis();
+            let timestamp = Utc::now().timestamp_millis();
             let mut tool_result_messages = Vec::new();
 
             // 遍历所有已完成的工具调用，创建对应的 Tool 消息
             for tool_call in tool_calls {
-                if tool_call.execution_status != LlmToolExecutionStatus::Pending {
+                if tool_call.execution_status != MessageToolExecutionStatus::Pending {
                     if let Some(result) = &tool_call.result {
                         let tool_result_message = Message {
                             id: uuid::Uuid::new_v4().to_string(),
@@ -1125,7 +1045,7 @@ impl MessageService {
 
         // 11. 构建包含工具调用结果的新请求
         let request = match self
-            .build_request_from_turn(&message.chat_id, turn_id)
+            .build_message_request(&message.chat_id, turn_id)
             .await
         {
             Ok(req) => req,
@@ -1145,83 +1065,13 @@ impl MessageService {
         );
 
         // 创建包装的 end_callback，在保存消息后调用原始回调
-        let chat_id_clone = message.chat_id.clone();
-        let turn_id_clone = message.turn_id.clone();
-        let repository = self.repository.clone();
-        let chat_service = self.chat_service.clone();
-        let request_clone = request.clone();
-        let mut end_callback = end_callback;
-
-        let end_callback_wrapper = move |stream_id: String, response: MessageResponse| {
-            // 保存助手消息到数据库
-            let chat_id = chat_id_clone.clone();
-            let turn_id = turn_id_clone.clone();
-            let repository = repository.clone();
-            let chat_service = chat_service.clone();
-            let request = request_clone.clone();
-            let response_clone = response.clone();
-            let stream_id_clone = stream_id.clone();
-
-            tokio::spawn(async move {
-                // 获取 chat 配置以构建消息配置
-                let config = if let Ok(chat) = chat_service.get_chat(chat_id.clone()).await {
-                    Some(MessageConfig {
-                        temperature: chat.temperature,
-                        top_p: chat.top_p,
-                        max_tokens: chat.max_tokens,
-                        stream: chat.stream,
-                        model_id: Some(request.model_id.clone()),
-                        provider_id: Some(request.provider_id.clone()),
-                        system_prompt: chat.system_prompt.clone(),
-                        mcp_servers: Some(chat.mcp_servers.clone()),
-                        turn_count: chat.turn_count,
-                    })
-                } else {
-                    None
-                };
-
-                let now = chrono::Utc::now().timestamp_millis();
-                match repository
-                    .create_message(&Message {
-                        id: response_clone.message_id.clone(),
-                        chat_id: chat_id.to_string(),
-                        role: LlmMessageRole::Assistant,
-                        content: response_clone.content.clone(),
-                        reasoning: response_clone.reasoning.clone(),
-                        tool_calls: response_clone.tool_calls.clone(),
-                        config,
-                        turn_id,
-                        tool_call_id: None,
-                        attachments: None,
-                        input_tokens: response_clone.input_tokens,
-                        output_tokens: response_clone.output_tokens,
-                        total_tokens: response_clone.total_tokens,
-                        start_time: Some(now),
-                        end_time: Some(now),
-                        duration: response_clone.duration,
-                        created_at: now,
-                        updated_at: now,
-                    })
-                    .await
-                {
-                    Ok(_) => {
-                        tracing::info!(
-                            "[MessageService::execute_tool_calls] Assistant message saved with ID: {}",
-                            response_clone.message_id
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[MessageService::execute_tool_calls] Failed to save assistant message: {}",
-                            e
-                        );
-                    }
-                }
-            });
-
-            // 调用原始的 end_callback
-            end_callback(stream_id_clone, response);
-        };
+        let end_callback_wrapper = Self::wrap_end_callback_with_save(
+            self.repository.clone(),
+            message.chat_id.clone(),
+            message.config.clone(),
+            message.turn_id.clone(),
+            end_callback,
+        );
 
         // 调用流式 LLM API 处理响应（不再返回值，通过回调处理）
         self.call_llm_api_stream(
@@ -1443,7 +1293,7 @@ impl MessageService {
 
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
-        let mut all_tool_calls: Vec<LlmToolCall> = Vec::new();
+        let mut all_tool_calls: Vec<handbox_llm::types::LlmToolCall> = Vec::new();
         let mut chunk_count = 0;
 
         // 7. 处理真实的流式响应
@@ -1471,16 +1321,13 @@ impl MessageService {
 
                                     // 确保有足够的空间
                                     while all_tool_calls.len() <= index {
-                                        all_tool_calls.push(LlmToolCall {
+                                        all_tool_calls.push(handbox_llm::types::LlmToolCall {
                                             id: String::new(),
                                             tool_type: String::new(),
                                             function: LlmToolFunction {
                                                 name: String::new(),
                                                 arguments: String::new(),
                                             },
-                                            execution_mode: Default::default(),
-                                            execution_status: Default::default(),
-                                            result: None,
                                         });
                                     }
 
@@ -1504,11 +1351,23 @@ impl MessageService {
                                 }
                             }
 
+                            // 将 LLM tool calls 转换为 Message tool calls 用于回调
+                            let message_tool_calls = if all_tool_calls.is_empty() {
+                                None
+                            } else {
+                                Some(
+                                    all_tool_calls
+                                        .iter()
+                                        .map(|tc| MessageToolCall::from(tc.clone()))
+                                        .collect(),
+                                )
+                            };
+
                             streaming_callback(StreamChunk {
                                 stream_id: stream_id.clone(),
                                 content: accumulated_content.clone(),
                                 reasoning: delta.reasoning.clone(),
-                                tool_calls: Some(all_tool_calls.clone()),
+                                tool_calls: message_tool_calls,
                             });
                             chunk_count += 1;
 
@@ -1548,13 +1407,17 @@ impl MessageService {
         );
 
         // 7. 构造消息配置并处理工具调用的执行模式
-        let config = Self::extract_message_config_from_chat(request, &chat)
-            .unwrap_or_else(|| Self::message_config_from_chat(&chat));
-        let config_option = Some(config.clone());
+        let config = Self::message_config_from_chat(&chat);
         let processed_tool_calls = if all_tool_calls.is_empty() {
             None
         } else {
-            Self::prepare_tool_calls(Some(all_tool_calls), &config_option)
+            // 先将 LlmToolCall 转换为 MessageToolCall
+            let message_tool_calls: Vec<MessageToolCall> = all_tool_calls
+                .into_iter()
+                .map(|tc| MessageToolCall::from(tc))
+                .collect();
+            // 然后根据配置更新执行模式
+            Self::prepare_tool_calls(Some(message_tool_calls), &Some(config))
         };
 
         // 8. 构造 MessageResponse
@@ -1706,7 +1569,7 @@ impl MessageService {
         turn_id: Option<i32>,
     ) -> Result<String, AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = Utc::now().timestamp_millis();
 
         let message = Message {
             id: message_id.clone(),
@@ -1736,18 +1599,19 @@ impl MessageService {
 
     /// 处理工具调用的执行模式和状态
     /// 根据消息配置中的 MCP 服务器设置，为每个工具调用设置执行模式和初始状态
+    ///
+    /// 输入：已经转换为 MessageToolCall 的工具调用（可能使用了默认的执行模式）
+    /// 输出：根据配置更新了执行模式的工具调用
     fn prepare_tool_calls(
-        tool_calls: Option<Vec<LlmToolCall>>,
+        tool_calls: Option<Vec<MessageToolCall>>,
         config: &Option<MessageConfig>,
-    ) -> Option<Vec<LlmToolCall>> {
-        use handbox_llm::types::{LlmToolExecutionMode, LlmToolExecutionStatus};
-
+    ) -> Option<Vec<MessageToolCall>> {
         tool_calls.map(|calls| {
             calls
                 .into_iter()
                 .map(|mut call| {
-                    // 默认为自动执行模式
-                    let mut execution_mode = LlmToolExecutionMode::Auto;
+                    // 默认为自动执行模式（如果还没有设置）
+                    let mut execution_mode = call.execution_mode.clone();
 
                     // 根据配置查找工具所属的 MCP 服务器及其执行模式
                     if let Some(cfg) = config {
@@ -1759,20 +1623,17 @@ impl MessageService {
                                 if server.enabled_tools.contains(tool_name) {
                                     // 根据服务器的执行模式设置工具的执行模式
                                     execution_mode = if server.execution_mode == "manual" {
-                                        LlmToolExecutionMode::Manual
+                                        MessageToolExecutionMode::Manual
                                     } else {
-                                        LlmToolExecutionMode::Auto
+                                        MessageToolExecutionMode::Auto
                                     };
                                     break;
                                 }
                             }
                         }
                     }
-
-                    // 设置执行模式和初始状态
+                    // 更新执行模式
                     call.execution_mode = execution_mode;
-                    call.execution_status = LlmToolExecutionStatus::Pending;
-
                     call
                 })
                 .collect()
@@ -1781,12 +1642,14 @@ impl MessageService {
 
     /// 构造并保存AI响应消息
     /// 返回 (message_id, processed_tool_calls)
+    ///
+    /// 注意：tool_calls 应该已经是处理过的 MessageToolCall（包含执行模式和状态）
     async fn save_assistant_message(
         &self,
         chat_id: &str,
         content: &str,
         reasoning: Option<String>,
-        tool_calls: Option<Vec<LlmToolCall>>,
+        tool_calls: Option<Vec<MessageToolCall>>,
         config: Option<MessageConfig>,
         start_time_millis: i64,
         duration_ms: i64,
@@ -1794,9 +1657,9 @@ impl MessageService {
         output_tokens: Option<i32>,
         total_tokens: Option<i32>,
         turn_id: Option<i32>,
-    ) -> Result<(String, Option<Vec<LlmToolCall>>), AppError> {
+    ) -> Result<(String, Option<Vec<MessageToolCall>>), AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = Utc::now().timestamp_millis();
 
         // 处理工具调用的执行模式和状态
         let processed_tool_calls = Self::prepare_tool_calls(tool_calls, &config);
@@ -1839,7 +1702,7 @@ impl MessageService {
     /// # 参数
     /// - `chat_id`: 聊天 ID
     /// - `turn_id`: 轮次 ID（最大轮次 ID）
-    async fn build_request_from_turn(
+    async fn build_message_request(
         &self,
         chat_id: &str,
         turn_id: i32,
@@ -1911,7 +1774,13 @@ impl MessageService {
             role: m.role.clone(),
             content: m.content.clone(),
             reasoning: m.reasoning.clone(),
-            tool_calls: m.tool_calls.clone(),
+            // 转换 MessageToolCall 为 LlmToolCall (去除业务字段)
+            tool_calls: m.tool_calls.as_ref().map(|calls| {
+                calls
+                    .iter()
+                    .map(|tc| tc.to_llm_tool_call())
+                    .collect()
+            }),
             tool_call_id: m.tool_call_id.clone(),
         }));
 
@@ -1921,26 +1790,7 @@ impl MessageService {
             model_id: message_config.model_id.clone().unwrap_or_default(),
             provider_id: message_config.provider_id.clone().unwrap_or_default(),
             messages: request_messages,
-            temp_user_message_id: None,
             attachments: None,
-        })
-    }
-
-    /// 从聊天信息中提取消息配置（保留旧接口）
-    fn extract_message_config_from_chat(
-        request: &MessageRequest,
-        chat: &Chat,
-    ) -> Option<MessageConfig> {
-        Some(MessageConfig {
-            model_id: Some(request.model_id.clone()),
-            provider_id: Some(request.provider_id.clone()),
-            temperature: chat.temperature,
-            top_p: chat.top_p,
-            max_tokens: chat.max_tokens,
-            stream: chat.stream,
-            system_prompt: chat.system_prompt.clone(),
-            mcp_servers: Some(chat.mcp_servers.clone()),
-            turn_count: chat.turn_count,
         })
     }
 
@@ -1961,12 +1811,20 @@ impl MessageService {
             .delta
             .ok_or_else(|| AppError::internal_error("No message in API choice"))?;
 
+        // 注意：这里暂时不转换 tool_calls，因为调用方需要使用原始的 LlmToolCall
+        // 转换会在 save_assistant_message 或 prepare_tool_calls 中完成
         Ok(MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: uuid::Uuid::new_v4().to_string(), // 临时ID，实际使用时会被覆盖
             content: message.content,
             reasoning: message.reasoning,
-            tool_calls: message.tool_calls,
+            // 临时转换为 MessageToolCall（默认状态）
+            tool_calls: message.tool_calls.map(|calls| {
+                calls
+                    .into_iter()
+                    .map(|tc| MessageToolCall::from(tc))
+                    .collect()
+            }),
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
             input_tokens: api_response.usage.as_ref().map(|u| u.prompt_tokens),
@@ -2106,8 +1964,8 @@ impl MessageService {
     async fn update_tool_call_status(
         &self,
         message_id: &str,
-        status_map: &HashMap<String, LlmToolExecutionStatus>,
-    ) -> Result<Vec<LlmToolCall>, AppError> {
+        status_map: &HashMap<String, MessageToolExecutionStatus>,
+    ) -> Result<Vec<MessageToolCall>, AppError> {
         // 1. 获取消息
         let mut message = self.get_message(message_id.to_string()).await?;
 
@@ -2122,7 +1980,7 @@ impl MessageService {
                     // 非完成状态时清除旧结果，避免残留
                     if !matches!(
                         status,
-                        LlmToolExecutionStatus::Completed | LlmToolExecutionStatus::Failed
+                        MessageToolExecutionStatus::Completed | MessageToolExecutionStatus::Failed
                     ) {
                         tool_call.result = None;
                     }
@@ -2137,7 +1995,7 @@ impl MessageService {
         }
 
         // 3. 保存更新后的工具调用
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = Utc::now().timestamp_millis();
         self.repository
             .update_message_tools(&message.id, message.tool_calls.as_ref(), now)
             .await?;
@@ -2156,7 +2014,7 @@ impl MessageService {
         &self,
         message_id: &str,
         results: &HashMap<String, String>,
-    ) -> Result<Vec<LlmToolCall>, AppError> {
+    ) -> Result<Vec<MessageToolCall>, AppError> {
         let mut message = self.get_message(message_id.to_string()).await?;
         let mut updated_calls = Vec::new();
 
@@ -2165,9 +2023,9 @@ impl MessageService {
                 if let Some(result) = results.get(&tool_call.id) {
                     tool_call.result = Some(result.clone());
                     tool_call.execution_status = if Self::is_failure_result(result) {
-                        LlmToolExecutionStatus::Failed
+                        MessageToolExecutionStatus::Failed
                     } else {
-                        LlmToolExecutionStatus::Completed
+                        MessageToolExecutionStatus::Completed
                     };
                     updated_calls.push(tool_call.clone());
                 }
@@ -2178,7 +2036,7 @@ impl MessageService {
             return Ok(updated_calls);
         }
 
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = Utc::now().timestamp_millis();
         self.repository
             .update_message_tools(&message.id, message.tool_calls.as_ref(), now)
             .await?;

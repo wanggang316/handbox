@@ -323,9 +323,6 @@ fn convert_openai_tool_call(call: OpenAIToolCall) -> LlmToolCall {
             name: call.function.name.clone(),
             arguments: call.function.arguments.clone(),
         },
-        execution_mode: Default::default(),
-        execution_status: Default::default(),
-        result: None,
     }
 }
 

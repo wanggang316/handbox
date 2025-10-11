@@ -1,8 +1,78 @@
 use super::common::{Timestamp, UUID};
 use crate::storage::types::McpServerConfig;
-use handbox_llm::{types::LlmMessageRole, LlmToolCall};
+use handbox_llm::types::{LlmMessageRole, LlmToolFunction};
 
 use serde::{Deserialize, Serialize};
+
+/// 工具调用执行模式
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageToolExecutionMode {
+    Auto,
+    Manual,
+}
+
+impl Default for MessageToolExecutionMode {
+    fn default() -> Self {
+        MessageToolExecutionMode::Auto
+    }
+}
+
+/// 工具调用执行状态
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageToolExecutionStatus {
+    Pending,   // 待执行
+    Executing, // 执行中
+    Completed, // 已执行
+    Failed,    // 执行错误
+}
+
+impl Default for MessageToolExecutionStatus {
+    fn default() -> Self {
+        MessageToolExecutionStatus::Pending
+    }
+}
+
+/// 业务层工具调用信息（包含执行相关的业务字段）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: LlmToolFunction,
+    #[serde(default)]
+    pub execution_mode: MessageToolExecutionMode,
+    #[serde(default)]
+    pub execution_status: MessageToolExecutionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+}
+
+impl From<handbox_llm::types::LlmToolCall> for MessageToolCall {
+    fn from(llm_call: handbox_llm::types::LlmToolCall) -> Self {
+        MessageToolCall {
+            id: llm_call.id,
+            tool_type: llm_call.tool_type,
+            function: llm_call.function,
+            execution_mode: MessageToolExecutionMode::default(),
+            execution_status: MessageToolExecutionStatus::default(),
+            result: None,
+        }
+    }
+}
+
+impl MessageToolCall {
+    /// 转换为 LLM 层的 ToolCall（移除业务字段）
+    pub fn to_llm_tool_call(&self) -> handbox_llm::types::LlmToolCall {
+        handbox_llm::types::LlmToolCall {
+            id: self.id.clone(),
+            tool_type: self.tool_type.clone(),
+            function: self.function.clone(),
+        }
+    }
+}
 
 /// 消息附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +109,7 @@ pub struct Message {
     pub role: LlmMessageRole,
     pub content: String,
     pub reasoning: Option<String>,
-    pub tool_calls: Option<Vec<LlmToolCall>>,
+    pub tool_calls: Option<Vec<MessageToolCall>>,
     pub turn_id: Option<i32>,
     pub tool_call_id: Option<String>,
     pub config: Option<MessageConfig>,
