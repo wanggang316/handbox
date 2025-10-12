@@ -202,7 +202,7 @@
 
 <Modal {open} {onClose} title={model?.name ?? "模型信息"}>
   <div
-    class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 space-y-6 text-sm text-base-content/90 scrollbar-padding"
+    class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 pb-6 space-y-6 text-sm text-base-content/90 scrollbar-padding"
   >
     {#if model}
       <table
@@ -261,26 +261,26 @@
 </Modal>
 
 <style>
-  .scrollbar-padding {
-    position: relative;
-    padding-bottom: 2rem;
-    scrollbar-gutter: stable;
+  /* .scrollbar-padding {
+    padding-bottom: 1.5rem;
+    scrollbar-gutter: stable both-edges;
+  } */
+
+  :global(.scrollbar-padding::-webkit-scrollbar) {
+    width: 6px;
   }
 
-  /* 在表格底部添加额外空间 */
-  .scrollbar-padding :global(table) {
-    margin-bottom: 1rem;
+  :global(.scrollbar-padding::-webkit-scrollbar-track) {
+    margin-bottom: 15px;
+    background: transparent;
   }
 
-  .scrollbar-padding::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 18px;
-    height: 14px;
-    background: var(--base-100);
-    border-bottom-right-radius: 1.25rem;
-    pointer-events: none;
+  :global(.scrollbar-padding::-webkit-scrollbar-thumb) {
+    background: color-mix(in oklch, var(--base-content) 15%, transparent);
+    border-radius: 3px;
+  }
+
+  :global(.scrollbar-padding::-webkit-scrollbar-thumb:hover) {
+    background: color-mix(in oklch, var(--base-content) 25%, transparent);
   }
 </style>
