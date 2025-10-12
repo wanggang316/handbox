@@ -8,8 +8,8 @@
     providerStateActions,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import type { Provider, AddProviderRequest } from "$lib/types/provider";
-  import { Trash2, ChevronLeft, SquarePen, Heart, Star } from "@lucide/svelte";
+  import type { Provider, AddProviderRequest, Model } from "$lib/types/provider";
+  import { Trash2, ChevronLeft, SquarePen, Star, Info, RefreshCw } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
@@ -17,10 +17,13 @@
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
+  import ModelInfoModal from "$lib/components/settings/ModelInfoModal.svelte";
 
   let providerId = $state("");
   let showDeleteConfirm = $state(false);
   let showEditModal = $state(false);
+  let showModelInfo = $state(false);
+  let selectedModel = $state<Model | null>(null);
 
   let confirmModalRef: any;
 
@@ -36,6 +39,10 @@
   // 获取预定义供应商信息
   let providerIcon = $derived(
     currentProvider ? getProviderIcon(currentProvider) : null,
+  );
+
+  const isRefreshing = $derived(
+    !!(currentProvider?.id && providerState.isFetchingModels === currentProvider.id),
   );
 
   onMount(() => {
@@ -130,6 +137,26 @@
     showDeleteConfirm = true;
   }
 
+  function openModelInfo(model: Model) {
+    selectedModel = model;
+    showModelInfo = true;
+  }
+
+  function closeModelInfo() {
+    showModelInfo = false;
+    selectedModel = null;
+  }
+
+  async function refreshModels() {
+    if (!currentProvider?.id) return;
+
+    try {
+      await providerActions.fetchProviderModels(currentProvider.id, true);
+    } catch (error) {
+      console.error("Failed to refresh models", error);
+    }
+  }
+
   async function confirmDelete() {
     if (!currentProvider || !currentProvider.id) return;
 
@@ -189,6 +216,14 @@
           <div class="flex flex-row items-center gap-4">
             <IconButton icon={SquarePen} on:click={handleEdit} />
 
+            <IconButton
+              icon={RefreshCw}
+              ariaLabel="刷新模型列表"
+              on:click={refreshModels}
+              disabled={isRefreshing}
+              customClass={`transition-transform ${isRefreshing ? 'animate-spin text-primary' : ''}`}
+            />
+
             <IconButton icon={Trash2} on:click={handleDelete} />
 
             <Toggle
@@ -215,6 +250,7 @@
             <div class="flex-1">Name</div>
             <div class="text-center w-16">Enabled</div>
             <div class="text-center w-16">Favorite</div>
+            <div class="text-center w-14">Info</div>
           </div>
 
           <!-- Model List -->
@@ -271,6 +307,16 @@
                     />
                   </button>
                 </div>
+
+                <div class="flex items-center justify-center w-14">
+                  <IconButton
+                    icon={Info}
+                    iconSize={16}
+                    size="w-6 h-6"
+                    ariaLabel="查看模型信息"
+                    on:click={() => openModelInfo(model)}
+                  />
+                </div>
               </div>
             {/each}
           </div>
@@ -283,6 +329,8 @@
     {/if}
   </main>
 </div>
+
+<ModelInfoModal open={showModelInfo} model={selectedModel} onClose={closeModelInfo} />
 
 <!-- 编辑供应商弹窗 -->
 <AddProviderModal

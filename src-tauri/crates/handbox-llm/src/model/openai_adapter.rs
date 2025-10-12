@@ -2,18 +2,19 @@
 
 use super::model_client::ModelClient;
 use crate::error::LlmClientError;
-use crate::types::{LlmModelFeature, LlmProvider, LlmStandardModel};
+use crate::types::{LlmModelModality, LlmProvider, LlmStandardModel};
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::to_value;
 
 /// OpenAI 风格的模型列表响应
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenAIModelsResponse {
     pub object: String,
     pub data: Vec<OpenAIModelData>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenAIModelData {
     pub id: String,
     pub object: String,
@@ -74,9 +75,15 @@ impl ModelClient for OpenAIModelClient {
                 id: api_model.id.clone(),
                 name: api_model.id.clone(),
                 context_length: None,
+                output_token_limit: None,
                 input_cost: None,
                 output_cost: None,
-                supported_features: Some(vec![LlmModelFeature::Chat]),
+                supported_features: None,
+                description: None,
+                input_modalities: Some(vec![LlmModelModality::Text]),
+                output_modalities: Some(vec![LlmModelModality::Text]),
+                metadata: to_value(&api_model).ok(),
+                pricing: None,
             });
         }
 

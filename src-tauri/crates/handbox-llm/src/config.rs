@@ -1,4 +1,10 @@
-use crate::types::{LlmApiType, LlmModelApiType, LlmModelFeature};
+use crate::types::{
+    LlmApiType,
+    LlmModelApiType,
+    LlmModelFeature,
+    LlmModelModality,
+};
+use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -13,9 +19,15 @@ pub struct LlmProviderConfig {
 pub struct LlmModelExtraInfo {
     pub name: String,
     pub context_length: Option<i32>,
+    pub output_token_limit: Option<i32>,
     pub input_cost_per_1k: Option<f32>,
     pub output_cost_per_1k: Option<f32>,
     pub features: Vec<LlmModelFeature>,
+    pub description: Option<String>,
+    pub input_modalities: Option<Vec<LlmModelModality>>,
+    pub output_modalities: Option<Vec<LlmModelModality>>,
+    pub metadata: Option<Value>,
+    pub pricing: Option<Value>,
 }
 
 pub trait LlmConfigProvider: Send + Sync {

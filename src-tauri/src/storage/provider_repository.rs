@@ -198,10 +198,31 @@ impl ProviderRepository {
     pub async fn create_model(&self, model: &Model) -> Result<(), AppError> {
         let features_json = model.features_to_json();
 
+        let input_modalities_json = Model::modalities_to_json(&model.input_modalities);
+        let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
+        let metadata_json = model.metadata_to_json();
+        let pricing_json = model.pricing_to_json();
+
         let query = r#"
-            INSERT INTO models (id, provider_id, name, context_length, input_cost, output_cost,
-                              supported_features, enabled, favorite, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO models (
+                id,
+                provider_id,
+                name,
+                context_length,
+                output_token_limit,
+                input_cost,
+                output_cost,
+                supported_features,
+                description,
+                input_modalities,
+                output_modalities,
+                metadata,
+                pricing,
+                enabled,
+                favorite,
+                created_at,
+                updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         "#;
 
         sqlx::query(query)
@@ -209,9 +230,15 @@ impl ProviderRepository {
             .bind(&model.provider_id)
             .bind(&model.name)
             .bind(model.context_length)
+            .bind(model.output_token_limit)
             .bind(model.input_cost)
             .bind(model.output_cost)
             .bind(features_json)
+            .bind(model.description.as_deref())
+            .bind(input_modalities_json.as_deref())
+            .bind(output_modalities_json.as_deref())
+            .bind(metadata_json.as_deref())
+            .bind(pricing_json.as_deref())
             .bind(model.enabled)
             .bind(model.favorite)
             .bind(model.created_at)
@@ -273,6 +300,10 @@ impl ProviderRepository {
         tracing::info!("Inserting {} new models", new_models.len());
         for model in new_models {
             let features_json = model.features_to_json();
+            let input_modalities_json = Model::modalities_to_json(&model.input_modalities);
+            let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
+            let metadata_json = model.metadata_to_json();
+            let pricing_json = model.pricing_to_json();
 
             // 从状态映射中获取用户设置的状态，如果没有则使用默认值
             let (enabled, favorite) = match state_map.get(&model.id) {
@@ -292,9 +323,27 @@ impl ProviderRepository {
             };
 
             let query = r#"
-                INSERT INTO models (id, provider_id, name, context_length, input_cost, output_cost,
-                                  supported_features, enabled, favorite, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                INSERT INTO models (
+                    id,
+                    provider_id,
+                    name,
+                    context_length,
+                    output_token_limit,
+                    input_cost,
+                    output_cost,
+                    supported_features,
+                    description,
+                    input_modalities,
+                    output_modalities,
+                    metadata,
+                    pricing,
+                    enabled,
+                    favorite,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                )
             "#;
 
             sqlx::query(query)
@@ -302,9 +351,15 @@ impl ProviderRepository {
                 .bind(&model.provider_id)
                 .bind(&model.name)
                 .bind(model.context_length)
+                .bind(model.output_token_limit)
                 .bind(model.input_cost)
                 .bind(model.output_cost)
                 .bind(&features_json)
+                .bind(model.description.as_deref())
+                .bind(input_modalities_json.as_deref())
+                .bind(output_modalities_json.as_deref())
+                .bind(metadata_json.as_deref())
+                .bind(pricing_json.as_deref())
                 .bind(enabled)
                 .bind(favorite)
                 .bind(model.created_at)
@@ -334,11 +389,33 @@ impl ProviderRepository {
 
         for model in models {
             let features_json = model.features_to_json();
+            let input_modalities_json = Model::modalities_to_json(&model.input_modalities);
+            let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
+            let metadata_json = model.metadata_to_json();
+            let pricing_json = model.pricing_to_json();
 
             let query = r#"
-                INSERT OR REPLACE INTO models (id, provider_id, name, context_length, input_cost, output_cost,
-                                      supported_features, enabled, favorite, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                INSERT OR REPLACE INTO models (
+                    id,
+                    provider_id,
+                    name,
+                    context_length,
+                    output_token_limit,
+                    input_cost,
+                    output_cost,
+                    supported_features,
+                    description,
+                    input_modalities,
+                    output_modalities,
+                    metadata,
+                    pricing,
+                    enabled,
+                    favorite,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                )
             "#;
 
             sqlx::query(query)
@@ -346,9 +423,15 @@ impl ProviderRepository {
                 .bind(&model.provider_id)
                 .bind(&model.name)
                 .bind(model.context_length)
+                .bind(model.output_token_limit)
                 .bind(model.input_cost)
                 .bind(model.output_cost)
                 .bind(features_json)
+                .bind(model.description.as_deref())
+                .bind(input_modalities_json.as_deref())
+                .bind(output_modalities_json.as_deref())
+                .bind(metadata_json.as_deref())
+                .bind(pricing_json.as_deref())
                 .bind(model.enabled)
                 .bind(model.favorite)
                 .bind(model.created_at)
@@ -370,8 +453,24 @@ impl ProviderRepository {
     /// 获取供应商的所有模型
     pub async fn get_models_by_provider(&self, provider_id: &str) -> Result<Vec<Model>, AppError> {
         let query = r#"
-            SELECT id, provider_id, name, context_length, input_cost, output_cost,
-                   supported_features, enabled, favorite, created_at, updated_at
+            SELECT
+                id,
+                provider_id,
+                name,
+                context_length,
+                output_token_limit,
+                input_cost,
+                output_cost,
+                supported_features,
+                description,
+                input_modalities,
+                output_modalities,
+                metadata,
+                pricing,
+                enabled,
+                favorite,
+                created_at,
+                updated_at
             FROM models WHERE provider_id = $1 ORDER BY created_at
         "#;
 
@@ -477,14 +576,44 @@ impl ProviderRepository {
             AppError::internal_error(&format!("Failed to parse model features: {}", e))
         })?;
 
+        let description: Option<String> = row.try_get("description")?;
+        let input_modalities: Option<String> = row.try_get("input_modalities")?;
+        let output_modalities: Option<String> = row.try_get("output_modalities")?;
+        let metadata_raw: Option<String> = row.try_get("metadata")?;
+        let pricing_raw: Option<String> = row.try_get("pricing")?;
+
+        let input_modalities =
+            Model::modalities_from_json(input_modalities.as_deref()).map_err(|e| {
+                AppError::internal_error(&format!("Failed to parse model input modalities: {}", e))
+            })?;
+
+        let output_modalities =
+            Model::modalities_from_json(output_modalities.as_deref()).map_err(|e| {
+                AppError::internal_error(&format!("Failed to parse model output modalities: {}", e))
+            })?;
+
+        let metadata = Model::metadata_from_json(metadata_raw.as_deref()).map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse model metadata: {}", e))
+        })?;
+
+        let pricing = Model::pricing_from_json(pricing_raw.as_deref()).map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse model pricing: {}", e))
+        })?;
+
         Ok(Model {
             id: row.try_get("id")?,
             provider_id: row.try_get("provider_id")?,
             name: row.try_get("name")?,
             context_length: row.try_get("context_length")?,
+            output_token_limit: row.try_get("output_token_limit")?,
             input_cost: row.try_get("input_cost")?,
             output_cost: row.try_get("output_cost")?,
             supported_features,
+            description,
+            input_modalities,
+            output_modalities,
+            metadata,
+            pricing,
             enabled: row.try_get("enabled")?,
             favorite: row.try_get("favorite").unwrap_or(false),
             created_at: row.try_get("created_at")?,

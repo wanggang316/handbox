@@ -5,8 +5,9 @@ use crate::storage::types::ModelFeature;
 use handbox_llm::config::{
     LlmConfigProvider, LlmModelExtraInfo as LlmClientModelExtraInfo, LlmProviderConfig,
 };
-use handbox_llm::types::{LlmApiType, LlmModelApiType, LlmModelFeature};
+use handbox_llm::types::{LlmApiType, LlmModelApiType, LlmModelFeature, LlmModelModality};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::OnceLock;
@@ -16,9 +17,15 @@ use std::sync::OnceLock;
 pub struct ModelExtraInfo {
     pub name: String,
     pub context_length: Option<i32>,
+    pub output_token_limit: Option<i32>,
     pub input_cost_per_1k: Option<f32>,
     pub output_cost_per_1k: Option<f32>,
     pub features: Vec<String>,
+    pub description: Option<String>,
+    pub input_modalities: Option<Vec<String>>,
+    pub output_modalities: Option<Vec<String>>,
+    pub metadata: Option<Value>,
+    pub pricing: Option<Value>,
 }
 
 /// 供应商配置
@@ -133,11 +140,22 @@ impl LlmConfig {
         features
             .iter()
             .filter_map(|f| match f.as_str() {
-                "text" => Some(ModelFeature::Text),
-                "vision" => Some(ModelFeature::Vision),
-                "function_calling" => Some(ModelFeature::FunctionCalling),
-                "streaming" => Some(ModelFeature::Streaming),
                 "reasoning" => Some(ModelFeature::Reasoning),
+                "tool" => Some(ModelFeature::Tool),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn convert_modalities(&self, modalities: &[String]) -> Vec<LlmModelModality> {
+        modalities
+            .iter()
+            .filter_map(|m| match m.as_str() {
+                "text" => Some(LlmModelModality::Text),
+                "image" => Some(LlmModelModality::Image),
+                "file" => Some(LlmModelModality::File),
+                "audio" => Some(LlmModelModality::Audio),
+                "video" => Some(LlmModelModality::Video),
                 _ => None,
             })
             .collect()
@@ -146,11 +164,8 @@ impl LlmConfig {
 
 fn map_model_feature(feature: ModelFeature) -> LlmModelFeature {
     match feature {
-        ModelFeature::Text => LlmModelFeature::Chat,
-        ModelFeature::Vision => LlmModelFeature::Vision,
-        ModelFeature::FunctionCalling => LlmModelFeature::FunctionCalling,
-        ModelFeature::Streaming => LlmModelFeature::Streaming,
         ModelFeature::Reasoning => LlmModelFeature::Reasoning,
+        ModelFeature::Tool => LlmModelFeature::Tool,
     }
 }
 
@@ -167,9 +182,21 @@ fn to_llm_model_extra_info(
     LlmClientModelExtraInfo {
         name: extra_info.name.clone(),
         context_length: extra_info.context_length,
+        output_token_limit: extra_info.output_token_limit,
         input_cost_per_1k: extra_info.input_cost_per_1k,
         output_cost_per_1k: extra_info.output_cost_per_1k,
         features,
+        description: extra_info.description.clone(),
+        input_modalities: extra_info
+            .input_modalities
+            .as_ref()
+            .map(|modalities| config.convert_modalities(modalities)),
+        output_modalities: extra_info
+            .output_modalities
+            .as_ref()
+            .map(|modalities| config.convert_modalities(modalities)),
+        metadata: extra_info.metadata.clone(),
+        pricing: extra_info.pricing.clone(),
     }
 }
 

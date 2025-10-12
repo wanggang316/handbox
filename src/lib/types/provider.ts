@@ -24,9 +24,15 @@ export interface Model {
   provider_id: string;
   name: string;
   context_length?: number;
+  output_token_limit?: number;
   input_cost?: number;
   output_cost?: number;
-  supported_features: ModelFeature[];
+  supported_features?: ModelFeature[] | null;
+  description?: string;
+  input_modalities?: ModelModality[];
+  output_modalities?: ModelModality[];
+  metadata?: unknown;
+  pricing?: ModelPricing;
   enabled: boolean;
   favorite: boolean;
   created_at: number;
@@ -40,7 +46,21 @@ export interface ModelWithProvider extends Model {
 }
 
 // 模型特性
-export type ModelFeature = 'text' | 'vision' | 'function-calling' | 'streaming' | 'reasoning';
+export type ModelFeature = 'reasoning' | 'tool';
+
+export type ModelModality = 'text' | 'image' | 'file' | 'audio' | 'video';
+
+export interface ModelPricing {
+  prompt?: string | number | null;
+  completion?: string | number | null;
+  request?: string | number | null;
+  image?: string | number | null;
+  web_search?: string | number | null;
+  internal_reasoning?: string | number | null;
+  input_cache_read?: string | number | null;
+  input_cache_write?: string | number | null;
+  [key: string]: string | number | null | undefined;
+}
 
 
 

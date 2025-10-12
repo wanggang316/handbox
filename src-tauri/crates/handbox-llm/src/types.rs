@@ -199,21 +199,20 @@ pub struct LlmDeltaToolFunction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub enum LlmModelFeature {
-    #[serde(rename = "chat")]
-    Chat,
-    #[serde(rename = "completion")]
-    Completion,
-    #[serde(rename = "embedding")]
-    Embedding,
-    #[serde(rename = "function_calling")]
-    FunctionCalling,
-    #[serde(rename = "vision")]
-    Vision,
-    #[serde(rename = "streaming")]
-    Streaming,
-    #[serde(rename = "reasoning")]
     Reasoning,
+    Tool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmModelModality {
+    Text,
+    Image,
+    File,
+    Audio,
+    Video,
 }
 
 #[derive(Debug, Clone)]
@@ -221,9 +220,15 @@ pub struct LlmStandardModel {
     pub id: String,
     pub name: String,
     pub context_length: Option<i32>,
+    pub output_token_limit: Option<i32>,
     pub input_cost: Option<f32>,
     pub output_cost: Option<f32>,
     pub supported_features: Option<Vec<LlmModelFeature>>,
+    pub description: Option<String>,
+    pub input_modalities: Option<Vec<LlmModelModality>>,
+    pub output_modalities: Option<Vec<LlmModelModality>>,
+    pub metadata: Option<Value>,
+    pub pricing: Option<Value>,
 }
 
 /// 聊天 API 类型枚举

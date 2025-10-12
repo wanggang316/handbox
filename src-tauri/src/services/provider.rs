@@ -2,10 +2,14 @@
 
 use crate::models::{AddProviderRequest, AppError};
 use crate::services::Database;
-use crate::storage::types::{Model, ModelFeature, Provider, ProviderWithModels, Timestamp, UUID};
+use crate::storage::types::{
+    Model, ModelFeature, ModelModality, Provider, ProviderWithModels, Timestamp, UUID,
+};
 use crate::storage::ProviderRepository;
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::{create_llm_client, LlmModelFeature, LlmProvider, LlmStandardModel};
+use handbox_llm::{
+    create_llm_client, LlmModelFeature, LlmModelModality, LlmProvider, LlmStandardModel,
+};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -413,18 +417,21 @@ impl ProviderService {
 
 /// 将标准模型适配为应用内部的 `Model`
 fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) -> Model {
-    let supported_features = standard_model.supported_features.map(|features| {
-        features
+    let supported_features = standard_model
+        .supported_features
+        .map(|features| features.into_iter().filter_map(map_llm_feature).collect());
+
+    let input_modalities = standard_model.input_modalities.map(|modalities| {
+        modalities
             .into_iter()
-            .map(|feature| match feature {
-                LlmModelFeature::Chat => ModelFeature::Text,
-                LlmModelFeature::Vision => ModelFeature::Vision,
-                LlmModelFeature::FunctionCalling => ModelFeature::FunctionCalling,
-                LlmModelFeature::Completion => ModelFeature::Text,
-                LlmModelFeature::Embedding => ModelFeature::Text,
-                LlmModelFeature::Streaming => ModelFeature::Streaming,
-                LlmModelFeature::Reasoning => ModelFeature::Reasoning,
-            })
+            .filter_map(map_llm_modality)
+            .collect()
+    });
+
+    let output_modalities = standard_model.output_modalities.map(|modalities| {
+        modalities
+            .into_iter()
+            .filter_map(map_llm_modality)
             .collect()
     });
 
@@ -433,13 +440,36 @@ fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) 
         provider_id,
         name: standard_model.name,
         context_length: standard_model.context_length,
+        output_token_limit: standard_model.output_token_limit,
         input_cost: standard_model.input_cost,
         output_cost: standard_model.output_cost,
         supported_features,
+        description: standard_model.description,
+        input_modalities,
+        output_modalities,
+        metadata: standard_model.metadata,
+        pricing: standard_model.pricing,
         enabled: true,
         favorite: false,
         created_at: now,
         updated_at: now,
+    }
+}
+
+fn map_llm_feature(feature: LlmModelFeature) -> Option<ModelFeature> {
+    match feature {
+        LlmModelFeature::Reasoning => Some(ModelFeature::Reasoning),
+        LlmModelFeature::Tool => Some(ModelFeature::Tool),
+    }
+}
+
+fn map_llm_modality(modality: LlmModelModality) -> Option<ModelModality> {
+    match modality {
+        LlmModelModality::Text => Some(ModelModality::Text),
+        LlmModelModality::Image => Some(ModelModality::Image),
+        LlmModelModality::File => Some(ModelModality::File),
+        LlmModelModality::Audio => Some(ModelModality::Audio),
+        LlmModelModality::Video => Some(ModelModality::Video),
     }
 }
 

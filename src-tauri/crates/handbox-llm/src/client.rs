@@ -145,9 +145,15 @@ mod tests {
             Some(LlmModelExtraInfo {
                 name: "test".into(),
                 context_length: None,
+                output_token_limit: None,
                 input_cost_per_1k: None,
                 output_cost_per_1k: None,
-                features: vec![LlmModelFeature::Chat],
+                features: vec![LlmModelFeature::Reasoning],
+                description: None,
+                input_modalities: None,
+                output_modalities: None,
+                metadata: None,
+                pricing: None,
             })
         }
     }

@@ -26,9 +26,19 @@ impl AnthropicModelClient {
             id: model_id.to_string(),
             name: extra_info.name.clone(),
             context_length: extra_info.context_length,
+            output_token_limit: extra_info.output_token_limit,
             input_cost: extra_info.input_cost_per_1k,
             output_cost: extra_info.output_cost_per_1k,
-            supported_features: Some(extra_info.features.clone()),
+            supported_features: if extra_info.features.is_empty() {
+                None
+            } else {
+                Some(extra_info.features.clone())
+            },
+            description: extra_info.description.clone(),
+            input_modalities: extra_info.input_modalities.clone(),
+            output_modalities: extra_info.output_modalities.clone(),
+            metadata: extra_info.metadata.clone(),
+            pricing: extra_info.pricing.clone(),
         }
     }
 }
