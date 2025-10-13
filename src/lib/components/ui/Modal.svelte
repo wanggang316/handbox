@@ -24,11 +24,12 @@
 </script>
 
 {#if open}
-  <div 
+  <div
     bind:this={modalElement}
-    class="fixed inset-0 bg-base-content/30 flex items-center justify-center z-[10010] animate-backdrop" 
+    class="fixed inset-0 flex items-center justify-center z-[10010] animate-backdrop"
+    style="background-color: var(--overlay);"
     class:animate-backdrop-close={closing}
-    role="dialog" 
+    role="dialog"
     aria-modal="true"
     tabindex="-1"
     onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }}

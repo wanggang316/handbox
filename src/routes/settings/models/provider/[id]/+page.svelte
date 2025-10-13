@@ -8,8 +8,19 @@
     providerStateActions,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import type { Provider, AddProviderRequest, Model } from "$lib/types/provider";
-  import { Trash2, ChevronLeft, SquarePen, Star, Info, RefreshCw } from "@lucide/svelte";
+  import type {
+    Provider,
+    AddProviderRequest,
+    Model,
+  } from "$lib/types/provider";
+  import {
+    Trash2,
+    ChevronLeft,
+    SquarePen,
+    Star,
+    Info,
+    RefreshCw,
+  } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
@@ -38,11 +49,14 @@
 
   // 获取预定义供应商信息
   let providerIcon = $derived(
-    currentProvider ? getProviderIcon(currentProvider) : null,
+    currentProvider ? getProviderIcon(currentProvider) : null
   );
 
   const isRefreshing = $derived(
-    !!(currentProvider?.id && providerState.isFetchingModels === currentProvider.id),
+    !!(
+      currentProvider?.id &&
+      providerState.isFetchingModels === currentProvider.id
+    )
   );
 
   onMount(() => {
@@ -115,7 +129,7 @@
 
     try {
       if (!currentProvider.id) {
-        throw new Error('Provider ID is undefined');
+        throw new Error("Provider ID is undefined");
       }
       console.log("handleToggleProvider", currentProvider.id, enabled);
       await providerActions.toggleProvider(currentProvider.id, enabled);
@@ -214,17 +228,17 @@
       <TableGroup>
         <TableBaseRow label={currentProvider.name} icon={iconSnippet}>
           <div class="flex flex-row items-center gap-4">
-            <IconButton icon={SquarePen} on:click={handleEdit} />
+            <IconButton icon={SquarePen} onclick={handleEdit} />
 
             <IconButton
               icon={RefreshCw}
               ariaLabel="刷新模型列表"
-              on:click={refreshModels}
+              onclick={refreshModels}
               disabled={isRefreshing}
-              customClass={`transition-transform ${isRefreshing ? 'animate-spin text-primary' : ''}`}
+              customClass={`transition-transform ${isRefreshing ? "animate-spin text-primary" : ""}`}
             />
 
-            <IconButton icon={Trash2} on:click={handleDelete} />
+            <IconButton icon={Trash2} onclick={handleDelete} />
 
             <Toggle
               checked={formData.enabled}
@@ -257,7 +271,10 @@
           <div class="bg-base-100">
             {#each providerModels as model, index}
               <div
-                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-base-100' : 'bg-base-200'} hover:bg-base-300"
+                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 ===
+                0
+                  ? 'bg-base-100'
+                  : 'bg-base-200'} hover:bg-base-300"
               >
                 <!-- Model Name -->
                 <div class="flex items-center flex-1">
@@ -275,7 +292,7 @@
                         providerActions.toggleModel(
                           currentProvider.id,
                           model.id,
-                          (e.currentTarget as HTMLInputElement).checked,
+                          (e.currentTarget as HTMLInputElement).checked
                         );
                       }
                     }}
@@ -290,7 +307,7 @@
                         providerActions.toggleModelFavorite(
                           currentProvider.id,
                           model.id,
-                          !model.favorite,
+                          !model.favorite
                         );
                       }
                     }}
@@ -314,7 +331,7 @@
                     iconSize={16}
                     size="w-6 h-6"
                     ariaLabel="查看模型信息"
-                    on:click={() => openModelInfo(model)}
+                    onclick={() => openModelInfo(model)}
                   />
                 </div>
               </div>
@@ -330,7 +347,11 @@
   </main>
 </div>
 
-<ModelInfoModal open={showModelInfo} model={selectedModel} onClose={closeModelInfo} />
+<ModelInfoModal
+  open={showModelInfo}
+  model={selectedModel}
+  onClose={closeModelInfo}
+/>
 
 <!-- 编辑供应商弹窗 -->
 <AddProviderModal

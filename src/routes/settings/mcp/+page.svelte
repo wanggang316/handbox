@@ -106,13 +106,13 @@
                 iconSize={16}
                 ariaLabel="编辑"
                 size="w-7 h-7"
-                on:click={(e) => handleEditServer(server, e)}
+                onclick={(e) => handleEditServer(server, e)}
               />
             </div>
           </div>
           <div>
             <!-- 工具统计信息或错误信息 -->
-            {#if server.status === 'error' && server.lastError}
+            {#if server.status === "error" && server.lastError}
               <div class="text-xs text-error">
                 {server.lastError.message}
               </div>
@@ -135,7 +135,9 @@
               </div>
             {:else}
               <div class="flex items-center gap-2">
-                <div class="text-xs text-base-content/60">0 tools, 0 enabled</div>
+                <div class="text-xs text-base-content/60">
+                  0 tools, 0 enabled
+                </div>
                 {#if server.lastSyncAt}
                   <span class="text-xs text-base-content/50">
                     · {formatDateTime(server.lastSyncAt)}
@@ -149,7 +151,7 @@
                 {#each server.tools as tool}
                   <span
                     class="px-2 py-0.5 text-xs rounded-full {server.enabledTools.includes(
-                      tool.name,
+                      tool.name
                     )
                       ? 'bg-primary/10 text-primary'
                       : 'bg-base-300 text-base-content/60'}"

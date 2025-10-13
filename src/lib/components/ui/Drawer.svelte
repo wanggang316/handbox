@@ -1,16 +1,22 @@
 <script lang="ts">
-  import { X } from '@lucide/svelte';
-  import TitleBar from './TitleBar.svelte';
+  import { X } from "@lucide/svelte";
+  import TitleBar from "./TitleBar.svelte";
 
   interface Props {
     open: boolean;
     title?: string;
     showCloseButton?: boolean;
     onClose: () => void;
-    children?: import('svelte').Snippet;
+    children?: import("svelte").Snippet;
   }
 
-  let { open = false, title = '', showCloseButton = true, onClose, children }: Props = $props();
+  let {
+    open = false,
+    title = "",
+    showCloseButton = true,
+    onClose,
+    children,
+  }: Props = $props();
 
   let closing = $state(false);
   let drawerElement = $state<HTMLDivElement>();
@@ -37,7 +43,9 @@
     role="dialog"
     aria-modal="true"
     tabindex="-1"
-    onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }}
+    onkeydown={(e) => {
+      if (e.key === "Escape") handleClose();
+    }}
   >
     <TitleBar showToggleButton={false} />
 
@@ -45,10 +53,13 @@
     <div
       role="button"
       tabindex="0"
-      class="absolute inset-0 bg-base-content/30 animate-backdrop"
+      class="absolute inset-0 animate-backdrop"
+      style="background-color: var(--overlay);"
       class:animate-backdrop-close={closing}
       onclick={handleClose}
-      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClose(); }}
+      onkeydown={(e) => {
+        if (e.key === "Enter" || e.key === " ") handleClose();
+      }}
     ></div>
 
     <!-- 抽屉容器 -->
@@ -60,7 +71,9 @@
       onkeydown={(e) => e.stopPropagation()}
     >
       <!-- 头部 -->
-      <div class="flex items-center justify-between px-6 py-4 border-b border-base-content/10">
+      <div
+        class="flex items-center justify-between px-6 py-4 border-b border-base-content/10"
+      >
         <h2 class="text-lg font-semibold text-base-content">{title}</h2>
         {#if showCloseButton}
           <button

@@ -1,24 +1,20 @@
 <script lang="ts">
-    import { Ellipsis } from "@lucide/svelte";
-    import IconButton from "../ui/IconButton.svelte";
-    import ChatSettings from "./settings/Settings.svelte";
-    import { uiState } from "$lib/states/ui.svelte";
-    import Button from "../ui/Button.svelte";
-    import { RefreshCw } from "@lucide/svelte";
+  import { Ellipsis } from "@lucide/svelte";
+  import IconButton from "../ui/IconButton.svelte";
+  import ChatSettings from "./settings/Settings.svelte";
+  import { uiState } from "$lib/states/ui.svelte";
+  import Button from "../ui/Button.svelte";
+  import { RefreshCw } from "@lucide/svelte";
 
   interface Props {
     chatId?: string;
     title?: string;
     sidebarOpen?: boolean;
   }
-  
-  let { 
-    chatId = '', 
-    title = '',
-    sidebarOpen = true 
-  }: Props = $props();
 
-  const CHAT_SETTINGS_MODAL = 'chat-settings';
+  let { chatId = "", title = "", sidebarOpen = true }: Props = $props();
+
+  const CHAT_SETTINGS_MODAL = "chat-settings";
 
   function handleChatSettings() {
     uiState.openModal(CHAT_SETTINGS_MODAL);
@@ -29,12 +25,14 @@
   }
 
   function handleRefresh() {
-    console.log('刷新状态');
+    console.log("刷新状态");
   }
 </script>
 
 <!-- 顶部栏 -->
-<header class="h-[50px] px-4 border-b border-base-300 flex items-center justify-between">
+<header
+  class="h-[50px] px-4 border-b border-base-300 flex items-center justify-between"
+>
   <div class="transition-all duration-300" class:ml-[120px]={!sidebarOpen}>
     <h1 class="text-base font-medium text-base-content">
       {title}
@@ -42,21 +40,20 @@
         <span class="text-xs text-base-content/70 ml-2">ID: {chatId}</span>
       {/if}
     </h1>
-    
   </div>
   <div class="flex items-center gap-2 relative z-[10001]">
     {#if chatId}
       <IconButton
         icon={Ellipsis}
         ariaLabel="设置"
-        on:click={handleChatSettings}
+        onclick={handleChatSettings}
       />
     {/if}
   </div>
 </header>
 
 <!-- 聊天设置模态框 -->
-<ChatSettings 
+<ChatSettings
   open={uiState.modals[CHAT_SETTINGS_MODAL] || false}
   onClose={handleCloseChatSettings}
 />

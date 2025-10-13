@@ -1,23 +1,30 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { page } from '$app/stores';
-  import { goto } from '$app/navigation';
-  import Tabs from '$lib/components/ui/Tabs.svelte';
-  import CircleButton from '$lib/components/ui/CircleButton.svelte';
-  import TableGroup from '$lib/components/ui/table/TableGroup.svelte';
-  import TableBaseRow from '$lib/components/ui/table/TableBaseRow.svelte';
-  import IconButton from '$lib/components/ui/IconButton.svelte';
-  import Toggle from '$lib/components/ui/Toggle.svelte';
-  import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
-  import McpServerFormModal from '$lib/components/settings/McpServerFormModal.svelte';
-  import { mcpState, mcpActions } from '$lib/states/mcp.svelte';
-  import { updateToolEnabled } from '$lib/api';
-  import type { McpServer } from '$lib/types';
-  import { formatDateTime } from '$lib/utils/date';
-  import { ChevronLeft, RefreshCw, SquarePen, Trash2, ChevronDown, ChevronRight } from '@lucide/svelte';
+  import { onMount } from "svelte";
+  import { page } from "$app/stores";
+  import { goto } from "$app/navigation";
+  import Tabs from "$lib/components/ui/Tabs.svelte";
+  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
+  import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
+  import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
+  import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
+  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
+  import { updateToolEnabled } from "$lib/api";
+  import type { McpServer } from "$lib/types";
+  import { formatDateTime } from "$lib/utils/date";
+  import {
+    ChevronLeft,
+    RefreshCw,
+    SquarePen,
+    Trash2,
+    ChevronDown,
+    ChevronRight,
+  } from "@lucide/svelte";
 
-  let serverId = $state('');
-  let activeTab = $state('tools');
+  let serverId = $state("");
+  let activeTab = $state("tools");
   let isRefreshing = $state(false);
   let showDeleteConfirm = $state(false);
   let showEditModal = $state(false);
@@ -39,7 +46,7 @@
   });
 
   onMount(() => {
-    serverId = $page.params.id || '';
+    serverId = $page.params.id || "";
     loadServer();
   });
 
@@ -56,11 +63,11 @@
           enabled: server.enabled,
         };
       } else {
-        console.error('MCP server not found:', serverId);
-        goto('/settings/mcp');
+        console.error("MCP server not found:", serverId);
+        goto("/settings/mcp");
       }
     } catch (error) {
-      console.error('Failed to load MCP server:', error);
+      console.error("Failed to load MCP server:", error);
     }
   }
 
@@ -80,9 +87,11 @@
 
     try {
       await mcpActions.toggleServer({ serverId: server.id, enabled });
-      console.log(`MCP server ${enabled ? 'enabled' : 'disabled'} successfully`);
+      console.log(
+        `MCP server ${enabled ? "enabled" : "disabled"} successfully`
+      );
     } catch (error) {
-      console.error('Failed to toggle MCP server:', error);
+      console.error("Failed to toggle MCP server:", error);
       // 发生错误时回滚UI状态
       formData.enabled = !enabled;
     }
@@ -95,14 +104,14 @@
     try {
       await mcpActions.refreshServer({ serverId: server.id });
     } catch (error) {
-      console.error('Failed to refresh MCP server:', error);
+      console.error("Failed to refresh MCP server:", error);
     } finally {
       isRefreshing = false;
     }
   }
 
   function handleEdit(event: CustomEvent) {
-    console.log('Edit button clicked', event);
+    console.log("Edit button clicked", event);
     if (!server) return;
     showEditModal = true;
   }
@@ -111,20 +120,23 @@
     showEditModal = false;
   }
 
-  async function handleSaveServer(data: { mode: 'create' | 'update'; data: any }) {
-    if (data.mode === 'update' && server) {
+  async function handleSaveServer(data: {
+    mode: "create" | "update";
+    data: any;
+  }) {
+    if (data.mode === "update" && server) {
       await mcpActions.updateServer(server.id, data.data);
-      console.log('MCP server updated successfully');
+      console.log("MCP server updated successfully");
       // 刷新服务器数据
       await mcpActions.loadServers(true);
-    } else if (data.mode === 'create') {
+    } else if (data.mode === "create") {
       await mcpActions.createServer(data.data);
-      console.log('MCP server created successfully');
+      console.log("MCP server created successfully");
     }
   }
 
   function handleDelete(event: CustomEvent) {
-    console.log('Delete button clicked', event);
+    console.log("Delete button clicked", event);
     if (!server) return;
     showDeleteConfirm = true;
   }
@@ -134,28 +146,28 @@
 
     try {
       await mcpActions.deleteServer(server.id);
-      console.log('MCP server deleted successfully');
-      goto('/settings/mcp');
+      console.log("MCP server deleted successfully");
+      goto("/settings/mcp");
     } catch (error) {
-      console.error('Failed to delete MCP server:', error);
+      console.error("Failed to delete MCP server:", error);
       // 删除失败时触发关闭动画
       confirmModalRef?.modalRef?.handleClose();
     }
   }
 
   function handleBack() {
-    goto('/settings/mcp');
+    goto("/settings/mcp");
   }
 
   const connectionTypeLabel = $derived(() => {
-    if (!server) return '';
+    if (!server) return "";
     switch (server.connectionType) {
-      case 'stdio':
-        return 'stdio';
-      case 'sse':
-        return 'SSE';
-      case 'http':
-        return 'HTTP';
+      case "stdio":
+        return "stdio";
+      case "sse":
+        return "SSE";
+      case "http":
+        return "HTTP";
       default:
         return server.connectionType;
     }
@@ -180,16 +192,15 @@
       const updatedServer = await updateToolEnabled({
         serverId: server.id,
         toolName,
-        enabled
+        enabled,
       });
 
       // 强制刷新服务器列表，确保列表页和详情页数据同步
       await mcpActions.loadServers(true);
     } catch (error) {
-      console.error('Failed to update tool enabled status:', error);
+      console.error("Failed to update tool enabled status:", error);
     }
   }
-
 </script>
 
 <!-- 页面布局：与 provider 详情页面一致 -->
@@ -217,19 +228,23 @@
         <div class="px-6 py-4">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <span class="text-sm text-base-content">{server.displayName || server.name}</span>
-              <span class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary">
+              <span class="text-sm text-base-content"
+                >{server.displayName || server.name}</span
+              >
+              <span
+                class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary"
+              >
                 {connectionTypeLabel()}
               </span>
             </div>
             <div class="flex flex-row items-center gap-4">
-              <IconButton icon={SquarePen} on:click={handleEdit} />
-              <IconButton icon={Trash2} on:click={handleDelete} />
+              <IconButton icon={SquarePen} onclick={handleEdit} />
+              <IconButton icon={Trash2} onclick={handleDelete} />
               <IconButton
                 icon={RefreshCw}
-                on:click={handleRefresh}
+                onclick={handleRefresh}
                 disabled={!server.enabled || isRefreshing}
-                customClass={isRefreshing ? 'animate-spin' : ''}
+                customClass={isRefreshing ? "animate-spin" : ""}
               />
               <Toggle checked={formData.enabled} onChange={handleToggle} />
             </div>
@@ -247,191 +262,226 @@
       {/if}
 
       <!-- 错误信息展示 -->
-      {#if server.status === 'error' && server.lastError}
+      {#if server.status === "error" && server.lastError}
         <div class="mt-4 p-4 rounded-lg bg-error/10 border border-error/20">
-          <div class="text-sm text-error font-medium break-words whitespace-pre-wrap">
+          <div
+            class="text-sm text-error font-medium break-words whitespace-pre-wrap"
+          >
             {server.lastError.message}
           </div>
         </div>
       {/if}
 
       <!-- Tab 导航（仅在非错误状态时显示） -->
-      {#if server.status !== 'error'}
-      <Tabs
-        value={activeTab}
-        items={[
-          { value: 'tools', label: '工具' },
-          { value: 'prompts', label: '提示' },
-          { value: 'resources', label: '资源' }
-        ]}
-        onChange={(val) => { activeTab = val; }}
-      />
+      {#if server.status !== "error"}
+        <Tabs
+          value={activeTab}
+          items={[
+            { value: "tools", label: "工具" },
+            { value: "prompts", label: "提示" },
+            { value: "resources", label: "资源" },
+          ]}
+          onChange={(val) => {
+            activeTab = val;
+          }}
+        />
 
-      <!-- Tab 内容 -->
-      {#if activeTab === 'tools'}
-        {#if server.tools.length === 0}
-          <div class="text-center text-sm py-8 text-base-content/70">
-            暂无工具数据
-          </div>
-        {:else}
-          <div class="space-y-2 mt-4">
-            {#each server.tools as tool}
-              <TableGroup>
-                <TableBaseRow label={tool.name} layout="vertical">
-                  <div class="flex items-start justify-between mb-3">
-                    <div class="flex-1">
-                      {#if tool.description}
-                        <p class="text-xs text-base-content/70">{tool.description}</p>
-                      {/if}
-                    </div>
-                    <Toggle
-                      checked={server.enabledTools.includes(tool.name)}
-                      onChange={(enabled) => handleToolToggle(tool.name, enabled)}
-                    />
-                    <!-- 工具开关不受服务器启用状态影响，可以随时配置 -->
-                  </div>
-
-                  {#if tool.inputSchema && typeof tool.inputSchema === 'object' && 'properties' in tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0}
-                    <button
-                      class="flex items-center gap-1 text-xs text-base-content/80 hover:text-base-content/80 mt-2"
-                      onclick={() => toggleTool(tool.name)}
-                    >
-                      {#if expandedTools[tool.name]}
-                        <ChevronDown size={12} />
-                        <span>参数</span>
-                      {:else}
-                        <ChevronRight size={12} />
-                        <span>参数 ({Object.keys(tool.inputSchema.properties || {}).length})</span>
-                      {/if}
-                    </button>
-
-                    {#if expandedTools[tool.name]}
-                      <div class="mt-3 pl-4 border-l-2 border-base-300">
-                        <div class="space-y-2">
-                          {#each Object.entries(tool.inputSchema.properties || {}) as [key, value]}
-                            {@const propValue = value as { type?: string; description?: string }}
-                            {@const requiredFields = (tool.inputSchema as { required?: string[] })?.required || []}
-                            {@const isRequired = requiredFields.includes(key)}
-                            <div class="text-xs">
-                              <span class="font-mono text-primary">{key}</span>
-                              {#if isRequired}
-                                <span class="text-error ml-1">*</span>
-                              {/if}
-                              {#if propValue.type}
-                                <span class="text-base-content/60 ml-1">({propValue.type})</span>
-                              {/if}
-                              {#if propValue.description}
-                                <span class="text-base-content/70 ml-2">- {propValue.description}</span>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
+        <!-- Tab 内容 -->
+        {#if activeTab === "tools"}
+          {#if server.tools.length === 0}
+            <div class="text-center text-sm py-8 text-base-content/70">
+              暂无工具数据
+            </div>
+          {:else}
+            <div class="space-y-2 mt-4">
+              {#each server.tools as tool}
+                <TableGroup>
+                  <TableBaseRow label={tool.name} layout="vertical">
+                    <div class="flex items-start justify-between mb-3">
+                      <div class="flex-1">
+                        {#if tool.description}
+                          <p class="text-xs text-base-content/70">
+                            {tool.description}
+                          </p>
+                        {/if}
                       </div>
-                    {/if}
-                  {/if}
-                </TableBaseRow>
-              </TableGroup>
-            {/each}
-          </div>
-        {/if}
-      {:else if activeTab === 'prompts'}
-        {#if server.prompts.length === 0}
-          <div class="text-center text-sm py-8 text-base-content/70">
-            暂无提示数据
-          </div>
-        {:else}
-          <div class="space-y-4 mt-4">
-            {#each server.prompts as prompt}
-              <TableGroup>
-                <TableBaseRow label={prompt.name} layout="vertical">
-                  {#if prompt.description}
-                    <p class="text-xs text-base-content/70 mb-3">{prompt.description}</p>
-                  {/if}
+                      <Toggle
+                        checked={server.enabledTools.includes(tool.name)}
+                        onChange={(enabled) =>
+                          handleToolToggle(tool.name, enabled)}
+                      />
+                      <!-- 工具开关不受服务器启用状态影响，可以随时配置 -->
+                    </div>
 
-                  {#if prompt.arguments.length > 0}
+                    {#if tool.inputSchema && typeof tool.inputSchema === "object" && "properties" in tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0}
+                      <button
+                        class="flex items-center gap-1 text-xs text-base-content/80 hover:text-base-content/80 mt-2"
+                        onclick={() => toggleTool(tool.name)}
+                      >
+                        {#if expandedTools[tool.name]}
+                          <ChevronDown size={12} />
+                          <span>参数</span>
+                        {:else}
+                          <ChevronRight size={12} />
+                          <span
+                            >参数 ({Object.keys(
+                              tool.inputSchema.properties || {}
+                            ).length})</span
+                          >
+                        {/if}
+                      </button>
+
+                      {#if expandedTools[tool.name]}
+                        <div class="mt-3 pl-4 border-l-2 border-base-300">
+                          <div class="space-y-2">
+                            {#each Object.entries(tool.inputSchema.properties || {}) as [key, value]}
+                              {@const propValue = value as {
+                                type?: string;
+                                description?: string;
+                              }}
+                              {@const requiredFields =
+                                (tool.inputSchema as { required?: string[] })
+                                  ?.required || []}
+                              {@const isRequired = requiredFields.includes(key)}
+                              <div class="text-xs">
+                                <span class="font-mono text-primary">{key}</span
+                                >
+                                {#if isRequired}
+                                  <span class="text-error ml-1">*</span>
+                                {/if}
+                                {#if propValue.type}
+                                  <span class="text-base-content/60 ml-1"
+                                    >({propValue.type})</span
+                                  >
+                                {/if}
+                                {#if propValue.description}
+                                  <span class="text-base-content/70 ml-2"
+                                    >- {propValue.description}</span
+                                  >
+                                {/if}
+                              </div>
+                            {/each}
+                          </div>
+                        </div>
+                      {/if}
+                    {/if}
+                  </TableBaseRow>
+                </TableGroup>
+              {/each}
+            </div>
+          {/if}
+        {:else if activeTab === "prompts"}
+          {#if server.prompts.length === 0}
+            <div class="text-center text-sm py-8 text-base-content/70">
+              暂无提示数据
+            </div>
+          {:else}
+            <div class="space-y-4 mt-4">
+              {#each server.prompts as prompt}
+                <TableGroup>
+                  <TableBaseRow label={prompt.name} layout="vertical">
+                    {#if prompt.description}
+                      <p class="text-xs text-base-content/70 mb-3">
+                        {prompt.description}
+                      </p>
+                    {/if}
+
+                    {#if prompt.arguments.length > 0}
+                      <button
+                        class="flex items-center gap-1 text-xs text-primary hover:text-primary/80 mt-2"
+                        onclick={() => togglePrompt(prompt.name)}
+                      >
+                        {#if expandedPrompts[prompt.name]}
+                          <ChevronDown size={14} />
+                          <span>参数</span>
+                        {:else}
+                          <ChevronRight size={14} />
+                          <span>参数 ({prompt.arguments.length})</span>
+                        {/if}
+                      </button>
+
+                      {#if expandedPrompts[prompt.name]}
+                        <div class="mt-3 pl-4 border-l-2 border-base-300">
+                          <div class="space-y-2">
+                            {#each prompt.arguments as arg}
+                              <div class="text-xs">
+                                <span class="font-mono text-primary"
+                                  >{arg.name}</span
+                                >
+                                {#if arg.required}
+                                  <span class="text-error ml-1">*</span>
+                                {/if}
+                                {#if arg.description}
+                                  <span class="text-base-content/70 ml-2"
+                                    >- {arg.description}</span
+                                  >
+                                {/if}
+                              </div>
+                            {/each}
+                          </div>
+                        </div>
+                      {/if}
+                    {/if}
+                  </TableBaseRow>
+                </TableGroup>
+              {/each}
+            </div>
+          {/if}
+        {:else if activeTab === "resources"}
+          {#if server.resources.length === 0}
+            <div class="text-center text-sm py-8 text-base-content/70">
+              暂无资源数据
+            </div>
+          {:else}
+            <div class="space-y-4 mt-4">
+              {#each server.resources as resource}
+                <TableGroup>
+                  <TableBaseRow label={resource.name} layout="vertical">
+                    {#if resource.description}
+                      <p class="text-xs text-base-content/70 mb-3">
+                        {resource.description}
+                      </p>
+                    {/if}
+
                     <button
                       class="flex items-center gap-1 text-xs text-primary hover:text-primary/80 mt-2"
-                      onclick={() => togglePrompt(prompt.name)}
+                      onclick={() => toggleResource(resource.uri)}
                     >
-                      {#if expandedPrompts[prompt.name]}
+                      {#if expandedResources[resource.uri]}
                         <ChevronDown size={14} />
-                        <span>参数</span>
+                        <span>详情</span>
                       {:else}
                         <ChevronRight size={14} />
-                        <span>参数 ({prompt.arguments.length})</span>
+                        <span>详情</span>
                       {/if}
                     </button>
 
-                    {#if expandedPrompts[prompt.name]}
-                      <div class="mt-3 pl-4 border-l-2 border-base-300">
-                        <div class="space-y-2">
-                          {#each prompt.arguments as arg}
-                            <div class="text-xs">
-                              <span class="font-mono text-primary">{arg.name}</span>
-                              {#if arg.required}
-                                <span class="text-error ml-1">*</span>
-                              {/if}
-                              {#if arg.description}
-                                <span class="text-base-content/70 ml-2">- {arg.description}</span>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      </div>
-                    {/if}
-                  {/if}
-                </TableBaseRow>
-              </TableGroup>
-            {/each}
-          </div>
-        {/if}
-      {:else if activeTab === 'resources'}
-        {#if server.resources.length === 0}
-          <div class="text-center text-sm py-8 text-base-content/70">
-            暂无资源数据
-          </div>
-        {:else}
-          <div class="space-y-4 mt-4">
-            {#each server.resources as resource}
-              <TableGroup>
-                <TableBaseRow label={resource.name} layout="vertical">
-                  {#if resource.description}
-                    <p class="text-xs text-base-content/70 mb-3">{resource.description}</p>
-                  {/if}
-
-                  <button
-                    class="flex items-center gap-1 text-xs text-primary hover:text-primary/80 mt-2"
-                    onclick={() => toggleResource(resource.uri)}
-                  >
                     {#if expandedResources[resource.uri]}
-                      <ChevronDown size={14} />
-                      <span>详情</span>
-                    {:else}
-                      <ChevronRight size={14} />
-                      <span>详情</span>
-                    {/if}
-                  </button>
-
-                  {#if expandedResources[resource.uri]}
-                    <div class="mt-3 pl-4 border-l-2 border-base-300 space-y-1">
-                      <div class="text-xs">
-                        <span class="text-base-content/60">URI:</span>
-                        <span class="ml-2 font-mono text-primary break-all">{resource.uri}</span>
-                      </div>
-                      {#if resource.mimeType}
+                      <div
+                        class="mt-3 pl-4 border-l-2 border-base-300 space-y-1"
+                      >
                         <div class="text-xs">
-                          <span class="text-base-content/60">MIME Type:</span>
-                          <span class="ml-2 text-base-content">{resource.mimeType}</span>
+                          <span class="text-base-content/60">URI:</span>
+                          <span class="ml-2 font-mono text-primary break-all"
+                            >{resource.uri}</span
+                          >
                         </div>
-                      {/if}
-                    </div>
-                  {/if}
-                </TableBaseRow>
-              </TableGroup>
-            {/each}
-          </div>
+                        {#if resource.mimeType}
+                          <div class="text-xs">
+                            <span class="text-base-content/60">MIME Type:</span>
+                            <span class="ml-2 text-base-content"
+                              >{resource.mimeType}</span
+                            >
+                          </div>
+                        {/if}
+                      </div>
+                    {/if}
+                  </TableBaseRow>
+                </TableGroup>
+              {/each}
+            </div>
+          {/if}
         {/if}
-      {/if}
       {/if}
     {/if}
   </main>
@@ -440,7 +490,7 @@
 <!-- 编辑弹窗 -->
 <McpServerFormModal
   open={showEditModal}
-  server={server}
+  {server}
   onClose={closeEditModal}
   onSave={handleSaveServer}
 />
@@ -450,7 +500,8 @@
   bind:this={confirmModalRef}
   open={showDeleteConfirm}
   title="删除 MCP 服务器"
-  message="确认要删除 <span class='font-medium'>{server?.displayName || server?.name}</span> 吗？<br/><br/>此操作无法撤销。"
+  message="确认要删除 <span class='font-medium'>{server?.displayName ||
+    server?.name}</span> 吗？<br/><br/>此操作无法撤销。"
   confirmText="删除"
   cancelText="取消"
   confirmButtonStyle="danger"

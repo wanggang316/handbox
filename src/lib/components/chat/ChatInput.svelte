@@ -29,7 +29,9 @@
   const currentModel = $derived(currentChatModel().model);
 
   // 判断是否处于编辑模式
-  const isEditing = $derived(editingMessageId !== null && editingMessageId !== undefined);
+  const isEditing = $derived(
+    editingMessageId !== null && editingMessageId !== undefined
+  );
 
   // 自动调整 textarea 高度
   function adjustTextareaHeight() {
@@ -80,7 +82,9 @@
 >
   <!-- 编辑模式提示 -->
   {#if isEditing}
-    <div class="flex items-center justify-between px-4 pt-3 pb-2 border-b border-base-300">
+    <div
+      class="flex items-center justify-between px-4 pt-3 pb-2 border-b border-base-300"
+    >
       <div class="flex items-center gap-2 text-sm text-base-content/70">
         <Pencil size={14} />
         <span>编辑消息</span>
@@ -98,7 +102,9 @@
   <textarea
     bind:this={textareaRef}
     bind:value={messageInput}
-    placeholder={isEditing ? "编辑消息内容..." : "在这里输入消息，按 Enter 发送"}
+    placeholder={isEditing
+      ? "编辑消息内容..."
+      : "在这里输入消息，按 Enter 发送"}
     onkeydown={handleKeydown}
     oninput={adjustTextareaHeight}
     rows="1"
@@ -112,7 +118,7 @@
     <IconButton
       icon={Plus}
       ariaLabel="添加附加"
-      on:click={handleAddAttachment}
+      onclick={handleAddAttachment}
     />
 
     <!-- 右侧：模型选择和发送按钮 -->
@@ -120,8 +126,8 @@
       <Button
         variant="clear"
         size="sm"
-        on:click={() => showModelModal = true}
-        >
+        on:click={() => (showModelModal = true)}
+      >
         {currentModel ? currentModel.name : "选择模型"}
         <ChevronsUpDown size={14} />
       </Button>

@@ -26,6 +26,9 @@
   --color-error: oklch(71% 0.194 13.428);
   --color-error-content: oklch(27% 0.105 12.094);
 
+  /* 遮罩层颜色 (Modal/Drawer backdrop) */
+  --color-overlay: oklch(21% 0.006 285.885 / 0.3);
+
   --color-base-100-dark: oklch(0.2308 0 0);
   --color-base-200-dark: oklch(0.2838 0.0047 247.99);
   --color-base-300-dark: oklch(0.3268 0.0055 236.68);
@@ -46,6 +49,9 @@
   --color-warning-content-dark: oklch(41% 0.112 45.904);
   --color-error-dark: oklch(71% 0.194 13.428);
   --color-error-content-dark: oklch(27% 0.105 12.094);
+
+  /* 遮罩层颜色 (Modal/Drawer backdrop) - 深色模式 */
+  --color-overlay-dark: oklch(21% 0.006 285.885 / 0.6);
 }
 
 /* 禁用桌面应用的全局滚动，但保留内部组件滚动 */
@@ -79,6 +85,7 @@ body {
   --warning-content: var(--color-warning-content);
   --error: var(--color-error);
   --error-content: var(--color-error-content);
+  --overlay: var(--color-overlay);
 }
 
 /* 深色主题 */
@@ -126,6 +133,7 @@ body {
   --warning-content: var(--color-warning-content-dark);
   --error: var(--color-error-dark);
   --error-content: var(--color-error-content-dark);
+  --overlay: var(--color-overlay-dark);
 }
 
 /* Markdown 样式 */
