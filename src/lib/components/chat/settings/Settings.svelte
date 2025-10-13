@@ -1,10 +1,9 @@
 <script lang="ts">
-  import Modal from '../../ui/Modal.svelte';
-  import ChatSettingSidebar from './SettingsSidebar.svelte';
+  import Drawer from '../../ui/Drawer.svelte';
   import PromptSettings from './SettingsPrompt.svelte';
   import ModelSettings from './SettingsModel.svelte';
   import McpSettings from './SettingsMcp.svelte';
-  import { chatState } from '$lib/states/chat.svelte';
+  import { MessageSquare, Settings as SettingsIcon, Server } from '@lucide/svelte';
 
   interface Props {
     open: boolean;
@@ -12,49 +11,41 @@
   }
 
   let { open, onClose }: Props = $props();
-
-  // 当前活跃的选项卡
-  let activeTab = $state('prompt');
-
-  // 记录上一个聊天 ID，用于检测切换
-  let lastChatId = $state(chatState.currentChat?.id);
-
-  // 监听聊天 ID 变化，重置 activeTab
-  $effect(() => {
-    if (chatState.currentChat?.id !== lastChatId) {
-      activeTab = 'prompt'; // 重置为默认标签
-      lastChatId = chatState.currentChat?.id;
-    }
-  });
-
-  function handleTabChange(tab: string) {
-    console.log('切换到:', tab);
-    activeTab = tab;
-  }
-
 </script>
 
-<Modal {open} title="" {onClose}>
-  <div class="flex w-[650px] h-[600px]">
-    <!-- 左侧边栏 -->
-    <ChatSettingSidebar
-      {activeTab}
-      onTabChange={handleTabChange}
-    />
-
-    <!-- 右侧内容区域 -->
-    <div class="flex-1 flex flex-col my-6 ml-2 mr-4">
-      <!-- 内容区域 -->
-      <div class="flex-1 overflow-y-auto">
-        {#if activeTab === 'prompt'}
-          <PromptSettings />
-        {:else if activeTab === 'model'}
-          <ModelSettings />
-        {:else if activeTab === 'mcp'}
-          <McpSettings />
-        {/if}
+<Drawer {open} title="聊天设置" {onClose}>
+  <div class="flex flex-col gap-8 px-6 py-6">
+    <!-- 提示词配置组 -->
+    <section class="flex flex-col gap-4">
+      <div class="flex items-center gap-2">
+        <MessageSquare size={18} class="text-primary" />
+        <h3 class="text-base font-semibold text-base-content">提示词</h3>
       </div>
+      <div class="pl-7">
+        <PromptSettings />
+      </div>
+    </section>
 
-    </div>
+    <!-- 模型参数配置组 -->
+    <section class="flex flex-col gap-4">
+      <div class="flex items-center gap-2">
+        <SettingsIcon size={18} class="text-primary" />
+        <h3 class="text-base font-semibold text-base-content">模型参数</h3>
+      </div>
+      <div class="pl-7">
+        <ModelSettings />
+      </div>
+    </section>
+
+    <!-- MCP 服务器配置组 -->
+    <section class="flex flex-col gap-4">
+      <div class="flex items-center gap-2">
+        <Server size={18} class="text-primary" />
+        <h3 class="text-base font-semibold text-base-content">MCP 服务器</h3>
+      </div>
+      <div class="pl-7">
+        <McpSettings />
+      </div>
+    </section>
   </div>
-</Modal>
+</Drawer>
