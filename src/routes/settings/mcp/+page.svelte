@@ -63,7 +63,7 @@
     }
   }
 
-  function handleEditServer(server: McpServer, event: CustomEvent) {
+  function handleEditServer(server: McpServer, event: MouseEvent) {
     goto(`/settings/mcp/${server.id}`);
   }
 </script>

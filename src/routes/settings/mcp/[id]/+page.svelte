@@ -110,7 +110,7 @@
     }
   }
 
-  function handleEdit(event: CustomEvent) {
+  function handleEdit(event: MouseEvent) {
     console.log("Edit button clicked", event);
     if (!server) return;
     showEditModal = true;
@@ -135,7 +135,7 @@
     }
   }
 
-  function handleDelete(event: CustomEvent) {
+  function handleDelete(event: MouseEvent) {
     console.log("Delete button clicked", event);
     if (!server) return;
     showDeleteConfirm = true;
