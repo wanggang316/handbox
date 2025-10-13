@@ -108,9 +108,7 @@
 
     <!-- 流式输出 -->
     <SwitchRow label="流式输出" bind:checked={currentSettings.streamResponse} />
-  </TableGroup>
 
-  <TableGroup>
     <!-- 最大 Token 数 -->
     <NumberStepperRow
       label="最大输出长度"

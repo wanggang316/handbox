@@ -1,6 +1,7 @@
 <script lang="ts">
   import { X } from "@lucide/svelte";
   import TitleBar from "./TitleBar.svelte";
+  import IconButton from "./IconButton.svelte";
 
   interface Props {
     open: boolean;
@@ -65,24 +66,23 @@
     <!-- 抽屉容器 -->
     <div
       role="presentation"
-      class="ml-auto relative bg-base-100 shadow-2xl w-full max-w-2xl flex flex-col animate-drawer"
+      class="ml-auto relative bg-base-100 shadow-2xl max-w-lg flex flex-col animate-drawer"
       class:animate-drawer-close={closing}
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}
     >
       <!-- 头部 -->
       <div
-        class="flex items-center justify-between px-6 py-4 border-b border-base-content/10"
+        class="h-[50px] flex items-center justify-between px-4 border-b border-base-content/10"
       >
-        <h2 class="text-lg font-semibold text-base-content">{title}</h2>
+        <h2 class="text-md text-base-content">{title}</h2>
         {#if showCloseButton}
-          <button
-            class="p-2 hover:bg-base-200 rounded-lg transition-colors"
+          <IconButton
+            icon={X}
+            ariaLabel="关闭"
+            customClass="z-[10001]"
             onclick={handleClose}
-            aria-label="关闭"
-          >
-            <X size={20} class="text-base-content/70" />
-          </button>
+          />
         {/if}
       </div>
 
