@@ -6,7 +6,7 @@ import { apiCall } from './index';
 import type {
 	Provider,
 	AddProviderRequest,
-	FrontendProviderConfig,
+	ProviderConfig,
 	ProviderConfigsResponse,
 	UUID
 } from '../types';
@@ -73,8 +73,8 @@ export async function getProviderConfigs(): Promise<ProviderConfigsResponse> {
  */
 export async function getProviderConfigByType(
 	providerType: string
-): Promise<FrontendProviderConfig | null> {
-	return apiCall<FrontendProviderConfig | null>('get_provider_config_by_type', {
+): Promise<ProviderConfig | null> {
+	return apiCall<ProviderConfig | null>('get_provider_config_by_type', {
 		provider_type: providerType
 	});
 }

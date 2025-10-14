@@ -6,7 +6,7 @@ import type {
 	Provider,
 	Model,
 	AddProviderRequest,
-	FrontendProviderConfig,
+	ProviderConfig,
 	UUID,
 	ProviderWithModels
 } from '../types';
@@ -16,15 +16,15 @@ import * as modelApi from '../api/model';
 
 // 供应商配置模板（从后端获取）
 export let providerConfigs = $state<{
-  providers: FrontendProviderConfig[];
-  custom_providers: FrontendProviderConfig[];
+  providers: ProviderConfig[];
+  custom_providers: ProviderConfig[];
 }>({
   providers: [],
   custom_providers: []
 });
 
 // 获取供应商配置信息的工具函数
-export function getProviderConfig(providerType: string): FrontendProviderConfig | undefined {
+export function getProviderConfig(providerType: string): ProviderConfig | undefined {
   return [...providerConfigs.providers, ...providerConfigs.custom_providers]
     .find(t => t.provider_type === providerType);
 }
@@ -36,15 +36,15 @@ export function getProviderIcon(provider: Provider): string | undefined {
 }
 
 // 根据 providerId 获取供应商配置
-export function getProviderConfigById(providerId: string): FrontendProviderConfig | undefined {
+export function getProviderConfigById(providerId: string): ProviderConfig | undefined {
   // 先从当前 provider 列表中查找对应的供应商
-  const provider = providerState.providers.find(p => p.id === providerId) || 
+  const provider = providerState.providers.find(p => p.id === providerId) ||
                   providerState.providersWithModels.find(p => p.id === providerId);
-  
+
   if (provider) {
     return getProviderConfig(provider.provider_type);
   }
-  
+
   return undefined;
 }
 

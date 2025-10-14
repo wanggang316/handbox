@@ -11,7 +11,7 @@ import type {
   ToolExecutionStatus,
   UserMessageSendRequest,
 } from '$lib/types/chat';
-import type { FrontendProviderConfig, UUID } from '$lib/types';
+import type { ProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { listenToStreamEvents } from '$lib/api/message';
 import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
@@ -21,7 +21,7 @@ interface MessageState {
   // 按 chatId 组织消息
   messagesByChat: Record<string, Message[]>;
   // providerId 到 providerConfig 的映射字典（用于快速获取 provider 图标等信息）
-  providerConfigsCache: Record<string, FrontendProviderConfig>;
+  providerConfigsCache: Record<string, ProviderConfig>;
   isLoading: boolean;
   isSending: boolean;
   error: string | null;
@@ -103,7 +103,7 @@ class MessageStore {
   }
 
   // 根据 providerId 获取 providerConfig（带缓存）
-  getProviderConfig(providerId: string): FrontendProviderConfig | undefined {
+  getProviderConfig(providerId: string): ProviderConfig | undefined {
     // 先从缓存中查找
     if (this.state.providerConfigsCache[providerId]) {
       return this.state.providerConfigsCache[providerId];

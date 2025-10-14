@@ -73,8 +73,8 @@ export interface AddProviderRequest {
   enabled?: boolean;
 }
 
-// 前端供应商配置选项（从后端获取）
-export interface FrontendProviderConfig {
+// 供应商配置选项（从后端获取）
+export interface ProviderConfig {
   provider_type: string;
   type_name: string;
   default_name: string;
@@ -85,10 +85,10 @@ export interface FrontendProviderConfig {
   description?: string;
 }
 
-// 前端供应商配置响应
+// 供应商配置响应
 export interface ProviderConfigsResponse {
-  providers: FrontendProviderConfig[];
-  custom_providers: FrontendProviderConfig[];
+  providers: ProviderConfig[];
+  custom_providers: ProviderConfig[];
 }
 
 // 模型列表请求
