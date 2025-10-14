@@ -106,6 +106,8 @@ impl ModelClient for GoogleModelClient {
                 api_model.get("supportedGenerationMethods"),
             );
 
+            let parameters = parse_google_parameters(&api_model);
+
             result_models.push(LlmStandardModel {
                 id: model_id,
                 name: display_name,
@@ -119,6 +121,7 @@ impl ModelClient for GoogleModelClient {
                 output_modalities,
                 metadata: Some(api_model.clone()),
                 pricing: None,
+                parameters,
             });
         }
 
@@ -215,5 +218,60 @@ fn parse_google_features(value: Option<&Value>) -> Option<Vec<LlmModelFeature>> 
     } else {
         features.dedup();
         Some(features)
+    }
+}
+
+fn parse_google_parameters(api_model: &Value) -> Option<Vec<crate::types::ModelParameter>> {
+    use crate::types::ModelParameter;
+
+    let mut parameters = Vec::new();
+
+    // 解析 temperature
+    if let Some(temp) = api_model.get("temperature").and_then(|v| v.as_f64()) {
+        let max_temp = api_model
+            .get("maxTemperature")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(2.0);
+
+        parameters.push(ModelParameter {
+            name: "temperature".to_string(),
+            default: Some(serde_json::json!(temp)),
+            min: Some(serde_json::json!(0.0)),
+            max: Some(serde_json::json!(max_temp)),
+        });
+    } else if let Some(max_temp) = api_model.get("maxTemperature").and_then(|v| v.as_f64()) {
+        // 只有 maxTemperature，使用它作为参考
+        parameters.push(ModelParameter {
+            name: "temperature".to_string(),
+            default: Some(serde_json::json!(1.0)),
+            min: Some(serde_json::json!(0.0)),
+            max: Some(serde_json::json!(max_temp)),
+        });
+    }
+
+    // 解析 topP
+    if let Some(top_p) = api_model.get("topP").and_then(|v| v.as_f64()) {
+        parameters.push(ModelParameter {
+            name: "top_p".to_string(),
+            default: Some(serde_json::json!(top_p)),
+            min: Some(serde_json::json!(0.0)),
+            max: Some(serde_json::json!(1.0)),
+        });
+    }
+
+    // 解析 topK
+    if let Some(top_k) = api_model.get("topK").and_then(|v| v.as_i64()) {
+        parameters.push(ModelParameter {
+            name: "top_k".to_string(),
+            default: Some(serde_json::json!(top_k)),
+            min: Some(serde_json::json!(0)),
+            max: None,
+        });
+    }
+
+    if parameters.is_empty() {
+        None
+    } else {
+        Some(parameters)
     }
 }

@@ -10,7 +10,9 @@ pub mod storage;
 pub mod utils;
 
 use crate::commands::*;
-use crate::services::{ChatService, McpService, MessageService, ProviderService, StorageService};
+use crate::services::{
+    ChatService, McpService, MessageService, ModelService, ProviderService, StorageService,
+};
 use crate::storage::Database;
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
@@ -46,6 +48,8 @@ async fn initialize_services(
         ProviderService::new(database_service.clone(), llm_config_provider.clone());
     let provider_service_shared = Arc::new(provider_service.clone());
 
+    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
+
     let mcp_service = McpService::new(database_service.clone());
     let mcp_service_shared = Arc::new(mcp_service.clone());
 
@@ -69,6 +73,7 @@ async fn initialize_services(
     app.manage(chat_service);
     app.manage(message_service);
     app.manage(provider_service);
+    app.manage(model_service);
     app.manage(mcp_service);
 
     Ok(())
@@ -143,12 +148,14 @@ pub fn run() {
             provider_create,
             provider_update,
             provider_delete,
-            provider_list_models,
             provider_toggle,
-            provider_toggle_model,
-            provider_toggle_model_favorite,
-            provider_get_all_with_models,
-            provider_get_favorite_models,
+            // 模型相关命令
+            model_list_by_provider,
+            model_toggle,
+            model_toggle_favorite,
+            model_get_all_with_providers,
+            model_get_favorites,
+            model_get_available,
             // MCP 管理命令
             mcp_list_servers,
             mcp_create_server,

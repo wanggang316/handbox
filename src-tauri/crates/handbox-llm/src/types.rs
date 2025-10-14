@@ -215,6 +215,18 @@ pub enum LlmModelModality {
     Video,
 }
 
+/// 模型参数配置
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelParameter {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Clone)]
 pub struct LlmStandardModel {
     pub id: String,
@@ -229,6 +241,7 @@ pub struct LlmStandardModel {
     pub output_modalities: Option<Vec<LlmModelModality>>,
     pub metadata: Option<Value>,
     pub pricing: Option<Value>,
+    pub parameters: Option<Vec<ModelParameter>>,
 }
 
 /// 聊天 API 类型枚举

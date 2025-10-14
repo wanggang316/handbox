@@ -58,6 +58,7 @@ impl OpenAIWithLocalProvider {
             output_modalities: extra_info.output_modalities.clone(),
             metadata: extra_info.metadata.clone(),
             pricing: extra_info.pricing.clone(),
+            parameters: None,
         }
     }
 }

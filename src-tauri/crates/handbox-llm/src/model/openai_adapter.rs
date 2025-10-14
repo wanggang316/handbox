@@ -84,6 +84,7 @@ impl ModelClient for OpenAIModelClient {
                 output_modalities: Some(vec![LlmModelModality::Text]),
                 metadata: to_value(&api_model).ok(),
                 pricing: None,
+                parameters: None,
             });
         }
 

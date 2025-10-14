@@ -14,4 +14,6 @@ pub use message::{
     Message, MessageAttachment, MessageConfig, MessageToolCall, MessageToolExecutionMode,
     MessageToolExecutionStatus,
 };
-pub use provider::{Model, ModelFeature, ModelModality, Provider, ProviderWithModels};
+pub use provider::{
+    Model, ModelFeature, ModelModality, ModelParameter, Provider, ProviderWithModels,
+};

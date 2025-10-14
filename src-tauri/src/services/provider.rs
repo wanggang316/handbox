@@ -5,7 +5,7 @@ use crate::services::Database;
 use crate::storage::types::{
     Model, ModelFeature, ModelModality, Provider, ProviderWithModels, Timestamp, UUID,
 };
-use crate::storage::ProviderRepository;
+use crate::storage::{ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::{
     create_llm_client, LlmModelFeature, LlmModelModality, LlmProvider, LlmStandardModel,
@@ -17,7 +17,8 @@ use uuid::Uuid;
 /// 供应商服务
 #[derive(Clone)]
 pub struct ProviderService {
-    repository: ProviderRepository,
+    provider_repo: ProviderRepository,
+    model_repo: ModelRepository,
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
@@ -25,7 +26,8 @@ impl ProviderService {
     /// 创建新的供应商服务实例
     pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
-            repository: ProviderRepository::new(db),
+            provider_repo: ProviderRepository::new(Arc::clone(&db)),
+            model_repo: ModelRepository::new(db),
             llm_config,
         }
     }
@@ -82,7 +84,7 @@ impl ProviderService {
                         standard_models.len()
                     );
                     // API Key 验证成功，创建供应商
-                    self.repository.create_provider(&provider).await?;
+                    self.provider_repo.create_provider(&provider).await?;
 
                     // 然后保存模型（新供应商直接创建，不需要同步状态）
                     if !standard_models.is_empty() {
@@ -93,7 +95,7 @@ impl ProviderService {
                                 adapt_model(standard_model, provider.id.clone(), now)
                             })
                             .collect();
-                        self.repository.create_models(&models).await?;
+                        self.model_repo.create_models(&models).await?;
                     }
 
                     tracing::info!(
@@ -130,13 +132,13 @@ impl ProviderService {
                         return Err(error);
                     }
                     // 对于其他错误（如网络问题），仍然创建供应商但给出警告
-                    self.repository.create_provider(&provider).await?;
+                    self.provider_repo.create_provider(&provider).await?;
                     tracing::warn!("Provider created despite model fetch failure (network or other non-auth error)");
                 }
             }
         } else {
             // 不验证 API Key，直接创建供应商
-            self.repository.create_provider(&provider).await?;
+            self.provider_repo.create_provider(&provider).await?;
             tracing::info!("Provider created without API key validation");
         }
 
@@ -197,7 +199,9 @@ impl ProviderService {
                         standard_models.len()
                     );
                     // API Key 验证成功，更新供应商
-                    self.repository.update_provider(&updated_provider).await?;
+                    self.provider_repo
+                        .update_provider(&updated_provider)
+                        .await?;
 
                     // 同步模型，保留用户状态
                     if !standard_models.is_empty() {
@@ -208,7 +212,7 @@ impl ProviderService {
                                 adapt_model(standard_model, updated_provider.id.clone(), now)
                             })
                             .collect();
-                        self.repository
+                        self.model_repo
                             .sync_provider_models(&updated_provider.id, &models)
                             .await?;
                     }
@@ -247,13 +251,17 @@ impl ProviderService {
                         return Err(error);
                     }
                     // 对于其他错误（如网络问题），仍然更新供应商但给出警告
-                    self.repository.update_provider(&updated_provider).await?;
+                    self.provider_repo
+                        .update_provider(&updated_provider)
+                        .await?;
                     tracing::warn!("Provider updated despite model fetch failure (network or other non-auth error)");
                 }
             }
         } else {
             // 没有关键配置变更或不需要验证，直接更新供应商
-            self.repository.update_provider(&updated_provider).await?;
+            self.provider_repo
+                .update_provider(&updated_provider)
+                .await?;
             if should_refresh_models {
                 tracing::info!("Provider updated without API key validation (validation disabled)");
             }
@@ -264,7 +272,7 @@ impl ProviderService {
 
     /// 获取单个供应商
     pub async fn get_provider(&self, provider_id: &UUID) -> Result<Provider, AppError> {
-        self.repository
+        self.provider_repo
             .get_provider_by_id(provider_id)
             .await?
             .ok_or_else(|| AppError::validation_error("Provider not found"))
@@ -272,7 +280,7 @@ impl ProviderService {
 
     /// 获取所有供应商
     pub async fn list_providers(&self) -> Result<Vec<Provider>, AppError> {
-        self.repository.list_providers().await
+        self.provider_repo.list_providers().await
     }
 
     /// 获取供应商及其模型
@@ -281,7 +289,7 @@ impl ProviderService {
         provider_id: &UUID,
     ) -> Result<ProviderWithModels, AppError> {
         let provider = self.get_provider(provider_id).await?;
-        let models = self.repository.get_models_by_provider(provider_id).await?;
+        let models = self.model_repo.get_models_by_provider(provider_id).await?;
 
         Ok(ProviderWithModels {
             id: provider.id,
@@ -298,7 +306,7 @@ impl ProviderService {
 
     /// 删除供应商
     pub async fn delete_provider(&self, provider_id: &UUID) -> Result<(), AppError> {
-        self.repository.delete_provider(provider_id).await
+        self.provider_repo.delete_provider(provider_id).await
     }
 
     /// 获取所有可用模型
@@ -309,7 +317,7 @@ impl ProviderService {
 
         for provider in providers {
             if provider.enabled {
-                let models = self.repository.get_models_by_provider(&provider.id).await?;
+                let models = self.model_repo.get_models_by_provider(&provider.id).await?;
                 all_models.extend(models.into_iter().filter(|m| m.enabled));
             }
         }
@@ -332,7 +340,7 @@ impl ProviderService {
         );
         // 如果不强制刷新，先尝试从数据库获取
         if !force_refresh {
-            let cached_models = self.repository.get_models_by_provider(provider_id).await?;
+            let cached_models = self.model_repo.get_models_by_provider(provider_id).await?;
             // if !cached_models.is_empty() {
             return Ok(cached_models);
             // }
@@ -352,12 +360,12 @@ impl ProviderService {
             .collect();
 
         // 同步到数据库（保留用户设置的状态）
-        self.repository
+        self.model_repo
             .sync_provider_models(&provider.id, &models)
             .await?;
 
         // 返回数据库中的模型（包含用户设置的状态）
-        let synced_models = self.repository.get_models_by_provider(&provider.id).await?;
+        let synced_models = self.model_repo.get_models_by_provider(&provider.id).await?;
         Ok(synced_models)
     }
 
@@ -375,7 +383,7 @@ impl ProviderService {
         provider.updated_at = self.current_timestamp();
 
         // 保存到数据库
-        self.repository.update_provider(&provider).await?;
+        self.provider_repo.update_provider(&provider).await?;
 
         Ok(provider)
     }
@@ -387,7 +395,7 @@ impl ProviderService {
         model_id: &str,
         enabled: bool,
     ) -> Result<(), AppError> {
-        self.repository
+        self.model_repo
             .toggle_model(provider_id, model_id, enabled)
             .await
     }
@@ -399,7 +407,7 @@ impl ProviderService {
         model_id: &str,
         favorite: bool,
     ) -> Result<(), AppError> {
-        self.repository
+        self.model_repo
             .toggle_favorite_model(provider_id, model_id, favorite)
             .await
     }
@@ -417,6 +425,8 @@ impl ProviderService {
 
 /// 将标准模型适配为应用内部的 `Model`
 fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) -> Model {
+    use crate::storage::types::ModelParameter;
+
     let supported_features = standard_model
         .supported_features
         .map(|features| features.into_iter().filter_map(map_llm_feature).collect());
@@ -435,6 +445,18 @@ fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) 
             .collect()
     });
 
+    let parameters = standard_model.parameters.map(|params| {
+        params
+            .into_iter()
+            .map(|p| ModelParameter {
+                name: p.name,
+                default: p.default,
+                min: p.min,
+                max: p.max,
+            })
+            .collect()
+    });
+
     Model {
         id: standard_model.id,
         provider_id,
@@ -449,6 +471,7 @@ fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) 
         output_modalities,
         metadata: standard_model.metadata,
         pricing: standard_model.pricing,
+        parameters,
         enabled: true,
         favorite: false,
         created_at: now,

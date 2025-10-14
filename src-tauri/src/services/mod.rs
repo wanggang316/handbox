@@ -2,6 +2,7 @@
 pub mod chat;
 pub mod mcp;
 pub mod message;
+pub mod model;
 pub mod provider;
 pub mod storage;
 
@@ -10,5 +11,6 @@ pub use crate::storage::Database;
 pub use chat::ChatService;
 pub use mcp::McpService;
 pub use message::MessageService;
+pub use model::ModelService;
 pub use provider::ProviderService;
 pub use storage::StorageService;

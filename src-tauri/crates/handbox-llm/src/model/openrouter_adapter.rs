@@ -55,6 +55,31 @@ pub struct OpenRouterModel {
     /// 支持的参数列表
     #[serde(default)]
     pub supported_parameters: Option<Vec<OpenRouterParameter>>,
+
+    /// 默认参数配置
+    #[serde(default)]
+    pub default_parameters: Option<OpenRouterDefaultParameters>,
+}
+
+/// OpenRouter 默认参数配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenRouterDefaultParameters {
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub top_k: Option<f64>,
+    #[serde(default)]
+    pub frequency_penalty: Option<f64>,
+    #[serde(default)]
+    pub presence_penalty: Option<f64>,
+    #[serde(default)]
+    pub repetition_penalty: Option<f64>,
+    #[serde(default)]
+    pub min_p: Option<f64>,
+    #[serde(default)]
+    pub top_a: Option<f64>,
 }
 
 /// OpenRouter 支持的参数类型
@@ -238,6 +263,9 @@ impl OpenRouterModel {
         // 将 pricing 转换为 JSON Value
         let pricing = serde_json::to_value(&self.pricing).ok();
 
+        // 构建参数列表
+        let parameters = build_parameters(&self.default_parameters, &self.supported_parameters);
+
         LlmStandardModel {
             id: self.id,
             name: self.name,
@@ -251,6 +279,7 @@ impl OpenRouterModel {
             output_modalities,
             metadata: None, // 不再需要存储原始数据
             pricing,
+            parameters,
         }
     }
 }
@@ -294,6 +323,135 @@ fn parse_features_from_params(params: &[OpenRouterParameter]) -> Option<Vec<LlmM
         None
     } else {
         Some(features)
+    }
+}
+
+/// 从 default_parameters 和 supported_parameters 构建参数列表
+fn build_parameters(
+    default_params: &Option<OpenRouterDefaultParameters>,
+    supported_params: &Option<Vec<OpenRouterParameter>>,
+) -> Option<Vec<crate::types::ModelParameter>> {
+    use crate::types::ModelParameter;
+
+    let mut parameters = Vec::new();
+
+    // 检查哪些参数被支持
+    let supported_set = supported_params.as_ref().map(|params| {
+        params
+            .iter()
+            .map(|p| match p {
+                OpenRouterParameter::Temperature => "temperature",
+                OpenRouterParameter::TopP => "top_p",
+                OpenRouterParameter::FrequencyPenalty => "frequency_penalty",
+                OpenRouterParameter::PresencePenalty => "presence_penalty",
+                OpenRouterParameter::Stop => "stop",
+                OpenRouterParameter::MaxTokens => "max_tokens",
+                OpenRouterParameter::Seed => "seed",
+                _ => "",
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<std::collections::HashSet<_>>()
+    });
+
+    // 如果有默认参数，从中提取
+    if let Some(defaults) = default_params {
+        if let Some(temp) = defaults.temperature {
+            if supported_set
+                .as_ref()
+                .map_or(true, |set| set.contains("temperature"))
+            {
+                parameters.push(ModelParameter {
+                    name: "temperature".to_string(),
+                    default: Some(serde_json::json!(temp)),
+                    min: Some(serde_json::json!(0.0)),
+                    max: Some(serde_json::json!(2.0)),
+                });
+            }
+        }
+
+        if let Some(top_p) = defaults.top_p {
+            if supported_set
+                .as_ref()
+                .map_or(true, |set| set.contains("top_p"))
+            {
+                parameters.push(ModelParameter {
+                    name: "top_p".to_string(),
+                    default: Some(serde_json::json!(top_p)),
+                    min: Some(serde_json::json!(0.0)),
+                    max: Some(serde_json::json!(1.0)),
+                });
+            }
+        }
+
+        if let Some(top_k) = defaults.top_k {
+            parameters.push(ModelParameter {
+                name: "top_k".to_string(),
+                default: Some(serde_json::json!(top_k)),
+                min: Some(serde_json::json!(0.0)),
+                max: None,
+            });
+        }
+
+        if let Some(freq_penalty) = defaults.frequency_penalty {
+            if supported_set
+                .as_ref()
+                .map_or(true, |set| set.contains("frequency_penalty"))
+            {
+                parameters.push(ModelParameter {
+                    name: "frequency_penalty".to_string(),
+                    default: Some(serde_json::json!(freq_penalty)),
+                    min: Some(serde_json::json!(-2.0)),
+                    max: Some(serde_json::json!(2.0)),
+                });
+            }
+        }
+
+        if let Some(pres_penalty) = defaults.presence_penalty {
+            if supported_set
+                .as_ref()
+                .map_or(true, |set| set.contains("presence_penalty"))
+            {
+                parameters.push(ModelParameter {
+                    name: "presence_penalty".to_string(),
+                    default: Some(serde_json::json!(pres_penalty)),
+                    min: Some(serde_json::json!(-2.0)),
+                    max: Some(serde_json::json!(2.0)),
+                });
+            }
+        }
+
+        if let Some(rep_penalty) = defaults.repetition_penalty {
+            parameters.push(ModelParameter {
+                name: "repetition_penalty".to_string(),
+                default: Some(serde_json::json!(rep_penalty)),
+                min: Some(serde_json::json!(0.0)),
+                max: Some(serde_json::json!(2.0)),
+            });
+        }
+
+        if let Some(min_p) = defaults.min_p {
+            parameters.push(ModelParameter {
+                name: "min_p".to_string(),
+                default: Some(serde_json::json!(min_p)),
+                min: Some(serde_json::json!(0.0)),
+                max: Some(serde_json::json!(1.0)),
+            });
+        }
+
+        if let Some(top_a) = defaults.top_a {
+            parameters.push(ModelParameter {
+                name: "top_a".to_string(),
+                default: Some(serde_json::json!(top_a)),
+                min: Some(serde_json::json!(0.0)),
+                max: Some(serde_json::json!(1.0)),
+            });
+        }
+    }
+
+    if parameters.is_empty() {
+        None
+    } else {
+        Some(parameters)
     }
 }
 

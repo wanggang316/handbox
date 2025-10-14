@@ -22,6 +22,18 @@ pub enum ModelModality {
     Video,
 }
 
+/// 模型参数配置
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelParameter {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<Value>,
+}
+
 /// 模型信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
@@ -38,6 +50,7 @@ pub struct Model {
     pub output_modalities: Option<Vec<ModelModality>>,
     pub metadata: Option<Value>,
     pub pricing: Option<Value>,
+    pub parameters: Option<Vec<ModelParameter>>,
     pub enabled: bool,
     pub favorite: bool,
     pub created_at: Timestamp,
@@ -135,6 +148,32 @@ impl Model {
         match json {
             Some(data) if !data.is_empty() => {
                 serde_json::from_str::<Vec<ModelModality>>(data).map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub fn parameters_to_json(&self) -> Option<String> {
+        self.parameters.as_ref().and_then(|params| {
+            if params.is_empty() {
+                None
+            } else {
+                serde_json::to_string(params).ok()
+            }
+        })
+    }
+
+    pub fn parameters_from_json(
+        json: Option<&str>,
+    ) -> Result<Option<Vec<ModelParameter>>, serde_json::Error> {
+        match json {
+            Some(data) if !data.is_empty() => {
+                let params = serde_json::from_str::<Vec<ModelParameter>>(data)?;
+                if params.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(params))
+                }
             }
             _ => Ok(None),
         }
