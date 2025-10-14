@@ -56,6 +56,7 @@ export class AppError extends Error {
 export * from './chat';
 export * from './message';
 export * from './provider';
+export * from './model';
 export * from './artifact';
 export * from './settings';
 export * from './search';

@@ -2,6 +2,7 @@ pub mod chat;
 pub mod common;
 pub mod mcp;
 pub mod message;
+pub mod model;
 pub mod provider;
 
 pub use chat::{Chat, McpServerConfig};
@@ -14,6 +15,5 @@ pub use message::{
     Message, MessageAttachment, MessageConfig, MessageToolCall, MessageToolExecutionMode,
     MessageToolExecutionStatus,
 };
-pub use provider::{
-    Model, ModelFeature, ModelModality, ModelParameter, Provider, ProviderWithModels,
-};
+pub use model::{Model, ModelFeature, ModelModality, ModelParameter};
+pub use provider::{Provider, ProviderWithModels};

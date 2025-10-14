@@ -2,9 +2,17 @@
  * 供应商相关状态管理 - 使用 Svelte 5 runes
  */
 
-import type { Provider, Model, AddProviderRequest, FrontendProviderConfig, UUID, ProviderWithModels } from '../types';
+import type {
+	Provider,
+	Model,
+	AddProviderRequest,
+	FrontendProviderConfig,
+	UUID,
+	ProviderWithModels
+} from '../types';
 import type { ModelWithProvider } from '../types/provider';
 import * as providerApi from '../api/provider';
+import * as modelApi from '../api/model';
 
 // 供应商配置模板（从后端获取）
 export let providerConfigs = $state<{
@@ -237,8 +245,8 @@ export const providerActions = {
     try {
       providerState.isLoadingWithModels = true;
       providerState.error = null;
-      
-      const providersWithModels = await providerApi.getProvidersWithModels(forceRefresh);
+
+      const providersWithModels = await modelApi.getAllModelsWithProviders(forceRefresh);
       providerState.providersWithModels = providersWithModels;
       
     } catch (error) {
@@ -329,10 +337,7 @@ export const providerActions = {
   async fetchProviderModels(providerId: UUID, forceRefresh = false): Promise<void> {
     try {
       providerState.isFetchingModels = providerId;
-      const response = await providerApi.getProviderModels(
-        providerId, 
-        forceRefresh
-      );
+      const response = await modelApi.getProviderModels(providerId, forceRefresh);
       
       // 更新当前模型列表
       providerState.currentModels = response.models;
@@ -369,7 +374,7 @@ export const providerActions = {
    */
   async toggleModel(providerId: UUID, modelId: string, enabled: boolean): Promise<void> {
     try {
-      await providerApi.toggleModel(providerId, modelId, enabled);
+      await modelApi.toggleModel(providerId, modelId, enabled);
       
       // 更新当前模型状态
       const index = providerState.currentModels.findIndex(m => 
@@ -392,8 +397,8 @@ export const providerActions = {
    */
   async toggleModelFavorite(providerId: UUID, modelId: string, favorite: boolean): Promise<void> {
     try {
-      console.log("toggleModelFavorite >>> :", providerId, modelId, favorite);
-      await providerApi.toggleModelFavorite(providerId, modelId, favorite);
+      console.log('toggleModelFavorite >>> :', providerId, modelId, favorite);
+      await modelApi.toggleModelFavorite(providerId, modelId, favorite);
       
       // 更新当前模型状态 (currentModels)
       const currentIndex = providerState.currentModels.findIndex(m => 
