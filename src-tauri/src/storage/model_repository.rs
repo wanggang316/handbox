@@ -35,7 +35,7 @@ impl ModelRepository {
                 provider_id,
                 name,
                 context_length,
-                output_token_limit,
+                output_max_tokens,
                 input_cost,
                 output_cost,
                 supported_features,
@@ -59,7 +59,7 @@ impl ModelRepository {
             .bind(&model.provider_id)
             .bind(&model.name)
             .bind(model.context_length)
-            .bind(model.output_token_limit)
+            .bind(model.output_max_tokens)
             .bind(model.input_cost)
             .bind(model.output_cost)
             .bind(features_json)
@@ -163,7 +163,7 @@ impl ModelRepository {
                     provider_id,
                     name,
                     context_length,
-                    output_token_limit,
+                    output_max_tokens,
                     input_cost,
                     output_cost,
                     supported_features,
@@ -189,7 +189,7 @@ impl ModelRepository {
                 .bind(&model.provider_id)
                 .bind(&model.name)
                 .bind(model.context_length)
-                .bind(model.output_token_limit)
+                .bind(model.output_max_tokens)
                 .bind(model.input_cost)
                 .bind(model.output_cost)
                 .bind(&features_json)
@@ -244,7 +244,7 @@ impl ModelRepository {
                     provider_id,
                     name,
                     context_length,
-                    output_token_limit,
+                    output_max_tokens,
                     input_cost,
                     output_cost,
                     supported_features,
@@ -270,7 +270,7 @@ impl ModelRepository {
                 .bind(&model.provider_id)
                 .bind(&model.name)
                 .bind(model.context_length)
-                .bind(model.output_token_limit)
+                .bind(model.output_max_tokens)
                 .bind(model.input_cost)
                 .bind(model.output_cost)
                 .bind(features_json)
@@ -308,7 +308,7 @@ impl ModelRepository {
                 provider_id,
                 name,
                 context_length,
-                output_token_limit,
+                output_max_tokens,
                 input_cost,
                 output_cost,
                 supported_features,
@@ -466,7 +466,7 @@ impl ModelRepository {
             provider_id: row.try_get("provider_id")?,
             name: row.try_get("name")?,
             context_length: row.try_get("context_length")?,
-            output_token_limit: row.try_get("output_token_limit")?,
+            output_max_tokens: row.try_get("output_max_tokens")?,
             input_cost: row.try_get("input_cost")?,
             output_cost: row.try_get("output_cost")?,
             supported_features,

@@ -12,7 +12,7 @@ pub struct LlmModel {
     pub id: String,
     pub name: String,
     pub context_length: Option<i32>,
-    pub output_token_limit: Option<i32>,
+    pub output_max_tokens: Option<i32>,
     pub input_cost: Option<f32>,
     pub output_cost: Option<f32>,
     pub supported_features: Option<Vec<LlmModelFeature>>,

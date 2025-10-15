@@ -124,7 +124,9 @@ impl OpenRouterModel {
             max_parameters,
         } = self;
 
-        let output_token_limit = top_provider.as_ref().and_then(|p| p.max_completion_tokens);
+        let output_max_tokens = top_provider
+            .as_ref()
+            .and_then(|p| p.max_completion_tokens);
 
         let input_modalities = architecture
             .as_ref()
@@ -170,7 +172,7 @@ impl OpenRouterModel {
             id,
             name,
             context_length: Some(context_length),
-            output_token_limit,
+            output_max_tokens,
             input_cost: Some(pricing_info.prompt),
             output_cost: Some(pricing_info.completion),
             supported_features,

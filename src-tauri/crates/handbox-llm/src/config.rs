@@ -19,7 +19,7 @@ pub struct LlmProviderConfig {
 pub struct LlmModelExtraInfo {
     pub name: String,
     pub context_length: Option<i32>,
-    pub output_token_limit: Option<i32>,
+    pub output_max_tokens: Option<i32>,
     pub input_cost_per_1k: Option<f32>,
     pub output_cost_per_1k: Option<f32>,
     pub features: Vec<LlmModelFeature>,

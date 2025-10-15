@@ -137,11 +137,11 @@
         });
       }
 
-      const outputTokenLimit = formatTokensAsK(current.output_token_limit);
-      if (outputTokenLimit) {
+      const outputMaxTokens = formatTokensAsK(current.output_max_tokens);
+      if (outputMaxTokens) {
         rows.push({
           label: "最大输出长度",
-          value: outputTokenLimit,
+          value: outputMaxTokens,
         });
       }
 

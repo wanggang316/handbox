@@ -75,7 +75,7 @@ impl ModelClient for OpenAIModelClient {
                 id: api_model.id.clone(),
                 name: api_model.id.clone(),
                 context_length: None,
-                output_token_limit: None,
+                output_max_tokens: None,
                 input_cost: None,
                 output_cost: None,
                 supported_features: None,

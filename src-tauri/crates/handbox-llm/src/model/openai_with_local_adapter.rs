@@ -45,7 +45,7 @@ impl OpenAIWithLocalProvider {
             id: model_id.to_string(),
             name: extra_info.name.clone(),
             context_length: extra_info.context_length,
-            output_token_limit: extra_info.output_token_limit,
+            output_max_tokens: extra_info.output_max_tokens,
             input_cost: extra_info.input_cost_per_1k,
             output_cost: extra_info.output_cost_per_1k,
             supported_features: if extra_info.features.is_empty() {

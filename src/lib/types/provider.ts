@@ -32,7 +32,7 @@ export interface Model {
   provider_id: string;
   name: string;
   context_length?: number;
-  output_token_limit?: number;
+  output_max_tokens?: number;
   input_cost?: number;
   output_cost?: number;
   supported_features?: ModelFeature[] | null;

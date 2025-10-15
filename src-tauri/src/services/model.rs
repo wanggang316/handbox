@@ -157,10 +157,11 @@ impl ModelService {
             models
                 .into_iter()
                 .map(|mut model| {
-                    // 从配置获取支持的参数和默认值
+                    // 从配置获取支持的参数、默认值和最大值
                     let supported_params =
                         config.get_supported_parameters(provider_type, &model.id);
                     let param_defaults = config.get_parameter_defaults(provider_type, &model.id);
+                    let param_max = config.get_max_parameters(provider_type, &model.id);
 
                     // 如果数据库中已有参数配置，则优先使用数据库的
                     // 否则从配置文件构建参数列表
@@ -186,17 +187,25 @@ impl ModelService {
                         }
                     }
 
-                    if model.default_parameters.is_none()
-                        || model.default_parameters.as_ref().unwrap().is_empty()
+                    if model
+                        .default_parameters
+                        .as_ref()
+                        .map(|params| params.is_empty())
+                        .unwrap_or(true)
                     {
                         if !param_defaults.is_empty() {
-                            let mut parameters = std::collections::HashMap::new();
+                            model.default_parameters = Some(param_defaults.clone());
+                        }
+                    }
 
-                            for (param_name, default_value) in param_defaults {
-                                parameters.insert(param_name, default_value);
-                            }
-
-                            model.default_parameters = Some(parameters);
+                    if model
+                        .max_parameters
+                        .as_ref()
+                        .map(|params| params.is_empty())
+                        .unwrap_or(true)
+                    {
+                        if !param_max.is_empty() {
+                            model.max_parameters = Some(param_max.clone());
                         }
                     }
 
@@ -224,7 +233,7 @@ fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model
         id,
         name,
         context_length,
-        output_token_limit,
+        output_max_tokens,
         input_cost,
         output_cost,
         supported_features,
@@ -266,7 +275,7 @@ fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model
         provider_id,
         name,
         context_length,
-        output_token_limit,
+        output_max_tokens,
         input_cost,
         output_cost,
         supported_features,

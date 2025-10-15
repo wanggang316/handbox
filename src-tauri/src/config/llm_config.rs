@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 pub struct ModelExtraInfo {
     pub name: String,
     pub context_length: Option<i32>,
-    pub output_token_limit: Option<i32>,
+    pub output_max_tokens: Option<i32>,
     pub input_cost_per_1k: Option<f32>,
     pub output_cost_per_1k: Option<f32>,
     pub features: Vec<String>,
@@ -28,6 +28,7 @@ pub struct ModelExtraInfo {
     pub pricing: Option<Value>,
     pub support_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
+    pub max_parameters: Option<HashMap<String, Value>>,
 }
 
 /// 供应商配置
@@ -44,6 +45,7 @@ pub struct ProviderConfig {
     pub model_local: Option<HashMap<String, ModelExtraInfo>>,
     pub support_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
+    pub max_parameters: Option<HashMap<String, Value>>,
 }
 
 /// LLM 配置文件结构
@@ -53,6 +55,7 @@ pub struct LlmConfig {
     pub custom_providers: Vec<ProviderConfig>,
     pub support_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
+    pub max_parameters: Option<HashMap<String, Value>>,
 }
 
 impl LlmConfig {
@@ -63,6 +66,7 @@ impl LlmConfig {
             custom_providers: Vec::new(),
             support_parameters: None,
             default_parameters: None,
+            max_parameters: None,
         }
     }
 
@@ -214,6 +218,39 @@ impl LlmConfig {
         defaults
     }
 
+    /// 获取参数最大值（级联：模型 -> 供应商 -> 全局）
+    pub fn get_max_parameters(
+        &self,
+        provider_type: &str,
+        model_id: &str,
+    ) -> HashMap<String, Value> {
+        let mut max_params = HashMap::new();
+
+        if let Some(global_max) = &self.max_parameters {
+            max_params.extend(global_max.clone());
+        }
+
+        if let Some(provider_config) = self.get_provider_config(provider_type) {
+            if let Some(provider_max) = &provider_config.max_parameters {
+                max_params.extend(provider_max.clone());
+            }
+
+            if let Some(model_local) = &provider_config.model_local {
+                if let Some(model_info) = model_local.get(model_id) {
+                    if let Some(model_max) = &model_info.max_parameters {
+                        max_params.extend(model_max.clone());
+                    }
+                }
+            }
+        } else if let Some(model_info) = self.get_model_extra_info(provider_type, model_id) {
+            if let Some(model_max) = &model_info.max_parameters {
+                max_params.extend(model_max.clone());
+            }
+        }
+
+        max_params
+    }
+
     pub fn convert_modalities(&self, modalities: &[String]) -> Vec<LlmModelModality> {
         modalities
             .iter()
@@ -242,7 +279,7 @@ fn to_llm_model_extra_info(
     LlmClientModelExtraInfo {
         name: extra_info.name.clone(),
         context_length: extra_info.context_length,
-        output_token_limit: extra_info.output_token_limit,
+        output_max_tokens: extra_info.output_max_tokens,
         input_cost_per_1k: extra_info.input_cost_per_1k,
         output_cost_per_1k: extra_info.output_cost_per_1k,
         features,

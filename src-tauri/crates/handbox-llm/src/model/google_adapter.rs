@@ -2,7 +2,9 @@
 
 use super::model_client::ModelClient;
 use crate::error::LlmClientError;
-use crate::types::{LlmModel, LlmModelFeature, LlmModelParameter, LlmProvider};
+use crate::types::{
+    LlmModel, LlmModelFeature, LlmModelModality, LlmModelParameter, LlmProvider,
+};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
@@ -75,6 +77,10 @@ impl ModelClient for GoogleModelClient {
             } = models_response;
 
             for api_model in models {
+                if !supports_generate_content(api_model.get("supportedGenerationMethods")) {
+                    continue;
+                }
+
                 let full_name = match api_model.get("name").and_then(|v| v.as_str()) {
                     Some(value) => value,
                     None => continue,
@@ -92,11 +98,23 @@ impl ModelClient for GoogleModelClient {
                     .unwrap_or_else(|| model_id.clone());
 
                 let context_length = parse_i32_field(api_model.get("inputTokenLimit"));
-                let output_token_limit = parse_i32_field(api_model.get("outputTokenLimit"));
+                let output_max_tokens = parse_i32_field(api_model.get("outputTokenLimit"));
                 let description = api_model
                     .get("description")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
+
+                let input_modalities = parse_modalities_field(
+                    api_model
+                        .get("inputModalities")
+                        .or_else(|| api_model.get("input_modalities")),
+                );
+
+                let output_modalities = parse_modalities_field(
+                    api_model
+                        .get("outputModalities")
+                        .or_else(|| api_model.get("output_modalities")),
+                );
 
                 let supports_reasoning = api_model
                     .get("thinking")
@@ -116,13 +134,13 @@ impl ModelClient for GoogleModelClient {
                     id: model_id,
                     name: display_name,
                     context_length,
-                    output_token_limit,
+                    output_max_tokens,
                     input_cost: None,
                     output_cost: None,
                     supported_features,
                     description,
-                    input_modalities: None,
-                    output_modalities: None,
+                    input_modalities,
+                    output_modalities,
                     metadata: Some(api_model),
                     pricing: None,
                     support_parameters,
@@ -157,6 +175,47 @@ fn parse_i32_field(value: Option<&Value>) -> Option<i32> {
     })
 }
 
+fn supports_generate_content(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str())
+            .any(|name| name == "generateContent"),
+        Some(Value::String(name)) => name == "generateContent",
+        _ => false,
+    }
+}
+
+fn parse_modalities_field(value: Option<&Value>) -> Option<Vec<LlmModelModality>> {
+    let mut result = Vec::new();
+
+    match value {
+        Some(Value::Array(items)) => {
+            for item in items {
+                if let Some(name) = item.as_str() {
+                    if let Ok(modality) = name.parse::<LlmModelModality>() {
+                        if !result.contains(&modality) {
+                            result.push(modality);
+                        }
+                    }
+                }
+            }
+        }
+        Some(Value::String(name)) => {
+            if let Ok(modality) = name.parse::<LlmModelModality>() {
+                result.push(modality);
+            }
+        }
+        _ => {}
+    }
+
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
 fn parse_google_parameters(
     api_model: &Value,
 ) -> (
@@ -178,8 +237,14 @@ fn parse_google_parameters(
     if let Some(temp) = api_model.get("temperature").and_then(|v| v.as_f64()) {
         push_param(&mut support_params, LlmModelParameter::Temperature);
         default_params_map.insert("temperature".to_string(), serde_json::json!(temp));
-    }
-    if let Some(max_temp) = api_model.get("maxTemperature").and_then(|v| v.as_f64()) {
+
+        let max_temp = api_model
+            .get("maxTemperature")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(2.0);
+        max_params_map.insert("temperature".to_string(), serde_json::json!(max_temp));
+    } else if let Some(max_temp) = api_model.get("maxTemperature").and_then(|v| v.as_f64()) {
+        push_param(&mut support_params, LlmModelParameter::Temperature);
         max_params_map.insert("temperature".to_string(), serde_json::json!(max_temp));
     }
 
@@ -187,12 +252,17 @@ fn parse_google_parameters(
     if let Some(top_p) = api_model.get("topP").and_then(|v| v.as_f64()) {
         push_param(&mut support_params, LlmModelParameter::TopP);
         default_params_map.insert("top_p".to_string(), serde_json::json!(top_p));
+        max_params_map.insert("top_p".to_string(), serde_json::json!(1.0));
     }
 
     // 解析 topK
     if let Some(top_k) = api_model.get("topK").and_then(|v| v.as_i64()) {
         push_param(&mut support_params, LlmModelParameter::TopK);
         default_params_map.insert("top_k".to_string(), serde_json::json!(top_k));
+    }
+
+    for param in [LlmModelParameter::MaxTokens, LlmModelParameter::Stop] {
+        push_param(&mut support_params, param);
     }
 
     let default_result = if default_params_map.is_empty() {
