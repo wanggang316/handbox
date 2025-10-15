@@ -1,8 +1,19 @@
 {
+    "support_parameters": ["temperature", "top_p", "top_k", "max_tokens"],
+    "default_parameters": {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 40
+    },
     "providers":
     [
         {
             "type": "openai",
+            "support_parameters": ["temperature", "top_p", "max_tokens"],
+            "default_parameters": {
+                "temperature": 1.0,
+                "top_p": 1.0
+            },
             "type_name": "OpenAI",
             "default_name": "OpenAI",
             "default_base_url": "https://api.openai.com/v1",
@@ -116,7 +127,9 @@
                     [
                         "text",
                         "reasoning"
-                    ]
+                    ],
+                    "support_parameters": ["max_tokens"],
+                    "default_parameters": {}
                 },
                 "o1-mini":
                 {
@@ -128,7 +141,9 @@
                     [
                         "text",
                         "reasoning"
-                    ]
+                    ],
+                    "support_parameters": ["max_tokens"],
+                    "default_parameters": {}
                 }
             }
         },
@@ -140,10 +155,21 @@
             "icon": "/logo-google.png",
             "chat_api_type": "google",
             "model_api_type": "google",
+            "support_parameters": ["temperature", "top_p", "top_k", "max_tokens"],
+            "default_parameters": {
+                "temperature": 0.9,
+                "top_p": 1.0,
+                "top_k": 40
+            },
             "model_local": null
         },
         {
             "type": "deepseek",
+            "support_parameters": ["temperature", "top_p", "max_tokens"],
+            "default_parameters": {
+                "temperature": 1.0,
+                "top_p": 1.0
+            },
             "type_name": "DeepSeek",
             "default_name": "DeepSeek",
             "default_base_url": "https://api.deepseek.com",
@@ -201,10 +227,21 @@
             "icon": "/logo-anthropic.png",
             "chat_api_type": "anthropic",
             "model_api_type": "anthropic",
+            "support_parameters": ["temperature", "top_p", "top_k", "max_tokens"],
+            "default_parameters": {
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "top_k": 5
+            },
             "model_local": null
         },
         {
             "type": "openrouter",
+            "support_parameters": ["temperature", "top_p", "max_tokens"],
+            "default_parameters": {
+                "temperature": 1.0,
+                "top_p": 1.0
+            },
             "type_name": "OpenRouter",
             "default_name": "OpenRouter",
             "default_base_url": "https://openrouter.ai/api/v1",
@@ -224,6 +261,11 @@
             "icon": "/logo-openai-compatible.png",
             "chat_api_type": "openai-completions",
             "model_api_type": "openai",
+            "support_parameters": ["temperature", "top_p", "max_tokens"],
+            "default_parameters": {
+                "temperature": 1.0,
+                "top_p": 1.0
+            },
             "model_local": null
         },
         {
@@ -234,6 +276,12 @@
             "icon": "/logo-anthropic-compatible.png",
             "chat_api_type": "anthropic",
             "model_api_type": "anthropic",
+            "support_parameters": ["temperature", "top_p", "top_k", "max_tokens"],
+            "default_parameters": {
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "top_k": 5
+            },
             "model_local": null
         }
     ]

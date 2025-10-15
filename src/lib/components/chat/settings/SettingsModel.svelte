@@ -1,19 +1,42 @@
 <script lang="ts">
-  import { chatState, chatActions } from "$lib/states/chat.svelte";
+  import { chatState, chatActions, currentChatModel } from "$lib/states/chat.svelte";
   import LabeledSliderRow from "../../ui/table/LabeledSliderRow.svelte";
   import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import NumberStepperRow from "../../ui/table/NumberStepperRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
   import RoundButton from "../../ui/RoundButton.svelte";
+  import type { ModelParameter } from "$lib/types/provider";
 
   type SaveStatus = "saved" | "saving" | "error";
 
-  // 获取当前聊天的设置，如果没有则使用默认值
+  // 获取模型参数信息
+  const getModelParameters = (): ModelParameter[] => {
+    const { model } = currentChatModel();
+    return model?.parameters || [];
+  };
+
+  // 检查参数是否被模型支持
+  const isParameterSupported = (paramName: string): boolean => {
+    const params = getModelParameters();
+    return params.some(p => p.name === paramName);
+  };
+
+  // 获取参数的默认值
+  const getParameterDefault = (paramName: string, fallback: number): number => {
+    const params = getModelParameters();
+    const param = params.find(p => p.name === paramName);
+    if (param?.default !== undefined && param.default !== null) {
+      return Number(param.default);
+    }
+    return fallback;
+  };
+
+  // 获取当前聊天的设置，如果没有则使用默认值（考虑模型参数配置）
   const getInitialSettings = () => ({
-    temperature: chatState.currentChat?.temperature || 0.7,
-    topP: chatState.currentChat?.topP || 1.0,
+    temperature: chatState.currentChat?.temperature || getParameterDefault('temperature', 0.7),
+    topP: chatState.currentChat?.topP || getParameterDefault('top_p', 1.0),
     streamResponse: chatState.currentChat?.stream ?? true,
-    maxTokens: chatState.currentChat?.maxTokens || 4000,
+    maxTokens: chatState.currentChat?.maxTokens || getParameterDefault('max_tokens', 4000),
     turnCount: chatState.currentChat?.turnCount || 5, // 对话回合数，默认值为 5
   });
 
@@ -60,65 +83,83 @@
 
   function handleDefault() {
     currentSettings = {
-      temperature: 0.7,
-      topP: 1.0,
+      temperature: getParameterDefault('temperature', 0.7),
+      topP: getParameterDefault('top_p', 1.0),
       streamResponse: true,
-      maxTokens: 4000,
+      maxTokens: getParameterDefault('max_tokens', 4000),
       turnCount: 5,
     };
   }
+
+  // 响应式：当模型变化时，重新获取参数支持信息
+  $effect(() => {
+    // 触发重新计算 - 当模型改变时，参数的可见性会自动更新
+    const { model } = currentChatModel();
+    if (model) {
+      // 当模型改变时，更新设置为模型的默认值（如果当前值与旧默认值相同）
+      const newSettings = getInitialSettings();
+      currentSettings = { ...newSettings };
+      originalSettings = { ...newSettings };
+    }
+  });
 </script>
 
 <div class="flex-1 p-0 space-y-6">
   <!-- 参数设置 -->
   <TableGroup>
-    <!-- Temperature -->
-    <LabeledSliderRow
-      label="Temperature"
-      bind:value={currentSettings.temperature}
-      min={0.1}
-      max={2.0}
-      step={0.1}
-      leftLabel="精确"
-      rightLabel="创意"
-      scaleMarks={[
-        { value: 0, position: 0 },
-        { value: 1, position: 47.37 },
-        { value: 2, position: 100 },
-      ]}
-      description=""
-    />
+    <!-- Temperature - 根据模型配置显示/隐藏 -->
+    {#if isParameterSupported('temperature')}
+      <LabeledSliderRow
+        label="Temperature"
+        bind:value={currentSettings.temperature}
+        min={0.1}
+        max={2.0}
+        step={0.1}
+        leftLabel="精确"
+        rightLabel="创意"
+        scaleMarks={[
+          { value: 0, position: 0 },
+          { value: 1, position: 47.37 },
+          { value: 2, position: 100 },
+        ]}
+        description=""
+      />
+    {/if}
 
-    <!-- Top-P -->
-    <LabeledSliderRow
-      label="Top-p"
-      bind:value={currentSettings.topP}
-      min={0}
-      max={1.0}
-      step={0.1}
-      leftLabel="聚焦"
-      rightLabel="多样"
-      scaleMarks={[
-        { value: 0, position: 0 },
-        { value: 0.5, position: 50 },
-        { value: 1.0, position: 100 },
-      ]}
-      description=""
-    />
+    <!-- Top-P - 根据模型配置显示/隐藏 -->
+    {#if isParameterSupported('top_p')}
+      <LabeledSliderRow
+        label="Top-p"
+        bind:value={currentSettings.topP}
+        min={0}
+        max={1.0}
+        step={0.1}
+        leftLabel="聚焦"
+        rightLabel="多样"
+        scaleMarks={[
+          { value: 0, position: 0 },
+          { value: 0.5, position: 50 },
+          { value: 1.0, position: 100 },
+        ]}
+        description=""
+      />
+    {/if}
 
     <!-- 流式输出 -->
     <SwitchRow label="流式输出" bind:checked={currentSettings.streamResponse} />
 
-    <!-- 最大 Token 数 -->
-    <NumberStepperRow
-      label="最大输出长度"
-      bind:value={currentSettings.maxTokens}
-      defaultValue={4000}
-      placeholder="4000 (默认)"
-      min={100}
-      max={10000000}
-      step={100}
-    />
+    <!-- 最大 Token 数 - 根据模型配置显示/隐藏 -->
+    {#if isParameterSupported('max_tokens')}
+      <NumberStepperRow
+        label="最大输出长度"
+        bind:value={currentSettings.maxTokens}
+        defaultValue={getParameterDefault('max_tokens', 4000)}
+        placeholder="{getParameterDefault('max_tokens', 4000)} (默认)"
+        min={100}
+        max={10000000}
+        step={100}
+      />
+    {/if}
 
     <!-- 对话轮数 -->
     <NumberStepperRow

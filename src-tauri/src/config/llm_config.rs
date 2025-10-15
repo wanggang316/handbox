@@ -26,6 +26,8 @@ pub struct ModelExtraInfo {
     pub output_modalities: Option<Vec<String>>,
     pub metadata: Option<Value>,
     pub pricing: Option<Value>,
+    pub support_parameters: Option<Vec<String>>,
+    pub default_parameters: Option<HashMap<String, Value>>,
 }
 
 /// 供应商配置
@@ -40,6 +42,8 @@ pub struct ProviderConfig {
     pub chat_api_type: String,  // "openai" | "google" | "anthropic"
     pub model_api_type: String, // "openai" | "openai+local" | "google" | "anthropic" | "openrouter"
     pub model_local: Option<HashMap<String, ModelExtraInfo>>,
+    pub support_parameters: Option<Vec<String>>,
+    pub default_parameters: Option<HashMap<String, Value>>,
 }
 
 /// LLM 配置文件结构
@@ -47,6 +51,8 @@ pub struct ProviderConfig {
 pub struct LlmConfig {
     pub providers: Vec<ProviderConfig>,
     pub custom_providers: Vec<ProviderConfig>,
+    pub support_parameters: Option<Vec<String>>,
+    pub default_parameters: Option<HashMap<String, Value>>,
 }
 
 impl LlmConfig {
@@ -55,6 +61,8 @@ impl LlmConfig {
         Self {
             providers: Vec::new(),
             custom_providers: Vec::new(),
+            support_parameters: None,
+            default_parameters: None,
         }
     }
 
@@ -145,6 +153,69 @@ impl LlmConfig {
                 _ => None,
             })
             .collect()
+    }
+
+    /// 获取模型支持的参数（级联：模型 -> 供应商 -> 全局）
+    pub fn get_supported_parameters(
+        &self,
+        provider_type: &str,
+        model_id: &str,
+    ) -> Vec<String> {
+        // 1. 先尝试从模型级别获取
+        if let Some(model_info) = self.get_model_extra_info(provider_type, model_id) {
+            if let Some(params) = &model_info.support_parameters {
+                if !params.is_empty() {
+                    return params.clone();
+                }
+            }
+        }
+
+        // 2. 从供应商级别获取
+        if let Some(provider_config) = self.get_provider_config(provider_type) {
+            if let Some(params) = &provider_config.support_parameters {
+                if !params.is_empty() {
+                    return params.clone();
+                }
+            }
+        }
+
+        // 3. 从全局配置获取
+        if let Some(params) = &self.support_parameters {
+            return params.clone();
+        }
+
+        // 4. 如果都没有，返回空数组
+        Vec::new()
+    }
+
+    /// 获取参数默认值（级联：模型 -> 供应商 -> 全局）
+    pub fn get_parameter_defaults(
+        &self,
+        provider_type: &str,
+        model_id: &str,
+    ) -> HashMap<String, Value> {
+        let mut defaults = HashMap::new();
+
+        // 1. 从全局配置获取默认值（最外层）
+        if let Some(global_defaults) = &self.default_parameters {
+            defaults.extend(global_defaults.clone());
+        }
+
+        // 2. 从供应商级别获取默认值（覆盖全局）
+        if let Some(provider_config) = self.get_provider_config(provider_type) {
+            if let Some(provider_defaults) = &provider_config.default_parameters {
+                defaults.extend(provider_defaults.clone());
+            }
+        }
+
+        // 3. 从模型级别获取默认值（覆盖供应商和全局）
+        if let Some(model_info) = self.get_model_extra_info(provider_type, model_id) {
+            if let Some(model_defaults) = &model_info.default_parameters {
+                defaults.extend(model_defaults.clone());
+            }
+        }
+
+        defaults
     }
 
     pub fn convert_modalities(&self, modalities: &[String]) -> Vec<LlmModelModality> {

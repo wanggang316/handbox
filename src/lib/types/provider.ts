@@ -18,6 +18,14 @@ export interface ProviderWithModels extends Provider {
   models: Model[];
 }
 
+// 模型参数定义
+export interface ModelParameter {
+  name: string;
+  default?: unknown;
+  min?: unknown;
+  max?: unknown;
+}
+
 // 模型信息
 export interface Model {
   id: string;
@@ -33,6 +41,7 @@ export interface Model {
   output_modalities?: ModelModality[];
   metadata?: unknown;
   pricing?: ModelPricing;
+  parameters?: ModelParameter[];
   enabled: boolean;
   favorite: boolean;
   created_at: number;

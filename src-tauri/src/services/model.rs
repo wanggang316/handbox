@@ -66,7 +66,9 @@ impl ModelService {
         // 如果不强制刷新，先尝试从数据库获取
         if !force_refresh {
             let cached_models = self.model_repo.get_models_by_provider(provider_id).await?;
-            return Ok(cached_models);
+            // 合并配置文件中的参数信息
+            let merged_models = self.merge_model_parameters(cached_models, &provider.provider_type);
+            return Ok(merged_models);
         }
 
         // 强制刷新：从 API 获取最新模型列表
@@ -89,7 +91,9 @@ impl ModelService {
 
         // 返回数据库中的模型（包含用户设置的状态）
         let synced_models = self.model_repo.get_models_by_provider(&provider.id).await?;
-        Ok(synced_models)
+        // 合并配置文件中的参数信息
+        let merged_models = self.merge_model_parameters(synced_models, &provider.provider_type);
+        Ok(merged_models)
     }
 
     /// 切换模型启用状态
@@ -140,6 +144,55 @@ impl ModelService {
         LlmProvider {
             base_url: provider.base_url.clone(),
             api_key: provider.api_key.clone(),
+        }
+    }
+
+    /// 合并模型参数（数据库 + 配置文件）
+    fn merge_model_parameters(
+        &self,
+        models: Vec<Model>,
+        provider_type: &str,
+    ) -> Vec<Model> {
+        use crate::config::llm_config::LlmConfig;
+        use crate::storage::types::ModelParameter;
+
+        // 尝试将 LlmConfigProvider 转换为 LlmConfig 以访问参数方法
+        let llm_config_any = &self.llm_config as &dyn std::any::Any;
+
+        if let Some(config) = llm_config_any.downcast_ref::<LlmConfig>() {
+            models
+                .into_iter()
+                .map(|mut model| {
+                    // 从配置获取支持的参数和默认值
+                    let supported_params = config.get_supported_parameters(provider_type, &model.id);
+                    let param_defaults = config.get_parameter_defaults(provider_type, &model.id);
+
+                    // 如果数据库中已有参数配置，则优先使用数据库的
+                    // 否则从配置文件构建参数列表
+                    if model.parameters.is_none() || model.parameters.as_ref().unwrap().is_empty() {
+                        if !supported_params.is_empty() {
+                            let mut parameters = Vec::new();
+
+                            for param_name in supported_params {
+                                let default_value = param_defaults.get(&param_name).cloned();
+                                parameters.push(ModelParameter {
+                                    name: param_name,
+                                    default: default_value,
+                                    min: None,
+                                    max: None,
+                                });
+                            }
+
+                            model.parameters = Some(parameters);
+                        }
+                    }
+
+                    model
+                })
+                .collect()
+        } else {
+            // 如果无法转换，返回原始模型列表
+            models
         }
     }
 
