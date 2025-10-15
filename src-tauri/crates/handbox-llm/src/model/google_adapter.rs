@@ -2,12 +2,7 @@
 
 use super::model_client::ModelClient;
 use crate::error::LlmClientError;
-use crate::types::{
-    LlmModelFeature,
-    LlmModelModality,
-    LlmProvider,
-    LlmStandardModel,
-};
+use crate::types::{LlmModel, LlmModelFeature, LlmModelParameter, LlmProvider};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
@@ -39,90 +34,109 @@ impl ModelClient for GoogleModelClient {
         &self,
         provider: &LlmProvider,
         _provider_type: &str,
-    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
+    ) -> Result<Vec<LlmModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Content-Type", "application/json")
-            .query(&[("key", &provider.api_key)])
-            .send()
-            .await
-            .map_err(|e| {
+        let mut result_models = Vec::new();
+        let mut page_token: Option<String> = None;
+
+        loop {
+            let mut request = self
+                .client
+                .get(&url)
+                .header("Content-Type", "application/json")
+                .query(&[("key", provider.api_key.as_str())]);
+
+            if let Some(token) = &page_token {
+                request = request.query(&[("pageToken", token.as_str())]);
+            }
+
+            let response = request.send().await.map_err(|e| {
                 LlmClientError::transport(format!("Failed to fetch Google models: {}", e))
             })?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(LlmClientError::api(format!(
-                "Google API returned error {}: {}",
-                status, error_text
-            )));
-        }
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                return Err(LlmClientError::api(format!(
+                    "Google API returned error {}: {}",
+                    status, error_text
+                )));
+            }
 
-        let models_response: GoogleModelsResponse = response.json().await.map_err(|e| {
-            LlmClientError::unexpected(format!("Failed to parse Google response: {}", e))
-        })?;
+            let models_response: GoogleModelsResponse = response.json().await.map_err(|e| {
+                LlmClientError::unexpected(format!("Failed to parse Google response: {}", e))
+            })?;
 
-        let mut result_models = Vec::new();
+            let GoogleModelsResponse {
+                models,
+                next_page_token,
+            } = models_response;
 
-        for api_model in models_response.models {
-            let full_name = match api_model.get("name").and_then(|v| v.as_str()) {
-                Some(value) => value,
-                None => continue,
-            };
+            for api_model in models {
+                let full_name = match api_model.get("name").and_then(|v| v.as_str()) {
+                    Some(value) => value,
+                    None => continue,
+                };
 
-            let model_id = full_name.strip_prefix("models/").unwrap_or(full_name).to_string();
+                let model_id = full_name
+                    .strip_prefix("models/")
+                    .unwrap_or(full_name)
+                    .to_string();
 
-            let display_name = api_model
-                .get("displayName")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| model_id.clone());
+                let display_name = api_model
+                    .get("displayName")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| model_id.clone());
 
-            let context_length = parse_i32_field(api_model.get("inputTokenLimit"));
-            let output_token_limit = parse_i32_field(api_model.get("outputTokenLimit"));
-            let description = api_model
-                .get("description")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+                let context_length = parse_i32_field(api_model.get("inputTokenLimit"));
+                let output_token_limit = parse_i32_field(api_model.get("outputTokenLimit"));
+                let description = api_model
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
-            let input_modalities = parse_modalities_field(
-                api_model
-                    .get("inputModalities")
-                    .or_else(|| api_model.get("input_modalities")),
-            );
+                let supports_reasoning = api_model
+                    .get("thinking")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
 
-            let output_modalities = parse_modalities_field(
-                api_model
-                    .get("outputModalities")
-                    .or_else(|| api_model.get("output_modalities")),
-            );
+                let supported_features = if supports_reasoning {
+                    Some(vec![LlmModelFeature::Reasoning])
+                } else {
+                    None
+                };
 
-            let supported_features = parse_google_features(
-                api_model.get("supportedGenerationMethods"),
-            );
+                let (support_parameters, default_parameters, max_parameters) =
+                    parse_google_parameters(&api_model);
 
-            let parameters = parse_google_parameters(&api_model);
+                result_models.push(LlmModel {
+                    id: model_id,
+                    name: display_name,
+                    context_length,
+                    output_token_limit,
+                    input_cost: None,
+                    output_cost: None,
+                    supported_features,
+                    description,
+                    input_modalities: None,
+                    output_modalities: None,
+                    metadata: Some(api_model),
+                    pricing: None,
+                    support_parameters,
+                    default_parameters,
+                    max_parameters,
+                });
+            }
 
-            result_models.push(LlmStandardModel {
-                id: model_id,
-                name: display_name,
-                context_length,
-                output_token_limit,
-                input_cost: None,
-                output_cost: None,
-                supported_features,
-                description,
-                input_modalities,
-                output_modalities,
-                metadata: Some(api_model.clone()),
-                pricing: None,
-                parameters,
-            });
+            match next_page_token {
+                Some(token) if !token.is_empty() => {
+                    page_token = Some(token);
+                }
+                _ => break,
+            }
         }
 
         Ok(result_models)
@@ -143,135 +157,55 @@ fn parse_i32_field(value: Option<&Value>) -> Option<i32> {
     })
 }
 
-fn parse_modalities_field(value: Option<&Value>) -> Option<Vec<LlmModelModality>> {
-    fn push_modality(list: &mut Vec<LlmModelModality>, modality: LlmModelModality) {
-        if !list.contains(&modality) {
-            list.push(modality);
+fn parse_google_parameters(
+    api_model: &Value,
+) -> (
+    Vec<LlmModelParameter>,
+    Option<std::collections::HashMap<String, serde_json::Value>>,
+    Option<std::collections::HashMap<String, serde_json::Value>>,
+) {
+    fn push_param(list: &mut Vec<LlmModelParameter>, param: LlmModelParameter) {
+        if !list.contains(&param) {
+            list.push(param);
         }
     }
 
-    fn map_modality(name: &str) -> Option<LlmModelModality> {
-        match name {
-            "text" => Some(LlmModelModality::Text),
-            "image" => Some(LlmModelModality::Image),
-            "file" => Some(LlmModelModality::File),
-            "audio" => Some(LlmModelModality::Audio),
-            "video" => Some(LlmModelModality::Video),
-            _ => None,
-        }
-    }
-
-    let mut result = Vec::new();
-
-    match value {
-        Some(Value::Array(items)) => {
-            for item in items {
-                if let Some(name) = item.as_str() {
-                    if let Some(modality) = map_modality(name) {
-                        push_modality(&mut result, modality);
-                    }
-                }
-            }
-        }
-        Some(Value::String(name)) => {
-            if let Some(modality) = map_modality(name) {
-                push_modality(&mut result, modality);
-            }
-        }
-        _ => {}
-    }
-
-    if result.is_empty() {
-        None
-    } else {
-        Some(result)
-    }
-}
-
-fn parse_google_features(value: Option<&Value>) -> Option<Vec<LlmModelFeature>> {
-    let mut features = Vec::new();
-
-    match value {
-        Some(Value::Array(items)) => {
-            for item in items {
-                if let Some(name) = item.as_str() {
-                    match name {
-                        "reasoning" => features.push(LlmModelFeature::Reasoning),
-                        "tool" | "toolUse" | "functionCall" => {
-                            features.push(LlmModelFeature::Tool)
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        Some(Value::String(name)) => match name.as_str() {
-            "reasoning" => features.push(LlmModelFeature::Reasoning),
-            "tool" | "toolUse" | "functionCall" => features.push(LlmModelFeature::Tool),
-            _ => {}
-        },
-        _ => {}
-    }
-
-    if features.is_empty() {
-        None
-    } else {
-        features.dedup();
-        Some(features)
-    }
-}
-
-fn parse_google_parameters(api_model: &Value) -> Option<Vec<crate::types::ModelParameter>> {
-    use crate::types::ModelParameter;
-
-    let mut parameters = Vec::new();
+    let mut support_params = Vec::new();
+    let mut default_params_map = std::collections::HashMap::new();
+    let mut max_params_map = std::collections::HashMap::new();
 
     // 解析 temperature
     if let Some(temp) = api_model.get("temperature").and_then(|v| v.as_f64()) {
-        let max_temp = api_model
-            .get("maxTemperature")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(2.0);
-
-        parameters.push(ModelParameter {
-            name: "temperature".to_string(),
-            default: Some(serde_json::json!(temp)),
-            min: Some(serde_json::json!(0.0)),
-            max: Some(serde_json::json!(max_temp)),
-        });
-    } else if let Some(max_temp) = api_model.get("maxTemperature").and_then(|v| v.as_f64()) {
-        // 只有 maxTemperature，使用它作为参考
-        parameters.push(ModelParameter {
-            name: "temperature".to_string(),
-            default: Some(serde_json::json!(1.0)),
-            min: Some(serde_json::json!(0.0)),
-            max: Some(serde_json::json!(max_temp)),
-        });
+        push_param(&mut support_params, LlmModelParameter::Temperature);
+        default_params_map.insert("temperature".to_string(), serde_json::json!(temp));
+    }
+    if let Some(max_temp) = api_model.get("maxTemperature").and_then(|v| v.as_f64()) {
+        max_params_map.insert("temperature".to_string(), serde_json::json!(max_temp));
     }
 
     // 解析 topP
     if let Some(top_p) = api_model.get("topP").and_then(|v| v.as_f64()) {
-        parameters.push(ModelParameter {
-            name: "top_p".to_string(),
-            default: Some(serde_json::json!(top_p)),
-            min: Some(serde_json::json!(0.0)),
-            max: Some(serde_json::json!(1.0)),
-        });
+        push_param(&mut support_params, LlmModelParameter::TopP);
+        default_params_map.insert("top_p".to_string(), serde_json::json!(top_p));
     }
 
     // 解析 topK
     if let Some(top_k) = api_model.get("topK").and_then(|v| v.as_i64()) {
-        parameters.push(ModelParameter {
-            name: "top_k".to_string(),
-            default: Some(serde_json::json!(top_k)),
-            min: Some(serde_json::json!(0)),
-            max: None,
-        });
+        push_param(&mut support_params, LlmModelParameter::TopK);
+        default_params_map.insert("top_k".to_string(), serde_json::json!(top_k));
     }
 
-    if parameters.is_empty() {
+    let default_result = if default_params_map.is_empty() {
         None
     } else {
-        Some(parameters)
-    }
+        Some(default_params_map)
+    };
+
+    let max_result = if max_params_map.is_empty() {
+        None
+    } else {
+        Some(max_params_map)
+    };
+
+    (support_params, default_result, max_result)
 }

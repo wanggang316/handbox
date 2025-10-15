@@ -5,9 +5,8 @@ use crate::services::Database;
 use crate::storage::types::{Model, ModelFeature, ModelModality, Provider, Timestamp, UUID};
 use crate::storage::{ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::{
-    create_llm_client, LlmModelFeature, LlmModelModality, LlmProvider, LlmStandardModel,
-};
+use handbox_llm::types::LlmModelParameter;
+use handbox_llm::{create_llm_client, LlmModel, LlmModelFeature, LlmModelModality, LlmProvider};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -148,13 +147,8 @@ impl ModelService {
     }
 
     /// 合并模型参数（数据库 + 配置文件）
-    fn merge_model_parameters(
-        &self,
-        models: Vec<Model>,
-        provider_type: &str,
-    ) -> Vec<Model> {
+    fn merge_model_parameters(&self, models: Vec<Model>, provider_type: &str) -> Vec<Model> {
         use crate::config::llm_config::LlmConfig;
-        use crate::storage::types::ModelParameter;
 
         // 尝试将 LlmConfigProvider 转换为 LlmConfig 以访问参数方法
         let llm_config_any = &self.llm_config as &dyn std::any::Any;
@@ -164,26 +158,45 @@ impl ModelService {
                 .into_iter()
                 .map(|mut model| {
                     // 从配置获取支持的参数和默认值
-                    let supported_params = config.get_supported_parameters(provider_type, &model.id);
+                    let supported_params =
+                        config.get_supported_parameters(provider_type, &model.id);
                     let param_defaults = config.get_parameter_defaults(provider_type, &model.id);
 
                     // 如果数据库中已有参数配置，则优先使用数据库的
                     // 否则从配置文件构建参数列表
-                    if model.parameters.is_none() || model.parameters.as_ref().unwrap().is_empty() {
+                    if model
+                        .support_parameters
+                        .as_ref()
+                        .map(|params| params.is_empty())
+                        .unwrap_or(true)
+                    {
                         if !supported_params.is_empty() {
-                            let mut parameters = Vec::new();
+                            let converted_params = supported_params
+                                .iter()
+                                .map(|param| {
+                                    param
+                                        .parse::<LlmModelParameter>()
+                                        .unwrap_or(LlmModelParameter::Unknown)
+                                })
+                                .collect::<Vec<_>>();
 
-                            for param_name in supported_params {
-                                let default_value = param_defaults.get(&param_name).cloned();
-                                parameters.push(ModelParameter {
-                                    name: param_name,
-                                    default: default_value,
-                                    min: None,
-                                    max: None,
-                                });
+                            if !converted_params.is_empty() {
+                                model.support_parameters = Some(converted_params);
+                            }
+                        }
+                    }
+
+                    if model.default_parameters.is_none()
+                        || model.default_parameters.as_ref().unwrap().is_empty()
+                    {
+                        if !param_defaults.is_empty() {
+                            let mut parameters = std::collections::HashMap::new();
+
+                            for (param_name, default_value) in param_defaults {
+                                parameters.insert(param_name, default_value);
                             }
 
-                            model.parameters = Some(parameters);
+                            model.default_parameters = Some(parameters);
                         }
                     }
 
@@ -206,54 +219,65 @@ impl ModelService {
 }
 
 /// 将标准模型适配为应用内部的 `Model`
-fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) -> Model {
-    use crate::storage::types::ModelParameter;
-
-    let supported_features = standard_model
-        .supported_features
-        .map(|features| features.into_iter().filter_map(map_llm_feature).collect());
-
-    let input_modalities = standard_model.input_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let output_modalities = standard_model.output_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let parameters = standard_model.parameters.map(|params| {
-        params
-            .into_iter()
-            .map(|p| ModelParameter {
-                name: p.name,
-                default: p.default,
-                min: p.min,
-                max: p.max,
-            })
-            .collect()
-    });
-
-    Model {
-        id: standard_model.id,
-        provider_id,
-        name: standard_model.name,
-        context_length: standard_model.context_length,
-        output_token_limit: standard_model.output_token_limit,
-        input_cost: standard_model.input_cost,
-        output_cost: standard_model.output_cost,
+fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model {
+    let LlmModel {
+        id,
+        name,
+        context_length,
+        output_token_limit,
+        input_cost,
+        output_cost,
         supported_features,
-        description: standard_model.description,
+        description,
         input_modalities,
         output_modalities,
-        metadata: standard_model.metadata,
-        pricing: standard_model.pricing,
-        parameters,
+        metadata,
+        pricing,
+        support_parameters,
+        default_parameters,
+        max_parameters,
+    } = standard_model;
+
+    let supported_features = supported_features
+        .map(|features| features.into_iter().filter_map(map_llm_feature).collect());
+
+    let input_modalities = input_modalities.map(|modalities| {
+        modalities
+            .into_iter()
+            .filter_map(map_llm_modality)
+            .collect()
+    });
+
+    let output_modalities = output_modalities.map(|modalities| {
+        modalities
+            .into_iter()
+            .filter_map(map_llm_modality)
+            .collect()
+    });
+
+    let support_parameters = if support_parameters.is_empty() {
+        None
+    } else {
+        Some(support_parameters)
+    };
+
+    Model {
+        id,
+        provider_id,
+        name,
+        context_length,
+        output_token_limit,
+        input_cost,
+        output_cost,
+        supported_features,
+        description,
+        input_modalities,
+        output_modalities,
+        metadata,
+        pricing,
+        support_parameters,
+        default_parameters,
+        max_parameters,
         enabled: true,
         favorite: false,
         created_at: now,

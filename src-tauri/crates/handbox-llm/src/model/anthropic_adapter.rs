@@ -3,7 +3,7 @@
 use super::model_client::ModelClient;
 use crate::config::{LlmConfigProvider, LlmModelExtraInfo};
 use crate::error::LlmClientError;
-use crate::types::{LlmProvider, LlmStandardModel};
+use crate::types::{LlmModel, LlmProvider};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -21,8 +21,8 @@ impl AnthropicModelClient {
         &self,
         model_id: &str,
         extra_info: &LlmModelExtraInfo,
-    ) -> LlmStandardModel {
-        LlmStandardModel {
+    ) -> LlmModel {
+        LlmModel {
             id: model_id.to_string(),
             name: extra_info.name.clone(),
             context_length: extra_info.context_length,
@@ -39,7 +39,9 @@ impl AnthropicModelClient {
             output_modalities: extra_info.output_modalities.clone(),
             metadata: extra_info.metadata.clone(),
             pricing: extra_info.pricing.clone(),
-            parameters: None,
+            support_parameters: Vec::new(),
+            default_parameters: None,
+            max_parameters: None,
         }
     }
 }
@@ -50,7 +52,7 @@ impl ModelClient for AnthropicModelClient {
         &self,
         _provider: &LlmProvider,
         provider_type: &str,
-    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
+    ) -> Result<Vec<LlmModel>, LlmClientError> {
         // Anthropic 不提供公开的模型列表 API，返回预定义的模型列表
         let provider_config = self.config.get_provider_config(provider_type);
 

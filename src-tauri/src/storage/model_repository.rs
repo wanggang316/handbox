@@ -25,7 +25,9 @@ impl ModelRepository {
         let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
         let metadata_json = model.metadata_to_json();
         let pricing_json = model.pricing_to_json();
-        let parameters_json = model.parameters_to_json();
+        let support_parameters_json = model.support_parameters_to_json();
+        let default_parameters_json = model.default_parameters_to_json();
+        let max_parameters_json = model.max_parameters_to_json();
 
         let query = r#"
             INSERT INTO models (
@@ -42,12 +44,14 @@ impl ModelRepository {
                 output_modalities,
                 metadata,
                 pricing,
-                parameters,
+                support_parameters,
+                default_parameters,
+                max_parameters,
                 enabled,
                 favorite,
                 created_at,
                 updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         "#;
 
         sqlx::query(query)
@@ -64,7 +68,9 @@ impl ModelRepository {
             .bind(output_modalities_json.as_deref())
             .bind(metadata_json.as_deref())
             .bind(pricing_json.as_deref())
-            .bind(parameters_json.as_deref())
+            .bind(support_parameters_json.as_deref())
+            .bind(default_parameters_json.as_deref())
+            .bind(max_parameters_json.as_deref())
             .bind(model.enabled)
             .bind(model.favorite)
             .bind(model.created_at)
@@ -130,7 +136,9 @@ impl ModelRepository {
             let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
             let metadata_json = model.metadata_to_json();
             let pricing_json = model.pricing_to_json();
-            let parameters_json = model.parameters_to_json();
+            let support_parameters_json = model.support_parameters_to_json();
+            let default_parameters_json = model.default_parameters_to_json();
+            let max_parameters_json = model.max_parameters_to_json();
 
             // 从状态映射中获取用户设置的状态，如果没有则使用默认值
             let (enabled, favorite) = match state_map.get(&model.id) {
@@ -164,13 +172,15 @@ impl ModelRepository {
                     output_modalities,
                     metadata,
                     pricing,
-                    parameters,
+                    support_parameters,
+                    default_parameters,
+                    max_parameters,
                     enabled,
                     favorite,
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
                 )
             "#;
 
@@ -188,7 +198,9 @@ impl ModelRepository {
                 .bind(output_modalities_json.as_deref())
                 .bind(metadata_json.as_deref())
                 .bind(pricing_json.as_deref())
-                .bind(parameters_json.as_deref())
+                .bind(support_parameters_json.as_deref())
+                .bind(default_parameters_json.as_deref())
+                .bind(max_parameters_json.as_deref())
                 .bind(enabled)
                 .bind(favorite)
                 .bind(model.created_at)
@@ -222,7 +234,9 @@ impl ModelRepository {
             let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
             let metadata_json = model.metadata_to_json();
             let pricing_json = model.pricing_to_json();
-            let parameters_json = model.parameters_to_json();
+            let support_parameters_json = model.support_parameters_to_json();
+            let default_parameters_json = model.default_parameters_to_json();
+            let max_parameters_json = model.max_parameters_to_json();
 
             let query = r#"
                 INSERT OR REPLACE INTO models (
@@ -239,13 +253,15 @@ impl ModelRepository {
                     output_modalities,
                     metadata,
                     pricing,
-                    parameters,
+                    support_parameters,
+                    default_parameters,
+                    max_parameters,
                     enabled,
                     favorite,
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
                 )
             "#;
 
@@ -263,7 +279,9 @@ impl ModelRepository {
                 .bind(output_modalities_json.as_deref())
                 .bind(metadata_json.as_deref())
                 .bind(pricing_json.as_deref())
-                .bind(parameters_json.as_deref())
+                .bind(support_parameters_json.as_deref())
+                .bind(default_parameters_json.as_deref())
+                .bind(max_parameters_json.as_deref())
                 .bind(model.enabled)
                 .bind(model.favorite)
                 .bind(model.created_at)
@@ -299,7 +317,9 @@ impl ModelRepository {
                 output_modalities,
                 metadata,
                 pricing,
-                parameters,
+                support_parameters,
+                default_parameters,
+                max_parameters,
                 enabled,
                 favorite,
                 created_at,
@@ -400,7 +420,9 @@ impl ModelRepository {
         let output_modalities: Option<String> = row.try_get("output_modalities")?;
         let metadata_raw: Option<String> = row.try_get("metadata")?;
         let pricing_raw: Option<String> = row.try_get("pricing")?;
-        let parameters_raw: Option<String> = row.try_get("parameters").ok();
+        let support_parameters_raw: Option<String> = row.try_get("support_parameters").ok();
+        let default_parameters_raw: Option<String> = row.try_get("default_parameters").ok();
+        let max_parameters_raw: Option<String> = row.try_get("max_parameters").ok();
 
         let input_modalities =
             Model::modalities_from_json(input_modalities.as_deref()).map_err(|e| {
@@ -420,9 +442,24 @@ impl ModelRepository {
             AppError::internal_error(&format!("Failed to parse model pricing: {}", e))
         })?;
 
-        let parameters = Model::parameters_from_json(parameters_raw.as_deref()).map_err(|e| {
-            AppError::internal_error(&format!("Failed to parse model parameters: {}", e))
+        let support_parameters = Model::support_parameters_from_json(
+            support_parameters_raw.as_deref(),
+        )
+        .map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse model support parameters: {}", e))
         })?;
+
+        let default_parameters = Model::default_parameters_from_json(
+            default_parameters_raw.as_deref(),
+        )
+        .map_err(|e| {
+            AppError::internal_error(&format!("Failed to parse model default parameters: {}", e))
+        })?;
+
+        let max_parameters = Model::max_parameters_from_json(max_parameters_raw.as_deref())
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to parse model max parameters: {}", e))
+            })?;
 
         Ok(Model {
             id: row.try_get("id")?,
@@ -438,7 +475,9 @@ impl ModelRepository {
             output_modalities,
             metadata,
             pricing,
-            parameters,
+            support_parameters,
+            default_parameters,
+            max_parameters,
             enabled: row.try_get("enabled")?,
             favorite: row.try_get("favorite").unwrap_or(false),
             created_at: row.try_get("created_at")?,

@@ -2,7 +2,7 @@
 
 use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
-use crate::types::{LlmModelApiType, LlmProvider, LlmStandardModel};
+use crate::types::{LlmModelApiType, LlmProvider, LlmModel};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ pub trait ModelClient: Send + Sync {
         &self,
         provider: &LlmProvider,
         provider_type: &str,
-    ) -> Result<Vec<LlmStandardModel>, LlmClientError>;
+    ) -> Result<Vec<LlmModel>, LlmClientError>;
 }
 
 /// 模型客户端工厂

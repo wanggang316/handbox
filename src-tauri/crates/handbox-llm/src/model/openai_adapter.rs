@@ -2,7 +2,7 @@
 
 use super::model_client::ModelClient;
 use crate::error::LlmClientError;
-use crate::types::{LlmModelModality, LlmProvider, LlmStandardModel};
+use crate::types::{LlmModel, LlmModelModality, LlmProvider};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::to_value;
@@ -41,7 +41,7 @@ impl ModelClient for OpenAIModelClient {
         &self,
         provider: &LlmProvider,
         _provider_type: &str,
-    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
+    ) -> Result<Vec<LlmModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching OpenAI-style models from: {}", url);
 
@@ -71,7 +71,7 @@ impl ModelClient for OpenAIModelClient {
         let mut result_models = Vec::new();
 
         for api_model in models_response.data {
-            result_models.push(LlmStandardModel {
+            result_models.push(LlmModel {
                 id: api_model.id.clone(),
                 name: api_model.id.clone(),
                 context_length: None,
@@ -84,7 +84,9 @@ impl ModelClient for OpenAIModelClient {
                 output_modalities: Some(vec![LlmModelModality::Text]),
                 metadata: to_value(&api_model).ok(),
                 pricing: None,
-                parameters: None,
+                support_parameters: Vec::new(),
+                default_parameters: None,
+                max_parameters: None,
             });
         }
 

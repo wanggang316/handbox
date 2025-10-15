@@ -156,11 +156,7 @@ impl LlmConfig {
     }
 
     /// 获取模型支持的参数（级联：模型 -> 供应商 -> 全局）
-    pub fn get_supported_parameters(
-        &self,
-        provider_type: &str,
-        model_id: &str,
-    ) -> Vec<String> {
+    pub fn get_supported_parameters(&self, provider_type: &str, model_id: &str) -> Vec<String> {
         // 1. 先尝试从模型级别获取
         if let Some(model_info) = self.get_model_extra_info(provider_type, model_id) {
             if let Some(params) = &model_info.support_parameters {
@@ -221,14 +217,7 @@ impl LlmConfig {
     pub fn convert_modalities(&self, modalities: &[String]) -> Vec<LlmModelModality> {
         modalities
             .iter()
-            .filter_map(|m| match m.as_str() {
-                "text" => Some(LlmModelModality::Text),
-                "image" => Some(LlmModelModality::Image),
-                "file" => Some(LlmModelModality::File),
-                "audio" => Some(LlmModelModality::Audio),
-                "video" => Some(LlmModelModality::Video),
-                _ => None,
-            })
+            .filter_map(|m| m.parse::<LlmModelModality>().ok())
             .collect()
     }
 }

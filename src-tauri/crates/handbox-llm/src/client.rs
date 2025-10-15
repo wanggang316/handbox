@@ -4,7 +4,7 @@ use crate::error::LlmClientError;
 use crate::model::{create_model_client, ModelClient};
 use crate::types::{
     LlmApiType, LlmChunkResponse, LlmModelApiType, LlmProvider, LlmRequest, LlmResponse,
-    LlmStandardModel,
+    LlmModel,
 };
 use std::sync::Arc;
 
@@ -68,7 +68,7 @@ impl LlmClient {
     pub async fn list_models(
         &self,
         provider: &LlmProvider,
-    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
+    ) -> Result<Vec<LlmModel>, LlmClientError> {
         self.model_api_client
             .list_models(provider, &self.provider_type)
             .await

@@ -7,9 +7,7 @@ use crate::storage::types::{
 };
 use crate::storage::{ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::{
-    create_llm_client, LlmModelFeature, LlmModelModality, LlmProvider, LlmStandardModel,
-};
+use handbox_llm::{create_llm_client, LlmModel, LlmModelFeature, LlmModelModality, LlmProvider};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -424,54 +422,65 @@ impl ProviderService {
 }
 
 /// 将标准模型适配为应用内部的 `Model`
-fn adapt_model(standard_model: LlmStandardModel, provider_id: String, now: i64) -> Model {
-    use crate::storage::types::ModelParameter;
-
-    let supported_features = standard_model
-        .supported_features
-        .map(|features| features.into_iter().filter_map(map_llm_feature).collect());
-
-    let input_modalities = standard_model.input_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let output_modalities = standard_model.output_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let parameters = standard_model.parameters.map(|params| {
-        params
-            .into_iter()
-            .map(|p| ModelParameter {
-                name: p.name,
-                default: p.default,
-                min: p.min,
-                max: p.max,
-            })
-            .collect()
-    });
-
-    Model {
-        id: standard_model.id,
-        provider_id,
-        name: standard_model.name,
-        context_length: standard_model.context_length,
-        output_token_limit: standard_model.output_token_limit,
-        input_cost: standard_model.input_cost,
-        output_cost: standard_model.output_cost,
+fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) -> Model {
+    let LlmModel {
+        id,
+        name,
+        context_length,
+        output_token_limit,
+        input_cost,
+        output_cost,
         supported_features,
-        description: standard_model.description,
+        description,
         input_modalities,
         output_modalities,
-        metadata: standard_model.metadata,
-        pricing: standard_model.pricing,
-        parameters,
+        metadata,
+        pricing,
+        support_parameters,
+        default_parameters,
+        max_parameters,
+    } = llm_model;
+
+    let supported_features = supported_features
+        .map(|features| features.into_iter().filter_map(map_llm_feature).collect());
+
+    let input_modalities = input_modalities.map(|modalities| {
+        modalities
+            .into_iter()
+            .filter_map(map_llm_modality)
+            .collect()
+    });
+
+    let output_modalities = output_modalities.map(|modalities| {
+        modalities
+            .into_iter()
+            .filter_map(map_llm_modality)
+            .collect()
+    });
+
+    let support_parameters = if support_parameters.is_empty() {
+        None
+    } else {
+        Some(support_parameters)
+    };
+
+    Model {
+        id,
+        provider_id,
+        name,
+        context_length,
+        output_token_limit,
+        input_cost,
+        output_cost,
+        supported_features,
+        description,
+        input_modalities,
+        output_modalities,
+        metadata,
+        pricing,
+        support_parameters,
+        default_parameters,
+        max_parameters,
         enabled: true,
         favorite: false,
         created_at: now,

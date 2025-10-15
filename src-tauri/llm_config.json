@@ -1,5 +1,5 @@
 {
-    "support_parameters": ["temperature", "top_p", "top_k", "max_tokens"],
+    "support_parameters": ["temperature", "top_p", "max_tokens"],
     "default_parameters": {
         "temperature": 0.7,
         "top_p": 0.9,

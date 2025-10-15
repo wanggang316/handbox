@@ -14,6 +14,6 @@ pub use model::ModelClient;
 pub use types::{
     LlmApiType, LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmDeltaToolCall,
     LlmMessage, LlmMessageRole, LlmModelApiType, LlmModelFeature, LlmModelModality, LlmProvider,
-    LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse, LlmStandardModel,
+    LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse, LlmModel,
     LlmToolCall, LlmToolCallDelta, LlmToolChoice, LlmToolFunction, LlmUsage,
 };

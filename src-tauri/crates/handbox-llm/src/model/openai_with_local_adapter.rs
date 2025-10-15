@@ -4,7 +4,7 @@ use super::model_client::ModelClient;
 use super::openai_adapter::OpenAIModelClient;
 use crate::config::{LlmConfigProvider, LlmModelExtraInfo};
 use crate::error::LlmClientError;
-use crate::types::{LlmProvider, LlmStandardModel};
+use crate::types::{LlmModel, LlmProvider};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -24,9 +24,9 @@ impl OpenAIWithLocalProvider {
 
     fn enhance_with_local_info(
         &self,
-        mut models: Vec<LlmStandardModel>,
+        mut models: Vec<LlmModel>,
         provider_type: &str,
-    ) -> Vec<LlmStandardModel> {
+    ) -> Vec<LlmModel> {
         for model in &mut models {
             if let Some(extra_info) = self.config.get_model_extra_info(provider_type, &model.id) {
                 *model = self.convert_model_extra_info(&model.id, &extra_info);
@@ -40,8 +40,8 @@ impl OpenAIWithLocalProvider {
         &self,
         model_id: &str,
         extra_info: &LlmModelExtraInfo,
-    ) -> LlmStandardModel {
-        LlmStandardModel {
+    ) -> LlmModel {
+        LlmModel {
             id: model_id.to_string(),
             name: extra_info.name.clone(),
             context_length: extra_info.context_length,
@@ -58,7 +58,9 @@ impl OpenAIWithLocalProvider {
             output_modalities: extra_info.output_modalities.clone(),
             metadata: extra_info.metadata.clone(),
             pricing: extra_info.pricing.clone(),
-            parameters: None,
+            support_parameters: Vec::new(),
+            default_parameters: None,
+            max_parameters: None,
         }
     }
 }
@@ -69,7 +71,7 @@ impl ModelClient for OpenAIWithLocalProvider {
         &self,
         provider: &LlmProvider,
         provider_type: &str,
-    ) -> Result<Vec<LlmStandardModel>, LlmClientError> {
+    ) -> Result<Vec<LlmModel>, LlmClientError> {
         let models = self
             .openai_provider
             .list_models(provider, provider_type)
