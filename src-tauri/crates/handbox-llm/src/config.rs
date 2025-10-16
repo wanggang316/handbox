@@ -1,9 +1,4 @@
-use crate::types::{
-    LlmApiType,
-    LlmModelApiType,
-    LlmModelFeature,
-    LlmModelModality,
-};
+use crate::types::{LlmApiType, LlmModelApiType, LlmModelFeature, LlmModelModality};
 use serde_json::Value;
 use std::collections::HashMap;
 

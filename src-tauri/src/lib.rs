@@ -118,6 +118,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // 测试命令
             greet,
+            // 认证相关命令
+            auth_google_login,
+            auth_logout,
+            auth_refresh_token,
+            auth_get_user,
+            auth_update_profile,
+            auth_validate_token,
             // 聊天相关命令
             chat_create,
             chat_list,

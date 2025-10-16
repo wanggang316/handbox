@@ -62,3 +62,4 @@ export * from './settings';
 export * from './search';
 export * from './window';
 export * from './mcp';
+export * from './auth';

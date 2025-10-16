@@ -2,7 +2,7 @@
 
 use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
-use crate::types::{LlmModelApiType, LlmProvider, LlmModel};
+use crate::types::{LlmModel, LlmModelApiType, LlmProvider};
 use async_trait::async_trait;
 use std::sync::Arc;
 

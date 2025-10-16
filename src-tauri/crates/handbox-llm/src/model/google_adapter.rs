@@ -2,9 +2,7 @@
 
 use super::model_client::ModelClient;
 use crate::error::LlmClientError;
-use crate::types::{
-    LlmModel, LlmModelFeature, LlmModelModality, LlmModelParameter, LlmProvider,
-};
+use crate::types::{LlmModel, LlmModelFeature, LlmModelModality, LlmModelParameter, LlmProvider};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;

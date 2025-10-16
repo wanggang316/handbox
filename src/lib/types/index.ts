@@ -35,3 +35,4 @@ export * from './provider';
 export * from './artifact';
 export * from './settings';
 export * from './mcp';
+export * from './user';

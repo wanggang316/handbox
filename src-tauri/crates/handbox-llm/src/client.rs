@@ -3,8 +3,7 @@ use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
 use crate::model::{create_model_client, ModelClient};
 use crate::types::{
-    LlmApiType, LlmChunkResponse, LlmModelApiType, LlmProvider, LlmRequest, LlmResponse,
-    LlmModel,
+    LlmApiType, LlmChunkResponse, LlmModel, LlmModelApiType, LlmProvider, LlmRequest, LlmResponse,
 };
 use std::sync::Arc;
 

@@ -3,57 +3,114 @@
   import Button from "$lib/components/ui/Button.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import AccountEdit from "$lib/components/settings/AccountEdit.svelte";
-
-  // 示例用户数据
-  let user = {
-    isLoggedIn: true,
-    username: "wanggang",
-    email: "gumpwang2016@gmail.com",
-    avatar: "https://lh3.googleusercontent.com/a/ACg8ocKdKLfYXuyg3WFnA4HGTrga_E2YtSw_r9x3079cyaNFsHSwsYAh=s96-c",
-    isPro: true,
-  };
+  import GoogleLoginButton from "$lib/components/auth/GoogleLoginButton.svelte";
+  import { userStore } from "$lib/stores";
+  import { logout, updateUserProfile } from "$lib/api/auth";
+  import { AppError } from "$lib/api";
 
   // Modal 状态控制
-  let showEditModal = false;
+  let showEditModal = $state(false);
+  let isLoading = $state(false);
+  let errorMessage = $state<string | null>(null);
+
+  // 从 store 获取用户状态
+  const user = $derived({
+    isLoggedIn: userStore.isLoggedIn,
+    username: userStore.user?.username,
+    email: userStore.user?.email,
+    avatar: userStore.user?.avatar,
+    isPro: userStore.user?.isPro || false
+  });
 
   function handleEditProfile() {
-    console.log("编辑用户资料 - 点击事件触发");
-    console.log("当前 showEditModal 状态:", showEditModal);
     showEditModal = true;
-    console.log("设置后 showEditModal 状态:", showEditModal);
   }
 
   function handleCloseModal() {
     showEditModal = false;
+    errorMessage = null;
   }
 
-  function handleSaveProfile(userData: { username: string; email: string; avatar?: string }) {
-    console.log("保存用户资料", userData);
-    // 更新用户数据
-    user.username = userData.username;
-    user.email = userData.email;
-    if (userData.avatar) {
-      user.avatar = userData.avatar;
+  async function handleSaveProfile(userData: { username: string; email: string; avatar?: string }) {
+    if (!userStore.isLoggedIn) return;
+
+    isLoading = true;
+    errorMessage = null;
+
+    try {
+      // 调用后端更新用户资料
+      const updatedUser = await updateUserProfile({
+        username: userData.username,
+        avatar: userData.avatar
+      });
+
+      // 更新本地状态
+      userStore.updateUser(updatedUser);
+
+      // 关闭弹窗
+      showEditModal = false;
+    } catch (error) {
+      console.error("更新用户资料失败:", error);
+
+      if (error instanceof AppError) {
+        errorMessage = error.message;
+      } else {
+        errorMessage = "更新失败，请重试";
+      }
+    } finally {
+      isLoading = false;
     }
-    // 这里可以添加保存到后端的逻辑
   }
 
-  function handleLogin() {
-    console.log("用户登录");
-    // 这里可以添加用户登录的逻辑
+  function handleLoginSuccess() {
+    errorMessage = null;
+    console.log("登录成功");
   }
 
-  function handleLogout() {
-    console.log("用户退出登录");
-    // 这里可以添加用户退出登录的逻辑
-    user.isLoggedIn = false;
-    user.username = "";
-    user.avatar = "";
+  function handleLoginError(error: AppError) {
+    errorMessage = error.message;
+    console.error("登录失败:", error);
+  }
+
+  async function handleLogout() {
+    if (!confirm("确定要退出登录吗？")) {
+      return;
+    }
+
+    isLoading = true;
+    errorMessage = null;
+
+    try {
+      // 调用后端登出接口
+      await logout();
+
+      // 清除本地用户状态
+      userStore.clearUser();
+
+      console.log("退出登录成功");
+    } catch (error) {
+      console.error("退出登录失败:", error);
+
+      if (error instanceof AppError) {
+        errorMessage = error.message;
+      } else {
+        errorMessage = "退出失败，请重试";
+      }
+    } finally {
+      isLoading = false;
+    }
   }
 </script>
 
 <div class="p-6 pr-8 flex flex-col gap-y-4">
-  <!-- 已登录状态 -->
+  <!-- 错误提示 -->
+  {#if errorMessage}
+    <div class="p-4 bg-error/10 border border-error/20 rounded-lg">
+      <p class="text-sm text-error">{errorMessage}</p>
+    </div>
+  {/if}
+
+  <!-- 用户信息卡片 -->
   <TableGroup>
     <div class="px-6 py-6 flex flex-row gap-y-4">
       <div class="flex-1">
@@ -61,7 +118,12 @@
       </div>
       {#if user.isLoggedIn}
         <div class="flex items-center">
-          <Button variant="gray" size="sm" on:click={handleEditProfile}>
+          <Button
+            variant="gray"
+            size="sm"
+            on:click={handleEditProfile}
+            disabled={isLoading}
+          >
             编辑资料
           </Button>
         </div>
@@ -72,19 +134,36 @@
   {#if user.isLoggedIn}
     <!-- 退出登录按钮 -->
     <div>
-      <Button variant="gray" size="sm" on:click={handleLogout}>退出登录</Button>
+      <Button
+        variant="gray"
+        size="sm"
+        on:click={handleLogout}
+        disabled={isLoading}
+      >
+        {isLoading ? '退出中...' : '退出登录'}
+      </Button>
     </div>
   {:else}
-    <div>
-      <Button variant="gray" size="sm" on:click={handleLogin}>登录</Button>
+    <!-- Google 登录按钮 -->
+    <div class="max-w-md">
+      <GoogleLoginButton
+        onSuccess={handleLoginSuccess}
+        onError={handleLoginError}
+      />
     </div>
   {/if}
 </div>
 
 <!-- 编辑资料弹窗 -->
-<AccountEdit 
-  open={showEditModal} 
-  {user}
-  onClose={handleCloseModal}
-  onSave={handleSaveProfile}
-/>
+{#if user.isLoggedIn && userStore.user}
+  <AccountEdit
+    open={showEditModal}
+    user={{
+      username: userStore.user.username,
+      email: userStore.user.email,
+      avatar: userStore.user.avatar || ''
+    }}
+    onClose={handleCloseModal}
+    onSave={handleSaveProfile}
+  />
+{/if}

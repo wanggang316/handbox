@@ -36,11 +36,7 @@ impl OpenAIWithLocalProvider {
         models
     }
 
-    fn convert_model_extra_info(
-        &self,
-        model_id: &str,
-        extra_info: &LlmModelExtraInfo,
-    ) -> LlmModel {
+    fn convert_model_extra_info(&self, model_id: &str, extra_info: &LlmModelExtraInfo) -> LlmModel {
         LlmModel {
             id: model_id.to_string(),
             name: extra_info.name.clone(),
