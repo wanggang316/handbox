@@ -36,6 +36,12 @@ futures = "0.3"
 futures-util = "0.3"
 tokio-stream = "0.1"
 rand = "0.8"
+url = "2.5"
+tiny_http = "0.12"
+base64 = "0.22"
+jsonwebtoken = "9.3"
+dotenvy = "0.15"
+urlencoding = "2.1"
 openai-rust = { path = "../../../../openai-rust/openai-rust" }
 google-genai-rust = { path = "../../../../google-genai-rust/google-genai-rust" }
 async-stream = "0.3"

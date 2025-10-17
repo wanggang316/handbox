@@ -1,125 +1,15 @@
 <script lang="ts">
-  import { googleLogin } from '$lib/api/auth';
-  import { userStore } from '$lib/stores';
-  import { AppError } from '$lib/api';
+  import { authState, login } from "$lib/states/auth.svelte";
 
-  interface Props {
-    onSuccess?: () => void;
-    onError?: (error: AppError) => void;
-  }
-
-  let { onSuccess, onError }: Props = $props();
-
-  // Google OAuth 配置
-  const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-  const REDIRECT_URI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'http://localhost:5173/auth/callback';
-
-  let isLoading = $state(false);
-  let errorMessage = $state<string | null>(null);
-
-  /**
-   * 处理 Google 登录
-   */
-  async function handleGoogleLogin() {
-    errorMessage = null;
-    isLoading = true;
-
-    try {
-      // 构建 Google OAuth URL
-      const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-      authUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID);
-      authUrl.searchParams.set('redirect_uri', REDIRECT_URI);
-      authUrl.searchParams.set('response_type', 'code');
-      authUrl.searchParams.set('scope', 'email profile openid');
-      authUrl.searchParams.set('access_type', 'offline');
-      authUrl.searchParams.set('prompt', 'consent');
-
-      // 打开 Google 登录页面
-      const authWindow = window.open(
-        authUrl.toString(),
-        'Google Login',
-        'width=500,height=600,left=100,top=100'
-      );
-
-      // 监听回调消息
-      window.addEventListener('message', handleAuthCallback);
-    } catch (error) {
-      console.error('Google 登录失败:', error);
-      errorMessage = '启动 Google 登录失败';
-      isLoading = false;
-
-      if (onError && error instanceof AppError) {
-        onError(error);
-      }
-    }
-  }
-
-  /**
-   * 处理 OAuth 回调
-   */
-  async function handleAuthCallback(event: MessageEvent) {
-    // 验证来源
-    if (event.origin !== window.location.origin) {
-      return;
-    }
-
-    const { type, code, error } = event.data;
-
-    if (type !== 'google-auth-callback') {
-      return;
-    }
-
-    // 移除监听器
-    window.removeEventListener('message', handleAuthCallback);
-
-    if (error) {
-      errorMessage = '授权失败: ' + error;
-      isLoading = false;
-      return;
-    }
-
-    if (!code) {
-      errorMessage = '未获取到授权码';
-      isLoading = false;
-      return;
-    }
-
-    try {
-      // 调用后端登录接口
-      const response = await googleLogin({
-        code,
-        redirectUri: REDIRECT_URI
-      });
-
-      // 更新用户状态
-      userStore.setUser(response.user, response.accessToken);
-
-      // 保存刷新令牌
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('refreshToken', response.refreshToken);
-      }
-
-      isLoading = false;
-      onSuccess?.();
-    } catch (error) {
-      console.error('登录失败:', error);
-
-      if (error instanceof AppError) {
-        errorMessage = error.message;
-        onError?.(error);
-      } else {
-        errorMessage = '登录失败，请重试';
-      }
-
-      isLoading = false;
-    }
+  async function handleLogin() {
+    await login();
   }
 </script>
 
 <button
   type="button"
-  onclick={handleGoogleLogin}
-  disabled={isLoading}
+  onclick={handleLogin}
+  disabled={authState.isLoading}
   class="
     flex items-center justify-center gap-3
     w-full px-4 py-3
@@ -131,8 +21,10 @@
     shadow-sm hover:shadow-md
   "
 >
-  {#if isLoading}
-    <div class="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+  {#if authState.isLoading}
+    <div
+      class="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"
+    ></div>
     <span>登录中...</span>
   {:else}
     <!-- Google Logo SVG -->
@@ -158,8 +50,8 @@
   {/if}
 </button>
 
-{#if errorMessage}
+{#if authState.error}
   <div class="mt-2 text-sm text-error">
-    {errorMessage}
+    {authState.error}
   </div>
 {/if}

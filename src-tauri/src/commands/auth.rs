@@ -1,186 +1,201 @@
-use crate::models::{
-    AppError, AuthResponse, GoogleLoginRequest, RefreshTokenRequest, UpdateUserProfileRequest, User,
-};
+use crate::models::{AppError, AuthResponse, GoogleLoginRequest, UpdateUserProfileRequest, User};
+use crate::services::{GoogleOAuthService, UserSessionService};
+use tauri::{Emitter, State};
 
-/// Google OAuth 登录
+/// 启动 Google OAuth 登录流程
 ///
-/// 接收 Google 授权码，通过后端 API 验证并返回用户信息和令牌
-///
-/// # 注意
-/// 此命令当前仅定义接口，实际的 Google OAuth 验证逻辑需要在后端 API 实现
+/// 生成授权 URL，打开浏览器，启动本地回调服务器，等待授权码
 #[tauri::command]
-pub async fn auth_google_login(request: GoogleLoginRequest) -> Result<AuthResponse, AppError> {
-    // TODO: 实现 Google OAuth 验证逻辑
-    // 1. 使用 code 和 redirect_uri 向 Google 换取 access token
-    // 2. 使用 access token 获取用户信息
-    // 3. 在数据库中创建或更新用户
-    // 4. 生成 JWT 访问令牌和刷新令牌
-    // 5. 返回用户信息和令牌
+pub async fn auth_start_google_oauth(
+    window: tauri::Window,
+    session_service: State<'_, UserSessionService>,
+) -> Result<String, AppError> {
+    tracing::info!("启动 Google OAuth 登录流程");
 
-    // 临时返回错误，提示后端未实现
-    Err(AppError {
-        code: "NOT_IMPLEMENTED".to_string(),
-        message: "Google 登录后端接口尚未实现，请联系后端开发人员".to_string(),
-        hint: Some(format!(
-            "需要使用 code={} 和 redirect_uri={} 完成 OAuth 流程",
-            request.code, request.redirect_uri
-        )),
-    })
+    // 1. 创建 OAuth 服务实例
+    let oauth_service = GoogleOAuthService::new()?;
+
+    // 2. 生成授权 URL
+    let auth_url = oauth_service.generate_auth_url()?;
+
+    // 3. 在后台启动回调服务器
+    let oauth_service_clone = GoogleOAuthService::new()?;
+    let window_clone = window.clone();
+    let session_service_clone = session_service.inner().clone();
+
+    tokio::spawn(async move {
+        match oauth_service_clone.start_callback_server().await {
+            Ok(code) => {
+                tracing::info!("成功接收到授权码");
+                // 使用授权码完成登录
+                match oauth_service_clone.google_login(&code).await {
+                    Ok(auth_response) => {
+                        tracing::info!(
+                            "Google 登录成功: user_id={}, email={}",
+                            auth_response.user.id,
+                            auth_response.user.email
+                        );
+
+                        // 保存用户会话
+                        if let Err(e) = session_service_clone
+                            .create_session(
+                                auth_response.user.clone(),
+                                auth_response.access_token.clone(),
+                                auth_response.refresh_token.clone(),
+                                auth_response.expires_in,
+                            )
+                            .await
+                        {
+                            tracing::error!("保存用户会话失败: {:?}", e);
+                        }
+
+                        // 发送成功事件到前端
+                        let _ = window_clone.emit("auth_login_success", auth_response);
+                    }
+                    Err(e) => {
+                        tracing::error!("Google 登录失败: {:?}", e);
+                        // 发送失败事件到前端
+                        let _ = window_clone.emit("auth_login_error", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("接收授权码失败: {:?}", e);
+                let _ = window_clone.emit("auth_login_error", e);
+            }
+        }
+    });
+
+    // 4. 使用 tauri-plugin-opener 打开浏览器
+    use tauri_plugin_opener::OpenerExt;
+    window
+        .opener()
+        .open_url(&auth_url, None::<&str>)
+        .map_err(|e| AppError {
+            code: "BROWSER_ERROR".to_string(),
+            message: format!("打开浏览器失败: {}", e),
+            hint: Some("请手动在浏览器中打开授权链接".to_string()),
+        })?;
+
+    Ok(auth_url)
+}
+
+/// Google OAuth 登录（备用方法，通常使用 auth_start_google_oauth）
+///
+/// 直接使用授权码进行登录，适用于自定义 OAuth 流程
+#[tauri::command]
+pub async fn auth_google_login(
+    request: GoogleLoginRequest,
+    session_service: State<'_, UserSessionService>,
+) -> Result<AuthResponse, AppError> {
+    tracing::info!("开始 Google OAuth 登录流程（直接授权码方式）");
+
+    // 1. 创建 OAuth 服务实例
+    let oauth_service = GoogleOAuthService::new()?;
+
+    // 2. 使用授权码交换令牌并验证
+    let auth_response = oauth_service.google_login(&request.code).await?;
+
+    tracing::info!(
+        "Google 登录成功: user_id={}, email={}",
+        auth_response.user.id,
+        auth_response.user.email
+    );
+
+    // 3. 保存用户会话
+    session_service
+        .create_session(
+            auth_response.user.clone(),
+            auth_response.access_token.clone(),
+            auth_response.refresh_token.clone(),
+            auth_response.expires_in,
+        )
+        .await?;
+
+    Ok(auth_response)
 }
 
 /// 用户登出
 ///
-/// 清除服务端 session，使令牌失效
+/// 清除用户会话
 #[tauri::command]
-pub async fn auth_logout() -> Result<(), AppError> {
-    // TODO: 实现登出逻辑
-    // 1. 清除服务端 session 或 JWT 黑名单
-    // 2. 可选：通知其他设备登出
-
-    // 临时返回成功
+pub async fn auth_logout(session_service: State<'_, UserSessionService>) -> Result<(), AppError> {
+    session_service.clear_session().await?;
+    tracing::info!("用户已登出");
     Ok(())
 }
 
-/// 刷新访问令牌
+/// 刷新 Google Access Token
 ///
-/// 使用刷新令牌获取新的访问令牌
+/// 使用 refresh_token 获取新的 access_token
 #[tauri::command]
-pub async fn auth_refresh_token(request: RefreshTokenRequest) -> Result<AuthResponse, AppError> {
-    // TODO: 实现令牌刷新逻辑
-    // 1. 验证刷新令牌有效性
-    // 2. 生成新的访问令牌
-    // 3. 返回新的令牌信息
-
-    Err(AppError {
-        code: "NOT_IMPLEMENTED".to_string(),
-        message: "令牌刷新接口尚未实现".to_string(),
-        hint: Some(format!("需要验证 refresh_token: {}", request.refresh_token)),
-    })
+pub async fn auth_refresh_token(
+    session_service: State<'_, UserSessionService>,
+) -> Result<(), AppError> {
+    session_service.refresh_google_token().await?;
+    tracing::info!("Google Access Token 已刷新");
+    Ok(())
 }
 
 /// 获取当前用户信息
 ///
-/// 验证当前令牌并返回用户信息
+/// 从会话中获取当前登录的用户信息
 #[tauri::command]
-pub async fn auth_get_user() -> Result<User, AppError> {
-    // TODO: 实现获取用户信息逻辑
-    // 1. 从请求头或上下文中提取 JWT
-    // 2. 验证 JWT 有效性
-    // 3. 从数据库获取用户信息
-    // 4. 返回用户信息
-
-    Err(AppError {
-        code: "NOT_IMPLEMENTED".to_string(),
-        message: "获取用户信息接口尚未实现".to_string(),
-        hint: Some("需要从 JWT 中提取用户 ID 并查询数据库".to_string()),
-    })
+pub async fn auth_get_user(
+    session_service: State<'_, UserSessionService>,
+) -> Result<User, AppError> {
+    session_service
+        .get_current_user()
+        .await
+        .ok_or_else(|| AppError {
+            code: "NO_SESSION".to_string(),
+            message: "当前没有登录用户".to_string(),
+            hint: Some("请先登录".to_string()),
+        })
 }
 
 /// 更新用户资料
 ///
 /// 更新用户名、头像等信息
 #[tauri::command]
-pub async fn auth_update_profile(request: UpdateUserProfileRequest) -> Result<User, AppError> {
-    // TODO: 实现更新用户资料逻辑
-    // 1. 验证当前用户身份
-    // 2. 验证输入数据有效性
-    // 3. 更新数据库中的用户信息
-    // 4. 返回更新后的用户信息
+pub async fn auth_update_profile(
+    request: UpdateUserProfileRequest,
+    session_service: State<'_, UserSessionService>,
+) -> Result<User, AppError> {
+    // 1. 获取当前用户
+    let mut current_user = session_service
+        .get_current_user()
+        .await
+        .ok_or_else(|| AppError {
+            code: "NO_SESSION".to_string(),
+            message: "当前没有登录用户".to_string(),
+            hint: Some("请先登录".to_string()),
+        })?;
 
-    Err(AppError {
-        code: "NOT_IMPLEMENTED".to_string(),
-        message: "更新用户资料接口尚未实现".to_string(),
-        hint: Some(format!(
-            "需要更新用户信息: username={:?}, avatar={:?}",
-            request.username, request.avatar
-        )),
-    })
+    // 2. 更新用户信息
+    if let Some(username) = request.username {
+        current_user.username = username;
+    }
+    if let Some(avatar) = request.avatar {
+        current_user.avatar = Some(avatar);
+    }
+    current_user.updated_at = chrono::Utc::now().to_rfc3339();
+
+    // 3. 保存到数据库
+    session_service.update_user(&current_user).await?;
+
+    tracing::info!("用户资料已更新: user_id={}", current_user.id);
+
+    Ok(current_user)
 }
 
-/// 验证令牌有效性
+/// 检查会话是否有效
 ///
-/// 检查当前令牌是否有效
+/// 检查当前会话和 token 是否有效（未过期）
 #[tauri::command]
-pub async fn auth_validate_token() -> Result<(), AppError> {
-    // TODO: 实现令牌验证逻辑
-    // 1. 从上下文中提取 JWT
-    // 2. 验证 JWT 签名和过期时间
-    // 3. 检查是否在黑名单中
-
-    Err(AppError {
-        code: "NOT_IMPLEMENTED".to_string(),
-        message: "令牌验证接口尚未实现".to_string(),
-        hint: Some("需要验证 JWT 的有效性".to_string()),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_auth_google_login_not_implemented() {
-        let request = GoogleLoginRequest {
-            code: "test_code".to_string(),
-            redirect_uri: "http://localhost:5173/auth/callback".to_string(),
-        };
-
-        let result = auth_google_login(request).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "NOT_IMPLEMENTED");
-    }
-
-    #[tokio::test]
-    async fn test_auth_logout() {
-        let result = auth_logout().await;
-        // 当前实现返回成功
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_auth_refresh_token_not_implemented() {
-        let request = RefreshTokenRequest {
-            refresh_token: "test_refresh_token".to_string(),
-        };
-
-        let result = auth_refresh_token(request).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "NOT_IMPLEMENTED");
-    }
-
-    #[tokio::test]
-    async fn test_auth_get_user_not_implemented() {
-        let result = auth_get_user().await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "NOT_IMPLEMENTED");
-    }
-
-    #[tokio::test]
-    async fn test_auth_update_profile_not_implemented() {
-        let request = UpdateUserProfileRequest {
-            username: Some("newname".to_string()),
-            avatar: None,
-        };
-
-        let result = auth_update_profile(request).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "NOT_IMPLEMENTED");
-    }
-
-    #[tokio::test]
-    async fn test_auth_validate_token_not_implemented() {
-        let result = auth_validate_token().await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err();
-        assert_eq!(err.code, "NOT_IMPLEMENTED");
-    }
+pub async fn auth_validate_token(
+    session_service: State<'_, UserSessionService>,
+) -> Result<bool, AppError> {
+    let is_valid = session_service.is_session_valid().await;
+    Ok(is_valid)
 }

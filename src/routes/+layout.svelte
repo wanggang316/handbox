@@ -4,6 +4,7 @@
   import { browser } from "$app/environment";
   import { uiState } from "$lib/states/ui.svelte";
   import { providerActions } from "$lib/states/provider.svelte";
+  import { initAuth, cleanupAuth } from "$lib/states/auth.svelte";
   import Toast from "$lib/components/ui/Toast.svelte";
 
   let { children } = $props();
@@ -24,12 +25,22 @@
         }
       };
       mediaQuery.addEventListener('change', handleSystemThemeChange);
-      
+
       // 初始化供应商配置模板
       providerActions.loadProviderConfigs().catch(error => {
         console.error('Failed to load provider configs:', error);
       });
+
+      // 初始化用户认证状态
+      initAuth().catch(error => {
+        console.error('Failed to initialize auth:', error);
+      });
     }
+
+    // 清理函数
+    return () => {
+      cleanupAuth();
+    };
   });
 </script>
 

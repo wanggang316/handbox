@@ -12,6 +12,7 @@ pub mod utils;
 use crate::commands::*;
 use crate::services::{
     ChatService, McpService, MessageService, ModelService, ProviderService, StorageService,
+    UserSessionService,
 };
 use crate::storage::Database;
 use crate::utils::logger;
@@ -68,6 +69,14 @@ async fn initialize_services(
         llm_config_provider,
     );
 
+    // 初始化用户会话服务
+    let user_session_service = UserSessionService::new(database_service.clone());
+
+    // 从数据库恢复上次的用户会话
+    if let Err(e) = user_session_service.load_session_from_db().await {
+        tracing::warn!("恢复用户会话失败: {:?}", e);
+    }
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(chat_service);
@@ -75,6 +84,7 @@ async fn initialize_services(
     app.manage(provider_service);
     app.manage(model_service);
     app.manage(mcp_service);
+    app.manage(user_session_service);
 
     Ok(())
 }
@@ -87,6 +97,12 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 加载环境变量
+    if let Err(e) = dotenvy::dotenv() {
+        // .env 文件不存在不是致命错误，只记录日志
+        eprintln!("Warning: Failed to load .env file: {}", e);
+    }
+
     // 初始化日志系统
     if let Err(e) = logger::init_logger() {
         eprintln!("Failed to initialize logger: {}", e);
@@ -119,6 +135,7 @@ pub fn run() {
             // 测试命令
             greet,
             // 认证相关命令
+            auth_start_google_oauth,
             auth_google_login,
             auth_logout,
             auth_refresh_token,

@@ -10,6 +10,7 @@
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
   import { Box, Plus, Search } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
+  import { authState, login } from "$lib/states/auth.svelte";
 
   // 获取当前选中的聊天 ID
   let currentChatId = $derived(
@@ -48,7 +49,7 @@
     goto("/search");
   }
 
-  function handleUserClick() {
+  async function handleUserClick() {
     if (currentUser.isLoggedIn) {
       console.log("打开用户设置");
       // 打开独立的设置窗口
@@ -56,8 +57,8 @@
         console.error("Failed to open settings window:", err);
       });
     } else {
-      console.log("跳转到登录页面");
-      // 这里可以添加跳转到登录页面的逻辑
+      // 直接启动 Google OAuth 登录流程
+      await login();
     }
   }
 
@@ -99,20 +100,14 @@
     }
   }
 
-  // 模拟用户状态，实际应该从 store 或 API 获取
-  // 可以切换这两个状态来测试不同的显示效果
-  let currentUser = $state({
-    isLoggedIn: true,
-    username: "Alex",
-    avatar:
-      "https://lh3.googleusercontent.com/a/ACg8ocKdKLfYXuyg3WFnA4HGTrga_E2YtSw_r9x3079cyaNFsHSwsYAh=s96-c", // 使用默认头像
-    isPro: true,
+  // 从 authState 获取用户状态
+  const currentUser = $derived({
+    isLoggedIn: authState.isLoggedIn,
+    username: authState.user?.username,
+    email: authState.user?.email,
+    avatar: authState.user?.avatar,
+    isPro: authState.user?.isPro || false
   });
-
-  // 未登录状态示例：
-  // let currentUser = $state({
-  //   isLoggedIn: false
-  // });
 </script>
 
 <div

@@ -4,8 +4,8 @@
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import AccountEdit from "$lib/components/settings/AccountEdit.svelte";
   import GoogleLoginButton from "$lib/components/auth/GoogleLoginButton.svelte";
-  import { userStore } from "$lib/stores";
-  import { logout, updateUserProfile } from "$lib/api/auth";
+  import { authState, logout as authLogout } from "$lib/states/auth.svelte";
+  import { updateUserProfile } from "$lib/api/auth";
   import { AppError } from "$lib/api";
 
   // Modal 状态控制
@@ -13,13 +13,13 @@
   let isLoading = $state(false);
   let errorMessage = $state<string | null>(null);
 
-  // 从 store 获取用户状态
+  // 从 authState 获取用户状态
   const user = $derived({
-    isLoggedIn: userStore.isLoggedIn,
-    username: userStore.user?.username,
-    email: userStore.user?.email,
-    avatar: userStore.user?.avatar,
-    isPro: userStore.user?.isPro || false
+    isLoggedIn: authState.isLoggedIn,
+    username: authState.user?.username,
+    email: authState.user?.email,
+    avatar: authState.user?.avatar,
+    isPro: authState.user?.isPro || false
   });
 
   function handleEditProfile() {
@@ -32,7 +32,7 @@
   }
 
   async function handleSaveProfile(userData: { username: string; email: string; avatar?: string }) {
-    if (!userStore.isLoggedIn) return;
+    if (!authState.isLoggedIn) return;
 
     isLoading = true;
     errorMessage = null;
@@ -44,8 +44,8 @@
         avatar: userData.avatar
       });
 
-      // 更新本地状态
-      userStore.updateUser(updatedUser);
+      // 更新认证状态
+      authState.user = updatedUser;
 
       // 关闭弹窗
       showEditModal = false;
@@ -62,16 +62,6 @@
     }
   }
 
-  function handleLoginSuccess() {
-    errorMessage = null;
-    console.log("登录成功");
-  }
-
-  function handleLoginError(error: AppError) {
-    errorMessage = error.message;
-    console.error("登录失败:", error);
-  }
-
   async function handleLogout() {
     if (!confirm("确定要退出登录吗？")) {
       return;
@@ -81,21 +71,11 @@
     errorMessage = null;
 
     try {
-      // 调用后端登出接口
-      await logout();
-
-      // 清除本地用户状态
-      userStore.clearUser();
-
+      await authLogout();
       console.log("退出登录成功");
     } catch (error) {
       console.error("退出登录失败:", error);
-
-      if (error instanceof AppError) {
-        errorMessage = error.message;
-      } else {
-        errorMessage = "退出失败，请重试";
-      }
+      errorMessage = "退出失败，请重试";
     } finally {
       isLoading = false;
     }
@@ -146,22 +126,19 @@
   {:else}
     <!-- Google 登录按钮 -->
     <div class="max-w-md">
-      <GoogleLoginButton
-        onSuccess={handleLoginSuccess}
-        onError={handleLoginError}
-      />
+      <GoogleLoginButton />
     </div>
   {/if}
 </div>
 
 <!-- 编辑资料弹窗 -->
-{#if user.isLoggedIn && userStore.user}
+{#if user.isLoggedIn && authState.user}
   <AccountEdit
     open={showEditModal}
     user={{
-      username: userStore.user.username,
-      email: userStore.user.email,
-      avatar: userStore.user.avatar || ''
+      username: authState.user.username,
+      email: authState.user.email,
+      avatar: authState.user.avatar || ''
     }}
     onClose={handleCloseModal}
     onSave={handleSaveProfile}

@@ -5,29 +5,57 @@
  */
 
 import { apiCall } from './index';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   AuthResponse,
-  GoogleLoginRequest,
-  RefreshTokenRequest,
   UpdateUserProfileRequest,
   User
 } from '$lib/types/user';
 
 /**
- * Google OAuth 登录
+ * 启动 Google OAuth 登录流程
  *
- * @param request - Google 登录请求参数
- * @returns 认证响应，包含用户信息和令牌
+ * 此函数会：
+ * 1. 生成授权 URL
+ * 2. 打开系统浏览器进行授权
+ * 3. 启动本地回调服务器等待授权码
+ * 4. 通过事件通知登录结果
+ *
+ * @returns 授权 URL
  *
  * 后端接口约定:
- * - 命令: auth_google_login
- * - 参数: { code: string, redirectUri: string }
- * - 返回: AuthResponse
+ * - 命令: auth_start_google_oauth
+ * - 事件: auth_login_success (成功) / auth_login_error (失败)
  */
-export async function googleLogin(request: GoogleLoginRequest): Promise<AuthResponse> {
-  return apiCall<AuthResponse>('auth_google_login', {
-    code: request.code,
-    redirect_uri: request.redirectUri
+export async function startGoogleOAuth(): Promise<string> {
+  return apiCall<string>('auth_start_google_oauth');
+}
+
+/**
+ * 监听 Google OAuth 登录成功事件
+ *
+ * @param callback - 登录成功回调函数
+ * @returns 取消监听函数
+ */
+export async function onLoginSuccess(
+  callback: (authResponse: AuthResponse) => void
+): Promise<UnlistenFn> {
+  return listen<AuthResponse>('auth_login_success', (event) => {
+    callback(event.payload);
+  });
+}
+
+/**
+ * 监听 Google OAuth 登录失败事件
+ *
+ * @param callback - 登录失败回调函数
+ * @returns 取消监听函数
+ */
+export async function onLoginError(
+  callback: (error: { code: string; message: string; hint?: string }) => void
+): Promise<UnlistenFn> {
+  return listen<{ code: string; message: string; hint?: string }>('auth_login_error', (event) => {
+    callback(event.payload);
   });
 }
 
@@ -46,20 +74,17 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * 刷新访问令牌
+ * 刷新 Google Access Token
  *
- * @param request - 刷新令牌请求
- * @returns 新的认证响应
+ * 使用当前会话中的 refresh_token 获取新的 access_token
  *
  * 后端接口约定:
  * - 命令: auth_refresh_token
- * - 参数: { refreshToken: string }
- * - 返回: AuthResponse
+ * - 参数: 无（从会话中自动获取）
+ * - 返回: void
  */
-export async function refreshToken(request: RefreshTokenRequest): Promise<AuthResponse> {
-  return apiCall<AuthResponse>('auth_refresh_token', {
-    refresh_token: request.refreshToken
-  });
+export async function refreshToken(): Promise<void> {
+  return apiCall<void>('auth_refresh_token');
 }
 
 /**
@@ -84,14 +109,11 @@ export async function getCurrentUser(): Promise<User> {
  *
  * 后端接口约定:
  * - 命令: auth_update_profile
- * - 参数: { username?: string, avatar?: string }
+ * - 参数: { request: { username?: string, avatar?: string } }
  * - 返回: User
  */
 export async function updateUserProfile(request: UpdateUserProfileRequest): Promise<User> {
-  return apiCall<User>('auth_update_profile', {
-    username: request.username,
-    avatar: request.avatar
-  });
+  return apiCall<User>('auth_update_profile', { request });
 }
 
 /**
