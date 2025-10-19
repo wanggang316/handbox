@@ -1,4 +1,4 @@
-use crate::types::{LlmApiType, LlmModelApiType, LlmModelFeature, LlmModelModality};
+use crate::types::{LlmApiType, LlmModelApiType, LlmModelModality};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -17,7 +17,7 @@ pub struct LlmModelExtraInfo {
     pub output_max_tokens: Option<i32>,
     pub input_cost_per_1k: Option<f32>,
     pub output_cost_per_1k: Option<f32>,
-    pub features: Vec<LlmModelFeature>,
+    pub features: Vec<String>,
     pub description: Option<String>,
     pub input_modalities: Option<Vec<LlmModelModality>>,
     pub output_modalities: Option<Vec<LlmModelModality>>,

@@ -15,7 +15,7 @@ pub struct LlmModel {
     pub output_max_tokens: Option<i32>,
     pub input_cost: Option<f32>,
     pub output_cost: Option<f32>,
-    pub supported_features: Option<Vec<LlmModelFeature>>,
+    pub supported_features: Option<Vec<String>>,
     pub description: Option<String>,
     pub input_modalities: Option<Vec<LlmModelModality>>,
     pub output_modalities: Option<Vec<LlmModelModality>>,
@@ -26,20 +26,14 @@ pub struct LlmModel {
     pub max_parameters: Option<HashMap<String, Value>>,
 }
 
-/// 模型功能枚举
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub enum LlmModelFeature {
-    Reasoning,
-    Tool,
-}
-
 /// 模型模态枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmModelModality {
     Text,
+    #[serde(alias = "images")]
     Image,
+    Pdf,
     File,
     Audio,
     Video,
@@ -53,8 +47,12 @@ impl FromStr for LlmModelModality {
 
         if value.eq_ignore_ascii_case("text") {
             Ok(LlmModelModality::Text)
-        } else if value.eq_ignore_ascii_case("image") {
+        } else if value.eq_ignore_ascii_case("image")
+            || value.eq_ignore_ascii_case("images")
+        {
             Ok(LlmModelModality::Image)
+        } else if value.eq_ignore_ascii_case("pdf") {
+            Ok(LlmModelModality::Pdf)
         } else if value.eq_ignore_ascii_case("file") {
             Ok(LlmModelModality::File)
         } else if value.eq_ignore_ascii_case("audio") {
@@ -219,6 +217,137 @@ where
     match opt {
         Some(s) if !s.is_empty() => s.parse::<f32>().map(Some).map_err(D::Error::custom),
         _ => Ok(None),
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelSupplementSource {
+    #[serde(default)]
+    pub scraped_at: Option<String>,
+    #[serde(default)]
+    pub total_models: Option<u32>,
+    #[serde(default)]
+    pub detailed_models: Option<u32>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub index_url: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelSupplementMetadata {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub source: Option<ModelSupplementSource>,
+    #[serde(default)]
+    pub total_models: Option<u32>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelSupplementDocument {
+    #[serde(default)]
+    pub metadata: Option<ModelSupplementMetadata>,
+    #[serde(default)]
+    pub models: Vec<ModelSupplement>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelSupplement {
+    #[serde(rename = "model_code")]
+    pub model_code: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub context_length: Option<i32>,
+    #[serde(default)]
+    pub output_max_tokens: Option<i32>,
+    #[serde(default)]
+    pub input_cost: Option<f32>,
+    #[serde(default)]
+    pub output_cost: Option<f32>,
+    #[serde(default)]
+    pub supported_features: Option<Vec<String>>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub input_modalities: Option<Vec<LlmModelModality>>,
+    #[serde(default)]
+    pub output_modalities: Option<Vec<LlmModelModality>>,
+    #[serde(default)]
+    pub metadata: Option<Value>,
+    #[serde(default)]
+    pub support_parameters: Vec<LlmModelParameter>,
+    #[serde(default)]
+    pub default_parameters: Option<HashMap<String, Value>>,
+    #[serde(default)]
+    pub max_parameters: Option<HashMap<String, Value>>,
+    #[serde(default)]
+    pub snapshots: Vec<String>,
+    #[serde(default)]
+    pub endpoints: Vec<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+impl ModelSupplement {
+    pub fn into_snapshot_models(self) -> Vec<(String, LlmModel)> {
+        let ModelSupplement {
+            model_code,
+            name,
+            context_length,
+            output_max_tokens,
+            input_cost,
+            output_cost,
+            supported_features,
+            description,
+            input_modalities,
+            output_modalities,
+            metadata,
+            support_parameters,
+            default_parameters,
+            max_parameters,
+            snapshots,
+            endpoints: _,
+            url: _,
+        } = self;
+
+        let snapshot_ids = if snapshots.is_empty() {
+            vec![model_code.clone()]
+        } else {
+            snapshots.clone()
+        };
+
+        let mut results = Vec::with_capacity(snapshot_ids.len());
+
+        for snapshot in snapshot_ids {
+            let model = LlmModel {
+                id: snapshot.clone(),
+                name: name
+                    .clone()
+                    .unwrap_or_else(|| snapshot.clone()),
+                context_length,
+                output_max_tokens,
+                input_cost,
+                output_cost,
+                supported_features: supported_features.clone(),
+                description: description.clone(),
+                input_modalities: input_modalities.clone(),
+                output_modalities: output_modalities.clone(),
+                metadata: metadata.clone(),
+                pricing: None,
+                support_parameters: support_parameters.clone(),
+                default_parameters: default_parameters.clone(),
+                max_parameters: max_parameters.clone(),
+            };
+
+            results.push((snapshot, model));
+        }
+
+        results
     }
 }
 

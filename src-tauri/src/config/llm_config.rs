@@ -1,11 +1,10 @@
 // LLM 配置管理器
 // 从 llm_config.json 读取供应商和模型配置信息
 
-use crate::storage::types::ModelFeature;
 use handbox_llm::config::{
     LlmConfigProvider, LlmModelExtraInfo as LlmClientModelExtraInfo, LlmProviderConfig,
 };
-use handbox_llm::types::{LlmApiType, LlmModelApiType, LlmModelFeature, LlmModelModality};
+use handbox_llm::types::{LlmApiType, LlmModelApiType, LlmModelModality};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -148,15 +147,8 @@ impl LlmConfig {
     }
 
     /// 转换特性字符串为 ModelFeature 枚举
-    pub fn convert_features(&self, features: &[String]) -> Vec<ModelFeature> {
-        features
-            .iter()
-            .filter_map(|f| match f.as_str() {
-                "reasoning" => Some(ModelFeature::Reasoning),
-                "tool" => Some(ModelFeature::Tool),
-                _ => None,
-            })
-            .collect()
+    pub fn convert_features(&self, features: &[String]) -> Vec<String> {
+        features.iter().map(|f| f.to_string()).collect()
     }
 
     /// 获取模型支持的参数（级联：模型 -> 供应商 -> 全局）
@@ -259,30 +251,17 @@ impl LlmConfig {
     }
 }
 
-fn map_model_feature(feature: ModelFeature) -> LlmModelFeature {
-    match feature {
-        ModelFeature::Reasoning => LlmModelFeature::Reasoning,
-        ModelFeature::Tool => LlmModelFeature::Tool,
-    }
-}
-
 fn to_llm_model_extra_info(
     config: &LlmConfig,
     extra_info: &ModelExtraInfo,
 ) -> LlmClientModelExtraInfo {
-    let features = config
-        .convert_features(&extra_info.features)
-        .into_iter()
-        .map(map_model_feature)
-        .collect();
-
     LlmClientModelExtraInfo {
         name: extra_info.name.clone(),
         context_length: extra_info.context_length,
         output_max_tokens: extra_info.output_max_tokens,
         input_cost_per_1k: extra_info.input_cost_per_1k,
         output_cost_per_1k: extra_info.output_cost_per_1k,
-        features,
+        features: extra_info.features.clone(),
         description: extra_info.description.clone(),
         input_modalities: extra_info
             .input_modalities

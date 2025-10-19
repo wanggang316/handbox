@@ -1,11 +1,17 @@
 // Google 模型客户端实现
 
 use super::model_client::ModelClient;
+use super::oss_client::OssClient;
 use crate::error::LlmClientError;
-use crate::types::{LlmModel, LlmModelFeature, LlmModelModality, LlmModelParameter, LlmProvider};
+use crate::types::{
+    LlmModel, LlmModelModality, LlmModelParameter, LlmProvider, ModelSupplementDocument,
+};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashMap;
+
+const GOOGLE_SUPPLEMENT_OBJECT_KEY: &str = "google_models.json";
 
 /// Google 风格的模型列表响应
 #[derive(Debug, Clone, Deserialize)]
@@ -37,6 +43,8 @@ impl ModelClient for GoogleModelClient {
     ) -> Result<Vec<LlmModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
+
+        let supplement_map = load_google_model_supplements().await;
 
         let mut result_models = Vec::new();
         let mut page_token: Option<String> = None;
@@ -120,7 +128,7 @@ impl ModelClient for GoogleModelClient {
                     .unwrap_or(false);
 
                 let supported_features = if supports_reasoning {
-                    Some(vec![LlmModelFeature::Reasoning])
+                    Some(vec!["reasoning".to_string()])
                 } else {
                     None
                 };
@@ -128,7 +136,7 @@ impl ModelClient for GoogleModelClient {
                 let (support_parameters, default_parameters, max_parameters) =
                     parse_google_parameters(&api_model);
 
-                result_models.push(LlmModel {
+                let mut model = LlmModel {
                     id: model_id,
                     name: display_name,
                     context_length,
@@ -144,7 +152,15 @@ impl ModelClient for GoogleModelClient {
                     support_parameters,
                     default_parameters,
                     max_parameters,
-                });
+                };
+
+                if let Some(map) = &supplement_map {
+                    if let Some(supplement) = map.get(&model.id) {
+                        merge_models(&mut model, supplement);
+                    }
+                }
+
+                result_models.push(model);
             }
 
             match next_page_token {
@@ -156,6 +172,83 @@ impl ModelClient for GoogleModelClient {
         }
 
         Ok(result_models)
+    }
+}
+
+async fn load_google_model_supplements() -> Option<HashMap<String, LlmModel>> {
+    let client = match OssClient::from_env() {
+        Ok(client) => client,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to load OSS configuration for Google supplements: {}",
+                err
+            );
+            return None;
+        }
+    };
+
+    let content = match client.get_object_text(GOOGLE_SUPPLEMENT_OBJECT_KEY).await {
+        Ok(text) => text,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to download Google supplement models from OSS: {}",
+                err
+            );
+            return None;
+        }
+    };
+
+    let document: ModelSupplementDocument = match serde_json::from_str(&content) {
+        Ok(doc) => doc,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to parse Google supplement models from OSS JSON: {}",
+                err
+            );
+            return None;
+        }
+    };
+
+    if document.models.is_empty() {
+        return None;
+    }
+
+    let mut models = HashMap::new();
+
+    for entry in document.models {
+        for (model_id, model) in entry.into_snapshot_models() {
+            models.insert(model_id, model);
+        }
+    }
+
+    Some(models)
+}
+
+fn merge_models(base: &mut LlmModel, supplement: &LlmModel) {
+    if let Some(input_cost) = supplement.input_cost {
+        base.input_cost = Some(input_cost);
+    }
+
+    if let Some(output_cost) = supplement.output_cost {
+        base.output_cost = Some(output_cost);
+    }
+
+    if let Some(features) = &supplement.supported_features {
+        if !features.is_empty() {
+            base.supported_features = Some(features.clone());
+        }
+    }
+
+    if let Some(input_modalities) = &supplement.input_modalities {
+        if !input_modalities.is_empty() {
+            base.input_modalities = Some(input_modalities.clone());
+        }
+    }
+
+    if let Some(output_modalities) = &supplement.output_modalities {
+        if !output_modalities.is_empty() {
+            base.output_modalities = Some(output_modalities.clone());
+        }
     }
 }
 

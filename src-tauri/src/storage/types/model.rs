@@ -5,21 +5,14 @@ use handbox_llm::types::LlmModelParameter;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// 模型特性
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
-#[serde(rename_all = "kebab-case")]
-#[sqlx(type_name = "TEXT", rename_all = "kebab-case")]
-pub enum ModelFeature {
-    Reasoning,
-    Tool,
-}
-
 /// 模态枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelModality {
     Text,
+    #[serde(alias = "images")]
     Image,
+    Pdf,
     File,
     Audio,
     Video,
@@ -35,7 +28,7 @@ pub struct Model {
     pub output_max_tokens: Option<i32>,
     pub input_cost: Option<f32>,
     pub output_cost: Option<f32>,
-    pub supported_features: Option<Vec<ModelFeature>>,
+    pub supported_features: Option<Vec<String>>,
     pub description: Option<String>,
     pub input_modalities: Option<Vec<ModelModality>>,
     pub output_modalities: Option<Vec<ModelModality>>,
@@ -56,24 +49,12 @@ impl Model {
             .unwrap_or_else(|_| "[]".to_string())
     }
 
-    pub fn features_from_json(json: &str) -> Result<Option<Vec<ModelFeature>>, serde_json::Error> {
+    pub fn features_from_json(json: &str) -> Result<Option<Vec<String>>, serde_json::Error> {
         if json.is_empty() {
             return Ok(None);
         }
 
-        let raw_features: Vec<String> = serde_json::from_str(json)?;
-        let mut features = Vec::new();
-
-        for feature in raw_features {
-            match feature.as_str() {
-                "reasoning" => features.push(ModelFeature::Reasoning),
-                "tool" | "tools" | "function-calling" | "function_calling" => {
-                    features.push(ModelFeature::Tool)
-                }
-                _ => {}
-            }
-        }
-
+        let features: Vec<String> = serde_json::from_str(json)?;
         if features.is_empty() {
             Ok(None)
         } else {

@@ -4,7 +4,6 @@ pub mod chat;
 pub mod mcp;
 pub mod message;
 pub mod model;
-pub mod oss_client;
 pub mod provider;
 pub mod storage;
 pub mod user_session;

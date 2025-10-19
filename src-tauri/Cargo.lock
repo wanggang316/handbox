@@ -1676,7 +1676,6 @@ dependencies = [
 name = "handbox"
 version = "0.1.0"
 dependencies = [
- "aliyun-oss-rs",
  "anyhow",
  "async-stream",
  "async-trait",
@@ -1716,6 +1715,7 @@ dependencies = [
 name = "handbox-llm"
 version = "0.1.0"
 dependencies = [
+ "aliyun-oss-rs",
  "async-stream",
  "async-trait",
  "chrono",

@@ -1,16 +1,11 @@
 // 供应商服务实现
 
 use crate::models::{AddProviderRequest, AppError};
-use crate::services::model::{
-    apply_model_supplements, fetch_model_supplements_from_oss, MODEL_SUPPLEMENTS_OBJECT_KEY,
-};
 use crate::services::Database;
-use crate::storage::types::{
-    Model, ModelFeature, ModelModality, Provider, ProviderWithModels, Timestamp, UUID,
-};
+use crate::storage::types::{Model, ModelModality, Provider, ProviderWithModels, Timestamp, UUID};
 use crate::storage::{ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::{create_llm_client, LlmModel, LlmModelFeature, LlmModelModality, LlmProvider};
+use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -90,33 +85,12 @@ impl ProviderService {
                     // 然后保存模型（新供应商直接创建，不需要同步状态）
                     if !standard_models.is_empty() {
                         let now = self.current_timestamp();
-                        let mut models: Vec<Model> = standard_models
+                        let models: Vec<Model> = standard_models
                             .into_iter()
                             .map(|standard_model| {
                                 adapt_model(standard_model, provider.id.clone(), now)
                             })
                             .collect();
-
-                        if provider.provider_type.eq_ignore_ascii_case("google") {
-                            match fetch_model_supplements_from_oss(MODEL_SUPPLEMENTS_OBJECT_KEY)
-                                .await
-                            {
-                                Ok(document) => {
-                                    apply_model_supplements(
-                                        &mut models,
-                                        &document.models,
-                                        &provider.provider_type,
-                                    );
-                                }
-                                Err(err) => {
-                                    tracing::warn!(
-                                        "Failed to enrich Google models from OSS: {}",
-                                        err
-                                    );
-                                }
-                            }
-                        }
-
                         self.model_repo.create_models(&models).await?;
                     }
 
@@ -228,36 +202,12 @@ impl ProviderService {
                     // 同步模型，保留用户状态
                     if !standard_models.is_empty() {
                         let now = self.current_timestamp();
-                        let mut models: Vec<Model> = standard_models
+                        let models: Vec<Model> = standard_models
                             .into_iter()
                             .map(|standard_model| {
                                 adapt_model(standard_model, updated_provider.id.clone(), now)
                             })
                             .collect();
-
-                        if updated_provider
-                            .provider_type
-                            .eq_ignore_ascii_case("google")
-                        {
-                            match fetch_model_supplements_from_oss(MODEL_SUPPLEMENTS_OBJECT_KEY)
-                                .await
-                            {
-                                Ok(document) => {
-                                    apply_model_supplements(
-                                        &mut models,
-                                        &document.models,
-                                        &updated_provider.provider_type,
-                                    );
-                                }
-                                Err(err) => {
-                                    tracing::warn!(
-                                        "Failed to enrich Google models from OSS: {}",
-                                        err
-                                    );
-                                }
-                            }
-                        }
-
                         self.model_repo
                             .sync_provider_models(&updated_provider.id, &models)
                             .await?;
@@ -400,19 +350,10 @@ impl ProviderService {
 
         // 适配为我们的Model结构
         let now = self.current_timestamp();
-        let mut models: Vec<Model> = standard_models
+        let models: Vec<Model> = standard_models
             .into_iter()
             .map(|standard_model| adapt_model(standard_model, provider.id.clone(), now))
             .collect();
-
-        if provider.provider_type.eq_ignore_ascii_case("google") {
-            match fetch_model_supplements_from_oss(MODEL_SUPPLEMENTS_OBJECT_KEY).await {
-                Ok(document) => {
-                    apply_model_supplements(&mut models, &document.models, &provider.provider_type)
-                }
-                Err(err) => tracing::warn!("Failed to enrich Google models from OSS: {}", err),
-            }
-        }
 
         // 同步到数据库（保留用户设置的状态）
         self.model_repo
@@ -498,8 +439,17 @@ fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) -> Model {
         max_parameters,
     } = llm_model;
 
-    let supported_features = supported_features
-        .map(|features| features.into_iter().filter_map(map_llm_feature).collect());
+    let supported_features = supported_features.and_then(|features| {
+        let mapped: Vec<String> = features
+            .into_iter()
+            .filter(|feature| !feature.trim().is_empty())
+            .collect();
+        if mapped.is_empty() {
+            None
+        } else {
+            Some(mapped)
+        }
+    });
 
     let input_modalities = input_modalities.map(|modalities| {
         modalities
@@ -545,17 +495,11 @@ fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) -> Model {
     }
 }
 
-fn map_llm_feature(feature: LlmModelFeature) -> Option<ModelFeature> {
-    match feature {
-        LlmModelFeature::Reasoning => Some(ModelFeature::Reasoning),
-        LlmModelFeature::Tool => Some(ModelFeature::Tool),
-    }
-}
-
 fn map_llm_modality(modality: LlmModelModality) -> Option<ModelModality> {
     match modality {
         LlmModelModality::Text => Some(ModelModality::Text),
         LlmModelModality::Image => Some(ModelModality::Image),
+        LlmModelModality::Pdf => Some(ModelModality::Pdf),
         LlmModelModality::File => Some(ModelModality::File),
         LlmModelModality::Audio => Some(ModelModality::Audio),
         LlmModelModality::Video => Some(ModelModality::Video),
@@ -583,29 +527,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_provider_persists_record() {
-        let (service, _dir) = create_service().await;
-
-        let config = AddProviderRequest {
-            name: "Test OpenAI".to_string(),
-            provider_type: "openai".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            api_key: "test-api-key".to_string(),
-            enabled: Some(true),
-        };
-
-        let provider = service
-            .create_provider(config)
-            .await
-            .expect("provider creation failed");
-
-        assert_eq!(provider.name, "Test OpenAI");
-        assert_eq!(provider.provider_type, "openai");
-        assert!(provider.enabled);
-    }
-
-    #[tokio::test]
-    async fn get_provider_returns_record() {
+    async fn create_provider_stores_record() {
         let (service, _dir) = create_service().await;
 
         let config = AddProviderRequest {

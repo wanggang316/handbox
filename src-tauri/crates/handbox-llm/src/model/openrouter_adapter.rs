@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::model_client::ModelClient;
 use crate::error::LlmClientError;
 use crate::types::{
-    LlmModel, LlmModelFeature, LlmModelModality, LlmModelParameter, LlmModelPricing, LlmProvider,
+    LlmModel, LlmModelModality, LlmModelParameter, LlmModelPricing, LlmProvider,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -187,21 +187,21 @@ impl OpenRouterModel {
 }
 
 /// 从支持的参数列表中解析功能
-fn parse_features_from_params(params: &[LlmModelParameter]) -> Option<Vec<LlmModelFeature>> {
-    let mut features = Vec::new();
+fn parse_features_from_params(params: &[LlmModelParameter]) -> Option<Vec<String>> {
+    let mut features: Vec<String> = Vec::new();
 
     for param in params {
         match param {
             // 工具调用相关参数
             LlmModelParameter::Tools => {
-                if !features.contains(&LlmModelFeature::Tool) {
-                    features.push(LlmModelFeature::Tool);
+                if !features.iter().any(|f| f == "tool") {
+                    features.push("tool".to_string());
                 }
             }
             // 推理相关参数
             LlmModelParameter::Reasoning => {
-                if !features.contains(&LlmModelFeature::Reasoning) {
-                    features.push(LlmModelFeature::Reasoning);
+                if !features.iter().any(|f| f == "reasoning") {
+                    features.push("reasoning".to_string());
                 }
             }
             // 其他参数暂不处理

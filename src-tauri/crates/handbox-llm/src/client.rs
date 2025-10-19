@@ -122,7 +122,6 @@ pub fn create_client(provider_type: &str, config: Arc<dyn LlmConfigProvider>) ->
 mod tests {
     use super::*;
     use crate::config::{LlmModelExtraInfo, LlmProviderConfig};
-    use crate::types::LlmModelFeature;
 
     struct TestConfigProvider;
 
@@ -147,7 +146,7 @@ mod tests {
                 output_max_tokens: None,
                 input_cost_per_1k: None,
                 output_cost_per_1k: None,
-                features: vec![LlmModelFeature::Reasoning],
+                features: vec!["reasoning".to_string()],
                 description: None,
                 input_modalities: None,
                 output_modalities: None,
