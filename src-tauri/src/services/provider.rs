@@ -1,6 +1,9 @@
 // 供应商服务实现
 
 use crate::models::{AddProviderRequest, AppError};
+use crate::services::model::{
+    apply_model_supplements, fetch_model_supplements_from_oss, MODEL_SUPPLEMENTS_OBJECT_KEY,
+};
 use crate::services::Database;
 use crate::storage::types::{
     Model, ModelFeature, ModelModality, Provider, ProviderWithModels, Timestamp, UUID,
@@ -87,12 +90,33 @@ impl ProviderService {
                     // 然后保存模型（新供应商直接创建，不需要同步状态）
                     if !standard_models.is_empty() {
                         let now = self.current_timestamp();
-                        let models: Vec<Model> = standard_models
+                        let mut models: Vec<Model> = standard_models
                             .into_iter()
                             .map(|standard_model| {
                                 adapt_model(standard_model, provider.id.clone(), now)
                             })
                             .collect();
+
+                        if provider.provider_type.eq_ignore_ascii_case("google") {
+                            match fetch_model_supplements_from_oss(MODEL_SUPPLEMENTS_OBJECT_KEY)
+                                .await
+                            {
+                                Ok(document) => {
+                                    apply_model_supplements(
+                                        &mut models,
+                                        &document.models,
+                                        &provider.provider_type,
+                                    );
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        "Failed to enrich Google models from OSS: {}",
+                                        err
+                                    );
+                                }
+                            }
+                        }
+
                         self.model_repo.create_models(&models).await?;
                     }
 
@@ -204,12 +228,36 @@ impl ProviderService {
                     // 同步模型，保留用户状态
                     if !standard_models.is_empty() {
                         let now = self.current_timestamp();
-                        let models: Vec<Model> = standard_models
+                        let mut models: Vec<Model> = standard_models
                             .into_iter()
                             .map(|standard_model| {
                                 adapt_model(standard_model, updated_provider.id.clone(), now)
                             })
                             .collect();
+
+                        if updated_provider
+                            .provider_type
+                            .eq_ignore_ascii_case("google")
+                        {
+                            match fetch_model_supplements_from_oss(MODEL_SUPPLEMENTS_OBJECT_KEY)
+                                .await
+                            {
+                                Ok(document) => {
+                                    apply_model_supplements(
+                                        &mut models,
+                                        &document.models,
+                                        &updated_provider.provider_type,
+                                    );
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        "Failed to enrich Google models from OSS: {}",
+                                        err
+                                    );
+                                }
+                            }
+                        }
+
                         self.model_repo
                             .sync_provider_models(&updated_provider.id, &models)
                             .await?;
@@ -352,10 +400,19 @@ impl ProviderService {
 
         // 适配为我们的Model结构
         let now = self.current_timestamp();
-        let models: Vec<Model> = standard_models
+        let mut models: Vec<Model> = standard_models
             .into_iter()
             .map(|standard_model| adapt_model(standard_model, provider.id.clone(), now))
             .collect();
+
+        if provider.provider_type.eq_ignore_ascii_case("google") {
+            match fetch_model_supplements_from_oss(MODEL_SUPPLEMENTS_OBJECT_KEY).await {
+                Ok(document) => {
+                    apply_model_supplements(&mut models, &document.models, &provider.provider_type)
+                }
+                Err(err) => tracing::warn!("Failed to enrich Google models from OSS: {}", err),
+            }
+        }
 
         // 同步到数据库（保留用户设置的状态）
         self.model_repo

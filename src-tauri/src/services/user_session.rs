@@ -130,16 +130,38 @@ impl UserSessionService {
             LIMIT 1
         "#;
 
-        let result = sqlx::query_as::<_, (String, String, String, Option<String>, bool, String, String, i64)>(query)
-            .fetch_optional(self.db.pool())
-            .await
-            .map_err(|e| AppError {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("加载会话失败: {}", e),
-                hint: None,
-            })?;
+        let result = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                Option<String>,
+                bool,
+                String,
+                String,
+                i64,
+            ),
+        >(query)
+        .fetch_optional(self.db.pool())
+        .await
+        .map_err(|e| AppError {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("加载会话失败: {}", e),
+            hint: None,
+        })?;
 
-        if let Some((id, username, email, avatar, is_pro, created_at, updated_at, token_expires_at)) = result {
+        if let Some((
+            id,
+            username,
+            email,
+            avatar,
+            is_pro,
+            created_at,
+            updated_at,
+            token_expires_at,
+        )) = result
+        {
             // 2. 检查 token 是否过期
             let now = chrono::Utc::now().timestamp();
             if token_expires_at <= now {

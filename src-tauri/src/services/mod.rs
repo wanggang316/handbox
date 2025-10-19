@@ -4,13 +4,14 @@ pub mod chat;
 pub mod mcp;
 pub mod message;
 pub mod model;
+pub mod oss_client;
 pub mod provider;
 pub mod storage;
 pub mod user_session;
 
 // 重新导出服务
-pub use auth::GoogleOAuthService;
 pub use crate::storage::Database;
+pub use auth::GoogleOAuthService;
 pub use chat::ChatService;
 pub use mcp::McpService;
 pub use message::MessageService;
