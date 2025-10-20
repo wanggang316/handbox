@@ -31,7 +31,7 @@
   }
 
   function formatTokensAsK(value?: number | null): string {
-    if (typeof value !== "number" || !Number.isFinite(value) || value === 0) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
       return "";
     }
 
@@ -60,7 +60,7 @@
   }
 
   function formatList(list?: string[] | null): string {
-    if (!list || list.length === 0) return "N/A";
+    if (!list || list.length === 0) return "";
     return list.map((item) => formatLabel(item)).join(", ");
   }
 
@@ -82,7 +82,7 @@
   );
 
   function formatPricePerMillion(value: number | null, currency = "USD"): string {
-    if (value === null || !Number.isFinite(value) || value === 0) {
+    if (value === null || !Number.isFinite(value)) {
       return "";
     }
 
@@ -110,11 +110,13 @@
 
       const rows: TableRow[] = [];
 
-      rows.push({
-        label: "模型 ID",
-        value: current.id || "N/A",
-        mono: true,
-      });
+      if (current.id) {
+        rows.push({
+          label: "模型 ID",
+          value: current.id,
+          mono: true,
+        });
+      }
 
       const contextLength = formatTokensAsK(current.context_length);
       if (contextLength) {
@@ -150,39 +152,32 @@
         });
       }
 
-      const supportedFeatures =
-        current.supported_features && current.supported_features.length > 0
-          ? formatList(current.supported_features)
-          : "N/A";
+      const supportedFeatures = formatList(current.supported_features);
 
-      if (supportedFeatures !== "N/A") {
+      if (supportedFeatures) {
         rows.push({ label: "支持特性", value: supportedFeatures });
       }
 
-      const inputModalities =
-        current.input_modalities && current.input_modalities.length > 0
-          ? formatList(current.input_modalities)
-          : "N/A";
+      const inputModalities = formatList(current.input_modalities);
 
-      if (inputModalities !== "N/A") {
+      if (inputModalities) {
         rows.push({ label: "输入模态", value: inputModalities });
       }
 
-      const outputModalities =
-        current.output_modalities && current.output_modalities.length > 0
-          ? formatList(current.output_modalities)
-          : "N/A";
+      const outputModalities = formatList(current.output_modalities);
 
-      if (outputModalities !== "N/A") {
+      if (outputModalities) {
         rows.push({ label: "输出模态", value: outputModalities });
       }
 
       const description = current.description?.trim();
-      rows.push({
-        label: "描述",
-        value: description && description.length > 0 ? description : "N/A",
-        preserveWhitespace: true,
-      });
+      if (description) {
+        rows.push({
+          label: "描述",
+          value: description,
+          preserveWhitespace: true,
+        });
+      }
 
       return rows as TableRow[];
     })(),
