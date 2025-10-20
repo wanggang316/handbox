@@ -25,11 +25,6 @@ pub fn create_model_client(
         LlmModelApiType::OpenAI => {
             Box::new(crate::model::openai_adapter::OpenAIModelClient::new()) as Box<_>
         }
-        LlmModelApiType::OpenAIWithLocal => Box::new(
-            crate::model::openai_with_local_adapter::OpenAIWithLocalProvider::new(Arc::clone(
-                &config,
-            )),
-        ) as Box<_>,
         LlmModelApiType::Google => {
             Box::new(crate::model::google_adapter::GoogleModelClient::new()) as Box<_>
         }

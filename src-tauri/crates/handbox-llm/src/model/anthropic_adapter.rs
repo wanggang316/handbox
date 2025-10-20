@@ -3,7 +3,7 @@
 use super::model_client::ModelClient;
 use crate::config::{LlmConfigProvider, LlmModelExtraInfo};
 use crate::error::LlmClientError;
-use crate::types::{LlmModel, LlmProvider};
+use crate::types::{merge_pricing, LlmModel, LlmProvider};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -18,13 +18,19 @@ impl AnthropicModelClient {
     }
 
     fn convert_model_extra_info(&self, model_id: &str, extra_info: &LlmModelExtraInfo) -> LlmModel {
+        let mut pricing = extra_info.pricing.clone();
+        merge_pricing(
+            &mut pricing,
+            extra_info.input_cost_per_1k.map(|v| v * 1_000.0),
+            extra_info.output_cost_per_1k.map(|v| v * 1_000.0),
+            Some("USD"),
+        );
+
         LlmModel {
             id: model_id.to_string(),
             name: extra_info.name.clone(),
             context_length: extra_info.context_length,
             output_max_tokens: extra_info.output_max_tokens,
-            input_cost: extra_info.input_cost_per_1k,
-            output_cost: extra_info.output_cost_per_1k,
             supported_features: if extra_info.features.is_empty() {
                 None
             } else {
@@ -34,7 +40,7 @@ impl AnthropicModelClient {
             input_modalities: extra_info.input_modalities.clone(),
             output_modalities: extra_info.output_modalities.clone(),
             metadata: extra_info.metadata.clone(),
-            pricing: extra_info.pricing.clone(),
+            pricing,
             support_parameters: Vec::new(),
             default_parameters: None,
             max_parameters: None,

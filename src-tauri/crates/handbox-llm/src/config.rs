@@ -1,4 +1,4 @@
-use crate::types::{LlmApiType, LlmModelApiType, LlmModelModality};
+use crate::types::{LlmApiType, LlmModelApiType, LlmModelModality, ModelPricing};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -22,7 +22,7 @@ pub struct LlmModelExtraInfo {
     pub input_modalities: Option<Vec<LlmModelModality>>,
     pub output_modalities: Option<Vec<LlmModelModality>>,
     pub metadata: Option<Value>,
-    pub pricing: Option<Value>,
+    pub pricing: Option<ModelPricing>,
 }
 
 pub trait LlmConfigProvider: Send + Sync {

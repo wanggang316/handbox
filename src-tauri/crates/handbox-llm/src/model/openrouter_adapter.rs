@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::model_client::ModelClient;
 use crate::error::LlmClientError;
 use crate::types::{
-    LlmModel, LlmModelModality, LlmModelParameter, LlmModelPricing, LlmProvider,
+    merge_pricing, LlmModel, LlmModelModality, LlmModelParameter, LlmModelPricing, LlmProvider,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -159,8 +159,13 @@ impl OpenRouterModel {
 
         let supported_features = parse_features_from_params(&support_parameters);
 
-        // 将 pricing 转换为 JSON Value
-        let pricing = serde_json::to_value(&pricing_info).ok();
+        let mut pricing = None;
+        merge_pricing(
+            &mut pricing,
+            Some(pricing_info.prompt * 1_000_000.0),
+            Some(pricing_info.completion * 1_000_000.0),
+            Some("USD"),
+        );
 
         // 构建参数列表
         let default_parameters = clone_non_empty_map(&default_parameters);
@@ -171,13 +176,11 @@ impl OpenRouterModel {
             name,
             context_length: Some(context_length),
             output_max_tokens,
-            input_cost: Some(pricing_info.prompt),
-            output_cost: Some(pricing_info.completion),
             supported_features,
             description,
             input_modalities,
             output_modalities,
-            metadata: None, // 不再需要存储原始数据
+            metadata: None,
             pricing,
             support_parameters,
             default_parameters,

@@ -15,5 +15,5 @@ pub use types::{
     LlmApiType, LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmDeltaToolCall,
     LlmMessage, LlmMessageRole, LlmModel, LlmModelApiType, LlmModelModality, LlmProvider,
     LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse, LlmToolCall, LlmToolCallDelta,
-    LlmToolChoice, LlmToolFunction, LlmUsage, ModelSupplement, ModelSupplementDocument,
+    LlmToolChoice, LlmToolFunction, LlmUsage, ModelPricing, ModelSupplement, ModelSupplementDocument,
 };

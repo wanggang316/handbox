@@ -33,8 +33,6 @@ export interface Model {
   name: string;
   context_length?: number;
   output_max_tokens?: number;
-  input_cost?: number;
-  output_cost?: number;
   supported_features?: ModelFeature[] | null;
   description?: string;
   input_modalities?: ModelModality[];
@@ -55,19 +53,21 @@ export interface ModelWithProvider extends Model {
 }
 
 // 模型特性
-export type ModelFeature = 'reasoning' | 'tool';
+export type ModelFeature = string;
 
-export type ModelModality = 'text' | 'image' | 'file' | 'audio' | 'video';
+export type ModelModality =
+  | 'text'
+  | 'image'
+  | 'images'
+  | 'pdf'
+  | 'file'
+  | 'audio'
+  | 'video';
 
 export interface ModelPricing {
-  prompt?: string | number | null;
-  completion?: string | number | null;
-  request?: string | number | null;
-  image?: string | number | null;
-  web_search?: string | number | null;
-  internal_reasoning?: string | number | null;
-  input_cache_read?: string | number | null;
-  input_cache_write?: string | number | null;
+  currency?: string;
+  input_text?: number | null;
+  output_text?: number | null;
   [key: string]: string | number | null | undefined;
 }
 

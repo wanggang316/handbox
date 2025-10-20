@@ -4,7 +4,8 @@ use super::model_client::ModelClient;
 use super::oss_client::OssClient;
 use crate::error::LlmClientError;
 use crate::types::{
-    LlmModel, LlmModelModality, LlmModelParameter, LlmProvider, ModelSupplementDocument,
+    extract_pricing_value, merge_pricing, LlmModel, LlmModelModality, LlmModelParameter,
+    LlmProvider, ModelSupplementDocument,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -139,16 +140,14 @@ impl ModelClient for GoogleModelClient {
                 let mut model = LlmModel {
                     id: model_id,
                     name: display_name,
-                    context_length,
-                    output_max_tokens,
-                    input_cost: None,
-                    output_cost: None,
-                    supported_features,
-                    description,
-                    input_modalities,
-                    output_modalities,
-                    metadata: Some(api_model),
-                    pricing: None,
+                context_length,
+                output_max_tokens,
+                supported_features,
+                description,
+                input_modalities,
+                output_modalities,
+                metadata: Some(api_model),
+                pricing: None,
                     support_parameters,
                     default_parameters,
                     max_parameters,
@@ -225,13 +224,18 @@ async fn load_google_model_supplements() -> Option<HashMap<String, LlmModel>> {
 }
 
 fn merge_models(base: &mut LlmModel, supplement: &LlmModel) {
-    if let Some(input_cost) = supplement.input_cost {
-        base.input_cost = Some(input_cost);
-    }
+    let currency = supplement
+        .pricing
+        .as_ref()
+        .and_then(|value| value.currency.as_deref())
+        .or(Some("USD"));
 
-    if let Some(output_cost) = supplement.output_cost {
-        base.output_cost = Some(output_cost);
-    }
+    merge_pricing(
+        &mut base.pricing,
+        extract_pricing_value(&supplement.pricing, "input_text"),
+        extract_pricing_value(&supplement.pricing, "output_text"),
+        currency,
+    );
 
     if let Some(features) = &supplement.supported_features {
         if !features.is_empty() {
@@ -249,6 +253,10 @@ fn merge_models(base: &mut LlmModel, supplement: &LlmModel) {
         if !output_modalities.is_empty() {
             base.output_modalities = Some(output_modalities.clone());
         }
+    }
+
+    if supplement.metadata.is_some() {
+        base.metadata = supplement.metadata.clone();
     }
 }
 

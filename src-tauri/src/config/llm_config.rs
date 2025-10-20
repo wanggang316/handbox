@@ -4,7 +4,7 @@
 use handbox_llm::config::{
     LlmConfigProvider, LlmModelExtraInfo as LlmClientModelExtraInfo, LlmProviderConfig,
 };
-use handbox_llm::types::{LlmApiType, LlmModelApiType, LlmModelModality};
+use handbox_llm::types::{LlmApiType, LlmModelApiType, LlmModelModality, ModelPricing};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ pub struct ModelExtraInfo {
     pub input_modalities: Option<Vec<String>>,
     pub output_modalities: Option<Vec<String>>,
     pub metadata: Option<Value>,
-    pub pricing: Option<Value>,
+    pub pricing: Option<ModelPricing>,
     pub support_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
@@ -40,7 +40,7 @@ pub struct ProviderConfig {
     pub default_base_url: String,
     pub icon: String,
     pub chat_api_type: String,  // "openai" | "google" | "anthropic"
-    pub model_api_type: String, // "openai" | "openai+local" | "google" | "anthropic" | "openrouter"
+    pub model_api_type: String, // "openai" | "google" | "anthropic" | "openrouter"
     pub model_local: Option<HashMap<String, ModelExtraInfo>>,
     pub support_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
@@ -146,9 +146,13 @@ impl LlmConfig {
         None
     }
 
-    /// 转换特性字符串为 ModelFeature 枚举
+    /// 清洗特性字符串，移除空值
     pub fn convert_features(&self, features: &[String]) -> Vec<String> {
-        features.iter().map(|f| f.to_string()).collect()
+        features
+            .iter()
+            .filter(|f| !f.trim().is_empty())
+            .map(|f| f.to_string())
+            .collect()
     }
 
     /// 获取模型支持的参数（级联：模型 -> 供应商 -> 全局）

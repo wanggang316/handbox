@@ -65,45 +65,28 @@
 
   function resolvePricingValue(
     pricing: ModelPricing | undefined,
-    key: string,
-  ): string | null {
+    key: "input_text" | "output_text",
+  ): number | null {
     if (!pricing) return null;
-
-    const entry = Object.entries(pricing).find(
-      ([entryKey]) => entryKey.toLowerCase() === key.toLowerCase(),
-    );
-
-    if (!entry) return null;
-
-    const [, value] = entry;
-    if (value === undefined || value === null) {
-      return null;
-    }
-
-    return typeof value === "string" ? value : value.toString();
+    const value = pricing[key];
+    return value ?? null;
   }
 
-  const promptPrice = $derived(resolvePricingValue(model?.pricing, "prompt"));
+  const promptPrice = $derived(resolvePricingValue(model?.pricing, "input_text"));
   const completionPrice = $derived(
-    resolvePricingValue(model?.pricing, "completion"),
+    resolvePricingValue(model?.pricing, "output_text"),
   );
 
-  function formatPricePerMillion(raw: string | null): string {
-    if (!raw) {
+  function formatPricePerMillion(value: number | null, currency = "USD"): string {
+    if (value === null || !Number.isFinite(value) || value === 0) {
       return "";
     }
 
-    const numeric = Number(raw);
-    if (!Number.isFinite(numeric) || numeric === 0) {
-      return "";
-    }
-
-    const perMillion = numeric * 1_000_000;
     const formatter = new Intl.NumberFormat(undefined, {
-      maximumFractionDigits: perMillion >= 100 ? 0 : perMillion >= 1 ? 2 : 4,
+      maximumFractionDigits: value >= 100 ? 0 : value >= 1 ? 2 : 4,
     });
 
-    return `$${formatter.format(perMillion)}/M Token`;
+    return `${currency.toUpperCase()} ${formatter.format(value)}/M Token`;
   }
 
   type TableRow = {
@@ -145,7 +128,9 @@
         });
       }
 
-      const inputPrice = formatPricePerMillion(promptPrice);
+      const currency = current.pricing?.currency ?? "USD";
+
+      const inputPrice = formatPricePerMillion(promptPrice, currency);
       if (inputPrice) {
         rows.push({
           label: "输入价格",
@@ -153,7 +138,7 @@
         });
       }
 
-      const outputPrice = formatPricePerMillion(completionPrice);
+      const outputPrice = formatPricePerMillion(completionPrice, currency);
       if (outputPrice) {
         rows.push({
           label: "输出价格",

@@ -36,8 +36,6 @@ impl ModelRepository {
                 name,
                 context_length,
                 output_max_tokens,
-                input_cost,
-                output_cost,
                 supported_features,
                 description,
                 input_modalities,
@@ -51,7 +49,7 @@ impl ModelRepository {
                 favorite,
                 created_at,
                 updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
         sqlx::query(query)
@@ -60,8 +58,6 @@ impl ModelRepository {
             .bind(&model.name)
             .bind(model.context_length)
             .bind(model.output_max_tokens)
-            .bind(model.input_cost)
-            .bind(model.output_cost)
             .bind(features_json)
             .bind(model.description.as_deref())
             .bind(input_modalities_json.as_deref())
@@ -164,8 +160,6 @@ impl ModelRepository {
                     name,
                     context_length,
                     output_max_tokens,
-                    input_cost,
-                    output_cost,
                     supported_features,
                     description,
                     input_modalities,
@@ -180,7 +174,7 @@ impl ModelRepository {
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
                 )
             "#;
 
@@ -190,8 +184,6 @@ impl ModelRepository {
                 .bind(&model.name)
                 .bind(model.context_length)
                 .bind(model.output_max_tokens)
-                .bind(model.input_cost)
-                .bind(model.output_cost)
                 .bind(&features_json)
                 .bind(model.description.as_deref())
                 .bind(input_modalities_json.as_deref())
@@ -245,8 +237,6 @@ impl ModelRepository {
                     name,
                     context_length,
                     output_max_tokens,
-                    input_cost,
-                    output_cost,
                     supported_features,
                     description,
                     input_modalities,
@@ -261,7 +251,7 @@ impl ModelRepository {
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
                 )
             "#;
 
@@ -271,8 +261,6 @@ impl ModelRepository {
                 .bind(&model.name)
                 .bind(model.context_length)
                 .bind(model.output_max_tokens)
-                .bind(model.input_cost)
-                .bind(model.output_cost)
                 .bind(features_json)
                 .bind(model.description.as_deref())
                 .bind(input_modalities_json.as_deref())
@@ -309,8 +297,6 @@ impl ModelRepository {
                 name,
                 context_length,
                 output_max_tokens,
-                input_cost,
-                output_cost,
                 supported_features,
                 description,
                 input_modalities,
@@ -467,8 +453,6 @@ impl ModelRepository {
             name: row.try_get("name")?,
             context_length: row.try_get("context_length")?,
             output_max_tokens: row.try_get("output_max_tokens")?,
-            input_cost: row.try_get("input_cost")?,
-            output_cost: row.try_get("output_cost")?,
             supported_features,
             description,
             input_modalities,

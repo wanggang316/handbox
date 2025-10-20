@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::common::Timestamp;
-use handbox_llm::types::LlmModelParameter;
+use handbox_llm::types::{LlmModelParameter, ModelPricing};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -26,14 +26,12 @@ pub struct Model {
     pub name: String,
     pub context_length: Option<i32>,
     pub output_max_tokens: Option<i32>,
-    pub input_cost: Option<f32>,
-    pub output_cost: Option<f32>,
     pub supported_features: Option<Vec<String>>,
     pub description: Option<String>,
     pub input_modalities: Option<Vec<ModelModality>>,
     pub output_modalities: Option<Vec<ModelModality>>,
     pub metadata: Option<Value>,
-    pub pricing: Option<Value>,
+    pub pricing: Option<ModelPricing>,
     pub support_parameters: Option<Vec<LlmModelParameter>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
@@ -87,24 +85,17 @@ impl Model {
     }
 
     pub fn pricing_to_json(&self) -> Option<String> {
-        self.pricing.as_ref().and_then(|value| {
-            if value.is_null() {
-                None
-            } else {
-                Some(value.to_string())
-            }
-        })
+        self.pricing
+            .as_ref()
+            .and_then(|value| serde_json::to_string(value).ok())
     }
 
-    pub fn pricing_from_json(json: Option<&str>) -> Result<Option<Value>, serde_json::Error> {
+    pub fn pricing_from_json(
+        json: Option<&str>,
+    ) -> Result<Option<ModelPricing>, serde_json::Error> {
         match json {
-            Some(data) if !data.is_empty() => {
-                let value = serde_json::from_str::<Value>(data)?;
-                if value.is_null() {
-                    Ok(None)
-                } else {
-                    Ok(Some(value))
-                }
+            Some(data) if !data.trim().is_empty() => {
+                serde_json::from_str::<ModelPricing>(data).map(Some)
             }
             _ => Ok(None),
         }
