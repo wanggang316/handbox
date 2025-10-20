@@ -19,6 +19,7 @@ pub struct LlmModel {
     pub output_modalities: Option<Vec<LlmModelModality>>,
     pub metadata: Option<Value>,
     pub pricing: Option<ModelPricing>,
+    pub url: Option<String>,
     pub support_parameters: Vec<LlmModelParameter>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
@@ -398,6 +399,7 @@ impl ModelSupplement {
                     Some(Value::Object(metadata_map))
                 },
                 pricing: None,
+                url: url.clone(),
                 support_parameters: support_parameters.clone(),
                 default_parameters: default_parameters.clone(),
                 max_parameters: max_parameters.clone(),

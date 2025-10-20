@@ -1,0 +1,2 @@
+ALTER TABLE models
+ADD COLUMN url TEXT;

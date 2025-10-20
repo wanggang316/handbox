@@ -32,6 +32,7 @@ pub struct Model {
     pub output_modalities: Option<Vec<ModelModality>>,
     pub metadata: Option<Value>,
     pub pricing: Option<ModelPricing>,
+    pub url: Option<String>,
     pub support_parameters: Option<Vec<LlmModelParameter>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,

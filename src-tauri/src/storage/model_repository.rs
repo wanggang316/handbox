@@ -34,39 +34,43 @@ impl ModelRepository {
                 id,
                 provider_id,
                 name,
+                description,
                 context_length,
                 output_max_tokens,
-                supported_features,
-                description,
+                pricing,
                 input_modalities,
                 output_modalities,
-                metadata,
-                pricing,
                 support_parameters,
                 default_parameters,
                 max_parameters,
+                supported_features,
+                metadata,
+                url,
                 enabled,
                 favorite,
                 created_at,
                 updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            )
         "#;
 
         sqlx::query(query)
             .bind(&model.id)
             .bind(&model.provider_id)
             .bind(&model.name)
+            .bind(model.description.as_deref())
             .bind(model.context_length)
             .bind(model.output_max_tokens)
-            .bind(features_json)
-            .bind(model.description.as_deref())
+            .bind(pricing_json.as_deref())
             .bind(input_modalities_json.as_deref())
             .bind(output_modalities_json.as_deref())
-            .bind(metadata_json.as_deref())
-            .bind(pricing_json.as_deref())
             .bind(support_parameters_json.as_deref())
             .bind(default_parameters_json.as_deref())
             .bind(max_parameters_json.as_deref())
+            .bind(&features_json)
+            .bind(metadata_json.as_deref())
+            .bind(model.url.as_deref())
             .bind(model.enabled)
             .bind(model.favorite)
             .bind(model.created_at)
@@ -158,23 +162,24 @@ impl ModelRepository {
                     id,
                     provider_id,
                     name,
+                    description,
                     context_length,
                     output_max_tokens,
-                    supported_features,
-                    description,
+                    pricing,
                     input_modalities,
                     output_modalities,
-                    metadata,
-                    pricing,
                     support_parameters,
                     default_parameters,
                     max_parameters,
+                    supported_features,
+                    metadata,
+                    url,
                     enabled,
                     favorite,
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
                 )
             "#;
 
@@ -182,17 +187,18 @@ impl ModelRepository {
                 .bind(&model.id)
                 .bind(&model.provider_id)
                 .bind(&model.name)
+                .bind(model.description.as_deref())
                 .bind(model.context_length)
                 .bind(model.output_max_tokens)
-                .bind(&features_json)
-                .bind(model.description.as_deref())
+                .bind(pricing_json.as_deref())
                 .bind(input_modalities_json.as_deref())
                 .bind(output_modalities_json.as_deref())
-                .bind(metadata_json.as_deref())
-                .bind(pricing_json.as_deref())
                 .bind(support_parameters_json.as_deref())
                 .bind(default_parameters_json.as_deref())
                 .bind(max_parameters_json.as_deref())
+                .bind(&features_json)
+                .bind(metadata_json.as_deref())
+                .bind(model.url.as_deref())
                 .bind(enabled)
                 .bind(favorite)
                 .bind(model.created_at)
@@ -246,12 +252,13 @@ impl ModelRepository {
                     support_parameters,
                     default_parameters,
                     max_parameters,
+                    url,
                     enabled,
                     favorite,
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
                 )
             "#;
 
@@ -270,6 +277,7 @@ impl ModelRepository {
                 .bind(support_parameters_json.as_deref())
                 .bind(default_parameters_json.as_deref())
                 .bind(max_parameters_json.as_deref())
+                .bind(model.url.as_deref())
                 .bind(model.enabled)
                 .bind(model.favorite)
                 .bind(model.created_at)
@@ -295,17 +303,18 @@ impl ModelRepository {
                 id,
                 provider_id,
                 name,
+                description,
                 context_length,
                 output_max_tokens,
-                supported_features,
-                description,
+                pricing,
                 input_modalities,
                 output_modalities,
-                metadata,
-                pricing,
                 support_parameters,
                 default_parameters,
                 max_parameters,
+                supported_features,
+                metadata,
+                url,
                 enabled,
                 favorite,
                 created_at,
@@ -409,6 +418,7 @@ impl ModelRepository {
         let support_parameters_raw: Option<String> = row.try_get("support_parameters").ok();
         let default_parameters_raw: Option<String> = row.try_get("default_parameters").ok();
         let max_parameters_raw: Option<String> = row.try_get("max_parameters").ok();
+        let url: Option<String> = row.try_get("url")?;
 
         let input_modalities =
             Model::modalities_from_json(input_modalities.as_deref()).map_err(|e| {
@@ -459,6 +469,7 @@ impl ModelRepository {
             output_modalities,
             metadata,
             pricing,
+            url,
             support_parameters,
             default_parameters,
             max_parameters,

@@ -182,6 +182,7 @@ impl OpenRouterModel {
             output_modalities,
             metadata: None,
             pricing,
+            url: None,
             support_parameters,
             default_parameters,
             max_parameters,

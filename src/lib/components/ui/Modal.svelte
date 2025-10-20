@@ -63,7 +63,10 @@
               <TrafficLightsRedButton onClick={handleClose} />
             {/if}
             {#if title}
-              <h3 class="text-base font-medium text-base-content/80 ml-4">{title}</h3>
+              <div class="ml-4 flex items-center gap-2">
+                <h3 class="text-base font-medium text-base-content/80">{title}</h3>
+                <slot name="title-actions" />
+              </div>
             {/if}
           </div>
         {/if}

@@ -41,6 +41,7 @@ impl AnthropicModelClient {
             output_modalities: extra_info.output_modalities.clone(),
             metadata: extra_info.metadata.clone(),
             pricing,
+            url: None,
             support_parameters: Vec::new(),
             default_parameters: None,
             max_parameters: None,

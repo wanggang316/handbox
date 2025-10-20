@@ -1,6 +1,7 @@
 <script lang="ts">
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import { PanelLeft } from "@lucide/svelte";
+  import { createEventDispatcher } from "svelte";
 
   interface Props {
     sidebarOpen?: boolean;
@@ -15,8 +16,10 @@
     onToggle,
     children,
   }: Props = $props();
+  const dispatch = createEventDispatcher<{ toggle: void }>();
 
   function handleToggle() {
+    dispatch("toggle");
     onToggle?.();
   }
 </script>

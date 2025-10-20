@@ -140,14 +140,15 @@ impl ModelClient for GoogleModelClient {
                 let mut model = LlmModel {
                     id: model_id,
                     name: display_name,
-                context_length,
-                output_max_tokens,
-                supported_features,
-                description,
-                input_modalities,
-                output_modalities,
-                metadata: Some(api_model),
-                pricing: None,
+                    context_length,
+                    output_max_tokens,
+                    supported_features,
+                    description,
+                    input_modalities,
+                    output_modalities,
+                    metadata: Some(api_model),
+                    pricing: None,
+                    url: None,
                     support_parameters,
                     default_parameters,
                     max_parameters,
@@ -252,6 +253,12 @@ fn merge_models(base: &mut LlmModel, supplement: &LlmModel) {
     if let Some(output_modalities) = &supplement.output_modalities {
         if !output_modalities.is_empty() {
             base.output_modalities = Some(output_modalities.clone());
+        }
+    }
+
+    if let Some(url) = &supplement.url {
+        if !url.trim().is_empty() {
+            base.url = Some(url.clone());
         }
     }
 

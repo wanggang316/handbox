@@ -91,6 +91,7 @@ impl ModelClient for OpenAIModelClient {
                 output_modalities: Some(vec![LlmModelModality::Text]),
                 metadata: to_value(&api_model).ok(),
                 pricing: None,
+                url: None,
                 support_parameters: Vec::new(),
                 default_parameters: None,
                 max_parameters: None,
@@ -196,6 +197,12 @@ fn merge_openai_model(base: &mut LlmModel, supplement: &LlmModel) {
             if !desc.trim().is_empty() {
                 base.description = Some(desc.clone());
             }
+        }
+    }
+
+    if let Some(url) = &supplement.url {
+        if !url.trim().is_empty() {
+            base.url = Some(url.clone());
         }
     }
 

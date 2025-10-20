@@ -1,7 +1,8 @@
 <script lang="ts">
   import Modal from "$lib/components/ui/Modal.svelte";
   import type { Model, ModelPricing } from "$lib/types/provider";
-  import { Copy, Check } from "lucide-svelte";
+  import { Copy, Check, ExternalLink } from "lucide-svelte";
+  import { openInBrowser } from "$lib/utils/browser";
 
   const props = $props<{
     open?: boolean;
@@ -75,6 +76,9 @@
   const promptPrice = $derived(resolvePricingValue(model?.pricing, "input_text"));
   const completionPrice = $derived(
     resolvePricingValue(model?.pricing, "output_text"),
+  );
+  const modelUrl = $derived(
+    model?.url && model.url.trim().length > 0 ? model.url : null,
   );
 
   function formatPricePerMillion(value: number | null, currency = "USD"): string {
@@ -183,9 +187,31 @@
       return rows as TableRow[];
     })(),
   );
+
+  async function handleOpenModelUrl() {
+    if (!modelUrl) return;
+
+    try {
+      await openInBrowser(modelUrl);
+    } catch (error) {
+      console.error("Failed to open model url:", error);
+    }
+  }
 </script>
 
 <Modal {open} {onClose} title={model?.name ?? "模型信息"}>
+  <svelte:fragment slot="title-actions">
+    {#if modelUrl}
+      <button
+        type="button"
+        class="inline-flex items-center justify-center h-8 w-8 rounded-full text-base-content/60 hover:text-primary transition-colors"
+        title="查看模型详情"
+        onclick={handleOpenModelUrl}
+      >
+        <ExternalLink size={16} stroke-width={1.75} />
+      </button>
+    {/if}
+  </svelte:fragment>
   <div
     class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 pb-6 space-y-6 text-sm text-base-content/90 scrollbar-padding"
   >

@@ -39,6 +39,7 @@ export interface Model {
   output_modalities?: ModelModality[];
   metadata?: unknown;
   pricing?: ModelPricing;
+  url?: string | null;
   parameters?: ModelParameter[];
   enabled: boolean;
   favorite: boolean;
