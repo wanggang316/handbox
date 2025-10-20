@@ -126,9 +126,9 @@ export const chatActions = {
   async updateModelSettings(settings: {
     temperature?: number;
     topP?: number;
+    topK?: number;
     maxTokens?: number;
     stream?: boolean;
-    turnCount?: number;
   }): Promise<void> {
     return chatActions.updateChatSettings(settings);
   },

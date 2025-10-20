@@ -41,6 +41,10 @@ export interface Model {
   pricing?: ModelPricing;
   url?: string | null;
   parameters?: ModelParameter[];
+  support_parameters?: string[] | null;
+  supported_parameters?: string[] | null;
+  default_parameters?: Record<string, unknown> | null;
+  max_parameters?: Record<string, unknown> | null;
   enabled: boolean;
   favorite: boolean;
   created_at: number;

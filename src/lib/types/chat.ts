@@ -18,6 +18,7 @@ export interface McpServerConfig {
 export interface MessageConfig {
   temperature?: number;
   topP?: number;
+  topK?: number;
   maxTokens?: number;
   stream?: boolean;
   modelId?: string;
@@ -70,6 +71,7 @@ export interface Chat extends BaseEntity {
   // Chat-level configuration (default values)
   temperature?: number;
   topP?: number;
+  topK?: number;
   maxTokens?: number;
   stream?: boolean;
   modelId?: string;
@@ -86,6 +88,7 @@ export interface Chat extends BaseEntity {
 export interface ModelParameters {
   temperature?: number;
   topP?: number;
+  topK?: number;
   maxTokens?: number;
   turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
   stream?: boolean;

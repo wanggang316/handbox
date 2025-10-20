@@ -19,17 +19,17 @@
 
 <Drawer {open} title="聊天设置" {onClose}>
   <div class="flex flex-col gap-8 px-4 py-4 w-sm">
+    <!-- 模型选择与参数配置组 -->
+    <section class="flex flex-col gap-4">
+      <div class="">
+        <ModelSettings />
+      </div>
+    </section>
+
     <!-- 提示词配置组 -->
     <section class="flex flex-col gap-4">
       <div class="">
         <PromptSettings />
-      </div>
-    </section>
-
-    <!-- 模型参数配置组 -->
-    <section class="flex flex-col gap-4">
-      <div class="">
-        <ModelSettings />
       </div>
     </section>
 
