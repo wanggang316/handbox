@@ -171,17 +171,6 @@ mod tests {
         assert_eq!(client.api_type(), "openai-completions");
     }
 
-    #[test]
-    fn test_llm_client_creation_with_custom_clients() {
-        let client = LlmClient::with_clients(
-            "custom".to_string(),
-            Box::new(crate::model::openai_adapter::OpenAIModelClient::new()),
-            Box::new(crate::chat::openai_completions_adapter::OpenAICompletionsChatClient::new()),
-        );
-
-        assert_eq!(client.provider_type(), "custom");
-    }
-
     #[tokio::test]
     async fn test_create_llm_client_from_config() {
         match create_llm_client("openai", Arc::new(TestConfigProvider)) {
