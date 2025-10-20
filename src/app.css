@@ -136,6 +136,19 @@ body {
   --overlay: var(--color-overlay-dark);
 }
 
+[data-theme="dark"] .shadow-2xl {
+  --tw-shadow: 0 32px 64px -28px color-mix(in oklch, var(--overlay) 10%, var(
+          --base-100
+        )
+        5%);
+  --tw-shadow-colored: 0 32px 64px -28px color-mix(in oklch, var(--overlay) 10%, var(
+          --base-100
+        )
+        5%);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
 /* Markdown 样式 */
 .markdown-content {
   line-height: 1.8;

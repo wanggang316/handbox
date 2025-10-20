@@ -55,7 +55,7 @@
       role="button"
       tabindex="0"
       class="absolute inset-0 animate-backdrop"
-      style="background-color: var(--overlay);"
+      style=""
       class:animate-backdrop-close={closing}
       onclick={handleClose}
       onkeydown={(e) => {
@@ -66,7 +66,7 @@
     <!-- 抽屉容器 -->
     <div
       role="presentation"
-      class="ml-auto relative bg-base-100 shadow-2xl max-w-lg flex flex-col animate-drawer"
+      class="ml-auto relative bg-base-300 max-w-lg flex flex-col animate-drawer"
       class:animate-drawer-close={closing}
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}
