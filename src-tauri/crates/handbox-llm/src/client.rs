@@ -132,6 +132,7 @@ mod tests {
                 chat_api_type: LlmApiType::OpenAICompletions,
                 model_api_type: LlmModelApiType::OpenAI,
                 model_local: None,
+                supplement_file: None,
             })
         }
 

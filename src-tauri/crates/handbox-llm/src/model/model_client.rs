@@ -23,10 +23,14 @@ pub fn create_model_client(
 ) -> Result<Box<dyn ModelClient>, LlmClientError> {
     Ok(match api_type {
         LlmModelApiType::OpenAI => {
-            Box::new(crate::model::openai_adapter::OpenAIModelClient::new()) as Box<_>
+            Box::new(crate::model::openai_adapter::OpenAIModelClient::new(
+                Arc::clone(&config),
+            )) as Box<_>
         }
         LlmModelApiType::Google => {
-            Box::new(crate::model::google_adapter::GoogleModelClient::new()) as Box<_>
+            Box::new(crate::model::google_adapter::GoogleModelClient::new(
+                Arc::clone(&config),
+            )) as Box<_>
         }
         LlmModelApiType::Anthropic => Box::new(
             crate::model::anthropic_adapter::AnthropicModelClient::new(Arc::clone(&config)),

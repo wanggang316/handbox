@@ -2,6 +2,7 @@
 
 use super::model_client::ModelClient;
 use super::oss_client::OssClient;
+use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
 use crate::types::{
     extract_pricing_value, merge_pricing, LlmModel, LlmModelModality, LlmModelParameter,
@@ -11,8 +12,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-
-const GOOGLE_SUPPLEMENT_OBJECT_KEY: &str = "google_models.json";
+use std::sync::Arc;
 
 /// Google 风格的模型列表响应
 #[derive(Debug, Clone, Deserialize)]
@@ -25,13 +25,85 @@ pub struct GoogleModelsResponse {
 /// Google 模型客户端
 pub struct GoogleModelClient {
     client: reqwest::Client,
+    config: Arc<dyn LlmConfigProvider>,
 }
 
 impl GoogleModelClient {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             client: reqwest::Client::new(),
+            config,
         }
+    }
+
+    async fn load_model_supplements(
+        &self,
+        provider_type: &str,
+    ) -> Option<HashMap<String, LlmModel>> {
+        let supplement_file = self
+            .config
+            .get_provider_config(provider_type)
+            .and_then(|cfg| cfg.supplement_file)
+            .and_then(|file| {
+                let trimmed = file.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            });
+
+        let supplement_file = match supplement_file {
+            Some(file) => file,
+            None => return None,
+        };
+
+        let client = match OssClient::from_env() {
+            Ok(client) => client,
+            Err(err) => {
+                tracing::debug!(
+                    "OSS config not available for {} supplement '{}': {}",
+                    provider_type, supplement_file, err
+                );
+                return None;
+            }
+        };
+
+        let content = match client.get_object_text(&supplement_file).await {
+            Ok(text) => text,
+            Err(err) => {
+                tracing::debug!(
+                    "Unable to download supplement '{}' for {}: {}",
+                    supplement_file, provider_type, err
+                );
+                return None;
+            }
+        };
+
+        let document: ModelSupplementDocument = match serde_json::from_str(&content) {
+            Ok(doc) => doc,
+            Err(err) => {
+                tracing::debug!(
+                    "Unable to parse supplement '{}' for {}: {}",
+                    supplement_file, provider_type, err
+                );
+                return None;
+            }
+        };
+
+        if document.models.is_empty() {
+            return None;
+        }
+
+        let mut models = HashMap::new();
+
+        for entry in document.models {
+            for (model_id, model) in entry.into_snapshot_models() {
+                models.insert(model_id, model);
+            }
+        }
+
+        Some(models)
     }
 }
 
@@ -40,12 +112,12 @@ impl ModelClient for GoogleModelClient {
     async fn list_models(
         &self,
         provider: &LlmProvider,
-        _provider_type: &str,
+        provider_type: &str,
     ) -> Result<Vec<LlmModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
 
-        let supplement_map = load_google_model_supplements().await;
+        let supplement_map = self.load_model_supplements(provider_type).await;
 
         let mut result_models = Vec::new();
         let mut page_token: Option<String> = None;
@@ -173,55 +245,6 @@ impl ModelClient for GoogleModelClient {
 
         Ok(result_models)
     }
-}
-
-async fn load_google_model_supplements() -> Option<HashMap<String, LlmModel>> {
-    let client = match OssClient::from_env() {
-        Ok(client) => client,
-        Err(err) => {
-            tracing::warn!(
-                "Failed to load OSS configuration for Google supplements: {}",
-                err
-            );
-            return None;
-        }
-    };
-
-    let content = match client.get_object_text(GOOGLE_SUPPLEMENT_OBJECT_KEY).await {
-        Ok(text) => text,
-        Err(err) => {
-            tracing::warn!(
-                "Failed to download Google supplement models from OSS: {}",
-                err
-            );
-            return None;
-        }
-    };
-
-    let document: ModelSupplementDocument = match serde_json::from_str(&content) {
-        Ok(doc) => doc,
-        Err(err) => {
-            tracing::warn!(
-                "Failed to parse Google supplement models from OSS JSON: {}",
-                err
-            );
-            return None;
-        }
-    };
-
-    if document.models.is_empty() {
-        return None;
-    }
-
-    let mut models = HashMap::new();
-
-    for entry in document.models {
-        for (model_id, model) in entry.into_snapshot_models() {
-            models.insert(model_id, model);
-        }
-    }
-
-    Some(models)
 }
 
 fn merge_models(base: &mut LlmModel, supplement: &LlmModel) {

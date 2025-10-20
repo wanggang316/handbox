@@ -45,6 +45,7 @@ pub struct ProviderConfig {
     pub support_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
+    pub supplement_file: Option<String>,
 }
 
 /// LLM 配置文件结构
@@ -297,6 +298,7 @@ impl LlmConfigProvider for LlmConfig {
                 chat_api_type,
                 model_api_type,
                 model_local,
+                supplement_file: config.supplement_file.clone(),
             })
         })
     }

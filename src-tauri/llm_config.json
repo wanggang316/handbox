@@ -28,7 +28,8 @@
             "default_base_url": "https://api.openai.com/v1",
             "icon": "/logo-openai.png",
             "chat_api_type": "openai-responses",
-            "model_api_type": "openai"
+            "model_api_type": "openai",
+            "supplement_file": "openai_models.json"
         },
         {
             "type": "google",
@@ -49,7 +50,8 @@
             "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
             "icon": "/logo-google.png",
             "chat_api_type": "google",
-            "model_api_type": "google"
+            "model_api_type": "google",
+            "supplement_file": "google_models.json"
         },
         {
             "type": "deepseek",
@@ -68,7 +70,8 @@
             "default_base_url": "https://api.deepseek.com",
             "icon": "/logo-deepseek.png",
             "chat_api_type": "openai-completions",
-            "model_api_type": "openai"
+            "model_api_type": "openai",
+            "supplement_file": "deepseek_models.json"
         },
         {
             "type": "anthropic",

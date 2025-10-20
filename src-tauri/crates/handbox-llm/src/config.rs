@@ -8,6 +8,7 @@ pub struct LlmProviderConfig {
     pub chat_api_type: LlmApiType,
     pub model_api_type: LlmModelApiType,
     pub model_local: Option<HashMap<String, LlmModelExtraInfo>>,
+    pub supplement_file: Option<String>,
 }
 
 #[derive(Debug, Clone)]
