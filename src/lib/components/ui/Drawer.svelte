@@ -66,7 +66,7 @@
     <!-- 抽屉容器 -->
     <div
       role="presentation"
-      class="ml-auto relative bg-base-300 max-w-lg flex flex-col animate-drawer"
+      class="ml-auto relative bg-base-200 max-w-lg flex flex-col animate-drawer"
       class:animate-drawer-close={closing}
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}

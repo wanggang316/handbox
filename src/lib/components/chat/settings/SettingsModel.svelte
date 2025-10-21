@@ -1,19 +1,47 @@
 <script lang="ts">
-  import { chatState, chatActions, currentChatModel } from "$lib/states/chat.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
+  import {
+    chatState,
+    chatActions,
+    currentChatModel,
+  } from "$lib/states/chat.svelte";
+  import { getProviderIconById } from "$lib/states/provider.svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
+  import { ChevronsUpDown } from "lucide-svelte";
 
-  import TableGroup from "../../ui/table/TableGroup.svelte";
-  import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
-  import DefaultRow from "../../ui/table/DefaultRow.svelte";
-  import LabeledSliderRow from "../../ui/table/LabeledSliderRow.svelte";
-  import NumberStepperRow from "../../ui/table/NumberStepperRow.svelte";
-  import SwitchRow from "../../ui/table/SwitchRow.svelte";
-  import RoundButton from "../../ui/RoundButton.svelte";
+  import LabeledSlider from "../../ui/LabeledSlider.svelte";
+  import NumberStepper from "../../ui/NumberStepper.svelte";
+  import Toggle from "../../ui/Toggle.svelte";
   import ChatModelSelectModal from "../ChatModelSelectModal.svelte";
 
   type SaveStatus = "saved" | "saving" | "error";
 
-  const currentModel = $derived<ModelWithProvider | undefined>(currentChatModel().model);
+  interface Props {
+    variant?: "all" | "selection" | "parameters";
+  }
+
+  let { variant = "all" }: Props = $props();
+
+  const currentModel = $derived<ModelWithProvider | undefined>(
+    currentChatModel().model
+  );
+
+  const providerIcon = $derived(
+    currentModel?.provider_id
+      ? getProviderIconById(currentModel.provider_id)
+      : undefined
+  );
+
+  const providerInitial = $derived(() => {
+    const name = currentModel?.providerName?.trim();
+    if (!name) return "M";
+    return name[0]?.toUpperCase() ?? "M";
+  });
+
+  const showSelection = $derived(variant === "all" || variant === "selection");
+  const showParameters = $derived(
+    variant === "all" || variant === "parameters"
+  );
 
   const PARAMETER_ALIASES: Record<string, string[]> = {
     temperature: ["temperature"],
@@ -59,8 +87,12 @@
     }
 
     const supportList = [
-      ...(Array.isArray(model.support_parameters) ? model.support_parameters : []),
-      ...(Array.isArray(model.supported_parameters) ? model.supported_parameters : []),
+      ...(Array.isArray(model.support_parameters)
+        ? model.support_parameters
+        : []),
+      ...(Array.isArray(model.supported_parameters)
+        ? model.supported_parameters
+        : []),
     ];
 
     for (const raw of supportList) {
@@ -163,8 +195,13 @@
     return fallback;
   }
 
-  function ensureNumber(value: number | null | undefined, fallback: number): number {
-    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  function ensureNumber(
+    value: number | null | undefined,
+    fallback: number
+  ): number {
+    return typeof value === "number" && Number.isFinite(value)
+      ? value
+      : fallback;
   }
 
   function clamp(value: number, min: number, max: number): number {
@@ -182,7 +219,9 @@
     return {
       temperature: getDefaultNumber("temperature", 0.7),
       topP: getDefaultNumber("top_p", 1.0),
-      topK: hasSupport("top_k") ? Math.max(getDefaultNumber("top_k", 40), 1) : 0,
+      topK: hasSupport("top_k")
+        ? Math.max(getDefaultNumber("top_k", 40), 1)
+        : 0,
       streamResponse: hasSupport("streaming")
         ? getDefaultBoolean("streaming", true)
         : true,
@@ -190,7 +229,7 @@
     };
   }
 
-const modelDefaults = $derived(getModelDefaultSettings());
+  const modelDefaults = $derived(getModelDefaultSettings());
 
   function resolveTemperatureMax(current: number): number {
     const upper = Math.max(getMaxNumber("temperature", 2), 0.1);
@@ -224,15 +263,22 @@ const modelDefaults = $derived(getModelDefaultSettings());
     if (!hasSupport("top_k")) {
       return current ?? 0;
     }
-    const baseline = Math.max(getMaxNumber("top_k", modelDefaults.topK || 100), modelDefaults.topK || 100, 1);
+    const baseline = Math.max(
+      getMaxNumber("top_k", modelDefaults.topK || 100),
+      modelDefaults.topK || 100,
+      1
+    );
     return Math.max(baseline, current ?? 1);
   }
 
   function resolveOutputTokensMax(current: number): number {
     const baseline = Math.max(
-      getMaxNumber("output_max_tokens", getMaxNumber("max_tokens", modelDefaults.maxTokens)),
+      getMaxNumber(
+        "output_max_tokens",
+        getMaxNumber("max_tokens", modelDefaults.maxTokens)
+      ),
       modelDefaults.maxTokens,
-      1,
+      1
     );
     return Math.max(baseline, current ?? baseline);
   }
@@ -248,13 +294,13 @@ const modelDefaults = $derived(getModelDefaultSettings());
       : defaults.topK || 0;
     const maxTokensLimit = Math.max(
       getMaxNumber("output_max_tokens", getMaxNumber("max_tokens", 1000000)),
-      defaults.maxTokens,
+      defaults.maxTokens
     );
 
     const temperature = clamp(
       ensureNumber(chat?.temperature, defaults.temperature),
       0,
-      temperatureMax,
+      temperatureMax
     );
 
     const topP = clamp(ensureNumber(chat?.topP, defaults.topP), 0, topPMax);
@@ -264,11 +310,13 @@ const modelDefaults = $derived(getModelDefaultSettings());
     const maxTokens = clamp(
       ensureNumber(chat?.maxTokens, defaults.maxTokens),
       1,
-      maxTokensLimit,
+      maxTokensLimit
     );
 
     const streamResponse = hasSupport("streaming")
-      ? (typeof chat?.stream === "boolean" ? chat?.stream : defaults.streamResponse)
+      ? typeof chat?.stream === "boolean"
+        ? chat?.stream
+        : defaults.streamResponse
       : defaults.streamResponse;
 
     return {
@@ -285,6 +333,14 @@ const modelDefaults = $derived(getModelDefaultSettings());
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let saveStatus = $state<SaveStatus>("saved");
   let showModelModal = $state(false);
+  let showAdvanced = $state(false);
+
+  const hasAdvancedParameters = $derived(
+    hasSupport("top_p") ||
+      hasSupport("top_k") ||
+      hasSupport("output_max_tokens") ||
+      hasSupport("streaming")
+  );
 
   $effect(() => {
     // 监听模型或聊天配置变化，刷新本地缓存
@@ -294,10 +350,12 @@ const modelDefaults = $derived(getModelDefaultSettings());
     currentSettings = { ...next };
     originalSettings = { ...next };
     saveStatus = "saved";
+    showAdvanced = false;
   });
 
   $effect(() => {
-    const hasChanges = JSON.stringify(currentSettings) !== JSON.stringify(originalSettings);
+    const hasChanges =
+      JSON.stringify(currentSettings) !== JSON.stringify(originalSettings);
     if (!hasChanges) {
       return;
     }
@@ -364,112 +422,214 @@ const modelDefaults = $derived(getModelDefaultSettings());
   }
 </script>
 
-<div class="flex-1 p-0 space-y-6">
-  <TableGroup title="模型">
-    <DefaultRow
-      label="当前模型"
-      value={currentModel ? currentModel.name : "选择模型"}
-      onclick={() => (showModelModal = true)}
-    />
+{#if showSelection}
+  <button
+    class="w-full rounded-2xl bg-base-100 px-3 py-4 border border-base-200 hover:bg-base-300"
+    type="button"
+    onclick={() => (showModelModal = true)}
+  >
+    {#if currentModel}
+      <div class="flex items-start justify-between gap-2">
+        <div class=" flex items-center gap-2">
+          <div class="flex-1 flex justify-center items-center">
+            <img
+              src={providerIcon}
+              alt={currentModel?.providerName ?? "模型供应商"}
+              class="h-8 w-8 rounded-md object-contain p-0"
+            />
+          </div>
 
-    <TableBaseRow label="供应商">
-      <span class="text-sm text-base-content/70">
-        {currentModel ? currentModel.providerName : "未选择"}
-      </span>
-    </TableBaseRow>
+          <div class="space-y-1 pb-1">
+            <div class="text-md text-base-content">
+              {currentModel ? currentModel.name : "未选择模型"}
+            </div>
+            <div
+              class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60"
+            >
+              {#if currentModel?.id}
+                <span class="font-mono text-[11px] text-base-content/50">
+                  {currentModel.id}
+                </span>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </div>
+      {#if currentModel.description}
+        <p class="mt-4 text-left text-xs leading-relaxed text-base-content/60">
+          {currentModel.description}
+        </p>
+      {/if}
+    {:else}
+      <div class="flex flex-row justify-between items-center px-2">
+        <p class="text-left text-sm leading-relaxed text-base-content">
+          选择一个模型以开始对话
+        </p>
+        <ChevronsUpDown size={14} />
+      </div>
+    {/if}
+  </button>
+{/if}
 
-    {#if currentModel?.id}
-      <TableBaseRow label="模型 ID">
-        <span class="text-xs font-mono text-base-content/60 break-all">
-          {currentModel.id}
+{#if showParameters}
+  <div
+    class="space-y-4 rounded-2xl border border-base-200 bg-base-100 px-5 py-5 shadow-sm"
+  >
+    <div class="space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <div class="space-y-1">
+          <h3 class="text-sm font-semibold text-base-content">Temperature</h3>
+        </div>
+        <span
+          class="rounded-full bg-base-200 px-3 py-1 font-mono text-sm text-base-content/80"
+        >
+          {currentSettings.temperature.toFixed(1)}
         </span>
-      </TableBaseRow>
-    {/if}
-  </TableGroup>
+      </div>
 
-  <TableGroup title="模型参数">
-    <LabeledSliderRow
-      label="Temperature"
-      bind:value={currentSettings.temperature}
-      min={0}
-      max={resolveTemperatureMax(currentSettings.temperature)}
-      step={0.1}
-      leftLabel="精确"
-      rightLabel="创意"
-      scaleMarks={getTemperatureScaleMarks()}
-    />
-
-    {#if hasSupport("top_p")}
-      <LabeledSliderRow
-        label="Top-p"
-        bind:value={currentSettings.topP}
+      <LabeledSlider
+        bind:value={currentSettings.temperature}
         min={0}
-        max={resolveTopPMax(currentSettings.topP)}
-        step={0.05}
-        leftLabel="聚焦"
-        rightLabel="多样"
-        scaleMarks={getTopPScaleMarks()}
+        max={resolveTemperatureMax(currentSettings.temperature)}
+        step={0.1}
+        leftLabel="精确"
+        rightLabel="创意"
+        scaleMarks={getTemperatureScaleMarks()}
+        showValue={false}
       />
+    </div>
+
+    {#if hasAdvancedParameters}
+      <div class="flex items-center justify-end">
+        <button
+          type="button"
+          class="flex items-center gap-1 rounded-full border border-base-300 px-3 py-1 text-xs font-medium text-base-content/70 hover:border-primary/50 hover:text-primary transition-colors"
+          onclick={() => (showAdvanced = !showAdvanced)}
+        >
+          {showAdvanced ? "收起高级" : "高级"}
+        </button>
+      </div>
     {/if}
 
-    {#if hasSupport("top_k")}
-      <NumberStepperRow
-        label="Top-k"
-        bind:value={currentSettings.topK}
-        defaultValue={modelDefaults.topK}
-        placeholder="{modelDefaults.topK} (默认)"
-        min={1}
-        max={resolveTopKMax(currentSettings.topK)}
-        step={1}
-      />
+    {#if showAdvanced}
+      <div
+        class="space-y-4 rounded-xl border border-dashed border-base-200 bg-base-50/50 px-4 py-4"
+      >
+        {#if hasSupport("top_p")}
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium text-base-content">Top-p</p>
+                <p class="text-xs text-base-content/60">
+                  限制采样概率分布的累积和。
+                </p>
+              </div>
+              <span
+                class="rounded bg-base-200 px-2 py-1 font-mono text-xs text-base-content/70"
+              >
+                {currentSettings.topP.toFixed(2)}
+              </span>
+            </div>
+            <LabeledSlider
+              bind:value={currentSettings.topP}
+              min={0}
+              max={resolveTopPMax(currentSettings.topP)}
+              step={0.05}
+              leftLabel="聚焦"
+              rightLabel="多样"
+              scaleMarks={getTopPScaleMarks()}
+              showValue={false}
+            />
+          </div>
+        {/if}
+
+        {#if hasSupport("top_k")}
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-medium text-base-content">Top-k</p>
+              <span
+                class="rounded bg-base-200 px-2 py-1 font-mono text-xs text-base-content/70"
+              >
+                {currentSettings.topK}
+              </span>
+            </div>
+            <NumberStepper
+              bind:value={currentSettings.topK}
+              min={1}
+              max={resolveTopKMax(currentSettings.topK)}
+              step={1}
+              defaultValue={modelDefaults.topK}
+              placeholder={`${modelDefaults.topK} (默认)`}
+            />
+          </div>
+        {/if}
+
+        {#if hasSupport("output_max_tokens")}
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-medium text-base-content">
+                输出最大 Token
+              </p>
+              <span
+                class="rounded bg-base-200 px-2 py-1 font-mono text-xs text-base-content/70"
+              >
+                {currentSettings.maxTokens}
+              </span>
+            </div>
+            <NumberStepper
+              bind:value={currentSettings.maxTokens}
+              min={1}
+              max={resolveOutputTokensMax(currentSettings.maxTokens)}
+              step={100}
+              defaultValue={modelDefaults.maxTokens}
+              placeholder={`${modelDefaults.maxTokens} (默认)`}
+            />
+          </div>
+        {/if}
+
+        {#if hasSupport("streaming")}
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-base-content">流式输出</p>
+              <p class="text-xs text-base-content/60">
+                实时获取模型响应，适合长文本输出。
+              </p>
+            </div>
+            <Toggle bind:checked={currentSettings.streamResponse} />
+          </div>
+        {/if}
+      </div>
     {/if}
 
-    {#if hasSupport("output_max_tokens")}
-      <NumberStepperRow
-        label="输出最大 Token"
-        bind:value={currentSettings.maxTokens}
-        defaultValue={modelDefaults.maxTokens}
-        placeholder="{modelDefaults.maxTokens} (默认)"
-        min={1}
-        max={resolveOutputTokensMax(currentSettings.maxTokens)}
-        step={100}
-      />
-    {/if}
+    <div class="flex items-center justify-between pt-2">
+      <!-- <button
+        type="button"
+        class="rounded-full border border-base-300 px-4 py-2 text-sm font-medium text-base-content hover:border-primary/50 hover:bg-primary/10 transition-colors"
+        onclick={handleDefault}
+      >
+        恢复默认
+      </button> -->
 
-    {#if hasSupport("streaming")}
-      <SwitchRow label="流式输出" bind:checked={currentSettings.streamResponse} />
-    {/if}
-  </TableGroup>
-
-  <div class="flex gap-3 pt-4 items-center justify-between">
-    <RoundButton
-      customClass="w-24"
-      label="恢复默认"
-      bgColor="bg-base-200"
-      textColor="text-base-content/80"
-      hoverColor="hover:text-base-content"
-      onclick={handleDefault}
-    />
-
-    {#if saveStatus !== "saved"}
-      <div class="px-6 py-2">
-        <div class="flex items-center gap-2">
+      {#if saveStatus !== "saved"}
+        <div class="flex items-center gap-2 text-xs text-base-content/70">
           <span
-            class="w-2 h-2 rounded-full {saveStatus === 'saving'
+            class="h-2 w-2 rounded-full {saveStatus === 'saving'
               ? 'bg-warning'
               : 'bg-error'}"
           ></span>
-          <span class="text-xs text-base-content/70">
+          <span>
             {saveStatus === "saving" ? "保存中..." : "保存失败"}
           </span>
         </div>
-      </div>
-    {/if}
+      {/if}
+    </div>
   </div>
-</div>
+{/if}
 
-<ChatModelSelectModal
-  bind:open={showModelModal}
-  selectedModel={currentModel ?? null}
-  onModelSelect={handleModelSelect}
-/>
+{#if showSelection}
+  <ChatModelSelectModal
+    bind:open={showModelModal}
+    selectedModel={currentModel ?? null}
+    onModelSelect={handleModelSelect}
+  />
+{/if}

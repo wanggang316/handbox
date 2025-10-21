@@ -3,11 +3,6 @@
   import PromptSettings from "./SettingsPrompt.svelte";
   import ModelSettings from "./SettingsModel.svelte";
   import McpSettings from "./SettingsMcp.svelte";
-  import {
-    MessageSquare,
-    Settings as SettingsIcon,
-    Server,
-  } from "@lucide/svelte";
 
   interface Props {
     open: boolean;
@@ -18,26 +13,31 @@
 </script>
 
 <Drawer {open} title="聊天设置" {onClose}>
-  <div class="flex flex-col gap-8 px-4 py-4 w-sm">
-    <!-- 模型选择与参数配置组 -->
-    <section class="flex flex-col gap-4">
-      <div class="">
-        <ModelSettings />
-      </div>
+  <div class="flex flex-col gap-6 px-6 py-6 w-[420px] max-w-full">
+    <section class="space-y-3">
+      <ModelSettings variant="selection" />
     </section>
 
-    <!-- 提示词配置组 -->
-    <section class="flex flex-col gap-4">
-      <div class="">
-        <PromptSettings />
-      </div>
+    <section class="space-y-3">
+      <PromptSettings />
     </section>
 
-    <!-- MCP 服务器配置组 -->
-    <section class="flex flex-col gap-4">
-      <div class="">
-        <McpSettings />
-      </div>
+    <section class="space-y-3">
+      <h2
+        class="text-xs font-semibold uppercase tracking-wide text-base-content/60"
+      >
+        模型参数
+      </h2>
+      <ModelSettings variant="parameters" />
+    </section>
+
+    <section class="space-y-3">
+      <h2
+        class="text-xs font-semibold uppercase tracking-wide text-base-content/60"
+      >
+        工具
+      </h2>
+      <McpSettings />
     </section>
   </div>
 </Drawer>
