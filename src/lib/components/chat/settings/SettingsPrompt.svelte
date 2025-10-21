@@ -1,45 +1,14 @@
 <script lang="ts">
   import { chatState, chatActions } from "$lib/states/chat.svelte";
   import Modal from "../../ui/Modal.svelte";
-  import Textarea from "../../ui/Textarea.svelte";
 
-  type SaveStatus = "saved" | "saving" | "error";
-
-  let draftPrompt = $state(chatState.currentChat?.systemPrompt ?? "");
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
-  let saveStatus = $state<SaveStatus>("saved");
+  let draftPrompt = $state("");
   let showModal = $state(false);
+  let modalRef = $state<Modal>();
 
   const hasActiveChat = $derived(Boolean(chatState.currentChat));
   const promptText = $derived(chatState.currentChat?.systemPrompt ?? "");
   const hasPrompt = $derived(promptText.trim().length > 0);
-
-  $effect(() => {
-    // 同步外部 prompt 到本地草稿
-    draftPrompt = chatState.currentChat?.systemPrompt ?? "";
-    saveStatus = "saved";
-  });
-
-  $effect(() => {
-    const remotePrompt = chatState.currentChat?.systemPrompt ?? "";
-    if (draftPrompt === remotePrompt) {
-      if (saveTimer) {
-        clearTimeout(saveTimer);
-        saveTimer = null;
-      }
-      return;
-    }
-
-    saveStatus = "saving";
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-    }
-
-    saveTimer = setTimeout(async () => {
-      saveTimer = null;
-      await persistPrompt();
-    }, 500);
-  });
 
   function handleOpenModal() {
     if (!hasActiveChat) return;
@@ -47,42 +16,39 @@
     showModal = true;
   }
 
-  async function persistPrompt() {
+  function handleCancelModal() {
+    modalRef?.handleClose();
+  }
+
+  async function handleSaveModal() {
     if (!hasActiveChat) {
-      saveStatus = "saved";
+      modalRef?.handleClose();
       return;
     }
 
     const remotePrompt = chatState.currentChat?.systemPrompt ?? "";
     if (draftPrompt === remotePrompt) {
-      saveStatus = "saved";
+      modalRef?.handleClose();
       return;
     }
 
     try {
       await chatActions.updateSystemPrompt(draftPrompt);
-      saveStatus = "saved";
+      modalRef?.handleClose();
     } catch (error) {
       console.error("Failed to update system prompt:", error);
-      saveStatus = "error";
+      // 保持 Modal 打开以便用户重试
     }
   }
 
-  async function handleCloseModal() {
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-      saveStatus = "saving";
-      await persistPrompt();
-    } else {
-      await persistPrompt();
-    }
+  function handleCloseModal() {
+    // Modal 关闭时不做任何保存操作
     showModal = false;
   }
 </script>
 
 <button
-  class="w-full space-y-4 rounded-2xl bg-base-100 px-5 py-4 hover:bg-base-300"
+  class="w-full space-y-4 rounded-2xl bg-base-200 px-5 py-4 hover:bg-base-300"
   type="button"
   onclick={handleOpenModal}
   disabled={!hasActiveChat}
@@ -91,18 +57,10 @@
     <div class="space-y-1">
       <h3 class="text-sm font-semibold text-base-content">System Prompt</h3>
     </div>
-    <!-- <button
-      type="button"
-      class="rounded-full border border-base-300 px-4 py-2 text-sm font-medium text-base-content hover:border-primary/50 hover:bg-primary/10 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-      onclick={handleOpenModal}
-      disabled={!hasActiveChat}
-    >
-      编辑
-    </button> -->
   </div>
 
   <div
-    class="rounded-xl border border-dashed border-base-200 bg-base-200/40 px-2 py-2 text-sm text-left leading-relaxed text-base-content/70 whitespace-pre-wrap max-h-40 overflow-y-auto"
+    class="px-0 py-0 text-sm text-left leading-relaxed text-base-content/70 line-clamp-3 overflow-hidden"
   >
     {#if hasPrompt}
       {promptText}
@@ -110,38 +68,43 @@
       <span class="text-base-content/50">暂无系统提示词</span>
     {/if}
   </div>
-
-  {#if saveStatus !== "saved"}
-    <div
-      class="flex items-center justify-end gap-2 text-xs text-base-content/70"
-    >
-      <span
-        class="h-2 w-2 rounded-full {saveStatus === 'saving'
-          ? 'bg-warning'
-          : 'bg-error'}"
-      ></span>
-      <span>{saveStatus === "saving" ? "保存中..." : "保存失败"}</span>
-    </div>
-  {/if}
 </button>
 
-<Modal bind:open={showModal} title="编辑系统提示词" onClose={handleCloseModal}>
-  <div class="w-[520px] max-w-[90vw] px-6 pt-16 pb-4">
-    <div class="space-y-5">
-      <Textarea bind:value={draftPrompt} rows={12} showCharCount={true} />
+<Modal
+  bind:this={modalRef}
+  bind:open={showModal}
+  title="编辑系统提示词"
+  onClose={handleCloseModal}
+>
+  <div class="w-[70vw] h-[80vh] px-6 pt-16 pb-6 flex flex-col gap-5">
+    <div class="flex-1 min-h-0">
+      <textarea
+        bind:value={draftPrompt}
+        placeholder="输入系统提示词..."
+        class="w-full h-full px-3 py-2 border border-base-300 rounded-md resize-none
+               focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+               font-mono text-sm text-base-content bg-base-200
+               scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200
+               hover:scrollbar-thumb-base-300/80"
+      ></textarea>
+    </div>
 
-      {#if saveStatus === "error"}
-        <p class="text-xs text-error">保存失败，请检查网络连接后重试。</p>
-      {/if}
-
-      <div class="flex items-center justify-end gap-3 pt-2">
-        {#if saveStatus === "saving"}
-          <span class="text-xs text-base-content/60">保存中…</span>
-        {/if}
+    <div class="flex items-center justify-between">
+      <div class="text-xs text-base-content/70">
+        字符数: {draftPrompt.length}
+      </div>
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          class="rounded-full border border-base-300 px-4 py-2 text-sm font-medium text-base-content hover:border-base-300/70 hover:bg-base-200 transition-colors"
+          onclick={handleCancelModal}
+        >
+          取消
+        </button>
         <button
           type="button"
           class="rounded-full border border-base-300 px-4 py-2 text-sm font-medium text-base-content hover:border-primary/50 hover:bg-primary/10 transition-colors"
-          onclick={handleCloseModal}
+          onclick={handleSaveModal}
         >
           完成
         </button>

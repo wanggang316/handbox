@@ -1,20 +1,27 @@
 <script lang="ts">
-  import Toggle from '../Toggle.svelte';
-  import TableBaseRow from './TableBaseRow.svelte';
+  import Toggle from "../Toggle.svelte";
+  import TableBaseRow from "./TableBaseRow.svelte";
 
   interface Props {
     label: string;
     checked: boolean;
     description?: string;
     disabled?: boolean;
+    onChange?: (value: boolean) => void;
   }
 
-  let { 
+  let {
     label,
     checked = $bindable(),
-    description = '',
-    disabled = false
+    description = "",
+    disabled = false,
+    onChange = (_value: boolean) => {},
   }: Props = $props();
+
+  function handleToggleChange(value: boolean) {
+    checked = value;
+    onChange(value);
+  }
 </script>
 
 <TableBaseRow {label}>
@@ -24,6 +31,6 @@
         {description}
       </div>
     {/if}
-    <Toggle bind:checked {disabled} />
+    <Toggle bind:checked {disabled} onChange={handleToggleChange} />
   </div>
 </TableBaseRow>

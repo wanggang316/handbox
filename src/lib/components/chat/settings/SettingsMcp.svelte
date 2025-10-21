@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Server, RefreshCw, ChevronsUpDown } from "@lucide/svelte";
+  import {
+    Server,
+    RefreshCw,
+    ChevronsUpDown,
+    ChevronDown,
+    ChevronUp,
+  } from "@lucide/svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import Button from "$lib/components/ui/Button.svelte";
@@ -9,16 +15,20 @@
   import { chatState, chatActions } from "$lib/states/chat.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import type { McpServer, McpServerConfig } from "$lib/types";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
 
   let currentServers = $state<McpServerConfig[]>(
-    chatState.currentChat?.mcpServers || [],
+    chatState.currentChat?.mcpServers || []
   );
   let originalServers = $state<McpServerConfig[]>(
-    chatState.currentChat?.mcpServers || [],
+    chatState.currentChat?.mcpServers || []
   );
   let saving = $state(false);
   let refreshing = $state(false);
   let expandedTools = $state<Record<string, boolean>>({});
+
+  let isCollapsed = $state(false);
+  let isHovering = $state(false);
 
   const executionModeOptions = [
     { value: "auto", label: "自动执行" },
@@ -42,14 +52,18 @@
     return JSON.stringify(currentServers) !== JSON.stringify(originalServers);
   });
 
+  function toggleCollapse() {
+    isCollapsed = !isCollapsed;
+  }
+
   // Only show enabled servers with ready status and at least one enabled tool
   const availableServers = $derived(() =>
     mcpState.servers.filter(
       (server) =>
         server.enabled &&
         server.status === "ready" &&
-        server.enabledTools.length > 0,
-    ),
+        server.enabledTools.length > 0
+    )
   );
 
   const decoratedServers = $derived(() => {
@@ -86,10 +100,10 @@
 
   async function handleExecutionModeChange(
     serverId: string,
-    mode: "auto" | "manual",
+    mode: "auto" | "manual"
   ) {
     currentServers = currentServers.map((s) =>
-      s.serverId === serverId ? { ...s, executionMode: mode } : s,
+      s.serverId === serverId ? { ...s, executionMode: mode } : s
     );
 
     // Auto-save
@@ -133,105 +147,115 @@
   }
 </script>
 
-<div class="flex-1 mt-1 p-0 space-y-3">
-  <div class="flex items-center justify-between">
-    <div class="text-sm text-base-content/70">
-      {#if !chatState.currentChat}
-        请先选择或创建聊天
+<div class="flex-1 mt-1">
+  <button
+    type="button"
+    class="flex w-full items-center justify-between my-1 px-2 text-xs cursor-pointer text-base-content/80 hover:text-base-content"
+    onclick={toggleCollapse}
+    onmouseenter={() => (isHovering = true)}
+    onmouseleave={() => (isHovering = false)}
+  >
+    <span>工具</span>
+    {#if isHovering}
+      {#if isCollapsed}
+        <ChevronDown size={16} />
       {:else}
-        已选中 {currentServers.length} 个服务器
+        <ChevronUp size={16} />
       {/if}
+    {/if}
+  </button>
+
+  {#if !isCollapsed}
+    <div class="flex items-center justify-between pl-2 pr-1">
+      <div class="text-[12px] text-base-content/50">
+        {#if !chatState.currentChat}
+          请先选择或创建聊天
+        {:else}
+          已选中 {currentServers.length} 个服务器
+        {/if}
+      </div>
+
+      <IconButton
+        icon={RefreshCw}
+        iconSize={14}
+        onclick={handleRefresh}
+        disabled={refreshing}
+        customClass={refreshing ? "animate-spin" : ""}
+      />
     </div>
 
-    <Button
-      on:click={handleRefresh}
-      variant="clear"
-      size="sm"
-      disabled={refreshing}
-    >
-      <RefreshCw class={refreshing ? "animate-spin" : ""} size={14} />
-      刷新列表
-    </Button>
-  </div>
+    {#if !chatState.currentChat}
+      <div class="text-center py-8 text-base-content/70">
+        <Server size={48} class="mx-auto mb-4 text-base-content/40" />
+        <p class="mb-2">请先选择或创建聊天</p>
+        <p class="text-sm">MCP 服务器配置将与聊天关联</p>
+      </div>
+    {:else if availableServers().length === 0}
+      <div class="text-center py-8 text-base-content/70">
+        <Server size={48} class="mx-auto mb-4 text-base-content/40" />
+        <p class="mb-2">暂无可用的 MCP 服务器</p>
+        <p class="text-sm">请在应用设置中配置 MCP 服务器</p>
+      </div>
+    {:else}
+      <TableGroup>
+        {#each decoratedServers() as item (item.server.id)}
+          <TableBaseRow
+            label={item.server.displayName ?? item.server.name}
+            layout="vertical"
+          >
+            {#snippet rightContent()}
+              <Toggle
+                checked={item.checked}
+                onChange={(value) => toggleSelection(item.server.id, value)}
+              />
+            {/snippet}
 
-  {#if !chatState.currentChat}
-    <div class="text-center py-8 text-base-content/70">
-      <Server size={48} class="mx-auto mb-4 text-base-content/40" />
-      <p class="mb-2">请先选择或创建聊天</p>
-      <p class="text-sm">MCP 服务器配置将与聊天关联</p>
-    </div>
-  {:else if availableServers().length === 0}
-    <div class="text-center py-8 text-base-content/70">
-      <Server size={48} class="mx-auto mb-4 text-base-content/40" />
-      <p class="mb-2">暂无可用的 MCP 服务器</p>
-      <p class="text-sm">请在应用设置中配置 MCP 服务器</p>
-    </div>
-  {:else}
-    <TableGroup>
-      {#each decoratedServers() as item (item.server.id)}
-        <TableBaseRow
-          label={item.server.displayName ?? item.server.name}
-          layout="vertical"
-        >
-          {#snippet rightContent()}
-            <Toggle
-              checked={item.checked}
-              onChange={(value) => toggleSelection(item.server.id, value)}
-            />
-          {/snippet}
-
-          <div class="flex flex-col gap-3 text-sm text-base-content/80">
-            <!-- Execution mode and tools button -->
-            <div class="flex items-center gap-2 justify-between">
-              <div class="flex items-center gap-1">                
-                <button
-                  class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded py-0.5 transition-colors"
-                  onclick={() => toggleTools(item.server.id)}
-                >
-                  <span>{item.server.enabledTools.length} enabled tools</span>
-                  <ChevronsUpDown size={12} />
-                </button>
+            <div class="flex flex-col gap-3 text-sm text-base-content/80">
+              <!-- Execution mode and tools button -->
+              <div class="flex items-center gap-2 justify-between">
+                <div class="flex items-center gap-1">
+                  <button
+                    class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded py-0.5 transition-colors"
+                    onclick={() => toggleTools(item.server.id)}
+                  >
+                    <span>{item.server.enabledTools.length} enabled tools</span>
+                    <ChevronsUpDown size={12} />
+                  </button>
+                </div>
+                {#if item.checked}
+                  <div>
+                    <DropDown
+                      options={executionModeOptions}
+                      selectedValue={item.executionMode}
+                      disabled={!item.checked}
+                      onSelect={(value) =>
+                        handleExecutionModeChange(
+                          item.server.id,
+                          value as "auto" | "manual"
+                        )}
+                      minWidth="min-w-28"
+                      buttonClass="text-xs"
+                    />
+                  </div>
+                {/if}
               </div>
-              {#if item.checked}
-                <div>
-                  <DropDown
-                    options={executionModeOptions}
-                    selectedValue={item.executionMode}
-                    disabled={!item.checked}
-                    onSelect={(value) =>
-                      handleExecutionModeChange(
-                        item.server.id,
-                        value as "auto" | "manual",
-                      )}
-                    minWidth="min-w-28"
-                    buttonClass="text-xs"
-                  />
+
+              <!-- Expanded tools list -->
+              {#if expandedTools[item.server.id] && item.server.tools.length > 0}
+                <div class="flex flex-wrap gap-1">
+                  {#each item.server.enabledTools as tool}
+                    <span
+                      class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary"
+                    >
+                      {tool}
+                    </span>
+                  {/each}
                 </div>
               {/if}
             </div>
-
-            <!-- Expanded tools list -->
-            {#if expandedTools[item.server.id] && item.server.tools.length > 0}
-              <div class="flex flex-wrap gap-1">
-                {#each item.server.enabledTools as tool}
-                  <span
-                    class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary"
-                  >
-                    {tool}
-                  </span>
-                {/each}
-              </div>
-            {/if}
-
-            <!-- Description -->
-            {#if item.server.description}
-              <p class="text-xs leading-relaxed text-base-content/70">
-                {item.server.description}
-              </p>
-            {/if}
-          </div>
-        </TableBaseRow>
-      {/each}
-    </TableGroup>
+          </TableBaseRow>
+        {/each}
+      </TableGroup>
+    {/if}
   {/if}
 </div>

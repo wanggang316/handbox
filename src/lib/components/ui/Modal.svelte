@@ -1,14 +1,30 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import TrafficLightsRedButton from "./TrafficLightsRedButton.svelte";
   import TitleBar from "./TitleBar.svelte";
 
-  export let open = false;
-  export let title = "";
-  export let showCloseButton = true;
-  export let onClose: () => void = () => {};
+  interface Props {
+    open?: boolean;
+    title?: string;
+    showCloseButton?: boolean;
+    closeOnBackdropClick?: boolean;
+    onClose?: () => void;
+    children?: import("svelte").Snippet;
+    titleActions?: import("svelte").Snippet;
+  }
 
-  let closing = false;
-  let modalElement: HTMLDivElement;
+  let {
+    open = $bindable(false),
+    title = "",
+    showCloseButton = true,
+    closeOnBackdropClick = false,
+    onClose = () => {},
+    children,
+    titleActions,
+  }: Props = $props();
+
+  let closing = $state(false);
+  let modalElement = $state<HTMLDivElement>();
 
   export function handleClose() {
     closing = true;
@@ -18,9 +34,17 @@
     }, 300);
   }
 
-  $: if (open && modalElement) {
-    modalElement.focus();
+  function handleBackdropClick(e: MouseEvent) {
+    if (closeOnBackdropClick && e.target === e.currentTarget) {
+      handleClose();
+    }
   }
+
+  $effect(() => {
+    if (open && modalElement) {
+      tick().then(() => modalElement?.focus());
+    }
+  });
 </script>
 
 {#if open}
@@ -32,6 +56,7 @@
     role="dialog"
     aria-modal="true"
     tabindex="-1"
+    onclick={handleBackdropClick}
     onkeydown={(e) => {
       if (e.key === "Escape") handleClose();
     }}
@@ -41,12 +66,14 @@
     <div class="relative animate-modal" class:animate-modal-close={closing}>
       <!-- 背景层：负责视觉效果和边界裁切，但不影响内容层 -->
       <div
-        class="bg-base-100 max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative pointer-events-none border-[1px] border-base-200"
+        class="bg-base-100 max-w-[90vw] max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden relative pointer-events-none border-[1px] border-base-200"
         style="border-radius: 20px; z-index: 1;"
       >
         <!-- 预留内容空间 -->
         <div class="px-0 py-0 invisible">
-          <slot />
+          {#if children}
+            {@render children()}
+          {/if}
         </div>
       </div>
 
@@ -66,7 +93,9 @@
                 <h3 class="text-base font-medium text-base-content/80">
                   {title}
                 </h3>
-                <slot name="title-actions" />
+                {#if titleActions}
+                  {@render titleActions()}
+                {/if}
               </div>
             {/if}
           </div>
@@ -74,7 +103,9 @@
 
         <!-- 内容区域：不受背景层裁切影响 -->
         <div class="px-0 py-0">
-          <slot />
+          {#if children}
+            {@render children()}
+          {/if}
         </div>
       </div>
     </div>

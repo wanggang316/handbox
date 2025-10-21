@@ -7,7 +7,12 @@
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
-  import type { McpServer, McpServerStatus } from "$lib/types";
+  import type {
+    CreateMcpServerRequest,
+    McpServer,
+    McpServerStatus,
+    UpdateMcpServerRequest,
+  } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
   import {
     LoaderCircle,
@@ -53,6 +58,23 @@
 
   function toggleTools(serverId: string) {
     expandedTools[serverId] = !expandedTools[serverId];
+  }
+
+  async function handleSaveServer({
+    mode,
+    data,
+  }: {
+    mode: "create" | "update";
+    data: CreateMcpServerRequest | UpdateMcpServerRequest;
+  }) {
+    if (mode === "create") {
+      await mcpActions.createServer(data as CreateMcpServerRequest);
+    } else if (editingServer) {
+      await mcpActions.updateServer(
+        editingServer.id,
+        data as UpdateMcpServerRequest
+      );
+    }
   }
 
   async function handleToggleServer(server: McpServer, enabled: boolean) {
@@ -195,4 +217,5 @@
   open={showFormModal}
   server={editingServer}
   onClose={closeModal}
+  onSave={handleSaveServer}
 />

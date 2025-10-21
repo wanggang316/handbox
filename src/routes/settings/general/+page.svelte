@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { TableGroup, SwitchRow, DropDownRow } from '$lib/components/ui/table';
-  import { settingsState } from '$lib/states';
+  import { settingsState, uiState } from '$lib/states';
   import type { Theme, ThemeColor, Language } from '$lib/types/settings';
 
   // 外观样式选项
@@ -45,6 +45,10 @@
         language = settingsState.settings.general.language;
         themeColor = settingsState.settings.general.themeColor;
         autoScroll = settingsState.settings.general.autoScroll;
+
+        uiState.setTheme(theme);
+        uiState.setLanguage(language);
+        uiState.setThemeColor(themeColor);
       }
     } catch (error) {
       console.error('加载通用设置失败:', error);
@@ -66,18 +70,21 @@
   // 处理主题变更
   function handleThemeChange(value: string) {
     theme = value as Theme;
+    uiState.setTheme(theme);
     updateGeneralSetting('theme', theme);
   }
 
   // 处理语言变更
   function handleLanguageChange(value: string) {
     language = value as Language;
+    uiState.setLanguage(language);
     updateGeneralSetting('language', language);
   }
 
   // 处理主题色变更
   function handleThemeColorChange(value: string) {
     themeColor = value as ThemeColor;
+    uiState.setThemeColor(themeColor);
     updateGeneralSetting('themeColor', themeColor);
   }
 
@@ -115,7 +122,7 @@
       label="聊天界面自动下滑"
       bind:checked={autoScroll}
       description=""
+      onChange={handleAutoScrollChange}
     />
   </TableGroup>
 </div>
-

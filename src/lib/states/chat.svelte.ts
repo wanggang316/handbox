@@ -11,7 +11,222 @@ import type { ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
 import { providerActions, getAllModels, providerState } from './provider.svelte';
 
+// ============================================
+// 模型参数管理 - 共享工具函数和常量
+// ============================================
+
+/**
+ * 参数别名映射，用于处理不同供应商的参数命名差异
+ */
+const PARAMETER_ALIASES: Record<string, string[]> = {
+  temperature: ["temperature"],
+  top_p: ["top_p"],
+  top_k: ["top_k"],
+  streaming: ["streaming", "stream"],
+  output_max_tokens: ["output_max_tokens", "max_tokens"],
+};
+
+/**
+ * 获取参数的所有别名
+ */
+export function getParameterAliases(name: string): string[] {
+  return PARAMETER_ALIASES[name] ?? [name];
+}
+
+/**
+ * 将值转换为数字
+ */
+export function toNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
+ * 将值转换为布尔值
+ */
+export function toBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) return true;
+    if (["false", "0", "no"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+/**
+ * 获取模型支持的参数集合
+ */
+export function getSupportedParameterSet(model?: ModelWithProvider): Set<string> {
+  const supported = new Set<string>();
+
+  if (!model) {
+    return supported;
+  }
+
+  const supportList = [
+    ...(Array.isArray(model.support_parameters) ? model.support_parameters : []),
+    ...(Array.isArray(model.supported_parameters) ? model.supported_parameters : []),
+  ];
+
+  for (const raw of supportList) {
+    if (typeof raw === "string" && raw.trim().length > 0) {
+      supported.add(raw.trim());
+    }
+  }
+
+  if (supported.size === 0 && Array.isArray(model.parameters)) {
+    for (const param of model.parameters) {
+      const name = typeof param?.name === "string" ? param.name.trim() : "";
+      if (name) {
+        supported.add(name);
+      }
+    }
+  }
+
+  return supported;
+}
+
+/**
+ * 检查模型是否支持指定参数
+ */
+export function hasParameterSupport(parameterName: string, model?: ModelWithProvider): boolean {
+  // temperature 是基础参数，默认支持
+  if (parameterName === "temperature") {
+    return true;
+  }
+
+  const aliases = getParameterAliases(parameterName);
+  const supportedParameters = getSupportedParameterSet(model);
+
+  if (supportedParameters.size > 0) {
+    return aliases.some((alias) => supportedParameters.has(alias));
+  }
+
+  const defaults = model?.default_parameters ?? null;
+  const maxes = model?.max_parameters ?? null;
+
+  if (defaults && aliases.some((alias) => alias in defaults)) {
+    return true;
+  }
+
+  if (maxes && aliases.some((alias) => alias in maxes)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 获取参数的默认数值
+ */
+export function getDefaultNumber(parameterName: string, fallback: number, model?: ModelWithProvider): number {
+  const defaults = model?.default_parameters ?? null;
+
+  if (defaults) {
+    for (const alias of getParameterAliases(parameterName)) {
+      if (alias in defaults) {
+        const parsed = toNumber(defaults[alias]);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+  }
+
+  return fallback;
+}
+
+/**
+ * 获取参数的默认布尔值
+ */
+export function getDefaultBoolean(parameterName: string, fallback: boolean, model?: ModelWithProvider): boolean {
+  const defaults = model?.default_parameters ?? null;
+
+  if (defaults) {
+    for (const alias of getParameterAliases(parameterName)) {
+      if (alias in defaults) {
+        const parsed = toBoolean(defaults[alias]);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+  }
+
+  return fallback;
+}
+
+/**
+ * 获取参数的最大值
+ */
+export function getMaxNumber(parameterName: string, fallback: number, model?: ModelWithProvider): number {
+  const maxes = model?.max_parameters ?? null;
+
+  if (maxes) {
+    for (const alias of getParameterAliases(parameterName)) {
+      if (alias in maxes) {
+        const parsed = toNumber(maxes[alias]);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+  }
+
+  return fallback;
+}
+
+/**
+ * 确保值是有效数字
+ */
+export function ensureNumber(value: number | null | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * 将值限制在指定范围内
+ */
+export function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  if (!Number.isFinite(max) || max <= min) return value < min ? min : value;
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * 获取模型的默认设置
+ */
+export function getModelDefaultSettings(model?: ModelWithProvider) {
+  const outputFallback = getDefaultNumber(
+    "output_max_tokens",
+    getDefaultNumber("max_tokens", 4000, model),
+    model
+  );
+
+  return {
+    temperature: getDefaultNumber("temperature", 0.7, model),
+    topP: getDefaultNumber("top_p", 1.0, model),
+    topK: hasParameterSupport("top_k", model)
+      ? Math.max(getDefaultNumber("top_k", 40, model), 1)
+      : 0,
+    streamResponse: hasParameterSupport("streaming", model)
+      ? getDefaultBoolean("streaming", true, model)
+      : true,
+    maxTokens: outputFallback > 0 ? outputFallback : 4000,
+  };
+}
+
+// ============================================
 // 聊天状态 - 使用 Svelte 5 runes
+// ============================================
 let currentChat = $state<Chat | null>(null);
 let chats = $state<Chat[]>([]);
 let isLoading = $state(false);
