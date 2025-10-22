@@ -1,12 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
-    Server,
-    RefreshCw,
-    ChevronsUpDown,
-    ChevronDown,
-    ChevronUp,
-  } from "@lucide/svelte";
+  import { Server, RefreshCw, ChevronDown, ChevronUp } from "@lucide/svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import Button from "$lib/components/ui/Button.svelte";
@@ -16,6 +10,7 @@
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import type { McpServer, McpServerConfig } from "$lib/types";
   import IconButton from "$lib/components/ui/IconButton.svelte";
+  import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
 
   let currentServers = $state<McpServerConfig[]>(
     chatState.currentChat?.mcpServers || []
@@ -186,15 +181,13 @@
 
     {#if !chatState.currentChat}
       <div class="text-center py-8 text-base-content/70">
-        <Server size={48} class="mx-auto mb-4 text-base-content/40" />
-        <p class="mb-2">请先选择或创建聊天</p>
-        <p class="text-sm">MCP 服务器配置将与聊天关联</p>
+        <p class="text-sm mb-2">请先选择或创建聊天</p>
+        <p class="text-xs">MCP 服务器配置将与聊天关联</p>
       </div>
     {:else if availableServers().length === 0}
       <div class="text-center py-8 text-base-content/70">
-        <Server size={48} class="mx-auto mb-4 text-base-content/40" />
-        <p class="mb-2">暂无可用的 MCP 服务器</p>
-        <p class="text-sm">请在应用设置中配置 MCP 服务器</p>
+        <p class="text-sm mb-2">暂无可用的 MCP 服务器</p>
+        <p class="text-xs">请在应用设置中配置并开启 MCP 服务器</p>
       </div>
     {:else}
       <TableGroup>
@@ -210,17 +203,14 @@
               />
             {/snippet}
 
-            <div class="flex flex-col gap-3 text-sm text-base-content/80">
+            <div class="flex flex-col gap-1 text-sm text-base-content/80">
               <!-- Execution mode and tools button -->
               <div class="flex items-center gap-2 justify-between">
-                <div class="flex items-center gap-1">
-                  <button
-                    class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded py-0.5 transition-colors"
+                <div class="flex items-center gap-1 pt-1">
+                  <ArrowButton
+                    label="{item.server.enabledTools.length} enabled tools"
                     onclick={() => toggleTools(item.server.id)}
-                  >
-                    <span>{item.server.enabledTools.length} enabled tools</span>
-                    <ChevronsUpDown size={12} />
-                  </button>
+                  />
                 </div>
                 {#if item.checked}
                   <div>
@@ -234,7 +224,9 @@
                           value as "auto" | "manual"
                         )}
                       minWidth="min-w-28"
-                      buttonClass="text-xs"
+                      buttonTextSize="text-[12px]"
+                      buttonIconSize="12"
+                      buttonPx="1"
                     />
                   </div>
                 {/if}

@@ -34,14 +34,16 @@
   {/snippet}
 
   {#if enabled}
-    <LabeledSlider
-      bind:value
-      {min}
-      {max}
-      {step}
-      {scaleMarks}
-      {showScaleMarks}
-      {showValue}
-    />
+    <div class="pt-2">
+      <LabeledSlider
+        bind:value
+        {min}
+        {max}
+        {step}
+        {scaleMarks}
+        {showScaleMarks}
+        {showValue}
+      />
+    </div>
   {/if}
 </TableBaseRow>

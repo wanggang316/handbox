@@ -21,7 +21,7 @@
 <div class="px-6 py-{py}">
   {#if label}
     {#if layout === "vertical"}
-      <div class="space-y-3">
+      <div class="space-y-0">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             {#if icon}

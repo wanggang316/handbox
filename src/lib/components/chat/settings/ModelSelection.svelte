@@ -30,40 +30,34 @@
 >
   {#if currentModel}
     <div class="flex items-start justify-between gap-2">
-      <div class="flex flex-row gap-2 items-center">
-        {#if providerIcon}
-          <div class="h-8 w-8 flex justify-center items-center">
+      <div class="space-y-1 pb-1 flex-1 flex flex-col text-left">
+        <div class="flex flex-row justify-start items-center gap-2">
+          {#if providerIcon}
             <img
               src={providerIcon}
               alt={currentModel?.providerName ?? "模型供应商"}
-              class="rounded-md object-contain"
+              class="h-4 w-4 rounded-md object-contain"
             />
-          </div>
-        {/if}
+          {/if}
+          <p class="text-xs text-base-content/50">
+            {currentModel?.providerName ?? "模型供应商"}
+          </p>
+        </div>
 
-        <div class="space-y-1 pb-1 flex-1 flex flex-col text-left">
-          <div class="text-md text-base-content">
-            {currentModel ? currentModel.name : "未选择模型"}
-          </div>
-          <div
-            class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60"
-          >
-            {#if currentModel?.id}
-              <span class="font-mono text-[11px] text-base-content/50">
-                {currentModel.id}
-              </span>
-            {/if}
-          </div>
+        <div class="text-md text-base-content">
+          {currentModel ? currentModel.name : "未选择模型"}
+        </div>
+        <div
+          class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60"
+        >
+          {#if currentModel?.id}
+            <span class="font-mono text-[11px] text-base-content/50">
+              {currentModel.id}
+            </span>
+          {/if}
         </div>
       </div>
     </div>
-    {#if currentModel.description}
-      <p
-        class="mt-4 text-left text-xs leading-relaxed text-base-content/60 line-clamp-3 overflow-hidden"
-      >
-        {currentModel.description}
-      </p>
-    {/if}
   {:else}
     <div class="flex flex-row justify-between items-center px-2">
       <p class="text-left text-sm leading-relaxed text-base-content">

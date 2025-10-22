@@ -55,7 +55,7 @@
 >
   <div class="flex items-start justify-between gap-4">
     <div class="space-y-1">
-      <h3 class="text-sm font-semibold text-base-content">System Prompt</h3>
+      <h3 class="text-sm text-base-content">System Prompt</h3>
     </div>
   </div>
 
