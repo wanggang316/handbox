@@ -38,3 +38,7 @@ export async function refreshMcpServer(request: RefreshMcpServerRequest): Promis
 export async function updateToolEnabled(request: UpdateToolEnabledRequest): Promise<McpServer> {
   return apiCall<McpServer>('mcp_update_tool_enabled', { request });
 }
+
+export async function countChatsUsingServer(serverId: string): Promise<number> {
+  return apiCall<number>('mcp_count_chats_using_server', { serverId });
+}

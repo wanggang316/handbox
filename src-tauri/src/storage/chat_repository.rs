@@ -170,6 +170,29 @@ impl ChatRepository {
         Ok(())
     }
 
+    /// 统计使用指定 MCP 服务器的聊天数量
+    pub async fn count_chats_using_mcp_server(
+        &self,
+        server_id: &str,
+    ) -> Result<i32, AppError> {
+        let query = r#"
+            SELECT COUNT(*) as count
+            FROM chats
+            WHERE mcp_servers LIKE '%' || $1 || '%'
+        "#;
+
+        let row = sqlx::query(query)
+            .bind(server_id)
+            .fetch_one(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to count chats: {}", e))
+            })?;
+
+        let count: i32 = row.try_get("count")?;
+        Ok(count)
+    }
+
     // 辅助方法：将数据库行转换为 Chat
     fn row_to_chat(&self, row: sqlx::sqlite::SqliteRow) -> Result<Chat, AppError> {
         use crate::storage::types::McpServerConfig;
@@ -283,5 +306,135 @@ mod tests {
         repo.delete_chat(&chat.id).await.unwrap();
         let deleted = repo.get_chat_by_id(&chat.id).await.unwrap();
         assert!(deleted.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_count_chats_using_mcp_server() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = ChatRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // Create chat with mcp server1
+        let chat1 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 1".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![crate::storage::types::McpServerConfig {
+                server_id: "server1".to_string(),
+                execution_mode: "auto".to_string(),
+                enabled_tools: vec![],
+            }],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat with server1 and server2
+        let chat2 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 2".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![
+                crate::storage::types::McpServerConfig {
+                    server_id: "server1".to_string(),
+                    execution_mode: "auto".to_string(),
+                    enabled_tools: vec![],
+                },
+                crate::storage::types::McpServerConfig {
+                    server_id: "server2".to_string(),
+                    execution_mode: "auto".to_string(),
+                    enabled_tools: vec![],
+                },
+            ],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat with server2 only
+        let chat3 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 3".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![crate::storage::types::McpServerConfig {
+                server_id: "server2".to_string(),
+                execution_mode: "auto".to_string(),
+                enabled_tools: vec![],
+            }],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat without MCP servers
+        let chat4 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 4".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_chat(&chat1).await.unwrap();
+        repo.create_chat(&chat2).await.unwrap();
+        repo.create_chat(&chat3).await.unwrap();
+        repo.create_chat(&chat4).await.unwrap();
+
+        // Count chats using server1
+        let count1 = repo.count_chats_using_mcp_server("server1").await.unwrap();
+        assert_eq!(count1, 2); // chat1 and chat2
+
+        // Count chats using server2
+        let count2 = repo.count_chats_using_mcp_server("server2").await.unwrap();
+        assert_eq!(count2, 2); // chat2 and chat3
+
+        // Count chats using non-existent server
+        let count3 = repo
+            .count_chats_using_mcp_server("server3")
+            .await
+            .unwrap();
+        assert_eq!(count3, 0);
     }
 }

@@ -12,6 +12,7 @@
   import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { updateToolEnabled } from "$lib/api";
+  import { countChatsUsingServer } from "$lib/api/mcp";
   import type { McpServer } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
   import {
@@ -27,8 +28,10 @@
   let activeTab = $state("tools");
   let isRefreshing = $state(false);
   let showDeleteConfirm = $state(false);
+  let showDisableConfirm = $state(false);
   let showEditModal = $state(false);
   let confirmModalRef: any;
+  let relatedChatsCount = $state(0);
 
   // 记录每个项目的展开状态
   let expandedTools = $state<Record<string, boolean>>({});
@@ -83,6 +86,26 @@
   async function handleToggle(enabled: boolean) {
     if (!server) return;
 
+    // 如果是禁用操作，需要检查关联的聊天
+    if (!enabled && server.enabled) {
+      try {
+        const count = await countChatsUsingServer(server.id);
+        relatedChatsCount = count;
+        showDisableConfirm = true;
+      } catch (error) {
+        console.error("Failed to count related chats:", error);
+        // 如果检查失败，仍然允许禁用
+        performToggle(enabled);
+      }
+    } else {
+      // 启用操作直接执行
+      performToggle(enabled);
+    }
+  }
+
+  async function performToggle(enabled: boolean) {
+    if (!server) return;
+
     formData.enabled = enabled; // 立即更新UI
 
     try {
@@ -95,6 +118,15 @@
       // 发生错误时回滚UI状态
       formData.enabled = !enabled;
     }
+  }
+
+  async function confirmDisable() {
+    await performToggle(false);
+    showDisableConfirm = false;
+  }
+
+  function cancelDisable() {
+    showDisableConfirm = false;
   }
 
   async function handleRefresh() {
@@ -510,4 +542,19 @@
   onClose={() => (showDeleteConfirm = false)}
   onConfirm={confirmDelete}
   onCancel={() => {}}
+/>
+
+<!-- 禁用确认弹窗 -->
+<ConfirmModal
+  open={showDisableConfirm}
+  title="关闭 MCP 服务器"
+  message={relatedChatsCount > 0
+    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${server?.displayName || server?.name}</span>。<br/><br/>关闭此服务器后，这些会话将无法使用该服务器的工具。<br/><br/>确定要关闭吗？`
+    : `确认关闭 <span class='font-medium'>${server?.displayName || server?.name}</span> 吗？`}
+  confirmText="关闭"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  onClose={() => (showDisableConfirm = false)}
+  onConfirm={confirmDisable}
+  onCancel={cancelDisable}
 />

@@ -8,7 +8,7 @@ use crate::models::{
 };
 use crate::services::Database;
 use crate::storage::types::{McpServer, McpServerStatus};
-use crate::storage::McpRepository;
+use crate::storage::{ChatRepository, McpRepository};
 use handbox_mcp::{
     validate_server_config, ConnectionConfig, McpClient, McpClientError, McpPrompt,
     McpPromptArgument, McpResource, McpTool, ProcessConfig, SseConfig, StreamableHttpConfig,
@@ -18,12 +18,14 @@ use handbox_mcp::{
 #[derive(Clone)]
 pub struct McpService {
     repository: McpRepository,
+    chat_repository: ChatRepository,
 }
 
 impl McpService {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
-            repository: McpRepository::new(db),
+            repository: McpRepository::new(db.clone()),
+            chat_repository: ChatRepository::new(db),
         }
     }
 
@@ -277,6 +279,13 @@ impl McpService {
         server.updated_at = Self::current_timestamp();
         self.repository.update_server(&server).await?;
         Ok(server)
+    }
+
+    /// Count chats using a specific MCP server
+    pub async fn count_chats_using_server(&self, server_id: &str) -> Result<i32, AppError> {
+        self.chat_repository
+            .count_chats_using_mcp_server(server_id)
+            .await
     }
 
     /// Update server status and metadata based on connection type
