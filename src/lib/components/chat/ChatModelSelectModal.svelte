@@ -21,6 +21,7 @@
 
   let searchQuery = $state("");
   let showFavoritesOnly = $state(false);
+  let isRefreshing = $state(false);
 
   // 从状态管理中获取数据 (直接使用 provider 状态，避免透传)
   const allModels = $derived(() => {
@@ -88,10 +89,32 @@
     }
   }
 
+  // 刷新模型列表，forceRefresh=true 时强制从后端拉取
+  async function refreshModels(forceRefresh: boolean) {
+    if (isRefreshing) {
+      return;
+    }
+
+    isRefreshing = true;
+    try {
+      await providerActions.loadProvidersWithModels(forceRefresh);
+    } catch (error) {
+      console.error("Failed to refresh providers and models:", error);
+    } finally {
+      isRefreshing = false;
+    }
+  }
+
   // 组件挂载时初始化数据
   onMount(async () => {
     if (providerState.providersWithModels.length === 0) {
-      await providerActions.loadProvidersWithModels();
+      await refreshModels(false);
+    }
+  });
+
+  $effect(() => {
+    if (open) {
+      void refreshModels(true);
     }
   });
 
