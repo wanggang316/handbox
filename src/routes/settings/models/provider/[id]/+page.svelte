@@ -29,12 +29,18 @@
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import ModelInfoModal from "$lib/components/settings/ModelInfoModal.svelte";
+  import { countChatsUsingProvider } from "$lib/api/provider";
+  import { countChatsUsingModel } from "$lib/api/model";
 
   let providerId = $state("");
   let showDeleteConfirm = $state(false);
+  let showDisableConfirm = $state(false);
+  let showModelDisableConfirm = $state(false);
   let showEditModal = $state(false);
   let showModelInfo = $state(false);
   let selectedModel = $state<Model | null>(null);
+  let modelToDisable = $state<Model | null>(null);
+  let relatedChatsCount = $state(0);
 
   let confirmModalRef: any;
 
@@ -123,6 +129,26 @@
 
   async function handleToggleProvider(enabled: boolean) {
     console.log("handleToggleProvider", enabled);
+    if (!currentProvider || !currentProvider.id) return;
+
+    // 如果是禁用操作，需要检查关联的聊天
+    if (!enabled && currentProvider.enabled) {
+      try {
+        const count = await countChatsUsingProvider(currentProvider.id);
+        relatedChatsCount = count;
+        showDisableConfirm = true;
+      } catch (error) {
+        console.error("Failed to count related chats:", error);
+        // 如果检查失败，仍然允许禁用
+        performProviderToggle(enabled);
+      }
+    } else {
+      // 启用操作直接执行
+      performProviderToggle(enabled);
+    }
+  }
+
+  async function performProviderToggle(enabled: boolean) {
     if (!currentProvider) return;
 
     formData.enabled = enabled; // 立即更新UI
@@ -144,6 +170,63 @@
       // 发生错误时回滚UI状态
       formData.enabled = !enabled;
     }
+  }
+
+  async function confirmDisableProvider() {
+    await performProviderToggle(false);
+    showDisableConfirm = false;
+  }
+
+  function cancelDisableProvider() {
+    showDisableConfirm = false;
+  }
+
+  async function handleToggleModel(model: Model, enabled: boolean) {
+    if (!currentProvider) return;
+
+    // 如果是禁用操作，需要检查关联的聊天
+    if (!enabled && model.enabled) {
+      try {
+        const count = await countChatsUsingModel(model.id);
+        relatedChatsCount = count;
+        modelToDisable = model;
+        showModelDisableConfirm = true;
+      } catch (error) {
+        console.error("Failed to count related chats:", error);
+        // 如果检查失败，仍然允许禁用
+        performModelToggle(model, enabled);
+      }
+    } else {
+      // 启用操作直接执行
+      performModelToggle(model, enabled);
+    }
+  }
+
+  async function performModelToggle(model: Model, enabled: boolean) {
+    if (!currentProvider || !currentProvider.id) return;
+
+    try {
+      await providerActions.toggleModel(
+        currentProvider.id,
+        model.id,
+        enabled
+      );
+    } catch (error) {
+      console.error("Failed to toggle model:", error);
+    }
+  }
+
+  async function confirmDisableModel() {
+    if (modelToDisable) {
+      await performModelToggle(modelToDisable, false);
+      showModelDisableConfirm = false;
+      modelToDisable = null;
+    }
+  }
+
+  function cancelDisableModel() {
+    showModelDisableConfirm = false;
+    modelToDisable = null;
   }
 
   async function handleDelete() {
@@ -286,15 +369,12 @@
                 <div class="flex items-center justify-center w-16">
                   <input
                     type="checkbox"
-                    bind:checked={model.enabled}
+                    checked={model.enabled}
                     onchange={(e) => {
-                      if (currentProvider && currentProvider.id) {
-                        providerActions.toggleModel(
-                          currentProvider.id,
-                          model.id,
-                          (e.currentTarget as HTMLInputElement).checked
-                        );
-                      }
+                      handleToggleModel(
+                        model,
+                        (e.currentTarget as HTMLInputElement).checked
+                      );
                     }}
                     class="w-4 h-4 text-primary bg-base-100 border-base-300 rounded focus:ring-primary focus:ring-2"
                   />
@@ -373,4 +453,34 @@
   onClose={() => (showDeleteConfirm = false)}
   onConfirm={confirmDelete}
   onCancel={() => {}}
+/>
+
+<!-- 禁用供应商确认弹窗 -->
+<ConfirmModal
+  open={showDisableConfirm}
+  title="关闭供应商"
+  message={relatedChatsCount > 0
+    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${currentProvider?.name}</span>。<br/><br/>关闭此供应商后，这些会话将无法使用该供应商的模型。<br/><br/>确定要关闭吗？`
+    : `确认关闭 <span class='font-medium'>${currentProvider?.name}</span> 吗？`}
+  confirmText="关闭"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  onClose={() => (showDisableConfirm = false)}
+  onConfirm={confirmDisableProvider}
+  onCancel={cancelDisableProvider}
+/>
+
+<!-- 禁用模型确认弹窗 -->
+<ConfirmModal
+  open={showModelDisableConfirm}
+  title="禁用模型"
+  message={relatedChatsCount > 0
+    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用模型 <span class='font-medium'>${modelToDisable?.name}</span>。<br/><br/>禁用此模型后，这些会话将无法使用该模型。<br/><br/>确定要禁用吗？`
+    : `确认禁用模型 <span class='font-medium'>${modelToDisable?.name}</span> 吗？`}
+  confirmText="禁用"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  onClose={() => (showModelDisableConfirm = false)}
+  onConfirm={confirmDisableModel}
+  onCancel={cancelDisableModel}
 />

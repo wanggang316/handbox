@@ -3,7 +3,7 @@
 use crate::models::{AddProviderRequest, AppError};
 use crate::services::Database;
 use crate::storage::types::{Model, ModelModality, Provider, ProviderWithModels, Timestamp, UUID};
-use crate::storage::{ModelRepository, ProviderRepository};
+use crate::storage::{ChatRepository, ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
 use std::sync::Arc;
@@ -15,6 +15,7 @@ use uuid::Uuid;
 pub struct ProviderService {
     provider_repo: ProviderRepository,
     model_repo: ModelRepository,
+    chat_repo: ChatRepository,
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
@@ -23,7 +24,8 @@ impl ProviderService {
     pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
-            model_repo: ModelRepository::new(db),
+            model_repo: ModelRepository::new(Arc::clone(&db)),
+            chat_repo: ChatRepository::new(db),
             llm_config,
         }
     }
@@ -416,6 +418,11 @@ impl ProviderService {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64
+    }
+
+    /// 统计使用指定供应商的聊天数量
+    pub async fn count_chats_using_provider(&self, provider_id: &str) -> Result<i32, AppError> {
+        self.chat_repo.count_chats_using_provider(provider_id).await
     }
 }
 

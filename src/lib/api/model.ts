@@ -85,3 +85,10 @@ export async function getFavoriteModels(): Promise<Model[]> {
 export async function getAvailableModels(): Promise<Model[]> {
 	return apiCall<Model[]>('model_get_available');
 }
+
+/**
+ * 统计使用指定模型的聊天数量
+ */
+export async function countChatsUsingModel(modelId: string): Promise<number> {
+	return apiCall<number>('model_count_chats', { modelId });
+}

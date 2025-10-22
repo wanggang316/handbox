@@ -173,6 +173,7 @@ pub fn run() {
             provider_update,
             provider_delete,
             provider_toggle,
+            provider_count_chats,
             // 模型相关命令
             model_list_by_provider,
             model_toggle,
@@ -180,6 +181,7 @@ pub fn run() {
             model_get_all_with_providers,
             model_get_favorites,
             model_get_available,
+            model_count_chats,
             // MCP 管理命令
             mcp_list_servers,
             mcp_create_server,

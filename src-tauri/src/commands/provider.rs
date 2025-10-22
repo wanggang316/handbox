@@ -191,3 +191,14 @@ pub async fn provider_get_favorite_models(
 
     Ok(favorite_models)
 }
+
+/// 统计使用指定供应商的聊天数量
+#[tauri::command]
+pub async fn provider_count_chats(
+    provider_id: String,
+    provider_service: State<'_, ProviderService>,
+) -> Result<i32, AppError> {
+    provider_service
+        .count_chats_using_provider(&provider_id)
+        .await
+}

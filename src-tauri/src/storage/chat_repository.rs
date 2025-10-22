@@ -193,6 +193,46 @@ impl ChatRepository {
         Ok(count)
     }
 
+    /// 统计使用指定供应商的聊天数量
+    pub async fn count_chats_using_provider(&self, provider_id: &str) -> Result<i32, AppError> {
+        let query = r#"
+            SELECT COUNT(*) as count
+            FROM chats
+            WHERE provider_id = $1
+        "#;
+
+        let row = sqlx::query(query)
+            .bind(provider_id)
+            .fetch_one(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to count chats: {}", e))
+            })?;
+
+        let count: i32 = row.try_get("count")?;
+        Ok(count)
+    }
+
+    /// 统计使用指定模型的聊天数量
+    pub async fn count_chats_using_model(&self, model_id: &str) -> Result<i32, AppError> {
+        let query = r#"
+            SELECT COUNT(*) as count
+            FROM chats
+            WHERE model_id = $1
+        "#;
+
+        let row = sqlx::query(query)
+            .bind(model_id)
+            .fetch_one(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to count chats: {}", e))
+            })?;
+
+        let count: i32 = row.try_get("count")?;
+        Ok(count)
+    }
+
     // 辅助方法：将数据库行转换为 Chat
     fn row_to_chat(&self, row: sqlx::sqlite::SqliteRow) -> Result<Chat, AppError> {
         use crate::storage::types::McpServerConfig;
@@ -435,6 +475,204 @@ mod tests {
             .count_chats_using_mcp_server("server3")
             .await
             .unwrap();
+        assert_eq!(count3, 0);
+    }
+
+    #[tokio::test]
+    async fn test_count_chats_using_provider() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = ChatRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // Create chat with provider1
+        let chat1 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 1".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: Some("model1".to_string()),
+            provider_id: Some("provider1".to_string()),
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat with provider1
+        let chat2 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 2".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: Some("model2".to_string()),
+            provider_id: Some("provider1".to_string()),
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat with provider2
+        let chat3 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 3".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: Some("model3".to_string()),
+            provider_id: Some("provider2".to_string()),
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_chat(&chat1).await.unwrap();
+        repo.create_chat(&chat2).await.unwrap();
+        repo.create_chat(&chat3).await.unwrap();
+
+        // Count chats using provider1
+        let count1 = repo.count_chats_using_provider("provider1").await.unwrap();
+        assert_eq!(count1, 2);
+
+        // Count chats using provider2
+        let count2 = repo.count_chats_using_provider("provider2").await.unwrap();
+        assert_eq!(count2, 1);
+
+        // Count chats using non-existent provider
+        let count3 = repo
+            .count_chats_using_provider("provider3")
+            .await
+            .unwrap();
+        assert_eq!(count3, 0);
+    }
+
+    #[tokio::test]
+    async fn test_count_chats_using_model() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = ChatRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // Create chat with model1
+        let chat1 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 1".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: Some("model1".to_string()),
+            provider_id: Some("provider1".to_string()),
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat with model1
+        let chat2 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 2".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: Some("model1".to_string()),
+            provider_id: Some("provider1".to_string()),
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat with model2
+        let chat3 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 3".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: Some("model2".to_string()),
+            provider_id: Some("provider1".to_string()),
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Create chat without model
+        let chat4 = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Chat 4".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_chat(&chat1).await.unwrap();
+        repo.create_chat(&chat2).await.unwrap();
+        repo.create_chat(&chat3).await.unwrap();
+        repo.create_chat(&chat4).await.unwrap();
+
+        // Count chats using model1
+        let count1 = repo.count_chats_using_model("model1").await.unwrap();
+        assert_eq!(count1, 2);
+
+        // Count chats using model2
+        let count2 = repo.count_chats_using_model("model2").await.unwrap();
+        assert_eq!(count2, 1);
+
+        // Count chats using non-existent model
+        let count3 = repo.count_chats_using_model("model3").await.unwrap();
         assert_eq!(count3, 0);
     }
 }

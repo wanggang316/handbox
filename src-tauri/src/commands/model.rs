@@ -115,3 +115,12 @@ pub async fn model_get_available(
 ) -> Result<Vec<Model>, AppError> {
     model_service.get_available_models().await
 }
+
+/// 统计使用指定模型的聊天数量
+#[tauri::command]
+pub async fn model_count_chats(
+    model_id: String,
+    model_service: State<'_, ModelService>,
+) -> Result<i32, AppError> {
+    model_service.count_chats_using_model(&model_id).await
+}

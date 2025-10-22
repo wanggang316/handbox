@@ -3,7 +3,7 @@
 use crate::models::AppError;
 use crate::services::Database;
 use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
-use crate::storage::{ModelRepository, ProviderRepository};
+use crate::storage::{ChatRepository, ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::types::LlmModelParameter;
 use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
@@ -15,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct ModelService {
     model_repo: ModelRepository,
     provider_repo: ProviderRepository,
+    chat_repo: ChatRepository,
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
@@ -23,7 +24,8 @@ impl ModelService {
     pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             model_repo: ModelRepository::new(Arc::clone(&db)),
-            provider_repo: ProviderRepository::new(db),
+            provider_repo: ProviderRepository::new(Arc::clone(&db)),
+            chat_repo: ChatRepository::new(db),
             llm_config,
         }
     }
@@ -224,6 +226,11 @@ impl ModelService {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64
+    }
+
+    /// 统计使用指定模型的聊天数量
+    pub async fn count_chats_using_model(&self, model_id: &str) -> Result<i32, AppError> {
+        self.chat_repo.count_chats_using_model(model_id).await
     }
 }
 

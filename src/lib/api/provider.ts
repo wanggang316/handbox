@@ -78,3 +78,10 @@ export async function getProviderConfigByType(
 		provider_type: providerType
 	});
 }
+
+/**
+ * 统计使用指定供应商的聊天数量
+ */
+export async function countChatsUsingProvider(providerId: string): Promise<number> {
+	return apiCall<number>('provider_count_chats', { providerId });
+}
