@@ -11,8 +11,8 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ChatService, McpService, MessageService, ModelService, ProviderService, StorageService,
-    UserSessionService,
+    ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
+    StorageService, UserSessionService,
 };
 use crate::storage::Database;
 use crate::utils::logger;
@@ -69,6 +69,8 @@ async fn initialize_services(
         llm_config_provider,
     );
 
+    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
+
     // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());
 
@@ -84,6 +86,7 @@ async fn initialize_services(
     app.manage(provider_service);
     app.manage(model_service);
     app.manage(mcp_service);
+    app.manage(search_service);
     app.manage(user_session_service);
 
     Ok(())
@@ -194,6 +197,12 @@ pub fn run() {
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
+            // 搜索相关命令
+            search_query,
+            search_history,
+            search_add_history,
+            search_clear_history,
+            search_suggestions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

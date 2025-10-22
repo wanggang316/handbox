@@ -13,6 +13,8 @@
   let chatId = $state('');
   let messageInput = $state('');
   let editingMessageId = $state<string | null>(null);
+  let targetMessageId = $state<string | null>(null);
+  let messageFocusKey = $state<string | null>(null);
 
   // 从 URL 参数获取聊天 ID
   onMount(async () => {
@@ -23,6 +25,10 @@
 
     const urlParams = $page.url.searchParams;
     const newChatId = urlParams.get('id') || '';
+    targetMessageId = urlParams.get('message');
+    messageFocusKey = targetMessageId
+      ? `${targetMessageId}:${urlParams.get('focus') ?? ''}`
+      : null;
 
     // 如果有 chatId，切换到对应聊天
     if (newChatId && newChatId !== chatId) {
@@ -43,6 +49,10 @@
   $effect(() => {
     const urlParams = $page.url.searchParams;
     const newChatId = urlParams.get('id') || '';
+    const newMessageId = urlParams.get('message');
+    const newFocusKey = newMessageId
+      ? `${newMessageId}:${urlParams.get('focus') ?? ''}`
+      : null;
 
     if (newChatId !== chatId) {
       chatId = newChatId;
@@ -57,6 +67,9 @@
         chatState.currentChat = null;
       }
     }
+
+    targetMessageId = newMessageId;
+    messageFocusKey = newFocusKey;
   });
 
   // 派生状态：当前聊天信息
@@ -152,7 +165,11 @@
   
   <!-- 可滚动的聊天内容区域，占据剩余空间 -->
   <div class="flex-1 min-h-0">
-    <ChatContentView onEditMessage={handleEditMessage} />
+    <ChatContentView
+      onEditMessage={handleEditMessage}
+      targetMessageId={targetMessageId}
+      focusKey={messageFocusKey}
+    />
   </div>
 
   <!-- 固定在底部的输入区域 -->

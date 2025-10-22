@@ -3,6 +3,7 @@
   import { messageStore } from '$lib/states/message.svelte';
   import { Bot } from 'lucide-svelte';
   import type { Message } from '$lib/types';
+  import { tick } from 'svelte';
 
   // Import child components
   import UserMessageView from './messages/MessageUser.svelte';
@@ -11,9 +12,11 @@
 
   interface Props {
     onEditMessage?: (messageId: string, content: string) => void;
+    targetMessageId?: string | null;
+    focusKey?: string | null;
   }
 
-  let { onEditMessage }: Props = $props();
+  let { onEditMessage, targetMessageId = null, focusKey = null }: Props = $props();
 
   // 复制消息内容
   async function copyMessage(content: string) {
@@ -207,6 +210,8 @@
   
   // 消息容器引用
   let messagesContainer: HTMLDivElement;
+  let currentHighlightElement: HTMLElement | null = null;
+  let lastAppliedFocusKey = $state<string | null>(null);
   
   // 自动滚动到底部
   function scrollToBottom() {
@@ -227,6 +232,50 @@
   $effect(() => {
     if (streamingContent || streamingToolCalls) {
       setTimeout(scrollToBottom, 50);
+    }
+  });
+
+  async function highlightMessage(messageId: string) {
+    await tick();
+    await tick();
+    const element = document.getElementById(`message-${messageId}`);
+    if (!element) {
+      return;
+    }
+
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    if (currentHighlightElement) {
+      currentHighlightElement.classList.remove('search-highlight');
+    }
+
+    currentHighlightElement = element as HTMLElement;
+    currentHighlightElement.classList.add('search-highlight');
+
+    window.setTimeout(() => {
+      if (currentHighlightElement === element) {
+        currentHighlightElement.classList.remove('search-highlight');
+        currentHighlightElement = null;
+      } else if (element.classList.contains('search-highlight')) {
+        element.classList.remove('search-highlight');
+      }
+    }, 2000);
+  }
+
+  $effect(() => {
+    if (!targetMessageId || !focusKey) {
+      return;
+    }
+
+    if (focusKey === lastAppliedFocusKey) {
+      return;
+    }
+
+    const exists = messages.some((message) => message.id === targetMessageId);
+
+    if (exists) {
+      lastAppliedFocusKey = focusKey;
+      void highlightMessage(targetMessageId);
     }
   });
 </script>
@@ -336,6 +385,12 @@
 />
 
 <style>
+  :global(.search-highlight) {
+    box-shadow: 0 0 0 2px var(--theme-color, rgba(59, 130, 246, 0.5));
+    border-radius: 16px;
+    transition: box-shadow 0.3s ease;
+  }
+
   /* 自定义滚动条 */
   .overflow-y-auto::-webkit-scrollbar {
     width: 6px;

@@ -11,6 +11,7 @@
   import { Box, Plus, Search } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login } from "$lib/states/auth.svelte";
+  import SearchModal from "$lib/components/search/SearchModal.svelte";
 
   // 获取当前选中的聊天 ID
   let currentChatId = $derived(
@@ -43,10 +44,10 @@
     goto("/chat");
   }
 
+  let showSearchModal = $state(false);
+
   function handleSearchClick() {
-    console.log("Clicked search");
-    // 导航到搜索页面
-    goto("/search");
+    showSearchModal = true;
   }
 
   async function handleUserClick() {
@@ -156,4 +157,6 @@
   <div class="flex-shrink-0 p-2">
     <UserSidebar user={currentUser} onUserClick={handleUserClick} />
   </div>
+
+  <SearchModal bind:open={showSearchModal} />
 </div>

@@ -171,10 +171,7 @@ impl ChatRepository {
     }
 
     /// 统计使用指定 MCP 服务器的聊天数量
-    pub async fn count_chats_using_mcp_server(
-        &self,
-        server_id: &str,
-    ) -> Result<i32, AppError> {
+    pub async fn count_chats_using_mcp_server(&self, server_id: &str) -> Result<i32, AppError> {
         let query = r#"
             SELECT COUNT(*) as count
             FROM chats
@@ -185,9 +182,7 @@ impl ChatRepository {
             .bind(server_id)
             .fetch_one(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to count chats: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to count chats: {}", e)))?;
 
         let count: i32 = row.try_get("count")?;
         Ok(count)
@@ -205,9 +200,7 @@ impl ChatRepository {
             .bind(provider_id)
             .fetch_one(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to count chats: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to count chats: {}", e)))?;
 
         let count: i32 = row.try_get("count")?;
         Ok(count)
@@ -225,9 +218,7 @@ impl ChatRepository {
             .bind(model_id)
             .fetch_one(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to count chats: {}", e))
-            })?;
+            .map_err(|e| AppError::internal_error(&format!("Failed to count chats: {}", e)))?;
 
         let count: i32 = row.try_get("count")?;
         Ok(count)
@@ -471,10 +462,7 @@ mod tests {
         assert_eq!(count2, 2); // chat2 and chat3
 
         // Count chats using non-existent server
-        let count3 = repo
-            .count_chats_using_mcp_server("server3")
-            .await
-            .unwrap();
+        let count3 = repo.count_chats_using_mcp_server("server3").await.unwrap();
         assert_eq!(count3, 0);
     }
 
@@ -561,10 +549,7 @@ mod tests {
         assert_eq!(count2, 1);
 
         // Count chats using non-existent provider
-        let count3 = repo
-            .count_chats_using_provider("provider3")
-            .await
-            .unwrap();
+        let count3 = repo.count_chats_using_provider("provider3").await.unwrap();
         assert_eq!(count3, 0);
     }
 

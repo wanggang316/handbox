@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod message;
 pub mod model;
 pub mod provider;
+pub mod search;
 pub mod settings;
 pub mod user;
 
@@ -20,5 +21,6 @@ pub use mcp::*;
 pub use message::*;
 pub use model::*;
 pub use provider::*;
+pub use search::*;
 pub use settings::*;
 pub use user::*;

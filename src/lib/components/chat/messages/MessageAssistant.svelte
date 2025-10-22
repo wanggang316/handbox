@@ -186,7 +186,10 @@
   }
 </script>
 
-<div class="group relative">
+<div
+  class="group relative"
+  id={message?.id ? "message-" + message.id : undefined}
+>
   <!-- 消息容器 -->
   <div class="flex flex-col gap-2">
     <!-- 模型供应商图标（模型） -->

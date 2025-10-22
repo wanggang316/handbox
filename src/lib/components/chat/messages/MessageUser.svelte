@@ -39,7 +39,7 @@
   }
 </script>
 
-<div class="group relative">
+<div class="group relative" id={"message-" + message.id}>
   <!-- 消息容器 -->
   <div class="flex justify-end">
     <!-- 消息内容 -->

@@ -5,6 +5,7 @@ pub mod mcp;
 pub mod message;
 pub mod model;
 pub mod provider;
+pub mod search;
 pub mod storage;
 pub mod user_session;
 
@@ -16,5 +17,6 @@ pub use mcp::McpService;
 pub use message::MessageService;
 pub use model::ModelService;
 pub use provider::ProviderService;
+pub use search::SearchService;
 pub use storage::StorageService;
 pub use user_session::UserSessionService;

@@ -6,6 +6,7 @@ pub mod mcp;
 pub mod message;
 pub mod model;
 pub mod provider;
+pub mod search;
 pub mod window;
 
 // 重新导出所有命令
@@ -16,4 +17,5 @@ pub use mcp::*;
 pub use message::*;
 pub use model::*;
 pub use provider::*;
+pub use search::*;
 pub use window::*;
