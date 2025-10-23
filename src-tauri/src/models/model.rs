@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListModelsRequest {
     pub provider_id: UUID,
-    pub force_refresh: Option<bool>,
+    pub refresh_from_remote: Option<bool>,
 }
 
 /// 模型列表响应

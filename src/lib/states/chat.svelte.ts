@@ -284,12 +284,6 @@ export function currentChatModel(): { model?: ModelWithProvider } {
 
 // 聊天操作函数
 export const chatActions = {
-  /**
-   * 切换模型收藏状态（委托给 providerActions）
-   */
-  async toggleModelFavorite(providerId: string, modelId: string, favorite: boolean): Promise<void> {
-    return providerActions.toggleModelFavorite(providerId, modelId, favorite);
-  },
 
   /**
    * 更新聊天配置

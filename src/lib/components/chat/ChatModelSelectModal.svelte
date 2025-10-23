@@ -3,7 +3,6 @@
   import { Search, Star, Check } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
   import { providerState, providerActions } from "$lib/states/provider.svelte";
-  import { onMount } from "svelte";
 
   interface Props {
     open?: boolean;
@@ -21,23 +20,26 @@
 
   let searchQuery = $state("");
   let showFavoritesOnly = $state(false);
-  let isRefreshing = $state(false);
-
-  // 从状态管理中获取数据 (直接使用 provider 状态，避免透传)
+  // 从 provider 状态派生可用模型，仅关注已启用的供应商与模型
   const allModels = $derived(() => {
-    return providerState.providersWithModels.flatMap((provider) =>
-      provider.models.map((model) => ({
-        ...model,
-        providerName: provider.name,
-        providerType: provider.provider_type,
-      }))
-    );
+    return providerState.providersWithModels
+      .filter((provider) => provider.enabled)
+      .flatMap((provider) =>
+        provider.models
+          .filter((model) => model.enabled)
+          .map((model) => ({
+            ...model,
+            providerName: provider.name,
+            providerType: provider.provider_type,
+          }))
+      );
   });
 
   const favoriteModels = $derived(() => {
     return allModels().filter((model) => model.favorite);
   });
   const selectedModelId = $derived(selectedModel?.id || "");
+  const isLoadingModels = $derived(() => providerState.isLoadingWithModels);
 
   // 过滤后的模型
   const filteredModels = $derived(() => {
@@ -71,6 +73,34 @@
     return groups;
   });
 
+  const shouldEnsureProvidersWithModels = $derived(() => {
+    console.log("open: " + open);
+    console.log("isLoadingWithModels: " + providerState.isLoadingWithModels);
+    console.log(
+      "providerState.providersWithModelsNeedRefresh: " +
+        providerState.providersWithModelsNeedRefresh
+    );
+
+    return (
+      open &&
+      !providerState.isLoadingWithModels &&
+      providerState.providersWithModelsNeedRefresh
+    );
+  });
+
+  $effect(() => {
+    console.log("----------1");
+    if (!shouldEnsureProvidersWithModels()) {
+      console.log("----------333");
+      return;
+    }
+
+    console.log("----------2");
+
+    // providerState.providersWithModelsNeedRefresh = false;
+    providerActions.loadProvidersWithModels();
+  });
+
   function handleModelSelect(model: ModelWithProvider) {
     onModelSelect(model);
     handleClose();
@@ -82,41 +112,13 @@
       await providerActions.toggleModelFavorite(
         model.provider_id,
         model.id,
-        !model.favorite
+        !model.favorite,
+        { skipRefreshFlag: true }
       );
     } catch (error) {
       console.error("Failed to toggle favorite:", error);
     }
   }
-
-  // 刷新模型列表，forceRefresh=true 时强制从后端拉取
-  async function refreshModels(forceRefresh: boolean) {
-    if (isRefreshing) {
-      return;
-    }
-
-    isRefreshing = true;
-    try {
-      await providerActions.loadProvidersWithModels(forceRefresh);
-    } catch (error) {
-      console.error("Failed to refresh providers and models:", error);
-    } finally {
-      isRefreshing = false;
-    }
-  }
-
-  // 组件挂载时初始化数据
-  onMount(async () => {
-    if (providerState.providersWithModels.length === 0) {
-      await refreshModels(false);
-    }
-  });
-
-  $effect(() => {
-    if (open) {
-      void refreshModels(true);
-    }
-  });
 
   function handleClose() {
     open = false;
@@ -162,7 +164,11 @@
       <!-- 过滤器按钮 -->
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs text-base-content/70">
-          共找到 {filteredModels().length} 个模型
+          {#if isLoadingModels()}
+            正在加载模型...
+          {:else}
+            共找到 {filteredModels().length} 个模型
+          {/if}
         </div>
 
         <button

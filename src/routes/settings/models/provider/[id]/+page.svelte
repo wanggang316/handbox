@@ -8,11 +8,7 @@
     providerStateActions,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import type {
-    Provider,
-    AddProviderRequest,
-    Model,
-  } from "$lib/types/provider";
+  import type { Model } from "$lib/types/provider";
   import {
     Trash2,
     ChevronLeft,
@@ -206,11 +202,7 @@
     if (!currentProvider || !currentProvider.id) return;
 
     try {
-      await providerActions.toggleModel(
-        currentProvider.id,
-        model.id,
-        enabled
-      );
+      await providerActions.toggleModel(currentProvider.id, model.id, enabled);
     } catch (error) {
       console.error("Failed to toggle model:", error);
     }

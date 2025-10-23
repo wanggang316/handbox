@@ -49,7 +49,7 @@ impl ModelService {
     pub async fn get_provider_models(
         &self,
         provider_id: &UUID,
-        force_refresh: bool,
+        refresh_from_remote: bool,
     ) -> Result<Vec<Model>, AppError> {
         // 先获取供应商信息
         let provider = self
@@ -59,20 +59,20 @@ impl ModelService {
             .ok_or_else(|| AppError::validation_error("Provider not found"))?;
 
         tracing::info!(
-            "Getting models for provider: {}, force_refresh: {}",
+            "Getting models for provider: {}, refresh_from_remote: {}",
             provider.name,
-            force_refresh
+            refresh_from_remote
         );
 
-        // 如果不强制刷新，先尝试从数据库获取
-        if !force_refresh {
+        // 如果不拉取远程，先尝试从数据库获取
+        if !refresh_from_remote {
             let cached_models = self.model_repo.get_models_by_provider(provider_id).await?;
             // 合并配置文件中的参数信息
             let merged_models = self.merge_model_parameters(cached_models, &provider.provider_type);
             return Ok(merged_models);
         }
 
-        // 强制刷新：从 API 获取最新模型列表
+        // 远程刷新：从 API 获取最新模型列表
         let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
             .map_err(AppError::from)?;
         let context = Self::provider_context(&provider);

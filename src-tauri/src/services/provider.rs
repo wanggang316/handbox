@@ -327,17 +327,17 @@ impl ProviderService {
     pub async fn get_provider_models(
         &self,
         provider_id: &UUID,
-        force_refresh: bool,
+        refresh_from_remote: bool,
     ) -> Result<Vec<Model>, AppError> {
         let provider = self.get_provider(provider_id).await?;
 
         tracing::info!(
-            "Getting provider models for provider: {}, force_refresh: {}",
+            "Getting provider models for provider: {}, refresh_from_remote: {}",
             provider.name,
-            force_refresh
+            refresh_from_remote
         );
-        // 如果不强制刷新，先尝试从数据库获取
-        if !force_refresh {
+        // 如果不需要访问远程，优先从数据库读取缓存
+        if !refresh_from_remote {
             let cached_models = self.model_repo.get_models_by_provider(provider_id).await?;
             // if !cached_models.is_empty() {
             return Ok(cached_models);

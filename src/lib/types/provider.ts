@@ -108,7 +108,7 @@ export interface ProviderConfigsResponse {
 // 模型列表请求
 export interface ListModelsRequest {
   providerId: string;
-  forceRefresh?: boolean;
+  refreshFromRemote?: boolean;
 }
 
 // 模型列表响应

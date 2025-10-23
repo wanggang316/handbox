@@ -19,7 +19,7 @@
     username: authState.user?.username,
     email: authState.user?.email,
     avatar: authState.user?.avatar,
-    isPro: authState.user?.isPro || false
+    isPro: authState.user?.isPro || false,
   });
 
   function handleEditProfile() {
@@ -31,7 +31,11 @@
     errorMessage = null;
   }
 
-  async function handleSaveProfile(userData: { username: string; email: string; avatar?: string }) {
+  async function handleSaveProfile(userData: {
+    username: string;
+    email: string;
+    avatar?: string;
+  }) {
     if (!authState.isLoggedIn) return;
 
     isLoading = true;
@@ -41,7 +45,7 @@
       // 调用后端更新用户资料
       const updatedUser = await updateUserProfile({
         username: userData.username,
-        avatar: userData.avatar
+        avatar: userData.avatar,
       });
 
       // 更新认证状态
@@ -82,7 +86,7 @@
   }
 </script>
 
-<div class="p-6 pr-8 flex flex-col gap-y-4">
+<div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
   <!-- 错误提示 -->
   {#if errorMessage}
     <div class="p-4 bg-error/10 border border-error/20 rounded-lg">
@@ -120,7 +124,7 @@
         on:click={handleLogout}
         disabled={isLoading}
       >
-        {isLoading ? '退出中...' : '退出登录'}
+        {isLoading ? "退出中..." : "退出登录"}
       </Button>
     </div>
   {:else}
@@ -138,7 +142,7 @@
     user={{
       username: authState.user.username,
       email: authState.user.email,
-      avatar: authState.user.avatar || ''
+      avatar: authState.user.avatar || "",
     }}
     onClose={handleCloseModal}
     onSave={handleSaveProfile}

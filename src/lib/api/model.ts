@@ -17,12 +17,12 @@ import type {
  */
 export async function getProviderModels(
 	providerId: UUID,
-	forceRefresh: boolean
+	refreshFromRemote: boolean
 ): Promise<ListModelsResponse> {
 	return apiCall<ListModelsResponse>('model_list_by_provider', {
 		request: {
 			provider_id: providerId,
-			force_refresh: forceRefresh
+			refresh_from_remote: refreshFromRemote
 		}
 	});
 }
@@ -65,10 +65,10 @@ export async function toggleModelFavorite(
  * 获取所有供应商及其模型（包含收藏状态）
  */
 export async function getAllModelsWithProviders(
-	forceRefresh: boolean = false
+	refreshFromRemote: boolean = false
 ): Promise<ProviderWithModels[]> {
 	return apiCall<ProviderWithModels[]>('model_get_all_with_providers', {
-		force_refresh: forceRefresh
+		refresh_from_remote: refreshFromRemote
 	});
 }
 

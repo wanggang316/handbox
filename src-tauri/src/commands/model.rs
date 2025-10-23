@@ -13,15 +13,15 @@ pub async fn model_list_by_provider(
     request: ListModelsRequest,
     model_service: State<'_, ModelService>,
 ) -> Result<ListModelsResponse, AppError> {
-    let force_refresh = request.force_refresh.unwrap_or(false);
+    let refresh_from_remote = request.refresh_from_remote.unwrap_or(false);
 
     let models = model_service
-        .get_provider_models(&request.provider_id, force_refresh)
+        .get_provider_models(&request.provider_id, refresh_from_remote)
         .await?;
 
     Ok(ListModelsResponse {
         models,
-        cached: !force_refresh,
+        cached: !refresh_from_remote,
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -54,17 +54,17 @@ pub async fn model_toggle_favorite(
 /// 获取所有供应商及其模型（包含收藏状态）
 #[tauri::command]
 pub async fn model_get_all_with_providers(
-    force_refresh: Option<bool>,
+    refresh_from_remote: Option<bool>,
     provider_service: State<'_, ProviderService>,
     model_service: State<'_, ModelService>,
 ) -> Result<Vec<ProviderWithModels>, AppError> {
-    let force_refresh = force_refresh.unwrap_or(false);
+    let refresh_from_remote = refresh_from_remote.unwrap_or(false);
     let providers = provider_service.list_providers().await?;
     let mut result = Vec::new();
 
     for provider in providers {
         match model_service
-            .get_provider_models(&provider.id, force_refresh)
+            .get_provider_models(&provider.id, refresh_from_remote)
             .await
         {
             Ok(models) => {

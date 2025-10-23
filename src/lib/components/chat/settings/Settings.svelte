@@ -45,7 +45,7 @@
 
   $effect(() => {
     if (open) {
-      void refreshChatSettingsData();
+      // void refreshChatSettingsData();
     }
   });
 </script>
