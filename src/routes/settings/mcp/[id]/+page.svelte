@@ -92,6 +92,7 @@
         const count = await countChatsUsingServer(server.id);
         relatedChatsCount = count;
         showDisableConfirm = true;
+        // 注意：不要在这里更新 formData.enabled，等待用户确认
       } catch (error) {
         console.error("Failed to count related chats:", error);
         // 如果检查失败，仍然允许禁用
@@ -106,7 +107,9 @@
   async function performToggle(enabled: boolean) {
     if (!server) return;
 
-    formData.enabled = enabled; // 立即更新UI
+    // 乐观更新UI
+    const previousState = formData.enabled;
+    formData.enabled = enabled;
 
     try {
       await mcpActions.toggleServer({ serverId: server.id, enabled });
@@ -116,7 +119,7 @@
     } catch (error) {
       console.error("Failed to toggle MCP server:", error);
       // 发生错误时回滚UI状态
-      formData.enabled = !enabled;
+      formData.enabled = previousState;
     }
   }
 
@@ -127,6 +130,7 @@
 
   function cancelDisable() {
     showDisableConfirm = false;
+    // 不需要回滚状态，因为我们从未更新过 formData.enabled
   }
 
   async function handleRefresh() {
@@ -229,6 +233,13 @@
 
       // 强制刷新服务器列表，确保列表页和详情页数据同步
       await mcpActions.loadServers(true);
+
+      // 通知其他窗口 MCP 工具已更新
+      mcpActions.notifyMcpServersUpdated('mcp-tool-toggled', {
+        serverId: server.id,
+        toolName,
+        enabled
+      });
     } catch (error) {
       console.error("Failed to update tool enabled status:", error);
     }

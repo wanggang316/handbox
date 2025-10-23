@@ -133,6 +133,7 @@
         const count = await countChatsUsingProvider(currentProvider.id);
         relatedChatsCount = count;
         showDisableConfirm = true;
+        // 注意：不要在这里更新 formData.enabled，等待用户确认
       } catch (error) {
         console.error("Failed to count related chats:", error);
         // 如果检查失败，仍然允许禁用
@@ -147,7 +148,9 @@
   async function performProviderToggle(enabled: boolean) {
     if (!currentProvider) return;
 
-    formData.enabled = enabled; // 立即更新UI
+    // 乐观更新UI
+    const previousState = formData.enabled;
+    formData.enabled = enabled;
 
     try {
       if (!currentProvider.id) {
@@ -164,7 +167,7 @@
     } catch (error) {
       console.error("Failed to toggle provider:", error);
       // 发生错误时回滚UI状态
-      formData.enabled = !enabled;
+      formData.enabled = previousState;
     }
   }
 
@@ -175,6 +178,7 @@
 
   function cancelDisableProvider() {
     showDisableConfirm = false;
+    // 不需要回滚状态，因为我们从未更新过 formData.enabled
   }
 
   async function handleToggleModel(model: Model, enabled: boolean) {

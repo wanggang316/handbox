@@ -7,7 +7,12 @@
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import DropDown from "$lib/components/ui/DropDown.svelte";
   import { chatState, chatActions } from "$lib/states/chat.svelte";
-  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
+  import {
+    mcpState,
+    mcpActions,
+    setupMcpServersUpdatedListener,
+    cleanupMcpServersUpdatedListener
+  } from "$lib/states/mcp.svelte";
   import type { McpServer, McpServerConfig } from "$lib/types";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
@@ -31,16 +36,36 @@
   ];
 
   onMount(() => {
+    // 注册跨窗口事件监听器（用于同步 MCP 服务器状态）
+    setupMcpServersUpdatedListener().catch((error) => {
+      console.error('Failed to setup MCP servers updated listener:', error);
+    });
+
     if (!mcpState.initialized) {
       mcpActions.loadServers().catch((error) => {
         console.error("Failed to load MCP servers:", error);
       });
     }
+
+    // 清理函数
+    return () => {
+      cleanupMcpServersUpdatedListener();
+    };
   });
 
   $effect(() => {
     currentServers = chatState.currentChat?.mcpServers || [];
     originalServers = chatState.currentChat?.mcpServers || [];
+  });
+
+  // 监听 MCP 服务器更新事件，自动刷新
+  $effect(() => {
+    if (mcpState.needsRefresh) {
+      console.log('[Tools] MCP servers needs refresh, reloading...');
+      mcpActions.loadServers(true).catch((error) => {
+        console.error('[Tools] Failed to reload MCP servers:', error);
+      });
+    }
   });
 
   const hasChanges = $derived(() => {

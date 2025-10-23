@@ -90,6 +90,7 @@
         relatedChatsCount = count;
         serverToDisable = server;
         showDisableConfirm = true;
+        // 注意：不要在这里执行 performToggle，等待用户确认
       } catch (error) {
         console.error("Failed to count related chats:", error);
         // 如果检查失败，仍然允许禁用
@@ -117,9 +118,13 @@
     }
   }
 
-  function cancelDisable() {
+  async function cancelDisable() {
     showDisableConfirm = false;
     serverToDisable = null;
+    // 强制刷新服务器列表以恢复 Toggle 状态
+    // 因为 Toggle 组件使用双向绑定，用户点击会立即改变内部状态
+    // 我们需要重新加载数据来恢复正确的状态
+    await mcpActions.loadServers(true);
   }
 
   function handleEditServer(server: McpServer, event: MouseEvent) {
