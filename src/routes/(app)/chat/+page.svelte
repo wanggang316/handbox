@@ -6,9 +6,13 @@
   import { onMount } from 'svelte';
   import { uiState } from '$lib/states/ui.svelte';
   import { chatState, chatActions, hasActiveChat, currentChatModel } from '$lib/states/chat.svelte';
+  import {
+    setupProvidersUpdatedListener,
+    cleanupProvidersUpdatedListener
+  } from '$lib/states/provider.svelte';
   import * as chatApi from '$lib/api/chat';
   import { goto } from '$app/navigation';
-    import { messageStore } from '$lib/states';
+  import { messageStore } from '$lib/states';
 
   let chatId = $state('');
   let messageInput = $state('');
@@ -17,32 +21,45 @@
   let messageFocusKey = $state<string | null>(null);
 
   // 从 URL 参数获取聊天 ID
-  onMount(async () => {
-    // 确保 chatState 已经初始化
-    if (!chatState.isInitialized && !chatState.isInitializing) {
-      await chatActions.initialize();
-    }
+  onMount(() => {
+    // 注册跨窗口事件监听器（用于同步供应商/模型状态）
+    setupProvidersUpdatedListener().catch((error) => {
+      console.error('Failed to setup providers updated listener:', error);
+    });
 
-    const urlParams = $page.url.searchParams;
-    const newChatId = urlParams.get('id') || '';
-    targetMessageId = urlParams.get('message');
-    messageFocusKey = targetMessageId
-      ? `${targetMessageId}:${urlParams.get('focus') ?? ''}`
-      : null;
-
-    // 如果有 chatId，切换到对应聊天
-    if (newChatId && newChatId !== chatId) {
-      chatId = newChatId;
-      try {
-        await chatActions.switchToChat(chatId);
-      } catch (error: any) {
-        console.error('Failed to switch to chat:', error);
+    // 异步初始化
+    (async () => {
+      // 确保 chatState 已经初始化
+      if (!chatState.isInitialized && !chatState.isInitializing) {
+        await chatActions.initialize();
       }
-    } else if (!newChatId) {
-      // 清空当前聊天状态，显示默认界面
-      chatId = '';
-      chatState.currentChat = null;
-    }
+
+      const urlParams = $page.url.searchParams;
+      const newChatId = urlParams.get('id') || '';
+      targetMessageId = urlParams.get('message');
+      messageFocusKey = targetMessageId
+        ? `${targetMessageId}:${urlParams.get('focus') ?? ''}`
+        : null;
+
+      // 如果有 chatId，切换到对应聊天
+      if (newChatId && newChatId !== chatId) {
+        chatId = newChatId;
+        try {
+          await chatActions.switchToChat(chatId);
+        } catch (error: any) {
+          console.error('Failed to switch to chat:', error);
+        }
+      } else if (!newChatId) {
+        // 清空当前聊天状态，显示默认界面
+        chatId = '';
+        chatState.currentChat = null;
+      }
+    })();
+
+    // 清理函数
+    return () => {
+      cleanupProvidersUpdatedListener();
+    };
   });
 
   // 监听 URL 变化

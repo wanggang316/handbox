@@ -13,37 +13,61 @@ import type {
 import type { ModelWithProvider } from '../types/provider';
 import * as providerApi from '../api/provider';
 import * as modelApi from '../api/model';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { Window as TauriWindow } from '@tauri-apps/api/window';
+import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 
 declare global {
   interface Window {
     __TAURI__?: unknown;
+    isTauri?: boolean;
   }
 }
 
+/**
+ * 检测是否在 Tauri 环境中运行
+ * Tauri 2.0+ 提供 window.isTauri 和 window.__TAURI__
+ * 注意：只有在 Tauri webview 中才会有这些属性（npm run tauri dev）
+ * 如果运行 npm run dev（浏览器模式），这些属性不存在
+ */
 function isTauriEnvironment(): boolean {
-  return typeof window !== 'undefined' && '__TAURI__' in window;
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  // Tauri 2.0+ 推荐方式
+  if ('isTauri' in window && window.isTauri === true) {
+    return true;
+  }
+
+  // 兼容旧版本
+  if ('__TAURI__' in window && window.__TAURI__) {
+    return true;
+  }
+
+  return false;
 }
 
+/**
+ * 使用 Tauri 2 的 emit() API 向所有窗口广播事件
+ * emit() 会自动将事件发送到所有窗口，无需手动遍历
+ */
 async function emitProvidersUpdated(
   payload: Record<string, unknown>
 ): Promise<void> {
+  console.log('[emitProvidersUpdated] Checking environment...');
+  console.log('[emitProvidersUpdated] isTauriEnvironment:', isTauriEnvironment());
+
   if (!isTauriEnvironment()) {
+    console.log('[emitProvidersUpdated] Not in Tauri environment, skipping emit');
     return;
   }
 
   try {
-    const windows = await TauriWindow.getAll();
-    await Promise.all(
-      windows.map(tauriWindow =>
-        tauriWindow.emit('providers:updated', payload).catch(error => {
-          console.error(`Failed to emit providers:updated to window ${tauriWindow.label}:`, error);
-        })
-      )
-    );
+    console.log('[emitProvidersUpdated] Emitting providers:updated event with payload:', payload);
+    // Tauri 2: emit() 自动广播到所有窗口
+    await emit('providers:updated', payload);
+    console.log('[emitProvidersUpdated] Event emitted successfully to all windows');
   } catch (error) {
-    console.error('Failed to broadcast providers:updated event:', error);
+    console.error('[emitProvidersUpdated] Failed to broadcast providers:updated event:', error);
   }
 }
 
@@ -120,8 +144,10 @@ function markProvidersWithModelsDirty(
   reason: string,
   data?: Record<string, unknown>
 ): void {
+  console.log('[markProvidersWithModelsDirty] Called with reason:', reason, 'data:', data);
   providerState.providersWithModelsNeedRefresh = true;
   const payload = data ? { reason, ...data } : { reason };
+  console.log('[markProvidersWithModelsDirty] Calling emitProvidersUpdated with payload:', payload);
   void emitProvidersUpdated(payload);
 }
 
@@ -571,27 +597,53 @@ export const providerActions = {
   }
 };
 
-async function setupProvidersUpdatedListener(): Promise<void> {
-  if (!isTauriEnvironment() || providersUpdatedUnlisten) {
+/**
+ * 注册 providers:updated 事件监听器
+ * 应该在组件 onMount 时调用，确保 Tauri 环境已准备好
+ */
+export async function setupProvidersUpdatedListener(): Promise<void> {
+  console.log('[setupProvidersUpdatedListener] Setting up listener...');
+  console.log('[setupProvidersUpdatedListener] Environment check:');
+  console.log('  - typeof window:', typeof window);
+  console.log('  - window.isTauri:', typeof window !== 'undefined' ? window.isTauri : 'N/A');
+  console.log('  - window.__TAURI__:', typeof window !== 'undefined' ? window.__TAURI__ : 'N/A');
+  console.log('  - isTauriEnvironment():', isTauriEnvironment());
+  console.log('[setupProvidersUpdatedListener] providersUpdatedUnlisten:', providersUpdatedUnlisten);
+
+  if (!isTauriEnvironment()) {
+    console.warn('[setupProvidersUpdatedListener] ⚠️  Not in Tauri environment!');
+    console.warn('  Make sure you are running "npm run tauri dev", not just "npm run dev"');
+    console.warn('  Cross-window events will not work in browser-only mode');
+    return;
+  }
+
+  if (providersUpdatedUnlisten) {
+    console.log('[setupProvidersUpdatedListener] Listener already set up');
     return;
   }
 
   try {
+    console.log('[setupProvidersUpdatedListener] Registering listener for providers:updated event');
     providersUpdatedUnlisten = await listen('providers:updated', event => {
-      console.log('providers:updated event received', event);
+      console.log('[providersUpdatedListener] providers:updated event received', event);
+      // 仅标记需要刷新，不自动加载
+      // 让各个组件根据自己的需要在打开时检查并加载
       providerState.providersWithModelsNeedRefresh = true;
-
-      void providerActions
-        .loadProvidersWithModels()
-        .catch(error => {
-          console.error('Failed to reload providers after providers:updated event:', error);
-        });
+      console.log('[providersUpdatedListener] Set providersWithModelsNeedRefresh to true');
     });
+    console.log('[setupProvidersUpdatedListener] Listener registered successfully');
   } catch (error) {
-    console.error('Failed to register providers:updated listener:', error);
+    console.error('[setupProvidersUpdatedListener] Failed to register providers:updated listener:', error);
   }
 }
 
-if (typeof window !== 'undefined') {
-  void setupProvidersUpdatedListener();
+/**
+ * 清理事件监听器
+ */
+export function cleanupProvidersUpdatedListener(): void {
+  if (providersUpdatedUnlisten) {
+    console.log('[cleanupProvidersUpdatedListener] Cleaning up listener');
+    providersUpdatedUnlisten();
+    providersUpdatedUnlisten = null;
+  }
 }

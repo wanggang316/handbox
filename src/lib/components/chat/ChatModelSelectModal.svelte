@@ -73,32 +73,29 @@
     return groups;
   });
 
-  const shouldEnsureProvidersWithModels = $derived(() => {
-    console.log("open: " + open);
-    console.log("isLoadingWithModels: " + providerState.isLoadingWithModels);
-    console.log(
-      "providerState.providersWithModelsNeedRefresh: " +
-        providerState.providersWithModelsNeedRefresh
-    );
-
-    return (
-      open &&
-      !providerState.isLoadingWithModels &&
-      providerState.providersWithModelsNeedRefresh
-    );
-  });
-
+  // 当 Modal 打开时检查是否需要刷新数据
   $effect(() => {
-    console.log("----------1");
-    if (!shouldEnsureProvidersWithModels()) {
-      console.log("----------333");
+    console.log("111");
+
+    console.log("open: " + open);
+    console.log(
+      "providerState.isLoadingWithModels: " + providerState.isLoadingWithModels
+    );
+    if (!open || providerState.isLoadingWithModels) {
+      console.log("222");
+
       return;
     }
 
-    console.log("----------2");
-
-    // providerState.providersWithModelsNeedRefresh = false;
-    providerActions.loadProvidersWithModels();
+    console.log("333");
+    // 如果需要刷新或者数据为空，则加载数据
+    if (
+      providerState.providersWithModelsNeedRefresh ||
+      providerState.providersWithModels.length === 0
+    ) {
+      console.log("ChatModelSelectModal: Loading providers with models");
+      providerActions.loadProvidersWithModels();
+    }
   });
 
   function handleModelSelect(model: ModelWithProvider) {

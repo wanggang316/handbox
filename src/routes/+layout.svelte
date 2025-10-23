@@ -17,54 +17,54 @@
       };
     }
 
-    const allowedThemes = new Set<Theme>(['light', 'dark', 'system']);
-    const savedTheme = localStorage.getItem('theme');
+    const allowedThemes = new Set<Theme>(["light", "dark", "system"]);
+    const savedTheme = localStorage.getItem("theme");
     if (savedTheme && allowedThemes.has(savedTheme as Theme)) {
       uiState.setTheme(savedTheme as Theme);
     } else {
-      uiState.setTheme('system');
+      uiState.setTheme("system");
     }
 
-    const savedThemeColor = localStorage.getItem('themeColor');
+    const savedThemeColor = localStorage.getItem("themeColor");
     if (savedThemeColor) {
       uiState.setThemeColor(savedThemeColor as ThemeColor);
     }
 
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleSystemThemeChange = () => {
-      if (uiState.theme === 'system') {
-        uiState.setTheme('system');
+      if (uiState.theme === "system") {
+        uiState.setTheme("system");
       }
     };
-    mediaQuery.addEventListener('change', handleSystemThemeChange);
+    mediaQuery.addEventListener("change", handleSystemThemeChange);
 
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === 'theme') {
+      if (event.key === "theme") {
         if (event.newValue && allowedThemes.has(event.newValue as Theme)) {
           uiState.setTheme(event.newValue as Theme);
         } else if (event.newValue === null) {
-          uiState.setTheme('system');
+          uiState.setTheme("system");
         }
       }
 
-      if (event.key === 'themeColor') {
-        const newColor = (event.newValue ?? 'system') as ThemeColor;
+      if (event.key === "themeColor") {
+        const newColor = (event.newValue ?? "system") as ThemeColor;
         uiState.setThemeColor(newColor);
       }
     };
-    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener("storage", handleStorageChange);
 
     providerActions.loadProviderConfigs().catch((error) => {
-      console.error('Failed to load provider configs:', error);
+      console.error("Failed to load provider configs:", error);
     });
 
     initAuth().catch((error) => {
-      console.error('Failed to initialize auth:', error);
+      console.error("Failed to initialize auth:", error);
     });
 
     return () => {
-      mediaQuery.removeEventListener('change', handleSystemThemeChange);
-      window.removeEventListener('storage', handleStorageChange);
+      mediaQuery.removeEventListener("change", handleSystemThemeChange);
+      window.removeEventListener("storage", handleStorageChange);
       cleanupAuth();
     };
   });
