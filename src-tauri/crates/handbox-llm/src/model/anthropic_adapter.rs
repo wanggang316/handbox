@@ -45,6 +45,7 @@ impl AnthropicModelClient {
             support_parameters: Vec::new(),
             default_parameters: None,
             max_parameters: None,
+            supported_methods: None,
         }
     }
 }

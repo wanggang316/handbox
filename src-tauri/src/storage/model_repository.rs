@@ -28,6 +28,7 @@ impl ModelRepository {
         let support_parameters_json = model.support_parameters_to_json();
         let default_parameters_json = model.default_parameters_to_json();
         let max_parameters_json = model.max_parameters_to_json();
+        let supported_methods_json = model.supported_methods_to_json();
 
         let query = r#"
             INSERT INTO models (
@@ -44,6 +45,7 @@ impl ModelRepository {
                 default_parameters,
                 max_parameters,
                 supported_features,
+                supported_methods,
                 metadata,
                 url,
                 enabled,
@@ -51,7 +53,7 @@ impl ModelRepository {
                 created_at,
                 updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
             )
         "#;
 
@@ -69,6 +71,7 @@ impl ModelRepository {
             .bind(default_parameters_json.as_deref())
             .bind(max_parameters_json.as_deref())
             .bind(&features_json)
+            .bind(supported_methods_json.as_deref())
             .bind(metadata_json.as_deref())
             .bind(model.url.as_deref())
             .bind(model.enabled)
@@ -139,6 +142,7 @@ impl ModelRepository {
             let support_parameters_json = model.support_parameters_to_json();
             let default_parameters_json = model.default_parameters_to_json();
             let max_parameters_json = model.max_parameters_to_json();
+            let supported_methods_json = model.supported_methods_to_json();
 
             // 从状态映射中获取用户设置的状态，如果没有则使用默认值
             let (enabled, favorite) = match state_map.get(&model.id) {
@@ -172,6 +176,7 @@ impl ModelRepository {
                     default_parameters,
                     max_parameters,
                     supported_features,
+                    supported_methods,
                     metadata,
                     url,
                     enabled,
@@ -179,7 +184,7 @@ impl ModelRepository {
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
                 )
             "#;
 
@@ -197,6 +202,7 @@ impl ModelRepository {
                 .bind(default_parameters_json.as_deref())
                 .bind(max_parameters_json.as_deref())
                 .bind(&features_json)
+                .bind(supported_methods_json.as_deref())
                 .bind(metadata_json.as_deref())
                 .bind(model.url.as_deref())
                 .bind(enabled)
@@ -235,6 +241,7 @@ impl ModelRepository {
             let support_parameters_json = model.support_parameters_to_json();
             let default_parameters_json = model.default_parameters_to_json();
             let max_parameters_json = model.max_parameters_to_json();
+            let supported_methods_json = model.supported_methods_to_json();
 
             let query = r#"
                 INSERT OR REPLACE INTO models (
@@ -252,13 +259,14 @@ impl ModelRepository {
                     support_parameters,
                     default_parameters,
                     max_parameters,
+                    supported_methods,
                     url,
                     enabled,
                     favorite,
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
                 )
             "#;
 
@@ -277,6 +285,7 @@ impl ModelRepository {
                 .bind(support_parameters_json.as_deref())
                 .bind(default_parameters_json.as_deref())
                 .bind(max_parameters_json.as_deref())
+                .bind(supported_methods_json.as_deref())
                 .bind(model.url.as_deref())
                 .bind(model.enabled)
                 .bind(model.favorite)
@@ -313,6 +322,7 @@ impl ModelRepository {
                 default_parameters,
                 max_parameters,
                 supported_features,
+                supported_methods,
                 metadata,
                 url,
                 enabled,
@@ -457,6 +467,12 @@ impl ModelRepository {
                 AppError::internal_error(&format!("Failed to parse model max parameters: {}", e))
             })?;
 
+        let supported_methods_raw: Option<String> = row.try_get("supported_methods").ok();
+        let supported_methods = Model::supported_methods_from_json(supported_methods_raw.as_deref())
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to parse model supported methods: {}", e))
+            })?;
+
         Ok(Model {
             id: row.try_get("id")?,
             provider_id: row.try_get("provider_id")?,
@@ -473,6 +489,7 @@ impl ModelRepository {
             support_parameters,
             default_parameters,
             max_parameters,
+            supported_methods,
             enabled: row.try_get("enabled")?,
             favorite: row.try_get("favorite").unwrap_or(false),
             created_at: row.try_get("created_at")?,

@@ -251,6 +251,7 @@ fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model
         support_parameters,
         default_parameters,
         max_parameters,
+        supported_methods,
     } = standard_model;
 
     let supported_features = supported_features.and_then(|features| {
@@ -285,6 +286,14 @@ fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model
         Some(support_parameters)
     };
 
+    let supported_methods = supported_methods.and_then(|methods| {
+        if methods.is_empty() {
+            None
+        } else {
+            Some(methods)
+        }
+    });
+
     Model {
         id,
         provider_id,
@@ -301,6 +310,7 @@ fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model
         support_parameters,
         default_parameters,
         max_parameters,
+        supported_methods,
         enabled: true,
         favorite: false,
         created_at: now,

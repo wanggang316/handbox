@@ -186,6 +186,7 @@ impl OpenRouterModel {
             support_parameters,
             default_parameters,
             max_parameters,
+            supported_methods: Some(vec!["completions".to_string()]),
         }
     }
 }

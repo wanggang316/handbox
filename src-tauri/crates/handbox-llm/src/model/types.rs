@@ -23,6 +23,7 @@ pub struct LlmModel {
     pub support_parameters: Vec<LlmModelParameter>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
+    pub supported_methods: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -53,9 +54,7 @@ impl FromStr for LlmModelModality {
 
         if value.eq_ignore_ascii_case("text") {
             Ok(LlmModelModality::Text)
-        } else if value.eq_ignore_ascii_case("image")
-            || value.eq_ignore_ascii_case("images")
-        {
+        } else if value.eq_ignore_ascii_case("image") || value.eq_ignore_ascii_case("images") {
             Ok(LlmModelModality::Image)
         } else if value.eq_ignore_ascii_case("pdf") {
             Ok(LlmModelModality::Pdf)
@@ -298,6 +297,8 @@ pub struct ModelSupplement {
     #[serde(default)]
     pub endpoints: Vec<String>,
     #[serde(default)]
+    pub supported_methods: Option<Vec<String>>,
+    #[serde(default)]
     pub url: Option<String>,
 }
 
@@ -321,6 +322,7 @@ impl ModelSupplement {
             max_parameters,
             snapshots,
             endpoints,
+            supported_methods,
             url,
         } = self;
 
@@ -346,13 +348,7 @@ impl ModelSupplement {
             if !snapshots.is_empty() {
                 metadata_map.insert(
                     "snapshots".to_string(),
-                    Value::Array(
-                        snapshots
-                            .iter()
-                            .cloned()
-                            .map(Value::String)
-                            .collect(),
-                    ),
+                    Value::Array(snapshots.iter().cloned().map(Value::String).collect()),
                 );
             }
 
@@ -377,16 +373,11 @@ impl ModelSupplement {
                 );
             }
 
-            metadata_map.insert(
-                "model_code".to_string(),
-                Value::String(model_code.clone()),
-            );
+            metadata_map.insert("model_code".to_string(), Value::String(model_code.clone()));
 
             let mut model = LlmModel {
                 id: snapshot_id.clone(),
-                name: name
-                    .clone()
-                    .unwrap_or_else(|| snapshot_id.clone()),
+                name: name.clone().unwrap_or_else(|| snapshot_id.clone()),
                 context_length,
                 output_max_tokens,
                 supported_features: supported_features.clone(),
@@ -403,6 +394,7 @@ impl ModelSupplement {
                 support_parameters: support_parameters.clone(),
                 default_parameters: default_parameters.clone(),
                 max_parameters: max_parameters.clone(),
+                supported_methods: supported_methods.clone(),
             };
 
             merge_pricing(
@@ -445,8 +437,7 @@ pub fn merge_pricing(
         current.output_text = Some(output);
     }
 
-    if current.currency.is_none() && current.input_text.is_none() && current.output_text.is_none()
-    {
+    if current.currency.is_none() && current.input_text.is_none() && current.output_text.is_none() {
         *pricing = None;
     } else {
         *pricing = Some(current);
@@ -459,6 +450,46 @@ pub fn extract_pricing_value(pricing: &Option<ModelPricing>, key: &str) -> Optio
         "output_text" => value.output_text,
         _ => None,
     })
+}
+
+/// 将字符串转换为 snake_case 格式
+/// 例如: "chatCompletions" -> "chat_completions", "Generate Content" -> "generate_content"
+pub fn to_snake_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut prev_is_lowercase = false;
+
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_whitespace() {
+            // 空格转换为下划线
+            if !result.is_empty() && !result.ends_with('_') {
+                result.push('_');
+            }
+            prev_is_lowercase = false;
+        } else if ch.is_uppercase() {
+            if i > 0 && prev_is_lowercase {
+                result.push('_');
+            }
+            result.push(ch.to_ascii_lowercase());
+            prev_is_lowercase = false;
+        } else {
+            result.push(ch);
+            prev_is_lowercase = ch.is_lowercase();
+        }
+    }
+
+    result
+}
+
+/// 将 endpoints 转换为 supported_methods 格式
+/// 添加指定前缀并转换为 snake_case
+pub fn convert_endpoints_to_methods(endpoints: &[String], prefix: &str) -> Vec<String> {
+    endpoints
+        .iter()
+        .map(|endpoint| {
+            let snake = to_snake_case(endpoint);
+            format!("{}_{}", prefix, snake)
+        })
+        .collect()
 }
 
 /// 模型 API 类型枚举

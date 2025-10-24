@@ -36,6 +36,7 @@ pub struct Model {
     pub support_parameters: Option<Vec<LlmModelParameter>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
+    pub supported_methods: Option<Vec<String>>,
     pub enabled: bool,
     pub favorite: bool,
     pub created_at: Timestamp,
@@ -191,6 +192,32 @@ impl Model {
                     Ok(None)
                 } else {
                     Ok(Some(params))
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub fn supported_methods_to_json(&self) -> Option<String> {
+        self.supported_methods.as_ref().and_then(|methods| {
+            if methods.is_empty() {
+                None
+            } else {
+                serde_json::to_string(methods).ok()
+            }
+        })
+    }
+
+    pub fn supported_methods_from_json(
+        json: Option<&str>,
+    ) -> Result<Option<Vec<String>>, serde_json::Error> {
+        match json {
+            Some(data) if !data.is_empty() => {
+                let methods = serde_json::from_str::<Vec<String>>(data)?;
+                if methods.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(methods))
                 }
             }
             _ => Ok(None),

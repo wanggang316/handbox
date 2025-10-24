@@ -5,8 +5,8 @@ use super::oss_client::OssClient;
 use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
 use crate::types::{
-    extract_pricing_value, merge_pricing, LlmModel, LlmModelModality, LlmModelParameter,
-    LlmProvider, ModelSupplementDocument,
+    convert_endpoints_to_methods, extract_pricing_value, merge_pricing, LlmModel,
+    LlmModelModality, LlmModelParameter, LlmProvider, ModelSupplementDocument,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -209,6 +209,24 @@ impl ModelClient for GoogleModelClient {
                 let (support_parameters, default_parameters, max_parameters) =
                     parse_google_parameters(&api_model);
 
+                // 提取 supportedGenerationMethods 并转换为 supported_methods
+                let supported_methods = api_model
+                    .get("supportedGenerationMethods")
+                    .and_then(|v| v.as_array())
+                    .map(|methods| {
+                        let method_strings: Vec<String> = methods
+                            .iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+
+                        if method_strings.is_empty() {
+                            None
+                        } else {
+                            Some(convert_endpoints_to_methods(&method_strings, "google"))
+                        }
+                    })
+                    .flatten();
+
                 let mut model = LlmModel {
                     id: model_id,
                     name: display_name,
@@ -224,6 +242,7 @@ impl ModelClient for GoogleModelClient {
                     support_parameters,
                     default_parameters,
                     max_parameters,
+                    supported_methods,
                 };
 
                 if let Some(map) = &supplement_map {

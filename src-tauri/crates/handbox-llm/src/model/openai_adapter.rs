@@ -5,8 +5,8 @@ use super::oss_client::OssClient;
 use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
 use crate::types::{
-    extract_pricing_value, merge_pricing, LlmModel, LlmModelModality, LlmProvider,
-    ModelSupplementDocument,
+    convert_endpoints_to_methods, extract_pricing_value, merge_pricing, LlmModel, LlmModelModality,
+    LlmProvider, ModelSupplementDocument,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -70,7 +70,9 @@ impl OpenAIModelClient {
             Err(err) => {
                 tracing::debug!(
                     "OSS config not available for {} supplement '{}': {}",
-                    provider_type, supplement_file, err
+                    provider_type,
+                    supplement_file,
+                    err
                 );
                 return None;
             }
@@ -81,7 +83,9 @@ impl OpenAIModelClient {
             Err(err) => {
                 tracing::debug!(
                     "Unable to download supplement '{}' for {}: {}",
-                    supplement_file, provider_type, err
+                    supplement_file,
+                    provider_type,
+                    err
                 );
                 return None;
             }
@@ -92,7 +96,9 @@ impl OpenAIModelClient {
             Err(err) => {
                 tracing::debug!(
                     "Unable to parse supplement '{}' for {}: {}",
-                    supplement_file, provider_type, err
+                    supplement_file,
+                    provider_type,
+                    err
                 );
                 return None;
             }
@@ -167,11 +173,12 @@ impl ModelClient for OpenAIModelClient {
                 support_parameters: Vec::new(),
                 default_parameters: None,
                 max_parameters: None,
+                supported_methods: None,
             };
 
             if let Some(map) = &supplement_map {
                 if let Some(supplement) = map.get(&model.id) {
-                    merge_openai_model(&mut model, supplement);
+                    merge_openai_model(&mut model, supplement, provider_type);
                 }
             }
 
@@ -182,7 +189,7 @@ impl ModelClient for OpenAIModelClient {
     }
 }
 
-fn merge_openai_model(base: &mut LlmModel, supplement: &LlmModel) {
+fn merge_openai_model(base: &mut LlmModel, supplement: &LlmModel, provider_type: &str) {
     if let Some(context_length) = supplement.context_length {
         base.context_length = Some(context_length);
     }
@@ -251,5 +258,28 @@ fn merge_openai_model(base: &mut LlmModel, supplement: &LlmModel) {
 
     if supplement.max_parameters.is_some() {
         base.max_parameters = supplement.max_parameters.clone();
+    }
+
+    // 处理 supported_methods
+    if let Some(methods) = &supplement.supported_methods {
+        if !methods.is_empty() {
+            base.supported_methods = Some(methods.clone());
+        }
+    } else {
+        // 从 metadata 中提取 endpoints 并转换
+        if let Some(metadata) = &supplement.metadata {
+            if let Some(endpoints) = metadata.get("endpoints").and_then(|v| v.as_array()) {
+                let endpoint_strings: Vec<String> = endpoints
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+
+                if !endpoint_strings.is_empty() {
+                    let prefix = provider_type;
+                    let methods = convert_endpoints_to_methods(&endpoint_strings, prefix);
+                    base.supported_methods = Some(methods);
+                }
+            }
+        }
     }
 }
