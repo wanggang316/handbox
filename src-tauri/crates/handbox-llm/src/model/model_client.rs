@@ -2,6 +2,10 @@
 
 use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
+use crate::model::anthropic_adapter::AnthropicModelClient;
+use crate::model::google_adapter::GoogleModelClient;
+use crate::model::openai_adapter::OpenAIModelClient;
+use crate::model::openrouter_adapter::OpenRouterModelClient;
 use crate::types::{LlmModel, LlmModelApiType, LlmProvider};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -22,21 +26,11 @@ pub fn create_model_client(
     config: Arc<dyn LlmConfigProvider>,
 ) -> Result<Box<dyn ModelClient>, LlmClientError> {
     Ok(match api_type {
-        LlmModelApiType::OpenAI => {
-            Box::new(crate::model::openai_adapter::OpenAIModelClient::new(
-                Arc::clone(&config),
-            )) as Box<_>
+        LlmModelApiType::OpenAI => Box::new(OpenAIModelClient::new(Arc::clone(&config))) as Box<_>,
+        LlmModelApiType::Google => Box::new(GoogleModelClient::new(Arc::clone(&config))) as Box<_>,
+        LlmModelApiType::Anthropic => {
+            Box::new(AnthropicModelClient::new(Arc::clone(&config))) as Box<_>
         }
-        LlmModelApiType::Google => {
-            Box::new(crate::model::google_adapter::GoogleModelClient::new(
-                Arc::clone(&config),
-            )) as Box<_>
-        }
-        LlmModelApiType::Anthropic => Box::new(
-            crate::model::anthropic_adapter::AnthropicModelClient::new(Arc::clone(&config)),
-        ) as Box<_>,
-        LlmModelApiType::OpenRouter => {
-            Box::new(crate::model::openrouter_adapter::OpenRouterModelClient::new()) as Box<_>
-        }
+        LlmModelApiType::OpenRouter => Box::new(OpenRouterModelClient::new()) as Box<_>,
     })
 }

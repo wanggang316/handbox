@@ -5,7 +5,6 @@ use crate::services::Database;
 use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
 use crate::storage::{ChatRepository, ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::types::LlmModelParameter;
 use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -148,76 +147,11 @@ impl ModelService {
         }
     }
 
-    /// 合并模型参数（数据库 + 配置文件）
-    fn merge_model_parameters(&self, models: Vec<Model>, provider_type: &str) -> Vec<Model> {
-        use crate::config::llm_config::LlmConfig;
-
-        // 尝试将 LlmConfigProvider 转换为 LlmConfig 以访问参数方法
-        let llm_config_any = &self.llm_config as &dyn std::any::Any;
-
-        if let Some(config) = llm_config_any.downcast_ref::<LlmConfig>() {
-            models
-                .into_iter()
-                .map(|mut model| {
-                    // 从配置获取支持的参数、默认值和最大值
-                    let supported_params =
-                        config.get_supported_parameters(provider_type, &model.id);
-                    let param_defaults = config.get_parameter_defaults(provider_type, &model.id);
-                    let param_max = config.get_max_parameters(provider_type, &model.id);
-
-                    // 如果数据库中已有参数配置，则优先使用数据库的
-                    // 否则从配置文件构建参数列表
-                    if model
-                        .support_parameters
-                        .as_ref()
-                        .map(|params| params.is_empty())
-                        .unwrap_or(true)
-                    {
-                        if !supported_params.is_empty() {
-                            let converted_params = supported_params
-                                .iter()
-                                .map(|param| {
-                                    param
-                                        .parse::<LlmModelParameter>()
-                                        .unwrap_or(LlmModelParameter::Unknown)
-                                })
-                                .collect::<Vec<_>>();
-
-                            if !converted_params.is_empty() {
-                                model.support_parameters = Some(converted_params);
-                            }
-                        }
-                    }
-
-                    if model
-                        .default_parameters
-                        .as_ref()
-                        .map(|params| params.is_empty())
-                        .unwrap_or(true)
-                    {
-                        if !param_defaults.is_empty() {
-                            model.default_parameters = Some(param_defaults.clone());
-                        }
-                    }
-
-                    if model
-                        .max_parameters
-                        .as_ref()
-                        .map(|params| params.is_empty())
-                        .unwrap_or(true)
-                    {
-                        if !param_max.is_empty() {
-                            model.max_parameters = Some(param_max.clone());
-                        }
-                    }
-
-                    model
-                })
-                .collect()
-        } else {
-            // 如果无法转换，返回原始模型列表
-            models
-        }
+    /// 合并模型参数（现在参数已经直接包含在模型数据中，从 supplement 文件获取）
+    fn merge_model_parameters(&self, models: Vec<Model>, _provider_type: &str) -> Vec<Model> {
+        // 模型参数现在直接从 API/supplement 文件中获取，不再需要从配置文件中查找
+        // 保留此方法是为了保持代码结构兼容性
+        models
     }
 
     /// 获取当前时间戳

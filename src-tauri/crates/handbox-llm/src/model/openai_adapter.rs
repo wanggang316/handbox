@@ -1,17 +1,16 @@
 // OpenAI 模型客户端实现
 
 use super::model_client::ModelClient;
-use super::oss_client::OssClient;
+use super::supplement::{OssSupplementProvider, SupplementProvider};
 use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
 use crate::types::{
-    convert_endpoints_to_methods, extract_pricing_value, merge_pricing, LlmModel, LlmModelModality,
-    LlmProvider, ModelSupplementDocument,
+    convert_endpoints_to_methods, merge_pricing, LlmModel, LlmModelModality, LlmProvider,
+    ModelSupplement,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::to_value;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// OpenAI 风格的模型列表响应
@@ -32,91 +31,98 @@ pub struct OpenAIModelData {
 /// OpenAI 风格模型客户端
 pub struct OpenAIModelClient {
     client: reqwest::Client,
-    config: Arc<dyn LlmConfigProvider>,
+    supplement_provider: OssSupplementProvider,
 }
 
 impl OpenAIModelClient {
     pub fn new(config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             client: reqwest::Client::new(),
-            config,
+            supplement_provider: OssSupplementProvider::new(config),
         }
     }
 
-    async fn load_model_supplements(
+    /// Merge supplement data into base model (OpenAI-specific logic)
+    fn merge_supplement(
         &self,
+        model: &mut LlmModel,
+        supplement: &ModelSupplement,
         provider_type: &str,
-    ) -> Option<HashMap<String, LlmModel>> {
-        let supplement_file = self
-            .config
-            .get_provider_config(provider_type)
-            .and_then(|cfg| cfg.supplement_file)
-            .and_then(|file| {
-                let trimmed = file.trim().to_string();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed)
-                }
-            });
-
-        let supplement_file = match supplement_file {
-            Some(file) => file,
-            None => return None,
-        };
-
-        let client = match OssClient::from_env() {
-            Ok(client) => client,
-            Err(err) => {
-                tracing::debug!(
-                    "OSS config not available for {} supplement '{}': {}",
-                    provider_type,
-                    supplement_file,
-                    err
-                );
-                return None;
-            }
-        };
-
-        let content = match client.get_object_text(&supplement_file).await {
-            Ok(text) => text,
-            Err(err) => {
-                tracing::debug!(
-                    "Unable to download supplement '{}' for {}: {}",
-                    supplement_file,
-                    provider_type,
-                    err
-                );
-                return None;
-            }
-        };
-
-        let document: ModelSupplementDocument = match serde_json::from_str(&content) {
-            Ok(doc) => doc,
-            Err(err) => {
-                tracing::debug!(
-                    "Unable to parse supplement '{}' for {}: {}",
-                    supplement_file,
-                    provider_type,
-                    err
-                );
-                return None;
-            }
-        };
-
-        if document.models.is_empty() {
-            return None;
+    ) {
+        // Merge basic fields - prefer supplement if present
+        if let Some(context_length) = supplement.context_length {
+            model.context_length = Some(context_length);
         }
-
-        let mut models = HashMap::new();
-
-        for entry in document.models {
-            for (model_id, model) in entry.into_snapshot_models() {
-                models.insert(model_id, model);
+        if let Some(output_max_tokens) = supplement.output_max_tokens {
+            model.output_max_tokens = Some(output_max_tokens);
+        }
+        if let Some(ref description) = supplement.description {
+            if !description.trim().is_empty() {
+                model.description = Some(description.clone());
+            }
+        }
+        if let Some(ref url) = supplement.url {
+            if !url.trim().is_empty() {
+                model.url = Some(url.clone());
             }
         }
 
-        Some(models)
+        // Merge collections - prefer supplement if present
+        if let Some(ref features) = supplement.supported_features {
+            if !features.is_empty() {
+                model.supported_features = Some(features.clone());
+            }
+        }
+        if let Some(ref modalities) = supplement.input_modalities {
+            if !modalities.is_empty() {
+                model.input_modalities = Some(modalities.clone());
+            }
+        }
+        if let Some(ref modalities) = supplement.output_modalities {
+            if !modalities.is_empty() {
+                model.output_modalities = Some(modalities.clone());
+            }
+        }
+
+        // Merge parameters
+        if !supplement.support_parameters.is_empty() {
+            model.support_parameters = supplement.support_parameters.clone();
+        }
+        if let Some(ref params) = supplement.default_parameters {
+            if !params.is_empty() {
+                model.default_parameters = Some(params.clone());
+            }
+        }
+        if let Some(ref params) = supplement.max_parameters {
+            if !params.is_empty() {
+                model.max_parameters = Some(params.clone());
+            }
+        }
+
+        // Merge metadata
+        if supplement.metadata.is_some() {
+            model.metadata = supplement.metadata.clone();
+        }
+
+        // Merge pricing
+        let currency = supplement.currency.as_deref().or(Some("USD"));
+        merge_pricing(
+            &mut model.pricing,
+            supplement.input_cost,
+            supplement.output_cost,
+            currency,
+        );
+
+        // Merge supported_methods - prefer supplement if present, otherwise convert from endpoints
+        if let Some(ref methods) = supplement.supported_methods {
+            if !methods.is_empty() {
+                model.supported_methods = Some(methods.clone());
+            }
+        } else if !supplement.endpoints.is_empty() {
+            // Convert endpoints to supported_methods for OpenAI
+            let methods = convert_endpoints_to_methods(&supplement.endpoints, provider_type);
+            model.supported_methods = Some(methods);
+        }
     }
 }
 
@@ -130,7 +136,11 @@ impl ModelClient for OpenAIModelClient {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching OpenAI-style models from: {}", url);
 
-        let supplement_map = self.load_model_supplements(provider_type).await;
+        // Load supplements
+        let supplement_map = self
+            .supplement_provider
+            .load_supplements(provider_type)
+            .await?;
 
         let response = self
             .client
@@ -176,9 +186,10 @@ impl ModelClient for OpenAIModelClient {
                 supported_methods: None,
             };
 
-            if let Some(map) = &supplement_map {
+            // Merge supplement data
+            if let Some(ref map) = supplement_map {
                 if let Some(supplement) = map.get(&model.id) {
-                    merge_openai_model(&mut model, supplement, provider_type);
+                    self.merge_supplement(&mut model, supplement, provider_type);
                 }
             }
 
@@ -186,100 +197,5 @@ impl ModelClient for OpenAIModelClient {
         }
 
         Ok(result_models)
-    }
-}
-
-fn merge_openai_model(base: &mut LlmModel, supplement: &LlmModel, provider_type: &str) {
-    if let Some(context_length) = supplement.context_length {
-        base.context_length = Some(context_length);
-    }
-
-    if let Some(output_max_tokens) = supplement.output_max_tokens {
-        base.output_max_tokens = Some(output_max_tokens);
-    }
-
-    let currency = supplement
-        .pricing
-        .as_ref()
-        .and_then(|value| value.currency.as_deref())
-        .or(Some("USD"));
-
-    merge_pricing(
-        &mut base.pricing,
-        extract_pricing_value(&supplement.pricing, "input_text"),
-        extract_pricing_value(&supplement.pricing, "output_text"),
-        currency,
-    );
-
-    if let Some(features) = &supplement.supported_features {
-        if !features.is_empty() {
-            base.supported_features = Some(features.clone());
-        }
-    }
-
-    if base
-        .description
-        .as_ref()
-        .map(|desc| desc.trim().is_empty())
-        .unwrap_or(true)
-    {
-        if let Some(desc) = &supplement.description {
-            if !desc.trim().is_empty() {
-                base.description = Some(desc.clone());
-            }
-        }
-    }
-
-    if let Some(url) = &supplement.url {
-        if !url.trim().is_empty() {
-            base.url = Some(url.clone());
-        }
-    }
-
-    if let Some(input_modalities) = &supplement.input_modalities {
-        if !input_modalities.is_empty() {
-            base.input_modalities = Some(input_modalities.clone());
-        }
-    }
-
-    if let Some(output_modalities) = &supplement.output_modalities {
-        if !output_modalities.is_empty() {
-            base.output_modalities = Some(output_modalities.clone());
-        }
-    }
-
-    if supplement.metadata.is_some() {
-        base.metadata = supplement.metadata.clone();
-    }
-
-    if supplement.default_parameters.is_some() {
-        base.default_parameters = supplement.default_parameters.clone();
-    }
-
-    if supplement.max_parameters.is_some() {
-        base.max_parameters = supplement.max_parameters.clone();
-    }
-
-    // 处理 supported_methods
-    if let Some(methods) = &supplement.supported_methods {
-        if !methods.is_empty() {
-            base.supported_methods = Some(methods.clone());
-        }
-    } else {
-        // 从 metadata 中提取 endpoints 并转换
-        if let Some(metadata) = &supplement.metadata {
-            if let Some(endpoints) = metadata.get("endpoints").and_then(|v| v.as_array()) {
-                let endpoint_strings: Vec<String> = endpoints
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
-
-                if !endpoint_strings.is_empty() {
-                    let prefix = provider_type;
-                    let methods = convert_endpoints_to_methods(&endpoint_strings, prefix);
-                    base.supported_methods = Some(methods);
-                }
-            }
-        }
     }
 }

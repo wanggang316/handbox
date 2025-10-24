@@ -19,10 +19,7 @@ fn test_to_snake_case() {
 
 #[test]
 fn test_convert_endpoints_to_methods_openai() {
-    let endpoints = vec![
-        "chatCompletions".to_string(),
-        "embeddings".to_string(),
-    ];
+    let endpoints = vec!["chatCompletions".to_string(), "embeddings".to_string()];
     let methods = convert_endpoints_to_methods(&endpoints, "openai");
 
     assert_eq!(methods.len(), 2);
@@ -47,9 +44,7 @@ fn test_convert_endpoints_to_methods_google() {
 
 #[test]
 fn test_convert_endpoints_to_methods_deepseek() {
-    let endpoints = vec![
-        "chatCompletions".to_string(),
-    ];
+    let endpoints = vec!["chatCompletions".to_string()];
     let methods = convert_endpoints_to_methods(&endpoints, "deepseek");
 
     assert_eq!(methods.len(), 1);

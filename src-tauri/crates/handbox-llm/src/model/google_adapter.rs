@@ -1,17 +1,16 @@
 // Google 模型客户端实现
 
 use super::model_client::ModelClient;
-use super::oss_client::OssClient;
+use super::supplement::{OssSupplementProvider, SupplementProvider};
 use crate::config::LlmConfigProvider;
 use crate::error::LlmClientError;
 use crate::types::{
-    convert_endpoints_to_methods, extract_pricing_value, merge_pricing, LlmModel,
-    LlmModelModality, LlmModelParameter, LlmProvider, ModelSupplementDocument,
+    convert_endpoints_to_methods, merge_pricing, LlmModel, LlmModelModality, LlmModelParameter,
+    LlmProvider, ModelSupplement,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Google 风格的模型列表响应
@@ -25,85 +24,101 @@ pub struct GoogleModelsResponse {
 /// Google 模型客户端
 pub struct GoogleModelClient {
     client: reqwest::Client,
-    config: Arc<dyn LlmConfigProvider>,
+    supplement_provider: OssSupplementProvider,
 }
 
 impl GoogleModelClient {
     pub fn new(config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             client: reqwest::Client::new(),
-            config,
+            supplement_provider: OssSupplementProvider::new(config),
         }
     }
 
-    async fn load_model_supplements(
-        &self,
-        provider_type: &str,
-    ) -> Option<HashMap<String, LlmModel>> {
-        let supplement_file = self
-            .config
-            .get_provider_config(provider_type)
-            .and_then(|cfg| cfg.supplement_file)
-            .and_then(|file| {
-                let trimmed = file.trim().to_string();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed)
+    /// Merge supplement data into base model (Google-specific logic)
+    /// Google keeps API-provided parameters, only fills in missing data from supplement
+    fn merge_supplement(&self, model: &mut LlmModel, supplement: &ModelSupplement) {
+        // Only fill missing basic fields (don't override API data)
+        if model.context_length.is_none() {
+            model.context_length = supplement.context_length;
+        }
+        if model.output_max_tokens.is_none() {
+            model.output_max_tokens = supplement.output_max_tokens;
+        }
+        if model.description.is_none() {
+            if let Some(ref desc) = supplement.description {
+                if !desc.trim().is_empty() {
+                    model.description = Some(desc.clone());
                 }
-            });
-
-        let supplement_file = match supplement_file {
-            Some(file) => file,
-            None => return None,
-        };
-
-        let client = match OssClient::from_env() {
-            Ok(client) => client,
-            Err(err) => {
-                tracing::debug!(
-                    "OSS config not available for {} supplement '{}': {}",
-                    provider_type, supplement_file, err
-                );
-                return None;
             }
-        };
-
-        let content = match client.get_object_text(&supplement_file).await {
-            Ok(text) => text,
-            Err(err) => {
-                tracing::debug!(
-                    "Unable to download supplement '{}' for {}: {}",
-                    supplement_file, provider_type, err
-                );
-                return None;
-            }
-        };
-
-        let document: ModelSupplementDocument = match serde_json::from_str(&content) {
-            Ok(doc) => doc,
-            Err(err) => {
-                tracing::debug!(
-                    "Unable to parse supplement '{}' for {}: {}",
-                    supplement_file, provider_type, err
-                );
-                return None;
-            }
-        };
-
-        if document.models.is_empty() {
-            return None;
         }
-
-        let mut models = HashMap::new();
-
-        for entry in document.models {
-            for (model_id, model) in entry.into_snapshot_models() {
-                models.insert(model_id, model);
+        if model.url.is_none() {
+            if let Some(ref url) = supplement.url {
+                if !url.trim().is_empty() {
+                    model.url = Some(url.clone());
+                }
             }
         }
 
-        Some(models)
+        // Fill missing collections
+        if model.supported_features.is_none() {
+            if let Some(ref features) = supplement.supported_features {
+                if !features.is_empty() {
+                    model.supported_features = Some(features.clone());
+                }
+            }
+        }
+        if model.input_modalities.is_none() {
+            if let Some(ref modalities) = supplement.input_modalities {
+                if !modalities.is_empty() {
+                    model.input_modalities = Some(modalities.clone());
+                }
+            }
+        }
+        if model.output_modalities.is_none() {
+            if let Some(ref modalities) = supplement.output_modalities {
+                if !modalities.is_empty() {
+                    model.output_modalities = Some(modalities.clone());
+                }
+            }
+        }
+
+        // Fill missing parameters (keep API data if present)
+        if model.support_parameters.is_empty() && !supplement.support_parameters.is_empty() {
+            model.support_parameters = supplement.support_parameters.clone();
+        }
+        if model.default_parameters.is_none() {
+            if let Some(ref params) = supplement.default_parameters {
+                if !params.is_empty() {
+                    model.default_parameters = Some(params.clone());
+                }
+            }
+        }
+        if model.max_parameters.is_none() {
+            if let Some(ref params) = supplement.max_parameters {
+                if !params.is_empty() {
+                    model.max_parameters = Some(params.clone());
+                }
+            }
+        }
+
+        // Merge pricing (always merge pricing info)
+        let currency = supplement.currency.as_deref().or(Some("USD"));
+        merge_pricing(
+            &mut model.pricing,
+            supplement.input_cost,
+            supplement.output_cost,
+            currency,
+        );
+
+        // Fill missing supported_methods
+        if model.supported_methods.is_none() {
+            if let Some(ref methods) = supplement.supported_methods {
+                if !methods.is_empty() {
+                    model.supported_methods = Some(methods.clone());
+                }
+            }
+        }
     }
 }
 
@@ -117,7 +132,11 @@ impl ModelClient for GoogleModelClient {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
 
-        let supplement_map = self.load_model_supplements(provider_type).await;
+        // Load supplements using the trait-based provider
+        let supplement_map = self
+            .supplement_provider
+            .load_supplements(provider_type)
+            .await?;
 
         let mut result_models = Vec::new();
         let mut page_token: Option<String> = None;
@@ -245,9 +264,10 @@ impl ModelClient for GoogleModelClient {
                     supported_methods,
                 };
 
-                if let Some(map) = &supplement_map {
+                // Merge supplement data
+                if let Some(ref map) = supplement_map {
                     if let Some(supplement) = map.get(&model.id) {
-                        merge_models(&mut model, supplement);
+                        self.merge_supplement(&mut model, supplement);
                     }
                 }
 
@@ -263,49 +283,6 @@ impl ModelClient for GoogleModelClient {
         }
 
         Ok(result_models)
-    }
-}
-
-fn merge_models(base: &mut LlmModel, supplement: &LlmModel) {
-    let currency = supplement
-        .pricing
-        .as_ref()
-        .and_then(|value| value.currency.as_deref())
-        .or(Some("USD"));
-
-    merge_pricing(
-        &mut base.pricing,
-        extract_pricing_value(&supplement.pricing, "input_text"),
-        extract_pricing_value(&supplement.pricing, "output_text"),
-        currency,
-    );
-
-    if let Some(features) = &supplement.supported_features {
-        if !features.is_empty() {
-            base.supported_features = Some(features.clone());
-        }
-    }
-
-    if let Some(input_modalities) = &supplement.input_modalities {
-        if !input_modalities.is_empty() {
-            base.input_modalities = Some(input_modalities.clone());
-        }
-    }
-
-    if let Some(output_modalities) = &supplement.output_modalities {
-        if !output_modalities.is_empty() {
-            base.output_modalities = Some(output_modalities.clone());
-        }
-    }
-
-    if let Some(url) = &supplement.url {
-        if !url.trim().is_empty() {
-            base.url = Some(url.clone());
-        }
-    }
-
-    if supplement.metadata.is_some() {
-        base.metadata = supplement.metadata.clone();
     }
 }
 

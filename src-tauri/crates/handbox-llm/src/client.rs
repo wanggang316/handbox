@@ -121,7 +121,7 @@ pub fn create_client(provider_type: &str, config: Arc<dyn LlmConfigProvider>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LlmModelExtraInfo, LlmProviderConfig};
+    use crate::config::LlmProviderConfig;
 
     struct TestConfigProvider;
 
@@ -131,28 +131,7 @@ mod tests {
                 provider_type: provider_type.to_string(),
                 chat_api_type: LlmApiType::OpenAICompletions,
                 model_api_type: LlmModelApiType::OpenAI,
-                model_local: None,
                 supplement_file: None,
-            })
-        }
-
-        fn get_model_extra_info(
-            &self,
-            _provider_type: &str,
-            _model_id: &str,
-        ) -> Option<LlmModelExtraInfo> {
-            Some(LlmModelExtraInfo {
-                name: "test".into(),
-                context_length: None,
-                output_max_tokens: None,
-                input_cost_per_1k: None,
-                output_cost_per_1k: None,
-                features: vec!["reasoning".to_string()],
-                description: None,
-                input_modalities: None,
-                output_modalities: None,
-                metadata: None,
-                pricing: None,
             })
         }
     }

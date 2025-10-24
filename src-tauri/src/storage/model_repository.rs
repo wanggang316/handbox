@@ -468,8 +468,8 @@ impl ModelRepository {
             })?;
 
         let supported_methods_raw: Option<String> = row.try_get("supported_methods").ok();
-        let supported_methods = Model::supported_methods_from_json(supported_methods_raw.as_deref())
-            .map_err(|e| {
+        let supported_methods =
+            Model::supported_methods_from_json(supported_methods_raw.as_deref()).map_err(|e| {
                 AppError::internal_error(&format!("Failed to parse model supported methods: {}", e))
             })?;
 
