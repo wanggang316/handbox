@@ -83,25 +83,33 @@
     }
   });
 
-  async function handleToggle(enabled: boolean) {
-    if (!server) return;
+  async function handleToggleBefore(
+    enabled: boolean,
+    previous: boolean
+  ) {
+    if (!server) return true;
 
-    // 如果是禁用操作，需要检查关联的聊天
-    if (!enabled && server.enabled) {
+    if (!enabled && previous && server.enabled) {
       try {
         const count = await countChatsUsingServer(server.id);
         relatedChatsCount = count;
-        showDisableConfirm = true;
-        // 注意：不要在这里更新 formData.enabled，等待用户确认
+        if (count > 0) {
+          showDisableConfirm = true;
+          return false;
+        }
       } catch (error) {
         console.error("Failed to count related chats:", error);
-        // 如果检查失败，仍然允许禁用
-        performToggle(enabled);
+        // 如果检查失败，允许继续执行禁用操作
+        return true;
       }
-    } else {
-      // 启用操作直接执行
-      performToggle(enabled);
     }
+
+    return true;
+  }
+
+  async function handleToggle(enabled: boolean) {
+    if (!server) return;
+    await performToggle(enabled);
   }
 
   async function performToggle(enabled: boolean) {
@@ -112,6 +120,7 @@
     formData.enabled = enabled;
 
     try {
+      console.log("performToggle", server.id, enabled);
       await mcpActions.toggleServer({ serverId: server.id, enabled });
       console.log(
         `MCP server ${enabled ? "enabled" : "disabled"} successfully`
@@ -129,8 +138,10 @@
   }
 
   function cancelDisable() {
+    if (server) {
+      formData.enabled = server.enabled;
+    }
     showDisableConfirm = false;
-    // 不需要回滚状态，因为我们从未更新过 formData.enabled
   }
 
   async function handleRefresh() {
@@ -235,10 +246,10 @@
       await mcpActions.loadServers(true);
 
       // 通知其他窗口 MCP 工具已更新
-      mcpActions.notifyMcpServersUpdated('mcp-tool-toggled', {
+      mcpActions.notifyMcpServersUpdated("mcp-tool-toggled", {
         serverId: server.id,
         toolName,
-        enabled
+        enabled,
       });
     } catch (error) {
       console.error("Failed to update tool enabled status:", error);
@@ -289,7 +300,11 @@
                 disabled={!server.enabled || isRefreshing}
                 customClass={isRefreshing ? "animate-spin" : ""}
               />
-              <Toggle checked={formData.enabled} onChange={handleToggle} />
+              <Toggle
+                checked={formData.enabled}
+                onChangeBefore={handleToggleBefore}
+                onChange={handleToggle}
+              />
             </div>
           </div>
         </div>

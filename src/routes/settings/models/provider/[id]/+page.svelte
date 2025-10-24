@@ -123,26 +123,33 @@
     }
   });
 
-  async function handleToggleProvider(enabled: boolean) {
-    console.log("handleToggleProvider", enabled);
-    if (!currentProvider || !currentProvider.id) return;
+  async function handleToggleProviderBefore(
+    enabled: boolean,
+    previous: boolean
+  ) {
+    if (!currentProvider || !currentProvider.id) return true;
 
-    // 如果是禁用操作，需要检查关联的聊天
-    if (!enabled && currentProvider.enabled) {
+    if (!enabled && previous && currentProvider.enabled) {
       try {
         const count = await countChatsUsingProvider(currentProvider.id);
         relatedChatsCount = count;
-        showDisableConfirm = true;
-        // 注意：不要在这里更新 formData.enabled，等待用户确认
+        if (count > 0) {
+          showDisableConfirm = true;
+          return false;
+        }
       } catch (error) {
         console.error("Failed to count related chats:", error);
-        // 如果检查失败，仍然允许禁用
-        performProviderToggle(enabled);
+        // 如果检查失败，允许继续执行禁用操作
+        return true;
       }
-    } else {
-      // 启用操作直接执行
-      performProviderToggle(enabled);
     }
+
+    return true;
+  }
+
+  async function handleToggleProvider(enabled: boolean) {
+    if (!currentProvider || !currentProvider.id) return;
+    await performProviderToggle(enabled);
   }
 
   async function performProviderToggle(enabled: boolean) {
@@ -177,8 +184,11 @@
   }
 
   function cancelDisableProvider() {
+    if (currentProvider) {
+      formData.enabled = currentProvider.enabled;
+    }
     showDisableConfirm = false;
-    // 不需要回滚状态，因为我们从未更新过 formData.enabled
+    // 保持当前 UI 状态不变
   }
 
   async function handleToggleModel(model: Model, enabled: boolean) {
@@ -321,6 +331,7 @@
 
             <Toggle
               checked={formData.enabled}
+              onChangeBefore={handleToggleProviderBefore}
               onChange={handleToggleProvider}
             />
           </div>

@@ -82,24 +82,36 @@
     }
   }
 
-  async function handleToggleServer(server: McpServer, enabled: boolean) {
-    // 如果是禁用操作，需要检查关联的聊天
-    if (!enabled && server.enabled) {
+  async function handleToggleServerBefore(
+    server: McpServer,
+    enabled: boolean,
+    previous: boolean
+  ) {
+    // 仅在从启用切换到禁用时提示
+    if (!enabled && previous && server.enabled) {
       try {
         const count = await countChatsUsingServer(server.id);
         relatedChatsCount = count;
-        serverToDisable = server;
-        showDisableConfirm = true;
-        // 注意：不要在这里执行 performToggle，等待用户确认
+        if (count > 0) {
+          serverToDisable = server;
+          showDisableConfirm = true;
+          return false;
+        }
+        serverToDisable = null;
       } catch (error) {
         console.error("Failed to count related chats:", error);
-        // 如果检查失败，仍然允许禁用
-        performToggle(server, enabled);
+        // 如果检查失败，允许继续禁用
+        serverToDisable = null;
+        return true;
       }
-    } else {
-      // 启用操作直接执行
-      performToggle(server, enabled);
     }
+
+    serverToDisable = null;
+    return true;
+  }
+
+  async function handleToggleServer(server: McpServer, enabled: boolean) {
+    await performToggle(server, enabled);
   }
 
   async function performToggle(server: McpServer, enabled: boolean) {
@@ -121,10 +133,6 @@
   async function cancelDisable() {
     showDisableConfirm = false;
     serverToDisable = null;
-    // 强制刷新服务器列表以恢复 Toggle 状态
-    // 因为 Toggle 组件使用双向绑定，用户点击会立即改变内部状态
-    // 我们需要重新加载数据来恢复正确的状态
-    await mcpActions.loadServers(true);
   }
 
   function handleEditServer(server: McpServer, event: MouseEvent) {
@@ -163,6 +171,8 @@
             <div class="flex items-center gap-2">
               <Toggle
                 checked={server.enabled}
+                onChangeBefore={(next, previous) =>
+                  handleToggleServerBefore(server, next, previous)}
                 onChange={(enabled) => handleToggleServer(server, enabled)}
               />
               <IconButton

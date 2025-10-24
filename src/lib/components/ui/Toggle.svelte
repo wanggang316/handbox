@@ -3,6 +3,7 @@
     label?: string;
     checked?: boolean;
     onChange?: (v: boolean) => void;
+    onChangeBefore?: (next: boolean, previous: boolean) => boolean | Promise<boolean>;
     id?: string;
     disabled?: boolean;
   }
@@ -11,18 +12,46 @@
     label = "",
     checked = $bindable(false),
     onChange = () => {},
+    onChangeBefore = () => true,
     id = `tgl-${Math.random().toString(36).slice(2)}`,
     disabled = false,
   }: Props = $props();
+
+  async function handleChange(event: Event) {
+    if (disabled) return;
+
+    const target = event.currentTarget as HTMLInputElement;
+    const next = target.checked;
+    const previous = checked;
+
+    let allow = true;
+    if (onChangeBefore) {
+      try {
+        allow = await onChangeBefore(next, previous);
+      } catch (error) {
+        console.error("Toggle onChangeBefore failed:", error);
+        allow = false;
+      }
+    }
+
+    if (!allow) {
+      target.checked = previous;
+      checked = previous;
+      return;
+    }
+
+    checked = next;
+    onChange(next);
+  }
 </script>
 
 <label class="toggle" class:disabled>
   <input
     {id}
     type="checkbox"
-    bind:checked
+    checked={checked}
     {disabled}
-    onchange={(e) => onChange((e.currentTarget as HTMLInputElement).checked)}
+    onchange={handleChange}
   />
   <span class="slider" aria-hidden="true"></span>
   {#if label}
