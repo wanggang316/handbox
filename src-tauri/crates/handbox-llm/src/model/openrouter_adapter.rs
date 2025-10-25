@@ -1,11 +1,12 @@
-// OpenRouter 模型客户端实现
+// OpenRouter 模型适配器实现
 
 use std::collections::HashMap;
 
-use super::model_client::ModelClient;
+use super::model_client::{ModelFetcher, ModelSupplementer};
 use crate::error::LlmClientError;
 use crate::types::{
     merge_pricing, LlmModel, LlmModelModality, LlmModelParameter, LlmModelPricing, LlmProvider,
+    ModelSupplement,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -229,12 +230,12 @@ fn clone_non_empty_map(
     params.as_ref().filter(|map| !map.is_empty()).cloned()
 }
 
-/// OpenRouter 模型客户端
-pub struct OpenRouterModelClient {
+/// OpenRouter 模型数据获取器
+pub struct OpenRouterFetcher {
     client: reqwest::Client,
 }
 
-impl OpenRouterModelClient {
+impl OpenRouterFetcher {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -243,11 +244,10 @@ impl OpenRouterModelClient {
 }
 
 #[async_trait]
-impl ModelClient for OpenRouterModelClient {
-    async fn list_models(
+impl ModelFetcher for OpenRouterFetcher {
+    async fn fetch_base_models(
         &self,
         provider: &LlmProvider,
-        _provider_type: &str,
     ) -> Result<Vec<LlmModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching OpenRouter models from: {}", url);
@@ -284,5 +284,16 @@ impl ModelClient for OpenRouterModelClient {
             .collect();
 
         Ok(standard_models)
+    }
+}
+
+/// OpenRouter 模型补充器
+pub struct OpenRouterSupplementer;
+
+impl ModelSupplementer for OpenRouterSupplementer {
+    /// OpenRouter 不使用 supplement - API 已经提供了完整数据
+    /// 直接返回原始模型
+    fn merge_supplement(&self, model: LlmModel, _supplement: &ModelSupplement) -> Vec<LlmModel> {
+        vec![model]
     }
 }

@@ -8,4 +8,3 @@ pub mod supplement;
 pub mod types;
 
 pub use model_client::{create_model_client, ModelClient};
-pub use supplement::{OssSupplementProvider, SupplementProvider};

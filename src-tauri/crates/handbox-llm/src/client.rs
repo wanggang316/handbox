@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// LLM 客户端入口 - 为外部调用提供统一接口
 pub struct LlmClient {
     provider_type: String,
-    model_api_client: Box<dyn ModelClient>,
+    model_api_client: ModelClient,
     chat_api_client: Box<dyn ChatClient>,
 }
 
@@ -22,7 +22,8 @@ impl LlmClient {
         chat_api_type: LlmApiType,
         config: Arc<dyn LlmConfigProvider>,
     ) -> Result<Self, LlmClientError> {
-        let model_api_client = create_model_client(model_api_type, Arc::clone(&config))?;
+        let model_api_client =
+            create_model_client(model_api_type, &provider_type, Arc::clone(&config))?;
         let chat_api_client = chat::create_chat_client(chat_api_type)?;
 
         Ok(Self {
@@ -35,7 +36,7 @@ impl LlmClient {
     /// 直接注入不同实现，便于测试或特殊场景
     pub fn with_clients(
         provider_type: String,
-        model_api_client: Box<dyn ModelClient>,
+        model_api_client: ModelClient,
         chat_api_client: Box<dyn ChatClient>,
     ) -> Self {
         Self {

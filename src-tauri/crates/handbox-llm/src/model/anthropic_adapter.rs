@@ -1,29 +1,33 @@
-// Anthropic 模型客户端实现
+// Anthropic 模型适配器实现
 
-use super::model_client::ModelClient;
-use super::supplement::{OssSupplementProvider, SupplementProvider};
-use crate::config::LlmConfigProvider;
+use super::model_client::{ModelFetcher, ModelSupplementer};
 use crate::error::LlmClientError;
-use crate::types::{merge_pricing, LlmModel, ModelSupplement};
+use crate::types::{merge_pricing, LlmModel, LlmProvider, ModelSupplement};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::Arc;
 
-/// Anthropic 模型客户端（基于 supplement 文件）
-pub struct AnthropicModelClient {
-    supplement_provider: OssSupplementProvider,
+/// Anthropic 模型数据获取器（没有公开 API）
+pub struct AnthropicFetcher;
+
+#[async_trait]
+impl ModelFetcher for AnthropicFetcher {
+    /// Anthropic 没有公开的模型列表 API，返回空 Vec
+    async fn fetch_base_models(
+        &self,
+        _provider: &LlmProvider,
+    ) -> Result<Vec<LlmModel>, LlmClientError> {
+        Ok(Vec::new())
+    }
 }
 
-impl AnthropicModelClient {
-    pub fn new(config: Arc<dyn LlmConfigProvider>) -> Self {
-        Self {
-            supplement_provider: OssSupplementProvider::new(config),
-        }
-    }
+/// Anthropic 模型补充器
+pub struct AnthropicSupplementer;
 
-    /// Convert ModelSupplement to LlmModel(s)
-    /// May produce multiple models if snapshots exist
-    fn supplement_to_models(&self, supplement: ModelSupplement) -> Vec<LlmModel> {
+impl ModelSupplementer for AnthropicSupplementer {
+    /// Anthropic 合并策略：完全从 supplement 构建模型
+    /// 因为 Anthropic 没有公开 API，所有数据都来自 supplement
+    /// 一个 supplement 可能展开为多个模型（如果有 snapshots）
+    fn merge_supplement(&self, _model: LlmModel, supplement: &ModelSupplement) -> Vec<LlmModel> {
         let model_code = supplement.model_code.clone();
 
         // Get snapshot IDs - if no snapshots, use model_code as the single ID
@@ -131,32 +135,5 @@ impl AnthropicModelClient {
         }
 
         models
-    }
-}
-
-#[async_trait]
-impl ModelClient for AnthropicModelClient {
-    async fn list_models(
-        &self,
-        _provider: &crate::types::LlmProvider,
-        provider_type: &str,
-    ) -> Result<Vec<LlmModel>, LlmClientError> {
-        // Anthropic 不提供公开的模型列表 API，使用 supplement 文件提供模型列表
-        let supplements_map = self
-            .supplement_provider
-            .load_supplements(provider_type)
-            .await?;
-
-        match supplements_map {
-            Some(map) => {
-                let mut models = Vec::new();
-                for supplement in map.into_values() {
-                    // Convert each ModelSupplement to LlmModel(s)
-                    models.extend(self.supplement_to_models(supplement));
-                }
-                Ok(models)
-            }
-            None => Ok(vec![]),
-        }
     }
 }

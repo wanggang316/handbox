@@ -1,17 +1,14 @@
-// Google 模型客户端实现
+// Google 模型适配器实现
 
-use super::model_client::ModelClient;
-use super::supplement::{OssSupplementProvider, SupplementProvider};
-use crate::config::LlmConfigProvider;
+use super::model_client::{ModelFetcher, ModelSupplementer};
 use crate::error::LlmClientError;
 use crate::types::{
-    convert_endpoints_to_methods, merge_pricing, LlmModel, LlmModelModality, LlmModelParameter,
-    LlmProvider, ModelSupplement,
+    convert_endpoints_to_methods, merge_pricing, LlmModel, LlmModelModality, LlmProvider,
+    ModelSupplement,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use std::sync::Arc;
 
 /// Google 风格的模型列表响应
 #[derive(Debug, Clone, Deserialize)]
@@ -21,122 +18,27 @@ pub struct GoogleModelsResponse {
     pub next_page_token: Option<String>,
 }
 
-/// Google 模型客户端
-pub struct GoogleModelClient {
+/// Google 模型数据获取器
+pub struct GoogleFetcher {
     client: reqwest::Client,
-    supplement_provider: OssSupplementProvider,
 }
 
-impl GoogleModelClient {
-    pub fn new(config: Arc<dyn LlmConfigProvider>) -> Self {
+impl GoogleFetcher {
+    pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
-            supplement_provider: OssSupplementProvider::new(config),
-        }
-    }
-
-    /// Merge supplement data into base model (Google-specific logic)
-    /// Google keeps API-provided parameters, only fills in missing data from supplement
-    fn merge_supplement(&self, model: &mut LlmModel, supplement: &ModelSupplement) {
-        // Only fill missing basic fields (don't override API data)
-        if model.context_length.is_none() {
-            model.context_length = supplement.context_length;
-        }
-        if model.output_max_tokens.is_none() {
-            model.output_max_tokens = supplement.output_max_tokens;
-        }
-        if model.description.is_none() {
-            if let Some(ref desc) = supplement.description {
-                if !desc.trim().is_empty() {
-                    model.description = Some(desc.clone());
-                }
-            }
-        }
-        if model.url.is_none() {
-            if let Some(ref url) = supplement.url {
-                if !url.trim().is_empty() {
-                    model.url = Some(url.clone());
-                }
-            }
-        }
-
-        // Fill missing collections
-        if model.supported_features.is_none() {
-            if let Some(ref features) = supplement.supported_features {
-                if !features.is_empty() {
-                    model.supported_features = Some(features.clone());
-                }
-            }
-        }
-        if model.input_modalities.is_none() {
-            if let Some(ref modalities) = supplement.input_modalities {
-                if !modalities.is_empty() {
-                    model.input_modalities = Some(modalities.clone());
-                }
-            }
-        }
-        if model.output_modalities.is_none() {
-            if let Some(ref modalities) = supplement.output_modalities {
-                if !modalities.is_empty() {
-                    model.output_modalities = Some(modalities.clone());
-                }
-            }
-        }
-
-        // Fill missing parameters (keep API data if present)
-        if model.support_parameters.is_empty() && !supplement.support_parameters.is_empty() {
-            model.support_parameters = supplement.support_parameters.clone();
-        }
-        if model.default_parameters.is_none() {
-            if let Some(ref params) = supplement.default_parameters {
-                if !params.is_empty() {
-                    model.default_parameters = Some(params.clone());
-                }
-            }
-        }
-        if model.max_parameters.is_none() {
-            if let Some(ref params) = supplement.max_parameters {
-                if !params.is_empty() {
-                    model.max_parameters = Some(params.clone());
-                }
-            }
-        }
-
-        // Merge pricing (always merge pricing info)
-        let currency = supplement.currency.as_deref().or(Some("USD"));
-        merge_pricing(
-            &mut model.pricing,
-            supplement.input_cost,
-            supplement.output_cost,
-            currency,
-        );
-
-        // Fill missing supported_methods
-        if model.supported_methods.is_none() {
-            if let Some(ref methods) = supplement.supported_methods {
-                if !methods.is_empty() {
-                    model.supported_methods = Some(methods.clone());
-                }
-            }
         }
     }
 }
 
 #[async_trait]
-impl ModelClient for GoogleModelClient {
-    async fn list_models(
+impl ModelFetcher for GoogleFetcher {
+    async fn fetch_base_models(
         &self,
         provider: &LlmProvider,
-        provider_type: &str,
     ) -> Result<Vec<LlmModel>, LlmClientError> {
         let url = format!("{}/models", provider.base_url);
         tracing::info!("Fetching Google models from: {}", url);
-
-        // Load supplements using the trait-based provider
-        let supplement_map = self
-            .supplement_provider
-            .load_supplements(provider_type)
-            .await?;
 
         let mut result_models = Vec::new();
         let mut page_token: Option<String> = None;
@@ -246,7 +148,7 @@ impl ModelClient for GoogleModelClient {
                     })
                     .flatten();
 
-                let mut model = LlmModel {
+                let model = LlmModel {
                     id: model_id,
                     name: display_name,
                     context_length,
@@ -264,13 +166,6 @@ impl ModelClient for GoogleModelClient {
                     supported_methods,
                 };
 
-                // Merge supplement data
-                if let Some(ref map) = supplement_map {
-                    if let Some(supplement) = map.get(&model.id) {
-                        self.merge_supplement(&mut model, supplement);
-                    }
-                }
-
                 result_models.push(model);
             }
 
@@ -283,6 +178,99 @@ impl ModelClient for GoogleModelClient {
         }
 
         Ok(result_models)
+    }
+}
+
+/// Google 模型补充器
+pub struct GoogleSupplementer;
+
+impl ModelSupplementer for GoogleSupplementer {
+    /// Google 合并策略：只填充缺失字段
+    /// 因为 Google API 返回的模型信息很丰富，我们优先保留 API 数据
+    fn merge_supplement(&self, mut model: LlmModel, supplement: &ModelSupplement) -> Vec<LlmModel> {
+        // Only fill missing basic fields (don't override API data)
+        if model.context_length.is_none() {
+            model.context_length = supplement.context_length;
+        }
+        if model.output_max_tokens.is_none() {
+            model.output_max_tokens = supplement.output_max_tokens;
+        }
+        if model.description.is_none() {
+            if let Some(ref desc) = supplement.description {
+                if !desc.trim().is_empty() {
+                    model.description = Some(desc.clone());
+                }
+            }
+        }
+        if model.url.is_none() {
+            if let Some(ref url) = supplement.url {
+                if !url.trim().is_empty() {
+                    model.url = Some(url.clone());
+                }
+            }
+        }
+
+        // Fill missing collections
+        if model.supported_features.is_none() {
+            if let Some(ref features) = supplement.supported_features {
+                if !features.is_empty() {
+                    model.supported_features = Some(features.clone());
+                }
+            }
+        }
+        if model.input_modalities.is_none() {
+            if let Some(ref modalities) = supplement.input_modalities {
+                if !modalities.is_empty() {
+                    model.input_modalities = Some(modalities.clone());
+                }
+            }
+        }
+        if model.output_modalities.is_none() {
+            if let Some(ref modalities) = supplement.output_modalities {
+                if !modalities.is_empty() {
+                    model.output_modalities = Some(modalities.clone());
+                }
+            }
+        }
+
+        // Fill missing parameters (keep API data if present)
+        if model.support_parameters.is_empty() && !supplement.support_parameters.is_empty() {
+            model.support_parameters = supplement.support_parameters.clone();
+        }
+        if model.default_parameters.is_none() {
+            if let Some(ref params) = supplement.default_parameters {
+                if !params.is_empty() {
+                    model.default_parameters = Some(params.clone());
+                }
+            }
+        }
+        if model.max_parameters.is_none() {
+            if let Some(ref params) = supplement.max_parameters {
+                if !params.is_empty() {
+                    model.max_parameters = Some(params.clone());
+                }
+            }
+        }
+
+        // Merge pricing (always merge pricing info)
+        let currency = supplement.currency.as_deref().or(Some("USD"));
+        merge_pricing(
+            &mut model.pricing,
+            supplement.input_cost,
+            supplement.output_cost,
+            currency,
+        );
+
+        // Fill missing supported_methods
+        if model.supported_methods.is_none() {
+            if let Some(ref methods) = supplement.supported_methods {
+                if !methods.is_empty() {
+                    model.supported_methods = Some(methods.clone());
+                }
+            }
+        }
+
+        vec![model]
     }
 }
 
@@ -344,10 +332,12 @@ fn parse_modalities_field(value: Option<&Value>) -> Option<Vec<LlmModelModality>
 fn parse_google_parameters(
     api_model: &Value,
 ) -> (
-    Vec<LlmModelParameter>,
+    Vec<crate::types::LlmModelParameter>,
     Option<std::collections::HashMap<String, serde_json::Value>>,
     Option<std::collections::HashMap<String, serde_json::Value>>,
 ) {
+    use crate::types::LlmModelParameter;
+
     fn push_param(list: &mut Vec<LlmModelParameter>, param: LlmModelParameter) {
         if !list.contains(&param) {
             list.push(param);
