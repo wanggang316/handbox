@@ -88,6 +88,34 @@ impl AppError {
             "请检查网络连接和配置",
         )
     }
+
+    /// 将 LLM API 错误转换为更友好的供应商错误
+    pub fn from_llm_fetch_error(error: handbox_llm::LlmClientError) -> Self {
+        let app_error: AppError = error.into();
+
+        // 检查是否是配置相关错误（API Key、端点等）
+        if app_error.code == "INTERNAL_ERROR"
+            && (app_error.message.contains("Incorrect API key")
+                || app_error.message.contains("invalid_api_key")
+                || app_error.message.contains("API key not valid")
+                || app_error.message.contains("400 Bad Request")
+                || app_error.message.contains("401 Unauthorized")
+                || app_error.message.contains("404 Not Found")
+                || app_error.message.contains("403 Forbidden"))
+        {
+            // 对于配置错误，返回特定的错误类型
+            if app_error.message.contains("404 Not Found") {
+                Self::provider_api_endpoint_invalid()
+            } else if app_error.message.contains("403 Forbidden") {
+                Self::provider_api_permission_denied()
+            } else {
+                Self::provider_api_key_invalid()
+            }
+        } else {
+            // 对于其他错误（如网络问题），返回原始错误
+            app_error
+        }
+    }
 }
 
 impl std::fmt::Display for AppError {

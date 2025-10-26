@@ -3,7 +3,7 @@
 use crate::models::{
     AddProviderRequest, AppError, ModelResponse, ProviderWithModels, ToggleProviderRequest,
 };
-use crate::services::ProviderService;
+use crate::services::{ModelService, ProviderService};
 use crate::storage::types::{Provider, UUID};
 use tauri::State;
 
@@ -70,13 +70,14 @@ pub async fn provider_toggle(
 pub async fn provider_list_with_models(
     refresh_from_remote: Option<bool>,
     provider_service: State<'_, ProviderService>,
+    model_service: State<'_, ModelService>,
 ) -> Result<Vec<ProviderWithModels>, AppError> {
     let refresh_from_remote = refresh_from_remote.unwrap_or(false);
     let providers = provider_service.list_providers().await?;
     let mut result = Vec::new();
 
     for provider in providers {
-        match provider_service
+        match model_service
             .get_provider_models(&provider.id, refresh_from_remote)
             .await
         {

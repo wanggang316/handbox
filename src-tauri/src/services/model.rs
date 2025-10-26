@@ -29,19 +29,68 @@ impl ModelService {
         }
     }
 
-    /// 获取所有可用模型（所有启用供应商的启用模型）
-    pub async fn get_available_models(&self) -> Result<Vec<Model>, AppError> {
-        let providers = self.provider_repo.list_providers().await?;
-        let mut all_models = Vec::new();
+    /// 从远程 API 获取模型并保存到数据库
+    ///
+    /// # 参数
+    /// - `provider`: 供应商信息
+    /// - `sync`: true = 同步模型（保留用户状态），false = 创建新模型
+    pub(crate) async fn fetch_and_sync_models(
+        &self,
+        provider: &Provider,
+        sync: bool,
+    ) -> Result<(), AppError> {
+        tracing::info!(
+            "Fetching models from API for provider: {}",
+            provider.name
+        );
 
-        for provider in providers {
-            if provider.enabled {
-                let models = self.model_repo.get_models_by_provider(&provider.id).await?;
-                all_models.extend(models.into_iter().filter(|m| m.enabled));
+        let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
+            .map_err(AppError::from)?;
+        let context = Self::provider_context(provider);
+
+        // 获取模型列表，使用友好的错误转换
+        let llm_models = client
+            .list_models(&context)
+            .await
+            .map_err(AppError::from_llm_fetch_error)?;
+
+        tracing::info!(
+            "Successfully fetched {} models for provider: {}",
+            llm_models.len(),
+            provider.name
+        );
+
+        // 适配为我们的 Model 结构
+        let now = self.current_timestamp();
+        let models: Vec<Model> = llm_models
+            .into_iter()
+            .map(|llm_model| adapt_model(llm_model, provider.id.clone(), now))
+            .collect();
+
+        // 保存或同步模型
+        if !models.is_empty() {
+            if sync {
+                // 同步模型，保留用户状态
+                self.model_repo
+                    .sync_provider_models(&provider.id, &models)
+                    .await?;
+                tracing::info!(
+                    "Successfully synced {} models for provider: {}",
+                    models.len(),
+                    provider.name
+                );
+            } else {
+                // 创建新模型
+                self.model_repo.create_models(&models).await?;
+                tracing::info!(
+                    "Successfully created {} models for provider: {}",
+                    models.len(),
+                    provider.name
+                );
             }
         }
 
-        Ok(all_models)
+        Ok(())
     }
 
     /// 获取供应商的模型列表
@@ -66,34 +115,15 @@ impl ModelService {
         // 如果不拉取远程，先尝试从数据库获取
         if !refresh_from_remote {
             let cached_models = self.model_repo.get_models_by_provider(provider_id).await?;
-            // 合并配置文件中的参数信息
-            let merged_models = self.merge_model_parameters(cached_models, &provider.provider_type);
-            return Ok(merged_models);
+            return Ok(cached_models);
         }
 
-        // 远程刷新：从 API 获取最新模型列表
-        let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
-            .map_err(AppError::from)?;
-        let context = Self::provider_context(&provider);
-        let standard_models = client.list_models(&context).await.map_err(AppError::from)?;
-
-        // 适配为我们的 Model 结构
-        let now = self.current_timestamp();
-        let models: Vec<Model> = standard_models
-            .into_iter()
-            .map(|standard_model| adapt_model(standard_model, provider.id.clone(), now))
-            .collect();
-
-        // 同步到数据库（保留用户设置的状态）
-        self.model_repo
-            .sync_provider_models(&provider.id, &models)
-            .await?;
+        // 远程刷新：从 API 获取最新模型列表并同步
+        self.fetch_and_sync_models(&provider, true).await?;
 
         // 返回数据库中的模型（包含用户设置的状态）
         let synced_models = self.model_repo.get_models_by_provider(&provider.id).await?;
-        // 合并配置文件中的参数信息
-        let merged_models = self.merge_model_parameters(synced_models, &provider.provider_type);
-        Ok(merged_models)
+        Ok(synced_models)
     }
 
     /// 切换模型启用状态
@@ -120,23 +150,6 @@ impl ModelService {
             .await
     }
 
-    /// 获取所有收藏的模型
-    pub async fn get_favorite_models(&self) -> Result<Vec<Model>, AppError> {
-        let providers = self.provider_repo.list_providers().await?;
-        let mut favorite_models = Vec::new();
-
-        for provider in providers {
-            match self.model_repo.get_models_by_provider(&provider.id).await {
-                Ok(models) => {
-                    favorite_models.extend(models.into_iter().filter(|m| m.favorite));
-                }
-                Err(_) => continue, // 忽略获取失败的供应商
-            }
-        }
-
-        Ok(favorite_models)
-    }
-
     // === 私有辅助方法 ===
 
     /// 构建 LLM Provider 上下文
@@ -145,13 +158,6 @@ impl ModelService {
             base_url: provider.base_url.clone(),
             api_key: provider.api_key.clone(),
         }
-    }
-
-    /// 合并模型参数（现在参数已经直接包含在模型数据中，从 supplement 文件获取）
-    fn merge_model_parameters(&self, models: Vec<Model>, _provider_type: &str) -> Vec<Model> {
-        // 模型参数现在直接从 API/supplement 文件中获取，不再需要从配置文件中查找
-        // 保留此方法是为了保持代码结构兼容性
-        models
     }
 
     /// 获取当前时间戳
@@ -169,7 +175,7 @@ impl ModelService {
 }
 
 /// 将标准模型适配为应用内部的 `Model`
-fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model {
+pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) -> Model {
     let LlmModel {
         id,
         name,
@@ -186,7 +192,7 @@ fn adapt_model(standard_model: LlmModel, provider_id: String, now: i64) -> Model
         default_parameters,
         max_parameters,
         supported_methods,
-    } = standard_model;
+    } = llm_model;
 
     let supported_features = supported_features.and_then(|features| {
         let mapped: Vec<String> = features
@@ -260,43 +266,5 @@ fn map_llm_modality(modality: LlmModelModality) -> Option<ModelModality> {
         LlmModelModality::File => Some(ModelModality::File),
         LlmModelModality::Audio => Some(ModelModality::Audio),
         LlmModelModality::Video => Some(ModelModality::Video),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::llm_config::LlmConfig;
-    use crate::storage::Database;
-    use tempfile::tempdir;
-
-    async fn create_service() -> (ModelService, tempfile::TempDir) {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let database = Database::new(&db_path).await.unwrap();
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        (
-            ModelService::new(Arc::new(database), llm_config_provider),
-            temp_dir,
-        )
-    }
-
-    #[tokio::test]
-    async fn get_available_models_returns_enabled_only() {
-        let (service, _dir) = create_service().await;
-
-        // 初始状态下应该没有模型
-        let models = service.get_available_models().await.unwrap();
-        assert_eq!(models.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn get_favorite_models_returns_favorites_only() {
-        let (service, _dir) = create_service().await;
-
-        // 初始状态下应该没有收藏的模型
-        let models = service.get_favorite_models().await.unwrap();
-        assert_eq!(models.len(), 0);
     }
 }
