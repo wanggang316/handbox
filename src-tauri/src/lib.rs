@@ -171,19 +171,16 @@ pub fn run() {
             // 供应商相关命令
             provider_list,
             provider_get,
-            provider_get_with_models,
             provider_create,
             provider_update,
             provider_delete,
             provider_toggle,
             provider_count_chats,
+            provider_list_with_models,
             // 模型相关命令
             model_list_by_provider,
             model_toggle,
             model_toggle_favorite,
-            model_get_all_with_providers,
-            model_get_favorites,
-            model_get_available,
             model_count_chats,
             // MCP 管理命令
             mcp_list_servers,

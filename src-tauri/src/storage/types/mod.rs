@@ -16,4 +16,4 @@ pub use message::{
     MessageToolExecutionStatus,
 };
 pub use model::{Model, ModelModality};
-pub use provider::{Provider, ProviderWithModels};
+pub use provider::Provider;

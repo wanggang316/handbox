@@ -1,10 +1,9 @@
 // 模型相关 IPC 命令
 
 use crate::models::{
-    AppError, ListModelsRequest, ListModelsResponse, ToggleModelFavoriteRequest, ToggleModelRequest,
+    AppError, ListModelsRequest, ModelResponse, ToggleModelFavoriteRequest, ToggleModelRequest,
 };
-use crate::services::{ModelService, ProviderService};
-use crate::storage::types::{Model, ProviderWithModels};
+use crate::services::ModelService;
 use tauri::State;
 
 /// 获取供应商模型列表
@@ -12,21 +11,17 @@ use tauri::State;
 pub async fn model_list_by_provider(
     request: ListModelsRequest,
     model_service: State<'_, ModelService>,
-) -> Result<ListModelsResponse, AppError> {
+) -> Result<Vec<ModelResponse>, AppError> {
     let refresh_from_remote = request.refresh_from_remote.unwrap_or(false);
 
     let models = model_service
         .get_provider_models(&request.provider_id, refresh_from_remote)
         .await?;
 
-    Ok(ListModelsResponse {
-        models,
-        cached: !refresh_from_remote,
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64,
-    })
+    // 转换为 ModelResponse
+    let models = models.into_iter().map(ModelResponse::from_model).collect();
+
+    Ok(models)
 }
 
 /// 切换模型启用状态
@@ -49,71 +44,6 @@ pub async fn model_toggle_favorite(
     model_service
         .toggle_favorite_model(&request.provider_id, &request.model_id, request.favorite)
         .await
-}
-
-/// 获取所有供应商及其模型（包含收藏状态）
-#[tauri::command]
-pub async fn model_get_all_with_providers(
-    refresh_from_remote: Option<bool>,
-    provider_service: State<'_, ProviderService>,
-    model_service: State<'_, ModelService>,
-) -> Result<Vec<ProviderWithModels>, AppError> {
-    let refresh_from_remote = refresh_from_remote.unwrap_or(false);
-    let providers = provider_service.list_providers().await?;
-    let mut result = Vec::new();
-
-    for provider in providers {
-        match model_service
-            .get_provider_models(&provider.id, refresh_from_remote)
-            .await
-        {
-            Ok(models) => {
-                result.push(ProviderWithModels {
-                    id: provider.id,
-                    name: provider.name,
-                    provider_type: provider.provider_type,
-                    base_url: provider.base_url,
-                    api_key: provider.api_key,
-                    enabled: provider.enabled,
-                    created_at: provider.created_at,
-                    updated_at: provider.updated_at,
-                    models,
-                });
-            }
-            Err(_) => {
-                // 即使获取模型失败，也返回供应商信息（空模型列表）
-                result.push(ProviderWithModels {
-                    id: provider.id,
-                    name: provider.name,
-                    provider_type: provider.provider_type,
-                    base_url: provider.base_url,
-                    api_key: provider.api_key,
-                    enabled: provider.enabled,
-                    created_at: provider.created_at,
-                    updated_at: provider.updated_at,
-                    models: Vec::new(),
-                });
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-/// 获取所有收藏的模型
-#[tauri::command]
-pub async fn model_get_favorites(
-    model_service: State<'_, ModelService>,
-) -> Result<Vec<Model>, AppError> {
-    model_service.get_favorite_models().await
-}
-
-/// 获取所有可用模型（所有启用供应商的启用模型）
-#[tauri::command]
-pub async fn model_get_available(
-    model_service: State<'_, ModelService>,
-) -> Result<Vec<Model>, AppError> {
-    model_service.get_available_models().await
 }
 
 /// 统计使用指定模型的聊天数量

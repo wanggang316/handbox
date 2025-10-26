@@ -5,8 +5,6 @@
 import { apiCall } from './index';
 import type {
 	Model,
-	ListModelsRequest,
-	ListModelsResponse,
 	ToggleModelFavoriteRequest,
 	ProviderWithModels,
 	UUID
@@ -18,8 +16,8 @@ import type {
 export async function getProviderModels(
 	providerId: UUID,
 	refreshFromRemote: boolean
-): Promise<ListModelsResponse> {
-	return apiCall<ListModelsResponse>('model_list_by_provider', {
+): Promise<Model[]> {
+	return apiCall<Model[]>('model_list_by_provider', {
 		request: {
 			provider_id: providerId,
 			refresh_from_remote: refreshFromRemote
@@ -70,13 +68,6 @@ export async function getAllModelsWithProviders(
 	return apiCall<ProviderWithModels[]>('model_get_all_with_providers', {
 		refresh_from_remote: refreshFromRemote
 	});
-}
-
-/**
- * 获取所有收藏的模型
- */
-export async function getFavoriteModels(): Promise<Model[]> {
-	return apiCall<Model[]>('model_get_favorites');
 }
 
 /**

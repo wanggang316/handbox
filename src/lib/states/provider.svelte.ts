@@ -418,10 +418,10 @@ export const providerActions = {
   async fetchProviderModels(providerId: UUID, refreshFromRemote = false): Promise<void> {
     try {
       providerState.isFetchingModels = providerId;
-      const response = await modelApi.getProviderModels(providerId, refreshFromRemote);
-      
+      const models = await modelApi.getProviderModels(providerId, refreshFromRemote);
+
       // 更新当前模型列表
-      providerState.currentModels = response.models;
+      providerState.currentModels = models;
 
       const providersWithModelsIndex = providerState.providersWithModels.findIndex(
         provider => provider.id === providerId
@@ -429,7 +429,7 @@ export const providerActions = {
       if (providersWithModelsIndex !== -1) {
         providerState.providersWithModels[providersWithModelsIndex] = {
           ...providerState.providersWithModels[providersWithModelsIndex],
-          models: response.models
+          models
         };
       }
 

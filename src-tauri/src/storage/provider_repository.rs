@@ -1,7 +1,7 @@
 // Provider 数据访问层 - 使用普通查询避免 sqlx 宏问题
 
 use crate::models::AppError;
-use crate::storage::types::{Provider, ProviderWithModels};
+use crate::storage::types::Provider;
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
@@ -151,34 +151,6 @@ impl ProviderRepository {
 
         tracing::info!("Providers: {:?}", providers);
         Ok(providers)
-    }
-
-    /// 获取带模型的供应商
-    /// 注意：此方法依赖 ModelRepository，应该在服务层组合使用
-    pub async fn get_provider_with_models(
-        &self,
-        id: &str,
-        model_repo: &crate::storage::ModelRepository,
-    ) -> Result<Option<ProviderWithModels>, AppError> {
-        let provider = self.get_provider_by_id(id).await?;
-
-        match provider {
-            Some(p) => {
-                let models = model_repo.get_models_by_provider(id).await?;
-                Ok(Some(ProviderWithModels {
-                    id: p.id,
-                    name: p.name,
-                    provider_type: p.provider_type,
-                    base_url: p.base_url,
-                    api_key: p.api_key,
-                    enabled: p.enabled,
-                    models,
-                    created_at: p.created_at,
-                    updated_at: p.updated_at,
-                }))
-            }
-            None => Ok(None),
-        }
     }
 
     /// 删除供应商

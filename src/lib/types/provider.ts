@@ -111,13 +111,6 @@ export interface ListModelsRequest {
   refreshFromRemote?: boolean;
 }
 
-// 模型列表响应
-export interface ListModelsResponse {
-  models: Model[];
-  cached: boolean;
-  timestamp: number;
-}
-
 // 模型收藏切换请求
 export interface ToggleModelFavoriteRequest {
   provider_id: string;

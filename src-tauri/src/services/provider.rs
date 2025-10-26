@@ -1,8 +1,8 @@
 // 供应商服务实现
 
-use crate::models::{AddProviderRequest, AppError};
+use crate::models::{AddProviderRequest, AppError, ModelResponse, ProviderWithModels};
 use crate::services::Database;
-use crate::storage::types::{Model, ModelModality, Provider, ProviderWithModels, Timestamp, UUID};
+use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
 use crate::storage::{ChatRepository, ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
@@ -288,6 +288,9 @@ impl ProviderService {
     ) -> Result<ProviderWithModels, AppError> {
         let provider = self.get_provider(provider_id).await?;
         let models = self.model_repo.get_models_by_provider(provider_id).await?;
+
+        // 转换为 ModelResponse
+        let models = models.into_iter().map(ModelResponse::from_model).collect();
 
         Ok(ProviderWithModels {
             id: provider.id,
