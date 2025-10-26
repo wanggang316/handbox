@@ -2,7 +2,7 @@
 // 从 llm_config.json 读取供应商配置信息
 
 use handbox_llm::config::{LlmConfigProvider, LlmProviderConfig};
-use handbox_llm::types::{LlmApiType, LlmModelApiType};
+use handbox_llm::types::{LlmApiType, LlmModelApiType, SupplementField};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ pub struct ProviderConfig {
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
     pub supplement_file: Option<String>,
+    pub supplement_fields: Option<Vec<SupplementField>>,
 }
 
 /// LLM 配置文件结构
@@ -119,6 +120,7 @@ impl LlmConfigProvider for LlmConfig {
                 chat_api_type,
                 model_api_type,
                 supplement_file: config.supplement_file.clone(),
+                supplement_fields: config.supplement_fields.clone(),
             })
         })
     }

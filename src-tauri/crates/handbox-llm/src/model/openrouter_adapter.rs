@@ -2,11 +2,10 @@
 
 use std::collections::HashMap;
 
-use super::model_client::{ModelFetcher, ModelSupplementer};
+use super::model_client::ModelFetcher;
 use crate::error::LlmClientError;
 use crate::types::{
     merge_pricing, LlmModel, LlmModelModality, LlmModelParameter, LlmModelPricing, LlmProvider,
-    ModelSupplement,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -284,16 +283,5 @@ impl ModelFetcher for OpenRouterFetcher {
             .collect();
 
         Ok(standard_models)
-    }
-}
-
-/// OpenRouter 模型补充器
-pub struct OpenRouterSupplementer;
-
-impl ModelSupplementer for OpenRouterSupplementer {
-    /// OpenRouter 不使用 supplement - API 已经提供了完整数据
-    /// 直接返回原始模型
-    fn merge_supplement(&self, model: LlmModel, _supplement: &ModelSupplement) -> Vec<LlmModel> {
-        vec![model]
     }
 }

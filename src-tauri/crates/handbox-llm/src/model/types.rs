@@ -6,6 +6,46 @@ use std::str::FromStr;
 
 use crate::error::LlmClientError;
 
+/// 要从 supplement 合并的字段名称
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum SupplementField {
+    /// 基础信息：name
+    Name,
+    /// 基础信息：context_length
+    ContextLength,
+    /// 基础信息：output_max_tokens
+    OutputMaxTokens,
+    /// 基础信息：description
+    Description,
+    /// 基础信息：url
+    Url,
+    /// 定价信息
+    Pricing,
+    /// 支持的特性列表
+    SupportedFeatures,
+    /// 输入模态
+    InputModalities,
+    /// 输出模态
+    OutputModalities,
+    /// 支持的参数
+    SupportParameters,
+    /// 默认参数值
+    DefaultParameters,
+    /// 最大参数值
+    MaxParameters,
+    /// 支持的方法
+    SupportedMethods,
+    /// 元数据
+    Metadata,
+}
+
+/// 检查是否应该合并指定字段
+/// 如果 fields 为空，则合并所有字段
+pub fn should_merge_field(fields: &[SupplementField], field: &SupplementField) -> bool {
+    fields.is_empty() || fields.contains(field)
+}
+
 /// 模型信息
 #[derive(Debug, Clone)]
 pub struct LlmModel {
@@ -383,6 +423,181 @@ pub fn convert_endpoints_to_methods(endpoints: &[String], prefix: &str) -> Vec<S
         .collect()
 }
 
+/// 统一的 supplement 合并函数
+/// 如果 supplement_fields 中配置了字段，就使用 supplement_file 文件中的字段值
+pub fn merge_supplement(
+    mut model: LlmModel,
+    supplement: &ModelSupplement,
+    fields: &[SupplementField],
+    provider_type: &str,
+) -> LlmModel {
+
+    // 合并 name 字段
+    if should_merge_field(fields, &SupplementField::Name) {
+        if let Some(ref name) = supplement.name {
+            if !name.trim().is_empty() {
+                model.name = name.clone();
+            }
+        }
+    }
+
+    // 合并 context_length 字段
+    if should_merge_field(fields, &SupplementField::ContextLength) {
+        if let Some(context_length) = supplement.context_length {
+            model.context_length = Some(context_length);
+        }
+    }
+
+    // 合并 output_max_tokens 字段
+    if should_merge_field(fields, &SupplementField::OutputMaxTokens) {
+        if let Some(output_max_tokens) = supplement.output_max_tokens {
+            model.output_max_tokens = Some(output_max_tokens);
+        }
+    }
+
+    // 合并 description 字段
+    if should_merge_field(fields, &SupplementField::Description) {
+        if let Some(ref description) = supplement.description {
+            if !description.trim().is_empty() {
+                model.description = Some(description.clone());
+            }
+        }
+    }
+
+    // 合并 url 字段
+    if should_merge_field(fields, &SupplementField::Url) {
+        if let Some(ref url) = supplement.url {
+            if !url.trim().is_empty() {
+                model.url = Some(url.clone());
+            }
+        }
+    }
+
+    // 合并定价信息
+    if should_merge_field(fields, &SupplementField::Pricing) {
+        let currency = supplement.currency.as_deref().or(Some("USD"));
+        merge_pricing(
+            &mut model.pricing,
+            supplement.input_cost,
+            supplement.output_cost,
+            currency,
+        );
+    }
+
+    // 合并特性列表
+    if should_merge_field(fields, &SupplementField::SupportedFeatures) {
+        if let Some(ref features) = supplement.supported_features {
+            if !features.is_empty() {
+                model.supported_features = Some(features.clone());
+            }
+        }
+    }
+
+    // 合并输入模态
+    if should_merge_field(fields, &SupplementField::InputModalities) {
+        if let Some(ref modalities) = supplement.input_modalities {
+            if !modalities.is_empty() {
+                model.input_modalities = Some(modalities.clone());
+            }
+        }
+    }
+
+    // 合并输出模态
+    if should_merge_field(fields, &SupplementField::OutputModalities) {
+        if let Some(ref modalities) = supplement.output_modalities {
+            if !modalities.is_empty() {
+                model.output_modalities = Some(modalities.clone());
+            }
+        }
+    }
+
+    // 合并支持的参数
+    if should_merge_field(fields, &SupplementField::SupportParameters) {
+        if !supplement.support_parameters.is_empty() {
+            model.support_parameters = supplement.support_parameters.clone();
+        }
+    }
+
+    // 合并默认参数
+    if should_merge_field(fields, &SupplementField::DefaultParameters) {
+        if let Some(ref params) = supplement.default_parameters {
+            if !params.is_empty() {
+                model.default_parameters = Some(params.clone());
+            }
+        }
+    }
+
+    // 合并最大参数
+    if should_merge_field(fields, &SupplementField::MaxParameters) {
+        if let Some(ref params) = supplement.max_parameters {
+            if !params.is_empty() {
+                model.max_parameters = Some(params.clone());
+            }
+        }
+    }
+
+    // 合并支持的方法
+    if should_merge_field(fields, &SupplementField::SupportedMethods) {
+        if let Some(ref methods) = supplement.supported_methods {
+            if !methods.is_empty() {
+                model.supported_methods = Some(methods.clone());
+            }
+        } else if !supplement.endpoints.is_empty() {
+            let provider_prefix = provider_type.to_lowercase();
+            let methods = convert_endpoints_to_methods(&supplement.endpoints, &provider_prefix);
+            model.supported_methods = Some(methods);
+        }
+    }
+
+    // 合并元数据
+    if should_merge_field(fields, &SupplementField::Metadata) {
+        let mut metadata_map = supplement
+            .metadata
+            .as_ref()
+            .and_then(|value| value.as_object().cloned())
+            .or_else(|| {
+                model
+                    .metadata
+                    .as_ref()
+                    .and_then(|value| value.as_object().cloned())
+            })
+            .unwrap_or_default();
+
+        // 添加 endpoints 到 metadata
+        if !supplement.endpoints.is_empty() {
+            metadata_map.insert(
+                "endpoints".to_string(),
+                Value::Array(
+                    supplement
+                        .endpoints
+                        .iter()
+                        .cloned()
+                        .map(Value::String)
+                        .collect(),
+                ),
+            );
+        }
+
+        // 添加 URL 到 metadata
+        if let Some(ref url_value) = supplement.url {
+            metadata_map.insert("url".to_string(), Value::String(url_value.clone()));
+        }
+
+        // 添加 currency 到 metadata
+        if let Some(ref currency_value) = supplement.currency {
+            metadata_map.insert(
+                "currency".to_string(),
+                Value::String(currency_value.clone()),
+            );
+        }
+
+        if !metadata_map.is_empty() {
+            model.metadata = Some(Value::Object(metadata_map));
+        }
+    }
+
+    model
+}
 /// 模型 API 类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmModelApiType {

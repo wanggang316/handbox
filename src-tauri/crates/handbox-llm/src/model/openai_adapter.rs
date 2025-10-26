@@ -1,11 +1,8 @@
 // OpenAI 模型适配器实现
 
-use super::model_client::{ModelFetcher, ModelSupplementer};
+use super::model_client::ModelFetcher;
 use crate::error::LlmClientError;
-use crate::types::{
-    convert_endpoints_to_methods, merge_pricing, LlmModel, LlmModelModality, LlmProvider,
-    ModelSupplement,
-};
+use crate::types::{LlmModel, LlmModelModality, LlmProvider};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::to_value;
@@ -93,90 +90,5 @@ impl ModelFetcher for OpenAIFetcher {
             .collect();
 
         Ok(result_models)
-    }
-}
-
-/// OpenAI 模型补充器
-pub struct OpenAISupplementer;
-
-impl ModelSupplementer for OpenAISupplementer {
-    /// OpenAI 合并策略：优先使用 supplement 数据
-    /// 因为 OpenAI API 返回的模型信息很少，supplement 通常更完整
-    fn merge_supplement(&self, mut model: LlmModel, supplement: &ModelSupplement) -> Vec<LlmModel> {
-        // Merge basic fields - prefer supplement if present
-        if let Some(context_length) = supplement.context_length {
-            model.context_length = Some(context_length);
-        }
-        if let Some(output_max_tokens) = supplement.output_max_tokens {
-            model.output_max_tokens = Some(output_max_tokens);
-        }
-        if let Some(ref description) = supplement.description {
-            if !description.trim().is_empty() {
-                model.description = Some(description.clone());
-            }
-        }
-        if let Some(ref url) = supplement.url {
-            if !url.trim().is_empty() {
-                model.url = Some(url.clone());
-            }
-        }
-
-        // Merge collections - prefer supplement if present
-        if let Some(ref features) = supplement.supported_features {
-            if !features.is_empty() {
-                model.supported_features = Some(features.clone());
-            }
-        }
-        if let Some(ref modalities) = supplement.input_modalities {
-            if !modalities.is_empty() {
-                model.input_modalities = Some(modalities.clone());
-            }
-        }
-        if let Some(ref modalities) = supplement.output_modalities {
-            if !modalities.is_empty() {
-                model.output_modalities = Some(modalities.clone());
-            }
-        }
-
-        // Merge parameters
-        if !supplement.support_parameters.is_empty() {
-            model.support_parameters = supplement.support_parameters.clone();
-        }
-        if let Some(ref params) = supplement.default_parameters {
-            if !params.is_empty() {
-                model.default_parameters = Some(params.clone());
-            }
-        }
-        if let Some(ref params) = supplement.max_parameters {
-            if !params.is_empty() {
-                model.max_parameters = Some(params.clone());
-            }
-        }
-
-        // Merge metadata
-        if supplement.metadata.is_some() {
-            model.metadata = supplement.metadata.clone();
-        }
-
-        // Merge pricing
-        let currency = supplement.currency.as_deref().or(Some("USD"));
-        merge_pricing(
-            &mut model.pricing,
-            supplement.input_cost,
-            supplement.output_cost,
-            currency,
-        );
-
-        // Merge supported_methods - prefer supplement if present, otherwise convert from endpoints
-        if let Some(ref methods) = supplement.supported_methods {
-            if !methods.is_empty() {
-                model.supported_methods = Some(methods.clone());
-            }
-        } else if !supplement.endpoints.is_empty() {
-            let methods = convert_endpoints_to_methods(&supplement.endpoints, "openai");
-            model.supported_methods = Some(methods);
-        }
-
-        vec![model]
     }
 }

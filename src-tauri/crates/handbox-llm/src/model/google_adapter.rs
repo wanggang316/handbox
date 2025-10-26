@@ -1,11 +1,8 @@
 // Google 模型适配器实现
 
-use super::model_client::{ModelFetcher, ModelSupplementer};
+use super::model_client::ModelFetcher;
 use crate::error::LlmClientError;
-use crate::types::{
-    convert_endpoints_to_methods, merge_pricing, LlmModel, LlmModelModality, LlmProvider,
-    ModelSupplement,
-};
+use crate::types::{convert_endpoints_to_methods, LlmModel, LlmModelModality, LlmProvider};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
@@ -178,99 +175,6 @@ impl ModelFetcher for GoogleFetcher {
         }
 
         Ok(result_models)
-    }
-}
-
-/// Google 模型补充器
-pub struct GoogleSupplementer;
-
-impl ModelSupplementer for GoogleSupplementer {
-    /// Google 合并策略：只填充缺失字段
-    /// 因为 Google API 返回的模型信息很丰富，我们优先保留 API 数据
-    fn merge_supplement(&self, mut model: LlmModel, supplement: &ModelSupplement) -> Vec<LlmModel> {
-        // Only fill missing basic fields (don't override API data)
-        if model.context_length.is_none() {
-            model.context_length = supplement.context_length;
-        }
-        if model.output_max_tokens.is_none() {
-            model.output_max_tokens = supplement.output_max_tokens;
-        }
-        if model.description.is_none() {
-            if let Some(ref desc) = supplement.description {
-                if !desc.trim().is_empty() {
-                    model.description = Some(desc.clone());
-                }
-            }
-        }
-        if model.url.is_none() {
-            if let Some(ref url) = supplement.url {
-                if !url.trim().is_empty() {
-                    model.url = Some(url.clone());
-                }
-            }
-        }
-
-        // Fill missing collections
-        if model.supported_features.is_none() {
-            if let Some(ref features) = supplement.supported_features {
-                if !features.is_empty() {
-                    model.supported_features = Some(features.clone());
-                }
-            }
-        }
-        if model.input_modalities.is_none() {
-            if let Some(ref modalities) = supplement.input_modalities {
-                if !modalities.is_empty() {
-                    model.input_modalities = Some(modalities.clone());
-                }
-            }
-        }
-        if model.output_modalities.is_none() {
-            if let Some(ref modalities) = supplement.output_modalities {
-                if !modalities.is_empty() {
-                    model.output_modalities = Some(modalities.clone());
-                }
-            }
-        }
-
-        // Fill missing parameters (keep API data if present)
-        if model.support_parameters.is_empty() && !supplement.support_parameters.is_empty() {
-            model.support_parameters = supplement.support_parameters.clone();
-        }
-        if model.default_parameters.is_none() {
-            if let Some(ref params) = supplement.default_parameters {
-                if !params.is_empty() {
-                    model.default_parameters = Some(params.clone());
-                }
-            }
-        }
-        if model.max_parameters.is_none() {
-            if let Some(ref params) = supplement.max_parameters {
-                if !params.is_empty() {
-                    model.max_parameters = Some(params.clone());
-                }
-            }
-        }
-
-        // Merge pricing (always merge pricing info)
-        let currency = supplement.currency.as_deref().or(Some("USD"));
-        merge_pricing(
-            &mut model.pricing,
-            supplement.input_cost,
-            supplement.output_cost,
-            currency,
-        );
-
-        // Fill missing supported_methods
-        if model.supported_methods.is_none() {
-            if let Some(ref methods) = supplement.supported_methods {
-                if !methods.is_empty() {
-                    model.supported_methods = Some(methods.clone());
-                }
-            }
-        }
-
-        vec![model]
     }
 }
 
