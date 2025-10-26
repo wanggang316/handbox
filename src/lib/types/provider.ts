@@ -26,6 +26,25 @@ export interface ModelParameter {
   max?: unknown;
 }
 
+export type ChatMethodName = 'completions' | 'responses' | 'google_generate_content';
+
+export interface ChatMethodParameterValues {
+  default?: number | null;
+  min?: number | null;
+  max?: number | null;
+}
+
+export interface ChatMethodParameter {
+  name: string;
+  support: boolean;
+  values?: ChatMethodParameterValues | null;
+}
+
+export interface ChatMethodResponse {
+  name: ChatMethodName;
+  parameters?: ChatMethodParameter[] | null;
+}
+
 // 模型信息
 export interface Model {
   id: string;
@@ -41,10 +60,8 @@ export interface Model {
   pricing?: ModelPricing;
   url?: string | null;
   parameters?: ModelParameter[];
-  support_parameters?: string[] | null;
   supported_parameters?: string[] | null;
-  default_parameters?: Record<string, unknown> | null;
-  max_parameters?: Record<string, unknown> | null;
+  chat_methods?: ChatMethodResponse[] | null;
   enabled: boolean;
   favorite: boolean;
   created_at: number;

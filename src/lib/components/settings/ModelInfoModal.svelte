@@ -192,24 +192,23 @@
       console.error("Failed to open model url:", error);
     }
   }
+
 </script>
 
 <Modal {open} {onClose} title={model?.name ?? "模型信息"}>
-  <svelte:fragment slot="title-actions">
+  <div
+    class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 pb-6 space-y-6 text-sm text-base-content/90 scrollbar-padding relative"
+  >
     {#if modelUrl}
       <button
         type="button"
-        class="inline-flex items-center justify-center h-8 w-8 rounded-full text-base-content/60 hover:text-primary transition-colors"
+        class="absolute top-0 right-6 inline-flex items-center justify-center h-8 w-8 rounded-full text-base-content/60 hover:text-primary transition-colors"
         title="查看模型详情"
         onclick={handleOpenModelUrl}
       >
         <ExternalLink size={16} stroke-width={1.75} />
       </button>
     {/if}
-  </svelte:fragment>
-  <div
-    class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 pb-6 space-y-6 text-sm text-base-content/90 scrollbar-padding"
-  >
     {#if model}
       <table
         class="w-full text-sm text-base-content/80 border-collapse table-fixed"

@@ -10,7 +10,6 @@
     closeOnBackdropClick?: boolean;
     onClose?: () => void;
     children?: import("svelte").Snippet;
-    titleActions?: import("svelte").Snippet;
   }
 
   let {
@@ -20,7 +19,6 @@
     closeOnBackdropClick = false,
     onClose = () => {},
     children,
-    titleActions,
   }: Props = $props();
 
   let closing = $state(false);
@@ -89,14 +87,9 @@
               <TrafficLightsRedButton onClick={handleClose} />
             {/if}
             {#if title}
-              <div class="ml-4 flex items-center gap-2">
-                <h3 class="text-base font-medium text-base-content/80">
-                  {title}
-                </h3>
-                {#if titleActions}
-                  {@render titleActions()}
-                {/if}
-              </div>
+              <h3 class="ml-4 text-base font-medium text-base-content/80">
+                {title}
+              </h3>
             {/if}
           </div>
         {/if}

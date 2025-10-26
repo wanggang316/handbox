@@ -47,7 +47,9 @@ impl ProviderService {
         };
 
         // 先获取并保存模型（同时验证 API Key），成功后再创建供应商
-        self.model_service.fetch_and_sync_models(&provider, false).await?;
+        self.model_service
+            .fetch_and_sync_models(&provider, false)
+            .await?;
 
         // 模型获取成功，创建供应商
         self.provider_repo.create_provider(&provider).await?;
@@ -215,7 +217,10 @@ mod tests {
             enabled: Some(false),
         };
 
-        let created = service.create_provider_without_validation(config).await.unwrap();
+        let created = service
+            .create_provider_without_validation(config)
+            .await
+            .unwrap();
         let fetched = service.get_provider(&created.id).await.unwrap();
 
         assert_eq!(fetched.id, created.id);
@@ -245,7 +250,10 @@ mod tests {
         ];
 
         for cfg in configs {
-            service.create_provider_without_validation(cfg).await.unwrap();
+            service
+                .create_provider_without_validation(cfg)
+                .await
+                .unwrap();
         }
 
         let providers = service.list_providers().await.unwrap();
@@ -276,7 +284,7 @@ mod tests {
                     name: "Updated".to_string(),
                     provider_type: "google".to_string(),
                     base_url: "https://api.google.com".to_string(), // 保持不变，避免触发验证
-                    api_key: "original".to_string(), // 保持不变，避免触发验证
+                    api_key: "original".to_string(),                // 保持不变，避免触发验证
                     enabled: Some(true),
                 },
             )

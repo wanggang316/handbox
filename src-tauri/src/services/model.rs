@@ -39,10 +39,7 @@ impl ModelService {
         provider: &Provider,
         sync: bool,
     ) -> Result<(), AppError> {
-        tracing::info!(
-            "Fetching models from API for provider: {}",
-            provider.name
-        );
+        tracing::info!("Fetching models from API for provider: {}", provider.name);
 
         let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
             .map_err(AppError::from)?;

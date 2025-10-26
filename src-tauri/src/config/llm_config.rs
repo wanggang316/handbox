@@ -9,6 +9,15 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::OnceLock;
 
+/// 聊天方法配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMethodConfig {
+    pub name: String,
+    pub support_parameters: Option<Vec<String>>,
+    pub default_parameters: Option<HashMap<String, Value>>,
+    pub max_parameters: Option<HashMap<String, Value>>,
+}
+
 /// 供应商配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
@@ -20,9 +29,6 @@ pub struct ProviderConfig {
     pub icon: String,
     pub chat_api_type: String,  // "openai" | "google" | "anthropic"
     pub model_api_type: String, // "openai" | "google" | "anthropic" | "openrouter"
-    pub support_parameters: Option<Vec<String>>,
-    pub default_parameters: Option<HashMap<String, Value>>,
-    pub max_parameters: Option<HashMap<String, Value>>,
     pub supplement_file: Option<String>,
     pub supplement_fields: Option<Vec<SupplementField>>,
 }
@@ -30,22 +36,19 @@ pub struct ProviderConfig {
 /// LLM 配置文件结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
+    #[serde(default)]
+    pub chat_methods: Vec<ChatMethodConfig>,
     pub providers: Vec<ProviderConfig>,
     pub custom_providers: Vec<ProviderConfig>,
-    pub support_parameters: Option<Vec<String>>,
-    pub default_parameters: Option<HashMap<String, Value>>,
-    pub max_parameters: Option<HashMap<String, Value>>,
 }
 
 impl LlmConfig {
     /// 创建新的配置管理器
     pub fn new() -> Self {
         Self {
+            chat_methods: Vec::new(),
             providers: Vec::new(),
             custom_providers: Vec::new(),
-            support_parameters: None,
-            default_parameters: None,
-            max_parameters: None,
         }
     }
 
@@ -71,6 +74,7 @@ impl LlmConfig {
         let loaded_config: LlmConfig = serde_json::from_str(&config_content)
             .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
+        self.chat_methods = loaded_config.chat_methods;
         self.providers = loaded_config.providers;
         self.custom_providers = loaded_config.custom_providers;
 
@@ -106,6 +110,13 @@ impl LlmConfig {
         all_configs.extend(self.providers.iter());
         all_configs.extend(self.custom_providers.iter());
         all_configs
+    }
+
+    /// 根据聊天方法名称获取配置
+    pub fn get_chat_method_config(&self, method_name: &str) -> Option<&ChatMethodConfig> {
+        self.chat_methods
+            .iter()
+            .find(|method| method.name == method_name)
     }
 }
 

@@ -7,9 +7,9 @@ import type {
   UUID,
   McpServerConfig
 } from '../types';
-import type { ModelWithProvider } from '../types/provider';
+import type { ChatMethodName, ChatMethodResponse, ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
-import { providerActions, getAllModels, providerState } from './provider.svelte';
+import { providerActions, getAllModels, providerState, getProviderConfig } from './provider.svelte';
 
 // ============================================
 // 模型参数管理 - 共享工具函数和常量
@@ -25,6 +25,66 @@ const PARAMETER_ALIASES: Record<string, string[]> = {
   streaming: ["streaming", "stream"],
   output_max_tokens: ["output_max_tokens", "max_tokens"],
 };
+
+function mapApiTypeToChatMethod(apiType?: string | null): ChatMethodName | null {
+  if (!apiType) {
+    return null;
+  }
+
+  switch (apiType) {
+    case "openai":
+    case "openai-completions":
+      return "completions";
+    case "openai-responses":
+      return "responses";
+    case "google":
+      return "google_generate_content";
+    default:
+      return null;
+  }
+}
+
+function getPrimaryChatMethod(model?: ModelWithProvider): ChatMethodResponse | null {
+  if (!model || !Array.isArray(model.chat_methods) || model.chat_methods.length === 0) {
+    return null;
+  }
+
+  const providerConfig = getProviderConfig(model.providerType);
+  const preferredChatMethodName = mapApiTypeToChatMethod(providerConfig?.chat_api_type);
+
+  if (preferredChatMethodName) {
+    const preferred = model.chat_methods.find((method) => method.name === preferredChatMethodName);
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  return model.chat_methods[0] ?? null;
+}
+
+function getMethodParameters(model?: ModelWithProvider) {
+  const method = getPrimaryChatMethod(model);
+  if (!method || !Array.isArray(method.parameters)) {
+    return [];
+  }
+  return method.parameters;
+}
+
+function findMethodParameter(parameterName: string, model?: ModelWithProvider) {
+  const params = getMethodParameters(model);
+  if (params.length === 0) {
+    return null;
+  }
+
+  for (const alias of getParameterAliases(parameterName)) {
+    const entry = params.find((param) => param.name === alias);
+    if (entry) {
+      return entry;
+    }
+  }
+
+  return null;
+}
 
 /**
  * 获取参数的所有别名
@@ -72,10 +132,14 @@ export function getSupportedParameterSet(model?: ModelWithProvider): Set<string>
     return supported;
   }
 
-  const supportList = [
-    ...(Array.isArray(model.support_parameters) ? model.support_parameters : []),
-    ...(Array.isArray(model.supported_parameters) ? model.supported_parameters : []),
-  ];
+  for (const param of getMethodParameters(model)) {
+    const name = typeof param?.name === "string" ? param.name.trim() : "";
+    if (name) {
+      supported.add(name);
+    }
+  }
+
+  const supportList = Array.isArray(model.supported_parameters) ? model.supported_parameters : [];
 
   for (const raw of supportList) {
     if (typeof raw === "string" && raw.trim().length > 0) {
@@ -104,22 +168,27 @@ export function hasParameterSupport(parameterName: string, model?: ModelWithProv
     return true;
   }
 
-  const aliases = getParameterAliases(parameterName);
   const supportedParameters = getSupportedParameterSet(model);
-
-  if (supportedParameters.size > 0) {
-    return aliases.some((alias) => supportedParameters.has(alias));
-  }
-
-  const defaults = model?.default_parameters ?? null;
-  const maxes = model?.max_parameters ?? null;
-
-  if (defaults && aliases.some((alias) => alias in defaults)) {
+  if (supportedParameters.size > 0 && getParameterAliases(parameterName).some((alias) => supportedParameters.has(alias))) {
     return true;
   }
 
-  if (maxes && aliases.some((alias) => alias in maxes)) {
-    return true;
+  const entry = findMethodParameter(parameterName, model);
+  if (entry) {
+    if (entry.support) {
+      return true;
+    }
+
+    if (entry.values) {
+      const hasValue =
+        toNumber(entry.values.default ?? null) !== null ||
+        toNumber(entry.values.max ?? null) !== null ||
+        toNumber(entry.values.min ?? null) !== null;
+
+      if (hasValue) {
+        return true;
+      }
+    }
   }
 
   return false;
@@ -129,16 +198,11 @@ export function hasParameterSupport(parameterName: string, model?: ModelWithProv
  * 获取参数的默认数值
  */
 export function getDefaultNumber(parameterName: string, fallback: number, model?: ModelWithProvider): number {
-  const defaults = model?.default_parameters ?? null;
-
-  if (defaults) {
-    for (const alias of getParameterAliases(parameterName)) {
-      if (alias in defaults) {
-        const parsed = toNumber(defaults[alias]);
-        if (parsed !== null) {
-          return parsed;
-        }
-      }
+  const entry = findMethodParameter(parameterName, model);
+  if (entry?.values) {
+    const parsed = toNumber(entry.values.default ?? null);
+    if (parsed !== null) {
+      return parsed;
     }
   }
 
@@ -149,16 +213,11 @@ export function getDefaultNumber(parameterName: string, fallback: number, model?
  * 获取参数的默认布尔值
  */
 export function getDefaultBoolean(parameterName: string, fallback: boolean, model?: ModelWithProvider): boolean {
-  const defaults = model?.default_parameters ?? null;
-
-  if (defaults) {
-    for (const alias of getParameterAliases(parameterName)) {
-      if (alias in defaults) {
-        const parsed = toBoolean(defaults[alias]);
-        if (parsed !== null) {
-          return parsed;
-        }
-      }
+  const entry = findMethodParameter(parameterName, model);
+  if (entry?.values) {
+    const parsed = toBoolean(entry.values.default ?? null);
+    if (parsed !== null) {
+      return parsed;
     }
   }
 
@@ -169,16 +228,11 @@ export function getDefaultBoolean(parameterName: string, fallback: boolean, mode
  * 获取参数的最大值
  */
 export function getMaxNumber(parameterName: string, fallback: number, model?: ModelWithProvider): number {
-  const maxes = model?.max_parameters ?? null;
-
-  if (maxes) {
-    for (const alias of getParameterAliases(parameterName)) {
-      if (alias in maxes) {
-        const parsed = toNumber(maxes[alias]);
-        if (parsed !== null) {
-          return parsed;
-        }
-      }
+  const entry = findMethodParameter(parameterName, model);
+  if (entry?.values) {
+    const parsed = toNumber(entry.values.max ?? null);
+    if (parsed !== null) {
+      return parsed;
     }
   }
 

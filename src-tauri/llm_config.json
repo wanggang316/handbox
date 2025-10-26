@@ -1,28 +1,54 @@
 {
-    "support_parameters": [
-        "temperature",
-        "top_p",
-        "max_tokens"
-    ],
-    "default_parameters": {
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40
-    },
-    "max_parameters": {},
-    "providers": [
+    "chat_methods": [
         {
-            "type": "openai",
+            "name": "completions",
             "support_parameters": [
                 "temperature",
                 "top_p",
+                "top_k",
                 "max_tokens"
             ],
             "default_parameters": {
-                "temperature": 1.0,
-                "top_p": 1.0
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40
             },
-            "max_parameters": {},
+            "max_parameters": {}
+        },
+        {
+            "name": "responses",
+            "support_parameters": [
+                "temperature",
+                "top_p",
+                "top_k",
+                "max_tokens"
+            ],
+            "default_parameters": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40
+            },
+            "max_parameters": {}
+        },
+        {
+            "name": "google_generate_content",
+            "support_parameters": [
+                "temperature",
+                "top_p",
+                "top_k",
+                "max_tokens"
+            ],
+            "default_parameters": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40
+            },
+            "max_parameters": {}
+        }
+    ],
+    "providers": [
+        {
+            "type": "openai",
             "type_name": "OpenAI",
             "default_name": "OpenAI",
             "default_base_url": "https://api.openai.com/v1",
@@ -33,18 +59,6 @@
         },
         {
             "type": "google",
-            "support_parameters": [
-                "temperature",
-                "top_p",
-                "top_k",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 0.9,
-                "top_p": 1.0,
-                "top_k": 40
-            },
-            "max_parameters": {},
             "type_name": "Google AI",
             "default_name": "Google AI",
             "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
@@ -55,16 +69,6 @@
         },
         {
             "type": "deepseek",
-            "support_parameters": [
-                "temperature",
-                "top_p",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1.0,
-                "top_p": 1.0
-            },
-            "max_parameters": {},
             "type_name": "DeepSeek",
             "default_name": "DeepSeek",
             "default_base_url": "https://api.deepseek.com",
@@ -75,18 +79,6 @@
         },
         {
             "type": "anthropic",
-            "support_parameters": [
-                "temperature",
-                "top_p",
-                "top_k",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1.0,
-                "top_p": 1.0,
-                "top_k": 5
-            },
-            "max_parameters": {},
             "type_name": "Anthropic",
             "default_name": "Anthropic",
             "default_base_url": "https://api.anthropic.com",
@@ -96,16 +88,6 @@
         },
         {
             "type": "openrouter",
-            "support_parameters": [
-                "temperature",
-                "top_p",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1.0,
-                "top_p": 1.0
-            },
-            "max_parameters": {},
             "type_name": "OpenRouter",
             "default_name": "OpenRouter",
             "default_base_url": "https://openrouter.ai/api/v1",
@@ -117,16 +99,6 @@
     "custom_providers": [
         {
             "type": "openai-compatible",
-            "support_parameters": [
-                "temperature",
-                "top_p",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1.0,
-                "top_p": 1.0
-            },
-            "max_parameters": {},
             "type_name": "OpenAI Compatible",
             "default_name": "Custom Provider",
             "default_base_url": "",
@@ -136,18 +108,6 @@
         },
         {
             "type": "anthropic-compatible",
-            "support_parameters": [
-                "temperature",
-                "top_p",
-                "top_k",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1.0,
-                "top_p": 1.0,
-                "top_k": 5
-            },
-            "max_parameters": {},
             "type_name": "Anthropic Compatible",
             "default_name": "Custom Provider",
             "default_base_url": "",
