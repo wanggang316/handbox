@@ -1,5 +1,7 @@
 <script lang="ts">
   import Modal from "$lib/components/ui/Modal.svelte";
+  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
+  import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import { Search, Star, Check } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
   import { providerState, providerActions } from "$lib/states/provider.svelte";
@@ -20,6 +22,7 @@
 
   let searchQuery = $state("");
   let showFavoritesOnly = $state(false);
+  let selectedProviderFilter = $state<string>("all");
   // 从 provider 状态派生可用模型，仅关注已启用的供应商与模型
   const allModels = $derived(() => {
     return providerState.providersWithModels
@@ -41,9 +44,27 @@
   const selectedModelId = $derived(selectedModel?.id || "");
   const isLoadingModels = $derived(() => providerState.isLoadingWithModels);
 
+  // 获取所有可用的供应商列表（用于筛选下拉框）
+  const availableProviders = $derived(() => {
+    const providers = new Set<string>();
+    allModels().forEach((model) => {
+      if (model.providerName) {
+        providers.add(model.providerName);
+      }
+    });
+    return Array.from(providers).sort();
+  });
+
   // 过滤后的模型
   const filteredModels = $derived(() => {
     let models = showFavoritesOnly ? favoriteModels() : allModels();
+
+    // 按供应商筛选
+    if (selectedProviderFilter !== "all") {
+      models = models.filter((model: ModelWithProvider) => {
+        return model.providerName === selectedProviderFilter;
+      });
+    }
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -168,20 +189,34 @@
           {/if}
         </div>
 
-        <button
-          onclick={() => (showFavoritesOnly = !showFavoritesOnly)}
-          class="flex items-center gap-1 px-2 py-1 rounded-md text-sm {showFavoritesOnly
-            ? 'bg-warning/10 text-warning border border-warning/30'
-            : 'bg-base-200 text-base-content/80 border border-base-200 hover:bg-base-300'}"
-        >
-          <Star
-            size={14}
-            class={showFavoritesOnly
-              ? "fill-warning text-warning"
-              : "text-base-content/60"}
-          />
-          收藏模型
-        </button>
+        <div class="flex items-center gap-2">
+          <!-- 供应商筛选 -->
+          <select
+            bind:value={selectedProviderFilter}
+            class="px-2 py-1 text-xs rounded-md bg-base-200 text-base-content border border-base-300 hover:bg-base-300 focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="all">全部供应商</option>
+            {#each availableProviders() as provider}
+              <option value={provider}>{provider}</option>
+            {/each}
+          </select>
+
+          <!-- 收藏筛选 -->
+          <button
+            onclick={() => (showFavoritesOnly = !showFavoritesOnly)}
+            class="flex items-center gap-1 px-2 py-1 rounded-md text-sm {showFavoritesOnly
+              ? 'bg-warning/10 text-warning border border-warning/30'
+              : 'bg-base-200 text-base-content/80 border border-base-200 hover:bg-base-300'}"
+          >
+            <Star
+              size={14}
+              class={showFavoritesOnly
+                ? "fill-warning text-warning"
+                : "text-base-content/60"}
+            />
+            收藏模型
+          </button>
+        </div>
       </div>
     </div>
 
@@ -197,52 +232,39 @@
         </div>
       {:else}
         <!-- 分组模型列表 -->
-        <div class="px-6 py-4 space-y-6">
+        <div class="px-4 py-4 space-y-2">
           {#each Object.entries(groupedModels()) as [providerName, models]}
-            <div>
-              <h3 class="text-sm font-medium text-base-content mb-3">
-                {providerName}
-              </h3>
-              <div class="space-y-1">
-                {#each models as model, index (model.id)}
-                  <div
-                    class="w-full flex flex-row items-center gap-4 px-4 py-1 {index %
-                      2 ===
-                    0
-                      ? 'bg-base-100'
-                      : 'bg-base-200'} hover:bg-base-300"
+            <TableGroup title={providerName} collapsible={true} defaultCollapsed={false}>
+              {#each models as model (model.id)}
+                <TableBaseRow>
+                  <button
+                    onclick={() => handleModelSelect(model)}
+                    class="flex-1 flex items-center justify-between gap-2 text-left"
                   >
-                    <button
-                      onclick={() => handleModelSelect(model)}
-                      class="flex-1 text-left"
-                    >
-                      <div class="flex items-center gap-2">
-                        <span class="text-base-content text-sm"
-                          >{model.name}</span
-                        >
-                        {#if model.id === selectedModelId}
-                          <Check size={16} class="text-primary" />
-                        {/if}
-                      </div>
-                    </button>
-                    <button
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        handleToggleFavorite(model);
-                      }}
-                      class="p-1 hover:bg-base-200 rounded transition-colors ml-2"
-                    >
-                      <Star
-                        size={16}
-                        class={model.favorite
-                          ? "fill-warning text-warning"
-                          : "text-base-content/60 hover:text-base-content"}
-                      />
-                    </button>
-                  </div>
-                {/each}
-              </div>
-            </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-base-content text-sm">{model.name}</span>
+                      {#if model.id === selectedModelId}
+                        <Check size={16} class="text-primary" />
+                      {/if}
+                    </div>
+                  </button>
+                  <button
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleToggleFavorite(model);
+                    }}
+                    class="p-1 hover:bg-base-200 rounded transition-colors"
+                  >
+                    <Star
+                      size={16}
+                      class={model.favorite
+                        ? "fill-warning text-warning"
+                        : "text-base-content/60 hover:text-base-content"}
+                    />
+                  </button>
+                </TableBaseRow>
+              {/each}
+            </TableGroup>
           {/each}
         </div>
       {/if}
