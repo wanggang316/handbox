@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { TableGroup, SwitchRow, DropDownRow } from "$lib/components/ui/table";
+  import { TableGroup, SwitchRow, SelectRow } from "$lib/components/ui/table";
   import { settingsState, uiState } from "$lib/states";
   import type { Theme, ThemeColor, Language } from "$lib/types/settings";
 
@@ -97,21 +97,21 @@
 
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
   <TableGroup>
-    <DropDownRow
+    <SelectRow
       label="外观样式"
       options={themeOptions}
       bind:selectedValue={theme}
       onSelect={(value) => handleThemeChange(value)}
     />
 
-    <DropDownRow
+    <SelectRow
       label="语言"
       options={languageOptions}
       bind:selectedValue={language}
       onSelect={(value) => handleLanguageChange(value)}
     />
 
-    <DropDownRow
+    <SelectRow
       label="主题色"
       options={themeColorOptions}
       bind:selectedValue={themeColor}

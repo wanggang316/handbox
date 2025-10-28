@@ -5,7 +5,7 @@
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TextRow from "$lib/components/ui/table/TextRow.svelte";
   import TextareaRow from "$lib/components/ui/table/TextareaRow.svelte";
-  import DropDownRow from "$lib/components/ui/table/DropDownRow.svelte";
+  import SelectRow from "$lib/components/ui/table/SelectRow.svelte";
   import { toastActions } from "$lib/states/toast.svelte";
   import type {
     CreateMcpServerRequest,
@@ -324,7 +324,7 @@
           placeholder="可选的用户可读名称"
         />
 
-        <DropDownRow
+        <SelectRow
           label="连接类型"
           bind:selectedValue={formData.connectionType}
           options={[

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import DropDownRow from "$lib/components/ui/table/DropDownRow.svelte";
+  import SelectRow from "$lib/components/ui/table/SelectRow.svelte";
   import SwitchRow from "$lib/components/ui/table/SwitchRow.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
 
@@ -18,7 +18,7 @@
 
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
   <TableGroup>
-    <DropDownRow
+    <SelectRow
       label="发送消息"
       {options}
       bind:selectedValue

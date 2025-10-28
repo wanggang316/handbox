@@ -1,8 +1,14 @@
 <script lang="ts">
   import Modal from "$lib/components/ui/Modal.svelte";
+  import Select from "$lib/components/ui/Select.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
-  import { Search, Star, Check } from "@lucide/svelte";
+  import {
+    Search,
+    Star,
+    Check,
+    ChevronDown,
+  } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
   import {
     providerState,
@@ -102,19 +108,10 @@
 
   // 当 Modal 打开时检查是否需要刷新数据
   $effect(() => {
-    console.log("111");
-
-    console.log("open: " + open);
-    console.log(
-      "providerState.isLoadingWithModels: " + providerState.isLoadingWithModels
-    );
     if (!open || providerState.isLoadingWithModels) {
-      console.log("222");
-
       return;
     }
 
-    console.log("333");
     // 如果需要刷新或者数据为空，则加载数据
     if (
       providerState.providersWithModelsNeedRefresh ||
@@ -210,22 +207,22 @@
 
         <div class="flex items-center gap-2">
           <!-- 供应商筛选 -->
-          <select
+          <Select
             bind:value={selectedProviderFilter}
-            class="px-2 py-1 text-xs rounded-md bg-base-200 text-base-content border border-base-300 hover:bg-base-300 focus:outline-none focus:ring-2 focus:ring-primary"
-          >
-            <option value="all">全部供应商</option>
-            {#each availableProviders() as provider}
-              <option value={provider}>{provider}</option>
-            {/each}
-          </select>
+            options={[
+              { value: "all", label: "全部供应商" },
+              ...availableProviders().map((p) => ({ value: p, label: p })),
+            ]}
+            autoWidth={true}
+            size="sm"
+          />
 
           <!-- 收藏筛选 -->
           <button
             onclick={() => (showFavoritesOnly = !showFavoritesOnly)}
-            class="flex items-center gap-1 px-2 py-1 rounded-md text-sm {showFavoritesOnly
+            class="flex items-center gap-1 px-2 py-1 rounded-md text-xs {showFavoritesOnly
               ? 'bg-warning/10 text-warning border border-warning/30'
-              : 'bg-base-200 text-base-content/80 border border-base-200 hover:bg-base-300'}"
+              : 'bg-base-200 text-base-content border border-base-200 hover:bg-base-300'}"
           >
             <Star
               size={14}
@@ -233,7 +230,7 @@
                 ? "fill-warning text-warning"
                 : "text-base-content/60"}
             />
-            收藏模型
+            收藏
           </button>
         </div>
       </div>

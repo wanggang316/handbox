@@ -9,7 +9,7 @@
   } from "$lib/states/provider.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TextRow from "../ui/table/TextRow.svelte";
-  import DropDownRow from "../ui/table/DropDownRow.svelte";
+  import SelectRow from "../ui/table/SelectRow.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
   import Modal from "../ui/Modal.svelte";
   import { toastActions } from "$lib/states/toast.svelte";
@@ -61,8 +61,11 @@
   // Modal 引用
   let modalRef: Modal;
 
-  // 使用统一的工具函数获取供应商分组
-  const providerGroups = $derived(getProviderDropdownOptions());
+  // 使用统一的工具函数获取供应商分组，并扁平化为选项列表
+  const providerOptions = $derived(() => {
+    const groups = getProviderDropdownOptions();
+    return groups.flatMap(group => group.options);
+  });
 
   // 简化的错误处理，使用后端标准化错误码
   function handleError(error: any) {
@@ -231,12 +234,12 @@
 
     <div class="flex-1 min-h-0 px-6 py-2 space-y-4">
       <TableGroup>
-        <DropDownRow
+        <SelectRow
           label="供应商类型"
-          groups={providerGroups}
+          options={providerOptions()}
           selectedValue={formData.provider_type}
           onSelect={selectProviderType}
-        ></DropDownRow>
+        ></SelectRow>
         <TextRow label="供应商名称" bind:value={formData.name}></TextRow>
       </TableGroup>
       <TableGroup>

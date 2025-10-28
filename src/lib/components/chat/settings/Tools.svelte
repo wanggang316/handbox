@@ -5,7 +5,7 @@
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
-  import DropDown from "$lib/components/ui/DropDown.svelte";
+  import Select from "$lib/components/ui/Select.svelte";
   import { chatState, chatActions } from "$lib/states/chat.svelte";
   import {
     mcpState,
@@ -239,7 +239,7 @@
                 </div>
                 {#if item.checked}
                   <div>
-                    <DropDown
+                    <Select
                       options={executionModeOptions}
                       selectedValue={item.executionMode}
                       disabled={!item.checked}
@@ -248,10 +248,8 @@
                           item.server.id,
                           value as "auto" | "manual"
                         )}
-                      minWidth="min-w-28"
-                      buttonTextSize="text-[12px]"
-                      buttonIconSize="12"
-                      buttonPx="1"
+                      size="sm"
+                      autoWidth={true}
                     />
                   </div>
                 {/if}

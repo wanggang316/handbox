@@ -1,41 +1,33 @@
 <script lang="ts">
-  import DropDown from '../DropDown.svelte';
+  import Select from '../Select.svelte';
   import TableBaseRow from './TableBaseRow.svelte';
 
-  interface DropDownOption {
+  interface Option {
     value: string;
     label: string;
-    disabled?: boolean;
-  }
-
-  interface DropDownGroup {
-    title?: string;
-    options: DropDownOption[];
   }
 
   interface Props {
     label: string;
-    options?: DropDownOption[];
-    groups?: DropDownGroup[];
+    options?: Option[];
     selectedValue: string;
     description?: string;
     disabled?: boolean;
-    onSelect?: (value: string, option: DropDownOption) => void;
+    onSelect?: (value: string) => void;
   }
 
-  let { 
+  let {
     label,
     options = [],
-    groups = [],
     selectedValue = $bindable(),
     description = '',
     disabled = false,
-    onSelect = (value: string, option: DropDownOption) => {}
+    onSelect = (value: string) => {}
   }: Props = $props();
 
-  function handleSelect(value: string, option: DropDownOption) {
+  function handleSelect(value: string) {
     selectedValue = value;
-    onSelect(value, option);
+    onSelect(value);
   }
 </script>
 
@@ -46,12 +38,13 @@
         {description}
       </div>
     {/if}
-    <DropDown 
+    <Select
       {options}
-      {groups}
       bind:selectedValue
       {disabled}
-      onSelect={handleSelect}
+      onChange={handleSelect}
+      autoWidth={true}
+      size="sm"
     />
   </div>
 </TableBaseRow>
