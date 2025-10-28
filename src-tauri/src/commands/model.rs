@@ -14,14 +14,9 @@ pub async fn model_list_by_provider(
 ) -> Result<Vec<ModelResponse>, AppError> {
     let refresh_from_remote = request.refresh_from_remote.unwrap_or(false);
 
-    let models = model_service
+    model_service
         .get_provider_models(&request.provider_id, refresh_from_remote)
-        .await?;
-
-    // 转换为 ModelResponse
-    let models = models.into_iter().map(ModelResponse::from_model).collect();
-
-    Ok(models)
+        .await
 }
 
 /// 切换模型启用状态

@@ -5,6 +5,7 @@
     title?: string;
     collapsible?: boolean;
     defaultCollapsed?: boolean;
+    showDivider?: boolean;
     children?: any;
   }
 
@@ -12,6 +13,7 @@
     title,
     collapsible = false,
     defaultCollapsed = false,
+    showDivider = true,
     children,
   }: Props = $props();
 
@@ -53,7 +55,7 @@
       <div
         class="absolute inset-0 bg-base-200 rounded-[20px] pointer-events-none"
       ></div>
-      <div class="relative table-group rounded-[20px]">
+      <div class="relative table-group rounded-[20px] {showDivider ? 'show-divider' : ''}">
         {@render children?.()}
       </div>
     </div>
@@ -61,11 +63,11 @@
 </div>
 
 <style>
-  .table-group :global(> *:not(:last-child)) {
+  .table-group.show-divider :global(> *:not(:last-child)) {
     position: relative;
   }
 
-  .table-group :global(> *:not(:last-child)::after) {
+  .table-group.show-divider :global(> *:not(:last-child)::after) {
     content: "";
     position: absolute;
     bottom: 0;

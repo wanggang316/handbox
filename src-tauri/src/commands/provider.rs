@@ -1,8 +1,6 @@
 // 供应商相关 IPC 命令
 
-use crate::models::{
-    AddProviderRequest, AppError, ModelResponse, ProviderWithModels, ToggleProviderRequest,
-};
+use crate::models::{AddProviderRequest, AppError, ProviderWithModels, ToggleProviderRequest};
 use crate::services::{ModelService, ProviderService};
 use crate::storage::types::{Provider, UUID};
 use tauri::State;
@@ -82,9 +80,6 @@ pub async fn provider_list_with_models(
             .await
         {
             Ok(models) => {
-                // 转换为 ModelResponse
-                let models = models.into_iter().map(ModelResponse::from_model).collect();
-
                 result.push(ProviderWithModels {
                     id: provider.id,
                     name: provider.name,

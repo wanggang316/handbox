@@ -1,5 +1,6 @@
 // 模型服务实现
 
+use crate::models::model::ModelResponse;
 use crate::models::AppError;
 use crate::services::Database;
 use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
@@ -90,12 +91,12 @@ impl ModelService {
         Ok(())
     }
 
-    /// 获取供应商的模型列表
+    /// 获取供应商的模型列表（转换为 ModelResponse 并过滤掉无效模型）
     pub async fn get_provider_models(
         &self,
         provider_id: &UUID,
         refresh_from_remote: bool,
-    ) -> Result<Vec<Model>, AppError> {
+    ) -> Result<Vec<ModelResponse>, AppError> {
         // 先获取供应商信息
         let provider = self
             .provider_repo
@@ -109,18 +110,23 @@ impl ModelService {
             refresh_from_remote
         );
 
-        // 如果不拉取远程，先尝试从数据库获取
-        if !refresh_from_remote {
-            let cached_models = self.model_repo.get_models_by_provider(provider_id).await?;
-            return Ok(cached_models);
-        }
+        // 获取原始模型列表
+        let models = if !refresh_from_remote {
+            // 从数据库获取缓存
+            self.model_repo.get_models_by_provider(provider_id).await?
+        } else {
+            // 远程刷新：从 API 获取最新模型列表并同步
+            self.fetch_and_sync_models(&provider, true).await?;
+            // 返回数据库中的模型（包含用户设置的状态）
+            self.model_repo.get_models_by_provider(&provider.id).await?
+        };
 
-        // 远程刷新：从 API 获取最新模型列表并同步
-        self.fetch_and_sync_models(&provider, true).await?;
-
-        // 返回数据库中的模型（包含用户设置的状态）
-        let synced_models = self.model_repo.get_models_by_provider(&provider.id).await?;
-        Ok(synced_models)
+        // 转换为 ModelResponse 并过滤掉 chat_methods 为空的模型
+        Ok(models
+            .into_iter()
+            .map(ModelResponse::from_model)
+            .filter(|model| model.chat_methods.is_some())
+            .collect())
     }
 
     /// 切换模型启用状态
@@ -263,5 +269,117 @@ fn map_llm_modality(modality: LlmModelModality) -> Option<ModelModality> {
         LlmModelModality::File => Some(ModelModality::File),
         LlmModelModality::Audio => Some(ModelModality::Audio),
         LlmModelModality::Video => Some(ModelModality::Video),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::types::{Model, UUID};
+
+    /// 创建一个测试用的 Model，包含 chat_methods
+    fn create_test_model_with_chat_methods(id: &str, provider_id: &str) -> Model {
+        Model {
+            id: id.to_string(),
+            provider_id: provider_id.to_string(),
+            name: format!("Test Model {id}"),
+            context_length: Some(4096),
+            output_max_tokens: Some(2048),
+            supported_features: None,
+            description: Some("A test model".to_string()),
+            input_modalities: None,
+            output_modalities: None,
+            metadata: None,
+            pricing: None,
+            url: None,
+            support_parameters: None, // 不要设置任何参数
+            default_parameters: None,
+            max_parameters: None,
+            supported_methods: Some(vec!["completions".to_string()]),
+            enabled: true,
+            favorite: false,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    /// 创建一个测试用的 Model，不包含 chat_methods
+    fn create_test_model_without_chat_methods(id: &str, provider_id: &str) -> Model {
+        Model {
+            id: id.to_string(),
+            provider_id: provider_id.to_string(),
+            name: format!("Test Model {id}"),
+            context_length: Some(4096),
+            output_max_tokens: Some(2048),
+            supported_features: None,
+            description: Some("A test model without chat methods".to_string()),
+            input_modalities: None,
+            output_modalities: None,
+            metadata: None,
+            pricing: None,
+            url: None,
+            support_parameters: None,
+            default_parameters: None,
+            max_parameters: None,
+            supported_methods: None, // 没有 supported_methods
+            enabled: true,
+            favorite: false,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_model_response_conversion_filters_empty_chat_methods() {
+        // 测试场景：验证 ModelResponse::from_model 转换和过滤逻辑
+        // 1. 有 supported_methods 的模型应该有 chat_methods
+        // 2. 没有 supported_methods 但有全局配置支持的模型可能也有 chat_methods
+        // 3. 完全没有任何支持的模型应该被过滤掉
+
+        let models = vec![
+            create_test_model_with_chat_methods("model1", "provider1"),
+            create_test_model_without_chat_methods("model2", "provider1"),
+            create_test_model_with_chat_methods("model3", "provider1"),
+        ];
+
+        // 转换为 ModelResponse 并过滤掉 chat_methods 为 None 的模型
+        // （这是 get_provider_models 方法中使用的逻辑）
+        let filtered_responses: Vec<ModelResponse> = models
+            .into_iter()
+            .map(ModelResponse::from_model)
+            .filter(|model| model.chat_methods.is_some())
+            .collect();
+
+        // 验证所有返回的模型都有 chat_methods
+        for response in &filtered_responses {
+            assert!(
+                response.chat_methods.is_some(),
+                "All returned models should have chat_methods"
+            );
+            assert!(
+                !response.chat_methods.as_ref().unwrap().is_empty(),
+                "chat_methods should not be empty"
+            );
+        }
+
+        // 验证过滤逻辑正常工作（至少返回了一些模型）
+        assert!(
+            !filtered_responses.is_empty(),
+            "Should have at least some models with chat_methods"
+        );
+    }
+
+    #[test]
+    fn test_model_response_conversion_empty_input() {
+        let models: Vec<Model> = vec![];
+
+        // 转换和过滤空列表
+        let responses: Vec<ModelResponse> = models
+            .into_iter()
+            .map(ModelResponse::from_model)
+            .filter(|model| model.chat_methods.is_some())
+            .collect();
+
+        assert_eq!(responses.len(), 0);
     }
 }

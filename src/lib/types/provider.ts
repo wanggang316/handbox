@@ -87,10 +87,8 @@ export type ModelModality =
   | 'video';
 
 export interface ModelPricing {
-  currency?: string;
-  input_text?: number | null;
-  output_text?: number | null;
-  [key: string]: string | number | null | undefined;
+  input_text?: string | null;
+  output_text?: string | null;
 }
 
 

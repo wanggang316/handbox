@@ -65,7 +65,7 @@ export async function toggleModelFavorite(
 export async function getAllModelsWithProviders(
 	refreshFromRemote: boolean = false
 ): Promise<ProviderWithModels[]> {
-	return apiCall<ProviderWithModels[]>('model_get_all_with_providers', {
+	return apiCall<ProviderWithModels[]>('provider_list_with_models', {
 		refresh_from_remote: refreshFromRemote
 	});
 }

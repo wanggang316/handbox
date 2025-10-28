@@ -67,7 +67,7 @@
   function resolvePricingValue(
     pricing: ModelPricing | undefined,
     key: "input_text" | "output_text",
-  ): number | null {
+  ): string | null {
     if (!pricing) return null;
     const value = pricing[key];
     return value ?? null;
@@ -81,16 +81,9 @@
     model?.url && model.url.trim().length > 0 ? model.url : null,
   );
 
-  function formatPricePerMillion(value: number | null, currency = "USD"): string {
-    if (value === null || !Number.isFinite(value)) {
-      return "";
-    }
-
-    const formatter = new Intl.NumberFormat(undefined, {
-      maximumFractionDigits: value >= 100 ? 0 : value >= 1 ? 2 : 4,
-    });
-
-    return `${currency.toUpperCase()} ${formatter.format(value)}/M Token`;
+  // 价格已由后端格式化，直接返回
+  function formatPricePerMillion(value: string | null): string {
+    return value || "";
   }
 
   type TableRow = {
@@ -134,9 +127,7 @@
         });
       }
 
-      const currency = current.pricing?.currency ?? "USD";
-
-      const inputPrice = formatPricePerMillion(promptPrice, currency);
+      const inputPrice = formatPricePerMillion(promptPrice);
       if (inputPrice) {
         rows.push({
           label: "输入价格",
@@ -144,7 +135,7 @@
         });
       }
 
-      const outputPrice = formatPricePerMillion(completionPrice, currency);
+      const outputPrice = formatPricePerMillion(completionPrice);
       if (outputPrice) {
         rows.push({
           label: "输出价格",

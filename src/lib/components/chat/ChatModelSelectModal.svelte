@@ -4,7 +4,11 @@
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import { Search, Star, Check } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
-  import { providerState, providerActions } from "$lib/states/provider.svelte";
+  import {
+    providerState,
+    providerActions,
+    getProviderIconById,
+  } from "$lib/states/provider.svelte";
 
   interface Props {
     open?: boolean;
@@ -23,6 +27,8 @@
   let searchQuery = $state("");
   let showFavoritesOnly = $state(false);
   let selectedProviderFilter = $state<string>("all");
+  let hoveredModel = $state<ModelWithProvider | null>(null);
+  let tooltipPosition = $state({ x: 0, y: 0 });
   // 从 provider 状态派生可用模型，仅关注已启用的供应商与模型
   const allModels = $derived(() => {
     return providerState.providersWithModels
@@ -146,6 +152,19 @@
   function clearSearch() {
     searchQuery = "";
   }
+
+  function handleMouseEnter(model: ModelWithProvider, event: MouseEvent) {
+    hoveredModel = model;
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    tooltipPosition = {
+      x: rect.right + 10,
+      y: rect.top,
+    };
+  }
+
+  function handleMouseLeave() {
+    hoveredModel = null;
+  }
 </script>
 
 <Modal
@@ -154,7 +173,7 @@
   showCloseButton={false}
   closeOnBackdropClick={true}
 >
-  <div class="w-[600px] h-[70vh] max-h-[70vh] flex flex-col">
+  <div class="w-[500px] h-[70vh] max-h-[70vh] flex flex-col">
     <!-- 搜索和过滤器区域 -->
     <div class="px-6 py-4 border-b border-base-300 space-y-3">
       <!-- 搜索框 -->
@@ -234,15 +253,29 @@
         <!-- 分组模型列表 -->
         <div class="px-4 py-4 space-y-2">
           {#each Object.entries(groupedModels()) as [providerName, models]}
-            <TableGroup title={providerName} collapsible={true} defaultCollapsed={false}>
-              {#each models as model (model.id)}
-                <TableBaseRow>
+            <TableGroup
+              title={providerName}
+              collapsible={true}
+              defaultCollapsed={false}
+              showDivider={false}
+            >
+              {#each models as model, index (model.id)}
+                <div
+                  role="button"
+                  tabindex="-1"
+                  class="flex flex-row px-4 py-1 {index % 2 === 0
+                    ? 'bg-base-100'
+                    : 'bg-base-200'} hover:bg-base-300"
+                  onmouseenter={(e) => handleMouseEnter(model, e)}
+                  onmouseleave={handleMouseLeave}
+                >
                   <button
                     onclick={() => handleModelSelect(model)}
                     class="flex-1 flex items-center justify-between gap-2 text-left"
                   >
                     <div class="flex items-center gap-2">
-                      <span class="text-base-content text-sm">{model.name}</span>
+                      <span class="text-base-content text-sm">{model.name}</span
+                      >
                       {#if model.id === selectedModelId}
                         <Check size={16} class="text-primary" />
                       {/if}
@@ -262,7 +295,7 @@
                         : "text-base-content/60 hover:text-base-content"}
                     />
                   </button>
-                </TableBaseRow>
+                </div>
               {/each}
             </TableGroup>
           {/each}
@@ -270,4 +303,74 @@
       {/if}
     </div>
   </div>
+
+  <!-- Tooltip for model details -->
+  {#if hoveredModel}
+    {@const providerIcon = getProviderIconById(hoveredModel.provider_id)}
+    <div
+      class="fixed z-[9999] bg-base-100 border border-base-300 rounded-lg shadow-xl px-4 pt-4 pb-0 min-w-[280px] max-w-[380px]"
+      style="left: {tooltipPosition.x}px; top: {tooltipPosition.y}px;"
+    >
+      <div class="space-y-1">
+        <!-- 模型名称 - 大字体，带供应商图标 -->
+        <div class="flex items-center gap-2">
+          {#if providerIcon}
+            <img
+              src={providerIcon}
+              alt={hoveredModel.providerName}
+              class="h-3.5 w-3.5 rounded-md object-contain flex-shrink-0"
+            />
+          {/if}
+          <div class="text-base text-base-content">
+            {hoveredModel.name}
+          </div>
+        </div>
+
+        <!-- 模型 ID - tag 样式 -->
+        <div class="flex mb-2">
+          <span
+            class="inline-block px-2 py-1 text-xs bg-base-200 text-base-content/70 rounded-lg break-all"
+          >
+            {hoveredModel.id}
+          </span>
+        </div>
+
+        <!-- 其他信息 -->
+        <div class="space-y-2 mb-4 text-xs">
+          {#if hoveredModel.context_length}
+            <div class="flex justify-between items-center">
+              <span class="text-base-content/70">上下文长度</span>
+              <span class="font-semibold text-base-content">
+                {hoveredModel.context_length.toLocaleString()} tokens
+              </span>
+            </div>
+          {/if}
+          {#if hoveredModel.output_max_tokens}
+            <div class="flex justify-between items-center">
+              <span class="text-base-content/70">最大输出长度</span>
+              <span class="font-semibold text-base-content">
+                {hoveredModel.output_max_tokens.toLocaleString()} tokens
+              </span>
+            </div>
+          {/if}
+          {#if hoveredModel.pricing?.input_text}
+            <div class="flex justify-between items-center">
+              <span class="text-base-content/70">输入价格</span>
+              <span class="font-semibold text-base-content">
+                {hoveredModel.pricing.input_text}
+              </span>
+            </div>
+          {/if}
+          {#if hoveredModel.pricing?.output_text}
+            <div class="flex justify-between items-center">
+              <span class="text-base-content/70">输出价格</span>
+              <span class="font-semibold text-base-content">
+                {hoveredModel.pricing.output_text}
+              </span>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
 </Modal>
