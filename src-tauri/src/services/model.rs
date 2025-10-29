@@ -195,6 +195,7 @@ pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) ->
         default_parameters,
         max_parameters,
         supported_methods,
+        created_at,
     } = llm_model;
 
     let supported_features = supported_features.and_then(|features| {
@@ -254,6 +255,7 @@ pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) ->
         default_parameters,
         max_parameters,
         supported_methods,
+        model_created_at: created_at,
         enabled: true,
         favorite: false,
         created_at: now,
@@ -296,6 +298,7 @@ mod tests {
             default_parameters: None,
             max_parameters: None,
             supported_methods: Some(vec!["completions".to_string()]),
+            model_created_at: None,
             enabled: true,
             favorite: false,
             created_at: 0,
@@ -322,6 +325,7 @@ mod tests {
             default_parameters: None,
             max_parameters: None,
             supported_methods: None, // 没有 supported_methods
+            model_created_at: None,
             enabled: true,
             favorite: false,
             created_at: 0,

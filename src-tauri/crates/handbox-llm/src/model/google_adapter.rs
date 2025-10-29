@@ -161,6 +161,7 @@ impl ModelFetcher for GoogleFetcher {
                     default_parameters,
                     max_parameters,
                     supported_methods,
+                    created_at: None,
                 };
 
                 result_models.push(model);

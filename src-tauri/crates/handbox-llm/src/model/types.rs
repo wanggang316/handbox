@@ -64,6 +64,7 @@ pub struct LlmModel {
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
     pub supported_methods: Option<Vec<String>>,
+    pub created_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]

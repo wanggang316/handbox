@@ -48,12 +48,13 @@ impl ModelRepository {
                 supported_methods,
                 metadata,
                 url,
+                model_created_at,
                 enabled,
                 favorite,
                 created_at,
                 updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
             )
         "#;
 
@@ -74,6 +75,7 @@ impl ModelRepository {
             .bind(supported_methods_json.as_deref())
             .bind(metadata_json.as_deref())
             .bind(model.url.as_deref())
+            .bind(model.model_created_at)
             .bind(model.enabled)
             .bind(model.favorite)
             .bind(model.created_at)
@@ -179,12 +181,13 @@ impl ModelRepository {
                     supported_methods,
                     metadata,
                     url,
+                    model_created_at,
                     enabled,
                     favorite,
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
                 )
             "#;
 
@@ -205,6 +208,7 @@ impl ModelRepository {
                 .bind(supported_methods_json.as_deref())
                 .bind(metadata_json.as_deref())
                 .bind(model.url.as_deref())
+                .bind(model.model_created_at)
                 .bind(enabled)
                 .bind(favorite)
                 .bind(model.created_at)
@@ -261,12 +265,13 @@ impl ModelRepository {
                     max_parameters,
                     supported_methods,
                     url,
+                    model_created_at,
                     enabled,
                     favorite,
                     created_at,
                     updated_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
                 )
             "#;
 
@@ -287,6 +292,7 @@ impl ModelRepository {
                 .bind(max_parameters_json.as_deref())
                 .bind(supported_methods_json.as_deref())
                 .bind(model.url.as_deref())
+                .bind(model.model_created_at)
                 .bind(model.enabled)
                 .bind(model.favorite)
                 .bind(model.created_at)
@@ -325,11 +331,18 @@ impl ModelRepository {
                 supported_methods,
                 metadata,
                 url,
+                model_created_at,
                 enabled,
                 favorite,
                 created_at,
                 updated_at
-            FROM models WHERE provider_id = $1 ORDER BY created_at
+            FROM models
+            WHERE provider_id = $1
+            ORDER BY
+                CASE
+                    WHEN model_created_at IS NOT NULL THEN model_created_at
+                    ELSE created_at
+                END DESC
         "#;
 
         let rows = sqlx::query(query)
@@ -490,6 +503,7 @@ impl ModelRepository {
             default_parameters,
             max_parameters,
             supported_methods,
+            model_created_at: row.try_get("model_created_at").ok(),
             enabled: row.try_get("enabled")?,
             favorite: row.try_get("favorite").unwrap_or(false),
             created_at: row.try_get("created_at")?,

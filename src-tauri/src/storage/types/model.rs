@@ -37,6 +37,7 @@ pub struct Model {
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
     pub supported_methods: Option<Vec<String>>,
+    pub model_created_at: Option<i64>,
     pub enabled: bool,
     pub favorite: bool,
     pub created_at: Timestamp,

@@ -86,6 +86,7 @@ impl ModelFetcher for OpenAIFetcher {
                 default_parameters: None,
                 max_parameters: None,
                 supported_methods: None,
+                created_at: api_model.created,
             })
             .collect();
 

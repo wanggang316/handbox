@@ -112,7 +112,7 @@ impl OpenRouterModel {
             id,
             canonical_slug: _,
             name,
-            created: _,
+            created,
             description,
             context_length,
             architecture,
@@ -187,6 +187,7 @@ impl OpenRouterModel {
             default_parameters,
             max_parameters,
             supported_methods: Some(vec!["completions".to_string()]),
+            created_at: created,
         }
     }
 }

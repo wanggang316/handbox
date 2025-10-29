@@ -188,7 +188,7 @@ impl ModelResponse {
                     method_config,
                 );
 
-                if !method_supported && parameters.is_none() {
+                if !method_supported {
                     return None;
                 }
 
