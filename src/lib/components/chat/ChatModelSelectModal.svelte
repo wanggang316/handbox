@@ -334,19 +334,19 @@
 
         <!-- 其他信息 -->
         <div class="space-y-2 mb-4 text-xs">
-          {#if hoveredModel.context_length}
+          {#if hoveredModel.display_context_length}
             <div class="flex justify-between items-center">
               <span class="text-base-content/70">上下文长度</span>
               <span class="font-semibold text-base-content">
-                {hoveredModel.context_length.toLocaleString()} tokens
+                {hoveredModel.display_context_length}
               </span>
             </div>
           {/if}
-          {#if hoveredModel.output_max_tokens}
+          {#if hoveredModel.display_output_max_tokens}
             <div class="flex justify-between items-center">
               <span class="text-base-content/70">最大输出长度</span>
               <span class="font-semibold text-base-content">
-                {hoveredModel.output_max_tokens.toLocaleString()} tokens
+                {hoveredModel.display_output_max_tokens}
               </span>
             </div>
           {/if}

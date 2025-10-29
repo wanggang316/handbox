@@ -105,6 +105,8 @@ pub struct ModelResponse {
     pub name: String,
     pub context_length: Option<i32>,
     pub output_max_tokens: Option<i32>,
+    pub display_context_length: Option<String>,
+    pub display_output_max_tokens: Option<String>,
     pub supported_features: Option<Vec<String>>,
     pub description: Option<String>,
     pub input_modalities: Option<Vec<ModelModality>>,
@@ -129,12 +131,18 @@ impl ModelResponse {
             .as_ref()
             .and_then(ModelPricingResponse::from_pricing);
 
+        // 格式化展示字段
+        let display_context_length = model.context_length.map(Self::format_number);
+        let display_output_max_tokens = model.output_max_tokens.map(Self::format_number);
+
         Self {
             id: model.id,
             provider_id: model.provider_id,
             name: model.name,
             context_length: model.context_length,
             output_max_tokens: model.output_max_tokens,
+            display_context_length,
+            display_output_max_tokens,
             supported_features: model.supported_features,
             description: model.description,
             input_modalities: model.input_modalities,
@@ -146,6 +154,22 @@ impl ModelResponse {
             favorite: model.favorite,
             created_at: model.created_at,
             updated_at: model.updated_at,
+        }
+    }
+
+    /// 格式化数字为可读的字符串
+    /// - 大于等于 1,000,000: 除以 1,000,000，显示两位小数 + "M"
+    /// - 大于等于 1,000: 除以 1,000，显示两位小数 + "K"
+    /// - 小于 1,000: 直接显示原值
+    fn format_number(value: i32) -> String {
+        if value >= 1_000_000 {
+            let formatted = (value as f64 / 1_000_000.0 * 100.0).round() / 100.0;
+            format!("{:.2}M", formatted)
+        } else if value >= 1_000 {
+            let formatted = (value as f64 / 1_000.0 * 100.0).round() / 100.0;
+            format!("{:.2}K", formatted)
+        } else {
+            value.to_string()
         }
     }
 
@@ -367,4 +391,67 @@ pub struct ToggleModelFavoriteRequest {
     pub provider_id: UUID,
     pub model_id: String,
     pub favorite: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_number_less_than_1000() {
+        assert_eq!(ModelResponse::format_number(0), "0");
+        assert_eq!(ModelResponse::format_number(1), "1");
+        assert_eq!(ModelResponse::format_number(999), "999");
+    }
+
+    #[test]
+    fn test_format_number_thousands() {
+        // 1,000 -> 1.00K
+        assert_eq!(ModelResponse::format_number(1000), "1.00K");
+
+        // 1,089 -> 1.09K (四舍五入)
+        assert_eq!(ModelResponse::format_number(1089), "1.09K");
+
+        // 1,094 -> 1.09K (四舍五入)
+        assert_eq!(ModelResponse::format_number(1094), "1.09K");
+
+        // 1,095 -> 1.10K (四舍五入)
+        assert_eq!(ModelResponse::format_number(1095), "1.10K");
+
+        // 12,345 -> 12.35K (四舍五入)
+        assert_eq!(ModelResponse::format_number(12345), "12.35K");
+
+        // 999,999 -> 1000.00K
+        assert_eq!(ModelResponse::format_number(999999), "1000.00K");
+    }
+
+    #[test]
+    fn test_format_number_millions() {
+        // 1,000,000 -> 1.00M
+        assert_eq!(ModelResponse::format_number(1_000_000), "1.00M");
+
+        // 1,048,938 -> 1.05M (四舍五入)
+        assert_eq!(ModelResponse::format_number(1_048_938), "1.05M");
+
+        // 1,044,999 -> 1.04M (四舍五入)
+        assert_eq!(ModelResponse::format_number(1_044_999), "1.04M");
+
+        // 1,045_000 -> 1.05M (四舍五入)
+        assert_eq!(ModelResponse::format_number(1_045_000), "1.05M");
+
+        // 128,000,000 -> 128.00M
+        assert_eq!(ModelResponse::format_number(128_000_000), "128.00M");
+
+        // 2,097,152 -> 2.10M (四舍五入)
+        assert_eq!(ModelResponse::format_number(2_097_152), "2.10M");
+    }
+
+    #[test]
+    fn test_format_number_edge_cases() {
+        // 边界值测试
+        assert_eq!(ModelResponse::format_number(999), "999");
+        assert_eq!(ModelResponse::format_number(1000), "1.00K");
+        assert_eq!(ModelResponse::format_number(999_999), "1000.00K");
+        assert_eq!(ModelResponse::format_number(1_000_000), "1.00M");
+    }
 }

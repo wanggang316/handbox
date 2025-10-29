@@ -52,6 +52,8 @@ export interface Model {
   name: string;
   context_length?: number;
   output_max_tokens?: number;
+  display_context_length?: string;
+  display_output_max_tokens?: string;
   supported_features?: ModelFeature[] | null;
   description?: string;
   input_modalities?: ModelModality[];

@@ -30,24 +30,6 @@
     }
   }
 
-  function formatTokensAsK(value?: number | null): string {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      return "";
-    }
-
-    // 小于 1024 时显示实际数值，不加单位
-    if (value < 1024) {
-      return value.toString();
-    }
-
-    const thousands = value / 1024;
-    const formatter = new Intl.NumberFormat(undefined, {
-      maximumFractionDigits: thousands >= 10 ? 0 : 1,
-    });
-
-    return `${formatter.format(thousands)}K`;
-  }
-
   function formatLabel(key: string): string {
     return key
       .split("_")
@@ -111,19 +93,18 @@
         });
       }
 
-      const contextLength = formatTokensAsK(current.context_length);
-      if (contextLength) {
+      // 使用后端格式化的字段
+      if (current.display_context_length) {
         rows.push({
           label: "上下文长度",
-          value: contextLength,
+          value: current.display_context_length,
         });
       }
 
-      const outputMaxTokens = formatTokensAsK(current.output_max_tokens);
-      if (outputMaxTokens) {
+      if (current.display_output_max_tokens) {
         rows.push({
           label: "最大输出长度",
-          value: outputMaxTokens,
+          value: current.display_output_max_tokens,
         });
       }
 
