@@ -55,7 +55,19 @@
             "icon": "/logo-openai.png",
             "chat_api_type": "openai-responses",
             "model_api_type": "openai",
-            "supplement_file": "openai_models.json"
+            "supplement_file": "openai_models.json",
+            "supplement_fields": [
+                "name",
+                "description",
+                "input_modalities",
+                "output_modalities",
+                "context_length",
+                "output_max_tokens",
+                "pricing",
+                "url",
+                "supported_features",
+                "supported_methods"
+            ]
         },
         {
             "type": "google",
@@ -65,7 +77,16 @@
             "icon": "/logo-google.png",
             "chat_api_type": "google",
             "model_api_type": "google",
-            "supplement_file": "google_models.json"
+            "supplement_file": "google_models.json",
+            "supplement_fields": [
+                "input_modalities",
+                "output_modalities",
+                "context_length",
+                "output_max_tokens",
+                "pricing",
+                "url",
+                "supported_features"
+            ]
         },
         {
             "type": "deepseek",
@@ -75,7 +96,19 @@
             "icon": "/logo-deepseek.png",
             "chat_api_type": "openai-completions",
             "model_api_type": "openai",
-            "supplement_file": "deepseek_models.json"
+            "supplement_file": "deepseek_models.json",
+            "supplement_fields": [
+                "name",
+                "description",
+                "input_modalities",
+                "output_modalities",
+                "context_length",
+                "output_max_tokens",
+                "pricing",
+                "url",
+                "supported_features",
+                "supported_methods"
+            ]
         },
         {
             "type": "anthropic",

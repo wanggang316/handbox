@@ -212,10 +212,8 @@ impl ModelResponse {
         };
 
         match method {
-            ChatMethod::Completions => methods
-                .iter()
-                .any(|m| m == "completions" || m == "openai_chat_completions"),
-            ChatMethod::Responses => methods.iter().any(|m| m == "openai_responses"),
+            ChatMethod::Completions => methods.iter().any(|m| m.ends_with("completions")),
+            ChatMethod::Responses => methods.iter().any(|m| m.ends_with("responses")),
             ChatMethod::GoogleGenerateContent => {
                 methods.iter().any(|m| m == "google_generate_content")
             }

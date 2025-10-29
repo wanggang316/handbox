@@ -41,9 +41,9 @@ pub enum SupplementField {
 }
 
 /// 检查是否应该合并指定字段
-/// 如果 fields 为空，则合并所有字段
+/// 如果 fields 为空，则不合并任何字段
 pub fn should_merge_field(fields: &[SupplementField], field: &SupplementField) -> bool {
-    fields.is_empty() || fields.contains(field)
+    !fields.is_empty() && fields.contains(field)
 }
 
 /// 模型信息
@@ -432,7 +432,6 @@ pub fn merge_supplement(
     fields: &[SupplementField],
     provider_type: &str,
 ) -> LlmModel {
-
     // 合并 name 字段
     if should_merge_field(fields, &SupplementField::Name) {
         if let Some(ref name) = supplement.name {
