@@ -4,16 +4,28 @@ use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilde
 
 /// 打开设置窗口
 #[tauri::command]
-pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
+pub async fn open_settings_window(app: AppHandle, path: Option<String>) -> Result<(), String> {
+    // 构建 URL 路径
+    let url_path = if let Some(p) = path {
+        format!("/settings{}", if p.starts_with('/') { p } else { format!("/{}", p) })
+    } else {
+        "/settings".to_string()
+    };
+
     // 检查设置窗口是否已经存在
     if let Some(window) = app.get_webview_window("settings") {
         // 如果窗口存在，显示并聚焦
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
+
+        // 导航到指定路径
+        window
+            .eval(&format!("window.location.href = '{}'", url_path))
+            .map_err(|e| e.to_string())?;
     } else {
         // 如果窗口不存在，创建新窗口
         let _window =
-            WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("/settings".into()))
+            WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
                 .title("Settings - handbox")
                 .inner_size(800.0, 600.0)
                 .min_inner_size(600.0, 400.0)
@@ -50,7 +62,7 @@ pub async fn toggle_settings_window(app: AppHandle) -> Result<(), String> {
             window.set_focus().map_err(|e| e.to_string())?;
         }
     } else {
-        open_settings_window(app).await?;
+        open_settings_window(app, None).await?;
     }
     Ok(())
 }

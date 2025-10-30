@@ -15,7 +15,7 @@
     UpdateMcpServerRequest,
   } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
-  import { countChatsUsingServer } from "$lib/api/mcp";
+  import { countChatsUsingServer, removeMcpServerFromChats } from "$lib/api/mcp";
   import {
     LoaderCircle,
     Puzzle,
@@ -122,7 +122,7 @@
     }
   }
 
-  async function confirmDisable() {
+  async function handleDisableWithoutRemove() {
     if (serverToDisable) {
       await performToggle(serverToDisable, false);
       showDisableConfirm = false;
@@ -130,7 +130,22 @@
     }
   }
 
-  async function cancelDisable() {
+  async function handleDisableAndRemove() {
+    if (!serverToDisable) return;
+
+    try {
+      // 先移除会话中的 MCP 配置
+      await removeMcpServerFromChats(serverToDisable.id);
+      // 再关闭 MCP 服务器
+      await performToggle(serverToDisable, false);
+      showDisableConfirm = false;
+      serverToDisable = null;
+    } catch (error) {
+      console.error("Failed to disable and remove MCP server:", error);
+    }
+  }
+
+  function handleCancelDisable() {
     showDisableConfirm = false;
     serverToDisable = null;
   }
@@ -277,12 +292,31 @@
   open={showDisableConfirm}
   title="关闭 MCP 服务器"
   message={relatedChatsCount > 0
-    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${serverToDisable?.displayName || serverToDisable?.name}</span>。<br/><br/>关闭此服务器后，这些会话将无法使用该服务器的工具。<br/><br/>确定要关闭吗？`
+    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${serverToDisable?.displayName || serverToDisable?.name}</span>。<br/><br/>请选择要执行的操作：`
     : `确认关闭 <span class='font-medium'>${serverToDisable?.displayName || serverToDisable?.name}</span> 吗？`}
+  actions={relatedChatsCount > 0
+    ? [
+        {
+          label: "解除关联后关闭",
+          style: "primary",
+          onClick: handleDisableAndRemove
+        },
+        {
+          label: "仅关闭 MCP",
+          style: "danger",
+          onClick: handleDisableWithoutRemove
+        },
+        {
+          label: "取消",
+          style: "secondary",
+          onClick: handleCancelDisable
+        }
+      ]
+    : undefined}
   confirmText="关闭"
   cancelText="取消"
   confirmButtonStyle="danger"
   onClose={() => (showDisableConfirm = false)}
-  onConfirm={confirmDisable}
-  onCancel={cancelDisable}
+  onConfirm={handleDisableWithoutRemove}
+  onCancel={handleCancelDisable}
 />

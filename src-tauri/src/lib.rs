@@ -191,6 +191,7 @@ pub fn run() {
             mcp_refresh_server,
             mcp_update_tool_enabled,
             mcp_count_chats_using_server,
+            mcp_remove_server_from_chats,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,

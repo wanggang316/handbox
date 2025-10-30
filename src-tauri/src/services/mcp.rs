@@ -288,6 +288,13 @@ impl McpService {
             .await
     }
 
+    /// Remove MCP server references from all chats
+    pub async fn remove_mcp_server_from_chats(&self, server_id: &str) -> Result<i32, AppError> {
+        self.chat_repository
+            .remove_mcp_server_from_chats(server_id)
+            .await
+    }
+
     /// Update server status and metadata based on connection type
     ///
     /// Returns Ok if connection succeeds, Err if connection fails

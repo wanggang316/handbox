@@ -42,3 +42,7 @@ export async function updateToolEnabled(request: UpdateToolEnabledRequest): Prom
 export async function countChatsUsingServer(serverId: string): Promise<number> {
   return apiCall<number>('mcp_count_chats_using_server', { serverId });
 }
+
+export async function removeMcpServerFromChats(serverId: string): Promise<number> {
+  return apiCall<number>('mcp_remove_server_from_chats', { serverId });
+}

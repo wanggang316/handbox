@@ -1,9 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Server, RefreshCw, ChevronDown, ChevronUp } from "@lucide/svelte";
+  import {
+    Server,
+    RefreshCw,
+    ChevronDown,
+    ChevronUp,
+    Trash2,
+    Settings2,
+  } from "@lucide/svelte";
+  import { openSettingsWindow } from "$lib/api/window";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import { chatState, chatActions } from "$lib/states/chat.svelte";
@@ -11,7 +18,7 @@
     mcpState,
     mcpActions,
     setupMcpServersUpdatedListener,
-    cleanupMcpServersUpdatedListener
+    cleanupMcpServersUpdatedListener,
   } from "$lib/states/mcp.svelte";
   import type { McpServer, McpServerConfig } from "$lib/types";
   import IconButton from "$lib/components/ui/IconButton.svelte";
@@ -38,7 +45,7 @@
   onMount(() => {
     // 注册跨窗口事件监听器（用于同步 MCP 服务器状态）
     setupMcpServersUpdatedListener().catch((error) => {
-      console.error('Failed to setup MCP servers updated listener:', error);
+      console.error("Failed to setup MCP servers updated listener:", error);
     });
 
     if (!mcpState.initialized) {
@@ -61,10 +68,21 @@
   // 监听 MCP 服务器更新事件，自动刷新
   $effect(() => {
     if (mcpState.needsRefresh) {
-      console.log('[Tools] MCP servers needs refresh, reloading...');
-      mcpActions.loadServers(true).catch((error) => {
-        console.error('[Tools] Failed to reload MCP servers:', error);
+      console.log("[Tools] MCP servers needs refresh, reloading...");
+      mcpActions.loadServers(true).catch((error: Error) => {
+        console.error("[Tools] Failed to reload MCP servers:", error);
       });
+
+      // 重新加载当前聊天配置（以防 MCP 被删除或解除关联）
+      if (chatState.currentChat?.id) {
+        console.log(
+          "[Tools] Reloading current chat to sync MCP configuration..."
+        );
+        const chatId = chatState.currentChat.id;
+        chatActions.switchToChat(chatId).catch((error: Error) => {
+          console.error("[Tools] Failed to reload current chat:", error);
+        });
+      }
     }
   });
 
@@ -85,6 +103,34 @@
         server.enabledTools.length > 0
     )
   );
+
+  // 检测当前聊天中已配置但已关闭的 MCP 服务器
+  const disabledConfiguredServers = $derived(() => {
+    if (!currentServers.length) return [];
+
+    return currentServers
+      .map((config) => {
+        const server = mcpState.servers.find((s) => s.id === config.serverId);
+        // 服务器存在但未启用，或状态不是 ready
+        if (server && (!server.enabled || server.status !== "ready")) {
+          return {
+            config,
+            server,
+            reason: !server.enabled ? "disabled" : "not_ready",
+          };
+        }
+        // 服务器已被删除
+        if (!server) {
+          return {
+            config,
+            server: null,
+            reason: "deleted" as const,
+          };
+        }
+        return null;
+      })
+      .filter((item) => item !== null);
+  });
 
   const decoratedServers = $derived(() => {
     return availableServers().map((server) => {
@@ -165,6 +211,21 @@
       refreshing = false;
     }
   }
+
+  // 删除已关闭的 MCP 服务器配置
+  async function removeDisabledServer(serverId: string) {
+    currentServers = currentServers.filter((s) => s.serverId !== serverId);
+    await saveChanges();
+  }
+
+  // 跳转到 MCP 服务器设置页面
+  async function navigateToMcpSettings(serverId: string) {
+    try {
+      await openSettingsWindow(`/mcp/${serverId}`);
+    } catch (error) {
+      console.error("Failed to open settings window:", error);
+    }
+  }
 </script>
 
 <div class="flex-1 mt-1">
@@ -209,68 +270,131 @@
         <p class="text-sm mb-2">请先选择或创建聊天</p>
         <p class="text-xs">MCP 服务器配置将与聊天关联</p>
       </div>
-    {:else if availableServers().length === 0}
+    {:else if availableServers().length === 0 && disabledConfiguredServers().length === 0}
       <div class="text-center py-8 text-base-content/70">
         <p class="text-sm mb-2">暂无可用的 MCP 服务器</p>
         <p class="text-xs">请在应用设置中配置并开启 MCP 服务器</p>
       </div>
     {:else}
-      <TableGroup>
-        {#each decoratedServers() as item (item.server.id)}
-          <TableBaseRow
-            label={item.server.displayName ?? item.server.name}
-            layout="vertical"
-          >
-            {#snippet rightContent()}
-              <Toggle
-                checked={item.checked}
-                onChange={(value) => toggleSelection(item.server.id, value)}
-              />
-            {/snippet}
+      <!-- 可用的 MCP 服务器 -->
+      {#if availableServers().length > 0}
+        <TableGroup>
+          {#each decoratedServers() as item (item.server.id)}
+            <TableBaseRow
+              label={item.server.displayName ?? item.server.name}
+              layout="vertical"
+            >
+              {#snippet rightContent()}
+                <Toggle
+                  checked={item.checked}
+                  onChange={(value) => toggleSelection(item.server.id, value)}
+                />
+              {/snippet}
 
-            <div class="flex flex-col gap-1 text-sm text-base-content/80">
-              <!-- Execution mode and tools button -->
-              <div class="flex items-center gap-2 justify-between">
-                <div class="flex items-center gap-1 pt-1">
-                  <ArrowButton
-                    label="{item.server.enabledTools.length} enabled tools"
-                    onclick={() => toggleTools(item.server.id)}
-                  />
-                </div>
-                {#if item.checked}
-                  <div>
-                    <Select
-                      options={executionModeOptions}
-                      selectedValue={item.executionMode}
-                      disabled={!item.checked}
-                      onSelect={(value) =>
-                        handleExecutionModeChange(
-                          item.server.id,
-                          value as "auto" | "manual"
-                        )}
-                      size="sm"
-                      autoWidth={true}
+              <div class="flex flex-col gap-1 text-sm text-base-content/80">
+                <!-- Execution mode and tools button -->
+                <div class="flex items-center gap-2 justify-between">
+                  <div class="flex items-center gap-1 pt-1">
+                    <ArrowButton
+                      label="{item.server.enabledTools.length} enabled tools"
+                      onclick={() => toggleTools(item.server.id)}
                     />
+                  </div>
+                  {#if item.checked}
+                    <div>
+                      <Select
+                        options={executionModeOptions}
+                        selectedValue={item.executionMode}
+                        disabled={!item.checked}
+                        onSelect={(value) =>
+                          handleExecutionModeChange(
+                            item.server.id,
+                            value as "auto" | "manual"
+                          )}
+                        size="sm"
+                        autoWidth={true}
+                      />
+                    </div>
+                  {/if}
+                </div>
+
+                <!-- Expanded tools list -->
+                {#if expandedTools[item.server.id] && item.server.tools.length > 0}
+                  <div class="flex flex-wrap gap-1">
+                    {#each item.server.enabledTools as tool}
+                      <span
+                        class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary"
+                      >
+                        {tool}
+                      </span>
+                    {/each}
                   </div>
                 {/if}
               </div>
+            </TableBaseRow>
+          {/each}
+        </TableGroup>
+      {/if}
 
-              <!-- Expanded tools list -->
-              {#if expandedTools[item.server.id] && item.server.tools.length > 0}
-                <div class="flex flex-wrap gap-1">
-                  {#each item.server.enabledTools as tool}
-                    <span
-                      class="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary"
-                    >
-                      {tool}
-                    </span>
-                  {/each}
+      <!-- 已关闭或不可用的 MCP 服务器 -->
+      {#if disabledConfiguredServers().length > 0}
+        <div class="mt-3">
+          <div class="text-[12px] text-base-content/40 pl-2 mb-1">
+            已关闭的服务器 ({disabledConfiguredServers().length})
+          </div>
+          <TableGroup>
+            {#each disabledConfiguredServers() as item (item.config.serverId)}
+              <TableBaseRow
+                label={item.server?.displayName ??
+                  item.server?.name ??
+                  item.config.serverId}
+                layout="vertical"
+              >
+                {#snippet rightContent()}
+                  <div class="flex items-center gap-1">
+                    <!-- 跳转到设置按钮 -->
+                    {#if item.server}
+                      <IconButton
+                        icon={Settings2}
+                        iconSize={16}
+                        onclick={() =>
+                          navigateToMcpSettings(item.config.serverId)}
+                      />
+                    {/if}
+                    <!-- 删除按钮 -->
+                    <IconButton
+                      icon={Trash2}
+                      iconSize={16}
+                      onclick={() => removeDisabledServer(item.config.serverId)}
+                    />
+                  </div>
+                {/snippet}
+
+                <div class="flex flex-col gap-1 text-sm opacity-60">
+                  <div class="text-xs text-base-content/60">
+                    {#if item.reason === "disabled"}
+                      <span class="text-warning/80">● 服务器已关闭</span>
+                    {:else if item.reason === "not_ready"}
+                      <span class="text-error/80">● 服务器未就绪</span>
+                    {:else if item.reason === "deleted"}
+                      <span class="text-error/80">● 服务器已删除</span>
+                    {/if}
+                  </div>
+                  <div class="text-xs text-base-content/50">
+                    {#if item.reason === "disabled"}
+                      此服务器已在全局设置中关闭，请启用后再使用
+                    {:else if item.reason === "not_ready"}
+                      此服务器状态异常，请检查配置
+                    {:else if item.reason === "deleted"}
+                      此服务器已被删除，建议移除此配置
+                    {/if}
+                  </div>
                 </div>
-              {/if}
-            </div>
-          </TableBaseRow>
-        {/each}
-      </TableGroup>
+              </TableBaseRow>
+            {/each}
+          </TableGroup>
+        </div>
+      {/if}
     {/if}
   {/if}
 </div>

@@ -12,7 +12,7 @@
   import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { updateToolEnabled } from "$lib/api";
-  import { countChatsUsingServer } from "$lib/api/mcp";
+  import { countChatsUsingServer, removeMcpServerFromChats } from "$lib/api/mcp";
   import type { McpServer } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
   import {
@@ -83,10 +83,7 @@
     }
   });
 
-  async function handleToggleBefore(
-    enabled: boolean,
-    previous: boolean
-  ) {
+  async function handleToggleBefore(enabled: boolean, previous: boolean) {
     if (!server) return true;
 
     if (!enabled && previous && server.enabled) {
@@ -132,12 +129,26 @@
     }
   }
 
-  async function confirmDisable() {
+  async function handleDisableWithoutRemove() {
     await performToggle(false);
     showDisableConfirm = false;
   }
 
-  function cancelDisable() {
+  async function handleDisableAndRemove() {
+    if (!server) return;
+
+    try {
+      // 先移除会话中的 MCP 配置
+      await removeMcpServerFromChats(server.id);
+      // 再关闭 MCP 服务器
+      await performToggle(false);
+      showDisableConfirm = false;
+    } catch (error) {
+      console.error("Failed to disable and remove MCP server:", error);
+    }
+  }
+
+  function handleCancelDisable() {
     if (server) {
       formData.enabled = server.enabled;
     }
@@ -312,7 +323,7 @@
 
       <!-- 同步时间信息 -->
       {#if server.lastSyncAt}
-        <div class="px-6 mt-2 mb-4">
+        <div class="px-6 mt-2 mb-4 flex justify-end">
           <span class="text-xs text-base-content/60">
             最后同步: {formatDateTime(server.lastSyncAt)}
           </span>
@@ -575,12 +586,31 @@
   open={showDisableConfirm}
   title="关闭 MCP 服务器"
   message={relatedChatsCount > 0
-    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${server?.displayName || server?.name}</span>。<br/><br/>关闭此服务器后，这些会话将无法使用该服务器的工具。<br/><br/>确定要关闭吗？`
+    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${server?.displayName || server?.name}</span>。<br/><br/>请选择要执行的操作：`
     : `确认关闭 <span class='font-medium'>${server?.displayName || server?.name}</span> 吗？`}
+  actions={relatedChatsCount > 0
+    ? [
+        {
+          label: "解除关联后关闭",
+          style: "primary",
+          onClick: handleDisableAndRemove
+        },
+        {
+          label: "仅关闭 MCP",
+          style: "danger",
+          onClick: handleDisableWithoutRemove
+        },
+        {
+          label: "取消",
+          style: "secondary",
+          onClick: handleCancelDisable
+        }
+      ]
+    : undefined}
   confirmText="关闭"
   cancelText="取消"
   confirmButtonStyle="danger"
   onClose={() => (showDisableConfirm = false)}
-  onConfirm={confirmDisable}
-  onCancel={cancelDisable}
+  onConfirm={handleDisableWithoutRemove}
+  onCancel={handleCancelDisable}
 />
