@@ -1292,11 +1292,18 @@ impl MessageService {
                             }
 
                             // 将 LLM tool calls 转换为 Message tool calls 用于回调
-                            let message_tool_calls = if all_tool_calls.is_empty() {
+                            // 过滤掉空的工具调用（id 和 name 都为空的）
+                            let valid_tool_calls: Vec<_> = all_tool_calls
+                                .iter()
+                                .filter(|tc| !tc.id.is_empty() && !tc.function.name.is_empty())
+                                .cloned()
+                                .collect();
+
+                            let message_tool_calls = if valid_tool_calls.is_empty() {
                                 None
                             } else {
                                 Some(
-                                    all_tool_calls
+                                    valid_tool_calls
                                         .iter()
                                         .map(|tc| MessageToolCall::from(tc.clone()))
                                         .collect(),
@@ -1348,11 +1355,17 @@ impl MessageService {
 
         // 7. 构造消息配置并处理工具调用的执行模式
         let config = Self::message_config_from_chat(&chat);
-        let processed_tool_calls = if all_tool_calls.is_empty() {
+        // 过滤掉空的工具调用（id 和 name 都为空的）
+        let valid_tool_calls: Vec<_> = all_tool_calls
+            .into_iter()
+            .filter(|tc| !tc.id.is_empty() && !tc.function.name.is_empty())
+            .collect();
+
+        let processed_tool_calls = if valid_tool_calls.is_empty() {
             None
         } else {
             // 先将 LlmToolCall 转换为 MessageToolCall
-            let message_tool_calls: Vec<MessageToolCall> = all_tool_calls
+            let message_tool_calls: Vec<MessageToolCall> = valid_tool_calls
                 .into_iter()
                 .map(|tc| MessageToolCall::from(tc))
                 .collect();
