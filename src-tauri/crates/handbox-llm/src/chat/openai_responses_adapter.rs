@@ -12,9 +12,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use openai_rust::client::Error as OpenAIError;
 use openai_rust::types::{
-    InputItem, InputMessage, InputMessageContent, InputMessageRole, Item, ItemFunctionCall,
-    ItemFunctionCallOutput, ItemStatus, OutputItem, Response as OpenAIResponse, ResponseInput,
-    ResponseStreamEvent, ResponseUsage, ResponsesTool, ResponsesToolChoice,
+    CreateResponseRequest, InputItem, InputMessage, InputMessageContent, InputMessageRole, Item,
+    ItemFunctionCall, ItemFunctionCallOutput, ItemStatus, OutputItem, Response as OpenAIResponse,
+    ResponseInput, ResponseStreamEvent, ResponseUsage, ResponsesTool, ResponsesToolChoice,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -31,7 +31,7 @@ impl OpenAIResponsesChatClient {
     fn convert_to_openai_response_request(
         &self,
         request: &LlmRequest,
-    ) -> Result<openai_rust::types::CreateResponseRequest, LlmClientError> {
+    ) -> Result<CreateResponseRequest, LlmClientError> {
         tracing::info!(
             "Converting LlmRequest: model={}, messages={}, has_tools={}, has_tool_choice={}, parallel_tool_calls={:?}",
             request.model,
@@ -135,7 +135,7 @@ impl OpenAIResponsesChatClient {
             .find(|msg| msg.role == LlmMessageRole::System)
             .map(|msg| msg.content.clone());
 
-        let mut builder = openai_rust::types::CreateResponseRequest::builder()
+        let mut builder = CreateResponseRequest::builder()
             .model(request.model.clone())
             .input(ResponseInput::Items(input_items));
 

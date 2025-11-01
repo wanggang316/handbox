@@ -432,6 +432,26 @@ pub fn merge_supplement(
     fields: &[SupplementField],
     provider_type: &str,
 ) -> LlmModel {
+    // 使用静态变量来只打印第一次合并的详细信息
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static FIRST_MERGE_LOGGED: AtomicBool = AtomicBool::new(false);
+
+    if !FIRST_MERGE_LOGGED.swap(true, Ordering::Relaxed) {
+        tracing::info!(
+            "First merge example - model '{}' (provider: {}), configured fields: {:?}",
+            model.id,
+            provider_type,
+            fields
+        );
+        tracing::info!(
+            "Supplement data for model '{}': url={:?}, input_cost={:?}, output_cost={:?}, currency={:?}",
+            model.id,
+            supplement.url,
+            supplement.input_cost,
+            supplement.output_cost,
+            supplement.currency
+        );
+    }
     // 合并 name 字段
     if should_merge_field(fields, &SupplementField::Name) {
         if let Some(ref name) = supplement.name {

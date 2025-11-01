@@ -1,5 +1,7 @@
 // Google 模型适配器实现
 
+use std::collections::HashMap;
+
 use super::model_client::ModelFetcher;
 use crate::error::LlmClientError;
 use crate::types::{convert_endpoints_to_methods, LlmModel, LlmModelModality, LlmProvider};
@@ -113,17 +115,6 @@ impl ModelFetcher for GoogleFetcher {
                         .or_else(|| api_model.get("output_modalities")),
                 );
 
-                let supports_reasoning = api_model
-                    .get("thinking")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
-
-                let supported_features = if supports_reasoning {
-                    Some(vec!["reasoning".to_string()])
-                } else {
-                    None
-                };
-
                 let (support_parameters, default_parameters, max_parameters) =
                     parse_google_parameters(&api_model);
 
@@ -150,7 +141,7 @@ impl ModelFetcher for GoogleFetcher {
                     name: display_name,
                     context_length,
                     output_max_tokens,
-                    supported_features,
+                    supported_features: None,
                     description,
                     input_modalities,
                     output_modalities,
@@ -238,8 +229,8 @@ fn parse_google_parameters(
     api_model: &Value,
 ) -> (
     Vec<crate::types::LlmModelParameter>,
-    Option<std::collections::HashMap<String, serde_json::Value>>,
-    Option<std::collections::HashMap<String, serde_json::Value>>,
+    Option<HashMap<String, serde_json::Value>>,
+    Option<HashMap<String, serde_json::Value>>,
 ) {
     use crate::types::LlmModelParameter;
 
@@ -250,8 +241,8 @@ fn parse_google_parameters(
     }
 
     let mut support_params = Vec::new();
-    let mut default_params_map = std::collections::HashMap::new();
-    let mut max_params_map = std::collections::HashMap::new();
+    let mut default_params_map = HashMap::new();
+    let mut max_params_map = HashMap::new();
 
     // 解析 temperature
     if let Some(temp) = api_model.get("temperature").and_then(|v| v.as_f64()) {

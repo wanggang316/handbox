@@ -7,7 +7,14 @@ use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilde
 pub async fn open_settings_window(app: AppHandle, path: Option<String>) -> Result<(), String> {
     // 构建 URL 路径
     let url_path = if let Some(p) = path {
-        format!("/settings{}", if p.starts_with('/') { p } else { format!("/{}", p) })
+        format!(
+            "/settings{}",
+            if p.starts_with('/') {
+                p
+            } else {
+                format!("/{}", p)
+            }
+        )
     } else {
         "/settings".to_string()
     };
@@ -24,20 +31,19 @@ pub async fn open_settings_window(app: AppHandle, path: Option<String>) -> Resul
             .map_err(|e| e.to_string())?;
     } else {
         // 如果窗口不存在，创建新窗口
-        let _window =
-            WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
-                .title("Settings - handbox")
-                .inner_size(800.0, 600.0)
-                .min_inner_size(600.0, 400.0)
-                .resizable(true)
-                .decorations(true)
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .hidden_title(true)
-                .maximizable(false)
-                .minimizable(false)
-                .traffic_light_position(LogicalPosition::new(15.0, 27.0))
-                .build()
-                .map_err(|e| e.to_string())?;
+        let _window = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
+            .title("Settings - handbox")
+            .inner_size(800.0, 600.0)
+            .min_inner_size(600.0, 400.0)
+            .resizable(true)
+            .decorations(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .maximizable(false)
+            .minimizable(false)
+            .traffic_light_position(LogicalPosition::new(15.0, 27.0))
+            .build()
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

@@ -9,7 +9,31 @@ use crate::model::openrouter_adapter::OpenRouterFetcher;
 use crate::model::supplement::{OssSupplementProvider, SupplementProvider};
 use crate::types::{merge_supplement, LlmModel, LlmModelApiType, LlmProvider, SupplementField};
 use async_trait::async_trait;
+use regex::Regex;
 use std::sync::Arc;
+
+/// 辅助函数：移除模型 ID 中的版本后缀
+/// 匹配并移除以下后缀：
+/// - `-preview`
+/// - `-preview-数字` (至少1个数字，如 -preview-1234)
+/// - `-preview-数字-数字` (如 -preview-09-2025)
+/// - `-preview-数字-数字-数字` (支持更多段，如 -preview-1-2-3)
+/// - `-exp`
+/// - `-exp-数字` (至少1个数字)
+/// - `-exp-数字-数字` (如 -exp-09-2025)
+/// - `-latest`
+fn strip_model_version_suffix(model_id: &str) -> Option<String> {
+    // 匹配 -preview 或 -exp 后跟可选的一个或多个 -数字 段
+    // (?:-\d+)+ 表示匹配一个或多个 "-数字" 段
+    let pattern = r"(-preview(?:-\d+)*|-exp(?:-\d+)*|-latest)$";
+    let re = Regex::new(pattern).ok()?;
+
+    if re.is_match(model_id) {
+        Some(re.replace(model_id, "").to_string())
+    } else {
+        None
+    }
+}
 
 /// 模型数据获取 trait - 从 API 获取基础模型数据
 #[async_trait]
@@ -75,14 +99,28 @@ impl ModelClient {
             // 对于 API 返回的模型，尝试合并 supplement
             for base_model in base_models {
                 if let Some(supplement) = supplements.get(&base_model.id) {
+                    // 直接找到 supplement，进行合并
                     result.push(merge_supplement(
                         base_model,
                         supplement,
                         fields,
                         provider_type,
                     ));
+                } else if let Some(stripped_id) = strip_model_version_suffix(&base_model.id) {
+                    // 尝试去掉版本后缀后再查找
+                    if let Some(supplement) = supplements.get(&stripped_id) {
+                        result.push(merge_supplement(
+                            base_model,
+                            supplement,
+                            fields,
+                            provider_type,
+                        ));
+                    } else {
+                        // 去掉后缀后仍找不到，使用 API 数据
+                        result.push(base_model);
+                    }
                 } else {
-                    // 没有 supplement 的模型，直接使用 API 数据
+                    // 没有版本后缀且找不到 supplement，直接使用 API 数据
                     result.push(base_model);
                 }
             }
@@ -109,4 +147,90 @@ pub fn create_model_client(
     };
 
     Ok(ModelClient::new(fetcher, config, provider_type))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_model_version_suffix() {
+        // 测试 -preview 后缀
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-preview"),
+            Some("gpt-4".to_string())
+        );
+
+        // 测试 -preview-数字 后缀
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-preview-1234"),
+            Some("gpt-4".to_string())
+        );
+
+        // 测试 -preview-日期 后缀 (YYYYMMDD)
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-preview-20240101"),
+            Some("gpt-4".to_string())
+        );
+
+        // 测试 -preview-月-年 格式 (MM-YYYY)
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-preview-09-2025"),
+            Some("gpt-4".to_string())
+        );
+
+        // 测试 -preview-多段数字格式
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-preview-1-2-3"),
+            Some("gpt-4".to_string())
+        );
+
+        // 测试 -exp 后缀
+        assert_eq!(
+            strip_model_version_suffix("claude-3-exp"),
+            Some("claude-3".to_string())
+        );
+
+        // 测试 -exp-数字 后缀
+        assert_eq!(
+            strip_model_version_suffix("claude-3-exp-5678"),
+            Some("claude-3".to_string())
+        );
+
+        // 测试 -exp-多段数字格式
+        assert_eq!(
+            strip_model_version_suffix("claude-3-exp-01-2025"),
+            Some("claude-3".to_string())
+        );
+
+        // 测试 -latest 后缀
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-latest"),
+            Some("gpt-4".to_string())
+        );
+
+        // 测试没有后缀的情况
+        assert_eq!(strip_model_version_suffix("gpt-4-turbo"), None);
+
+        // 测试普通模型名称
+        assert_eq!(strip_model_version_suffix("gpt-4"), None);
+
+        // 测试复杂的模型名称
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-turbo-preview"),
+            Some("gpt-4-turbo".to_string())
+        );
+
+        // 测试多个破折号的情况
+        assert_eq!(
+            strip_model_version_suffix("claude-3-5-sonnet-latest"),
+            Some("claude-3-5-sonnet".to_string())
+        );
+
+        // 测试两位数字的情况
+        assert_eq!(
+            strip_model_version_suffix("gpt-4-preview-09"),
+            Some("gpt-4".to_string())
+        );
+    }
 }
