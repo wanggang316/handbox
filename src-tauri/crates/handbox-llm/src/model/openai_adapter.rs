@@ -82,7 +82,7 @@ impl ModelFetcher for OpenAIFetcher {
                 metadata: to_value(&api_model).ok(),
                 pricing: None,
                 url: None,
-                support_parameters: Vec::new(),
+                supported_parameters: None,
                 default_parameters: None,
                 max_parameters: None,
                 supported_methods: None,

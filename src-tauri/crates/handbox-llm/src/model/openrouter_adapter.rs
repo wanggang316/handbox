@@ -148,16 +148,28 @@ impl OpenRouterModel {
             })
             .filter(|v| !v.is_empty());
 
-        let mut support_parameters = Vec::new();
+        let mut supported_parameters_list = Vec::new();
         if let Some(params) = supported_parameters {
             for param in params {
-                if !support_parameters.contains(&param) {
-                    support_parameters.push(param);
+                if !supported_parameters_list.contains(&param) {
+                    supported_parameters_list.push(param);
                 }
             }
         }
 
-        let supported_features = parse_features_from_params(&support_parameters);
+        let supported_features = parse_features_from_params(&supported_parameters_list);
+
+        // 将 LlmModelParameter 枚举转换为字符串
+        let supported_parameters = if supported_parameters_list.is_empty() {
+            None
+        } else {
+            Some(
+                supported_parameters_list
+                    .iter()
+                    .map(|p| p.as_str().to_string())
+                    .collect(),
+            )
+        };
 
         let mut pricing = None;
         merge_pricing(
@@ -183,7 +195,7 @@ impl OpenRouterModel {
             metadata: None,
             pricing,
             url: None,
-            support_parameters,
+            supported_parameters,
             default_parameters,
             max_parameters,
             supported_methods: Some(vec!["completions".to_string()]),

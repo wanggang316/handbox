@@ -142,6 +142,23 @@
         rows.push({ label: "输出模态", value: outputModalities });
       }
 
+      const supportedMethods = formatList(current.supported_chat_methods);
+      if (supportedMethods) {
+        rows.push({
+          label: "支持方法",
+          value: supportedMethods,
+          mono: true,
+        });
+      }
+
+      const supportedParameters = formatList(current.supported_parameters);
+      if (supportedParameters) {
+        rows.push({
+          label: "支持参数",
+          value: supportedParameters,
+        });
+      }
+
       const description = current.description?.trim();
       if (description) {
         rows.push({

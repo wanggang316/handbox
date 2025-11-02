@@ -25,7 +25,7 @@ impl ModelRepository {
         let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
         let metadata_json = model.metadata_to_json();
         let pricing_json = model.pricing_to_json();
-        let support_parameters_json = model.support_parameters_to_json();
+        let supported_parameters_json = model.supported_parameters_to_json();
         let default_parameters_json = model.default_parameters_to_json();
         let max_parameters_json = model.max_parameters_to_json();
         let supported_methods_json = model.supported_methods_to_json();
@@ -41,7 +41,7 @@ impl ModelRepository {
                 pricing,
                 input_modalities,
                 output_modalities,
-                support_parameters,
+                supported_parameters,
                 default_parameters,
                 max_parameters,
                 supported_features,
@@ -68,7 +68,7 @@ impl ModelRepository {
             .bind(pricing_json.as_deref())
             .bind(input_modalities_json.as_deref())
             .bind(output_modalities_json.as_deref())
-            .bind(support_parameters_json.as_deref())
+            .bind(supported_parameters_json.as_deref())
             .bind(default_parameters_json.as_deref())
             .bind(max_parameters_json.as_deref())
             .bind(&features_json)
@@ -141,7 +141,7 @@ impl ModelRepository {
             let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
             let metadata_json = model.metadata_to_json();
             let pricing_json = model.pricing_to_json();
-            let support_parameters_json = model.support_parameters_to_json();
+            let supported_parameters_json = model.supported_parameters_to_json();
             let default_parameters_json = model.default_parameters_to_json();
             let max_parameters_json = model.max_parameters_to_json();
             let supported_methods_json = model.supported_methods_to_json();
@@ -174,7 +174,7 @@ impl ModelRepository {
                     pricing,
                     input_modalities,
                     output_modalities,
-                    support_parameters,
+                    supported_parameters,
                     default_parameters,
                     max_parameters,
                     supported_features,
@@ -201,7 +201,7 @@ impl ModelRepository {
                 .bind(pricing_json.as_deref())
                 .bind(input_modalities_json.as_deref())
                 .bind(output_modalities_json.as_deref())
-                .bind(support_parameters_json.as_deref())
+                .bind(supported_parameters_json.as_deref())
                 .bind(default_parameters_json.as_deref())
                 .bind(max_parameters_json.as_deref())
                 .bind(&features_json)
@@ -242,7 +242,7 @@ impl ModelRepository {
             let output_modalities_json = Model::modalities_to_json(&model.output_modalities);
             let metadata_json = model.metadata_to_json();
             let pricing_json = model.pricing_to_json();
-            let support_parameters_json = model.support_parameters_to_json();
+            let supported_parameters_json = model.supported_parameters_to_json();
             let default_parameters_json = model.default_parameters_to_json();
             let max_parameters_json = model.max_parameters_to_json();
             let supported_methods_json = model.supported_methods_to_json();
@@ -260,7 +260,7 @@ impl ModelRepository {
                     output_modalities,
                     metadata,
                     pricing,
-                    support_parameters,
+                    supported_parameters,
                     default_parameters,
                     max_parameters,
                     supported_methods,
@@ -287,7 +287,7 @@ impl ModelRepository {
                 .bind(output_modalities_json.as_deref())
                 .bind(metadata_json.as_deref())
                 .bind(pricing_json.as_deref())
-                .bind(support_parameters_json.as_deref())
+                .bind(supported_parameters_json.as_deref())
                 .bind(default_parameters_json.as_deref())
                 .bind(max_parameters_json.as_deref())
                 .bind(supported_methods_json.as_deref())
@@ -324,7 +324,7 @@ impl ModelRepository {
                 pricing,
                 input_modalities,
                 output_modalities,
-                support_parameters,
+                supported_parameters,
                 default_parameters,
                 max_parameters,
                 supported_features,
@@ -438,7 +438,7 @@ impl ModelRepository {
         let output_modalities: Option<String> = row.try_get("output_modalities")?;
         let metadata_raw: Option<String> = row.try_get("metadata")?;
         let pricing_raw: Option<String> = row.try_get("pricing")?;
-        let support_parameters_raw: Option<String> = row.try_get("support_parameters").ok();
+        let supported_parameters_raw: Option<String> = row.try_get("supported_parameters").ok();
         let default_parameters_raw: Option<String> = row.try_get("default_parameters").ok();
         let max_parameters_raw: Option<String> = row.try_get("max_parameters").ok();
         let url: Option<String> = row.try_get("url")?;
@@ -461,12 +461,15 @@ impl ModelRepository {
             AppError::internal_error(&format!("Failed to parse model pricing: {}", e))
         })?;
 
-        let support_parameters = Model::support_parameters_from_json(
-            support_parameters_raw.as_deref(),
-        )
-        .map_err(|e| {
-            AppError::internal_error(&format!("Failed to parse model support parameters: {}", e))
-        })?;
+        let supported_parameters =
+            Model::supported_parameters_from_json(supported_parameters_raw.as_deref()).map_err(
+                |e| {
+                    AppError::internal_error(&format!(
+                        "Failed to parse model supported parameters: {}",
+                        e
+                    ))
+                },
+            )?;
 
         let default_parameters = Model::default_parameters_from_json(
             default_parameters_raw.as_deref(),
@@ -499,7 +502,7 @@ impl ModelRepository {
             metadata,
             pricing,
             url,
-            support_parameters,
+            supported_parameters,
             default_parameters,
             max_parameters,
             supported_methods,

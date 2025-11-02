@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMethodConfig {
     pub name: String,
-    pub support_parameters: Option<Vec<String>>,
+    pub supported_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
 }

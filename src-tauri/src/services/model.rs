@@ -121,11 +121,11 @@ impl ModelService {
             self.model_repo.get_models_by_provider(&provider.id).await?
         };
 
-        // 转换为 ModelResponse 并过滤掉 chat_methods 为空的模型
+        // 转换为 ModelResponse 并过滤掉 chat_method 为空的模型
         Ok(models
             .into_iter()
             .map(ModelResponse::from_model)
-            .filter(|model| model.chat_methods.is_some())
+            .filter(|model| model.chat_method.is_some())
             .collect())
     }
 
@@ -191,7 +191,7 @@ pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) ->
         metadata,
         pricing,
         url,
-        support_parameters,
+        supported_parameters,
         default_parameters,
         max_parameters,
         supported_methods,
@@ -224,12 +224,6 @@ pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) ->
             .collect()
     });
 
-    let support_parameters = if support_parameters.is_empty() {
-        None
-    } else {
-        Some(support_parameters)
-    };
-
     let supported_methods = supported_methods.and_then(|methods| {
         if methods.is_empty() {
             None
@@ -251,7 +245,7 @@ pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) ->
         metadata,
         pricing,
         url,
-        support_parameters,
+        supported_parameters,
         default_parameters,
         max_parameters,
         supported_methods,
@@ -294,7 +288,7 @@ mod tests {
             metadata: None,
             pricing: None,
             url: None,
-            support_parameters: None, // 不要设置任何参数
+            supported_parameters: None,
             default_parameters: None,
             max_parameters: None,
             supported_methods: Some(vec!["completions".to_string()]),
@@ -321,7 +315,7 @@ mod tests {
             metadata: None,
             pricing: None,
             url: None,
-            support_parameters: None,
+            supported_parameters: None,
             default_parameters: None,
             max_parameters: None,
             supported_methods: None, // 没有 supported_methods
@@ -346,30 +340,30 @@ mod tests {
             create_test_model_with_chat_methods("model3", "provider1"),
         ];
 
-        // 转换为 ModelResponse 并过滤掉 chat_methods 为 None 的模型
+        // 转换为 ModelResponse 并过滤掉 chat_method 为 None 的模型
         // （这是 get_provider_models 方法中使用的逻辑）
         let filtered_responses: Vec<ModelResponse> = models
             .into_iter()
             .map(ModelResponse::from_model)
-            .filter(|model| model.chat_methods.is_some())
+            .filter(|model| model.chat_method.is_some())
             .collect();
 
-        // 验证所有返回的模型都有 chat_methods
+        // 验证所有返回的模型都有 chat_method
         for response in &filtered_responses {
             assert!(
-                response.chat_methods.is_some(),
-                "All returned models should have chat_methods"
+                response.chat_method.is_some(),
+                "All returned models should have chat_method"
             );
             assert!(
-                !response.chat_methods.as_ref().unwrap().is_empty(),
-                "chat_methods should not be empty"
+                response.supported_chat_methods.is_some(),
+                "All returned models should have supported_chat_methods"
             );
         }
 
         // 验证过滤逻辑正常工作（至少返回了一些模型）
         assert!(
             !filtered_responses.is_empty(),
-            "Should have at least some models with chat_methods"
+            "Should have at least some models with chat_method"
         );
     }
 
@@ -381,7 +375,7 @@ mod tests {
         let responses: Vec<ModelResponse> = models
             .into_iter()
             .map(ModelResponse::from_model)
-            .filter(|model| model.chat_methods.is_some())
+            .filter(|model| model.chat_method.is_some())
             .collect();
 
         assert_eq!(responses.len(), 0);

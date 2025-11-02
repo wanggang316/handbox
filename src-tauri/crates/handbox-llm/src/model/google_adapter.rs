@@ -115,8 +115,20 @@ impl ModelFetcher for GoogleFetcher {
                         .or_else(|| api_model.get("output_modalities")),
                 );
 
-                let (support_parameters, default_parameters, max_parameters) =
+                let (supported_parameters_list, default_parameters, max_parameters) =
                     parse_google_parameters(&api_model);
+
+                // 将 LlmModelParameter 枚举转换为字符串
+                let supported_parameters = if supported_parameters_list.is_empty() {
+                    None
+                } else {
+                    Some(
+                        supported_parameters_list
+                            .iter()
+                            .map(|p| p.as_str().to_string())
+                            .collect(),
+                    )
+                };
 
                 // 提取 supportedGenerationMethods 并转换为 supported_methods
                 let supported_methods = api_model
@@ -148,7 +160,7 @@ impl ModelFetcher for GoogleFetcher {
                     metadata: Some(api_model),
                     pricing: None,
                     url: None,
-                    support_parameters,
+                    supported_parameters,
                     default_parameters,
                     max_parameters,
                     supported_methods,

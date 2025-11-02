@@ -2,7 +2,7 @@
     "chat_methods": [
         {
             "name": "completions",
-            "support_parameters": [
+            "supported_parameters": [
                 "temperature",
                 "top_p",
                 "max_tokens"
@@ -18,7 +18,7 @@
         },
         {
             "name": "responses",
-            "support_parameters": [
+            "supported_parameters": [
                 "temperature",
                 "top_p",
                 "max_tokens"
@@ -34,7 +34,7 @@
         },
         {
             "name": "google_generate_content",
-            "support_parameters": [
+            "supported_parameters": [
                 "temperature",
                 "top_p",
                 "max_tokens"
@@ -69,7 +69,8 @@
                 "pricing",
                 "url",
                 "supported_features",
-                "supported_methods"
+                "supported_methods",
+                "supported_parameters"
             ]
         },
         {
@@ -88,7 +89,8 @@
                 "output_max_tokens",
                 "pricing",
                 "url",
-                "supported_features"
+                "supported_features",
+                "supported_parameters"
             ]
         },
         {
@@ -110,7 +112,8 @@
                 "pricing",
                 "url",
                 "supported_features",
-                "supported_methods"
+                "supported_methods",
+                "supported_parameters"
             ]
         },
         {

@@ -7,9 +7,9 @@ import type {
   UUID,
   McpServerConfig
 } from '../types';
-import type { ChatMethodName, ChatMethodResponse, ModelWithProvider } from '../types/provider';
+import type { ChatMethodResponse, ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
-import { providerActions, getAllModels, providerState, getProviderConfig } from './provider.svelte';
+import { providerActions, getAllModels, providerState } from './provider.svelte';
 
 // ============================================
 // 模型参数管理 - 共享工具函数和常量
@@ -26,40 +26,12 @@ const PARAMETER_ALIASES: Record<string, string[]> = {
   output_max_tokens: ["output_max_tokens", "max_tokens"],
 };
 
-function mapApiTypeToChatMethod(apiType?: string | null): ChatMethodName | null {
-  if (!apiType) {
-    return null;
-  }
-
-  switch (apiType) {
-    case "openai":
-    case "openai-completions":
-      return "completions";
-    case "openai-responses":
-      return "responses";
-    case "google":
-      return "google_generate_content";
-    default:
-      return null;
-  }
-}
-
 function getPrimaryChatMethod(model?: ModelWithProvider): ChatMethodResponse | null {
-  if (!model || !Array.isArray(model.chat_methods) || model.chat_methods.length === 0) {
+  if (!model) {
     return null;
   }
 
-  const providerConfig = getProviderConfig(model.providerType);
-  const preferredChatMethodName = mapApiTypeToChatMethod(providerConfig?.chat_api_type);
-
-  if (preferredChatMethodName) {
-    const preferred = model.chat_methods.find((method) => method.name === preferredChatMethodName);
-    if (preferred) {
-      return preferred;
-    }
-  }
-
-  return model.chat_methods[0] ?? null;
+  return model.chat_method ?? null;
 }
 
 function getMethodParameters(model?: ModelWithProvider) {

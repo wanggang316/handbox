@@ -128,10 +128,7 @@ impl OssSupplementProvider {
             supplements.insert(supplement.model_code.clone(), supplement);
         }
 
-        tracing::info!(
-            "Supplement map created with {} entries",
-            supplements.len()
-        );
+        tracing::info!("Supplement map created with {} entries", supplements.len());
 
         supplements
     }

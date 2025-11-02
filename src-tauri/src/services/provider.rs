@@ -46,13 +46,13 @@ impl ProviderService {
             updated_at: self.current_timestamp(),
         };
 
+        // 模型获取成功，创建供应商
+        self.provider_repo.create_provider(&provider).await?;
+
         // 先获取并保存模型（同时验证 API Key），成功后再创建供应商
         self.model_service
             .fetch_and_sync_models(&provider, false)
             .await?;
-
-        // 模型获取成功，创建供应商
-        self.provider_repo.create_provider(&provider).await?;
 
         tracing::info!(
             "Successfully created provider and models: {}",

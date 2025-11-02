@@ -63,7 +63,8 @@ export interface Model {
   url?: string | null;
   parameters?: ModelParameter[];
   supported_parameters?: string[] | null;
-  chat_methods?: ChatMethodResponse[] | null;
+  supported_chat_methods?: ChatMethodName[] | null;
+  chat_method?: ChatMethodResponse | null;
   enabled: boolean;
   favorite: boolean;
   created_at: number;

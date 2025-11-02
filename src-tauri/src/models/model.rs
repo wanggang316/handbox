@@ -113,7 +113,9 @@ pub struct ModelResponse {
     pub output_modalities: Option<Vec<ModelModality>>,
     pub pricing: Option<ModelPricingResponse>,
     pub url: Option<String>,
-    pub chat_methods: Option<Vec<ChatMethodResponse>>,
+    pub supported_parameters: Option<Vec<LlmModelParameter>>,
+    pub supported_chat_methods: Option<Vec<ChatMethod>>,
+    pub chat_method: Option<ChatMethodResponse>,
     pub enabled: bool,
     pub favorite: bool,
     pub created_at: Timestamp,
@@ -123,7 +125,21 @@ pub struct ModelResponse {
 impl ModelResponse {
     /// 从 Model 转换为 ModelResponse
     pub fn from_model(model: Model) -> Self {
-        let chat_methods = Self::build_chat_method_responses(&model);
+        let chat_method_responses = Self::build_chat_method_responses(&model);
+
+        // 提取支持的聊天方法列表和推荐的方法
+        let (supported_chat_methods, chat_method) = if let Some(methods) = chat_method_responses {
+            let supported = methods.iter().map(|m| m.name).collect();
+            // 优先选择 responses，其次退回到列表第一个
+            let recommended = methods
+                .iter()
+                .find(|m| m.name == ChatMethod::Responses)
+                .cloned()
+                .or_else(|| methods.first().cloned());
+            (Some(supported), recommended)
+        } else {
+            (None, None)
+        };
 
         // 转换价格信息
         let pricing = model
@@ -134,6 +150,14 @@ impl ModelResponse {
         // 格式化展示字段
         let display_context_length = model.context_length.map(Self::format_number);
         let display_output_max_tokens = model.output_max_tokens.map(Self::format_number);
+
+        // 转换 supported_parameters 从 Vec<String> 到 Vec<LlmModelParameter>
+        let supported_parameters = model.supported_parameters.map(|params| {
+            params
+                .iter()
+                .filter_map(|s| s.parse::<LlmModelParameter>().ok())
+                .collect()
+        });
 
         Self {
             id: model.id,
@@ -149,7 +173,9 @@ impl ModelResponse {
             output_modalities: model.output_modalities,
             pricing,
             url: model.url,
-            chat_methods,
+            supported_parameters,
+            supported_chat_methods,
+            chat_method,
             enabled: model.enabled,
             favorite: model.favorite,
             created_at: model.created_at,
@@ -181,8 +207,17 @@ impl ModelResponse {
             .filter_map(|method| {
                 let method_supported = Self::is_method_supported(supported_methods, method);
                 let method_config = config.get_chat_method_config(method.as_str());
+
+                // Convert Vec<String> to Vec<LlmModelParameter> for the parameters builder
+                let supported_params = model.supported_parameters.as_ref().map(|params| {
+                    params
+                        .iter()
+                        .filter_map(|s| s.parse::<LlmModelParameter>().ok())
+                        .collect::<Vec<_>>()
+                });
+
                 let parameters = Self::build_method_parameters(
-                    model.support_parameters.as_ref(),
+                    supported_params.as_ref(),
                     model.default_parameters.as_ref(),
                     model.max_parameters.as_ref(),
                     method_config,
@@ -221,20 +256,20 @@ impl ModelResponse {
     }
 
     fn build_method_parameters(
-        support_params: Option<&Vec<LlmModelParameter>>,
+        supported_params: Option<&Vec<LlmModelParameter>>,
         db_defaults: Option<&HashMap<String, serde_json::Value>>,
         db_max: Option<&HashMap<String, serde_json::Value>>,
         method_config: Option<&ChatMethodConfig>,
     ) -> Option<Vec<ModelParameterResponse>> {
         let mut parameter_names: HashSet<String> = HashSet::new();
-        Self::collect_support_keys(support_params, &mut parameter_names);
+        Self::collect_support_keys(supported_params, &mut parameter_names);
         Self::collect_value_keys(db_defaults, &mut parameter_names);
         Self::collect_value_keys(db_max, &mut parameter_names);
 
         if let Some(config) = method_config {
             Self::collect_value_keys(config.default_parameters.as_ref(), &mut parameter_names);
             Self::collect_value_keys(config.max_parameters.as_ref(), &mut parameter_names);
-            if let Some(support_list) = &config.support_parameters {
+            if let Some(support_list) = &config.supported_parameters {
                 for key in support_list {
                     parameter_names.insert(key.clone());
                 }
@@ -245,7 +280,7 @@ impl ModelResponse {
             return None;
         }
 
-        let support_lookup = Self::build_parameter_support_lookup(support_params, method_config);
+        let support_lookup = Self::build_parameter_support_lookup(supported_params, method_config);
         let mut names: Vec<String> = parameter_names.into_iter().collect();
         names.sort();
 
@@ -278,10 +313,10 @@ impl ModelResponse {
     }
 
     fn collect_support_keys(
-        support_params: Option<&Vec<LlmModelParameter>>,
+        supported_params: Option<&Vec<LlmModelParameter>>,
         target: &mut HashSet<String>,
     ) {
-        if let Some(params) = support_params {
+        if let Some(params) = supported_params {
             for param in params {
                 target.insert(param.as_str().to_string());
             }
@@ -300,15 +335,15 @@ impl ModelResponse {
     }
 
     fn build_parameter_support_lookup(
-        db_support: Option<&Vec<LlmModelParameter>>,
+        db_supported: Option<&Vec<LlmModelParameter>>,
         method_config: Option<&ChatMethodConfig>,
     ) -> HashSet<String> {
         let mut keys = HashSet::new();
-        Self::collect_support_keys(db_support, &mut keys);
+        Self::collect_support_keys(db_supported, &mut keys);
 
         if keys.is_empty() {
             if let Some(config) = method_config {
-                if let Some(support_list) = &config.support_parameters {
+                if let Some(support_list) = &config.supported_parameters {
                     for key in support_list {
                         keys.insert(key.clone());
                     }

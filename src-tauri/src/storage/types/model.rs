@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::common::Timestamp;
-use handbox_llm::types::{LlmModelParameter, ModelPricing};
+use handbox_llm::types::ModelPricing;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -33,7 +33,7 @@ pub struct Model {
     pub metadata: Option<Value>,
     pub pricing: Option<ModelPricing>,
     pub url: Option<String>,
-    pub support_parameters: Option<Vec<LlmModelParameter>>,
+    pub supported_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
     pub supported_methods: Option<Vec<String>>,
@@ -121,32 +121,6 @@ impl Model {
         }
     }
 
-    pub fn support_parameters_to_json(&self) -> Option<String> {
-        self.support_parameters.as_ref().and_then(|params| {
-            if params.is_empty() {
-                None
-            } else {
-                serde_json::to_string(params).ok()
-            }
-        })
-    }
-
-    pub fn support_parameters_from_json(
-        json: Option<&str>,
-    ) -> Result<Option<Vec<LlmModelParameter>>, serde_json::Error> {
-        match json {
-            Some(data) if !data.is_empty() => {
-                let params = serde_json::from_str::<Vec<LlmModelParameter>>(data)?;
-                if params.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(params))
-                }
-            }
-            _ => Ok(None),
-        }
-    }
-
     pub fn default_parameters_to_json(&self) -> Option<String> {
         self.default_parameters.as_ref().and_then(|params| {
             if params.is_empty() {
@@ -219,6 +193,32 @@ impl Model {
                     Ok(None)
                 } else {
                     Ok(Some(methods))
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub fn supported_parameters_to_json(&self) -> Option<String> {
+        self.supported_parameters.as_ref().and_then(|params| {
+            if params.is_empty() {
+                None
+            } else {
+                serde_json::to_string(params).ok()
+            }
+        })
+    }
+
+    pub fn supported_parameters_from_json(
+        json: Option<&str>,
+    ) -> Result<Option<Vec<String>>, serde_json::Error> {
+        match json {
+            Some(data) if !data.is_empty() => {
+                let params = serde_json::from_str::<Vec<String>>(data)?;
+                if params.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(params))
                 }
             }
             _ => Ok(None),

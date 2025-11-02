@@ -29,7 +29,7 @@ pub enum SupplementField {
     /// 输出模态
     OutputModalities,
     /// 支持的参数
-    SupportParameters,
+    SupportedParameters,
     /// 默认参数值
     DefaultParameters,
     /// 最大参数值
@@ -60,7 +60,7 @@ pub struct LlmModel {
     pub metadata: Option<Value>,
     pub pricing: Option<ModelPricing>,
     pub url: Option<String>,
-    pub support_parameters: Vec<LlmModelParameter>,
+    pub supported_parameters: Option<Vec<String>>,
     pub default_parameters: Option<HashMap<String, Value>>,
     pub max_parameters: Option<HashMap<String, Value>>,
     pub supported_methods: Option<Vec<String>>,
@@ -328,7 +328,7 @@ pub struct ModelSupplement {
     #[serde(default)]
     pub currency: Option<String>,
     #[serde(default)]
-    pub support_parameters: Vec<LlmModelParameter>,
+    pub supported_parameters: Option<Vec<String>>,
     #[serde(default)]
     pub default_parameters: Option<HashMap<String, Value>>,
     #[serde(default)]
@@ -532,9 +532,11 @@ pub fn merge_supplement(
     }
 
     // 合并支持的参数
-    if should_merge_field(fields, &SupplementField::SupportParameters) {
-        if !supplement.support_parameters.is_empty() {
-            model.support_parameters = supplement.support_parameters.clone();
+    if should_merge_field(fields, &SupplementField::SupportedParameters) {
+        if let Some(ref params) = supplement.supported_parameters {
+            if !params.is_empty() {
+                model.supported_parameters = Some(params.clone());
+            }
         }
     }
 
