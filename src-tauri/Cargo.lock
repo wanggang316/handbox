@@ -42,8 +42,6 @@ dependencies = [
 [[package]]
 name = "aliyun-oss-rs"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f9c2e36d8ab958692d1f05cd781b3cbf4168e4211451e7b266fb2b0e0d5a9b3"
 dependencies = [
  "base64 0.22.1",
  "bytes",

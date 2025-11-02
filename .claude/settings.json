@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/git-add.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
