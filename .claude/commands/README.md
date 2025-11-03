@@ -17,6 +17,72 @@ Claude: Uses /worktree-flow complete - automatically commits, merges, and cleans
 
 ## 📋 Available Commands
 
+### `/commit` - Git Commit with Conventional Commits ⭐
+
+Manual git commit command with Conventional Commits format.
+
+**Usage:**
+```bash
+/commit "message"                    # Simple commit
+/commit feat api "add streaming"     # With type and scope
+/commit --amend "fix typo"          # Amend last commit
+/commit --wip "work in progress"    # WIP commit (no push)
+```
+
+**Features:**
+- Conventional Commits format (feat, fix, refactor, etc.)
+- Auto-adds co-authorship footer
+- Supports --amend, --wip, --no-push options
+- Shows staged changes before commit
+
+---
+
+### `/db` - Database Query Commands ⭐
+
+Quick SQLite database inspection for debugging.
+
+**Usage:**
+```bash
+/db tables                           # List all tables
+/db schema models                    # Show table structure
+/db query models 10                  # Query data (limit 10)
+/db migrations                       # Show migration history
+/db fk-check                         # Check foreign keys
+/db sql "SELECT * FROM providers"   # Custom query
+```
+
+**Features:**
+- Fast schema inspection
+- Data querying with pretty output
+- Migration history tracking
+- Foreign key validation
+- Integrity checks
+
+---
+
+### `/test` - Test Execution Commands ⭐
+
+Quick test running and coverage reporting.
+
+**Usage:**
+```bash
+/test                                # Run all tests
+/test coverage                       # Generate coverage report
+/test test_send_message              # Run specific test
+/test mod services::chat             # Test module
+/test watch                          # Watch mode (auto-run)
+/test verbose                        # Show output
+```
+
+**Features:**
+- Fast test execution
+- Coverage reports (HTML)
+- Watch mode for TDD
+- Module/file filtering
+- Verbose output option
+
+---
+
 ### `/worktree-flow` - Complete Workflow Automation ⭐
 
 **Recommended for most users.** Automates the entire worktree development cycle.
