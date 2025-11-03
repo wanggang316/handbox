@@ -1,316 +1,266 @@
 # Claude Code Custom Commands
 
-This directory contains custom slash commands for Claude Code, specifically designed for Git worktree workflows.
+This directory contains custom slash commands for Claude Code, designed for the HandBox project development workflow.
 
-## 🚀 Quick Start
+## Available Commands
 
-### Simple Workflow (Recommended)
-```
-User: "在 feature/new-ui worktree 上实现新的用户界面"
-Claude: Uses /worktree-flow start feature/new-ui main "实现新的用户界面"
+### `/commit` - Intelligent Git Commit
 
-[... work on the feature ...]
-
-User: "完成这个 worktree"
-Claude: Uses /worktree-flow complete - automatically commits, merges, and cleans up
-```
-
-## 📋 Available Commands
-
-### `/commit` - Git Commit with Conventional Commits ⭐
-
-Manual git commit command with Conventional Commits format.
+Analyzes changes and creates a commit with Conventional Commits format.
 
 **Usage:**
-```bash
-/commit "message"                    # Simple commit
-/commit feat api "add streaming"     # With type and scope
-/commit --amend "fix typo"          # Amend last commit
-/commit --wip "work in progress"    # WIP commit (no push)
+```
+/commit
+/commit "custom message"
 ```
 
-**Features:**
-- Conventional Commits format (feat, fix, refactor, etc.)
-- Auto-adds co-authorship footer
-- Supports --amend, --wip, --no-push options
-- Shows staged changes before commit
+**What it does:**
+- Analyzes git status and staged changes
+- Generates semantic commit message (feat, fix, refactor, etc.)
+- Adds co-authorship footer
+- Follows Conventional Commits format
+
+**Example:**
+```
+User: /commit
+Claude: [analyzes changes, creates commit like "feat(frontend): add dark mode toggle"]
+```
 
 ---
 
-### `/db` - Database Query Commands ⭐
+### `/db-inspect` - Database Inspector
 
 Quick SQLite database inspection for debugging.
 
 **Usage:**
-```bash
-/db tables                           # List all tables
-/db schema models                    # Show table structure
-/db query models 10                  # Query data (limit 10)
-/db migrations                       # Show migration history
-/db fk-check                         # Check foreign keys
-/db sql "SELECT * FROM providers"   # Custom query
+```
+/db-inspect                          # Show all tables
+/db-inspect models                   # Show table schema and data
+/db-inspect "SELECT * FROM models"   # Custom query
 ```
 
-**Features:**
-- Fast schema inspection
-- Data querying with pretty output
-- Migration history tracking
-- Foreign key validation
-- Integrity checks
-
----
-
-### `/test` - Test Execution Commands ⭐
-
-Quick test running and coverage reporting.
-
-**Usage:**
-```bash
-/test                                # Run all tests
-/test coverage                       # Generate coverage report
-/test test_send_message              # Run specific test
-/test mod services::chat             # Test module
-/test watch                          # Watch mode (auto-run)
-/test verbose                        # Show output
-```
-
-**Features:**
-- Fast test execution
-- Coverage reports (HTML)
-- Watch mode for TDD
-- Module/file filtering
-- Verbose output option
-
----
-
-### `/worktree-flow` - Complete Workflow Automation ⭐
-
-**Recommended for most users.** Automates the entire worktree development cycle.
-
-**Actions:**
-- `/worktree-flow start <branch> [base] "<task>"` - Start new feature in worktree
-- `/worktree-flow complete [target] "<message>"` - Finish and merge automatically
-- `/worktree-flow status` - Show current worktree status
-
-**Conversational Usage:**
-Claude recognizes these phrases automatically:
-- "在 XXX worktree 上完成..." → starts workflow
-- "完成这个 worktree" → completes and merges
-- "Finish this worktree" → completes and merges
-
-**What it does automatically:**
-1. ✅ Commits all changes with proper message
-2. ✅ Pushes branch to remote
-3. ✅ Switches to main worktree
-4. ✅ Merges with --no-ff (preserves history)
-5. ✅ Pushes merged changes
-6. ✅ Removes worktree
-7. ✅ Deletes feature branch
+**What it does:**
+- Connects to HandBox SQLite database
+- Shows tables, schemas, and data
+- Executes read-only queries
 
 **Example:**
-```bash
-# Start working
-/worktree-flow start feature/auth main "Add user authentication"
-
-# When done
-/worktree-flow complete main "feat: add user authentication system"
+```
+/db-inspect models
+[Shows model table schema and sample data]
 ```
 
 ---
 
-### `/worktree` - Manual Worktree Management
+### `/test-run` - Run Rust Tests
 
-For users who want more control over individual steps.
+Execute backend tests with optional filters.
 
-**Subcommands:**
-- `/worktree list` - List all existing worktrees
-- `/worktree switch <branch>` - Switch to a specific worktree
-- `/worktree create <branch> [base]` - Create a new worktree
-- `/worktree code <task>` - Execute coding task with context
-- `/worktree finish [target]` - Interactive completion (shows steps)
-- `/worktree merge <source> [target]` - Merge a branch
-- `/worktree remove <branch>` - Remove a worktree
-
-**Examples:**
-```bash
-# Create and work manually
-/worktree create feature/new-ui main
-/worktree code "Redesign user interface"
-
-# When done (step by step)
-/worktree finish main
-# Claude will guide you through each step
-
-# Or merge directly
-/worktree merge feature/new-ui main
-/worktree remove feature/new-ui
+**Usage:**
+```
+/test-run                    # Run all tests
+/test-run test_send_message  # Run specific test
+/test-run services::chat     # Run module tests
+/test-run --verbose          # Show output
 ```
 
-## 🎯 Best Practices
+**What it does:**
+- Runs tests in `src-tauri/` directory
+- Shows pass/fail results
+- Optionally shows test output
 
-### 1. Use Conversational Flow (Easiest)
+**Example:**
 ```
-You: "在 feature/payment worktree 上添加支付功能"
-Claude: [automatically creates worktree and starts coding]
-
-You: "完成这个 worktree"
-Claude: [automatically commits, merges, cleans up]
+/test-run services::chat
+[Runs all tests in chat service module]
 ```
-
-### 2. Manual Control Flow
-```
-/worktree-flow start feature/payment main "Add payment integration"
-[work on feature...]
-/worktree-flow complete main "feat: integrate payment gateway"
-```
-
-### 3. Step-by-Step Flow (Most Control)
-```
-/worktree create feature/payment main
-/worktree code "Add payment integration"
-[work on feature...]
-/worktree finish main
-[follow Claude's guidance for each step]
-```
-
-## 🔧 How It Works
-
-### Hooks Integration
-
-The commands work seamlessly with configured hooks:
-
-1. **git-add.sh** (UserPromptSubmit)
-   - Automatically stages all changes before each message
-   - Ensures nothing is forgotten
-
-2. **worktree-context.sh** (UserPromptSubmit)
-   - Detects when you're in a linked worktree
-   - Provides context to Claude automatically
-   - Shows warnings about worktree-specific considerations
-
-### Context Awareness
-
-When in a linked worktree, Claude receives:
-```
-<worktree-context>
-You are currently working in a Git worktree environment:
-- Current branch: feature/xxx
-- Worktree path: /path/to/worktree
-- Main worktree: /path/to/main
-...
-</worktree-context>
-```
-
-This helps Claude:
-- Understand the isolation environment
-- Make appropriate git operation suggestions
-- Avoid operations that might affect other worktrees
-
-## 🛡️ Safety Features
-
-1. **Prevents accidental operations in main worktree**
-   - `complete` and `finish` commands check if you're in a linked worktree
-
-2. **Always uses --no-ff merge**
-   - Preserves feature branch history
-   - Makes it easy to revert entire features
-
-3. **Pulls before merging**
-   - Ensures you're merging into latest code
-   - Reduces conflicts
-
-4. **Cleans up only after successful merge**
-   - Worktree is not removed if merge fails
-   - Branch is deleted only after successful merge
-
-5. **Auto-staging with git-add.sh**
-   - Never lose uncommitted changes
-   - Everything is staged before operations
-
-## 📖 Typical Development Cycle
-
-```
-1. User: "在 feature/xxx worktree 上实现功能"
-   ↓
-2. Claude: Creates worktree, starts coding
-   ↓
-3. Claude: Makes changes, tests, commits
-   ↓
-4. User: "完成这个 worktree"
-   ↓
-5. Claude: Automatically:
-   - Commits remaining changes
-   - Pushes to remote
-   - Switches to main worktree
-   - Merges with --no-ff
-   - Pushes merged changes
-   - Removes worktree
-   - Deletes branch
-   ↓
-6. Done! Feature merged and cleaned up
-```
-
-## 🎓 Advanced Usage
-
-### Working on Multiple Features
-```bash
-# Start multiple worktrees
-/worktree-flow start feature/ui main "UI improvements"
-/worktree-flow start feature/api main "API updates"
-
-# List all active worktrees
-/worktree list
-
-# Switch between them
-cd ../handbox-feature/ui
-cd ../handbox-feature/api
-
-# Complete them independently
-/worktree-flow complete
-```
-
-### Custom Merge Targets
-```bash
-# Merge into develop instead of main
-/worktree-flow complete develop "feat: new feature"
-
-# Or with /worktree
-/worktree merge feature/xxx develop
-```
-
-### Emergency Cleanup
-```bash
-# If something goes wrong, manually clean up
-/worktree list
-/worktree remove feature/broken-branch
-git branch -D feature/broken-branch
-```
-
-## 🔍 Troubleshooting
-
-**Problem: "Not in a linked worktree" error**
-- You're trying to complete from the main worktree
-- Solution: Make sure you're in the feature worktree
-
-**Problem: Merge conflicts**
-- The workflow will stop and show conflict messages
-- Solution: Resolve conflicts manually, then continue
-
-**Problem: Worktree not found**
-- The worktree may have been manually deleted
-- Solution: Use `git worktree prune` to clean up
-
-**Problem: Can't delete branch**
-- Branch might not be fully merged
-- Solution: Use `git branch -D` (force delete) if you're sure
-
-## 📚 References
-
-- Git Worktree Documentation: https://git-scm.com/docs/git-worktree
-- Claude Code Hooks: `.claude/settings.json`
-- Command Implementation: `.claude/commands/`
 
 ---
 
-See `.claude/settings.json` for hook configuration.
-See individual command files for implementation details.
+### `/worktree-list` - List Git Worktrees
+
+Show all git worktrees in the repository.
+
+**Usage:**
+```
+/worktree-list
+```
+
+**What it does:**
+- Shows all worktree paths
+- Displays current branch for each
+- Helps navigate between worktrees
+
+---
+
+### `/worktree-create` - Create New Worktree
+
+Create a new git worktree for isolated development.
+
+**Usage:**
+```
+/worktree-create feature/auth           # Create from main
+/worktree-create feature/ui develop     # Create from develop
+```
+
+**What it does:**
+- Creates new worktree in sibling directory
+- Creates new branch from base (default: main)
+- Isolates changes from main worktree
+
+**Example:**
+```
+/worktree-create feature/auth
+[Creates worktree at ../handbox-feature/auth]
+```
+
+---
+
+### `/worktree-complete` - Complete Worktree Work
+
+Finish worktree development and merge to main branch.
+
+**Usage:**
+```
+/worktree-complete           # Merge to main
+/worktree-complete develop   # Merge to develop
+```
+
+**What it does:**
+1. Commits all changes
+2. Pushes branch to remote
+3. Switches to main worktree
+4. Merges with --no-ff (preserves history)
+5. Pushes merged changes
+6. Removes worktree
+7. Deletes branch
+
+**Example:**
+```
+User: "完成这个worktree"
+Claude: /worktree-complete
+[Automatically completes entire merge workflow]
+```
+
+---
+
+## Command Design Philosophy
+
+All commands follow these principles:
+
+1. **Atomic Operations** - Each command does one thing well
+2. **Simple Prompts** - No complex bash scripts, just clear instructions
+3. **Context-Aware** - Uses frontmatter and argument hints
+4. **Composable** - Commands work together naturally
+
+## Integration with Other Features
+
+### Hooks
+
+Commands work seamlessly with configured hooks:
+
+- **git-add.sh** (UserPromptSubmit) - Auto-stages changes before commit
+- **worktree-context.sh** (UserPromptSubmit) - Provides worktree context
+- **auto-format.sh** (PostToolUse) - Auto-formats code after edits
+
+### Skills
+
+- **handbox-committer** - Automatically triggered by "提交代码", "commit this", etc.
+
+### Subagents
+
+For complex tasks, use specialized subagents:
+
+- **rust-backend** - Rust/Tauri development
+- **svelte-frontend** - SvelteKit/Svelte development
+- **security-reviewer** - Security audits
+- **database-inspector** - Complex database debugging
+- **rust-test-writer** - Unit test creation
+
+## Typical Workflows
+
+### Feature Development in Worktree
+
+```
+1. Create worktree
+   /worktree-create feature/auth
+
+2. Work on feature
+   [Make changes, test, iterate]
+
+3. Commit changes
+   /commit
+
+4. Complete and merge
+   /worktree-complete
+```
+
+### Database Debugging
+
+```
+1. Inspect database
+   /db-inspect models
+
+2. For complex investigation
+   "调查为什么模型插入失败"
+   [Uses database-inspector subagent]
+```
+
+### Test-Driven Development
+
+```
+1. Write test
+   "为 chat_service 编写单元测试"
+   [Uses rust-test-writer subagent]
+
+2. Run tests
+   /test-run services::chat
+
+3. Iterate until passing
+   /test-run --verbose
+```
+
+## Best Practices
+
+1. **Use commands for simple, frequent operations**
+   - Running tests
+   - Checking database
+   - Creating commits
+   - Managing worktrees
+
+2. **Use subagents for complex tasks**
+   - Writing tests
+   - Security reviews
+   - Detailed code analysis
+   - Debugging complex issues
+
+3. **Let hooks automate repetitive tasks**
+   - Auto-staging changes
+   - Auto-formatting code
+   - Providing context
+
+## Adding New Commands
+
+To add a new command:
+
+1. Create `command-name.md` in `.claude/commands/`
+2. Use frontmatter for metadata:
+   ```markdown
+   ---
+   description: Brief description
+   argument-hint: [arg1] [arg2]
+   when: Optional trigger phrases
+   ---
+   ```
+3. Write simple, clear instructions (not bash scripts)
+4. Use `$1`, `$2`, or `$ARGUMENTS` for arguments
+5. Keep it atomic (single purpose)
+6. Update this README
+
+## References
+
+- [Claude Code Slash Commands Documentation](https://docs.claude.com/en/docs/claude-code/slash-commands)
+- Project configuration: `.claude/settings.json`
+- Skills directory: `.claude/skills/`
+- Subagents directory: `.claude/agents/`
+- Hooks directory: `.claude/hooks/`
