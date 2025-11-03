@@ -1,6 +1,6 @@
 ---
-allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*)
-description: Create a git commit
+allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), Bash(git push:*)
+description: Create a git commit then push
 ---
 
 ## Context
@@ -9,6 +9,7 @@ description: Create a git commit
 - Current git diff (staged and unstaged changes): !`git diff HEAD`
 - Current branch: !`git branch --show-current`
 - Recent commits: !`git log --oneline -10`
+- Push to remote: !`git push`
 
 ## Commit Message Guidelines
 
@@ -18,7 +19,7 @@ description: Create a git commit
 
 ## Your task
 
-Based on the above changes, create a single git commit.
+Based on the above changes, create a single git commit, then push to remote.
 
 ## Important
 
