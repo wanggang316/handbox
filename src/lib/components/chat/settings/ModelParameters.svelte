@@ -20,7 +20,10 @@
 
   const currentModel = $derived(currentChatModel().model);
 
-  const modelDefaults = $derived(getModelDefaultSettings(currentModel));
+const modelDefaults = $derived(getModelDefaultSettings(currentModel));
+const supportsTemperature = $derived(
+  hasParameterSupport("temperature", currentModel)
+);
 
   const hasAdvancedParameters = $derived(
     hasParameterSupport("top_p", currentModel) ||
@@ -57,16 +60,22 @@
     ];
   }
 
-  function resolveTopKMax(current: number): number {
+  function resolveTopKMax(current: number | undefined): number {
     if (!hasParameterSupport("top_k", currentModel)) {
       return current ?? 0;
     }
+    const defaultTopK =
+      typeof modelDefaults.topK === "number" && Number.isFinite(modelDefaults.topK)
+        ? Math.max(modelDefaults.topK, 1)
+        : 1;
     const baseline = Math.max(
-      getMaxNumber("top_k", modelDefaults.topK || 100, currentModel),
-      modelDefaults.topK || 100,
+      getMaxNumber("top_k", defaultTopK, currentModel),
+      defaultTopK,
       1
     );
-    return Math.max(baseline, current ?? 1);
+    const currentValue =
+      typeof current === "number" && Number.isFinite(current) ? current : defaultTopK;
+    return Math.max(baseline, currentValue);
   }
 
   function getTopKScaleMarks() {
@@ -79,16 +88,22 @@
   }
 
   function resolveOutputTokensMax(current: number): number {
+    const defaultMaxTokens =
+      typeof modelDefaults.maxTokens === "number" && Number.isFinite(modelDefaults.maxTokens)
+        ? Math.max(modelDefaults.maxTokens, 1)
+        : 1;
     const baseline = Math.max(
       getMaxNumber(
         "output_max_tokens",
-        getMaxNumber("max_tokens", modelDefaults.maxTokens, currentModel),
+        getMaxNumber("max_tokens", defaultMaxTokens, currentModel),
         currentModel
       ),
-      modelDefaults.maxTokens,
+      defaultMaxTokens,
       1
     );
-    return Math.max(baseline, current ?? baseline);
+    const currentValue =
+      typeof current === "number" && Number.isFinite(current) ? current : baseline;
+    return Math.max(baseline, currentValue);
   }
 
   function buildInitialSettings() {
@@ -100,30 +115,53 @@
       0.1
     );
     const topPMax = Math.max(getMaxNumber("top_p", 1, currentModel), 0.1);
+    const defaultTopK =
+      typeof defaults.topK === "number" && Number.isFinite(defaults.topK)
+        ? Math.max(defaults.topK, 1)
+        : 1;
     const topKMax = hasParameterSupport("top_k", currentModel)
-      ? Math.max(getMaxNumber("top_k", defaults.topK || 100, currentModel), 1)
-      : defaults.topK || 0;
+      ? Math.max(getMaxNumber("top_k", defaultTopK, currentModel), defaultTopK, 1)
+      : undefined;
     const maxTokensLimit = Math.max(
       getMaxNumber(
         "output_max_tokens",
-        getMaxNumber("max_tokens", 1000000, currentModel),
+        getMaxNumber(
+          "max_tokens",
+          typeof defaults.maxTokens === "number" && Number.isFinite(defaults.maxTokens)
+            ? Math.max(defaults.maxTokens, 1)
+            : 1,
+          currentModel
+        ),
         currentModel
       ),
-      defaults.maxTokens
+      typeof defaults.maxTokens === "number" && Number.isFinite(defaults.maxTokens)
+        ? Math.max(defaults.maxTokens, 1)
+        : 1
     );
 
+    const temperatureFallback =
+      typeof defaults.temperature === "number" && Number.isFinite(defaults.temperature)
+        ? defaults.temperature
+        : 0;
     const temperature = clamp(
-      ensureNumber(chat?.temperature, defaults.temperature),
+      ensureNumber(chat?.temperature, temperatureFallback),
       0,
       temperatureMax
     );
 
-    const topP = clamp(ensureNumber(chat?.topP, defaults.topP), 0, topPMax);
+    const topPFallback =
+      typeof defaults.topP === "number" && Number.isFinite(defaults.topP) ? defaults.topP : 0;
+    const topP = clamp(ensureNumber(chat?.topP, topPFallback), 0, topPMax);
     const topK = hasParameterSupport("top_k", currentModel)
-      ? clamp(ensureNumber(chat?.topK, defaults.topK), 1, topKMax)
-      : defaults.topK;
+      ? clamp(ensureNumber(chat?.topK, defaultTopK), 1, topKMax ?? defaultTopK)
+      : undefined;
+
+    const maxTokensFallback =
+      typeof defaults.maxTokens === "number" && Number.isFinite(defaults.maxTokens)
+        ? Math.max(defaults.maxTokens, 1)
+        : 1;
     const maxTokens = clamp(
-      ensureNumber(chat?.maxTokens, defaults.maxTokens),
+      ensureNumber(chat?.maxTokens, maxTokensFallback),
       1,
       maxTokensLimit
     );
@@ -131,8 +169,10 @@
     const streamResponse = hasParameterSupport("streaming", currentModel)
       ? typeof chat?.stream === "boolean"
         ? chat?.stream
-        : defaults.streamResponse
-      : defaults.streamResponse;
+        : (typeof defaults.streamResponse === "boolean" ? defaults.streamResponse : true)
+      : typeof defaults.streamResponse === "boolean"
+        ? defaults.streamResponse
+        : true;
 
     return {
       temperature,
@@ -161,6 +201,7 @@
   });
 
   $effect(() => {
+    supportsTemperature;
     const hasChanges =
       JSON.stringify(currentSettings) !== JSON.stringify(originalSettings);
     if (!hasChanges) {
@@ -175,38 +216,72 @@
     saveTimer = setTimeout(async () => {
       try {
         const payload: {
-          temperature: number;
+          temperature?: number;
           topP?: number;
           topK?: number;
           stream?: boolean;
           maxTokens?: number;
-        } = {
-          temperature: currentSettings.temperature,
-        };
+        } = {};
 
+        const temperatureChanged =
+          currentSettings.temperature !== originalSettings.temperature;
         if (
-          hasParameterSupport("top_p", currentModel) &&
-          currentSettings.enableTopP
+          supportsTemperature &&
+          typeof currentSettings.temperature === "number" &&
+          temperatureChanged
+        ) {
+          payload.temperature = currentSettings.temperature;
+        }
+
+        const hasTopP = hasParameterSupport("top_p", currentModel);
+        const topPChanged =
+          currentSettings.topP !== originalSettings.topP ||
+          currentSettings.enableTopP !== originalSettings.enableTopP;
+        if (
+          hasTopP &&
+          currentSettings.enableTopP &&
+          typeof currentSettings.topP === "number" &&
+          topPChanged
         ) {
           payload.topP = currentSettings.topP;
         }
 
+        const hasTopK = hasParameterSupport("top_k", currentModel);
+        const topKChanged =
+          currentSettings.topK !== originalSettings.topK ||
+          currentSettings.enableTopK !== originalSettings.enableTopK;
         if (
-          hasParameterSupport("top_k", currentModel) &&
-          currentSettings.enableTopK
+          hasTopK &&
+          currentSettings.enableTopK &&
+          typeof currentSettings.topK === "number" &&
+          topKChanged
         ) {
           payload.topK = currentSettings.topK;
         }
 
-        if (hasParameterSupport("streaming", currentModel)) {
+        const streamChanged =
+          currentSettings.streamResponse !== originalSettings.streamResponse;
+        if (
+          hasParameterSupport("streaming", currentModel) &&
+          typeof currentSettings.streamResponse === "boolean" &&
+          streamChanged
+        ) {
           payload.stream = currentSettings.streamResponse;
         }
 
-        if (hasParameterSupport("output_max_tokens", currentModel)) {
+        const maxTokensChanged =
+          currentSettings.maxTokens !== originalSettings.maxTokens;
+        if (
+          hasParameterSupport("output_max_tokens", currentModel) &&
+          typeof currentSettings.maxTokens === "number" &&
+          maxTokensChanged
+        ) {
           payload.maxTokens = currentSettings.maxTokens;
         }
 
-        await chatActions.updateModelSettings(payload);
+        if (Object.keys(payload).length > 0) {
+          await chatActions.updateModelSettings(payload);
+        }
 
         originalSettings = { ...currentSettings };
         saveStatus = "saved";
@@ -219,19 +294,21 @@
 </script>
 
 <div class="space-y-0">
-  <TableGroup>
-    <TableBaseRow label="Temperature" layout="vertical">
-      <LabeledSlider
-        bind:value={currentSettings.temperature}
-        min={0}
-        max={resolveTemperatureMax(currentSettings.temperature)}
-        step={0.1}
-        scaleMarks={getTemperatureScaleMarks()}
-        showScaleMarks={false}
-        showValue={true}
-      />
-    </TableBaseRow>
-  </TableGroup>
+  {#if supportsTemperature}
+    <TableGroup>
+      <TableBaseRow label="Temperature" layout="vertical">
+        <LabeledSlider
+          bind:value={currentSettings.temperature}
+          min={0}
+          max={resolveTemperatureMax(currentSettings.temperature)}
+          step={0.1}
+          scaleMarks={getTemperatureScaleMarks()}
+          showScaleMarks={false}
+          showValue={true}
+        />
+      </TableBaseRow>
+    </TableGroup>
+  {/if}
 
   {#if hasAdvancedParameters}
     <TableGroup title="高级" collapsible defaultCollapsed={true}>

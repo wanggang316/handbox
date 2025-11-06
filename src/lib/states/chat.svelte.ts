@@ -7,7 +7,7 @@ import type {
   UUID,
   McpServerConfig
 } from '../types';
-import type { ChatMethodResponse, ModelWithProvider } from '../types/provider';
+import type { ChatMethodParameter, ModelWithProvider } from '../types/provider';
 import * as chatApi from '../api/chat';
 import { providerActions, getAllModels, providerState } from './provider.svelte';
 
@@ -15,54 +15,64 @@ import { providerActions, getAllModels, providerState } from './provider.svelte'
 // 模型参数管理 - 共享工具函数和常量
 // ============================================
 
-/**
- * 参数别名映射，用于处理不同供应商的参数命名差异
- */
-const PARAMETER_ALIASES: Record<string, string[]> = {
-  temperature: ["temperature"],
-  top_p: ["top_p"],
-  top_k: ["top_k"],
-  streaming: ["streaming", "stream"],
-  output_max_tokens: ["output_max_tokens", "max_tokens"],
-};
-
-function getPrimaryChatMethod(model?: ModelWithProvider): ChatMethodResponse | null {
-  if (!model) {
-    return null;
-  }
-
-  return model.chat_method ?? null;
-}
-
 function getMethodParameters(model?: ModelWithProvider) {
-  const method = getPrimaryChatMethod(model);
-  if (!method || !Array.isArray(method.parameters)) {
+  if (!model?.chat_method || !Array.isArray(model.chat_method.parameters)) {
     return [];
   }
-  return method.parameters;
+
+  // 过滤掉无效的参数定义，并标准化名称
+  return model.chat_method.parameters
+    .filter(
+      (param): param is ChatMethodParameter =>
+        !!param && typeof param.name === "string" && param.name.trim().length > 0
+    )
+    .map((param) => ({
+      ...param,
+      name: param.name.trim()
+    }));
 }
 
 function findMethodParameter(parameterName: string, model?: ModelWithProvider) {
+  const target = typeof parameterName === "string" ? parameterName.trim() : "";
+  if (!target) {
+    return null;
+  }
+
   const params = getMethodParameters(model);
   if (params.length === 0) {
     return null;
   }
 
-  for (const alias of getParameterAliases(parameterName)) {
-    const entry = params.find((param) => param.name === alias);
-    if (entry) {
-      return entry;
+  return params.find((param) => param.name === target) ?? null;
+}
+
+function getLegacyParameterDefault(parameterName: string, model?: ModelWithProvider): number | undefined {
+  if (!model || !Array.isArray(model.parameters)) {
+    return undefined;
+  }
+
+  const entry = model.parameters.find(
+    (param) => typeof param?.name === "string" && param.name.trim() === parameterName
+  );
+
+  if (!entry) {
+    return undefined;
+  }
+
+  const parsed = toNumber(entry.default ?? null);
+  return parsed !== null ? parsed : undefined;
+}
+
+function getParameterDefaultNumber(parameterName: string, model?: ModelWithProvider): number | undefined {
+  const entry = findMethodParameter(parameterName, model);
+  if (entry?.values) {
+    const parsed = toNumber(entry.values.default ?? null);
+    if (parsed !== null) {
+      return parsed;
     }
   }
 
-  return null;
-}
-
-/**
- * 获取参数的所有别名
- */
-export function getParameterAliases(name: string): string[] {
-  return PARAMETER_ALIASES[name] ?? [name];
+  return getLegacyParameterDefault(parameterName, model);
 }
 
 /**
@@ -105,7 +115,10 @@ export function getSupportedParameterSet(model?: ModelWithProvider): Set<string>
   }
 
   for (const param of getMethodParameters(model)) {
-    const name = typeof param?.name === "string" ? param.name.trim() : "";
+    const name = param.name;
+    if (param.support === false) {
+      continue;
+    }
     if (name) {
       supported.add(name);
     }
@@ -135,20 +148,20 @@ export function getSupportedParameterSet(model?: ModelWithProvider): Set<string>
  * 检查模型是否支持指定参数
  */
 export function hasParameterSupport(parameterName: string, model?: ModelWithProvider): boolean {
-  // temperature 是基础参数，默认支持
-  if (parameterName === "temperature") {
-    return true;
+  const target = typeof parameterName === "string" ? parameterName.trim() : "";
+  if (!target) {
+    return false;
   }
 
   const supportedParameters = getSupportedParameterSet(model);
-  if (supportedParameters.size > 0 && getParameterAliases(parameterName).some((alias) => supportedParameters.has(alias))) {
+  if (supportedParameters.size > 0 && supportedParameters.has(target)) {
     return true;
   }
 
-  const entry = findMethodParameter(parameterName, model);
+  const entry = findMethodParameter(target, model);
   if (entry) {
-    if (entry.support) {
-      return true;
+    if (typeof entry.support === "boolean") {
+      return entry.support;
     }
 
     if (entry.values) {
@@ -163,37 +176,19 @@ export function hasParameterSupport(parameterName: string, model?: ModelWithProv
     }
   }
 
+  // 如果没有明确的参数支持信息，但模型提供了全局支持列表，则尝试匹配
+  const supportedList = Array.isArray(model?.supported_parameters) ? model.supported_parameters : null;
+  if (supportedParameters.size === 0 && supportedList) {
+    if (
+      supportedList.some(
+        (value) => typeof value === "string" && value.trim() === target
+      )
+    ) {
+      return true;
+    }
+  }
+
   return false;
-}
-
-/**
- * 获取参数的默认数值
- */
-export function getDefaultNumber(parameterName: string, fallback: number, model?: ModelWithProvider): number {
-  const entry = findMethodParameter(parameterName, model);
-  if (entry?.values) {
-    const parsed = toNumber(entry.values.default ?? null);
-    if (parsed !== null) {
-      return parsed;
-    }
-  }
-
-  return fallback;
-}
-
-/**
- * 获取参数的默认布尔值
- */
-export function getDefaultBoolean(parameterName: string, fallback: boolean, model?: ModelWithProvider): boolean {
-  const entry = findMethodParameter(parameterName, model);
-  if (entry?.values) {
-    const parsed = toBoolean(entry.values.default ?? null);
-    if (parsed !== null) {
-      return parsed;
-    }
-  }
-
-  return fallback;
 }
 
 /**
@@ -231,22 +226,39 @@ export function clamp(value: number, min: number, max: number): number {
  * 获取模型的默认设置
  */
 export function getModelDefaultSettings(model?: ModelWithProvider) {
-  const outputFallback = getDefaultNumber(
-    "output_max_tokens",
-    getDefaultNumber("max_tokens", 4000, model),
-    model
-  );
+  const temperature = getParameterDefaultNumber("temperature", model);
+  const topP = getParameterDefaultNumber("top_p", model);
+  const topK = hasParameterSupport("top_k", model)
+    ? getParameterDefaultNumber("top_k", model)
+    : undefined;
+
+  const streamingEntry = hasParameterSupport("streaming", model)
+    ? findMethodParameter("streaming", model)
+    : null;
+
+  const streamResponse = streamingEntry
+    ? (() => {
+        const parsed = toBoolean(streamingEntry.values?.default ?? null);
+        return parsed !== null ? parsed : undefined;
+      })()
+    : undefined;
+
+  const maxTokensCandidate =
+    getParameterDefaultNumber("output_max_tokens", model) ??
+    getParameterDefaultNumber("max_tokens", model) ??
+    (typeof model?.output_max_tokens === "number" && Number.isFinite(model.output_max_tokens)
+      ? model.output_max_tokens
+      : undefined);
 
   return {
-    temperature: getDefaultNumber("temperature", 0.7, model),
-    topP: getDefaultNumber("top_p", 1.0, model),
-    topK: hasParameterSupport("top_k", model)
-      ? Math.max(getDefaultNumber("top_k", 40, model), 1)
-      : 0,
-    streamResponse: hasParameterSupport("streaming", model)
-      ? getDefaultBoolean("streaming", true, model)
-      : true,
-    maxTokens: outputFallback > 0 ? outputFallback : 4000,
+    temperature,
+    topP,
+    topK: typeof topK === "number" && Number.isFinite(topK) ? Math.max(topK, 1) : undefined,
+    streamResponse,
+    maxTokens:
+      typeof maxTokensCandidate === "number" && Number.isFinite(maxTokensCandidate) && maxTokensCandidate > 0
+        ? maxTokensCandidate
+        : undefined,
   };
 }
 
@@ -389,11 +401,6 @@ export const chatActions = {
         messageCount: 0,
         modelId,
         providerId,
-        temperature: 0.7,
-        topP: 1.0,
-        maxTokens: 4000,
-        stream: true,
-        systemPrompt: '',
         mcpServers: [],
         createdAt: Date.now(),
         updatedAt: Date.now()
@@ -463,17 +470,18 @@ export const chatActions = {
 
       isLoading = true;
 
-      // 使用完整参数创建聊天，一次性包含所有信息
+      console.log('Creating chat with current configuration:', currentChat);
+      // 使用当前配置创建聊天，未设置的参数交由后端默认处理
       const chat = await chatApi.createChat(
         name,
-        0.7, // temperature
-        1.0, // topP
-        4000, // maxTokens
-        true, // stream
+        currentChat.temperature,
+        currentChat.topP,
+        currentChat.maxTokens,
+        currentChat.stream,
         currentChat.modelId,
         currentChat.providerId,
-        '', // systemPrompt
-        [] // mcpServers
+        currentChat.systemPrompt,
+        currentChat.mcpServers
       );
 
       // 更新聊天列表（归一化为数组后再拼接，避免展开不可迭代对象）
