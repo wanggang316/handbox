@@ -151,11 +151,14 @@
         });
       }
 
-      const supportedParameters = formatList(current.supported_parameters);
+      const supportedParameters = current.supported_parameters
+        ?.filter((p) => p && p.trim().length > 0)
+        .join(", ");
       if (supportedParameters) {
         rows.push({
           label: "支持参数",
           value: supportedParameters,
+          mono: true,
         });
       }
 

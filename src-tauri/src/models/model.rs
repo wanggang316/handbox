@@ -152,10 +152,12 @@ impl ModelResponse {
         let display_output_max_tokens = model.output_max_tokens.map(Self::format_number);
 
         // 转换 supported_parameters 从 Vec<String> 到 Vec<LlmModelParameter>
+        // 过滤掉 Unknown 参数
         let supported_parameters = model.supported_parameters.map(|params| {
             params
                 .iter()
                 .filter_map(|s| s.parse::<LlmModelParameter>().ok())
+                .filter(|param| *param != LlmModelParameter::Unknown)
                 .collect()
         });
 
@@ -209,10 +211,12 @@ impl ModelResponse {
                 let method_config = config.get_chat_method_config(method.as_str());
 
                 // Convert Vec<String> to Vec<LlmModelParameter> for the parameters builder
+                // 过滤掉 Unknown 参数
                 let supported_params = model.supported_parameters.as_ref().map(|params| {
                     params
                         .iter()
                         .filter_map(|s| s.parse::<LlmModelParameter>().ok())
+                        .filter(|param| *param != LlmModelParameter::Unknown)
                         .collect::<Vec<_>>()
                 });
 
@@ -289,6 +293,11 @@ impl ModelResponse {
             let param_enum = key
                 .parse::<LlmModelParameter>()
                 .unwrap_or(LlmModelParameter::Unknown);
+
+            // 过滤掉 Unknown 参数
+            if param_enum == LlmModelParameter::Unknown {
+                continue;
+            }
 
             let values =
                 Self::build_parameter_value_for_key(&key, db_defaults, db_max, method_config);
