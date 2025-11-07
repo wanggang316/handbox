@@ -1402,6 +1402,14 @@ impl MessageService {
         request: &MessageRequest,
         chat: &Chat,
     ) -> Result<LlmRequest, AppError> {
+        /// 过滤掉无效的数值参数（0 或负数）
+        fn normalize_numeric<T>(value: Option<T>) -> Option<T>
+        where
+            T: PartialOrd + Default,
+        {
+            value.filter(|v| *v > T::default())
+        }
+
         let messages: Vec<LlmMessage> = request
             .messages
             .iter()
@@ -1419,9 +1427,9 @@ impl MessageService {
         Ok(LlmRequest {
             model: request.model_id.clone(),
             messages,
-            temperature: chat.temperature,
-            max_tokens: chat.max_tokens,
-            stream: Some(false),
+            temperature: normalize_numeric(chat.temperature),
+            max_tokens: normalize_numeric(chat.max_tokens),
+            stream: chat.stream.or(Some(true)), // 默认为 true
             tools: if tools.is_empty() {
                 None
             } else {
@@ -2037,15 +2045,46 @@ impl MessageService {
 
     /// 根据聊天信息构建消息配置
     fn message_config_from_chat(chat: &Chat) -> MessageConfig {
+        fn normalize_str(value: &Option<String>) -> Option<String> {
+            value.as_ref().and_then(|text| {
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else if trimmed.len() == text.len() {
+                    Some(text.clone())
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
+        }
+
+        /// 过滤掉无效的数值参数（0 或负数）
+        /// 这些参数如果为 0，说明它们没有被设置或不被支持，应该保持为 None
+        fn normalize_numeric<T>(value: Option<T>) -> Option<T>
+        where
+            T: PartialOrd + Default,
+        {
+            value.filter(|v| *v > T::default())
+        }
+
+        let system_prompt = normalize_str(&chat.system_prompt);
+        let model_id = normalize_str(&chat.model_id);
+        let provider_id = normalize_str(&chat.provider_id);
+        let mcp_servers = if chat.mcp_servers.is_empty() {
+            None
+        } else {
+            Some(chat.mcp_servers.clone())
+        };
+
         MessageConfig {
-            temperature: chat.temperature,
-            top_p: chat.top_p,
-            max_tokens: chat.max_tokens,
+            temperature: normalize_numeric(chat.temperature),
+            top_p: normalize_numeric(chat.top_p),
+            max_tokens: normalize_numeric(chat.max_tokens),
             stream: chat.stream,
-            model_id: chat.model_id.clone(),
-            provider_id: chat.provider_id.clone(),
-            system_prompt: chat.system_prompt.clone(),
-            mcp_servers: Some(chat.mcp_servers.clone()),
+            model_id,
+            provider_id,
+            system_prompt,
+            mcp_servers,
             turn_count: chat.turn_count,
         }
     }
@@ -2279,5 +2318,82 @@ mod tests {
         assert_eq!(defaults.max_tokens, Some(2048));
         assert_eq!(defaults.context_length, Some(4096));
         assert_eq!(defaults.stream, Some(true));
+    }
+
+    #[test]
+    fn message_config_from_chat_filters_zero_values() {
+        let chat = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Test Chat".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: Some(0.0), // 应该被过滤掉
+            top_p: Some(0.0),       // 应该被过滤掉
+            max_tokens: Some(0),    // 应该被过滤掉
+            stream: Some(false),
+            model_id: Some("gpt-5-nano".to_string()),
+            provider_id: Some("test-provider".to_string()),
+            system_prompt: Some("Test prompt".to_string()),
+            mcp_servers: vec![],
+            turn_count: Some(5),
+            artifact_id: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let config = MessageService::message_config_from_chat(&chat);
+
+        // 验证 0 值被过滤为 None
+        assert_eq!(config.temperature, None);
+        assert_eq!(config.top_p, None);
+        assert_eq!(config.max_tokens, None);
+
+        // 验证其他字段正常保留
+        assert_eq!(config.stream, Some(false));
+        assert_eq!(config.model_id, Some("gpt-5-nano".to_string()));
+        assert_eq!(config.provider_id, Some("test-provider".to_string()));
+        assert_eq!(config.turn_count, Some(5));
+
+        // 验证 JSON 序列化不包含 0 值
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("\"temperature\""));
+        assert!(!json.contains("\"topP\""));
+        assert!(!json.contains("\"maxTokens\""));
+    }
+
+    #[test]
+    fn message_config_from_chat_preserves_valid_values() {
+        let chat = Chat {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Test Chat".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: Some(0.7),
+            top_p: Some(0.9),
+            max_tokens: Some(2048),
+            stream: Some(true),
+            model_id: Some("gpt-4".to_string()),
+            provider_id: Some("openai".to_string()),
+            system_prompt: Some("You are a helpful assistant.".to_string()),
+            mcp_servers: vec![],
+            turn_count: Some(10),
+            artifact_id: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let config = MessageService::message_config_from_chat(&chat);
+
+        // 验证有效值被保留
+        assert_eq!(config.temperature, Some(0.7));
+        assert_eq!(config.top_p, Some(0.9));
+        assert_eq!(config.max_tokens, Some(2048));
+        assert_eq!(config.stream, Some(true));
+
+        // 验证 JSON 序列化包含有效值
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"temperature\""));
+        assert!(json.contains("\"topP\""));
+        assert!(json.contains("\"maxTokens\""));
     }
 }

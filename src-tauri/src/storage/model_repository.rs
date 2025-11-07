@@ -461,15 +461,15 @@ impl ModelRepository {
             AppError::internal_error(&format!("Failed to parse model pricing: {}", e))
         })?;
 
-        let supported_parameters =
-            Model::supported_parameters_from_json(supported_parameters_raw.as_deref()).map_err(
-                |e| {
-                    AppError::internal_error(&format!(
-                        "Failed to parse model supported parameters: {}",
-                        e
-                    ))
-                },
-            )?;
+        let supported_parameters = Model::supported_parameters_from_json(
+            supported_parameters_raw.as_deref(),
+        )
+        .map_err(|e| {
+            AppError::internal_error(&format!(
+                "Failed to parse model supported parameters: {}",
+                e
+            ))
+        })?;
 
         let default_parameters = Model::default_parameters_from_json(
             default_parameters_raw.as_deref(),

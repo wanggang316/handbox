@@ -223,59 +223,29 @@ const supportsTemperature = $derived(
           maxTokens?: number;
         } = {};
 
-        const temperatureChanged =
-          currentSettings.temperature !== originalSettings.temperature;
-        if (
-          supportsTemperature &&
-          typeof currentSettings.temperature === "number" &&
-          temperatureChanged
-        ) {
+        if (supportsTemperature) {
           payload.temperature = currentSettings.temperature;
         }
 
-        const hasTopP = hasParameterSupport("top_p", currentModel);
-        const topPChanged =
-          currentSettings.topP !== originalSettings.topP ||
-          currentSettings.enableTopP !== originalSettings.enableTopP;
         if (
-          hasTopP &&
-          currentSettings.enableTopP &&
-          typeof currentSettings.topP === "number" &&
-          topPChanged
+          hasParameterSupport("top_p", currentModel) &&
+          currentSettings.enableTopP
         ) {
           payload.topP = currentSettings.topP;
         }
 
-        const hasTopK = hasParameterSupport("top_k", currentModel);
-        const topKChanged =
-          currentSettings.topK !== originalSettings.topK ||
-          currentSettings.enableTopK !== originalSettings.enableTopK;
         if (
-          hasTopK &&
-          currentSettings.enableTopK &&
-          typeof currentSettings.topK === "number" &&
-          topKChanged
+          hasParameterSupport("top_k", currentModel) &&
+          currentSettings.enableTopK
         ) {
           payload.topK = currentSettings.topK;
         }
 
-        const streamChanged =
-          currentSettings.streamResponse !== originalSettings.streamResponse;
-        if (
-          hasParameterSupport("streaming", currentModel) &&
-          typeof currentSettings.streamResponse === "boolean" &&
-          streamChanged
-        ) {
+        if (hasParameterSupport("streaming", currentModel)) {
           payload.stream = currentSettings.streamResponse;
         }
 
-        const maxTokensChanged =
-          currentSettings.maxTokens !== originalSettings.maxTokens;
-        if (
-          hasParameterSupport("output_max_tokens", currentModel) &&
-          typeof currentSettings.maxTokens === "number" &&
-          maxTokensChanged
-        ) {
+        if (hasParameterSupport("output_max_tokens", currentModel)) {
           payload.maxTokens = currentSettings.maxTokens;
         }
 
