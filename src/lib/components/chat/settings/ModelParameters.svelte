@@ -139,32 +139,45 @@ const supportsTemperature = $derived(
         : 1
     );
 
+    // 使用模型默认值作为 fallback，而不是 0
     const temperatureFallback =
       typeof defaults.temperature === "number" && Number.isFinite(defaults.temperature)
         ? defaults.temperature
-        : 0;
-    const temperature = clamp(
-      ensureNumber(chat?.temperature, temperatureFallback),
-      0,
-      temperatureMax
-    );
+        : 1.0; // 改为 1.0（OpenAI 默认值）
 
     const topPFallback =
-      typeof defaults.topP === "number" && Number.isFinite(defaults.topP) ? defaults.topP : 0;
-    const topP = clamp(ensureNumber(chat?.topP, topPFallback), 0, topPMax);
-    const topK = hasParameterSupport("top_k", currentModel)
-      ? clamp(ensureNumber(chat?.topK, defaultTopK), 1, topKMax ?? defaultTopK)
-      : undefined;
+      typeof defaults.topP === "number" && Number.isFinite(defaults.topP)
+        ? defaults.topP
+        : 1.0; // 改为 1.0（OpenAI 默认值）
 
     const maxTokensFallback =
       typeof defaults.maxTokens === "number" && Number.isFinite(defaults.maxTokens)
         ? Math.max(defaults.maxTokens, 1)
-        : 1;
-    const maxTokens = clamp(
-      ensureNumber(chat?.maxTokens, maxTokensFallback),
-      1,
-      maxTokensLimit
-    );
+        : 2048; // 改为合理的默认值
+
+    // 判断参数是否被用户设置过（值 > 0 表示已设置）
+    const hasTemperature = typeof chat?.temperature === "number" && chat.temperature > 0;
+    const hasTopP = typeof chat?.topP === "number" && chat.topP > 0;
+    const hasTopK = typeof chat?.topK === "number" && chat.topK > 0;
+    const hasMaxTokens = typeof chat?.maxTokens === "number" && chat.maxTokens > 0;
+
+    const temperature = hasTemperature
+      ? clamp(chat!.temperature!, 0, temperatureMax)
+      : clamp(temperatureFallback, 0, temperatureMax);
+
+    const topP = hasTopP
+      ? clamp(chat!.topP!, 0, topPMax)
+      : clamp(topPFallback, 0, topPMax);
+
+    const topK = hasParameterSupport("top_k", currentModel)
+      ? hasTopK
+        ? clamp(chat!.topK!, 1, topKMax ?? defaultTopK)
+        : clamp(defaultTopK, 1, topKMax ?? defaultTopK)
+      : undefined;
+
+    const maxTokens = hasMaxTokens
+      ? clamp(chat!.maxTokens!, 1, maxTokensLimit)
+      : clamp(maxTokensFallback, 1, maxTokensLimit);
 
     const streamResponse = hasParameterSupport("streaming", currentModel)
       ? typeof chat?.stream === "boolean"
@@ -180,8 +193,11 @@ const supportsTemperature = $derived(
       topK,
       streamResponse,
       maxTokens,
-      enableTopP: chat?.topP !== undefined && chat?.topP !== null,
-      enableTopK: chat?.topK !== undefined && chat?.topK !== null,
+      // 开关状态：只有当值有效设置时才启用（值 > 0）
+      enableTemperature: hasTemperature,
+      enableTopP: hasTopP,
+      enableTopK: hasTopK,
+      enableMaxTokens: hasMaxTokens,
     };
   }
 
@@ -223,7 +239,11 @@ const supportsTemperature = $derived(
           maxTokens?: number;
         } = {};
 
-        if (supportsTemperature) {
+        // 只在开关启用且参数被支持时才保存
+        if (
+          supportsTemperature &&
+          currentSettings.enableTemperature
+        ) {
           payload.temperature = currentSettings.temperature;
         }
 
@@ -245,7 +265,10 @@ const supportsTemperature = $derived(
           payload.stream = currentSettings.streamResponse;
         }
 
-        if (hasParameterSupport("output_max_tokens", currentModel)) {
+        if (
+          hasParameterSupport("output_max_tokens", currentModel) &&
+          currentSettings.enableMaxTokens
+        ) {
           payload.maxTokens = currentSettings.maxTokens;
         }
 
@@ -266,17 +289,17 @@ const supportsTemperature = $derived(
 <div class="space-y-0">
   {#if supportsTemperature}
     <TableGroup>
-      <TableBaseRow label="Temperature" layout="vertical">
-        <LabeledSlider
-          bind:value={currentSettings.temperature}
-          min={0}
-          max={resolveTemperatureMax(currentSettings.temperature)}
-          step={0.1}
-          scaleMarks={getTemperatureScaleMarks()}
-          showScaleMarks={false}
-          showValue={true}
-        />
-      </TableBaseRow>
+      <ModelSliderParameterRow
+        label="Temperature"
+        bind:value={currentSettings.temperature}
+        bind:enabled={currentSettings.enableTemperature}
+        min={0}
+        max={resolveTemperatureMax(currentSettings.temperature)}
+        step={0.1}
+        scaleMarks={getTemperatureScaleMarks()}
+        showScaleMarks={false}
+        showValue={true}
+      />
     </TableGroup>
   {/if}
 
@@ -311,12 +334,20 @@ const supportsTemperature = $derived(
       {/if}
 
       {#if hasParameterSupport("output_max_tokens", currentModel)}
-        <NumberStepperRow
+        <ModelSliderParameterRow
           label="输出最大 Token"
           bind:value={currentSettings.maxTokens}
+          bind:enabled={currentSettings.enableMaxTokens}
           min={1}
           max={resolveOutputTokensMax(currentSettings.maxTokens)}
           step={100}
+          scaleMarks={[
+            { value: 1, position: 0 },
+            { value: Math.floor(resolveOutputTokensMax(currentSettings.maxTokens) / 2), position: 50 },
+            { value: resolveOutputTokensMax(currentSettings.maxTokens), position: 100 },
+          ]}
+          showScaleMarks={false}
+          showValue={true}
         />
       {/if}
 
