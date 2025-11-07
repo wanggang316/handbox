@@ -9,6 +9,18 @@ use handbox_llm::types::{LlmMessage, LlmMessageRole, LlmRequest};
 use handbox_llm::{create_llm_client, LlmProvider};
 use std::sync::Arc;
 
+/// 聊天参数类型
+pub enum ChatParameter {
+    Name(String),
+    Temperature(Option<f32>),
+    TopP(Option<f32>),
+    MaxTokens(Option<i32>),
+    Stream(Option<bool>),
+    Model { model_id: String, provider_id: String },
+    SystemPrompt(Option<String>),
+    McpServers(Vec<McpServerConfig>),
+}
+
 /// 聊天服务
 #[derive(Clone)]
 pub struct ChatService {
@@ -100,51 +112,91 @@ impl ChatService {
         }
     }
 
-    /// 更新聊天
+    /// 统一的参数更新方法
+    pub async fn update_chat_parameter(
+        &self,
+        chat_id: UUID,
+        parameter: ChatParameter,
+    ) -> Result<Chat, AppError> {
+        let mut chat = self.get_chat(chat_id).await?;
+
+        match parameter {
+            ChatParameter::Name(name) => chat.name = name,
+            ChatParameter::Temperature(temp) => chat.temperature = temp,
+            ChatParameter::TopP(top_p) => chat.top_p = top_p,
+            ChatParameter::MaxTokens(max_tokens) => chat.max_tokens = max_tokens,
+            ChatParameter::Stream(stream) => chat.stream = stream,
+            ChatParameter::Model { model_id, provider_id } => {
+                chat.model_id = Some(model_id);
+                chat.provider_id = Some(provider_id);
+            }
+            ChatParameter::SystemPrompt(prompt) => chat.system_prompt = prompt,
+            ChatParameter::McpServers(servers) => chat.mcp_servers = servers,
+        }
+
+        chat.updated_at = Self::current_timestamp();
+        self.repository.update_chat(&chat).await?;
+        Ok(chat)
+    }
+
+    /// 批量更新聊天设置（保留用于兼容性）
     pub async fn update_chat(
         &self,
         chat_id: UUID,
         name: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        max_tokens: Option<i32>,
-        stream: Option<bool>,
+        temperature: Option<Option<f32>>,
+        top_p: Option<Option<f32>>,
+        max_tokens: Option<Option<i32>>,
+        stream: Option<Option<bool>>,
         model_id: Option<String>,
         provider_id: Option<String>,
         system_prompt: Option<String>,
         mcp_servers: Option<Vec<McpServerConfig>>,
         turn_count: Option<i32>,
     ) -> Result<Chat, AppError> {
-        let now = std::time::SystemTime::now()
+        let mut chat = self.get_chat(chat_id).await?;
+
+        if let Some(n) = name {
+            chat.name = n;
+        }
+        if let Some(t) = temperature {
+            chat.temperature = t;
+        }
+        if let Some(tp) = top_p {
+            chat.top_p = tp;
+        }
+        if let Some(mt) = max_tokens {
+            chat.max_tokens = mt;
+        }
+        if let Some(s) = stream {
+            chat.stream = s;
+        }
+        if let Some(mid) = model_id {
+            chat.model_id = Some(mid);
+        }
+        if let Some(pid) = provider_id {
+            chat.provider_id = Some(pid);
+        }
+        if let Some(sp) = system_prompt {
+            chat.system_prompt = Some(sp);
+        }
+        if let Some(ms) = mcp_servers {
+            chat.mcp_servers = ms;
+        }
+        if let Some(tc) = turn_count {
+            chat.turn_count = Some(tc);
+        }
+
+        chat.updated_at = Self::current_timestamp();
+        self.repository.update_chat(&chat).await?;
+        Ok(chat)
+    }
+
+    fn current_timestamp() -> i64 {
+        std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_millis() as i64;
-
-        // 先检查聊天是否存在
-        let existing_chat = self.get_chat(chat_id.clone()).await?;
-
-        // 构建更新后的聊天数据
-        let updated_chat = Chat {
-            id: existing_chat.id,
-            name: name.unwrap_or(existing_chat.name),
-            last_message_at: existing_chat.last_message_at,
-            message_count: existing_chat.message_count,
-            temperature: temperature.or(existing_chat.temperature),
-            top_p: top_p.or(existing_chat.top_p),
-            max_tokens: max_tokens.or(existing_chat.max_tokens),
-            stream: stream.or(existing_chat.stream),
-            model_id: model_id.or(existing_chat.model_id),
-            provider_id: provider_id.or(existing_chat.provider_id),
-            system_prompt: system_prompt.or(existing_chat.system_prompt),
-            mcp_servers: mcp_servers.unwrap_or(existing_chat.mcp_servers),
-            turn_count: turn_count.or(existing_chat.turn_count),
-            artifact_id: existing_chat.artifact_id,
-            created_at: existing_chat.created_at,
-            updated_at: now,
-        };
-
-        self.repository.update_chat(&updated_chat).await?;
-        Ok(updated_chat)
+            .as_millis() as i64
     }
 
     /// 删除聊天
@@ -510,10 +562,10 @@ mod tests {
             .update_chat(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                Some(0.8),
-                Some(0.95),
-                Some(4096),
-                Some(false),
+                Some(Some(0.8)),       // Option<Option<f32>>
+                Some(Some(0.95)),      // Option<Option<f32>>
+                Some(Some(4096)),      // Option<Option<i32>>
+                Some(Some(false)),     // Option<Option<bool>>
                 Some("claude-3".to_string()),
                 Some("anthropic".to_string()),
                 Some("Updated prompt".to_string()),
@@ -647,5 +699,113 @@ mod tests {
         assert_eq!(params.max_tokens, Some(1024));
         assert_eq!(params.context_length, Some(2048));
         assert_eq!(params.stream, Some(false));
+    }
+
+    #[tokio::test]
+    async fn clears_parameters_when_passed_some_none() {
+        let db = create_test_database().await;
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
+
+        // 创建带有参数的聊天
+        let created = service
+            .create_chat(
+                "Test Chat".to_string(),
+                Some(0.7),
+                Some(0.9),
+                Some(2048),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(created.temperature, Some(0.7));
+        assert_eq!(created.top_p, Some(0.9));
+        assert_eq!(created.max_tokens, Some(2048));
+        assert_eq!(created.stream, Some(true));
+
+        // 清空所有参数（通过传递 Some(None)）
+        let updated = service
+            .update_chat(
+                created.id.clone(),
+                None,
+                Some(None), // 清空 temperature
+                Some(None), // 清空 top_p
+                Some(None), // 清空 max_tokens
+                Some(None), // 清空 stream
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("update failed");
+
+        assert_eq!(updated.temperature, None);
+        assert_eq!(updated.top_p, None);
+        assert_eq!(updated.max_tokens, None);
+        assert_eq!(updated.stream, None);
+    }
+
+    #[tokio::test]
+    async fn preserves_parameters_when_passed_none() {
+        let db = create_test_database().await;
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
+
+        // 创建带有参数的聊天
+        let created = service
+            .create_chat(
+                "Test Chat".to_string(),
+                Some(0.7),
+                Some(0.9),
+                Some(2048),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // 不传递参数（None），应该保持原值
+        let updated = service
+            .update_chat(
+                created.id.clone(),
+                Some("Updated Name".to_string()),
+                None, // 不修改 temperature，保持原值
+                None, // 不修改 top_p，保持原值
+                None, // 不修改 max_tokens，保持原值
+                None, // 不修改 stream，保持原值
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("update failed");
+
+        assert_eq!(updated.name, "Updated Name");
+        assert_eq!(updated.temperature, Some(0.7)); // 保持原值
+        assert_eq!(updated.top_p, Some(0.9)); // 保持原值
+        assert_eq!(updated.max_tokens, Some(2048)); // 保持原值
+        assert_eq!(updated.stream, Some(true)); // 保持原值
     }
 }

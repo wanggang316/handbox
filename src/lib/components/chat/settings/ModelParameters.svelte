@@ -20,10 +20,10 @@
 
   const currentModel = $derived(currentChatModel().model);
 
-const modelDefaults = $derived(getModelDefaultSettings(currentModel));
-const supportsTemperature = $derived(
-  hasParameterSupport("temperature", currentModel)
-);
+  const modelDefaults = $derived(getModelDefaultSettings(currentModel));
+  const supportsTemperature = $derived(
+    hasParameterSupport("temperature", currentModel)
+  );
 
   const hasAdvancedParameters = $derived(
     hasParameterSupport("top_p", currentModel) ||
@@ -65,7 +65,8 @@ const supportsTemperature = $derived(
       return current ?? 0;
     }
     const defaultTopK =
-      typeof modelDefaults.topK === "number" && Number.isFinite(modelDefaults.topK)
+      typeof modelDefaults.topK === "number" &&
+      Number.isFinite(modelDefaults.topK)
         ? Math.max(modelDefaults.topK, 1)
         : 1;
     const baseline = Math.max(
@@ -74,7 +75,9 @@ const supportsTemperature = $derived(
       1
     );
     const currentValue =
-      typeof current === "number" && Number.isFinite(current) ? current : defaultTopK;
+      typeof current === "number" && Number.isFinite(current)
+        ? current
+        : defaultTopK;
     return Math.max(baseline, currentValue);
   }
 
@@ -89,7 +92,8 @@ const supportsTemperature = $derived(
 
   function resolveOutputTokensMax(current: number): number {
     const defaultMaxTokens =
-      typeof modelDefaults.maxTokens === "number" && Number.isFinite(modelDefaults.maxTokens)
+      typeof modelDefaults.maxTokens === "number" &&
+      Number.isFinite(modelDefaults.maxTokens)
         ? Math.max(modelDefaults.maxTokens, 1)
         : 1;
     const baseline = Math.max(
@@ -102,7 +106,9 @@ const supportsTemperature = $derived(
       1
     );
     const currentValue =
-      typeof current === "number" && Number.isFinite(current) ? current : baseline;
+      typeof current === "number" && Number.isFinite(current)
+        ? current
+        : baseline;
     return Math.max(baseline, currentValue);
   }
 
@@ -120,28 +126,35 @@ const supportsTemperature = $derived(
         ? Math.max(defaults.topK, 1)
         : 1;
     const topKMax = hasParameterSupport("top_k", currentModel)
-      ? Math.max(getMaxNumber("top_k", defaultTopK, currentModel), defaultTopK, 1)
+      ? Math.max(
+          getMaxNumber("top_k", defaultTopK, currentModel),
+          defaultTopK,
+          1
+        )
       : undefined;
     const maxTokensLimit = Math.max(
       getMaxNumber(
         "output_max_tokens",
         getMaxNumber(
           "max_tokens",
-          typeof defaults.maxTokens === "number" && Number.isFinite(defaults.maxTokens)
+          typeof defaults.maxTokens === "number" &&
+            Number.isFinite(defaults.maxTokens)
             ? Math.max(defaults.maxTokens, 1)
             : 1,
           currentModel
         ),
         currentModel
       ),
-      typeof defaults.maxTokens === "number" && Number.isFinite(defaults.maxTokens)
+      typeof defaults.maxTokens === "number" &&
+        Number.isFinite(defaults.maxTokens)
         ? Math.max(defaults.maxTokens, 1)
         : 1
     );
 
     // 使用模型默认值作为 fallback，而不是 0
     const temperatureFallback =
-      typeof defaults.temperature === "number" && Number.isFinite(defaults.temperature)
+      typeof defaults.temperature === "number" &&
+      Number.isFinite(defaults.temperature)
         ? defaults.temperature
         : 1.0; // 改为 1.0（OpenAI 默认值）
 
@@ -151,15 +164,18 @@ const supportsTemperature = $derived(
         : 1.0; // 改为 1.0（OpenAI 默认值）
 
     const maxTokensFallback =
-      typeof defaults.maxTokens === "number" && Number.isFinite(defaults.maxTokens)
+      typeof defaults.maxTokens === "number" &&
+      Number.isFinite(defaults.maxTokens)
         ? Math.max(defaults.maxTokens, 1)
         : 2048; // 改为合理的默认值
 
     // 判断参数是否被用户设置过（值 > 0 表示已设置）
-    const hasTemperature = typeof chat?.temperature === "number" && chat.temperature > 0;
+    const hasTemperature =
+      typeof chat?.temperature === "number" && chat.temperature > 0;
     const hasTopP = typeof chat?.topP === "number" && chat.topP > 0;
     const hasTopK = typeof chat?.topK === "number" && chat.topK > 0;
-    const hasMaxTokens = typeof chat?.maxTokens === "number" && chat.maxTokens > 0;
+    const hasMaxTokens =
+      typeof chat?.maxTokens === "number" && chat.maxTokens > 0;
 
     const temperature = hasTemperature
       ? clamp(chat!.temperature!, 0, temperatureMax)
@@ -182,7 +198,9 @@ const supportsTemperature = $derived(
     const streamResponse = hasParameterSupport("streaming", currentModel)
       ? typeof chat?.stream === "boolean"
         ? chat?.stream
-        : (typeof defaults.streamResponse === "boolean" ? defaults.streamResponse : true)
+        : typeof defaults.streamResponse === "boolean"
+          ? defaults.streamResponse
+          : true
       : typeof defaults.streamResponse === "boolean"
         ? defaults.streamResponse
         : true;
@@ -205,6 +223,67 @@ const supportsTemperature = $derived(
   let originalSettings = $state(buildInitialSettings());
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let saveStatus = $state<SaveStatus>("saved");
+
+  async function saveSettings() {
+    try {
+      saveStatus = "saving";
+      const payload: {
+        temperature?: number | null;
+        topP?: number | null;
+        topK?: number | null;
+        stream?: boolean;
+        maxTokens?: number | null;
+      } = {};
+
+      // 处理 temperature：开关启用时设置值，关闭时设置为 null
+      if (supportsTemperature) {
+        payload.temperature = currentSettings.enableTemperature
+          ? currentSettings.temperature
+          : null;
+      }
+
+      // 处理 top_p：开关启用时设置值，关闭时设置为 null
+      if (hasParameterSupport("top_p", currentModel)) {
+        payload.topP = currentSettings.enableTopP ? currentSettings.topP : null;
+      }
+
+      // 处理 top_k：开关启用时设置值，关闭时设置为 null
+      if (hasParameterSupport("top_k", currentModel)) {
+        payload.topK = currentSettings.enableTopK ? currentSettings.topK : null;
+      }
+
+      // 处理 streaming：始终保存
+      if (hasParameterSupport("streaming", currentModel)) {
+        payload.stream = currentSettings.streamResponse;
+      }
+
+      // 处理 max_tokens：开关启用时设置值，关闭时设置为 null
+      if (hasParameterSupport("output_max_tokens", currentModel)) {
+        payload.maxTokens = currentSettings.enableMaxTokens
+          ? currentSettings.maxTokens
+          : null;
+      }
+
+      if (Object.keys(payload).length > 0) {
+        await chatActions.updateModelSettings(payload);
+      }
+
+      originalSettings = { ...currentSettings };
+      saveStatus = "saved";
+    } catch (error) {
+      console.error("Failed to update model settings:", error);
+      saveStatus = "error";
+    }
+  }
+
+  // 当 Toggle 状态改变时立即保存
+  function handleToggleChange() {
+    console.log("[handleToggleChange] Current settings:", currentSettings);
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+    }
+    saveSettings();
+  }
 
   $effect(() => {
     // 监听模型或聊天配置变化，刷新本地缓存
@@ -229,59 +308,8 @@ const supportsTemperature = $derived(
       clearTimeout(saveTimer);
     }
 
-    saveTimer = setTimeout(async () => {
-      try {
-        const payload: {
-          temperature?: number;
-          topP?: number;
-          topK?: number;
-          stream?: boolean;
-          maxTokens?: number;
-        } = {};
-
-        // 只在开关启用且参数被支持时才保存
-        if (
-          supportsTemperature &&
-          currentSettings.enableTemperature
-        ) {
-          payload.temperature = currentSettings.temperature;
-        }
-
-        if (
-          hasParameterSupport("top_p", currentModel) &&
-          currentSettings.enableTopP
-        ) {
-          payload.topP = currentSettings.topP;
-        }
-
-        if (
-          hasParameterSupport("top_k", currentModel) &&
-          currentSettings.enableTopK
-        ) {
-          payload.topK = currentSettings.topK;
-        }
-
-        if (hasParameterSupport("streaming", currentModel)) {
-          payload.stream = currentSettings.streamResponse;
-        }
-
-        if (
-          hasParameterSupport("output_max_tokens", currentModel) &&
-          currentSettings.enableMaxTokens
-        ) {
-          payload.maxTokens = currentSettings.maxTokens;
-        }
-
-        if (Object.keys(payload).length > 0) {
-          await chatActions.updateModelSettings(payload);
-        }
-
-        originalSettings = { ...currentSettings };
-        saveStatus = "saved";
-      } catch (error) {
-        console.error("Failed to update model settings:", error);
-        saveStatus = "error";
-      }
+    saveTimer = setTimeout(() => {
+      saveSettings();
     }, 500);
   });
 </script>
@@ -299,6 +327,7 @@ const supportsTemperature = $derived(
         scaleMarks={getTemperatureScaleMarks()}
         showScaleMarks={false}
         showValue={true}
+        onToggleChange={handleToggleChange}
       />
     </TableGroup>
   {/if}
@@ -316,6 +345,7 @@ const supportsTemperature = $derived(
           scaleMarks={getTopPScaleMarks()}
           showScaleMarks={false}
           showValue={true}
+          onToggleChange={handleToggleChange}
         />
       {/if}
 
@@ -330,6 +360,7 @@ const supportsTemperature = $derived(
           scaleMarks={getTopKScaleMarks()}
           showScaleMarks={false}
           showValue={true}
+          onToggleChange={handleToggleChange}
         />
       {/if}
 
@@ -343,11 +374,20 @@ const supportsTemperature = $derived(
           step={100}
           scaleMarks={[
             { value: 1, position: 0 },
-            { value: Math.floor(resolveOutputTokensMax(currentSettings.maxTokens) / 2), position: 50 },
-            { value: resolveOutputTokensMax(currentSettings.maxTokens), position: 100 },
+            {
+              value: Math.floor(
+                resolveOutputTokensMax(currentSettings.maxTokens) / 2
+              ),
+              position: 50,
+            },
+            {
+              value: resolveOutputTokensMax(currentSettings.maxTokens),
+              position: 100,
+            },
           ]}
           showScaleMarks={false}
           showValue={true}
+          onToggleChange={handleToggleChange}
         />
       {/if}
 

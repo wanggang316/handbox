@@ -149,7 +149,9 @@ pub fn run() {
             chat_create,
             chat_list,
             chat_get,
-            chat_update,
+            chat_update_field,
+            chat_update_model,
+            chat_update_name,
             chat_delete,
             chat_generate_title,
             // 消息相关命令

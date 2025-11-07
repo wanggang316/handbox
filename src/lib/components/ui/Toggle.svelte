@@ -3,7 +3,10 @@
     label?: string;
     checked?: boolean;
     onChange?: (v: boolean) => void;
-    onChangeBefore?: (next: boolean, previous: boolean) => boolean | Promise<boolean>;
+    onChangeBefore?: (
+      next: boolean,
+      previous: boolean
+    ) => boolean | Promise<boolean>;
     id?: string;
     disabled?: boolean;
   }
@@ -46,13 +49,7 @@
 </script>
 
 <label class="toggle" class:disabled>
-  <input
-    {id}
-    type="checkbox"
-    checked={checked}
-    {disabled}
-    onchange={handleChange}
-  />
+  <input {id} type="checkbox" {checked} {disabled} onchange={handleChange} />
   <span class="slider" aria-hidden="true"></span>
   {#if label}
     <span class="text">{label}</span>

@@ -92,6 +92,9 @@ impl ChatRepository {
 
     /// 更新聊天
     pub async fn update_chat(&self, chat: &Chat) -> Result<(), AppError> {
+        println!("[update_chat] Updating chat: id={}, temperature={:?}, top_p={:?}, max_tokens={:?}, stream={:?}",
+            chat.id, chat.temperature, chat.top_p, chat.max_tokens, chat.stream);
+
         let mcp_servers_json = serde_json::to_string(&chat.mcp_servers)
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
@@ -305,15 +308,24 @@ impl ChatRepository {
             Vec::new()
         };
 
+        // 明确处理 NULL 值：SQLx 要求我们指定要读取 Option<T> 类型
+        let temperature: Option<f32> = row.try_get::<Option<f32>, _>("temperature")?;
+        let top_p: Option<f32> = row.try_get::<Option<f32>, _>("top_p")?;
+        let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
+        let stream: Option<bool> = row.try_get::<Option<bool>, _>("stream")?;
+
+        println!("[row_to_chat] Read from DB - temperature={:?}, top_p={:?}, max_tokens={:?}, stream={:?}",
+            temperature, top_p, max_tokens, stream);
+
         Ok(Chat {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
             last_message_at: row.try_get("last_message_at").ok(),
             message_count: row.try_get("message_count")?,
-            temperature: row.try_get("temperature").ok(),
-            top_p: row.try_get("top_p").ok(),
-            max_tokens: row.try_get("max_tokens").ok(),
-            stream: row.try_get("stream").ok(),
+            temperature,
+            top_p,
+            max_tokens,
+            stream,
             model_id: row.try_get("model_id").ok(),
             provider_id: row.try_get("provider_id").ok(),
             system_prompt: row.try_get("system_prompt").ok(),

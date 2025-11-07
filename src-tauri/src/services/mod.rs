@@ -12,7 +12,7 @@ pub mod user_session;
 // 重新导出服务
 pub use crate::storage::Database;
 pub use auth::GoogleOAuthService;
-pub use chat::ChatService;
+pub use chat::{ChatParameter, ChatService};
 pub use mcp::McpService;
 pub use message::MessageService;
 pub use model::ModelService;

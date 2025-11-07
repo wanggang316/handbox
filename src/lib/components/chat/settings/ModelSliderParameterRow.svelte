@@ -13,6 +13,7 @@
     showScaleMarks?: boolean;
     showValue?: boolean;
     enabled?: boolean;
+    onToggleChange?: (enabled: boolean) => void;
   }
 
   let {
@@ -25,12 +26,13 @@
     showScaleMarks = false,
     showValue = true,
     enabled = $bindable(true),
+    onToggleChange,
   }: Props = $props();
 </script>
 
 <TableBaseRow {label} layout="vertical">
   {#snippet rightContent()}
-    <Toggle bind:checked={enabled} />
+    <Toggle bind:checked={enabled} onChange={onToggleChange} />
   {/snippet}
 
   {#if enabled}
