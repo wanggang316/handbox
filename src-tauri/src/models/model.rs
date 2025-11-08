@@ -126,7 +126,7 @@ pub struct ChatMethodResponse {
 /// 单个参数信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelParameterResponse {
-    pub name: LlmModelParameter,
+    pub name: String,
     pub support: bool,
     pub component: ParameterComponent,
     pub props: ComponentProps,
@@ -376,7 +376,7 @@ impl ModelResponse {
             );
 
             parameters.push(ModelParameterResponse {
-                name: param_enum,
+                name: key.clone(),
                 support,
                 component,
                 props,
