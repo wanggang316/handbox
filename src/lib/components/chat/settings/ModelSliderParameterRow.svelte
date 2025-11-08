@@ -12,8 +12,10 @@
     scaleMarks?: Array<{ value: number; position: number }>;
     showScaleMarks?: boolean;
     showValue?: boolean;
+    showToggle?: boolean; // 是否显示开关，默认显示
     enabled?: boolean;
     onToggleChange?: (enabled: boolean) => void;
+    helpText?: string; // 可选的帮助提示文本
   }
 
   let {
@@ -25,27 +27,50 @@
     scaleMarks = [],
     showScaleMarks = false,
     showValue = true,
+    showToggle = true,
     enabled = $bindable(true),
     onToggleChange,
+    helpText,
   }: Props = $props();
+
+  // 如果不显示开关，总是启用
+  const isEnabled = $derived(showToggle ? enabled : true);
 </script>
 
-<TableBaseRow {label} layout="vertical">
-  {#snippet rightContent()}
-    <Toggle bind:checked={enabled} onChange={onToggleChange} />
-  {/snippet}
+{#if showToggle}
+  <TableBaseRow {label} layout="vertical" {helpText}>
+    {#snippet rightContent()}
+      <Toggle bind:checked={enabled} onChange={onToggleChange} />
+    {/snippet}
 
-  {#if enabled}
-    <div class="pt-2">
-      <LabeledSlider
-        bind:value
-        {min}
-        {max}
-        {step}
-        {scaleMarks}
-        {showScaleMarks}
-        {showValue}
-      />
-    </div>
-  {/if}
-</TableBaseRow>
+    {#if isEnabled}
+      <div class="pt-2">
+        <LabeledSlider
+          bind:value
+          {min}
+          {max}
+          {step}
+          {scaleMarks}
+          {showScaleMarks}
+          {showValue}
+        />
+      </div>
+    {/if}
+  </TableBaseRow>
+{:else}
+  <TableBaseRow {label} layout="vertical" {helpText}>
+    {#if isEnabled}
+      <div class="pt-2">
+        <LabeledSlider
+          bind:value
+          {min}
+          {max}
+          {step}
+          {scaleMarks}
+          {showScaleMarks}
+          {showValue}
+        />
+      </div>
+    {/if}
+  </TableBaseRow>
+{/if}

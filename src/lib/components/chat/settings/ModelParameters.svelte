@@ -9,13 +9,11 @@
     ensureNumber,
     clamp,
   } from "$lib/states/chat.svelte";
-  import LabeledSlider from "../../ui/LabeledSlider.svelte";
   import Toggle from "../../ui/Toggle.svelte";
   import NumberStepperRow from "../../ui/table/NumberStepperRow.svelte";
   import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
-  import { Info } from "@lucide/svelte";
 
   type SaveStatus = "saved" | "saving" | "error";
 
@@ -236,8 +234,14 @@
    * 保存单个字段
    */
   async function saveField(
-    fieldName: "temperature" | "topP" | "topK" | "maxTokens" | "stream" | "turnCount",
-    value: number | boolean | null,
+    fieldName:
+      | "temperature"
+      | "topP"
+      | "topK"
+      | "maxTokens"
+      | "stream"
+      | "turnCount",
+    value: number | boolean | null
   ) {
     try {
       saveStatus = "saving";
@@ -269,12 +273,19 @@
   // 自动保存 temperature
   $effect(() => {
     // 跳过初始化
-    if (!originalSettings.enableTemperature && !currentSettings.enableTemperature) {
+    if (
+      !originalSettings.enableTemperature &&
+      !currentSettings.enableTemperature
+    ) {
       return;
     }
 
-    const newValue = currentSettings.enableTemperature ? currentSettings.temperature : null;
-    const oldValue = originalSettings.enableTemperature ? originalSettings.temperature : null;
+    const newValue = currentSettings.enableTemperature
+      ? currentSettings.temperature
+      : null;
+    const oldValue = originalSettings.enableTemperature
+      ? originalSettings.temperature
+      : null;
 
     if (newValue === oldValue) {
       return;
@@ -315,8 +326,12 @@
       return;
     }
 
-    const newValue = currentSettings.enableTopK ? currentSettings.topK ?? null : null;
-    const oldValue = originalSettings.enableTopK ? originalSettings.topK ?? null : null;
+    const newValue = currentSettings.enableTopK
+      ? (currentSettings.topK ?? null)
+      : null;
+    const oldValue = originalSettings.enableTopK
+      ? (originalSettings.topK ?? null)
+      : null;
 
     if (newValue === oldValue) {
       return;
@@ -336,8 +351,12 @@
       return;
     }
 
-    const newValue = currentSettings.enableMaxTokens ? currentSettings.maxTokens : null;
-    const oldValue = originalSettings.enableMaxTokens ? originalSettings.maxTokens : null;
+    const newValue = currentSettings.enableMaxTokens
+      ? currentSettings.maxTokens
+      : null;
+    const oldValue = originalSettings.enableMaxTokens
+      ? originalSettings.maxTokens
+      : null;
 
     if (newValue === oldValue) {
       return;
@@ -391,6 +410,7 @@
         scaleMarks={getTemperatureScaleMarks()}
         showScaleMarks={false}
         showValue={true}
+        showToggle={true}
       />
     </TableGroup>
   {/if}
@@ -408,6 +428,7 @@
           scaleMarks={getTopPScaleMarks()}
           showScaleMarks={false}
           showValue={true}
+          showToggle={true}
         />
       {/if}
 
@@ -422,6 +443,7 @@
           scaleMarks={getTopKScaleMarks()}
           showScaleMarks={false}
           showValue={true}
+          showToggle={true}
         />
       {/if}
 
@@ -448,6 +470,7 @@
           ]}
           showScaleMarks={false}
           showValue={true}
+          showToggle={true}
         />
       {/if}
 
@@ -464,31 +487,24 @@
           </div>
         </TableBaseRow>
       {/if}
+
+      <!-- 上下文对话轮数设置 -->
+      <ModelSliderParameterRow
+        label="上下文对话轮数"
+        bind:value={currentSettings.turnCount}
+        min={1}
+        max={100}
+        step={1}
+        scaleMarks={[
+          { value: 1, position: 0 },
+          { value: 50, position: 50 },
+          { value: 100, position: 100 },
+        ]}
+        showScaleMarks={false}
+        showValue={true}
+        showToggle={false}
+        helpText="设置每次对话携带的历史消息轮数。轮数越多，上下文越完整，但 token 消耗也越多。"
+      />
     </TableGroup>
   {/if}
-
-  <!-- 对话轮数设置 -->
-  <TableGroup title="上下文管理">
-    <TableBaseRow label="对话轮数" layout="vertical">
-      <div class="space-y-2 pt-2">
-        <LabeledSlider
-          bind:value={currentSettings.turnCount}
-          min={1}
-          max={100}
-          step={1}
-          scaleMarks={[
-            { value: 1, position: 0 },
-            { value: 50, position: 50 },
-            { value: 100, position: 100 },
-          ]}
-          showScaleMarks={false}
-          showValue={true}
-        />
-        <p class="text-xs text-base-content/60 flex items-start gap-1.5">
-          <Info class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-          <span>设置每次对话携带的历史消息轮数。轮数越多，上下文越完整，但 token 消耗也越多。</span>
-        </p>
-      </div>
-    </TableBaseRow>
-  </TableGroup>
 </div>
