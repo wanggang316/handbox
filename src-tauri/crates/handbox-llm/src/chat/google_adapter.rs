@@ -59,6 +59,12 @@ impl GoogleChatClient {
         if let Some(temperature) = request.temperature {
             generation_config.temperature = Some(temperature);
         }
+        if let Some(top_p) = request.top_p {
+            generation_config.top_p = Some(top_p);
+        }
+        if let Some(top_k) = request.top_k {
+            generation_config.top_k = Some(top_k);
+        }
         if let Some(max_tokens) = request.max_tokens {
             generation_config.max_output_tokens = Some(max_tokens);
         }

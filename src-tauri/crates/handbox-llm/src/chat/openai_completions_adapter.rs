@@ -68,6 +68,7 @@ impl OpenAICompletionsChatClient {
             model: request.model.clone(),
             messages,
             temperature: request.temperature,
+            top_p: request.top_p,
             stream: request.stream,
             tools,
             tool_choice,

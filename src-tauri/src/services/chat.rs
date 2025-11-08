@@ -14,6 +14,7 @@ pub enum ChatParameter {
     Name(String),
     Temperature(Option<f32>),
     TopP(Option<f32>),
+    TopK(Option<i32>),
     MaxTokens(Option<i32>),
     Stream(Option<bool>),
     Model {
@@ -61,6 +62,7 @@ impl ChatService {
         name: String,
         temperature: Option<f32>,
         top_p: Option<f32>,
+        top_k: Option<i32>,
         max_tokens: Option<i32>,
         stream: Option<bool>,
         model_id: Option<String>,
@@ -80,6 +82,7 @@ impl ChatService {
             message_count: 0,
             temperature,
             top_p,
+            top_k,
             max_tokens,
             stream,
             model_id,
@@ -128,6 +131,7 @@ impl ChatService {
             ChatParameter::Name(name) => chat.name = name,
             ChatParameter::Temperature(temp) => chat.temperature = temp,
             ChatParameter::TopP(top_p) => chat.top_p = top_p,
+            ChatParameter::TopK(top_k) => chat.top_k = top_k,
             ChatParameter::MaxTokens(max_tokens) => chat.max_tokens = max_tokens,
             ChatParameter::Stream(stream) => chat.stream = stream,
             ChatParameter::Model {
@@ -154,6 +158,7 @@ impl ChatService {
         name: Option<String>,
         temperature: Option<Option<f32>>,
         top_p: Option<Option<f32>>,
+        top_k: Option<Option<i32>>,
         max_tokens: Option<Option<i32>>,
         stream: Option<Option<bool>>,
         model_id: Option<String>,
@@ -172,6 +177,9 @@ impl ChatService {
         }
         if let Some(tp) = top_p {
             chat.top_p = tp;
+        }
+        if let Some(tk) = top_k {
+            chat.top_k = tk;
         }
         if let Some(mt) = max_tokens {
             chat.max_tokens = mt;
@@ -298,7 +306,9 @@ impl ChatService {
                 tool_call_id: None,
             }],
             temperature: Some(0.1), // 使用低温度确保稳定输出
-            max_tokens: Some(50),   // 限制输出长度
+            top_p: None,
+            top_k: None,
+            max_tokens: Some(50), // 限制输出长度
             stream: Some(false),
             tools: None,
             tool_choice: None,
@@ -399,6 +409,7 @@ mod tests {
                 "Test Chat".to_string(),
                 Some(0.7),
                 Some(0.9),
+                Some(40),
                 Some(2048),
                 Some(true),
                 Some("gpt-4o".to_string()),
@@ -416,6 +427,7 @@ mod tests {
         assert_eq!(chat.name, "Test Chat");
         assert_eq!(chat.temperature, Some(0.7));
         assert_eq!(chat.top_p, Some(0.9));
+        assert_eq!(chat.top_k, Some(40));
         assert_eq!(chat.max_tokens, Some(2048));
         assert_eq!(chat.stream, Some(true));
         assert_eq!(chat.model_id, Some("gpt-4o".to_string()));
@@ -455,6 +467,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -464,6 +477,7 @@ mod tests {
         service
             .create_chat(
                 "Chat 2".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -500,6 +514,7 @@ mod tests {
         let created = service
             .create_chat(
                 "Test Chat".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -562,6 +577,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -572,6 +588,7 @@ mod tests {
                 Some("Updated Name".to_string()),
                 Some(Some(0.8)),   // Option<Option<f32>>
                 Some(Some(0.95)),  // Option<Option<f32>>
+                Some(Some(40)),    // Option<Option<i32>>
                 Some(Some(4096)),  // Option<Option<i32>>
                 Some(Some(false)), // Option<Option<bool>>
                 Some("claude-3".to_string()),
@@ -597,6 +614,7 @@ mod tests {
         assert_eq!(updated.name, "Updated Name");
         assert_eq!(updated.temperature, Some(0.8));
         assert_eq!(updated.top_p, Some(0.95));
+        assert_eq!(updated.top_k, Some(40));
         assert_eq!(updated.max_tokens, Some(4096));
         assert_eq!(updated.stream, Some(false));
         assert_eq!(updated.model_id, Some("claude-3".to_string()));
@@ -641,6 +659,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -672,6 +691,7 @@ mod tests {
         let chat = service
             .create_chat(
                 "No Messages".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -726,6 +746,7 @@ mod tests {
                 "Test Chat".to_string(),
                 Some(0.7),
                 Some(0.9),
+                Some(40),
                 Some(2048),
                 Some(true),
                 None,
@@ -738,6 +759,7 @@ mod tests {
 
         assert_eq!(created.temperature, Some(0.7));
         assert_eq!(created.top_p, Some(0.9));
+        assert_eq!(created.top_k, Some(40));
         assert_eq!(created.max_tokens, Some(2048));
         assert_eq!(created.stream, Some(true));
 
@@ -748,6 +770,7 @@ mod tests {
                 None,
                 Some(None), // 清空 temperature
                 Some(None), // 清空 top_p
+                Some(None), // 清空 top_k
                 Some(None), // 清空 max_tokens
                 Some(None), // 清空 stream
                 None,
@@ -761,6 +784,7 @@ mod tests {
 
         assert_eq!(updated.temperature, None);
         assert_eq!(updated.top_p, None);
+        assert_eq!(updated.top_k, None);
         assert_eq!(updated.max_tokens, None);
         assert_eq!(updated.stream, None);
     }
@@ -782,6 +806,7 @@ mod tests {
                 "Test Chat".to_string(),
                 Some(0.7),
                 Some(0.9),
+                Some(40),
                 Some(2048),
                 Some(true),
                 None,
@@ -799,6 +824,7 @@ mod tests {
                 Some("Updated Name".to_string()),
                 None, // 不修改 temperature，保持原值
                 None, // 不修改 top_p，保持原值
+                None, // 不修改 top_k，保持原值
                 None, // 不修改 max_tokens，保持原值
                 None, // 不修改 stream，保持原值
                 None,
@@ -813,6 +839,7 @@ mod tests {
         assert_eq!(updated.name, "Updated Name");
         assert_eq!(updated.temperature, Some(0.7)); // 保持原值
         assert_eq!(updated.top_p, Some(0.9)); // 保持原值
+        assert_eq!(updated.top_k, Some(40)); // 保持原值
         assert_eq!(updated.max_tokens, Some(2048)); // 保持原值
         assert_eq!(updated.stream, Some(true)); // 保持原值
     }

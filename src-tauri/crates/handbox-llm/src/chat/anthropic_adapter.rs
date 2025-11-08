@@ -57,6 +57,14 @@ impl AnthropicChatClient {
             req_body["temperature"] = temperature.into();
         }
 
+        if let Some(top_p) = request.top_p {
+            req_body["top_p"] = top_p.into();
+        }
+
+        if let Some(top_k) = request.top_k {
+            req_body["top_k"] = top_k.into();
+        }
+
         if let Some(max_tokens) = request.max_tokens {
             req_body["max_tokens"] = max_tokens.into();
         }

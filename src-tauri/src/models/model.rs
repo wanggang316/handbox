@@ -455,18 +455,20 @@ impl ModelResponse {
         };
 
         // 获取显示名称
-        let name = config.name.clone()
+        let name = config
+            .name
+            .clone()
             .unwrap_or_else(|| param.as_str().to_string());
 
         // 构建属性
         let props = match component {
             ParameterComponent::Switch => {
                 // 优先使用配置中的 default，然后是数据库的值
-                let default = config.default.as_ref()
+                let default = config
+                    .default
+                    .as_ref()
                     .and_then(Self::parse_bool)
-                    .or_else(|| {
-                        Self::resolve_bool_for_key(key, db_defaults, None)
-                    });
+                    .or_else(|| Self::resolve_bool_for_key(key, db_defaults, None));
                 ComponentProps::Switch(SwitchProps { default, name })
             }
             ParameterComponent::Slider => {
@@ -481,18 +483,22 @@ impl ModelResponse {
                         // max: 优先使用模型的 output_max_tokens，然后是配置，最后是数据库
                         output_max
                             .or_else(|| config.max.as_ref().and_then(Self::parse_number))
-                            .or_else(|| Self::resolve_number_for_key(key, db_max, None))
+                            .or_else(|| Self::resolve_number_for_key(key, db_max, None)),
                     )
                 } else {
                     (
                         // default: 优先使用配置中的 default，然后是数据库的值
-                        config.default.as_ref()
+                        config
+                            .default
+                            .as_ref()
                             .and_then(Self::parse_number)
                             .or_else(|| Self::resolve_number_for_key(key, db_defaults, None)),
                         // max: 优先使用配置中的 max，然后是数据库的值
-                        config.max.as_ref()
+                        config
+                            .max
+                            .as_ref()
                             .and_then(Self::parse_number)
-                            .or_else(|| Self::resolve_number_for_key(key, db_max, None))
+                            .or_else(|| Self::resolve_number_for_key(key, db_max, None)),
                     )
                 };
 

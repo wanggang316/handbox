@@ -147,6 +147,10 @@ impl OpenAIResponsesChatClient {
             builder = builder.temperature(temperature);
         }
 
+        if let Some(top_p) = request.top_p {
+            builder = builder.top_p(top_p);
+        }
+
         if let Some(max_tokens) = request.max_tokens {
             builder = builder.max_output_tokens(max_tokens);
         }

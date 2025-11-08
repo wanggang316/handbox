@@ -577,6 +577,7 @@ export const chatActions = {
         name,
         currentChat.temperature,
         currentChat.topP,
+        currentChat.topK,
         currentChat.maxTokens,
         currentChat.stream,
         currentChat.modelId,

@@ -11,31 +11,38 @@ pub struct GenerateTitleResponse {
     pub title: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatCreateRequest {
+    pub name: String,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
+    pub max_tokens: Option<i32>,
+    pub stream: Option<bool>,
+    pub model_id: Option<String>,
+    pub provider_id: Option<String>,
+    pub system_prompt: Option<String>,
+    pub mcp_servers: Option<Vec<crate::storage::types::McpServerConfig>>,
+}
+
 /// 创建新的聊天
 #[tauri::command]
 pub async fn chat_create(
-    name: String,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
-    max_tokens: Option<i32>,
-    stream: Option<bool>,
-    model_id: Option<String>,
-    provider_id: Option<String>,
-    system_prompt: Option<String>,
-    mcp_servers: Option<Vec<crate::storage::types::McpServerConfig>>,
+    request: ChatCreateRequest,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
     chat_service
         .create_chat(
-            name,
-            temperature,
-            top_p,
-            max_tokens,
-            stream,
-            model_id,
-            provider_id,
-            system_prompt,
-            mcp_servers,
+            request.name,
+            request.temperature,
+            request.top_p,
+            request.top_k,
+            request.max_tokens,
+            request.stream,
+            request.model_id,
+            request.provider_id,
+            request.system_prompt,
+            request.mcp_servers,
         )
         .await
 }
@@ -92,6 +99,19 @@ pub async fn chat_update_field(
                 )
             };
             ChatParameter::TopP(top_p_value)
+        }
+        "topK" => {
+            let top_k_value = if value.is_null() {
+                None
+            } else {
+                Some(
+                    value
+                        .as_i64()
+                        .ok_or_else(|| AppError::validation_error("Invalid top_k value"))?
+                        as i32,
+                )
+            };
+            ChatParameter::TopK(top_k_value)
         }
         "maxTokens" => {
             let max_tokens_value = if value.is_null() {

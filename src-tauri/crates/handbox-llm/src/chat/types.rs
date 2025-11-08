@@ -88,6 +88,8 @@ pub struct LlmRequest {
     pub model: String,
     pub messages: Vec<LlmMessage>,
     pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
     pub max_tokens: Option<i32>,
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

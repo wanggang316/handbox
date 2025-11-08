@@ -12,13 +12,13 @@ use std::sync::OnceLock;
 /// 参数配置（合并了 default、max 和 UI 配置）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterConfig {
-    pub component: Option<String>,      // "slider" | "switch"
-    pub level: Option<String>,          // "base" | "advance"
-    pub step: Option<f64>,              // 仅滑块使用
-    pub name: Option<String>,           // 显示名称
-    pub show_toggle: Option<bool>,      // 仅滑块使用，是否显示开关
-    pub default: Option<Value>,         // 默认值
-    pub max: Option<Value>,             // 最大值
+    pub component: Option<String>, // "slider" | "switch"
+    pub level: Option<String>,     // "base" | "advance"
+    pub step: Option<f64>,         // 仅滑块使用
+    pub name: Option<String>,      // 显示名称
+    pub show_toggle: Option<bool>, // 仅滑块使用，是否显示开关
+    pub default: Option<Value>,    // 默认值
+    pub max: Option<Value>,        // 最大值
 }
 
 /// 聊天方法配置
@@ -60,7 +60,8 @@ impl ChatMethodsConfig {
 
         // 合并 default_supported_parameters（方法特定的覆盖 base）
         if !method_config.default_supported_parameters.is_empty() {
-            merged.default_supported_parameters = method_config.default_supported_parameters.clone();
+            merged.default_supported_parameters =
+                method_config.default_supported_parameters.clone();
         }
 
         // 合并 additional_parameters（方法特定的覆盖 base）

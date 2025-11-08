@@ -1428,6 +1428,8 @@ impl MessageService {
             model: request.model_id.clone(),
             messages,
             temperature: normalize_numeric(chat.temperature),
+            top_p: normalize_numeric(chat.top_p),
+            top_k: chat.top_k,
             max_tokens: normalize_numeric(chat.max_tokens),
             stream: chat.stream.or(Some(true)), // 默认为 true
             tools: if tools.is_empty() {
@@ -2215,6 +2217,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -2329,6 +2332,7 @@ mod tests {
             message_count: 0,
             temperature: Some(0.0), // 应该被过滤掉
             top_p: Some(0.0),       // 应该被过滤掉
+            top_k: Some(0),         // 应该被过滤掉
             max_tokens: Some(0),    // 应该被过滤掉
             stream: Some(false),
             model_id: Some("gpt-5-nano".to_string()),
@@ -2370,6 +2374,7 @@ mod tests {
             message_count: 0,
             temperature: Some(0.7),
             top_p: Some(0.9),
+            top_k: Some(40),
             max_tokens: Some(2048),
             stream: Some(true),
             model_id: Some("gpt-4".to_string()),

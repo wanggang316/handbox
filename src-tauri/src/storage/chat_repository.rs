@@ -23,8 +23,8 @@ impl ChatRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
         let query = r#"
-            INSERT INTO chats (id, name, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            INSERT INTO chats (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         "#;
 
         sqlx::query(query)
@@ -32,6 +32,7 @@ impl ChatRepository {
             .bind(&chat.name)
             .bind(chat.temperature)
             .bind(chat.top_p)
+            .bind(chat.top_k)
             .bind(chat.max_tokens)
             .bind(chat.stream)
             .bind(&chat.model_id)
@@ -51,7 +52,7 @@ impl ChatRepository {
     /// 获取聊天列表
     pub async fn list_chats(&self, limit: i32, offset: i32) -> Result<Vec<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
             FROM chats ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -73,7 +74,7 @@ impl ChatRepository {
     /// 根据 ID 获取聊天
     pub async fn get_chat_by_id(&self, chat_id: &UUID) -> Result<Option<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
             FROM chats WHERE id = $1
         "#;
 
@@ -96,14 +97,15 @@ impl ChatRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
         let query = r#"
-            UPDATE chats SET name = $1, temperature = $2, top_p = $3, max_tokens = $4, stream = $5, model_id = $6, provider_id = $7, system_prompt = $8, mcp_servers = $9, turn_count = $10, updated_at = $11
-            WHERE id = $12
+            UPDATE chats SET name = $1, temperature = $2, top_p = $3, top_k = $4, max_tokens = $5, stream = $6, model_id = $7, provider_id = $8, system_prompt = $9, mcp_servers = $10, turn_count = $11, updated_at = $12
+            WHERE id = $13
         "#;
 
         let result = sqlx::query(query)
             .bind(&chat.name)
             .bind(chat.temperature)
             .bind(chat.top_p)
+            .bind(chat.top_k)
             .bind(chat.max_tokens)
             .bind(chat.stream)
             .bind(&chat.model_id)
@@ -308,6 +310,7 @@ impl ChatRepository {
         // 明确处理 NULL 值：SQLx 要求我们指定要读取 Option<T> 类型
         let temperature: Option<f32> = row.try_get::<Option<f32>, _>("temperature")?;
         let top_p: Option<f32> = row.try_get::<Option<f32>, _>("top_p")?;
+        let top_k: Option<i32> = row.try_get::<Option<i32>, _>("top_k")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
         let stream: Option<bool> = row.try_get::<Option<bool>, _>("stream")?;
 
@@ -318,6 +321,7 @@ impl ChatRepository {
             message_count: row.try_get("message_count")?,
             temperature,
             top_p,
+            top_k,
             max_tokens,
             stream,
             model_id: row.try_get("model_id").ok(),
@@ -362,6 +366,7 @@ mod tests {
             message_count: 0,
             temperature: Some(0.7),
             top_p: Some(0.9),
+            top_k: Some(40),
             max_tokens: Some(2048),
             stream: Some(true),
             model_id: Some("gpt-4o".to_string()),
@@ -433,6 +438,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -457,6 +463,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -488,6 +495,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -512,6 +520,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -560,6 +569,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: Some("model1".to_string()),
@@ -580,6 +590,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: Some("model2".to_string()),
@@ -600,6 +611,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: Some("model3".to_string()),
@@ -647,6 +659,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: Some("model1".to_string()),
@@ -667,6 +680,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: Some("model1".to_string()),
@@ -687,6 +701,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: Some("model2".to_string()),
@@ -707,6 +722,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -755,6 +771,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -779,6 +796,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -810,6 +828,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,
@@ -834,6 +853,7 @@ mod tests {
             message_count: 0,
             temperature: None,
             top_p: None,
+            top_k: None,
             max_tokens: None,
             stream: None,
             model_id: None,

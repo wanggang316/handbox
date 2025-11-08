@@ -1,5 +1,6 @@
 use crate::models::{AppError, AuthResponse, User};
 use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
+use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use std::{collections::HashMap, time::Duration};
 use tiny_http::{Response, Server};
@@ -67,18 +68,27 @@ struct GoogleIdTokenClaims {
 /// Google OAuth 服务
 pub struct GoogleOAuthService {
     config: GoogleOAuthConfig,
-    http_client: reqwest::Client,
+    http_client: OnceCell<reqwest::Client>,
 }
 
 impl GoogleOAuthService {
     /// 创建新的 OAuth 服务实例
     pub fn new() -> Result<Self, AppError> {
         let config = GoogleOAuthConfig::from_env()?;
-        let http_client = reqwest::Client::new();
 
         Ok(Self {
             config,
-            http_client,
+            http_client: OnceCell::new(),
+        })
+    }
+
+    fn http_client(&self) -> Result<&reqwest::Client, AppError> {
+        self.http_client.get_or_try_init(|| {
+            reqwest::Client::builder().build().map_err(|e| AppError {
+                code: "NETWORK_ERROR".to_string(),
+                message: format!("创建 HTTP 客户端失败: {}", e),
+                hint: None,
+            })
         })
     }
 
@@ -227,8 +237,9 @@ impl GoogleOAuthService {
         params.insert("grant_type", "authorization_code");
         params.insert("redirect_uri", &redirect_uri);
 
-        let response = self
-            .http_client
+        let client = self.http_client()?;
+
+        let response = client
             .post("https://oauth2.googleapis.com/token")
             .form(&params)
             .send()
@@ -279,8 +290,8 @@ impl GoogleOAuthService {
 
         // 2. 获取 Google 的公钥
         let jwks_url = "https://www.googleapis.com/oauth2/v3/certs";
-        let jwks: serde_json::Value = self
-            .http_client
+        let client = self.http_client()?;
+        let jwks: serde_json::Value = client
             .get(jwks_url)
             .send()
             .await
@@ -417,10 +428,20 @@ mod tests {
         let service = GoogleOAuthService::new().unwrap();
         let auth_url = service.generate_auth_url().unwrap();
 
-        assert!(auth_url.contains("https://accounts.google.com/o/oauth2/v2/auth"));
-        assert!(auth_url.contains("client_id=test_client_id"));
-        assert!(auth_url.contains("response_type=code"));
-        assert!(auth_url.contains("scope=openid%20email%20profile"));
+        let parsed = Url::parse(&auth_url).expect("valid auth url");
+        assert_eq!(parsed.scheme(), "https");
+        assert_eq!(parsed.domain(), Some("accounts.google.com"));
+        assert_eq!(parsed.path(), "/o/oauth2/v2/auth");
+
+        let params: std::collections::HashMap<_, _> =
+            parsed.query_pairs().into_owned().collect();
+
+        assert_eq!(params.get("client_id"), Some(&"test_client_id".to_string()));
+        assert_eq!(params.get("response_type"), Some(&"code".to_string()));
+        assert_eq!(
+            params.get("scope"),
+            Some(&"openid email profile".to_string())
+        );
     }
 
     #[test]

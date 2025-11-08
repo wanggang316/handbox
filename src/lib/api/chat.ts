@@ -7,12 +7,13 @@ import type { Chat, UUID, McpServerConfig } from "../types";
 
 /**
  * 创建新的聊天
- * 后端签名: chat_create(name, temperature?, top_p?, max_tokens?, stream?, model_id?, provider_id?, system_prompt?, mcp_servers?)
+ * 后端签名: chat_create(request: ChatCreateRequest)
  */
 export async function createChat(
   name: string,
   temperature?: number,
   topP?: number,
+  topK?: number,
   maxTokens?: number,
   stream?: boolean,
   modelId?: string,
@@ -20,19 +21,20 @@ export async function createChat(
   systemPrompt?: string,
   mcpServers?: McpServerConfig[],
 ): Promise<Chat> {
-  const payload = {
+  const request = {
     name,
     temperature,
-    topP: topP,
-    maxTokens: maxTokens,
+    topP,
+    topK,
+    maxTokens,
     stream,
-    modelId: modelId,
-    providerId: providerId,
-    systemPrompt: systemPrompt,
-    mcpServers: mcpServers,
+    modelId,
+    providerId,
+    systemPrompt,
+    mcpServers,
   };
-  console.log("Creating chat:", payload);
-  return apiCall<Chat>("chat_create", payload);
+  console.log("Creating chat:", request);
+  return apiCall<Chat>("chat_create", { request });
 }
 
 /**
@@ -71,7 +73,7 @@ export async function generateChatTitle(
 /**
  * 更新聊天单个字段
  * @param chatId 聊天 ID
- * @param fieldName 字段名 (temperature, topP, maxTokens, stream, systemPrompt, mcpServers, turnCount)
+ * @param fieldName 字段名 (temperature, topP, topK, maxTokens, stream, systemPrompt, mcpServers, turnCount)
  * @param value 字段值，null 表示清空
  */
 export async function updateChatField(
@@ -79,6 +81,7 @@ export async function updateChatField(
   fieldName:
     | "temperature"
     | "topP"
+    | "topK"
     | "maxTokens"
     | "stream"
     | "systemPrompt"
