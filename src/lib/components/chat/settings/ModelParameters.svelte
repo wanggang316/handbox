@@ -3,226 +3,87 @@
     chatState,
     chatActions,
     currentChatModel,
-    hasParameterSupport,
-    getModelDefaultSettings,
-    getMaxNumber,
-    ensureNumber,
-    clamp,
+    toNumber,
   } from "$lib/states/chat.svelte";
-  import Toggle from "../../ui/Toggle.svelte";
-  import NumberStepperRow from "../../ui/table/NumberStepperRow.svelte";
   import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
-  import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
+  import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
+  import type {
+    ModelParameterResponse,
+    SliderProps,
+    SwitchProps,
+  } from "$lib/types/provider";
 
   type SaveStatus = "saved" | "saving" | "error";
 
   const currentModel = $derived(currentChatModel().model);
-
-  const modelDefaults = $derived(getModelDefaultSettings(currentModel));
-  const supportsTemperature = $derived(
-    hasParameterSupport("temperature", currentModel)
+  const parameters = $derived(
+    (currentModel?.chat_method?.parameters as ModelParameterResponse[]) || []
   );
 
-  const hasAdvancedParameters = $derived(
-    hasParameterSupport("top_p", currentModel) ||
-      hasParameterSupport("top_k", currentModel) ||
-      hasParameterSupport("output_max_tokens", currentModel) ||
-      hasParameterSupport("streaming", currentModel)
+  // 按 level 分组参数
+  const baseParameters = $derived(parameters.filter((p) => p.level === "base"));
+  const advanceParameters = $derived(
+    parameters.filter((p) => p.level === "advance")
   );
 
-  function resolveTemperatureMax(current: number): number {
-    const upper = Math.max(getMaxNumber("temperature", 2, currentModel), 0.1);
-    return Math.max(upper, current ?? 0);
+  // 辅助函数：限制值在 min-max 范围内
+  function clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
   }
 
-  function getTemperatureScaleMarks() {
-    const upper = Math.max(getMaxNumber("temperature", 2, currentModel), 0.1);
-    return [
-      { value: 0, position: 0 },
-      { value: Number((upper / 2).toFixed(2)), position: 50 },
-      { value: upper, position: 100 },
-    ];
+  // 辅助函数：类型守卫
+  function isSliderProps(
+    props: SliderProps | SwitchProps
+  ): props is SliderProps {
+    return "step" in props;
   }
 
-  function resolveTopPMax(current: number): number {
-    const upper = Math.max(getMaxNumber("top_p", 1, currentModel), 0.1);
-    return Math.max(upper, current ?? 0);
+  // 辅助函数：将 snake_case 转换为 camelCase (用于数据库字段映射)
+  function snakeToCamel(str: string): string {
+    return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
   }
 
-  function getTopPScaleMarks() {
-    const upper = Math.max(getMaxNumber("top_p", 1, currentModel), 0.1);
-    return [
-      { value: 0, position: 0 },
-      { value: Number((upper / 2).toFixed(2)), position: 50 },
-      { value: upper, position: 100 },
-    ];
-  }
-
-  function resolveTopKMax(current: number | undefined): number {
-    if (!hasParameterSupport("top_k", currentModel)) {
-      return current ?? 0;
-    }
-    const defaultTopK =
-      typeof modelDefaults.topK === "number" &&
-      Number.isFinite(modelDefaults.topK)
-        ? Math.max(modelDefaults.topK, 1)
-        : 1;
-    const baseline = Math.max(
-      getMaxNumber("top_k", defaultTopK, currentModel),
-      defaultTopK,
-      1
-    );
-    const currentValue =
-      typeof current === "number" && Number.isFinite(current)
-        ? current
-        : defaultTopK;
-    return Math.max(baseline, currentValue);
-  }
-
-  function getTopKScaleMarks() {
-    const upper = resolveTopKMax(currentSettings.topK);
-    return [
-      { value: 1, position: 0 },
-      { value: Math.floor(upper / 2), position: 50 },
-      { value: upper, position: 100 },
-    ];
-  }
-
-  function resolveOutputTokensMax(current: number): number {
-    const defaultMaxTokens =
-      typeof modelDefaults.maxTokens === "number" &&
-      Number.isFinite(modelDefaults.maxTokens)
-        ? Math.max(modelDefaults.maxTokens, 1)
-        : 1;
-    const baseline = Math.max(
-      getMaxNumber(
-        "output_max_tokens",
-        getMaxNumber("max_tokens", defaultMaxTokens, currentModel),
-        currentModel
-      ),
-      defaultMaxTokens,
-      1
-    );
-    const currentValue =
-      typeof current === "number" && Number.isFinite(current)
-        ? current
-        : baseline;
-    return Math.max(baseline, currentValue);
-  }
-
+  // 构建初始设置
   function buildInitialSettings() {
-    const defaults = modelDefaults;
     const chat = chatState.currentChat;
+    const settings: Record<string, any> = {};
 
-    const temperatureMax = Math.max(
-      getMaxNumber("temperature", 2, currentModel),
-      0.1
-    );
-    const topPMax = Math.max(getMaxNumber("top_p", 1, currentModel), 0.1);
-    const defaultTopK =
-      typeof defaults.topK === "number" && Number.isFinite(defaults.topK)
-        ? Math.max(defaults.topK, 1)
-        : 1;
-    const topKMax = hasParameterSupport("top_k", currentModel)
-      ? Math.max(
-          getMaxNumber("top_k", defaultTopK, currentModel),
-          defaultTopK,
-          1
-        )
-      : undefined;
-    const maxTokensLimit = Math.max(
-      getMaxNumber(
-        "output_max_tokens",
-        getMaxNumber(
-          "max_tokens",
-          typeof defaults.maxTokens === "number" &&
-            Number.isFinite(defaults.maxTokens)
-            ? Math.max(defaults.maxTokens, 1)
-            : 1,
-          currentModel
-        ),
-        currentModel
-      ),
-      typeof defaults.maxTokens === "number" &&
-        Number.isFinite(defaults.maxTokens)
-        ? Math.max(defaults.maxTokens, 1)
-        : 1
-    );
+    parameters.forEach((param) => {
+      const paramName = param.name; // snake_case from backend
+      const dbFieldName = snakeToCamel(paramName); // camelCase for database
 
-    // 使用模型默认值作为 fallback，而不是 0
-    const temperatureFallback =
-      typeof defaults.temperature === "number" &&
-      Number.isFinite(defaults.temperature)
-        ? defaults.temperature
-        : 1.0; // 改为 1.0（OpenAI 默认值）
+      if (param.component === "slider" && isSliderProps(param.props)) {
+        const props = param.props;
+        const chatValue = (chat as any)?.[dbFieldName];
+        const hasValue = chatValue !== null && chatValue !== undefined;
 
-    const topPFallback =
-      typeof defaults.topP === "number" && Number.isFinite(defaults.topP)
-        ? defaults.topP
-        : 1.0; // 改为 1.0（OpenAI 默认值）
+        const min = props.min ?? 0;
+        const max = props.max ?? 100;
+        const defaultValue = props.default ?? min;
 
-    const maxTokensFallback =
-      typeof defaults.maxTokens === "number" &&
-      Number.isFinite(defaults.maxTokens)
-        ? Math.max(defaults.maxTokens, 1)
-        : 2048; // 改为合理的默认值
+        const value = hasValue
+          ? clamp(toNumber(chatValue) ?? defaultValue, min, max)
+          : clamp(defaultValue, min, max);
 
-    // 判断参数是否被用户设置过（null/undefined 表示未设置，0 是有效值）
-    const hasTemperature =
-      chat?.temperature !== null && chat?.temperature !== undefined;
-    const hasTopP = chat?.topP !== null && chat?.topP !== undefined;
-    const hasTopK = chat?.topK !== null && chat?.topK !== undefined;
-    const hasMaxTokens =
-      chat?.maxTokens !== null && chat?.maxTokens !== undefined;
+        settings[paramName] = value;
+        settings[`enable${capitalize(paramName)}`] = hasValue;
+      } else if (param.component === "switch" && !isSliderProps(param.props)) {
+        const props = param.props;
+        const chatValue = (chat as any)?.[dbFieldName];
+        const value =
+          typeof chatValue === "boolean" ? chatValue : (props.default ?? true);
 
-    const temperature = hasTemperature
-      ? clamp(chat!.temperature!, 0, temperatureMax)
-      : clamp(temperatureFallback, 0, temperatureMax);
+        settings[paramName] = value;
+      }
+    });
 
-    const topP = hasTopP
-      ? clamp(chat!.topP!, 0, topPMax)
-      : clamp(topPFallback, 0, topPMax);
+    return settings;
+  }
 
-    const topK = hasParameterSupport("top_k", currentModel)
-      ? hasTopK
-        ? clamp(chat!.topK!, 1, topKMax ?? defaultTopK)
-        : clamp(defaultTopK, 1, topKMax ?? defaultTopK)
-      : undefined;
-
-    const maxTokens = hasMaxTokens
-      ? clamp(chat!.maxTokens!, 1, maxTokensLimit)
-      : clamp(maxTokensFallback, 1, maxTokensLimit);
-
-    const streamResponse = hasParameterSupport("streaming", currentModel)
-      ? typeof chat?.stream === "boolean"
-        ? chat?.stream
-        : typeof defaults.streamResponse === "boolean"
-          ? defaults.streamResponse
-          : true
-      : typeof defaults.streamResponse === "boolean"
-        ? defaults.streamResponse
-        : true;
-
-    // 对话轮数设置（默认值为 10）
-    const turnCount =
-      chat?.turnCount !== null && chat?.turnCount !== undefined
-        ? clamp(chat.turnCount, 1, 100)
-        : 10;
-
-    return {
-      temperature,
-      topP,
-      topK,
-      streamResponse,
-      maxTokens,
-      turnCount,
-      // 开关状态：只有当值被明确设置时才启用（非 null/undefined）
-      enableTemperature: hasTemperature,
-      enableTopP: hasTopP,
-      enableTopK: hasTopK,
-      enableMaxTokens: hasMaxTokens,
-    };
+  // 辅助函数：首字母大写
+  function capitalize(str: string): string {
+    return str.charAt(0).toUpperCase() + str.slice(1);
   }
 
   let currentSettings = $state(buildInitialSettings());
@@ -233,19 +94,10 @@
   /**
    * 保存单个字段
    */
-  async function saveField(
-    fieldName:
-      | "temperature"
-      | "topP"
-      | "topK"
-      | "maxTokens"
-      | "stream"
-      | "turnCount",
-    value: number | boolean | null
-  ) {
+  async function saveField(fieldName: string, value: number | boolean | null) {
     try {
       saveStatus = "saving";
-      await chatActions.updateModelField(fieldName, value);
+      await chatActions.updateModelField(fieldName as any, value);
       saveStatus = "saved";
     } catch (error) {
       console.error(`Failed to update ${fieldName}:`, error);
@@ -270,241 +122,141 @@
     }
   });
 
-  // 自动保存 temperature
+  // 为每个参数创建自动保存 effect
   $effect(() => {
-    // 跳过初始化
-    if (
-      !originalSettings.enableTemperature &&
-      !currentSettings.enableTemperature
-    ) {
-      return;
-    }
+    parameters.forEach((param) => {
+      const paramName = param.name; // snake_case from backend
+      const dbFieldName = snakeToCamel(paramName); // camelCase for database
 
-    const newValue = currentSettings.enableTemperature
-      ? currentSettings.temperature
-      : null;
-    const oldValue = originalSettings.enableTemperature
-      ? originalSettings.temperature
-      : null;
+      if (param.component === "slider") {
+        const enableKey = `enable${capitalize(paramName)}`;
 
-    if (newValue === oldValue) {
-      return;
-    }
+        // 跳过初始化
+        if (!originalSettings[enableKey] && !currentSettings[enableKey]) {
+          return;
+        }
 
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      await saveField("temperature", newValue);
-      originalSettings.temperature = currentSettings.temperature;
-      originalSettings.enableTemperature = currentSettings.enableTemperature;
-    }, 500);
+        const newValue = currentSettings[enableKey]
+          ? currentSettings[paramName]
+          : null;
+        const oldValue = originalSettings[enableKey]
+          ? originalSettings[paramName]
+          : null;
+
+        if (newValue === oldValue) {
+          return;
+        }
+
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(async () => {
+          await saveField(dbFieldName, newValue);
+          originalSettings[paramName] = currentSettings[paramName];
+          originalSettings[enableKey] = currentSettings[enableKey];
+        }, 500);
+      } else if (param.component === "switch") {
+        if (currentSettings[paramName] === originalSettings[paramName]) {
+          return;
+        }
+
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(async () => {
+          await saveField(dbFieldName, currentSettings[paramName]);
+          originalSettings[paramName] = currentSettings[paramName];
+        }, 500);
+      }
+    });
   });
 
-  // 自动保存 topP
-  $effect(() => {
-    if (!originalSettings.enableTopP && !currentSettings.enableTopP) {
-      return;
-    }
+  // 渲染滑块参数
+  function renderSliderParameter(param: ModelParameterResponse) {
+    if (!isSliderProps(param.props)) return null;
 
-    const newValue = currentSettings.enableTopP ? currentSettings.topP : null;
-    const oldValue = originalSettings.enableTopP ? originalSettings.topP : null;
+    const props = param.props;
+    const paramName = param.name;
+    const enableKey = `enable${capitalize(paramName)}`;
 
-    if (newValue === oldValue) {
-      return;
-    }
+    const min = props.min ?? 0;
+    const max = props.max ?? 100;
+    const step = props.step ?? 1;
 
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      await saveField("topP", newValue);
-      originalSettings.topP = currentSettings.topP;
-      originalSettings.enableTopP = currentSettings.enableTopP;
-    }, 500);
-  });
+    // 计算刻度标记
+    const scaleMarks = [
+      { value: min, position: 0 },
+      { value: Number(((min + max) / 2).toFixed(2)), position: 50 },
+      { value: max, position: 100 },
+    ];
 
-  // 自动保存 topK
-  $effect(() => {
-    if (!originalSettings.enableTopK && !currentSettings.enableTopK) {
-      return;
-    }
-
-    const newValue = currentSettings.enableTopK
-      ? (currentSettings.topK ?? null)
-      : null;
-    const oldValue = originalSettings.enableTopK
-      ? (originalSettings.topK ?? null)
-      : null;
-
-    if (newValue === oldValue) {
-      return;
-    }
-
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      await saveField("topK", newValue);
-      originalSettings.topK = currentSettings.topK;
-      originalSettings.enableTopK = currentSettings.enableTopK;
-    }, 500);
-  });
-
-  // 自动保存 maxTokens
-  $effect(() => {
-    if (!originalSettings.enableMaxTokens && !currentSettings.enableMaxTokens) {
-      return;
-    }
-
-    const newValue = currentSettings.enableMaxTokens
-      ? currentSettings.maxTokens
-      : null;
-    const oldValue = originalSettings.enableMaxTokens
-      ? originalSettings.maxTokens
-      : null;
-
-    if (newValue === oldValue) {
-      return;
-    }
-
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      await saveField("maxTokens", newValue);
-      originalSettings.maxTokens = currentSettings.maxTokens;
-      originalSettings.enableMaxTokens = currentSettings.enableMaxTokens;
-    }, 500);
-  });
-
-  // 自动保存 stream
-  $effect(() => {
-    if (currentSettings.streamResponse === originalSettings.streamResponse) {
-      return;
-    }
-
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      await saveField("stream", currentSettings.streamResponse);
-      originalSettings.streamResponse = currentSettings.streamResponse;
-    }, 500);
-  });
-
-  // 自动保存 turnCount
-  $effect(() => {
-    if (currentSettings.turnCount === originalSettings.turnCount) {
-      return;
-    }
-
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      await saveField("turnCount", currentSettings.turnCount);
-      originalSettings.turnCount = currentSettings.turnCount;
-    }, 500);
-  });
+    return {
+      label: props.name,
+      min,
+      max,
+      step,
+      scaleMarks,
+      showToggle: props.show_toggle ?? false,
+      paramName,
+      enableKey,
+    };
+  }
 </script>
 
 <div class="space-y-0">
-  {#if supportsTemperature}
+  {#if baseParameters.length > 0}
     <TableGroup>
-      <ModelSliderParameterRow
-        label="Temperature"
-        bind:value={currentSettings.temperature}
-        bind:enabled={currentSettings.enableTemperature}
-        min={0}
-        max={resolveTemperatureMax(currentSettings.temperature)}
-        step={0.1}
-        scaleMarks={getTemperatureScaleMarks()}
-        showScaleMarks={false}
-        showValue={true}
-        showToggle={true}
-      />
+      {#each baseParameters as param}
+        {#if param.component === "slider"}
+          {@const config = renderSliderParameter(param)}
+          {#if config}
+            <ModelSliderParameterRow
+              label={config.label}
+              bind:value={currentSettings[config.paramName]}
+              bind:enabled={currentSettings[config.enableKey]}
+              min={config.min}
+              max={config.max}
+              step={config.step}
+              scaleMarks={config.scaleMarks}
+              showScaleMarks={false}
+              showValue={true}
+              showToggle={config.showToggle}
+            />
+          {/if}
+        {:else if param.component === "switch"}
+          {@const props = param.props as SwitchProps}
+          <SwitchRow
+            label={props.name}
+            bind:checked={currentSettings[param.name]}
+          />
+        {/if}
+      {/each}
     </TableGroup>
   {/if}
 
-  {#if hasAdvancedParameters}
+  {#if advanceParameters.length > 0}
     <TableGroup title="高级" collapsible defaultCollapsed={true}>
-      {#if hasParameterSupport("top_p", currentModel)}
-        <ModelSliderParameterRow
-          label="Top-p"
-          bind:value={currentSettings.topP}
-          bind:enabled={currentSettings.enableTopP}
-          min={0}
-          max={resolveTopPMax(currentSettings.topP)}
-          step={0.05}
-          scaleMarks={getTopPScaleMarks()}
-          showScaleMarks={false}
-          showValue={true}
-          showToggle={true}
-        />
-      {/if}
-
-      {#if hasParameterSupport("top_k", currentModel)}
-        <ModelSliderParameterRow
-          label="Top-k"
-          bind:value={currentSettings.topK}
-          bind:enabled={currentSettings.enableTopK}
-          min={1}
-          max={resolveTopKMax(currentSettings.topK)}
-          step={1}
-          scaleMarks={getTopKScaleMarks()}
-          showScaleMarks={false}
-          showValue={true}
-          showToggle={true}
-        />
-      {/if}
-
-      {#if hasParameterSupport("max_tokens", currentModel)}
-        <ModelSliderParameterRow
-          label="输出最大 Token"
-          bind:value={currentSettings.maxTokens}
-          bind:enabled={currentSettings.enableMaxTokens}
-          min={1}
-          max={resolveOutputTokensMax(currentSettings.maxTokens)}
-          step={1}
-          scaleMarks={[
-            { value: 1, position: 0 },
-            {
-              value: Math.floor(
-                resolveOutputTokensMax(currentSettings.maxTokens) / 2
-              ),
-              position: 50,
-            },
-            {
-              value: resolveOutputTokensMax(currentSettings.maxTokens),
-              position: 100,
-            },
-          ]}
-          showScaleMarks={false}
-          showValue={true}
-          showToggle={true}
-        />
-      {/if}
-
-      {#if hasParameterSupport("streaming", currentModel)}
-        <TableBaseRow>
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-base-content">流式输出</p>
-              <p class="text-xs text-base-content/60">
-                实时获取模型响应，适合长文本输出。
-              </p>
-            </div>
-            <Toggle bind:checked={currentSettings.streamResponse} />
-          </div>
-        </TableBaseRow>
-      {/if}
-
-      <!-- 上下文对话轮数设置 -->
-      <ModelSliderParameterRow
-        label="上下文对话轮数"
-        bind:value={currentSettings.turnCount}
-        min={1}
-        max={100}
-        step={1}
-        scaleMarks={[
-          { value: 1, position: 0 },
-          { value: 50, position: 50 },
-          { value: 100, position: 100 },
-        ]}
-        showScaleMarks={false}
-        showValue={true}
-        showToggle={false}
-        helpText="设置每次对话携带的历史消息轮数。轮数越多，上下文越完整，但 token 消耗也越多。"
-      />
+      {#each advanceParameters as param}
+        {#if param.component === "slider"}
+          {@const config = renderSliderParameter(param)}
+          {#if config}
+            <ModelSliderParameterRow
+              label={config.label}
+              bind:value={currentSettings[config.paramName]}
+              bind:enabled={currentSettings[config.enableKey]}
+              min={config.min}
+              max={config.max}
+              step={config.step}
+              scaleMarks={config.scaleMarks}
+              showScaleMarks={false}
+              showValue={true}
+              showToggle={config.showToggle}
+            />
+          {/if}
+        {:else if param.component === "switch"}
+          {@const props = param.props as SwitchProps}
+          <SwitchRow
+            label={props.name}
+            bind:checked={currentSettings[param.name]}
+          />
+        {/if}
+      {/each}
     </TableGroup>
   {/if}
 </div>

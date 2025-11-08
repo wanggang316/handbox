@@ -74,6 +74,48 @@ impl ModelPricingResponse {
     }
 }
 
+/// 参数显示等级
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterLevel {
+    Base,    // 基础参数，默认显示
+    Advance, // 高级参数，在"高级"分组中显示
+}
+
+/// 参数组件类型
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterComponent {
+    Slider, // 滑块组件
+    Switch, // 开关组件
+}
+
+/// 滑块组件属性
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SliderProps {
+    pub default: Option<f64>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: Option<f64>,
+    pub name: String,
+    pub show_toggle: Option<bool>,
+}
+
+/// 开关组件属性
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwitchProps {
+    pub default: Option<bool>,
+    pub name: String,
+}
+
+/// 组件属性联合类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ComponentProps {
+    Slider(SliderProps),
+    Switch(SwitchProps),
+}
+
 /// 聊天方法详情
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMethodResponse {
@@ -86,15 +128,9 @@ pub struct ChatMethodResponse {
 pub struct ModelParameterResponse {
     pub name: LlmModelParameter,
     pub support: bool,
-    pub values: Option<ModelParameterValueResponse>,
-}
-
-/// 参数值范围
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelParameterValueResponse {
-    pub default: Option<f64>,
-    pub min: Option<f64>,
-    pub max: Option<f64>,
+    pub component: ParameterComponent,
+    pub props: ComponentProps,
+    pub level: ParameterLevel,
 }
 
 /// 前端模型响应结构
@@ -224,7 +260,8 @@ impl ModelResponse {
                     supported_params.as_ref(),
                     model.default_parameters.as_ref(),
                     model.max_parameters.as_ref(),
-                    method_config,
+                    &method_config,
+                    model.output_max_tokens,
                 );
 
                 if !method_supported {
@@ -263,22 +300,37 @@ impl ModelResponse {
         supported_params: Option<&Vec<LlmModelParameter>>,
         db_defaults: Option<&HashMap<String, serde_json::Value>>,
         db_max: Option<&HashMap<String, serde_json::Value>>,
-        method_config: Option<&ChatMethodConfig>,
+        method_config: &ChatMethodConfig,
+        output_max_tokens: Option<i32>,
     ) -> Option<Vec<ModelParameterResponse>> {
         let mut parameter_names: HashSet<String> = HashSet::new();
-        Self::collect_support_keys(supported_params, &mut parameter_names);
-        Self::collect_value_keys(db_defaults, &mut parameter_names);
-        Self::collect_value_keys(db_max, &mut parameter_names);
 
-        if let Some(config) = method_config {
-            Self::collect_value_keys(config.default_parameters.as_ref(), &mut parameter_names);
-            Self::collect_value_keys(config.max_parameters.as_ref(), &mut parameter_names);
-            if let Some(support_list) = &config.supported_parameters {
-                for key in support_list {
+        // 1. 如果数据库有 supported_params，使用数据库的；否则使用配置的 default_supported_parameters
+        if let Some(params) = supported_params {
+            if !params.is_empty() {
+                // 使用数据库的 supported_params
+                Self::collect_support_keys(Some(params), &mut parameter_names);
+            } else {
+                // 数据库的 supported_params 为空，使用配置的 default_supported_parameters
+                for key in &method_config.default_supported_parameters {
                     parameter_names.insert(key.clone());
                 }
             }
+        } else {
+            // 数据库没有 supported_params，使用配置的 default_supported_parameters
+            for key in &method_config.default_supported_parameters {
+                parameter_names.insert(key.clone());
+            }
         }
+
+        // 2. 添加配置的额外参数（如 turn_count）
+        for key in &method_config.additional_parameters {
+            parameter_names.insert(key.clone());
+        }
+
+        // 3. 添加数据库中的 defaults 和 max（兼容旧数据）
+        Self::collect_value_keys(db_defaults, &mut parameter_names);
+        Self::collect_value_keys(db_max, &mut parameter_names);
 
         if parameter_names.is_empty() {
             return None;
@@ -290,27 +342,45 @@ impl ModelResponse {
 
         let mut parameters = Vec::new();
         for key in names {
+            // 获取参数配置
+            let param_config = method_config.parameters.get(&key);
+
+            // 如果没有参数配置，跳过该参数
+            if param_config.is_none() {
+                continue;
+            }
+
+            // 检查 component 字段是否存在
+            let config = param_config.unwrap();
+            if config.component.is_none() {
+                continue;
+            }
+
             let param_enum = key
                 .parse::<LlmModelParameter>()
                 .unwrap_or(LlmModelParameter::Unknown);
 
-            // 过滤掉 Unknown 参数
-            if param_enum == LlmModelParameter::Unknown {
-                continue;
-            }
-
-            let values =
-                Self::build_parameter_value_for_key(&key, db_defaults, db_max, method_config);
-
+            // 注意：对于应用层配置（如 turn_count），它们会被解析为 Unknown
+            // 但由于它们有参数配置，所以我们保留它们
+            // support 字段表示该参数是否被模型支持，应用层配置永远为 false
             let support = support_lookup.contains(&key);
-            if !support && values.is_none() {
-                continue;
-            }
+
+            // 构建组件和属性
+            let (component, props, level) = Self::build_component_and_props(
+                &key,
+                &param_enum,
+                db_defaults,
+                db_max,
+                Some(config),
+                output_max_tokens,
+            );
 
             parameters.push(ModelParameterResponse {
                 name: param_enum,
                 support,
-                values,
+                component,
+                props,
+                level,
             });
         }
 
@@ -345,51 +415,102 @@ impl ModelResponse {
 
     fn build_parameter_support_lookup(
         db_supported: Option<&Vec<LlmModelParameter>>,
-        method_config: Option<&ChatMethodConfig>,
+        method_config: &ChatMethodConfig,
     ) -> HashSet<String> {
         let mut keys = HashSet::new();
         Self::collect_support_keys(db_supported, &mut keys);
 
         if keys.is_empty() {
-            if let Some(config) = method_config {
-                if let Some(support_list) = &config.supported_parameters {
-                    for key in support_list {
-                        keys.insert(key.clone());
-                    }
-                }
+            for key in &method_config.default_supported_parameters {
+                keys.insert(key.clone());
             }
         }
 
         keys
     }
 
-    fn build_parameter_value_for_key(
+    fn build_component_and_props(
         key: &str,
+        param: &LlmModelParameter,
         db_defaults: Option<&HashMap<String, serde_json::Value>>,
         db_max: Option<&HashMap<String, serde_json::Value>>,
-        method_config: Option<&ChatMethodConfig>,
-    ) -> Option<ModelParameterValueResponse> {
-        let default_value = Self::resolve_number_for_key(
-            key,
-            db_defaults,
-            method_config.and_then(|config| config.default_parameters.as_ref()),
-        );
+        param_config: Option<&crate::config::llm_config::ParameterConfig>,
+        output_max_tokens: Option<i32>,
+    ) -> (ParameterComponent, ComponentProps, ParameterLevel) {
+        // param_config 在调用前已经检查过，这里可以安全 unwrap
+        let config = param_config.expect("param_config should not be None");
 
-        let max_value = Self::resolve_number_for_key(
-            key,
-            db_max,
-            method_config.and_then(|config| config.max_parameters.as_ref()),
-        );
+        // 确定组件类型 (component 字段在调用前也已经检查过)
+        let component = match config.component.as_deref() {
+            Some("switch") => ParameterComponent::Switch,
+            Some("slider") => ParameterComponent::Slider,
+            _ => ParameterComponent::Slider, // 默认为 Slider
+        };
 
-        if default_value.is_none() && max_value.is_none() {
-            None
-        } else {
-            Some(ModelParameterValueResponse {
-                default: default_value,
-                min: None,
-                max: max_value,
-            })
-        }
+        // 确定显示等级
+        let level = match config.level.as_deref() {
+            Some("base") => ParameterLevel::Base,
+            Some("advance") => ParameterLevel::Advance,
+            _ => ParameterLevel::Advance, // 默认高级
+        };
+
+        // 获取显示名称
+        let name = config.name.clone()
+            .unwrap_or_else(|| param.as_str().to_string());
+
+        // 构建属性
+        let props = match component {
+            ParameterComponent::Switch => {
+                // 优先使用配置中的 default，然后是数据库的值
+                let default = config.default.as_ref()
+                    .and_then(Self::parse_bool)
+                    .or_else(|| {
+                        Self::resolve_bool_for_key(key, db_defaults, None)
+                    });
+                ComponentProps::Switch(SwitchProps { default, name })
+            }
+            ParameterComponent::Slider => {
+                // 对于 max_tokens 参数，默认值和最大值都使用模型的 output_max_tokens
+                let (default, max) = if key == "max_tokens" {
+                    let output_max = output_max_tokens.map(|v| v as f64);
+                    (
+                        // default: 优先使用模型的 output_max_tokens，然后是配置，最后是数据库
+                        output_max
+                            .or_else(|| config.default.as_ref().and_then(Self::parse_number))
+                            .or_else(|| Self::resolve_number_for_key(key, db_defaults, None)),
+                        // max: 优先使用模型的 output_max_tokens，然后是配置，最后是数据库
+                        output_max
+                            .or_else(|| config.max.as_ref().and_then(Self::parse_number))
+                            .or_else(|| Self::resolve_number_for_key(key, db_max, None))
+                    )
+                } else {
+                    (
+                        // default: 优先使用配置中的 default，然后是数据库的值
+                        config.default.as_ref()
+                            .and_then(Self::parse_number)
+                            .or_else(|| Self::resolve_number_for_key(key, db_defaults, None)),
+                        // max: 优先使用配置中的 max，然后是数据库的值
+                        config.max.as_ref()
+                            .and_then(Self::parse_number)
+                            .or_else(|| Self::resolve_number_for_key(key, db_max, None))
+                    )
+                };
+
+                let step = config.step;
+                let show_toggle = config.show_toggle;
+
+                ComponentProps::Slider(SliderProps {
+                    default,
+                    min: Some(0.0), // 默认最小值为0
+                    max,
+                    step,
+                    name,
+                    show_toggle,
+                })
+            }
+        };
+
+        (component, props, level)
     }
 
     fn resolve_number_for_key(
@@ -407,6 +528,25 @@ impl ModelResponse {
         match value {
             serde_json::Value::Number(num) => num.as_f64(),
             serde_json::Value::String(text) => text.parse::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    fn resolve_bool_for_key(
+        key: &str,
+        primary: Option<&HashMap<String, serde_json::Value>>,
+        fallback: Option<&HashMap<String, serde_json::Value>>,
+    ) -> Option<bool> {
+        primary
+            .and_then(|map| map.get(key))
+            .or_else(|| fallback.and_then(|map| map.get(key)))
+            .and_then(Self::parse_bool)
+    }
+
+    fn parse_bool(value: &serde_json::Value) -> Option<bool> {
+        match value {
+            serde_json::Value::Bool(b) => Some(*b),
+            serde_json::Value::String(text) => text.parse::<bool>().ok(),
             _ => None,
         }
     }

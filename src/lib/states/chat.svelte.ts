@@ -3,7 +3,10 @@
  */
 
 import type { Chat, UUID, McpServerConfig } from "../types";
-import type { ChatMethodParameter, ModelWithProvider } from "../types/provider";
+import type {
+  ModelParameterResponse,
+  ModelWithProvider,
+} from "../types/provider";
 import * as chatApi from "../api/chat";
 import {
   providerActions,
@@ -23,7 +26,7 @@ function getMethodParameters(model?: ModelWithProvider) {
   // 过滤掉无效的参数定义，并标准化名称
   return model.chat_method.parameters
     .filter(
-      (param): param is ChatMethodParameter =>
+      (param): param is ModelParameterResponse =>
         !!param &&
         typeof param.name === "string" &&
         param.name.trim().length > 0,
@@ -74,8 +77,8 @@ function getParameterDefaultNumber(
   model?: ModelWithProvider,
 ): number | undefined {
   const entry = findMethodParameter(parameterName, model);
-  if (entry?.values) {
-    const parsed = toNumber(entry.values.default ?? null);
+  if (entry?.props && "default" in entry.props) {
+    const parsed = toNumber(entry.props.default ?? null);
     if (parsed !== null) {
       return parsed;
     }
@@ -182,11 +185,12 @@ export function hasParameterSupport(
       return entry.support;
     }
 
-    if (entry.values) {
+    if (entry.props) {
       const hasValue =
-        toNumber(entry.values.default ?? null) !== null ||
-        toNumber(entry.values.max ?? null) !== null ||
-        toNumber(entry.values.min ?? null) !== null;
+        ("default" in entry.props &&
+          toNumber(entry.props.default ?? null) !== null) ||
+        ("max" in entry.props && toNumber(entry.props.max ?? null) !== null) ||
+        ("min" in entry.props && toNumber(entry.props.min ?? null) !== null);
 
       if (hasValue) {
         return true;
@@ -220,8 +224,8 @@ export function getMaxNumber(
   model?: ModelWithProvider,
 ): number {
   const entry = findMethodParameter(parameterName, model);
-  if (entry?.values) {
-    const parsed = toNumber(entry.values.max ?? null);
+  if (entry?.props && "max" in entry.props) {
+    const parsed = toNumber(entry.props.max ?? null);
     if (parsed !== null) {
       return parsed;
     }
@@ -265,7 +269,10 @@ export function getModelDefaultSettings(model?: ModelWithProvider) {
 
   const streamResponse = streamingEntry
     ? (() => {
-        const parsed = toBoolean(streamingEntry.values?.default ?? null);
+        const parsed =
+          streamingEntry.props && "default" in streamingEntry.props
+            ? toBoolean(streamingEntry.props.default ?? null)
+            : null;
         return parsed !== null ? parsed : undefined;
       })()
     : undefined;

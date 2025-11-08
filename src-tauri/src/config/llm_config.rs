@@ -9,13 +9,72 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::OnceLock;
 
-/// 聊天方法配置
+/// 参数配置（合并了 default、max 和 UI 配置）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParameterConfig {
+    pub component: Option<String>,      // "slider" | "switch"
+    pub level: Option<String>,          // "base" | "advance"
+    pub step: Option<f64>,              // 仅滑块使用
+    pub name: Option<String>,           // 显示名称
+    pub show_toggle: Option<bool>,      // 仅滑块使用，是否显示开关
+    pub default: Option<Value>,         // 默认值
+    pub max: Option<Value>,             // 最大值
+}
+
+/// 聊天方法配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatMethodConfig {
-    pub name: String,
-    pub supported_parameters: Option<Vec<String>>,
-    pub default_parameters: Option<HashMap<String, Value>>,
-    pub max_parameters: Option<HashMap<String, Value>>,
+    #[serde(default)]
+    pub default_supported_parameters: Vec<String>,
+    #[serde(default)]
+    pub additional_parameters: Vec<String>,
+    #[serde(default)]
+    pub parameters: HashMap<String, ParameterConfig>,
+}
+
+/// 聊天方法集合配置（包含 base 和各个方法）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChatMethodsConfig {
+    #[serde(default)]
+    pub base: ChatMethodConfig,
+    #[serde(default)]
+    pub completions: ChatMethodConfig,
+    #[serde(default)]
+    pub responses: ChatMethodConfig,
+    #[serde(default)]
+    pub google_generate_content: ChatMethodConfig,
+}
+
+impl ChatMethodsConfig {
+    /// 获取合并后的方法配置
+    pub fn get_merged_config(&self, method_name: &str) -> ChatMethodConfig {
+        let method_config = match method_name {
+            "completions" => &self.completions,
+            "responses" => &self.responses,
+            "google_generate_content" => &self.google_generate_content,
+            _ => return self.base.clone(),
+        };
+
+        // 合并 base 和方法特定的配置
+        let mut merged = self.base.clone();
+
+        // 合并 default_supported_parameters（方法特定的覆盖 base）
+        if !method_config.default_supported_parameters.is_empty() {
+            merged.default_supported_parameters = method_config.default_supported_parameters.clone();
+        }
+
+        // 合并 additional_parameters（方法特定的覆盖 base）
+        if !method_config.additional_parameters.is_empty() {
+            merged.additional_parameters = method_config.additional_parameters.clone();
+        }
+
+        // 合并 parameters（方法特定的覆盖 base 中的同名参数）
+        for (key, value) in &method_config.parameters {
+            merged.parameters.insert(key.clone(), value.clone());
+        }
+
+        merged
+    }
 }
 
 /// 供应商配置
@@ -37,7 +96,7 @@ pub struct ProviderConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
     #[serde(default)]
-    pub chat_methods: Vec<ChatMethodConfig>,
+    pub chat_methods: ChatMethodsConfig,
     pub providers: Vec<ProviderConfig>,
     pub custom_providers: Vec<ProviderConfig>,
 }
@@ -46,7 +105,7 @@ impl LlmConfig {
     /// 创建新的配置管理器
     pub fn new() -> Self {
         Self {
-            chat_methods: Vec::new(),
+            chat_methods: ChatMethodsConfig::default(),
             providers: Vec::new(),
             custom_providers: Vec::new(),
         }
@@ -112,11 +171,9 @@ impl LlmConfig {
         all_configs
     }
 
-    /// 根据聊天方法名称获取配置
-    pub fn get_chat_method_config(&self, method_name: &str) -> Option<&ChatMethodConfig> {
-        self.chat_methods
-            .iter()
-            .find(|method| method.name == method_name)
+    /// 根据聊天方法名称获取配置（返回合并后的配置）
+    pub fn get_chat_method_config(&self, method_name: &str) -> ChatMethodConfig {
+        self.chat_methods.get_merged_config(method_name)
     }
 }
 

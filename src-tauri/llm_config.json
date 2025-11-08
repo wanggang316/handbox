@@ -1,158 +1,171 @@
 {
-    "chat_methods": [
-        {
-            "name": "completions",
-            "supported_parameters": [
-                "temperature",
-                "top_p",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1,
-                "top_p": 1.0
-            },
-            "max_parameters": {
-                "temperature": 2.0,
-                "top_p": 1.0
-            }
+  "chat_methods": {
+    "base": {
+      "default_supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "streaming"
+      ],
+      "additional_parameters": ["turn_count"],
+      "parameters": {
+        "temperature": {
+          "component": "slider",
+          "level": "base",
+          "step": 0.1,
+          "name": "Temperature",
+          "show_toggle": true,
+          "default": 1,
+          "max": 2.0
         },
-        {
-            "name": "responses",
-            "supported_parameters": [
-                "temperature",
-                "top_p",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1,
-                "top_p": 1.0
-            },
-            "max_parameters": {
-                "temperature": 2.0,
-                "top_p": 1.0
-            }
+        "top_p": {
+          "component": "slider",
+          "level": "advance",
+          "step": 0.05,
+          "name": "Top-p",
+          "show_toggle": true,
+          "default": 1.0,
+          "max": 1.0
         },
-        {
-            "name": "google_generate_content",
-            "supported_parameters": [
-                "temperature",
-                "top_p",
-                "max_tokens"
-            ],
-            "default_parameters": {
-                "temperature": 1,
-                "top_p": 1.0
-            },
-            "max_parameters": {
-                "temperature": 2.0,
-                "top_p": 1.0
-            }
+        "top_k": {
+          "component": "slider",
+          "level": "advance",
+          "step": 1,
+          "name": "Top-k",
+          "show_toggle": true
+        },
+        "max_tokens": {
+          "component": "slider",
+          "level": "advance",
+          "step": 1,
+          "name": "输出最大 Token",
+          "show_toggle": true
+        },
+        "streaming": {
+          "component": "switch",
+          "level": "advance",
+          "name": "流式输出",
+          "default": true
+        },
+        "turn_count": {
+          "component": "slider",
+          "level": "advance",
+          "step": 1,
+          "name": "上下文对话轮数",
+          "show_toggle": false,
+          "default": 10,
+          "max": 100
         }
-    ],
-    "providers": [
-        {
-            "type": "openai",
-            "type_name": "OpenAI",
-            "default_name": "OpenAI",
-            "default_base_url": "https://api.openai.com/v1",
-            "icon": "/logo-openai.png",
-            "chat_api_type": "openai-responses",
-            "model_api_type": "openai",
-            "supplement_file": "openai_models.json",
-            "supplement_fields": [
-                "name",
-                "description",
-                "input_modalities",
-                "output_modalities",
-                "context_length",
-                "output_max_tokens",
-                "pricing",
-                "url",
-                "supported_features",
-                "supported_methods",
-                "supported_parameters"
-            ]
-        },
-        {
-            "type": "google",
-            "type_name": "Google AI",
-            "default_name": "Google AI",
-            "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
-            "icon": "/logo-google.png",
-            "chat_api_type": "google",
-            "model_api_type": "google",
-            "supplement_file": "google_models.json",
-            "supplement_fields": [
-                "input_modalities",
-                "output_modalities",
-                "context_length",
-                "output_max_tokens",
-                "pricing",
-                "url",
-                "supported_features",
-                "supported_parameters"
-            ]
-        },
-        {
-            "type": "deepseek",
-            "type_name": "DeepSeek",
-            "default_name": "DeepSeek",
-            "default_base_url": "https://api.deepseek.com",
-            "icon": "/logo-deepseek.png",
-            "chat_api_type": "openai-completions",
-            "model_api_type": "openai",
-            "supplement_file": "deepseek_models.json",
-            "supplement_fields": [
-                "name",
-                "description",
-                "input_modalities",
-                "output_modalities",
-                "context_length",
-                "output_max_tokens",
-                "pricing",
-                "url",
-                "supported_features",
-                "supported_methods",
-                "supported_parameters"
-            ]
-        },
-        {
-            "type": "anthropic",
-            "type_name": "Anthropic",
-            "default_name": "Anthropic",
-            "default_base_url": "https://api.anthropic.com",
-            "icon": "/logo-anthropic.png",
-            "chat_api_type": "anthropic",
-            "model_api_type": "anthropic"
-        },
-        {
-            "type": "openrouter",
-            "type_name": "OpenRouter",
-            "default_name": "OpenRouter",
-            "default_base_url": "https://openrouter.ai/api/v1",
-            "icon": "/logo-openrouter.png",
-            "chat_api_type": "openai-completions",
-            "model_api_type": "openrouter"
-        }
-    ],
-    "custom_providers": [
-        {
-            "type": "openai-compatible",
-            "type_name": "OpenAI Compatible",
-            "default_name": "Custom Provider",
-            "default_base_url": "",
-            "icon": "/logo-openai-compatible.png",
-            "chat_api_type": "openai-completions",
-            "model_api_type": "openai"
-        },
-        {
-            "type": "anthropic-compatible",
-            "type_name": "Anthropic Compatible",
-            "default_name": "Custom Provider",
-            "default_base_url": "",
-            "icon": "/logo-anthropic-compatible.png",
-            "chat_api_type": "anthropic",
-            "model_api_type": "anthropic"
-        }
-    ]
+      }
+    },
+    "completions": {},
+    "responses": {},
+    "google_generate_content": {}
+  },
+  "providers": [
+    {
+      "type": "openai",
+      "type_name": "OpenAI",
+      "default_name": "OpenAI",
+      "default_base_url": "https://api.openai.com/v1",
+      "icon": "/logo-openai.png",
+      "chat_api_type": "openai-responses",
+      "model_api_type": "openai",
+      "supplement_file": "openai_models.json",
+      "supplement_fields": [
+        "name",
+        "description",
+        "input_modalities",
+        "output_modalities",
+        "context_length",
+        "output_max_tokens",
+        "pricing",
+        "url",
+        "supported_features",
+        "supported_methods",
+        "supported_parameters"
+      ]
+    },
+    {
+      "type": "google",
+      "type_name": "Google AI",
+      "default_name": "Google AI",
+      "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "icon": "/logo-google.png",
+      "chat_api_type": "google",
+      "model_api_type": "google",
+      "supplement_file": "google_models.json",
+      "supplement_fields": [
+        "input_modalities",
+        "output_modalities",
+        "context_length",
+        "output_max_tokens",
+        "pricing",
+        "url",
+        "supported_features",
+        "supported_parameters"
+      ]
+    },
+    {
+      "type": "deepseek",
+      "type_name": "DeepSeek",
+      "default_name": "DeepSeek",
+      "default_base_url": "https://api.deepseek.com",
+      "icon": "/logo-deepseek.png",
+      "chat_api_type": "openai-completions",
+      "model_api_type": "openai",
+      "supplement_file": "deepseek_models.json",
+      "supplement_fields": [
+        "name",
+        "description",
+        "input_modalities",
+        "output_modalities",
+        "context_length",
+        "output_max_tokens",
+        "pricing",
+        "url",
+        "supported_features",
+        "supported_methods",
+        "supported_parameters"
+      ]
+    },
+    {
+      "type": "anthropic",
+      "type_name": "Anthropic",
+      "default_name": "Anthropic",
+      "default_base_url": "https://api.anthropic.com",
+      "icon": "/logo-anthropic.png",
+      "chat_api_type": "anthropic",
+      "model_api_type": "anthropic"
+    },
+    {
+      "type": "openrouter",
+      "type_name": "OpenRouter",
+      "default_name": "OpenRouter",
+      "default_base_url": "https://openrouter.ai/api/v1",
+      "icon": "/logo-openrouter.png",
+      "chat_api_type": "openai-completions",
+      "model_api_type": "openrouter"
+    }
+  ],
+  "custom_providers": [
+    {
+      "type": "openai-compatible",
+      "type_name": "OpenAI Compatible",
+      "default_name": "Custom Provider",
+      "default_base_url": "",
+      "icon": "/logo-openai-compatible.png",
+      "chat_api_type": "openai-completions",
+      "model_api_type": "openai"
+    },
+    {
+      "type": "anthropic-compatible",
+      "type_name": "Anthropic Compatible",
+      "default_name": "Custom Provider",
+      "default_base_url": "",
+      "icon": "/logo-anthropic-compatible.png",
+      "chat_api_type": "anthropic",
+      "model_api_type": "anthropic"
+    }
+  ]
 }

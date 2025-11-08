@@ -2,7 +2,7 @@
  * 供应商相关类型定义
  */
 
-import type { BaseEntity } from './index';
+import type { BaseEntity } from "./index";
 
 // 供应商配置
 export interface Provider extends BaseEntity {
@@ -26,23 +26,48 @@ export interface ModelParameter {
   max?: unknown;
 }
 
-export type ChatMethodName = 'completions' | 'responses' | 'google_generate_content';
+export type ChatMethodName =
+  | "completions"
+  | "responses"
+  | "google_generate_content";
 
-export interface ChatMethodParameterValues {
+// 参数显示等级
+export type ParameterLevel = "base" | "advance";
+
+// 参数组件类型
+export type ParameterComponent = "slider" | "switch";
+
+// 滑块组件属性
+export interface SliderProps {
   default?: number | null;
   min?: number | null;
   max?: number | null;
+  step?: number | null;
+  name: string;
+  show_toggle?: boolean | null;
 }
 
-export interface ChatMethodParameter {
+// 开关组件属性
+export interface SwitchProps {
+  default?: boolean | null;
+  name: string;
+}
+
+// 组件属性联合类型
+export type ComponentProps = SliderProps | SwitchProps;
+
+// 参数响应 (替换原 ChatMethodParameter)
+export interface ModelParameterResponse {
   name: string;
   support: boolean;
-  values?: ChatMethodParameterValues | null;
+  component: ParameterComponent;
+  props: ComponentProps;
+  level: ParameterLevel;
 }
 
 export interface ChatMethodResponse {
   name: ChatMethodName;
-  parameters?: ChatMethodParameter[] | null;
+  parameters?: ModelParameterResponse[] | null;
 }
 
 // 模型信息
@@ -81,20 +106,18 @@ export interface ModelWithProvider extends Model {
 export type ModelFeature = string;
 
 export type ModelModality =
-  | 'text'
-  | 'image'
-  | 'images'
-  | 'pdf'
-  | 'file'
-  | 'audio'
-  | 'video';
+  | "text"
+  | "image"
+  | "images"
+  | "pdf"
+  | "file"
+  | "audio"
+  | "video";
 
 export interface ModelPricing {
   input_text?: string | null;
   output_text?: string | null;
 }
-
-
 
 // 添加供应商请求
 export interface AddProviderRequest {
