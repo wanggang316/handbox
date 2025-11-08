@@ -67,22 +67,15 @@ pub async fn chat_update_field(
     value: serde_json::Value,
     chat_service: State<'_, ChatService>,
 ) -> Result<Chat, AppError> {
-    println!(
-        "[chat_update_field] chat_id: {}, field_name: {}, value: {:?}",
-        chat_id, field_name, value
-    );
-
     let parameter = match field_name.as_str() {
         "temperature" => {
             let temp_value = if value.is_null() {
-                println!("[chat_update_field] temperature: value is null, setting to None");
                 None
             } else {
                 let val = value
                     .as_f64()
                     .ok_or_else(|| AppError::validation_error("Invalid temperature value"))?
                     as f32;
-                println!("[chat_update_field] temperature: value is {}", val);
                 Some(val)
             };
             ChatParameter::Temperature(temp_value)
@@ -143,6 +136,19 @@ pub async fn chat_update_field(
                 AppError::validation_error(&format!("Invalid mcp_servers value: {}", e))
             })?;
             ChatParameter::McpServers(servers)
+        }
+        "turnCount" => {
+            let turn_count_value = if value.is_null() {
+                None
+            } else {
+                Some(
+                    value
+                        .as_i64()
+                        .ok_or_else(|| AppError::validation_error("Invalid turn_count value"))?
+                        as i32,
+                )
+            };
+            ChatParameter::TurnCount(turn_count_value)
         }
         _ => {
             return Err(AppError::validation_error(&format!(

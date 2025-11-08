@@ -71,7 +71,7 @@ export async function generateChatTitle(
 /**
  * 更新聊天单个字段
  * @param chatId 聊天 ID
- * @param fieldName 字段名 (temperature, topP, maxTokens, stream, systemPrompt, mcpServers)
+ * @param fieldName 字段名 (temperature, topP, maxTokens, stream, systemPrompt, mcpServers, turnCount)
  * @param value 字段值，null 表示清空
  */
 export async function updateChatField(
@@ -82,7 +82,8 @@ export async function updateChatField(
     | "maxTokens"
     | "stream"
     | "systemPrompt"
-    | "mcpServers",
+    | "mcpServers"
+    | "turnCount",
   value: number | boolean | string | McpServerConfig[] | null,
 ): Promise<Chat> {
   return apiCall<Chat>("chat_update_field", {

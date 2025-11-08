@@ -174,6 +174,8 @@ export function hasParameterSupport(
     return true;
   }
 
+  console.log("supportedParameters: ", supportedParameters);
+
   const entry = findMethodParameter(target, model);
   if (entry) {
     if (typeof entry.support === "boolean") {
@@ -390,8 +392,46 @@ export const chatActions = {
   },
 
   /**
-   * 更新模型参数
-   * 每次只更新一个字段，简单直接
+   * 更新单个模型参数字段
+   */
+  async updateModelField(
+    fieldName:
+      | "temperature"
+      | "topP"
+      | "topK"
+      | "maxTokens"
+      | "stream"
+      | "turnCount",
+    value: number | boolean | null,
+  ): Promise<void> {
+    if (!chatState.currentChat?.id) {
+      return;
+    }
+
+    // topK 暂不支持后端存储，跳过
+    if (fieldName === "topK") {
+      console.warn("topK parameter is not yet supported in backend");
+      return;
+    }
+
+    const updated = await chatApi.updateChatField(
+      chatState.currentChat.id,
+      fieldName as
+        | "temperature"
+        | "topP"
+        | "maxTokens"
+        | "stream"
+        | "turnCount",
+      value,
+    );
+
+    // 更新本地状态
+    chatState.currentChat = updated;
+  },
+
+  /**
+   * 更新模型参数（批量）
+   * @deprecated 建议使用 updateModelField 进行单字段更新
    */
   async updateModelSettings(settings: {
     temperature?: number | null;
@@ -401,11 +441,8 @@ export const chatActions = {
     stream?: boolean | null;
   }): Promise<void> {
     if (!chatState.currentChat?.id) {
-      console.warn("No current chat to update");
       return;
     }
-
-    console.log("[updateModelSettings] Updating with settings:", settings);
 
     let updated = chatState.currentChat;
 
@@ -438,8 +475,6 @@ export const chatActions = {
         settings.stream,
       );
     }
-
-    console.log("[updateModelSettings] Updated chat:", updated);
 
     // 更新本地状态
     chatState.currentChat = updated;

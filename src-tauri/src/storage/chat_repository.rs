@@ -92,9 +92,6 @@ impl ChatRepository {
 
     /// 更新聊天
     pub async fn update_chat(&self, chat: &Chat) -> Result<(), AppError> {
-        println!("[update_chat] Updating chat: id={}, temperature={:?}, top_p={:?}, max_tokens={:?}, stream={:?}",
-            chat.id, chat.temperature, chat.top_p, chat.max_tokens, chat.stream);
-
         let mcp_servers_json = serde_json::to_string(&chat.mcp_servers)
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
@@ -313,9 +310,6 @@ impl ChatRepository {
         let top_p: Option<f32> = row.try_get::<Option<f32>, _>("top_p")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
         let stream: Option<bool> = row.try_get::<Option<bool>, _>("stream")?;
-
-        println!("[row_to_chat] Read from DB - temperature={:?}, top_p={:?}, max_tokens={:?}, stream={:?}",
-            temperature, top_p, max_tokens, stream);
 
         Ok(Chat {
             id: row.try_get("id")?,

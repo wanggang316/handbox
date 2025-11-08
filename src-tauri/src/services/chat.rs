@@ -16,9 +16,13 @@ pub enum ChatParameter {
     TopP(Option<f32>),
     MaxTokens(Option<i32>),
     Stream(Option<bool>),
-    Model { model_id: String, provider_id: String },
+    Model {
+        model_id: String,
+        provider_id: String,
+    },
     SystemPrompt(Option<String>),
     McpServers(Vec<McpServerConfig>),
+    TurnCount(Option<i32>),
 }
 
 /// 聊天服务
@@ -126,12 +130,16 @@ impl ChatService {
             ChatParameter::TopP(top_p) => chat.top_p = top_p,
             ChatParameter::MaxTokens(max_tokens) => chat.max_tokens = max_tokens,
             ChatParameter::Stream(stream) => chat.stream = stream,
-            ChatParameter::Model { model_id, provider_id } => {
+            ChatParameter::Model {
+                model_id,
+                provider_id,
+            } => {
                 chat.model_id = Some(model_id);
                 chat.provider_id = Some(provider_id);
             }
             ChatParameter::SystemPrompt(prompt) => chat.system_prompt = prompt,
             ChatParameter::McpServers(servers) => chat.mcp_servers = servers,
+            ChatParameter::TurnCount(turn_count) => chat.turn_count = turn_count,
         }
 
         chat.updated_at = Self::current_timestamp();
@@ -562,10 +570,10 @@ mod tests {
             .update_chat(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                Some(Some(0.8)),       // Option<Option<f32>>
-                Some(Some(0.95)),      // Option<Option<f32>>
-                Some(Some(4096)),      // Option<Option<i32>>
-                Some(Some(false)),     // Option<Option<bool>>
+                Some(Some(0.8)),   // Option<Option<f32>>
+                Some(Some(0.95)),  // Option<Option<f32>>
+                Some(Some(4096)),  // Option<Option<i32>>
+                Some(Some(false)), // Option<Option<bool>>
                 Some("claude-3".to_string()),
                 Some("anthropic".to_string()),
                 Some("Updated prompt".to_string()),

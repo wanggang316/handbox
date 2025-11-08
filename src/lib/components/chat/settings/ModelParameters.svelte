@@ -15,6 +15,7 @@
   import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
+  import { Info } from "@lucide/svelte";
 
   type SaveStatus = "saved" | "saving" | "error";
 
@@ -205,12 +206,19 @@
         ? defaults.streamResponse
         : true;
 
+    // 对话轮数设置（默认值为 10）
+    const turnCount =
+      typeof chat?.turnCount === "number" && chat.turnCount > 0
+        ? clamp(chat.turnCount, 1, 100)
+        : 10;
+
     return {
       temperature,
       topP,
       topK,
       streamResponse,
       maxTokens,
+      turnCount,
       // 开关状态：只有当值有效设置时才启用（值 > 0）
       enableTemperature: hasTemperature,
       enableTopP: hasTopP,
@@ -224,67 +232,24 @@
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let saveStatus = $state<SaveStatus>("saved");
 
-  async function saveSettings() {
+  /**
+   * 保存单个字段
+   */
+  async function saveField(
+    fieldName: "temperature" | "topP" | "topK" | "maxTokens" | "stream" | "turnCount",
+    value: number | boolean | null,
+  ) {
     try {
       saveStatus = "saving";
-      const payload: {
-        temperature?: number | null;
-        topP?: number | null;
-        topK?: number | null;
-        stream?: boolean;
-        maxTokens?: number | null;
-      } = {};
-
-      // 处理 temperature：开关启用时设置值，关闭时设置为 null
-      if (supportsTemperature) {
-        payload.temperature = currentSettings.enableTemperature
-          ? currentSettings.temperature
-          : null;
-      }
-
-      // 处理 top_p：开关启用时设置值，关闭时设置为 null
-      if (hasParameterSupport("top_p", currentModel)) {
-        payload.topP = currentSettings.enableTopP ? currentSettings.topP : null;
-      }
-
-      // 处理 top_k：开关启用时设置值，关闭时设置为 null
-      if (hasParameterSupport("top_k", currentModel)) {
-        payload.topK = currentSettings.enableTopK ? currentSettings.topK : null;
-      }
-
-      // 处理 streaming：始终保存
-      if (hasParameterSupport("streaming", currentModel)) {
-        payload.stream = currentSettings.streamResponse;
-      }
-
-      // 处理 max_tokens：开关启用时设置值，关闭时设置为 null
-      if (hasParameterSupport("output_max_tokens", currentModel)) {
-        payload.maxTokens = currentSettings.enableMaxTokens
-          ? currentSettings.maxTokens
-          : null;
-      }
-
-      if (Object.keys(payload).length > 0) {
-        await chatActions.updateModelSettings(payload);
-      }
-
-      originalSettings = { ...currentSettings };
+      await chatActions.updateModelField(fieldName, value);
       saveStatus = "saved";
     } catch (error) {
-      console.error("Failed to update model settings:", error);
+      console.error(`Failed to update ${fieldName}:`, error);
       saveStatus = "error";
     }
   }
 
-  // 当 Toggle 状态改变时立即保存
-  function handleToggleChange() {
-    console.log("[handleToggleChange] Current settings:", currentSettings);
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-    }
-    saveSettings();
-  }
-
+  // 重置状态到初始值
   $effect(() => {
     // 监听模型或聊天配置变化，刷新本地缓存
     currentModel;
@@ -293,23 +258,122 @@
     currentSettings = { ...next };
     originalSettings = { ...next };
     saveStatus = "saved";
+
+    // 取消可能存在的定时器
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
   });
 
+  // 自动保存 temperature
   $effect(() => {
-    supportsTemperature;
-    const hasChanges =
-      JSON.stringify(currentSettings) !== JSON.stringify(originalSettings);
-    if (!hasChanges) {
+    // 跳过初始化
+    if (!originalSettings.enableTemperature && !currentSettings.enableTemperature) {
       return;
     }
 
-    saveStatus = "saving";
-    if (saveTimer) {
-      clearTimeout(saveTimer);
+    const newValue = currentSettings.enableTemperature ? currentSettings.temperature : null;
+    const oldValue = originalSettings.enableTemperature ? originalSettings.temperature : null;
+
+    if (newValue === oldValue) {
+      return;
     }
 
-    saveTimer = setTimeout(() => {
-      saveSettings();
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      await saveField("temperature", newValue);
+      originalSettings.temperature = currentSettings.temperature;
+      originalSettings.enableTemperature = currentSettings.enableTemperature;
+    }, 500);
+  });
+
+  // 自动保存 topP
+  $effect(() => {
+    if (!originalSettings.enableTopP && !currentSettings.enableTopP) {
+      return;
+    }
+
+    const newValue = currentSettings.enableTopP ? currentSettings.topP : null;
+    const oldValue = originalSettings.enableTopP ? originalSettings.topP : null;
+
+    if (newValue === oldValue) {
+      return;
+    }
+
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      await saveField("topP", newValue);
+      originalSettings.topP = currentSettings.topP;
+      originalSettings.enableTopP = currentSettings.enableTopP;
+    }, 500);
+  });
+
+  // 自动保存 topK
+  $effect(() => {
+    if (!originalSettings.enableTopK && !currentSettings.enableTopK) {
+      return;
+    }
+
+    const newValue = currentSettings.enableTopK ? currentSettings.topK ?? null : null;
+    const oldValue = originalSettings.enableTopK ? originalSettings.topK ?? null : null;
+
+    if (newValue === oldValue) {
+      return;
+    }
+
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      await saveField("topK", newValue);
+      originalSettings.topK = currentSettings.topK;
+      originalSettings.enableTopK = currentSettings.enableTopK;
+    }, 500);
+  });
+
+  // 自动保存 maxTokens
+  $effect(() => {
+    if (!originalSettings.enableMaxTokens && !currentSettings.enableMaxTokens) {
+      return;
+    }
+
+    const newValue = currentSettings.enableMaxTokens ? currentSettings.maxTokens : null;
+    const oldValue = originalSettings.enableMaxTokens ? originalSettings.maxTokens : null;
+
+    if (newValue === oldValue) {
+      return;
+    }
+
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      await saveField("maxTokens", newValue);
+      originalSettings.maxTokens = currentSettings.maxTokens;
+      originalSettings.enableMaxTokens = currentSettings.enableMaxTokens;
+    }, 500);
+  });
+
+  // 自动保存 stream
+  $effect(() => {
+    if (currentSettings.streamResponse === originalSettings.streamResponse) {
+      return;
+    }
+
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      await saveField("stream", currentSettings.streamResponse);
+      originalSettings.streamResponse = currentSettings.streamResponse;
+    }, 500);
+  });
+
+  // 自动保存 turnCount
+  $effect(() => {
+    if (currentSettings.turnCount === originalSettings.turnCount) {
+      return;
+    }
+
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      await saveField("turnCount", currentSettings.turnCount);
+      originalSettings.turnCount = currentSettings.turnCount;
     }, 500);
   });
 </script>
@@ -327,7 +391,6 @@
         scaleMarks={getTemperatureScaleMarks()}
         showScaleMarks={false}
         showValue={true}
-        onToggleChange={handleToggleChange}
       />
     </TableGroup>
   {/if}
@@ -345,7 +408,6 @@
           scaleMarks={getTopPScaleMarks()}
           showScaleMarks={false}
           showValue={true}
-          onToggleChange={handleToggleChange}
         />
       {/if}
 
@@ -360,11 +422,10 @@
           scaleMarks={getTopKScaleMarks()}
           showScaleMarks={false}
           showValue={true}
-          onToggleChange={handleToggleChange}
         />
       {/if}
 
-      {#if hasParameterSupport("output_max_tokens", currentModel)}
+      {#if hasParameterSupport("max_tokens", currentModel)}
         <ModelSliderParameterRow
           label="输出最大 Token"
           bind:value={currentSettings.maxTokens}
@@ -387,7 +448,6 @@
           ]}
           showScaleMarks={false}
           showValue={true}
-          onToggleChange={handleToggleChange}
         />
       {/if}
 
@@ -406,4 +466,29 @@
       {/if}
     </TableGroup>
   {/if}
+
+  <!-- 对话轮数设置 -->
+  <TableGroup title="上下文管理">
+    <TableBaseRow label="对话轮数" layout="vertical">
+      <div class="space-y-2 pt-2">
+        <LabeledSlider
+          bind:value={currentSettings.turnCount}
+          min={1}
+          max={100}
+          step={1}
+          scaleMarks={[
+            { value: 1, position: 0 },
+            { value: 50, position: 50 },
+            { value: 100, position: 100 },
+          ]}
+          showScaleMarks={false}
+          showValue={true}
+        />
+        <p class="text-xs text-base-content/60 flex items-start gap-1.5">
+          <Info class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          <span>设置每次对话携带的历史消息轮数。轮数越多，上下文越完整，但 token 消耗也越多。</span>
+        </p>
+      </div>
+    </TableBaseRow>
+  </TableGroup>
 </div>
