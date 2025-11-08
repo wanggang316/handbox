@@ -168,13 +168,13 @@
         ? Math.max(defaults.maxTokens, 1)
         : 2048; // 改为合理的默认值
 
-    // 判断参数是否被用户设置过（值 > 0 表示已设置）
+    // 判断参数是否被用户设置过（null/undefined 表示未设置，0 是有效值）
     const hasTemperature =
-      typeof chat?.temperature === "number" && chat.temperature > 0;
-    const hasTopP = typeof chat?.topP === "number" && chat.topP > 0;
-    const hasTopK = typeof chat?.topK === "number" && chat.topK > 0;
+      chat?.temperature !== null && chat?.temperature !== undefined;
+    const hasTopP = chat?.topP !== null && chat?.topP !== undefined;
+    const hasTopK = chat?.topK !== null && chat?.topK !== undefined;
     const hasMaxTokens =
-      typeof chat?.maxTokens === "number" && chat.maxTokens > 0;
+      chat?.maxTokens !== null && chat?.maxTokens !== undefined;
 
     const temperature = hasTemperature
       ? clamp(chat!.temperature!, 0, temperatureMax)
@@ -206,7 +206,7 @@
 
     // 对话轮数设置（默认值为 10）
     const turnCount =
-      typeof chat?.turnCount === "number" && chat.turnCount > 0
+      chat?.turnCount !== null && chat?.turnCount !== undefined
         ? clamp(chat.turnCount, 1, 100)
         : 10;
 
@@ -217,7 +217,7 @@
       streamResponse,
       maxTokens,
       turnCount,
-      // 开关状态：只有当值有效设置时才启用（值 > 0）
+      // 开关状态：只有当值被明确设置时才启用（非 null/undefined）
       enableTemperature: hasTemperature,
       enableTopP: hasTopP,
       enableTopK: hasTopK,
@@ -454,7 +454,7 @@
           bind:enabled={currentSettings.enableMaxTokens}
           min={1}
           max={resolveOutputTokensMax(currentSettings.maxTokens)}
-          step={100}
+          step={1}
           scaleMarks={[
             { value: 1, position: 0 },
             {

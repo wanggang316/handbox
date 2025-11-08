@@ -8,11 +8,6 @@
             "type": "command",
             "command": ".claude/hooks/git-add.sh",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/worktree-context.sh",
-            "timeout": 5
           }
         ]
       }
