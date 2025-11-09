@@ -118,7 +118,7 @@
   }
 </script>
 
-{#if !enabled}
+{#if enabled}
   <SwitchRow
     label={`${label ?? "Thinking"} · 包含过程`}
     checked={currentReasoning?.thinking?.includeThoughts ?? false}

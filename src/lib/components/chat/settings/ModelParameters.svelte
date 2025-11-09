@@ -289,7 +289,6 @@
             model={currentModel ?? null}
           />
         {:else if param.component === "thinking"}
-          <div>222222222</div>
           <ModelThinkingParameterRow
             label={(param.props as ReasoningProps)?.name ?? param.name}
             model={currentModel ?? null}
