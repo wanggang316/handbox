@@ -89,6 +89,7 @@ pub enum ParameterComponent {
     Slider,    // 滑块组件
     Switch,    // 开关组件
     Reasoning, // 推理/思维配置组件
+    Thinking,  // Google Thinking 配置组件
 }
 
 /// 滑块组件属性
@@ -453,6 +454,7 @@ impl ModelResponse {
             Some("switch") => ParameterComponent::Switch,
             Some("slider") => ParameterComponent::Slider,
             Some("reasoning") => ParameterComponent::Reasoning,
+            Some("thinking") => ParameterComponent::Thinking,
             _ => ParameterComponent::Slider, // 默认为 Slider
         };
 
@@ -523,7 +525,9 @@ impl ModelResponse {
                     show_toggle,
                 })
             }
-            ParameterComponent::Reasoning => ComponentProps::Reasoning(ReasoningProps { name }),
+            ParameterComponent::Reasoning | ParameterComponent::Thinking => {
+                ComponentProps::Reasoning(ReasoningProps { name })
+            }
         };
 
         (component, props, level)

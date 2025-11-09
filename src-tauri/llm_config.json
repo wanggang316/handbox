@@ -77,9 +77,16 @@
       }
     },
     "google_generate_content": {
+      "default_supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "streaming",
+        "thinking"
+      ],
       "parameters": {
-        "thinking": {
-          "component": "reasoning",
+        "reasoning": {
+          "component": "thinking",
           "level": "advance",
           "name": "Thinking"
         }

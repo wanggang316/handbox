@@ -7,6 +7,7 @@
   } from "$lib/states/chat.svelte";
   import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
   import ModelReasoningParameterRow from "./ModelReasoningParameterRow.svelte";
+  import ModelThinkingParameterRow from "./ModelThinkingParameterRow.svelte";
   import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
   import type {
@@ -43,10 +44,8 @@
 
   function isReasoningParamName(
     name: string
-  ): name is "reasoning" | "reasoning_effort" | "thinking" {
-    return (
-      name === "reasoning" || name === "reasoning_effort" || name === "thinking"
-    );
+  ): name is "reasoning" | "reasoning_effort" {
+    return name === "reasoning" || name === "reasoning_effort";
   }
 
   // 辅助函数：将 snake_case 转换为 camelCase (用于数据库字段映射)
@@ -61,7 +60,7 @@
 
     console.log("parameters", parameters);
     parameters.forEach((param) => {
-      if (param.component === "reasoning") {
+      if (param.component === "reasoning" || param.component === "thinking") {
         return;
       }
       const paramName = param.name; // snake_case from backend
@@ -248,6 +247,11 @@
             label={(param.props as ReasoningProps)?.name ?? param.name}
             model={currentModel ?? null}
           />
+        {:else if param.component === "thinking"}
+          <ModelThinkingParameterRow
+            label={(param.props as ReasoningProps)?.name ?? param.name}
+            model={currentModel ?? null}
+          />
         {/if}
       {/each}
     </TableGroup>
@@ -281,6 +285,12 @@
         {:else if param.component === "reasoning" && isReasoningParamName(param.name)}
           <ModelReasoningParameterRow
             paramName={param.name}
+            label={(param.props as ReasoningProps)?.name ?? param.name}
+            model={currentModel ?? null}
+          />
+        {:else if param.component === "thinking"}
+          <div>222222222</div>
+          <ModelThinkingParameterRow
             label={(param.props as ReasoningProps)?.name ?? param.name}
             model={currentModel ?? null}
           />
