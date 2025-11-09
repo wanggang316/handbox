@@ -12,7 +12,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use openai_rust::types::{
     CompletionChunkResponse, CompletionRequest, CompletionResponse, DeltaToolCall, Function,
-    FunctionCall, RequestMessage, Role, Tool, ToolCall as OpenAIToolCall, ToolChoice,
+    FunctionCall, ReasoningEffort as CompletionReasoningEffort, RequestMessage, Role, Tool,
+    ToolCall as OpenAIToolCall, ToolChoice,
 };
 
 /// OpenAI Completions 风格聊天客户端
@@ -73,6 +74,9 @@ impl OpenAICompletionsChatClient {
             tools,
             tool_choice,
             parallel_tool_calls: request.parallel_tool_calls,
+            reasoning_effort: request
+                .reasoning_effort
+                .map(Self::map_reasoning_effort),
             ..Default::default()
         }
     }
@@ -148,6 +152,19 @@ impl OpenAICompletionsChatClient {
             model: chunk.model,
             choices,
             usage: None,
+        }
+    }
+}
+
+impl OpenAICompletionsChatClient {
+    fn map_reasoning_effort(
+        effort: handbox_llm::types::LlmReasoningEffort,
+    ) -> CompletionReasoningEffort {
+        match effort {
+            handbox_llm::types::LlmReasoningEffort::Minimal => CompletionReasoningEffort::Minimal,
+            handbox_llm::types::LlmReasoningEffort::Low => CompletionReasoningEffort::Low,
+            handbox_llm::types::LlmReasoningEffort::Medium => CompletionReasoningEffort::Medium,
+            handbox_llm::types::LlmReasoningEffort::High => CompletionReasoningEffort::High,
         }
     }
 }

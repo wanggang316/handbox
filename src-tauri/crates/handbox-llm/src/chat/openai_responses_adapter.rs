@@ -13,8 +13,10 @@ use futures::StreamExt;
 use openai_rust::client::Error as OpenAIError;
 use openai_rust::types::{
     CreateResponseRequest, InputItem, InputMessage, InputMessageContent, InputMessageRole, Item,
-    ItemFunctionCall, ItemFunctionCallOutput, ItemStatus, OutputItem, Response as OpenAIResponse,
-    ResponseInput, ResponseStreamEvent, ResponseUsage, ResponsesTool, ResponsesToolChoice,
+    ItemFunctionCall, ItemFunctionCallOutput, ItemStatus, OutputItem, Reasoning as OpenAIReasoning,
+    ReasoningEffort as OpenAIReasoningEffort, ReasoningSummary as OpenAIReasoningSummary,
+    Response as OpenAIResponse, ResponseInput, ResponseStreamEvent, ResponseUsage, ResponsesTool,
+    ResponsesToolChoice,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -157,6 +159,10 @@ impl OpenAIResponsesChatClient {
 
         if let Some(stream) = request.stream {
             builder = builder.stream(stream);
+        }
+
+        if let Some(reasoning) = &request.reasoning {
+            builder = builder.reasoning(Self::map_reasoning(reasoning));
         }
 
         // 转换工具定义
@@ -393,6 +399,38 @@ impl OpenAIResponsesChatClient {
             | ResponseStreamEvent::OutputTextDone { .. }
             | ResponseStreamEvent::ContentPartDone { .. }
             | ResponseStreamEvent::Unknown => None,
+        }
+    }
+}
+
+impl OpenAIResponsesChatClient {
+    fn map_reasoning(reasoning: &handbox_llm::types::LlmResponsesReasoning) -> OpenAIReasoning {
+        OpenAIReasoning {
+            effort: reasoning.effort.map(Self::map_reasoning_effort),
+            summary: reasoning.summary.map(Self::map_reasoning_summary),
+            #[allow(deprecated)]
+            generate_summary: None,
+        }
+    }
+
+    fn map_reasoning_effort(
+        effort: handbox_llm::types::LlmReasoningEffort,
+    ) -> OpenAIReasoningEffort {
+        match effort {
+            handbox_llm::types::LlmReasoningEffort::Minimal => OpenAIReasoningEffort::Minimal,
+            handbox_llm::types::LlmReasoningEffort::Low => OpenAIReasoningEffort::Low,
+            handbox_llm::types::LlmReasoningEffort::Medium => OpenAIReasoningEffort::Medium,
+            handbox_llm::types::LlmReasoningEffort::High => OpenAIReasoningEffort::High,
+        }
+    }
+
+    fn map_reasoning_summary(
+        summary: handbox_llm::types::LlmReasoningSummary,
+    ) -> OpenAIReasoningSummary {
+        match summary {
+            handbox_llm::types::LlmReasoningSummary::Auto => OpenAIReasoningSummary::Auto,
+            handbox_llm::types::LlmReasoningSummary::Concise => OpenAIReasoningSummary::Concise,
+            handbox_llm::types::LlmReasoningSummary::Detailed => OpenAIReasoningSummary::Detailed,
         }
     }
 }

@@ -22,9 +22,22 @@ impl ChatRepository {
         let mcp_servers_json = serde_json::to_string(&chat.mcp_servers)
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
+        let supported_parameters_json = chat.supported_parameters.as_ref().and_then(|params| {
+            if params.is_empty() {
+                None
+            } else {
+                serde_json::to_string(params).ok()
+            }
+        });
+
+        let reasoning_json = chat
+            .reasoning
+            .as_ref()
+            .and_then(|value| serde_json::to_string(value).ok());
+
         let query = r#"
-            INSERT INTO chats (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            INSERT INTO chats (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, supported_parameters, reasoning, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         "#;
 
         sqlx::query(query)
@@ -40,6 +53,9 @@ impl ChatRepository {
             .bind(&chat.system_prompt)
             .bind(&mcp_servers_json)
             .bind(chat.turn_count)
+            .bind(&chat.artifact_id)
+            .bind(supported_parameters_json)
+            .bind(reasoning_json)
             .bind(chat.created_at)
             .bind(chat.updated_at)
             .execute(self.db.pool())
@@ -52,7 +68,7 @@ impl ChatRepository {
     /// 获取聊天列表
     pub async fn list_chats(&self, limit: i32, offset: i32) -> Result<Vec<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, supported_parameters, reasoning, created_at, updated_at
             FROM chats ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -74,7 +90,7 @@ impl ChatRepository {
     /// 根据 ID 获取聊天
     pub async fn get_chat_by_id(&self, chat_id: &UUID) -> Result<Option<Chat>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, supported_parameters, reasoning, created_at, updated_at
             FROM chats WHERE id = $1
         "#;
 
@@ -96,9 +112,22 @@ impl ChatRepository {
         let mcp_servers_json = serde_json::to_string(&chat.mcp_servers)
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
 
+        let supported_parameters_json = chat.supported_parameters.as_ref().and_then(|params| {
+            if params.is_empty() {
+                None
+            } else {
+                serde_json::to_string(params).ok()
+            }
+        });
+
+        let reasoning_json = chat
+            .reasoning
+            .as_ref()
+            .and_then(|value| serde_json::to_string(value).ok());
+
         let query = r#"
-            UPDATE chats SET name = $1, temperature = $2, top_p = $3, top_k = $4, max_tokens = $5, stream = $6, model_id = $7, provider_id = $8, system_prompt = $9, mcp_servers = $10, turn_count = $11, updated_at = $12
-            WHERE id = $13
+            UPDATE chats SET name = $1, temperature = $2, top_p = $3, top_k = $4, max_tokens = $5, stream = $6, model_id = $7, provider_id = $8, system_prompt = $9, mcp_servers = $10, turn_count = $11, artifact_id = $12, supported_parameters = $13, reasoning = $14, updated_at = $15
+            WHERE id = $16
         "#;
 
         let result = sqlx::query(query)
@@ -113,6 +142,9 @@ impl ChatRepository {
             .bind(&chat.system_prompt)
             .bind(&mcp_servers_json)
             .bind(chat.turn_count)
+            .bind(&chat.artifact_id)
+            .bind(supported_parameters_json)
+            .bind(reasoning_json)
             .bind(chat.updated_at)
             .bind(&chat.id)
             .execute(self.db.pool())
@@ -307,6 +339,20 @@ impl ChatRepository {
             Vec::new()
         };
 
+        let supported_parameters = row
+            .try_get::<Option<String>, _>("supported_parameters")?
+            .and_then(|raw| match raw.trim() {
+                "" => None,
+                value => serde_json::from_str(value).ok(),
+            });
+
+        let reasoning = row
+            .try_get::<Option<String>, _>("reasoning")?
+            .and_then(|raw| match raw.trim() {
+                "" => None,
+                value => serde_json::from_str(value).ok(),
+            });
+
         // 明确处理 NULL 值：SQLx 要求我们指定要读取 Option<T> 类型
         let temperature: Option<f32> = row.try_get::<Option<f32>, _>("temperature")?;
         let top_p: Option<f32> = row.try_get::<Option<f32>, _>("top_p")?;
@@ -330,6 +376,8 @@ impl ChatRepository {
             mcp_servers,
             turn_count: row.try_get("turn_count").ok(),
             artifact_id: row.try_get("artifact_id").ok(),
+            supported_parameters,
+            reasoning,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -386,6 +434,8 @@ mod tests {
             ],
             turn_count: Some(5),
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -451,6 +501,8 @@ mod tests {
             }],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -483,6 +535,8 @@ mod tests {
             ],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -508,6 +562,8 @@ mod tests {
             }],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -529,6 +585,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -578,6 +636,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -599,6 +659,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -620,6 +682,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -668,6 +732,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -689,6 +755,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -710,6 +778,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -731,6 +801,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -784,6 +856,8 @@ mod tests {
             }],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -816,6 +890,8 @@ mod tests {
             ],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -841,6 +917,8 @@ mod tests {
             }],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -862,6 +940,8 @@ mod tests {
             mcp_servers: vec![],
             turn_count: None,
             artifact_id: None,
+            supported_parameters: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };

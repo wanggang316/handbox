@@ -25,7 +25,7 @@ impl GoogleChatClient {
         &self,
         request: &LlmRequest,
     ) -> google_genai_rust::types::GenerateContentRequest {
-        use google_genai_rust::types::{Content, GenerationConfig};
+        use google_genai_rust::types::{Content, GenerationConfig, ThinkingConfig};
 
         // 转换消息格式 - 将系统消息分离出来
         let mut system_instruction = None;
@@ -67,6 +67,9 @@ impl GoogleChatClient {
         }
         if let Some(max_tokens) = request.max_tokens {
             generation_config.max_output_tokens = Some(max_tokens);
+        }
+        if let Some(thinking) = request.thinking.as_ref() {
+            generation_config.thinking_config = Some(Self::map_thinking_config(thinking));
         }
 
         let mut google_request = google_genai_rust::types::GenerateContentRequest::new(contents);
@@ -195,6 +198,17 @@ impl GoogleChatClient {
             }],
             usage: None,
         })
+    }
+}
+
+impl GoogleChatClient {
+    fn map_thinking_config(
+        thinking: &handbox_llm::types::LlmThinkingConfig,
+    ) -> ThinkingConfig {
+        ThinkingConfig {
+            include_thoughts: thinking.include_thoughts,
+            thinking_budget: thinking.thinking_budget,
+        }
     }
 }
 

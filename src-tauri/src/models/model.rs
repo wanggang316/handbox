@@ -86,8 +86,9 @@ pub enum ParameterLevel {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ParameterComponent {
-    Slider, // 滑块组件
-    Switch, // 开关组件
+    Slider,    // 滑块组件
+    Switch,    // 开关组件
+    Reasoning, // 推理/思维配置组件
 }
 
 /// 滑块组件属性
@@ -114,6 +115,13 @@ pub struct SwitchProps {
 pub enum ComponentProps {
     Slider(SliderProps),
     Switch(SwitchProps),
+    Reasoning(ReasoningProps),
+}
+
+/// 推理配置属性
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningProps {
+    pub name: String,
 }
 
 /// 聊天方法详情
@@ -444,6 +452,7 @@ impl ModelResponse {
         let component = match config.component.as_deref() {
             Some("switch") => ParameterComponent::Switch,
             Some("slider") => ParameterComponent::Slider,
+            Some("reasoning") => ParameterComponent::Reasoning,
             _ => ParameterComponent::Slider, // 默认为 Slider
         };
 
@@ -514,6 +523,7 @@ impl ModelResponse {
                     show_toggle,
                 })
             }
+            ParameterComponent::Reasoning => ComponentProps::Reasoning(ReasoningProps { name }),
         };
 
         (component, props, level)

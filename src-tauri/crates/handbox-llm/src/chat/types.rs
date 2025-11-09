@@ -93,6 +93,12 @@ pub struct LlmRequest {
     pub max_tokens: Option<i32>,
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<LlmResponsesReasoning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<LlmReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<LlmThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<LlmRequestTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<LlmToolChoice>,
@@ -197,6 +203,45 @@ pub type LlmToolCallDelta = LlmDeltaToolCall;
 pub struct LlmDeltaToolFunction {
     pub name: Option<String>,
     pub arguments: Option<String>,
+}
+
+/// Responses API 推理配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmResponsesReasoning {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<LlmReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<LlmReasoningSummary>,
+}
+
+/// 通用的推理强度
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmReasoningEffort {
+    Minimal,
+    Low,
+    Medium,
+    High,
+}
+
+/// 推理总结级别
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmReasoningSummary {
+    Auto,
+    Concise,
+    Detailed,
+}
+
+/// Google 思维配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmThinkingConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_thoughts: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<i32>,
 }
 
 /// 聊天 API 类型枚举

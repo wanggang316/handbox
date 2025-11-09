@@ -1,4 +1,5 @@
 use super::common::{Timestamp, UUID};
+use handbox_llm::types::{LlmReasoningEffort, LlmResponsesReasoning, LlmThinkingConfig};
 use serde::{Deserialize, Serialize};
 
 fn default_execution_mode() -> String {
@@ -35,8 +36,22 @@ pub struct Chat {
     pub mcp_servers: Vec<McpServerConfig>,
     pub turn_count: Option<i32>,
     pub artifact_id: Option<UUID>,
+    pub supported_parameters: Option<Vec<String>>,
+    pub reasoning: Option<ChatReasoningConfig>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+}
+
+/// 聊天级推理配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatReasoningConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub responses: Option<LlmResponsesReasoning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<LlmReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<LlmThinkingConfig>,
 }
 
 #[cfg(test)]
@@ -73,6 +88,8 @@ mod tests {
             }],
             turn_count: Some(5),
             artifact_id: None,
+            supported_parameters: Some(vec!["temperature".to_string(), "reasoning".to_string()]),
+            reasoning: None,
             created_at: 1000,
             updated_at: 2000,
         };

@@ -5,13 +5,15 @@
     currentChatModel,
     toNumber,
   } from "$lib/states/chat.svelte";
-  import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
+import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
+import ModelReasoningParameterRow from "./ModelReasoningParameterRow.svelte";
   import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
   import type {
     ModelParameterResponse,
     SliderProps,
     SwitchProps,
+    ReasoningProps,
   } from "$lib/types/provider";
 
   type SaveStatus = "saved" | "saving" | "error";
@@ -34,9 +36,15 @@
 
   // 辅助函数：类型守卫
   function isSliderProps(
-    props: SliderProps | SwitchProps
+    props: SliderProps | SwitchProps | ReasoningProps
   ): props is SliderProps {
-    return "step" in props;
+    return props != null && typeof props === "object" && "min" in props;
+  }
+
+  function isReasoningParamName(
+    name: string,
+  ): name is "reasoning" | "reasoning_effort" | "thinking" {
+    return name === "reasoning" || name === "reasoning_effort" || name === "thinking";
   }
 
   // 辅助函数：将 snake_case 转换为 camelCase (用于数据库字段映射)
@@ -50,6 +58,9 @@
     const settings: Record<string, any> = {};
 
     parameters.forEach((param) => {
+      if (param.component === "reasoning") {
+        return;
+      }
       const paramName = param.name; // snake_case from backend
       const dbFieldName = snakeToCamel(paramName); // camelCase for database
 
@@ -68,8 +79,8 @@
 
         settings[paramName] = value;
         settings[`enable${capitalize(paramName)}`] = hasValue;
-      } else if (param.component === "switch" && !isSliderProps(param.props)) {
-        const props = param.props;
+      } else if (param.component === "switch") {
+        const props = param.props as SwitchProps;
         const chatValue = (chat as any)?.[dbFieldName];
         const value =
           typeof chatValue === "boolean" ? chatValue : (props.default ?? true);
@@ -125,6 +136,9 @@
   // 为每个参数创建自动保存 effect
   $effect(() => {
     parameters.forEach((param) => {
+      if (param.component === "reasoning") {
+        return;
+      }
       const paramName = param.name; // snake_case from backend
       const dbFieldName = snakeToCamel(paramName); // camelCase for database
 
@@ -225,6 +239,12 @@
             label={props.name}
             bind:checked={currentSettings[param.name]}
           />
+        {:else if param.component === "reasoning" && isReasoningParamName(param.name)}
+          <ModelReasoningParameterRow
+            paramName={param.name}
+            label={(param.props as ReasoningProps)?.name ?? param.name}
+            model={currentModel ?? null}
+          />
         {/if}
       {/each}
     </TableGroup>
@@ -254,6 +274,12 @@
           <SwitchRow
             label={props.name}
             bind:checked={currentSettings[param.name]}
+          />
+        {:else if param.component === "reasoning" && isReasoningParamName(param.name)}
+          <ModelReasoningParameterRow
+            paramName={param.name}
+            label={(param.props as ReasoningProps)?.name ?? param.name}
+            model={currentModel ?? null}
           />
         {/if}
       {/each}

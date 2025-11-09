@@ -35,7 +35,7 @@ export type ChatMethodName =
 export type ParameterLevel = "base" | "advance";
 
 // 参数组件类型
-export type ParameterComponent = "slider" | "switch";
+export type ParameterComponent = "slider" | "switch" | "reasoning";
 
 // 滑块组件属性
 export interface SliderProps {
@@ -53,8 +53,12 @@ export interface SwitchProps {
   name: string;
 }
 
+export interface ReasoningProps {
+  name?: string | null;
+}
+
 // 组件属性联合类型
-export type ComponentProps = SliderProps | SwitchProps;
+export type ComponentProps = SliderProps | SwitchProps | ReasoningProps;
 
 // 参数响应 (替换原 ChatMethodParameter)
 export interface ModelParameterResponse {

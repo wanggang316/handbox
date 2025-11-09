@@ -359,6 +359,52 @@ impl ModelRepository {
         Ok(models)
     }
 
+    /// 根据 provider 和 model_id 获取单个模型
+    pub async fn get_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<Option<Model>, AppError> {
+        let query = r#"
+            SELECT
+                id,
+                provider_id,
+                name,
+                description,
+                context_length,
+                output_max_tokens,
+                pricing,
+                input_modalities,
+                output_modalities,
+                supported_parameters,
+                default_parameters,
+                max_parameters,
+                supported_features,
+                supported_methods,
+                metadata,
+                url,
+                model_created_at,
+                enabled,
+                favorite,
+                created_at,
+                updated_at
+            FROM models
+            WHERE provider_id = $1 AND id = $2
+            LIMIT 1
+        "#;
+
+        let row = sqlx::query(query)
+            .bind(provider_id)
+            .bind(model_id)
+            .fetch_optional(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to get model {}: {}", model_id, e))
+            })?;
+
+        Ok(row.map(|r| self.row_to_model(r)).transpose()?)
+    }
+
     /// 更新模型启用状态
     pub async fn toggle_model(
         &self,

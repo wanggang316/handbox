@@ -1423,6 +1423,9 @@ impl MessageService {
             .collect();
 
         let tools = self.prepare_tools(&chat).await?;
+        let reasoning_config = chat.reasoning.clone();
+        let supports_reasoning = Self::chat_supports_parameter(&chat, "reasoning");
+        let supports_thinking = Self::chat_supports_parameter(&chat, "thinking");
 
         Ok(LlmRequest {
             model: request.model_id.clone(),
@@ -1443,6 +1446,18 @@ impl MessageService {
                 Some(LlmToolChoice::Auto)
             },
             parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
+            reasoning: reasoning_config
+                .as_ref()
+                .and_then(|cfg| cfg.responses.clone())
+                .filter(|_| supports_reasoning),
+            reasoning_effort: reasoning_config
+                .as_ref()
+                .and_then(|cfg| cfg.reasoning_effort.clone())
+                .filter(|_| supports_reasoning),
+            thinking: reasoning_config
+                .as_ref()
+                .and_then(|cfg| cfg.thinking.clone())
+                .filter(|_| supports_thinking),
         })
     }
 
@@ -1521,6 +1536,13 @@ impl MessageService {
         }
 
         Ok(tools)
+    }
+
+    fn chat_supports_parameter(chat: &Chat, key: &str) -> bool {
+        chat.supported_parameters
+            .as_ref()
+            .map(|params| params.iter().any(|param| param == key))
+            .unwrap_or(false)
     }
 
     /// 构造并保存用户消息

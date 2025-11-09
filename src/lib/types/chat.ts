@@ -62,6 +62,30 @@ export interface MessageAttachment {
   path: string;
 }
 
+// Reasoning/thinking support
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+export type ReasoningSummary = 'auto' | 'concise' | 'detailed';
+
+export interface ResponsesReasoningConfig {
+  effort?: ReasoningEffort | null;
+  summary?: ReasoningSummary | null;
+}
+
+export interface ReasoningEffortConfig {
+  effort?: ReasoningEffort | null;
+}
+
+export interface ThinkingConfig {
+  includeThoughts?: boolean | null;
+  thinkingBudget?: number | null;
+}
+
+export interface ChatReasoningConfig {
+  responses?: ResponsesReasoningConfig;
+  reasoningEffort?: ReasoningEffortConfig;
+  thinking?: ThinkingConfig;
+}
+
 // 聊天实体
 export interface Chat extends BaseEntity {
   name: string;
@@ -81,6 +105,8 @@ export interface Chat extends BaseEntity {
   turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
 
   artifactId?: UUID;
+  supportedParameters?: string[] | null;
+  reasoning?: ChatReasoningConfig | null;
 }
 
 

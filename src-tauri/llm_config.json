@@ -58,9 +58,33 @@
         }
       }
     },
-    "completions": {},
-    "responses": {},
-    "google_generate_content": {}
+    "completions": {
+      "parameters": {
+        "reasoning_effort": {
+          "component": "reasoning",
+          "level": "advance",
+          "name": "Reasoning"
+        }
+      }
+    },
+    "responses": {
+      "parameters": {
+        "reasoning": {
+          "component": "reasoning",
+          "level": "advance",
+          "name": "Reasoning"
+        }
+      }
+    },
+    "google_generate_content": {
+      "parameters": {
+        "thinking": {
+          "component": "reasoning",
+          "level": "advance",
+          "name": "Thinking"
+        }
+      }
+    }
   },
   "providers": [
     {

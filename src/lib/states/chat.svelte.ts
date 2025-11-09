@@ -2,7 +2,12 @@
  * 聊天相关状态管理 - Svelte 5 状态管理
  */
 
-import type { Chat, UUID, McpServerConfig } from "../types";
+import type {
+  Chat,
+  UUID,
+  McpServerConfig,
+  ChatReasoningConfig,
+} from "../types";
 import type {
   ModelParameterResponse,
   ModelWithProvider,
@@ -487,6 +492,19 @@ export const chatActions = {
     chatState.currentChat = updated;
   },
 
+  async updateReasoning(reasoning: ChatReasoningConfig | null): Promise<void> {
+    if (!chatState.currentChat?.id) {
+      return;
+    }
+
+    const updated = await chatApi.updateChatField(
+      chatState.currentChat.id,
+      "reasoning",
+      reasoning,
+    );
+    chatState.currentChat = updated;
+  },
+
   /**
    * 更新MCP服务器配置
    */
@@ -516,6 +534,8 @@ export const chatActions = {
         modelId,
         providerId,
         mcpServers: [],
+        supportedParameters: null,
+        reasoning: null,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       } as Chat;

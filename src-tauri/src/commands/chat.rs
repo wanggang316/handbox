@@ -2,7 +2,7 @@
 
 use crate::models::AppError;
 use crate::services::{ChatParameter, ChatService};
-use crate::storage::types::{Chat, UUID};
+use crate::storage::types::{Chat, ChatReasoningConfig, UUID};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -169,6 +169,21 @@ pub async fn chat_update_field(
                 )
             };
             ChatParameter::TurnCount(turn_count_value)
+        }
+        "reasoning" => {
+            let reasoning_value = if value.is_null() {
+                None
+            } else {
+                Some(
+                    serde_json::from_value::<ChatReasoningConfig>(value).map_err(|e| {
+                        AppError::validation_error(&format!(
+                            "Invalid reasoning configuration: {}",
+                            e
+                        ))
+                    })?,
+                )
+            };
+            ChatParameter::Reasoning(reasoning_value)
         }
         _ => {
             return Err(AppError::validation_error(&format!(

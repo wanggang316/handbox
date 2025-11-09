@@ -2,7 +2,7 @@
 
 use crate::models::{AddProviderRequest, AppError};
 use crate::services::{Database, ModelService};
-use crate::storage::types::{Provider, Timestamp, UUID};
+use crate::storage::types::{Model, Provider, Timestamp, UUID};
 use crate::storage::{ChatRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
@@ -143,6 +143,15 @@ impl ProviderService {
     /// 获取所有供应商
     pub async fn list_providers(&self) -> Result<Vec<Provider>, AppError> {
         self.provider_repo.list_providers().await
+    }
+
+    /// 获取单个模型
+    pub async fn get_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<Option<Model>, AppError> {
+        self.model_service.get_model(provider_id, model_id).await
     }
 
     /// 删除供应商

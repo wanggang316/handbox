@@ -3,7 +3,7 @@
  */
 
 import { apiCall } from "./index";
-import type { Chat, UUID, McpServerConfig } from "../types";
+import type { Chat, UUID, McpServerConfig, ChatReasoningConfig } from "../types";
 
 /**
  * 创建新的聊天
@@ -86,8 +86,9 @@ export async function updateChatField(
     | "stream"
     | "systemPrompt"
     | "mcpServers"
-    | "turnCount",
-  value: number | boolean | string | McpServerConfig[] | null,
+    | "turnCount"
+    | "reasoning",
+  value: number | boolean | string | McpServerConfig[] | ChatReasoningConfig | null,
 ): Promise<Chat> {
   return apiCall<Chat>("chat_update_field", {
     chatId,

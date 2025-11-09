@@ -841,14 +841,16 @@ mod tests {
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
-            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, supported_parameters, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#;
         sqlx::query(chat_query)
             .bind(&chat_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
+            .bind(Option::<String>::None)
+            .bind(Option::<String>::None)
             .bind(now)
             .bind(now)
             .execute(db_arc.pool())
@@ -933,14 +935,16 @@ mod tests {
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
-            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, supported_parameters, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#;
         sqlx::query(chat_query)
             .bind(&chat_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
+            .bind(Option::<String>::None)
+            .bind(Option::<String>::None)
             .bind(now)
             .bind(now)
             .execute(db_arc.pool())
@@ -995,14 +999,16 @@ mod tests {
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
-            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, supported_parameters, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#;
         sqlx::query(chat_query)
             .bind(&chat_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
+            .bind(Option::<String>::None)
+            .bind(Option::<String>::None)
             .bind(now)
             .bind(now)
             .execute(db_arc.pool())
@@ -1120,14 +1126,16 @@ mod tests {
 
         // 创建 chat
         let chat_query = r#"
-            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, supported_parameters, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#;
         sqlx::query(chat_query)
             .bind(&chat_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
+            .bind(Option::<String>::None)
+            .bind(Option::<String>::None)
             .bind(now)
             .bind(now)
             .execute(db_arc.pool())

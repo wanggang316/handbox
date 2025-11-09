@@ -129,6 +129,15 @@ impl ModelService {
             .collect())
     }
 
+    /// 获取单个模型
+    pub async fn get_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<Option<Model>, AppError> {
+        self.model_repo.get_model(provider_id, model_id).await
+    }
+
     /// 切换模型启用状态
     pub async fn toggle_model(
         &self,
