@@ -534,7 +534,6 @@ export const chatActions = {
         modelId,
         providerId,
         mcpServers: [],
-        supportedParameters: null,
         reasoning: null,
         createdAt: Date.now(),
         updatedAt: Date.now(),

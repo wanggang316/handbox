@@ -1424,8 +1424,10 @@ impl MessageService {
 
         let tools = self.prepare_tools(&chat).await?;
         let reasoning_config = chat.reasoning.clone();
-        let supports_reasoning = Self::chat_supports_parameter(&chat, "reasoning");
-        let supports_thinking = Self::chat_supports_parameter(&chat, "thinking");
+        let supported_parameters = self.lookup_supported_parameters(chat).await?;
+        let supports_reasoning = Self::parameters_include(&supported_parameters, "reasoning")
+            || Self::parameters_include(&supported_parameters, "reasoning_effort");
+        let supports_thinking = Self::parameters_include(&supported_parameters, "thinking");
 
         Ok(LlmRequest {
             model: request.model_id.clone(),
@@ -1538,9 +1540,25 @@ impl MessageService {
         Ok(tools)
     }
 
-    fn chat_supports_parameter(chat: &Chat, key: &str) -> bool {
-        chat.supported_parameters
-            .as_ref()
+    async fn lookup_supported_parameters(
+        &self,
+        chat: &Chat,
+    ) -> Result<Option<Vec<String>>, AppError> {
+        if let (Some(model_id), Some(provider_id)) = (&chat.model_id, &chat.provider_id) {
+            if let Some(model) = self
+                .provider_service
+                .get_model(provider_id, model_id)
+                .await?
+            {
+                return Ok(model.supported_parameters.clone());
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn parameters_include(list: &Option<Vec<String>>, key: &str) -> bool {
+        list.as_ref()
             .map(|params| params.iter().any(|param| param == key))
             .unwrap_or(false)
     }

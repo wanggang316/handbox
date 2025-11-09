@@ -35,11 +35,6 @@
   });
 
   function chatSupports(key: 'reasoning' | 'thinking'): boolean {
-    const chatParams = chat?.supportedParameters;
-    if (Array.isArray(chatParams) && chatParams.length > 0) {
-      return chatParams.includes(key);
-    }
-
     if (model) {
       const supported = getSupportedParameterSet(model);
       if (key === 'thinking') {

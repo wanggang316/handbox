@@ -92,13 +92,10 @@ impl ChatService {
             mcp_servers: mcp_servers.unwrap_or_default(),
             turn_count: Some(5), // 默认值为 5
             artifact_id: None,
-            supported_parameters: None,
             reasoning: None,
             created_at: now,
             updated_at: now,
         };
-
-        self.populate_supported_parameters(&mut chat).await?;
 
         self.repository.create_chat(&chat).await?;
         Ok(chat)
@@ -145,15 +142,12 @@ impl ChatService {
             } => {
                 chat.model_id = Some(model_id);
                 chat.provider_id = Some(provider_id);
-                self.populate_supported_parameters(&mut chat).await?;
             }
             ChatParameter::SystemPrompt(prompt) => chat.system_prompt = prompt,
             ChatParameter::McpServers(servers) => chat.mcp_servers = servers,
             ChatParameter::TurnCount(turn_count) => chat.turn_count = turn_count,
             ChatParameter::Reasoning(reasoning) => chat.reasoning = reasoning,
         }
-
-        Self::prune_reasoning_if_unsupported(&mut chat);
 
         chat.updated_at = Self::current_timestamp();
         self.repository.update_chat(&chat).await?;
@@ -212,66 +206,9 @@ impl ChatService {
             chat.turn_count = Some(tc);
         }
 
-        if model_id.is_some() || provider_id.is_some() {
-            self.populate_supported_parameters(&mut chat).await?;
-        }
-
-        Self::prune_reasoning_if_unsupported(&mut chat);
-
         chat.updated_at = Self::current_timestamp();
         self.repository.update_chat(&chat).await?;
         Ok(chat)
-    }
-
-    async fn populate_supported_parameters(&self, chat: &mut Chat) -> Result<(), AppError> {
-        if let (Some(model_id), Some(provider_id)) = (&chat.model_id, &chat.provider_id) {
-            let model = self
-                .provider_service
-                .get_model(provider_id, model_id)
-                .await?
-                .ok_or_else(|| {
-                    AppError::validation_error(&format!(
-                        "Model {} for provider {} not found",
-                        model_id, provider_id
-                    ))
-                })?;
-            chat.supported_parameters = model.supported_parameters.clone();
-        } else {
-            chat.supported_parameters = None;
-        }
-
-        Ok(())
-    }
-
-    fn prune_reasoning_if_unsupported(chat: &mut Chat) {
-        if chat.reasoning.is_none() {
-            return;
-        }
-
-        if let Some(reasoning) = &mut chat.reasoning {
-            if !Self::chat_supports_parameter(chat, "reasoning") {
-                reasoning.responses = None;
-                reasoning.reasoning_effort = None;
-            }
-
-            if !Self::chat_supports_parameter(chat, "thinking") {
-                reasoning.thinking = None;
-            }
-
-            if reasoning.responses.is_none()
-                && reasoning.reasoning_effort.is_none()
-                && reasoning.thinking.is_none()
-            {
-                chat.reasoning = None;
-            }
-        }
-    }
-
-    fn chat_supports_parameter(chat: &Chat, key: &str) -> bool {
-        chat.supported_parameters
-            .as_ref()
-            .map(|params| params.iter().any(|param| param == key))
-            .unwrap_or(false)
     }
 
     fn current_timestamp() -> i64 {

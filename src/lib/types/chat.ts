@@ -105,7 +105,6 @@ export interface Chat extends BaseEntity {
   turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
 
   artifactId?: UUID;
-  supportedParameters?: string[] | null;
   reasoning?: ChatReasoningConfig | null;
 }
 
