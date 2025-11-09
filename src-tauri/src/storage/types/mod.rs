@@ -5,7 +5,7 @@ pub mod message;
 pub mod model;
 pub mod provider;
 
-pub use chat::{Chat, McpServerConfig};
+pub use chat::{Chat, ChatReasoningConfig, McpServerConfig};
 pub use common::{Timestamp, UUID};
 pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,

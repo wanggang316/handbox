@@ -76,7 +76,7 @@ impl ChatService {
             .unwrap()
             .as_millis() as i64;
 
-        let mut chat = Chat {
+        let chat = Chat {
             id: uuid::Uuid::new_v4().to_string(),
             name,
             last_message_at: None,
@@ -206,6 +206,20 @@ impl ChatService {
             chat.turn_count = Some(tc);
         }
 
+        chat.updated_at = Self::current_timestamp();
+        self.repository.update_chat(&chat).await?;
+        Ok(chat)
+    }
+
+    /// 清空模型相关参数
+    pub async fn clear_model_parameters(&self, chat_id: UUID) -> Result<Chat, AppError> {
+        let mut chat = self.get_chat(chat_id).await?;
+        chat.temperature = None;
+        chat.top_p = None;
+        chat.top_k = None;
+        chat.max_tokens = None;
+        chat.stream = None;
+        chat.reasoning = None;
         chat.updated_at = Self::current_timestamp();
         self.repository.update_chat(&chat).await?;
         Ok(chat)
@@ -588,6 +602,9 @@ mod tests {
             .await
             .unwrap();
 
+        let original_model_id = created.model_id.clone();
+        let original_provider_id = created.provider_id.clone();
+
         let updated = service
             .update_chat(
                 created.id.clone(),
@@ -597,8 +614,8 @@ mod tests {
                 Some(Some(40)),    // Option<Option<i32>>
                 Some(Some(4096)),  // Option<Option<i32>>
                 Some(Some(false)), // Option<Option<bool>>
-                Some("claude-3".to_string()),
-                Some("anthropic".to_string()),
+                None,              // model unchanged
+                None,              // provider unchanged
                 Some("Updated prompt".to_string()),
                 Some(vec![
                     McpServerConfig {
@@ -623,8 +640,6 @@ mod tests {
         assert_eq!(updated.top_k, Some(40));
         assert_eq!(updated.max_tokens, Some(4096));
         assert_eq!(updated.stream, Some(false));
-        assert_eq!(updated.model_id, Some("claude-3".to_string()));
-        assert_eq!(updated.provider_id, Some("anthropic".to_string()));
         assert_eq!(updated.system_prompt, Some("Updated prompt".to_string()));
         assert_eq!(
             updated.mcp_servers,
@@ -793,6 +808,46 @@ mod tests {
         assert_eq!(updated.top_k, None);
         assert_eq!(updated.max_tokens, None);
         assert_eq!(updated.stream, None);
+    }
+
+    #[tokio::test]
+    async fn clears_parameters_via_service_method() {
+        let db = create_test_database().await;
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
+
+        let created = service
+            .create_chat(
+                "Test Chat".to_string(),
+                Some(0.8),
+                Some(0.6),
+                Some(20),
+                Some(1024),
+                Some(true),
+                Some("model-1".to_string()),
+                Some("provider-1".to_string()),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let cleared = service
+            .clear_model_parameters(created.id.clone())
+            .await
+            .expect("clear failed");
+
+        assert!(cleared.temperature.is_none());
+        assert!(cleared.top_p.is_none());
+        assert!(cleared.top_k.is_none());
+        assert!(cleared.max_tokens.is_none());
+        assert!(cleared.stream.is_none());
+        assert!(cleared.reasoning.is_none());
     }
 
     #[tokio::test]

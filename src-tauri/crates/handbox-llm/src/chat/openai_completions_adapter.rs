@@ -5,8 +5,8 @@ use crate::chat::ChatClient;
 use crate::error::LlmClientError;
 use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmDeltaToolCall,
-    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmProvider, LlmRequest, LlmResponse,
-    LlmToolCall, LlmToolChoice, LlmToolFunction, LlmUsage,
+    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort,
+    LlmRequest, LlmResponse, LlmToolCall, LlmToolChoice, LlmToolFunction, LlmUsage,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -76,6 +76,7 @@ impl OpenAICompletionsChatClient {
             parallel_tool_calls: request.parallel_tool_calls,
             reasoning_effort: request
                 .reasoning_effort
+                .clone()
                 .map(Self::map_reasoning_effort),
             ..Default::default()
         }
@@ -157,14 +158,12 @@ impl OpenAICompletionsChatClient {
 }
 
 impl OpenAICompletionsChatClient {
-    fn map_reasoning_effort(
-        effort: handbox_llm::types::LlmReasoningEffort,
-    ) -> CompletionReasoningEffort {
+    fn map_reasoning_effort(effort: LlmReasoningEffort) -> CompletionReasoningEffort {
         match effort {
-            handbox_llm::types::LlmReasoningEffort::Minimal => CompletionReasoningEffort::Minimal,
-            handbox_llm::types::LlmReasoningEffort::Low => CompletionReasoningEffort::Low,
-            handbox_llm::types::LlmReasoningEffort::Medium => CompletionReasoningEffort::Medium,
-            handbox_llm::types::LlmReasoningEffort::High => CompletionReasoningEffort::High,
+            LlmReasoningEffort::Minimal => CompletionReasoningEffort::Minimal,
+            LlmReasoningEffort::Low => CompletionReasoningEffort::Low,
+            LlmReasoningEffort::Medium => CompletionReasoningEffort::Medium,
+            LlmReasoningEffort::High => CompletionReasoningEffort::High,
         }
     }
 }

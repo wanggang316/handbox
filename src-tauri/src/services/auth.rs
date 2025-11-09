@@ -407,6 +407,10 @@ impl GoogleOAuthService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use once_cell::sync::Lazy;
+    use std::sync::Mutex;
+
+    static ENV_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
     fn test_oauth_config_redirect_uri() {
@@ -421,9 +425,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_auth_url() {
+        let _lock = ENV_GUARD.lock().unwrap();
         // 设置测试环境变量
         std::env::set_var("GOOGLE_CLIENT_ID", "test_client_id");
         std::env::set_var("GOOGLE_CLIENT_SECRET", "test_secret");
+        std::env::remove_var("OAUTH_REDIRECT_PORT");
 
         let service = GoogleOAuthService::new().unwrap();
         let auth_url = service.generate_auth_url().unwrap();
@@ -442,10 +448,15 @@ mod tests {
             params.get("scope"),
             Some(&"openid email profile".to_string())
         );
+
+        // 清理环境
+        std::env::remove_var("GOOGLE_CLIENT_ID");
+        std::env::remove_var("GOOGLE_CLIENT_SECRET");
     }
 
     #[test]
     fn test_oauth_config_custom_port() {
+        let _lock = ENV_GUARD.lock().unwrap();
         std::env::set_var("OAUTH_REDIRECT_PORT", "8080");
         std::env::set_var("GOOGLE_CLIENT_ID", "test_id");
         std::env::set_var("GOOGLE_CLIENT_SECRET", "test_secret");
@@ -453,5 +464,9 @@ mod tests {
         let config = GoogleOAuthConfig::from_env().unwrap();
         assert_eq!(config.redirect_port, 8080);
         assert_eq!(config.redirect_uri(), "http://127.0.0.1:8080");
+
+        std::env::remove_var("OAUTH_REDIRECT_PORT");
+        std::env::remove_var("GOOGLE_CLIENT_ID");
+        std::env::remove_var("GOOGLE_CLIENT_SECRET");
     }
 }

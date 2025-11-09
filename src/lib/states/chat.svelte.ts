@@ -258,6 +258,18 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function resetChatModelParameters(target: Chat | null | undefined) {
+  if (!target) {
+    return;
+  }
+  target.temperature = undefined;
+  target.topP = undefined;
+  target.topK = undefined;
+  target.maxTokens = undefined;
+  target.stream = undefined;
+  target.reasoning = null;
+}
+
 /**
  * 获取模型的默认设置
  */
@@ -547,15 +559,29 @@ export const chatActions = {
     currentChat.modelId = modelId;
     currentChat.providerId = providerId;
 
-    // 如果已经有 id（已保存到后端），则更新后端
-    if (currentChat.id) {
-      try {
-        await chatApi.updateChatModel(currentChat.id, modelId, providerId);
-      } catch (error) {
-        // 回滚本地状态
-        await chatActions.loadChats(); // 重新加载以恢复状态
-        throw error;
+    // 未持久化聊天：仅本地清空
+    if (!currentChat.id) {
+      resetChatModelParameters(currentChat);
+      return;
+    }
+
+    try {
+      const updated = await chatApi.updateChatModel(
+        currentChat.id,
+        modelId,
+        providerId,
+      );
+      if (!updated.id) {
+        throw new Error("Missing chat id after model update");
       }
+      const cleared = await chatApi.clearModelParameters(updated.id);
+      chatState.currentChat = cleared;
+      chatState.chats = chatState.chats.map((chat) =>
+        chat.id === cleared.id ? cleared : chat,
+      );
+    } catch (error) {
+      await chatActions.loadChats();
+      throw error;
     }
   },
 

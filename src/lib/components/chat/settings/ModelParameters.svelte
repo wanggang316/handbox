@@ -5,8 +5,8 @@
     currentChatModel,
     toNumber,
   } from "$lib/states/chat.svelte";
-import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
-import ModelReasoningParameterRow from "./ModelReasoningParameterRow.svelte";
+  import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
+  import ModelReasoningParameterRow from "./ModelReasoningParameterRow.svelte";
   import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
   import type {
@@ -42,9 +42,11 @@ import ModelReasoningParameterRow from "./ModelReasoningParameterRow.svelte";
   }
 
   function isReasoningParamName(
-    name: string,
+    name: string
   ): name is "reasoning" | "reasoning_effort" | "thinking" {
-    return name === "reasoning" || name === "reasoning_effort" || name === "thinking";
+    return (
+      name === "reasoning" || name === "reasoning_effort" || name === "thinking"
+    );
   }
 
   // 辅助函数：将 snake_case 转换为 camelCase (用于数据库字段映射)
@@ -57,6 +59,7 @@ import ModelReasoningParameterRow from "./ModelReasoningParameterRow.svelte";
     const chat = chatState.currentChat;
     const settings: Record<string, any> = {};
 
+    console.log("parameters", parameters);
     parameters.forEach((param) => {
       if (param.component === "reasoning") {
         return;

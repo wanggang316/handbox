@@ -116,6 +116,13 @@ export async function updateChatModel(
 }
 
 /**
+ * 清空聊天的模型参数
+ */
+export async function clearModelParameters(chatId: UUID): Promise<Chat> {
+  return apiCall<Chat>("chat_clear_model_parameters", { chatId });
+}
+
+/**
  * 更新聊天名称
  * @param chatId 聊天 ID
  * @param name 新名称

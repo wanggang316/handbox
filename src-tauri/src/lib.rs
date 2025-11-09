@@ -151,6 +151,7 @@ pub fn run() {
             chat_get,
             chat_update_field,
             chat_update_model,
+            chat_clear_model_parameters,
             chat_update_name,
             chat_delete,
             chat_generate_title,

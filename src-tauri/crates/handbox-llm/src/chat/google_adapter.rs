@@ -5,10 +5,11 @@ use crate::chat::ChatClient;
 use crate::error::LlmClientError;
 use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
-    LlmProvider, LlmRequest, LlmResponse, LlmUsage,
+    LlmProvider, LlmRequest, LlmResponse, LlmThinkingConfig, LlmUsage,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
+use google_genai_rust::types::ThinkingConfig;
 
 /// Google 风格聊天客户端
 pub struct GoogleChatClient {
@@ -25,7 +26,7 @@ impl GoogleChatClient {
         &self,
         request: &LlmRequest,
     ) -> google_genai_rust::types::GenerateContentRequest {
-        use google_genai_rust::types::{Content, GenerationConfig, ThinkingConfig};
+        use google_genai_rust::types::{Content, GenerationConfig};
 
         // 转换消息格式 - 将系统消息分离出来
         let mut system_instruction = None;
@@ -202,9 +203,7 @@ impl GoogleChatClient {
 }
 
 impl GoogleChatClient {
-    fn map_thinking_config(
-        thinking: &handbox_llm::types::LlmThinkingConfig,
-    ) -> ThinkingConfig {
+    fn map_thinking_config(thinking: &LlmThinkingConfig) -> ThinkingConfig {
         ThinkingConfig {
             include_thoughts: thinking.include_thoughts,
             thinking_budget: thinking.thinking_budget,

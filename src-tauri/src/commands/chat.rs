@@ -215,6 +215,15 @@ pub async fn chat_update_model(
         .await
 }
 
+/// 清空模型参数
+#[tauri::command]
+pub async fn chat_clear_model_parameters(
+    chat_id: UUID,
+    chat_service: State<'_, ChatService>,
+) -> Result<Chat, AppError> {
+    chat_service.clear_model_parameters(chat_id).await
+}
+
 /// 更新聊天名称
 #[tauri::command]
 pub async fn chat_update_name(
