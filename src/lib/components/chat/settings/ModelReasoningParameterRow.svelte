@@ -11,6 +11,7 @@
   } from "$lib/types/chat";
   import type { ModelWithProvider } from "$lib/types/provider";
   import SelectRow from "../../ui/table/SelectRow.svelte";
+  import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
 
   let {
     paramName,
@@ -123,26 +124,46 @@
 
 {#if enabled}
   {#if variant === "responses"}
-    <SelectRow
-      label={`${label ?? "Reasoning"} · 难度`}
-      options={effortOptions}
-      selectedValue={currentReasoning?.responses?.effort ?? ""}
-      onSelect={(value) =>
-        applyReasoning((draft) => {
-          draft.responses = draft.responses ?? {};
-          draft.responses.effort = normalizeEffort(value) ?? null;
-        })}
-    />
-    <SelectRow
-      label={`${label ?? "Reasoning"} · 总结`}
-      options={summaryOptions}
-      selectedValue={currentReasoning?.responses?.summary ?? ""}
-      onSelect={(value) =>
-        applyReasoning((draft) => {
-          draft.responses = draft.responses ?? {};
-          draft.responses.summary = normalizeSummary(value) ?? null;
-        })}
-    />
+    <TableBaseRow label={label ?? "Reasoning"} layout="vertical">
+      <div class="flex flex-col gap-2 pt-2 pl-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-base-content/60">难度</span>
+          <select
+            class="select select-xs w-28"
+            value={currentReasoning?.responses?.effort ?? ""}
+            onchange={(event) => {
+              const value = (event.currentTarget as HTMLSelectElement).value;
+              applyReasoning((draft) => {
+                draft.responses = draft.responses ?? {};
+                draft.responses.effort = normalizeEffort(value) ?? null;
+              });
+            }}
+          >
+            {#each effortOptions as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-base-content/60">总结</span>
+          <select
+            class="select select-xs w-28"
+            value={currentReasoning?.responses?.summary ?? ""}
+            onchange={(event) => {
+              const value = (event.currentTarget as HTMLSelectElement).value;
+              applyReasoning((draft) => {
+                draft.responses = draft.responses ?? {};
+                draft.responses.summary = normalizeSummary(value) ?? null;
+              });
+            }}
+          >
+            {#each summaryOptions as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+    </TableBaseRow>
   {:else}
     <SelectRow
       label={label ?? "Reasoning"}

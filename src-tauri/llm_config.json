@@ -62,7 +62,7 @@
       "parameters": {
         "reasoning_effort": {
           "component": "reasoning",
-          "level": "advance",
+          "level": "base",
           "name": "Reasoning"
         }
       }
@@ -71,7 +71,7 @@
       "parameters": {
         "reasoning": {
           "component": "reasoning",
-          "level": "advance",
+          "level": "base",
           "name": "Reasoning"
         }
       }
@@ -87,7 +87,7 @@
       "parameters": {
         "reasoning": {
           "component": "thinking",
-          "level": "advance",
+          "level": "base",
           "name": "Thinking"
         }
       }

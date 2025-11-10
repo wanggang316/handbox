@@ -6,7 +6,6 @@
   } from "$lib/states/chat.svelte";
   import type { ChatReasoningConfig } from "$lib/types/chat";
   import type { ModelWithProvider } from "$lib/types/provider";
-  import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
 
   let {
@@ -119,34 +118,36 @@
 </script>
 
 {#if enabled}
-  <SwitchRow
-    label={`${label ?? "Thinking"} · 包含过程`}
-    checked={currentReasoning?.thinking?.includeThoughts ?? false}
-    onChange={(value) =>
-      applyReasoning((draft) => {
-        draft.thinking = draft.thinking ?? {};
-        draft.thinking.includeThoughts = value;
-      })}
-  />
-  <TableBaseRow label={`${label ?? "Thinking"} · 预算`} layout="vertical">
-    <div class="flex items-center gap-2 pt-2">
-      <input
-        class="input input-sm w-24 text-right"
-        type="number"
-        min="0"
-        step="1"
-        value={thinkingBudgetInput}
-        onchange={(event) =>
-          updateThinkingBudget((event.currentTarget as HTMLInputElement).value)}
-        placeholder="默认"
-      />
-      <button
-        type="button"
-        class="btn btn-ghost btn-xs"
-        onclick={() => updateThinkingBudget("")}
-      >
-        清除
-      </button>
+  <TableBaseRow label={label ?? "Thinking"} layout="vertical">
+    <div class="flex flex-col gap-2 pt-2 pl-2">
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-base-content/60">包含过程</span>
+        <input
+          type="checkbox"
+          class="toggle toggle-xs"
+          checked={currentReasoning?.thinking?.includeThoughts ?? false}
+          onchange={(event) => {
+            const value = (event.currentTarget as HTMLInputElement).checked;
+            applyReasoning((draft) => {
+              draft.thinking = draft.thinking ?? {};
+              draft.thinking.includeThoughts = value;
+            });
+          }}
+        />
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-base-content/60">预算</span>
+        <input
+          class="input input-xs w-20 text-right"
+          type="number"
+          min="0"
+          step="1"
+          value={thinkingBudgetInput}
+          onchange={(event) =>
+            updateThinkingBudget((event.currentTarget as HTMLInputElement).value)}
+          placeholder="默认"
+        />
+      </div>
     </div>
   </TableBaseRow>
 {/if}
