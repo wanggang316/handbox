@@ -55,10 +55,27 @@ export interface SwitchProps {
 
 export interface ReasoningProps {
   name?: string | null;
+  effort_options?: Record<string, string[]> | null;
+  summary_options?: Record<string, string[]> | null;
+}
+
+// Thinking Budget 选项配置
+export interface BudgetOptions {
+  dynamic?: number | null; // -1 表示动态调整
+  disable?: number | null; // 0 表示禁用
+  range?: [number, number] | null; // [min, max] 滑杆范围
+}
+
+// Thinking Budget 配置
+export interface BudgetConfig {
+  models: string[]; // 适用的模型列表，格式: "provider_type/model_id"
+  options: BudgetOptions; // 可选项
+  default: string; // 默认选项: "dynamic", "disable", "range"
 }
 
 export interface ThinkingProps {
   name?: string | null;
+  budget_configs?: BudgetConfig[] | null;
 }
 
 // 组件属性联合类型

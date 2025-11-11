@@ -9,16 +9,38 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::OnceLock;
 
+/// Thinking Budget 选项配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic: Option<i32>, // -1 表示动态调整
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable: Option<i32>, // 0 表示禁用
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<Vec<i32>>, // [min, max] 滑杆范围
+}
+
+/// Thinking Budget 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetConfig {
+    pub models: Vec<String>,    // 适用的模型列表，格式: "provider_type/model_id"
+    pub options: BudgetOptions, // 可选项
+    pub default: String,        // 默认选项: "dynamic", "disable", "range"
+}
+
 /// 参数配置（合并了 default、max 和 UI 配置）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterConfig {
-    pub component: Option<String>, // "slider" | "switch"
+    pub component: Option<String>, // "slider" | "switch" | "reasoning" | "thinking"
     pub level: Option<String>,     // "base" | "advance"
     pub step: Option<f64>,         // 仅滑块使用
     pub name: Option<String>,      // 显示名称
     pub show_toggle: Option<bool>, // 仅滑块使用，是否显示开关
     pub default: Option<Value>,    // 默认值
     pub max: Option<Value>,        // 最大值
+    pub effort_options: Option<HashMap<String, Vec<String>>>, // reasoning 参数的 effort 选项
+    pub summary_options: Option<HashMap<String, Vec<String>>>, // reasoning 参数的 summary 选项
+    pub budget_configs: Option<Vec<BudgetConfig>>, // thinking 参数的 budget 配置
 }
 
 /// 聊天方法配置
@@ -201,4 +223,70 @@ static GLOBAL_LLM_CONFIG: OnceLock<LlmConfig> = OnceLock::new();
 /// 获取全局 LLM 配置实例
 pub fn get_global_llm_config() -> &'static LlmConfig {
     GLOBAL_LLM_CONFIG.get_or_init(|| LlmConfig::load())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reasoning_parameter_config() {
+        let config = LlmConfig::load();
+
+        // 测试 responses 方法的 reasoning 参数
+        let responses_config = config.get_chat_method_config("responses");
+        let reasoning_param = responses_config.parameters.get("reasoning");
+        assert!(reasoning_param.is_some());
+
+        let reasoning = reasoning_param.unwrap();
+        assert_eq!(reasoning.component, Some("reasoning".to_string()));
+        assert_eq!(reasoning.level, Some("base".to_string()));
+        assert_eq!(reasoning.name, Some("Reasoning".to_string()));
+
+        // 验证 effort_options
+        assert!(reasoning.effort_options.is_some());
+        let effort_options = reasoning.effort_options.as_ref().unwrap();
+        assert!(effort_options.contains_key("common"));
+        let common_effort = effort_options.get("common").unwrap();
+        assert!(common_effort.contains(&"minimal".to_string()));
+        assert!(common_effort.contains(&"low".to_string()));
+        assert!(common_effort.contains(&"medium".to_string()));
+        assert!(common_effort.contains(&"high".to_string()));
+
+        // 验证 summary_options
+        assert!(reasoning.summary_options.is_some());
+        let summary_options = reasoning.summary_options.as_ref().unwrap();
+        assert!(summary_options.contains_key("common"));
+        let common_summary = summary_options.get("common").unwrap();
+        assert!(common_summary.contains(&"auto".to_string()));
+        assert!(common_summary.contains(&"detailed".to_string()));
+    }
+
+    #[test]
+    fn test_reasoning_effort_parameter_config() {
+        let config = LlmConfig::load();
+
+        // 测试 completions 方法的 reasoning_effort 参数
+        let completions_config = config.get_chat_method_config("completions");
+        let reasoning_effort_param = completions_config.parameters.get("reasoning_effort");
+        assert!(reasoning_effort_param.is_some());
+
+        let reasoning_effort = reasoning_effort_param.unwrap();
+        assert_eq!(reasoning_effort.component, Some("reasoning".to_string()));
+        assert_eq!(reasoning_effort.level, Some("base".to_string()));
+        assert_eq!(reasoning_effort.name, Some("Reasoning".to_string()));
+
+        // 验证 effort_options
+        assert!(reasoning_effort.effort_options.is_some());
+        let effort_options = reasoning_effort.effort_options.as_ref().unwrap();
+        assert!(effort_options.contains_key("common"));
+        let common_effort = effort_options.get("common").unwrap();
+        assert!(common_effort.contains(&"minimal".to_string()));
+        assert!(common_effort.contains(&"low".to_string()));
+        assert!(common_effort.contains(&"medium".to_string()));
+        assert!(common_effort.contains(&"high".to_string()));
+
+        // reasoning_effort 不应该有 summary_options
+        assert!(reasoning_effort.summary_options.is_none());
+    }
 }

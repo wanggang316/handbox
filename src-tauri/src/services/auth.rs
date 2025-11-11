@@ -439,8 +439,7 @@ mod tests {
         assert_eq!(parsed.domain(), Some("accounts.google.com"));
         assert_eq!(parsed.path(), "/o/oauth2/v2/auth");
 
-        let params: std::collections::HashMap<_, _> =
-            parsed.query_pairs().into_owned().collect();
+        let params: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
 
         assert_eq!(params.get("client_id"), Some(&"test_client_id".to_string()));
         assert_eq!(params.get("response_type"), Some(&"code".to_string()));

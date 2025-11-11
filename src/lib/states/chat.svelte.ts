@@ -42,7 +42,10 @@ function getMethodParameters(model?: ModelWithProvider) {
     }));
 }
 
-function findMethodParameter(parameterName: string, model?: ModelWithProvider) {
+export function findMethodParameter(
+  parameterName: string,
+  model?: ModelWithProvider,
+) {
   const target = typeof parameterName === "string" ? parameterName.trim() : "";
   if (!target) {
     return null;

@@ -3,13 +3,18 @@
     chatState,
     chatActions,
     getSupportedParameterSet,
+    findMethodParameter,
   } from "$lib/states/chat.svelte";
   import type {
     ChatReasoningConfig,
     ReasoningEffort,
     ReasoningSummary,
   } from "$lib/types/chat";
-  import type { ModelWithProvider } from "$lib/types/provider";
+  import type {
+    ModelWithProvider,
+    ReasoningProps,
+  } from "$lib/types/provider";
+  import Select from "../../ui/Select.svelte";
   import SelectRow from "../../ui/table/SelectRow.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
 
@@ -98,20 +103,66 @@
     await chatActions.updateReasoning(next);
   }
 
-  const effortOptions = [
-    { value: "", label: "跟随模型" },
-    { value: "minimal", label: "Minimal" },
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-  ];
+  // 从模型配置中获取 reasoning 参数的 props
+  function getReasoningProps(): ReasoningProps | null {
+    if (!model) return null;
+    const param = findMethodParameter(paramName, model);
+    if (!param || !param.props) return null;
+    return param.props as ReasoningProps;
+  }
 
-  const summaryOptions = [
-    { value: "", label: "跟随模型" },
-    { value: "auto", label: "Auto" },
-    { value: "concise", label: "Concise" },
-    { value: "detailed", label: "Detailed" },
-  ];
+  // 根据 provider_type/model_id 获取对应的选项列表
+  function getOptionsForModel(
+    optionsConfig: Record<string, string[]> | null | undefined,
+    defaultOptions: string[]
+  ): string[] {
+    if (!optionsConfig) return defaultOptions;
+
+    // 尝试匹配 provider_type/model_id
+    if (model) {
+      const key = `${model.providerType}/${model.id}`;
+      if (optionsConfig[key]) {
+        return optionsConfig[key];
+      }
+    }
+
+    // 回退到 common
+    return optionsConfig.common || defaultOptions;
+  }
+
+  // 构建 effort 选项
+  const effortOptions = $derived(() => {
+    const reasoningProps = getReasoningProps();
+    const configuredOptions = getOptionsForModel(
+      reasoningProps?.effort_options,
+      ["minimal", "low", "medium", "high"]
+    );
+
+    return [
+      { value: "", label: "跟随模型" },
+      ...configuredOptions.map((opt) => ({
+        value: opt,
+        label: opt.charAt(0).toUpperCase() + opt.slice(1),
+      })),
+    ];
+  });
+
+  // 构建 summary 选项
+  const summaryOptions = $derived(() => {
+    const reasoningProps = getReasoningProps();
+    const configuredOptions = getOptionsForModel(
+      reasoningProps?.summary_options,
+      ["auto", "detailed"]
+    );
+
+    return [
+      { value: "", label: "跟随模型" },
+      ...configuredOptions.map((opt) => ({
+        value: opt,
+        label: opt.charAt(0).toUpperCase() + opt.slice(1),
+      })),
+    ];
+  });
 
   function normalizeEffort(value: string): ReasoningEffort | undefined {
     return value ? (value as ReasoningEffort) : undefined;
@@ -128,46 +179,40 @@
       <div class="flex flex-col gap-2 pt-2 pl-2">
         <div class="flex items-center justify-between">
           <span class="text-xs text-base-content/60">难度</span>
-          <select
-            class="select select-xs w-28"
+          <Select
             value={currentReasoning?.responses?.effort ?? ""}
-            onchange={(event) => {
-              const value = (event.currentTarget as HTMLSelectElement).value;
+            options={effortOptions()}
+            autoWidth={true}
+            size="sm"
+            onChange={(value) => {
               applyReasoning((draft) => {
                 draft.responses = draft.responses ?? {};
                 draft.responses.effort = normalizeEffort(value) ?? null;
               });
             }}
-          >
-            {#each effortOptions as option}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
+          />
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-base-content/60">总结</span>
-          <select
-            class="select select-xs w-28"
+          <Select
             value={currentReasoning?.responses?.summary ?? ""}
-            onchange={(event) => {
-              const value = (event.currentTarget as HTMLSelectElement).value;
+            options={summaryOptions()}
+            autoWidth={true}
+            size="sm"
+            onChange={(value) => {
               applyReasoning((draft) => {
                 draft.responses = draft.responses ?? {};
                 draft.responses.summary = normalizeSummary(value) ?? null;
               });
             }}
-          >
-            {#each summaryOptions as option}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
+          />
         </div>
       </div>
     </TableBaseRow>
   {:else}
     <SelectRow
       label={label ?? "Reasoning"}
-      options={effortOptions}
+      options={effortOptions()}
       selectedValue={currentReasoning?.reasoningEffort?.effort ?? ""}
       onSelect={(value) =>
         applyReasoning((draft) => {

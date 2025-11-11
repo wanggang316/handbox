@@ -117,12 +117,25 @@ pub enum ComponentProps {
     Slider(SliderProps),
     Switch(SwitchProps),
     Reasoning(ReasoningProps),
+    Thinking(ThinkingProps),
 }
 
 /// 推理配置属性
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningProps {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort_options: Option<HashMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary_options: Option<HashMap<String, Vec<String>>>,
+}
+
+/// Thinking 配置属性
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkingProps {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_configs: Option<Vec<crate::config::llm_config::BudgetConfig>>,
 }
 
 /// 聊天方法详情
@@ -525,9 +538,15 @@ impl ModelResponse {
                     show_toggle,
                 })
             }
-            ParameterComponent::Reasoning | ParameterComponent::Thinking => {
-                ComponentProps::Reasoning(ReasoningProps { name })
-            }
+            ParameterComponent::Reasoning => ComponentProps::Reasoning(ReasoningProps {
+                name,
+                effort_options: config.effort_options.clone(),
+                summary_options: config.summary_options.clone(),
+            }),
+            ParameterComponent::Thinking => ComponentProps::Thinking(ThinkingProps {
+                name,
+                budget_configs: config.budget_configs.clone(),
+            }),
         };
 
         (component, props, level)
