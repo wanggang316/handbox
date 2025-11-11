@@ -206,7 +206,7 @@ pub struct LlmDeltaToolFunction {
 }
 
 /// Responses API 推理配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LlmResponsesReasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -235,7 +235,7 @@ pub enum LlmReasoningSummary {
 }
 
 /// Google 思维配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LlmThinkingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]

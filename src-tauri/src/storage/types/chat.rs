@@ -42,7 +42,7 @@ pub struct Chat {
 }
 
 /// 聊天级推理配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatReasoningConfig {
     #[serde(skip_serializing_if = "Option::is_none")]

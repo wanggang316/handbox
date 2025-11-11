@@ -493,11 +493,13 @@ impl MessageService {
             provider_id: chat.provider_id.clone(),
             temperature: chat.temperature,
             top_p: chat.top_p,
+            top_k: chat.top_k,
             max_tokens: chat.max_tokens,
             stream: chat.stream,
             system_prompt: chat.system_prompt.clone(),
             mcp_servers: Some(chat.mcp_servers.clone()),
             turn_count: chat.turn_count,
+            reasoning: chat.reasoning.clone(),
         };
 
         let update_time = Utc::now().timestamp_millis();
@@ -1719,11 +1721,13 @@ impl MessageService {
             provider_id: chat.provider_id.clone(),
             temperature: chat.temperature,
             top_p: chat.top_p,
+            top_k: chat.top_k,
             max_tokens: chat.max_tokens,
             stream: chat.stream,
             system_prompt: chat.system_prompt.clone(),
             mcp_servers: Some(chat.mcp_servers.clone()),
             turn_count: chat.turn_count,
+            reasoning: chat.reasoning.clone(),
         };
 
         // 3. 构建消息数组
@@ -2121,6 +2125,7 @@ impl MessageService {
         MessageConfig {
             temperature: normalize_numeric(chat.temperature),
             top_p: normalize_numeric(chat.top_p),
+            top_k: normalize_numeric(chat.top_k),
             max_tokens: normalize_numeric(chat.max_tokens),
             stream: chat.stream,
             model_id,
@@ -2128,6 +2133,7 @@ impl MessageService {
             system_prompt,
             mcp_servers,
             turn_count: chat.turn_count,
+            reasoning: chat.reasoning.clone(),
         }
     }
 
@@ -2331,6 +2337,7 @@ mod tests {
         let config = MessageConfig {
             temperature: Some(0.8),
             top_p: Some(0.9),
+            top_k: Some(40),
             max_tokens: Some(1000),
             stream: Some(true),
             model_id: Some("gpt-4".to_string()),
@@ -2342,6 +2349,7 @@ mod tests {
                 enabled_tools: vec!["tool1".to_string()],
             }]),
             turn_count: Some(5),
+            reasoning: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -2350,6 +2358,7 @@ mod tests {
         assert_eq!(roundtrip.temperature, config.temperature);
         assert_eq!(roundtrip.model_id, config.model_id);
         assert_eq!(roundtrip.provider_id, config.provider_id);
+        assert_eq!(roundtrip.top_k, config.top_k);
     }
 
     #[test]

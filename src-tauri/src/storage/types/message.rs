@@ -1,3 +1,4 @@
+use super::chat::ChatReasoningConfig;
 use super::common::{Timestamp, UUID};
 use crate::storage::types::McpServerConfig;
 use handbox_llm::types::{LlmMessageRole, LlmToolFunction};
@@ -94,6 +95,8 @@ pub struct MessageConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
@@ -107,6 +110,8 @@ pub struct MessageConfig {
     pub mcp_servers: Option<Vec<McpServerConfig>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ChatReasoningConfig>,
 }
 
 /// 消息实体
@@ -174,6 +179,7 @@ mod tests {
         let config = MessageConfig {
             temperature: Some(0.8),
             top_p: Some(0.9),
+            top_k: Some(40),
             max_tokens: Some(1000),
             stream: Some(true),
             model_id: Some("gpt-4".to_string()),
@@ -185,6 +191,7 @@ mod tests {
                 enabled_tools: vec!["tool1".to_string()],
             }]),
             turn_count: Some(5),
+            reasoning: None,
         };
 
         let json = serde_json::to_string(&config).expect("serialize config");
@@ -193,5 +200,6 @@ mod tests {
         assert_eq!(config.temperature, deserialized.temperature);
         assert_eq!(config.model_id, deserialized.model_id);
         assert_eq!(config.turn_count, deserialized.turn_count);
+        assert_eq!(config.top_k, deserialized.top_k);
     }
 }

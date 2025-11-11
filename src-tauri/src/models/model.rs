@@ -101,6 +101,8 @@ pub struct SliderProps {
     pub step: Option<f64>,
     pub name: String,
     pub show_toggle: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 /// 开关组件属性
@@ -108,6 +110,8 @@ pub struct SliderProps {
 pub struct SwitchProps {
     pub default: Option<bool>,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 /// 组件属性联合类型
@@ -128,6 +132,8 @@ pub struct ReasoningProps {
     pub effort_options: Option<HashMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary_options: Option<HashMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 /// Thinking 配置属性
@@ -136,6 +142,8 @@ pub struct ThinkingProps {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_configs: Option<Vec<crate::config::llm_config::BudgetConfig>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 /// 聊天方法详情
@@ -493,7 +501,11 @@ impl ModelResponse {
                     .as_ref()
                     .and_then(Self::parse_bool)
                     .or_else(|| Self::resolve_bool_for_key(key, db_defaults, None));
-                ComponentProps::Switch(SwitchProps { default, name })
+                ComponentProps::Switch(SwitchProps {
+                    default,
+                    name,
+                    tip: config.tip.clone(),
+                })
             }
             ParameterComponent::Slider => {
                 // 对于 max_tokens 参数，默认值和最大值都使用模型的 output_max_tokens
@@ -536,16 +548,19 @@ impl ModelResponse {
                     step,
                     name,
                     show_toggle,
+                    tip: config.tip.clone(),
                 })
             }
             ParameterComponent::Reasoning => ComponentProps::Reasoning(ReasoningProps {
                 name,
                 effort_options: config.effort_options.clone(),
                 summary_options: config.summary_options.clone(),
+                tip: config.tip.clone(),
             }),
             ParameterComponent::Thinking => ComponentProps::Thinking(ThinkingProps {
                 name,
                 budget_configs: config.budget_configs.clone(),
+                tip: config.tip.clone(),
             }),
         };
 

@@ -6,6 +6,7 @@
     label: string;
     checked: boolean;
     description?: string;
+    helpText?: string;
     disabled?: boolean;
     onChange?: (value: boolean) => void;
   }
@@ -14,6 +15,7 @@
     label,
     checked = $bindable(),
     description = "",
+    helpText = undefined,
     disabled = false,
     onChange = (_value: boolean) => {},
   }: Props = $props();
@@ -24,7 +26,7 @@
   }
 </script>
 
-<TableBaseRow {label}>
+<TableBaseRow {label} {helpText}>
   <div class="flex flex-col items-end">
     {#if description}
       <div class="text-xs text-base-content/70 mb-1 text-right">

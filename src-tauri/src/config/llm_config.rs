@@ -41,6 +41,8 @@ pub struct ParameterConfig {
     pub effort_options: Option<HashMap<String, Vec<String>>>, // reasoning 参数的 effort 选项
     pub summary_options: Option<HashMap<String, Vec<String>>>, // reasoning 参数的 summary 选项
     pub budget_configs: Option<Vec<BudgetConfig>>, // thinking 参数的 budget 配置
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>, // 参数说明提示文本
 }
 
 /// 聊天方法配置

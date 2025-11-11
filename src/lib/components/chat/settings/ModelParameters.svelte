@@ -211,6 +211,7 @@
       showToggle: props.show_toggle ?? false,
       paramName,
       enableKey,
+      tip: props.tip,
     };
   }
 </script>
@@ -233,6 +234,7 @@
               showScaleMarks={false}
               showValue={true}
               showToggle={config.showToggle}
+              helpText={config.tip ?? undefined}
             />
           {/if}
         {:else if param.component === "switch"}
@@ -240,16 +242,19 @@
           <SwitchRow
             label={props.name}
             bind:checked={currentSettings[param.name]}
+            helpText={props.tip ?? undefined}
           />
         {:else if param.component === "reasoning" && isReasoningParamName(param.name)}
           <ModelReasoningParameterRow
             paramName={param.name}
             label={(param.props as ReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ReasoningProps)?.tip ?? undefined}
             model={currentModel ?? null}
           />
         {:else if param.component === "thinking"}
           <ModelThinkingParameterRow
             label={(param.props as ReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ReasoningProps)?.tip ?? undefined}
             model={currentModel ?? null}
           />
         {/if}
@@ -274,6 +279,7 @@
               showScaleMarks={false}
               showValue={true}
               showToggle={config.showToggle}
+              helpText={config.tip ?? undefined}
             />
           {/if}
         {:else if param.component === "switch"}
@@ -281,16 +287,19 @@
           <SwitchRow
             label={props.name}
             bind:checked={currentSettings[param.name]}
+            helpText={props.tip ?? undefined}
           />
         {:else if param.component === "reasoning" && isReasoningParamName(param.name)}
           <ModelReasoningParameterRow
             paramName={param.name}
             label={(param.props as ReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ReasoningProps)?.tip ?? undefined}
             model={currentModel ?? null}
           />
         {:else if param.component === "thinking"}
           <ModelThinkingParameterRow
             label={(param.props as ReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ReasoningProps)?.tip ?? undefined}
             model={currentModel ?? null}
           />
         {/if}

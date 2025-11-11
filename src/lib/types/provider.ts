@@ -45,18 +45,21 @@ export interface SliderProps {
   step?: number | null;
   name: string;
   show_toggle?: boolean | null;
+  tip?: string | null;
 }
 
 // 开关组件属性
 export interface SwitchProps {
   default?: boolean | null;
   name: string;
+  tip?: string | null;
 }
 
 export interface ReasoningProps {
   name?: string | null;
   effort_options?: Record<string, string[]> | null;
   summary_options?: Record<string, string[]> | null;
+  tip?: string | null;
 }
 
 // Thinking Budget 选项配置
@@ -76,6 +79,7 @@ export interface BudgetConfig {
 export interface ThinkingProps {
   name?: string | null;
   budget_configs?: BudgetConfig[] | null;
+  tip?: string | null;
 }
 
 // 组件属性联合类型

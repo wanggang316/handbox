@@ -16,7 +16,8 @@
           "name": "Temperature",
           "show_toggle": true,
           "default": 1,
-          "max": 2.0
+          "max": 2.0,
+          "tip": "Temperature 越高，模型生成的内容越随机，反之则越保守。"
         },
         "top_p": {
           "component": "slider",
@@ -25,21 +26,24 @@
           "name": "Top-p",
           "show_toggle": true,
           "default": 1.0,
-          "max": 1.0
+          "max": 1.0,
+          "tip": "Top-p 越高，模型生成的内容越随机，反之则越保守。"
         },
         "top_k": {
           "component": "slider",
           "level": "advance",
           "step": 1,
           "name": "Top-k",
-          "show_toggle": true
+          "show_toggle": true,
+          "tip": "Top-k 越高，模型生成的内容越随机，反之则越保守。"
         },
         "max_tokens": {
           "component": "slider",
           "level": "advance",
           "step": 1,
           "name": "输出最大 Token",
-          "show_toggle": true
+          "show_toggle": true,
+          "tip": "输出最大 Token 越高，模型生成的内容越长，反之则越短。"
         },
         "streaming": {
           "component": "switch",
@@ -54,7 +58,8 @@
           "name": "上下文对话轮数",
           "show_toggle": false,
           "default": 10,
-          "max": 100
+          "max": 100,
+          "tip": "上下文对话轮数越高，模型生成的内容越长，反之则越短。"
         }
       }
     },
@@ -100,6 +105,7 @@
           "component": "thinking",
           "level": "base",
           "name": "Thinking",
+          "tip": "The thinkingBudget parameter guides the model on the number of thinking tokens to use when generating a response. A higher token count generally allows for more detailed reasoning, which can be beneficial for tackling more complex tasks. If latency is more important, use a lower budget or disable thinking by setting thinkingBudget to 0. Setting the thinkingBudget to -1 turns on dynamic thinking, meaning the model will adjust the budget based on the complexity of the request.",
           "budget_configs": [
             {
               "models": ["google/gemini-2.5-pro"],

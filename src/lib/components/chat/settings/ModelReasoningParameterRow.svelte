@@ -21,10 +21,12 @@
   let {
     paramName,
     label = undefined,
+    helpText = undefined,
     model = null,
   }: {
     paramName: "reasoning" | "reasoning_effort";
     label?: string;
+    helpText?: string;
     model?: ModelWithProvider | null;
   } = $props();
 
@@ -175,7 +177,7 @@
 
 {#if enabled}
   {#if variant === "responses"}
-    <TableBaseRow label={label ?? "Reasoning"} layout="vertical">
+    <TableBaseRow label={label ?? "Reasoning"} {helpText} layout="vertical">
       <div class="flex flex-col gap-2 pt-2 pl-2">
         <div class="flex items-center justify-between">
           <span class="text-xs text-base-content/60">难度</span>
@@ -212,6 +214,7 @@
   {:else}
     <SelectRow
       label={label ?? "Reasoning"}
+      {helpText}
       options={effortOptions()}
       selectedValue={currentReasoning?.reasoningEffort?.effort ?? ""}
       onSelect={(value) =>

@@ -865,6 +865,7 @@ mod tests {
             config: Some(MessageConfig {
                 temperature: Some(0.7),
                 top_p: Some(0.9),
+                top_k: None,
                 max_tokens: Some(1000),
                 stream: Some(true),
                 model_id: Some("gpt-4o".to_string()),
@@ -872,6 +873,7 @@ mod tests {
                 system_prompt: None,
                 mcp_servers: None,
                 turn_count: Some(5),
+                reasoning: None,
             }),
             tool_calls: None,
             turn_id: Some(1),

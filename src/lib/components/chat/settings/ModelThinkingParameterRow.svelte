@@ -19,9 +19,11 @@
 
   let {
     label = undefined,
+    helpText = undefined,
     model = null,
   }: {
     label?: string;
+    helpText?: string;
     model?: ModelWithProvider | null;
   } = $props();
 
@@ -258,7 +260,7 @@
 </script>
 
 {#if enabled}
-  <TableBaseRow label={label ?? "Thinking"} layout="vertical">
+  <TableBaseRow label={label ?? "Thinking"} {helpText} layout="vertical">
     <div class="flex flex-col gap-3 pt-2 pl-2">
       <!-- Include Thoughts Toggle -->
       <div class="flex items-center justify-between">
