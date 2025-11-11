@@ -1428,8 +1428,7 @@ impl MessageService {
         let reasoning_config = chat.reasoning.clone();
         let supported_parameters = self.lookup_supported_parameters(chat).await?;
         let supports_reasoning = Self::parameters_include(&supported_parameters, "reasoning")
-            || Self::parameters_include(&supported_parameters, "reasoning_effort");
-        let supports_thinking = Self::parameters_include(&supported_parameters, "thinking");
+            || Self::parameters_include(&supported_parameters, "thinking");
 
         Ok(LlmRequest {
             model: request.model_id.clone(),
@@ -1461,7 +1460,7 @@ impl MessageService {
             thinking: reasoning_config
                 .as_ref()
                 .and_then(|cfg| cfg.thinking.clone())
-                .filter(|_| supports_thinking),
+                .filter(|_| supports_reasoning),
         })
     }
 

@@ -9,7 +9,7 @@ use crate::types::{
 };
 use async_trait::async_trait;
 use futures::StreamExt;
-use google_genai_rust::types::ThinkingConfig;
+use google_genai_rust::types::{GenerateContentRequest, ThinkingConfig};
 
 /// Google 风格聊天客户端
 pub struct GoogleChatClient {
@@ -22,10 +22,7 @@ impl GoogleChatClient {
     }
 
     /// 将通用请求转换为 Google SDK GenerateContentRequest
-    fn convert_to_google_request(
-        &self,
-        request: &LlmRequest,
-    ) -> google_genai_rust::types::GenerateContentRequest {
+    fn convert_to_google_request(&self, request: &LlmRequest) -> GenerateContentRequest {
         use google_genai_rust::types::{Content, GenerationConfig};
 
         // 转换消息格式 - 将系统消息分离出来
@@ -73,10 +70,11 @@ impl GoogleChatClient {
             generation_config.thinking_config = Some(Self::map_thinking_config(thinking));
         }
 
-        let mut google_request = google_genai_rust::types::GenerateContentRequest::new(contents);
+        let mut google_request = GenerateContentRequest::new(contents);
         google_request.system_instruction = system_instruction;
         google_request.generation_config = Some(generation_config);
 
+        tracing::info!("Google request: {:?}", google_request);
         google_request
     }
 
@@ -91,13 +89,8 @@ impl GoogleChatClient {
         for (index, candidate) in google_response.candidates.iter().enumerate() {
             // 提取文本内容
             let mut content = String::new();
-            if let Some(content_obj) = &candidate.content {
-                for part in &content_obj.parts {
-                    if let Some(text) = &part.text {
-                        content.push_str(text);
-                    }
-                }
-            }
+            let mut reasoning_text = String::new();
+            Self::collect_parts(candidate.iter_parts(), &mut content, &mut reasoning_text);
 
             // 转换完成原因
             let finish_reason = candidate.finish_reason.as_ref().map(|reason| {
@@ -116,7 +109,7 @@ impl GoogleChatClient {
                 delta: Some(LlmMessage {
                     role: LlmMessageRole::Assistant,
                     content,
-                    reasoning: None, // Google API 不支持推理过程
+                    reasoning: Self::normalize_reasoning(reasoning_text),
                     tool_calls: None,
                     tool_call_id: None,
                 }),
@@ -152,16 +145,15 @@ impl GoogleChatClient {
         // 提取文本增量
         let mut delta_content = String::new();
         let mut finish_reason = None;
+        let mut reasoning_text = String::new();
 
         if let Some(candidates) = &stream_response.candidates {
             for candidate in candidates {
-                if let Some(content) = &candidate.content {
-                    for part in &content.parts {
-                        if let Some(text) = &part.text {
-                            delta_content.push_str(text);
-                        }
-                    }
-                }
+                Self::collect_parts(
+                    candidate.iter_parts(),
+                    &mut delta_content,
+                    &mut reasoning_text,
+                );
 
                 // 检查完成原因
                 if let Some(reason) = &candidate.finish_reason {
@@ -179,7 +171,7 @@ impl GoogleChatClient {
             }
         }
 
-        if delta_content.is_empty() && finish_reason.is_none() {
+        if delta_content.is_empty() && reasoning_text.is_empty() && finish_reason.is_none() {
             return None;
         }
 
@@ -191,14 +183,58 @@ impl GoogleChatClient {
                 index: 0,
                 delta: Some(LlmDeltaMessage {
                     role: Some(LlmMessageRole::Assistant),
-                    content: Some(delta_content),
-                    reasoning: None,
+                    content: if delta_content.is_empty() {
+                        None
+                    } else {
+                        Some(delta_content)
+                    },
+                    reasoning: Self::normalize_reasoning(reasoning_text),
                     tool_calls: None,
                 }),
                 finish_reason,
             }],
             usage: None,
         })
+    }
+
+    fn collect_parts<'a>(
+        mut parts: impl Iterator<Item = &'a google_genai_rust::types::Part>,
+        content: &mut String,
+        reasoning: &mut String,
+    ) {
+        for part in parts.by_ref() {
+            if let Some(text) = part.text.as_ref() {
+                if Self::is_reasoning_part(part) {
+                    Self::append_reasoning(reasoning, text);
+                } else {
+                    content.push_str(text);
+                }
+            }
+        }
+    }
+
+    fn append_reasoning(buffer: &mut String, text: &str) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        if !buffer.is_empty() {
+            buffer.push('\n');
+        }
+        buffer.push_str(trimmed);
+    }
+
+    fn is_reasoning_part(part: &google_genai_rust::types::Part) -> bool {
+        part.thought.unwrap_or(false) || part.thought_signature.is_some()
+    }
+
+    fn normalize_reasoning(reasoning: String) -> Option<String> {
+        let trimmed = reasoning.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
 }
 

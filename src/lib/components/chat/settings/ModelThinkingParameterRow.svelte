@@ -16,6 +16,7 @@
   import Select from "../../ui/Select.svelte";
   import LabeledSlider from "../../ui/LabeledSlider.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
+  import InfoTooltip from "../../ui/InfoTooltip.svelte";
 
   let {
     label = undefined,
@@ -260,11 +261,17 @@
 </script>
 
 {#if enabled}
+  {@const thinkingProps = getThinkingProps()}
   <TableBaseRow label={label ?? "Thinking"} {helpText} layout="vertical">
     <div class="flex flex-col gap-3 pt-2 pl-2">
       <!-- Include Thoughts Toggle -->
       <div class="flex items-center justify-between">
-        <span class="text-xs text-base-content/60">包含过程</span>
+        <div class="flex items-center gap-1">
+          <span class="text-xs text-base-content/60">包含过程</span>
+          {#if thinkingProps?.include_thoughts_tip}
+            <InfoTooltip content={thinkingProps.include_thoughts_tip} />
+          {/if}
+        </div>
         <Toggle
           checked={currentReasoning?.thinking?.includeThoughts ?? false}
           onChange={(value) => {
@@ -280,7 +287,12 @@
       {#if budgetModeOptions().length > 0}
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between">
-            <span class="text-xs text-base-content/60">预算模式</span>
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-base-content/60">预算模式</span>
+              {#if thinkingProps?.budget_tip}
+                <InfoTooltip content={thinkingProps.budget_tip} />
+              {/if}
+            </div>
             <Select
               value={budgetMode}
               options={budgetModeOptions()}

@@ -17,7 +17,7 @@
           "show_toggle": true,
           "default": 1,
           "max": 2.0,
-          "tip": "Temperature 越高，模型生成的内容越随机，反之则越保守。"
+          "tips": "控制输出的随机性和创造性。值越高(接近2.0)，输出越多样化和创造性，但可能不够精确;值越低(接近0)，输出越确定和保守，更适合需要一致性和准确性的任务。推荐创意写作使用较高值(1.0-1.5)，技术问答使用较低值(0.3-0.7)。"
         },
         "top_p": {
           "component": "slider",
@@ -27,7 +27,7 @@
           "show_toggle": true,
           "default": 1.0,
           "max": 1.0,
-          "tip": "Top-p 越高，模型生成的内容越随机，反之则越保守。"
+          "tips": "核采样参数，控制模型从概率累积达到该值的词汇中选择。例如 top_p=0.9 意味着只考虑累积概率达到 90% 的词汇。值越小，输出越集中和确定;值越大，输出越多样。通常与 temperature 二选一使用，推荐保持默认值 1.0，主要通过 temperature 调节。"
         },
         "top_k": {
           "component": "slider",
@@ -35,7 +35,7 @@
           "step": 1,
           "name": "Top-k",
           "show_toggle": true,
-          "tip": "Top-k 越高，模型生成的内容越随机，反之则越保守。"
+          "tips": "限制模型每步只从概率最高的 K 个词汇中选择。较小的值(如 10-20)使输出更集中和可预测，较大的值(如 50-100)允许更多样的选择。此参数主要用于平衡输出的多样性和质量，过小可能导致重复，过大可能产生不相关内容。"
         },
         "max_tokens": {
           "component": "slider",
@@ -43,13 +43,14 @@
           "step": 1,
           "name": "输出最大 Token",
           "show_toggle": true,
-          "tip": "输出最大 Token 越高，模型生成的内容越长，反之则越短。"
+          "tips": "限制模型单次响应生成的最大 token 数量(一个 token 约为 0.75 个英文单词或 0.5 个中文字)。设置合理的上限可以控制成本和响应时间。注意:如果回答被截断，可能是达到了此限制，建议根据任务需要适当调整。"
         },
         "streaming": {
           "component": "switch",
           "level": "advance",
           "name": "流式输出",
-          "default": true
+          "default": true,
+          "tips": "启用后，模型会逐字逐句返回回答，让你能实时看到生成过程，提升交互体验。禁用则等待完整回答生成后一次性返回，适合需要完整处理结果的场景。推荐保持启用以获得更好的使用体验。"
         },
         "turn_count": {
           "component": "slider",
@@ -59,7 +60,7 @@
           "show_toggle": false,
           "default": 10,
           "max": 100,
-          "tip": "上下文对话轮数越高，模型生成的内容越长，反之则越短。"
+          "tips": "控制发送给模型的历史对话轮数。值越大，模型能记住的上下文越多，理解连贯性越好，但会增加 token 消耗和成本。建议日常对话使用 10-20 轮，深度讨论使用 30-50 轮。注意:过多的历史可能导致模型关注过时信息。"
         }
       }
     },
@@ -69,6 +70,7 @@
           "component": "reasoning",
           "level": "base",
           "name": "Reasoning",
+          "tips": "OpenAI 推理模式通过内部思考过程增强模型处理复杂问题的能力。选择不同的努力程度来平衡推理深度和响应速度: minimal 适合简单任务，low 用于一般问题，medium 处理中等复杂度任务，high 专注于复杂推理、数学和编程等高难度问题。",
           "effort_options": {
             "common": ["minimal", "low", "medium", "high"]
           }
@@ -81,6 +83,7 @@
           "component": "reasoning",
           "level": "base",
           "name": "Reasoning",
+          "tips": "OpenAI 扩展推理模式，提供更强的问题解决能力。effort 控制推理深度，summary 决定思考过程的展示方式: auto 让模型自动决定，detailed 显示完整推理过程，concise 提供简化的思考摘要。推荐复杂任务使用 high effort + detailed summary 组合。",
           "effort_options": {
             "common": ["minimal", "low", "medium", "high"],
             "openai/gpt-5-pro": ["high"]
@@ -105,7 +108,9 @@
           "component": "thinking",
           "level": "base",
           "name": "Thinking",
-          "tip": "The thinkingBudget parameter guides the model on the number of thinking tokens to use when generating a response. A higher token count generally allows for more detailed reasoning, which can be beneficial for tackling more complex tasks. If latency is more important, use a lower budget or disable thinking by setting thinkingBudget to 0. Setting the thinkingBudget to -1 turns on dynamic thinking, meaning the model will adjust the budget based on the complexity of the request.",
+          "tips": "Google Gemini 的思考模式通过内部推理过程提升复杂问题的解决能力。特别适用于编程、数学和数据分析等需要深度推理的任务。启用思考模式会增加响应时间和 token 消耗，但能显著提高输出质量。",
+          "include_thoughts_tip": "启用后，API 会返回模型思考过程的摘要版本，让你了解模型的推理路径。这对于调试意外回答或理解模型决策过程很有帮助。注意:思考内容不是原始内部数据，而是经过模型整理的易懂版本。",
+          "budget_tip": "控制模型用于思考的 token 配额。Dynamic(-1) 让模型根据任务复杂度自动调整深度，适合大多数场景;Disable(0) 完全关闭思考以降低延迟，适合简单的事实查询或分类任务;Custom 允许你手动设置具体 token 数，更高的预算支持更详细的推理，但会增加成本和响应时间。建议:简单任务禁用，中等任务使用动态模式，复杂编程/数学问题使用较高的自定义预算。",
           "budget_configs": [
             {
               "models": ["google/gemini-2.5-pro"],

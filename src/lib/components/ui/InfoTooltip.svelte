@@ -1,5 +1,6 @@
 <script lang="ts">
   import { HelpCircle } from "@lucide/svelte";
+  import { fade, fly } from "svelte/transition";
 
   interface Props {
     content: string;
@@ -27,7 +28,7 @@
     if (!buttonElement) return;
 
     const rect = buttonElement.getBoundingClientRect();
-    const top = rect.top - 8; // 8px margin
+    const top = rect.top - 12; // 12px margin for slight upward offset
     const left = rect.left + rect.width / 2; // 水平居中对齐到按钮中心
 
     tooltipStyle = `top: ${top}px; left: ${left}px;`;
@@ -54,8 +55,9 @@
     onmouseleave={hide}
     style={tooltipStyle}
     class="fixed z-[9999] w-64 bg-base-100 border border-base-300 rounded-lg shadow-lg p-3 transform -translate-x-1/2 -translate-y-full"
+    transition:fly={{ y: 8, duration: 200, opacity: 0 }}
   >
-    <p class="text-xs text-base-content/80 leading-relaxed">
+    <p class="text-xs text-base-content/80 leading-relaxed whitespace-pre-wrap">
       {content}
     </p>
   </div>

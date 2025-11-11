@@ -42,7 +42,11 @@ pub struct ParameterConfig {
     pub summary_options: Option<HashMap<String, Vec<String>>>, // reasoning 参数的 summary 选项
     pub budget_configs: Option<Vec<BudgetConfig>>, // thinking 参数的 budget 配置
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tip: Option<String>, // 参数说明提示文本
+    pub tips: Option<String>, // 参数说明提示文本
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_thoughts_tip: Option<String>, // thinking 参数：包含过程的提示文本
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tip: Option<String>, // thinking 参数：预算模式的提示文本
 }
 
 /// 聊天方法配置
