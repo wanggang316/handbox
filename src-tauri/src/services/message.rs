@@ -1254,6 +1254,11 @@ impl MessageService {
                             // 处理推理过程
                             if let Some(reasoning_chunk) = &delta.reasoning {
                                 accumulated_reasoning.push_str(reasoning_chunk);
+                                tracing::info!(
+                                    "[MessageService::call_llm_api_stream] Received reasoning chunk: '{}', total accumulated: {} chars",
+                                    reasoning_chunk,
+                                    accumulated_reasoning.len()
+                                );
                             }
 
                             // 积累工具调用信息
@@ -1379,11 +1384,11 @@ impl MessageService {
         let response = MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: message_id.clone(),
-            content: accumulated_content,
+            content: accumulated_content.clone(),
             reasoning: if accumulated_reasoning.is_empty() {
                 None
             } else {
-                Some(accumulated_reasoning)
+                Some(accumulated_reasoning.clone())
             },
             tool_calls: processed_tool_calls,
             model_id: request.model_id.clone(),
@@ -1393,6 +1398,12 @@ impl MessageService {
             total_tokens: None,
             duration: Some(duration),
         };
+
+        tracing::info!(
+            "[MessageService::call_llm_api_stream] Stream completed - content: {} chars, reasoning: {} chars",
+            accumulated_content.len(),
+            accumulated_reasoning.len()
+        );
 
         // 调用结束回调，传递 stream_id
         end_callback(stream_id, response);
@@ -1430,6 +1441,12 @@ impl MessageService {
         let supports_reasoning = Self::parameters_include(&supported_parameters, "reasoning")
             || Self::parameters_include(&supported_parameters, "thinking");
 
+        tracing::info!(
+            "[MessageService::convert_to_api_request] reasoning_config: {:?}, supports_reasoning: {}",
+            reasoning_config,
+            supports_reasoning
+        );
+
         Ok(LlmRequest {
             model: request.model_id.clone(),
             messages,
@@ -1449,10 +1466,17 @@ impl MessageService {
                 Some(LlmToolChoice::Auto)
             },
             parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
-            reasoning: reasoning_config
-                .as_ref()
-                .and_then(|cfg| cfg.responses.clone())
-                .filter(|_| supports_reasoning),
+            reasoning: {
+                let reasoning = reasoning_config
+                    .as_ref()
+                    .and_then(|cfg| cfg.responses.clone())
+                    .filter(|_| supports_reasoning);
+                tracing::info!(
+                    "[MessageService::convert_to_api_request] Final reasoning param: {:?}",
+                    reasoning
+                );
+                reasoning
+            },
             reasoning_effort: reasoning_config
                 .as_ref()
                 .and_then(|cfg| cfg.reasoning_effort.clone())
@@ -2166,6 +2190,13 @@ impl MessageService {
 
             tokio::spawn(async move {
                 let now = Utc::now().timestamp_millis();
+
+                tracing::info!(
+                    "[MessageService::wrap_end_callback_with_save] Saving assistant message - content: {} chars, reasoning: {:?}",
+                    response_clone.content.len(),
+                    response_clone.reasoning.as_ref().map(|r| format!("{} chars", r.len()))
+                );
+
                 match repository
                     .create_message(&Message {
                         id: response_clone.message_id.clone(),
@@ -2191,8 +2222,9 @@ impl MessageService {
                 {
                     Ok(_) => {
                         tracing::info!(
-                            "[MessageService] Assistant message saved with ID: {}",
-                            response_clone.message_id
+                            "[MessageService] Assistant message saved with ID: {}, reasoning included: {}",
+                            response_clone.message_id,
+                            response_clone.reasoning.is_some()
                         );
                     }
                     Err(e) => {

@@ -163,7 +163,14 @@ impl OpenAIResponsesChatClient {
         }
 
         if let Some(reasoning) = &request.reasoning {
+            tracing::info!(
+                "[OpenAIResponsesChatClient] Adding reasoning config - effort: {:?}, summary: {:?}",
+                reasoning.effort,
+                reasoning.summary
+            );
             builder = builder.reasoning(Self::map_reasoning(reasoning));
+        } else {
+            tracing::warn!("[OpenAIResponsesChatClient] No reasoning config in request!");
         }
 
         // 转换工具定义
@@ -395,7 +402,35 @@ impl OpenAIResponsesChatClient {
                 "OpenAI Responses stream error: {} ({})",
                 error.message, error.code
             )))),
-            ResponseStreamEvent::OutputItemAdded { .. }
+            ResponseStreamEvent::ReasoningSummaryTextDelta {
+                delta,
+                output_index,
+                ..
+            } => {
+                // 推理摘要文本增量 - 流式发送推理内容
+                tracing::info!(
+                    "[OpenAIResponsesChatClient] Reasoning summary delta received: '{}' (output_index: {})",
+                    delta,
+                    output_index
+                );
+                Some(Ok(state.reasoning_summary_delta_chunk(
+                    output_index as i32,
+                    delta,
+                )))
+            }
+            ResponseStreamEvent::ReasoningSummaryTextDone { text, .. } => {
+                // 推理摘要文本完成 - 可选：发送完整推理摘要
+                // 由于我们已经通过 delta 发送了内容，这里可以选择忽略或记录
+                tracing::debug!("Reasoning summary completed: {} chars", text.len());
+                None
+            }
+            ResponseStreamEvent::ReasoningSummaryPartAdded { .. }
+            | ResponseStreamEvent::ReasoningSummaryPartDone { .. }
+            | ResponseStreamEvent::ReasoningTextDelta { .. }
+            | ResponseStreamEvent::ReasoningTextDone { .. }
+            | ResponseStreamEvent::RefusalDelta { .. }
+            | ResponseStreamEvent::RefusalDone { .. }
+            | ResponseStreamEvent::OutputItemAdded { .. }
             | ResponseStreamEvent::ContentPartAdded { .. }
             | ResponseStreamEvent::OutputTextDone { .. }
             | ResponseStreamEvent::ContentPartDone { .. }
@@ -459,8 +494,8 @@ impl ChatClient for OpenAIResponsesChatClient {
 
         let openai_request = self.convert_to_openai_response_request(&request)?;
 
-        tracing::debug!(
-            "Request payload: {}",
+        tracing::info!(
+            "[OpenAIResponsesChatClient] Request payload: {}",
             serde_json::to_string_pretty(&openai_request).unwrap_or_default()
         );
 
@@ -497,8 +532,8 @@ impl ChatClient for OpenAIResponsesChatClient {
 
         let openai_request = self.convert_to_openai_response_request(&request)?;
 
-        tracing::debug!(
-            "Request payload: {}",
+        tracing::info!(
+            "[OpenAIResponsesChatClient] Streaming request payload: {}",
             serde_json::to_string_pretty(&openai_request).unwrap_or_default()
         );
 
@@ -677,6 +712,25 @@ impl StreamState {
                     role: Some(LlmMessageRole::Assistant),
                     content: None,
                     reasoning: Some(reasoning),
+                    tool_calls: None,
+                }),
+                finish_reason: None,
+            }],
+            usage: None,
+        }
+    }
+
+    fn reasoning_summary_delta_chunk(&self, index: i32, delta: String) -> LlmChunkResponse {
+        LlmChunkResponse {
+            id: self.response_id.clone(),
+            object: "chat.completion.chunk".to_string(),
+            model: self.model.clone(),
+            choices: vec![LlmChunkChoice {
+                index,
+                delta: Some(LlmDeltaMessage {
+                    role: Some(LlmMessageRole::Assistant),
+                    content: None,
+                    reasoning: Some(delta),
                     tool_calls: None,
                 }),
                 finish_reason: None,
