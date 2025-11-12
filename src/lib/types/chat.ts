@@ -2,15 +2,15 @@
  * 聊天相关类型定义 - 匹配后端 Rust 架构
  */
 
-import type { BaseEntity, UUID, Timestamp } from './index';
+import type { BaseEntity, UUID, Timestamp } from "./index";
 
 // 消息角色
-export type MessageRole = 'user' | 'assistant' | 'system';
+export type MessageRole = "user" | "assistant" | "system";
 
 // MCP 服务器配置
 export interface McpServerConfig {
   serverId: string;
-  executionMode: 'auto' | 'manual';
+  executionMode: "auto" | "manual";
   enabledTools: string[]; // List of enabled tool names for this server
 }
 
@@ -63,8 +63,8 @@ export interface MessageAttachment {
 }
 
 // Reasoning/thinking support
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
-export type ReasoningSummary = 'auto' | 'concise' | 'detailed';
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type ReasoningSummary = "auto" | "concise" | "detailed";
 
 export interface ResponsesReasoningConfig {
   effort?: ReasoningEffort | null;
@@ -73,6 +73,7 @@ export interface ResponsesReasoningConfig {
 
 export interface ReasoningEffortConfig {
   effort?: ReasoningEffort | null;
+  includeReasoning?: boolean | null;
 }
 
 export interface ThinkingConfig {
@@ -107,7 +108,6 @@ export interface Chat extends BaseEntity {
   artifactId?: UUID;
   reasoning?: ChatReasoningConfig | null;
 }
-
 
 // 模型参数
 export interface ModelParameters {
@@ -167,12 +167,15 @@ export interface MessageResponse {
   duration?: number;
 }
 
-
 // 工具调用执行模式
-export type ToolExecutionMode = 'auto' | 'manual';
+export type ToolExecutionMode = "auto" | "manual";
 
 // 工具调用执行状态
-export type ToolExecutionStatus = 'pending' | 'executing' | 'completed' | 'failed';
+export type ToolExecutionStatus =
+  | "pending"
+  | "executing"
+  | "completed"
+  | "failed";
 
 // 工具函数信息
 export interface ToolFunction {
@@ -192,7 +195,10 @@ export interface ToolCall {
 }
 
 // 流式消息事件
-export type MessageStreamEvent = 
-  | { type: 'delta'; data: { content: string; reasoning?: string; tokens?: number } }
-  | { type: 'done'; data: MessageResponse }
-  | { type: 'error'; data: { error: string; code?: string } };
+export type MessageStreamEvent =
+  | {
+      type: "delta";
+      data: { content: string; reasoning?: string; tokens?: number };
+    }
+  | { type: "done"; data: MessageResponse }
+  | { type: "error"; data: { error: string; code?: string } };

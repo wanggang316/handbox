@@ -66,11 +66,12 @@
     },
     "completions": {
       "parameters": {
-        "reasoning_effort": {
-          "component": "reasoning",
+        "reasoning": {
+          "component": "completions_reasoning",
           "level": "base",
           "name": "Reasoning",
           "tips": "OpenAI 推理模式通过内部思考过程增强模型处理复杂问题的能力。选择不同的努力程度来平衡推理深度和响应速度: minimal 适合简单任务，low 用于一般问题，medium 处理中等复杂度任务，high 专注于复杂推理、数学和编程等高难度问题。",
+          "include_reasoning": true,
           "effort_options": {
             "common": ["minimal", "low", "medium", "high"]
           }
@@ -80,7 +81,7 @@
     "responses": {
       "parameters": {
         "reasoning": {
-          "component": "reasoning",
+          "component": "responses_reasoning",
           "level": "base",
           "name": "Reasoning",
           "tips": "OpenAI 扩展推理模式，提供更强的问题解决能力。effort 控制推理深度，summary 决定思考过程的展示方式: auto 让模型自动决定，detailed 显示完整推理过程，concise 提供简化的思考摘要。推荐复杂任务使用 high effort + detailed summary 组合。",

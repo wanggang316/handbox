@@ -35,7 +35,12 @@ export type ChatMethodName =
 export type ParameterLevel = "base" | "advance";
 
 // 参数组件类型
-export type ParameterComponent = "slider" | "switch" | "reasoning" | "thinking";
+export type ParameterComponent =
+  | "slider"
+  | "switch"
+  | "responses_reasoning"
+  | "completions_reasoning"
+  | "thinking";
 
 // 滑块组件属性
 export interface SliderProps {
@@ -55,12 +60,24 @@ export interface SwitchProps {
   tips?: string | null;
 }
 
-export interface ReasoningProps {
+// Responses 方法推理配置属性
+export interface ResponsesReasoningProps {
   name?: string | null;
   effort_options?: Record<string, string[]> | null;
   summary_options?: Record<string, string[]> | null;
   tips?: string | null;
 }
+
+// Completions 方法推理配置属性
+export interface CompletionsReasoningProps {
+  name?: string | null;
+  include_reasoning?: boolean | null;
+  effort_options?: Record<string, string[]> | null;
+  tips?: string | null;
+}
+
+// 保持向后兼容的别名
+export type ReasoningProps = ResponsesReasoningProps;
 
 // Thinking Budget 选项配置
 export interface BudgetOptions {
@@ -88,7 +105,8 @@ export interface ThinkingProps {
 export type ComponentProps =
   | SliderProps
   | SwitchProps
-  | ReasoningProps
+  | ResponsesReasoningProps
+  | CompletionsReasoningProps
   | ThinkingProps;
 
 // 参数响应 (替换原 ChatMethodParameter)

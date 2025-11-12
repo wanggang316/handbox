@@ -509,14 +509,17 @@ export const chatActions = {
 
   async updateReasoning(reasoning: ChatReasoningConfig | null): Promise<void> {
     if (!chatState.currentChat?.id) {
+      console.log("[chatActions] updateReasoning called but no chat ID");
       return;
     }
 
+    console.log("[chatActions] updateReasoning:", JSON.stringify(reasoning, null, 2));
     const updated = await chatApi.updateChatField(
       chatState.currentChat.id,
       "reasoning",
       reasoning,
     );
+    console.log("[chatActions] updateReasoning response:", JSON.stringify(updated.reasoning, null, 2));
     chatState.currentChat = updated;
   },
 

@@ -31,7 +31,7 @@ pub struct BudgetConfig {
 /// 参数配置（合并了 default、max 和 UI 配置）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterConfig {
-    pub component: Option<String>, // "slider" | "switch" | "reasoning" | "thinking"
+    pub component: Option<String>, // "slider" | "switch" | "responses_reasoning" | "completions_reasoning" | "thinking"
     pub level: Option<String>,     // "base" | "advance"
     pub step: Option<f64>,         // 仅滑块使用
     pub name: Option<String>,      // 显示名称
@@ -39,8 +39,10 @@ pub struct ParameterConfig {
     pub default: Option<Value>,    // 默认值
     pub max: Option<Value>,        // 最大值
     pub effort_options: Option<HashMap<String, Vec<String>>>, // reasoning 参数的 effort 选项
-    pub summary_options: Option<HashMap<String, Vec<String>>>, // reasoning 参数的 summary 选项
-    pub budget_configs: Option<Vec<BudgetConfig>>, // thinking 参数的 budget 配置
+    pub summary_options: Option<HashMap<String, Vec<String>>>, // responses_reasoning 参数的 summary 选项
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_reasoning: Option<bool>, // completions_reasoning 参数：是否包含推理过程
+    pub budget_configs: Option<Vec<BudgetConfig>>,             // thinking 参数的 budget 配置
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tips: Option<String>, // 参数说明提示文本
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -245,7 +247,7 @@ mod tests {
         assert!(reasoning_param.is_some());
 
         let reasoning = reasoning_param.unwrap();
-        assert_eq!(reasoning.component, Some("reasoning".to_string()));
+        assert_eq!(reasoning.component, Some("responses_reasoning".to_string()));
         assert_eq!(reasoning.level, Some("base".to_string()));
         assert_eq!(reasoning.name, Some("Reasoning".to_string()));
 
@@ -269,22 +271,25 @@ mod tests {
     }
 
     #[test]
-    fn test_reasoning_effort_parameter_config() {
+    fn test_completions_reasoning_parameter_config() {
         let config = LlmConfig::load();
 
-        // 测试 completions 方法的 reasoning_effort 参数
+        // 测试 completions 方法的 reasoning 参数
         let completions_config = config.get_chat_method_config("completions");
-        let reasoning_effort_param = completions_config.parameters.get("reasoning_effort");
-        assert!(reasoning_effort_param.is_some());
+        let reasoning_param = completions_config.parameters.get("reasoning");
+        assert!(reasoning_param.is_some());
 
-        let reasoning_effort = reasoning_effort_param.unwrap();
-        assert_eq!(reasoning_effort.component, Some("reasoning".to_string()));
-        assert_eq!(reasoning_effort.level, Some("base".to_string()));
-        assert_eq!(reasoning_effort.name, Some("Reasoning".to_string()));
+        let reasoning = reasoning_param.unwrap();
+        assert_eq!(
+            reasoning.component,
+            Some("completions_reasoning".to_string())
+        );
+        assert_eq!(reasoning.level, Some("base".to_string()));
+        assert_eq!(reasoning.name, Some("Reasoning".to_string()));
 
         // 验证 effort_options
-        assert!(reasoning_effort.effort_options.is_some());
-        let effort_options = reasoning_effort.effort_options.as_ref().unwrap();
+        assert!(reasoning.effort_options.is_some());
+        let effort_options = reasoning.effort_options.as_ref().unwrap();
         assert!(effort_options.contains_key("common"));
         let common_effort = effort_options.get("common").unwrap();
         assert!(common_effort.contains(&"minimal".to_string()));
@@ -292,7 +297,10 @@ mod tests {
         assert!(common_effort.contains(&"medium".to_string()));
         assert!(common_effort.contains(&"high".to_string()));
 
-        // reasoning_effort 不应该有 summary_options
-        assert!(reasoning_effort.summary_options.is_none());
+        // completions reasoning 不应该有 summary_options
+        assert!(reasoning.summary_options.is_none());
+
+        // 验证 include_reasoning
+        assert_eq!(reasoning.include_reasoning, Some(true));
     }
 }

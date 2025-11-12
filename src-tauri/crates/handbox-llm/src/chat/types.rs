@@ -95,7 +95,7 @@ pub struct LlmRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<LlmResponsesReasoning>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<LlmReasoningEffort>,
+    pub reasoning_effort: Option<LlmReasoningEffortConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<LlmThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -232,6 +232,16 @@ pub enum LlmReasoningSummary {
     Auto,
     Concise,
     Detailed,
+}
+
+/// Completions API 推理配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmReasoningEffortConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<LlmReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_reasoning: Option<bool>,
 }
 
 /// Google 思维配置

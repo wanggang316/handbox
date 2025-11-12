@@ -1,5 +1,5 @@
 use super::common::{Timestamp, UUID};
-use handbox_llm::types::{LlmReasoningEffort, LlmResponsesReasoning, LlmThinkingConfig};
+use handbox_llm::types::{LlmReasoningEffortConfig, LlmResponsesReasoning, LlmThinkingConfig};
 use serde::{Deserialize, Serialize};
 
 fn default_execution_mode() -> String {
@@ -48,7 +48,7 @@ pub struct ChatReasoningConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub responses: Option<LlmResponsesReasoning>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<LlmReasoningEffort>,
+    pub reasoning_effort: Option<LlmReasoningEffortConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<LlmThinkingConfig>,
 }

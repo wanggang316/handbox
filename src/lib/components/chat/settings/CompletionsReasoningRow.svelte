@@ -8,15 +8,14 @@
   import type {
     ChatReasoningConfig,
     ReasoningEffort,
-    ReasoningSummary,
   } from "$lib/types/chat";
   import type {
     ModelWithProvider,
-    ReasoningProps,
+    CompletionsReasoningProps,
   } from "$lib/types/provider";
   import Select from "../../ui/Select.svelte";
-  import SelectRow from "../../ui/table/SelectRow.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
+  import Toggle from "../../ui/Toggle.svelte";
 
   let {
     paramName,
@@ -24,29 +23,24 @@
     helpText = undefined,
     model = null,
   }: {
-    paramName: "reasoning" | "reasoning_effort";
+    paramName: "reasoning";
     label?: string;
     helpText?: string;
     model?: ModelWithProvider | null;
   } = $props();
 
   const chat = $derived(chatState.currentChat);
-  let variant = $state<"responses" | "reasoning_effort">("responses");
   let currentReasoning = $state<ChatReasoningConfig | null>(null);
 
   $effect(() => {
     currentReasoning = chat?.reasoning ?? null;
-    variant =
-      paramName === "reasoning_effort" ? "reasoning_effort" : "responses";
   });
 
   function chatSupportsReasoning(): boolean {
     if (model) {
       const supported = getSupportedParameterSet(model);
-      return supported.has("reasoning") || supported.has("reasoning_effort");
+      return supported.has("reasoning");
     }
-
-    // 默认允许 reasoning，thinking 默认禁用
     return true;
   }
 
@@ -79,7 +73,11 @@
     ) {
       delete config.responses;
     }
-    if (config.reasoningEffort && !config.reasoningEffort.effort) {
+    if (
+      config.reasoningEffort &&
+      !config.reasoningEffort.effort &&
+      config.reasoningEffort.includeReasoning == null
+    ) {
       delete config.reasoningEffort;
     }
     if (
@@ -100,17 +98,21 @@
   async function applyReasoning(mutator: (draft: ChatReasoningConfig) => void) {
     if (!chat?.id) return;
     const draft = cloneReasoning();
+    console.log("[CompletionsReasoning] Before mutator:", JSON.stringify(draft, null, 2));
     mutator(draft);
+    console.log("[CompletionsReasoning] After mutator:", JSON.stringify(draft, null, 2));
     const next = cleanupConfig(draft);
+    console.log("[CompletionsReasoning] After cleanup:", JSON.stringify(next, null, 2));
     await chatActions.updateReasoning(next);
+    console.log("[CompletionsReasoning] Update sent to backend");
   }
 
   // 从模型配置中获取 reasoning 参数的 props
-  function getReasoningProps(): ReasoningProps | null {
+  function getReasoningProps(): CompletionsReasoningProps | null {
     if (!model) return null;
     const param = findMethodParameter(paramName, model);
     if (!param || !param.props) return null;
-    return param.props as ReasoningProps;
+    return param.props as CompletionsReasoningProps;
   }
 
   // 根据 provider_type/model_id 获取对应的选项列表
@@ -149,79 +151,52 @@
     ];
   });
 
-  // 构建 summary 选项
-  const summaryOptions = $derived(() => {
-    const reasoningProps = getReasoningProps();
-    const configuredOptions = getOptionsForModel(
-      reasoningProps?.summary_options,
-      ["auto", "detailed"]
-    );
-
-    return [
-      { value: "", label: "跟随模型" },
-      ...configuredOptions.map((opt) => ({
-        value: opt,
-        label: opt.charAt(0).toUpperCase() + opt.slice(1),
-      })),
-    ];
-  });
-
   function normalizeEffort(value: string): ReasoningEffort | undefined {
     return value ? (value as ReasoningEffort) : undefined;
   }
 
-  function normalizeSummary(value: string): ReasoningSummary | undefined {
-    return value ? (value as ReasoningSummary) : undefined;
-  }
+  // Get include_reasoning from props
+  const includeReasoning = $derived(() => {
+    const reasoningProps = getReasoningProps();
+    return reasoningProps?.include_reasoning ?? false;
+  });
 </script>
 
 {#if enabled}
-  {#if variant === "responses"}
-    <TableBaseRow label={label ?? "Reasoning"} {helpText} layout="vertical">
-      <div class="flex flex-col gap-2 pt-2 pl-2">
+  <TableBaseRow label={label ?? "Reasoning"} {helpText} layout="vertical">
+    <div class="flex flex-col gap-3 pt-2 pl-2">
+      <!-- Include Reasoning Toggle (if configured) -->
+      {#if includeReasoning()}
         <div class="flex items-center justify-between">
-          <span class="text-xs text-base-content/60">难度</span>
-          <Select
-            value={currentReasoning?.responses?.effort ?? ""}
-            options={effortOptions()}
-            autoWidth={true}
-            size="sm"
+          <span class="text-xs text-base-content/60">包含推理</span>
+          <Toggle
+            checked={currentReasoning?.reasoningEffort?.includeReasoning ?? false}
             onChange={(value) => {
               applyReasoning((draft) => {
-                draft.responses = draft.responses ?? {};
-                draft.responses.effort = normalizeEffort(value) ?? null;
+                draft.reasoningEffort = draft.reasoningEffort ?? {};
+                draft.reasoningEffort.includeReasoning = value;
               });
             }}
           />
         </div>
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-base-content/60">总结</span>
-          <Select
-            value={currentReasoning?.responses?.summary ?? ""}
-            options={summaryOptions()}
-            autoWidth={true}
-            size="sm"
-            onChange={(value) => {
-              applyReasoning((draft) => {
-                draft.responses = draft.responses ?? {};
-                draft.responses.summary = normalizeSummary(value) ?? null;
-              });
-            }}
-          />
-        </div>
+      {/if}
+
+      <!-- Effort Selection -->
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-base-content/60">难度</span>
+        <Select
+          value={currentReasoning?.reasoningEffort?.effort ?? ""}
+          options={effortOptions()}
+          autoWidth={true}
+          size="sm"
+          onChange={(value) => {
+            applyReasoning((draft) => {
+              draft.reasoningEffort = draft.reasoningEffort ?? {};
+              draft.reasoningEffort.effort = normalizeEffort(value) ?? null;
+            });
+          }}
+        />
       </div>
-    </TableBaseRow>
-  {:else}
-    <SelectRow
-      label={label ?? "Reasoning"}
-      {helpText}
-      options={effortOptions()}
-      selectedValue={currentReasoning?.reasoningEffort?.effort ?? ""}
-      onSelect={(value) =>
-        applyReasoning((draft) => {
-          draft.reasoningEffort = draft.reasoningEffort ?? {};
-          draft.reasoningEffort.effort = normalizeEffort(value) ?? null;
-        })}
-    />
-  {/if}
+    </div>
+  </TableBaseRow>
 {/if}

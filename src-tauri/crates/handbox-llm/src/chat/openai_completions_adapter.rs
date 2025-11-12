@@ -76,7 +76,8 @@ impl OpenAICompletionsChatClient {
             parallel_tool_calls: request.parallel_tool_calls,
             reasoning_effort: request
                 .reasoning_effort
-                .clone()
+                .as_ref()
+                .and_then(|cfg| cfg.effort.clone())
                 .map(Self::map_reasoning_effort),
             ..Default::default()
         }

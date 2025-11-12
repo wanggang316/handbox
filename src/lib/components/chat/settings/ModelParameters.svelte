@@ -6,15 +6,17 @@
     toNumber,
   } from "$lib/states/chat.svelte";
   import ModelSliderParameterRow from "./ModelSliderParameterRow.svelte";
-  import ModelReasoningParameterRow from "./ModelReasoningParameterRow.svelte";
-  import ModelThinkingParameterRow from "./ModelThinkingParameterRow.svelte";
+  import ResponsesReasoningRow from "./ResponsesReasoningRow.svelte";
+  import CompletionsReasoningRow from "./CompletionsReasoningRow.svelte";
+  import GoogleGenaiThinkingRow from "./GoogleGenaiThinkingRow.svelte";
   import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
   import type {
     ModelParameterResponse,
     SliderProps,
     SwitchProps,
-    ReasoningProps,
+    ResponsesReasoningProps,
+    CompletionsReasoningProps,
   } from "$lib/types/provider";
 
   type SaveStatus = "saved" | "saving" | "error";
@@ -37,15 +39,17 @@
 
   // 辅助函数：类型守卫
   function isSliderProps(
-    props: SliderProps | SwitchProps | ReasoningProps
+    props:
+      | SliderProps
+      | SwitchProps
+      | ResponsesReasoningProps
+      | CompletionsReasoningProps
   ): props is SliderProps {
     return props != null && typeof props === "object" && "min" in props;
   }
 
-  function isReasoningParamName(
-    name: string
-  ): name is "reasoning" | "reasoning_effort" {
-    return name === "reasoning" || name === "reasoning_effort";
+  function isReasoningParamName(name: string): name is "reasoning" {
+    return name === "reasoning";
   }
 
   // 辅助函数：将 snake_case 转换为 camelCase (用于数据库字段映射)
@@ -60,7 +64,11 @@
 
     console.log("parameters", parameters);
     parameters.forEach((param) => {
-      if (param.component === "reasoning" || param.component === "thinking") {
+      if (
+        param.component === "responses_reasoning" ||
+        param.component === "completions_reasoning" ||
+        param.component === "thinking"
+      ) {
         return;
       }
       const paramName = param.name; // snake_case from backend
@@ -138,7 +146,11 @@
   // 为每个参数创建自动保存 effect
   $effect(() => {
     parameters.forEach((param) => {
-      if (param.component === "reasoning") {
+      if (
+        param.component === "responses_reasoning" ||
+        param.component === "completions_reasoning" ||
+        param.component === "thinking"
+      ) {
         return;
       }
       const paramName = param.name; // snake_case from backend
@@ -244,17 +256,28 @@
             bind:checked={currentSettings[param.name]}
             helpText={props.tips ?? undefined}
           />
-        {:else if param.component === "reasoning" && isReasoningParamName(param.name)}
-          <ModelReasoningParameterRow
+        {:else if param.component === "responses_reasoning" && isReasoningParamName(param.name)}
+          <ResponsesReasoningRow
             paramName={param.name}
-            label={(param.props as ReasoningProps)?.name ?? param.name}
-            helpText={(param.props as ReasoningProps)?.tips ?? undefined}
+            label={(param.props as ResponsesReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ResponsesReasoningProps)?.tips ??
+              undefined}
+            model={currentModel ?? null}
+          />
+        {:else if param.component === "completions_reasoning" && isReasoningParamName(param.name)}
+          <CompletionsReasoningRow
+            paramName={param.name}
+            label={(param.props as CompletionsReasoningProps)?.name ??
+              param.name}
+            helpText={(param.props as CompletionsReasoningProps)?.tips ??
+              undefined}
             model={currentModel ?? null}
           />
         {:else if param.component === "thinking"}
-          <ModelThinkingParameterRow
-            label={(param.props as ReasoningProps)?.name ?? param.name}
-            helpText={(param.props as ReasoningProps)?.tips ?? undefined}
+          <GoogleGenaiThinkingRow
+            label={(param.props as ResponsesReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ResponsesReasoningProps)?.tips ??
+              undefined}
             model={currentModel ?? null}
           />
         {/if}
@@ -289,17 +312,28 @@
             bind:checked={currentSettings[param.name]}
             helpText={props.tips ?? undefined}
           />
-        {:else if param.component === "reasoning" && isReasoningParamName(param.name)}
-          <ModelReasoningParameterRow
+        {:else if param.component === "responses_reasoning" && isReasoningParamName(param.name)}
+          <ResponsesReasoningRow
             paramName={param.name}
-            label={(param.props as ReasoningProps)?.name ?? param.name}
-            helpText={(param.props as ReasoningProps)?.tips ?? undefined}
+            label={(param.props as ResponsesReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ResponsesReasoningProps)?.tips ??
+              undefined}
+            model={currentModel ?? null}
+          />
+        {:else if param.component === "completions_reasoning" && isReasoningParamName(param.name)}
+          <CompletionsReasoningRow
+            paramName={param.name}
+            label={(param.props as CompletionsReasoningProps)?.name ??
+              param.name}
+            helpText={(param.props as CompletionsReasoningProps)?.tips ??
+              undefined}
             model={currentModel ?? null}
           />
         {:else if param.component === "thinking"}
-          <ModelThinkingParameterRow
-            label={(param.props as ReasoningProps)?.name ?? param.name}
-            helpText={(param.props as ReasoningProps)?.tips ?? undefined}
+          <GoogleGenaiThinkingRow
+            label={(param.props as ResponsesReasoningProps)?.name ?? param.name}
+            helpText={(param.props as ResponsesReasoningProps)?.tips ??
+              undefined}
             model={currentModel ?? null}
           />
         {/if}

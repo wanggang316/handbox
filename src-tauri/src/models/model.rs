@@ -86,10 +86,11 @@ pub enum ParameterLevel {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ParameterComponent {
-    Slider,    // 滑块组件
-    Switch,    // 开关组件
-    Reasoning, // 推理/思维配置组件
-    Thinking,  // Google Thinking 配置组件
+    Slider,               // 滑块组件
+    Switch,               // 开关组件
+    ResponsesReasoning,   // Responses 方法的推理配置组件
+    CompletionsReasoning, // Completions 方法的推理配置组件
+    Thinking,             // Google Thinking 配置组件
 }
 
 /// 滑块组件属性
@@ -120,18 +121,31 @@ pub struct SwitchProps {
 pub enum ComponentProps {
     Slider(SliderProps),
     Switch(SwitchProps),
-    Reasoning(ReasoningProps),
+    ResponsesReasoning(ResponsesReasoningProps),
+    CompletionsReasoning(CompletionsReasoningProps),
     Thinking(ThinkingProps),
 }
 
-/// 推理配置属性
+/// Responses 方法推理配置属性
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReasoningProps {
+pub struct ResponsesReasoningProps {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort_options: Option<HashMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary_options: Option<HashMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tips: Option<String>,
+}
+
+/// Completions 方法推理配置属性
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionsReasoningProps {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_reasoning: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort_options: Option<HashMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tips: Option<String>,
 }
@@ -478,7 +492,8 @@ impl ModelResponse {
         let component = match config.component.as_deref() {
             Some("switch") => ParameterComponent::Switch,
             Some("slider") => ParameterComponent::Slider,
-            Some("reasoning") => ParameterComponent::Reasoning,
+            Some("responses_reasoning") => ParameterComponent::ResponsesReasoning,
+            Some("completions_reasoning") => ParameterComponent::CompletionsReasoning,
             Some("thinking") => ParameterComponent::Thinking,
             _ => ParameterComponent::Slider, // 默认为 Slider
         };
@@ -555,12 +570,22 @@ impl ModelResponse {
                     tips: config.tips.clone(),
                 })
             }
-            ParameterComponent::Reasoning => ComponentProps::Reasoning(ReasoningProps {
-                name,
-                effort_options: config.effort_options.clone(),
-                summary_options: config.summary_options.clone(),
-                tips: config.tips.clone(),
-            }),
+            ParameterComponent::ResponsesReasoning => {
+                ComponentProps::ResponsesReasoning(ResponsesReasoningProps {
+                    name,
+                    effort_options: config.effort_options.clone(),
+                    summary_options: config.summary_options.clone(),
+                    tips: config.tips.clone(),
+                })
+            }
+            ParameterComponent::CompletionsReasoning => {
+                ComponentProps::CompletionsReasoning(CompletionsReasoningProps {
+                    name,
+                    include_reasoning: config.include_reasoning,
+                    effort_options: config.effort_options.clone(),
+                    tips: config.tips.clone(),
+                })
+            }
             ParameterComponent::Thinking => ComponentProps::Thinking(ThinkingProps {
                 name,
                 budget_configs: config.budget_configs.clone(),
