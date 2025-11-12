@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { Copy, RotateCcw, Trash2, ChevronDown, ChevronRight } from "lucide-svelte";
+  import {
+    Copy,
+    RotateCcw,
+    Trash2,
+    ChevronDown,
+    ChevronRight,
+  } from "lucide-svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states";
@@ -216,7 +222,9 @@
       {#if isMessageLoading}
         <!-- 加载状态 -->
         <div class="max-w-full py-2 text-base-content flex items-center">
-          <div class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"></div>
+          <div
+            class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+          ></div>
         </div>
       {:else}
         <!-- 消息气泡 -->
@@ -264,13 +272,13 @@
             <ToolCallList
               toolCalls={message?.toolCalls ?? []}
               messageId={message?.id}
-              isStreaming={isStreaming}
+              {isStreaming}
             />
           {/if}
 
           {#if !isStreaming && !isMessageLoading}
-          <!-- 性能信息 -->
-          <!-- <div class="flex flex-row gap-2 mt-6 text-xs text-base-content/60">
+            <!-- 性能信息 -->
+            <!-- <div class="flex flex-row gap-2 mt-6 text-xs text-base-content/60">
             {#if message?.createdAt}
               <span>
                 {formatTime(message.createdAt)}

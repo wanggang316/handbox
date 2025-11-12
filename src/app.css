@@ -454,10 +454,10 @@ pre.code-block--compact {
   border-bottom: none;
 }
 
-/* 推理过程的特殊样式 */
+/* 推理过程的特殊样式 - 浅色模式 */
 .reasoning-content {
   line-height: 1.5;
-  color: #64748b;
+  color: color-mix(in oklch, var(--base-content) 60%, transparent);
 }
 
 .reasoning-content h1,
@@ -466,29 +466,34 @@ pre.code-block--compact {
 .reasoning-content h4,
 .reasoning-content h5,
 .reasoning-content h6 {
-  color: #1e40af;
-  border-color: #93c5fd;
+  color: color-mix(in oklch, var(--base-content) 70%, transparent);
+  border-color: color-mix(in oklch, var(--base-300) 80%, transparent);
 }
 
-.reasoning-content code {
-  background-color: #dbeafe;
-  color: #1e40af;
-  border-color: #93c5fd;
+.reasoning-content strong {
+  font-weight: 600;
+  color: color-mix(in oklch, var(--base-content) 65%, transparent);
+}
+
+.reasoning-content code:not(.hljs) {
+  background-color: color-mix(in oklch, var(--base-300) 50%, transparent);
+  color: color-mix(in oklch, var(--base-content) 70%, transparent);
+  border-color: color-mix(in oklch, var(--base-300) 60%, transparent);
 }
 
 .reasoning-content pre {
-  background-color: #dbeafe;
-  border-color: #93c5fd;
+  background-color: color-mix(in oklch, var(--base-200) 80%, transparent);
+  border-color: color-mix(in oklch, var(--base-300) 60%, transparent);
 }
 
 .reasoning-content pre code {
-  color: #1e40af;
+  color: color-mix(in oklch, var(--base-content) 70%, transparent);
 }
 
 .reasoning-content blockquote {
-  border-left-color: #3b82f6;
-  background-color: #dbeafe;
-  color: #1e40af;
+  border-left-color: color-mix(in oklch, var(--primary) 60%, transparent);
+  background-color: color-mix(in oklch, var(--base-200) 70%, transparent);
+  color: color-mix(in oklch, var(--base-content) 65%, transparent);
 }
 
 /* 动画：与类名 pulse-scale 对应，供 Tailwind 任意值动画使用 */
