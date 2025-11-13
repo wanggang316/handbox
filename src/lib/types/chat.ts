@@ -81,10 +81,17 @@ export interface ThinkingConfig {
   thinkingBudget?: number | null;
 }
 
+export interface OpenrouterReasoningConfig {
+  effort?: ReasoningEffort | null;
+  maxTokens?: number | null;
+  exclude?: boolean | null;
+}
+
 export interface ChatReasoningConfig {
   responses?: ResponsesReasoningConfig;
   reasoningEffort?: ReasoningEffortConfig;
   thinking?: ThinkingConfig;
+  openrouter?: OpenrouterReasoningConfig;
 }
 
 // 聊天实体

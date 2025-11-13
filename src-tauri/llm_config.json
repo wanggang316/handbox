@@ -233,7 +233,25 @@
       "default_base_url": "https://openrouter.ai/api/v1",
       "icon": "/logo-openrouter.png",
       "chat_api_type": "openai-completions",
-      "model_api_type": "openrouter"
+      "model_api_type": "openrouter",
+      "parameters": {
+        "reasoning": {
+          "component": "openrouter_reasoning",
+          "level": "base",
+          "name": "Reasoning",
+          "tips": "OpenRouter 推理模式允许兼容的模型进行深度思考。通过调整努力程度来平衡推理质量和成本。对于 Anthropic 模型，还可以设置推理 token 配额以精确控制思考预算。",
+          "effect_tips": "控制模型推理的努力程度。low 适合简单任务，medium 处理中等复杂度问题，high 专注于需要深度推理的复杂任务。更高的努力程度会增加响应时间和成本，但能获得更好的推理质量。",
+          "max_tokens_tips": "为推理过程分配的 token 配额。更高的配额允许模型进行更深入的思考，但会增加成本。建议根据任务复杂度调整: 简单问题 1000-5000，中等复杂度 5000-20000，复杂推理任务 20000+。",
+          "default_props": ["effect", "exclude"],
+          "special_props": {
+            "anthropic/*": ["max_tokens"]
+          },
+          "effort_options": {
+            "common": ["low", "medium", "high"]
+          },
+          "max_tokens": [1, 99999999]
+        }
+      }
     }
   ],
   "custom_providers": [

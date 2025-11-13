@@ -91,6 +91,7 @@ pub enum ParameterComponent {
     ResponsesReasoning,   // Responses 方法的推理配置组件
     CompletionsReasoning, // Completions 方法的推理配置组件
     Thinking,             // Google Thinking 配置组件
+    OpenrouterReasoning,  // OpenRouter 推理配置组件
 }
 
 /// 滑块组件属性
@@ -124,6 +125,7 @@ pub enum ComponentProps {
     ResponsesReasoning(ResponsesReasoningProps),
     CompletionsReasoning(CompletionsReasoningProps),
     Thinking(ThinkingProps),
+    OpenrouterReasoning(OpenrouterReasoningProps),
 }
 
 /// Responses 方法推理配置属性
@@ -162,6 +164,26 @@ pub struct ThinkingProps {
     pub include_thoughts_tip: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tip: Option<String>,
+}
+
+/// OpenRouter 推理配置属性
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenrouterReasoningProps {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tips: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_tips: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens_tips: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_props: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub special_props: Option<HashMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort_options: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<Vec<i32>>,
 }
 
 /// 聊天方法详情
@@ -207,9 +229,14 @@ pub struct ModelResponse {
 }
 
 impl ModelResponse {
-    /// 从 Model 转换为 ModelResponse
+    /// 从 Model 转换为 ModelResponse (不包含 provider 级别参数覆盖)
     pub fn from_model(model: Model) -> Self {
-        let chat_method_responses = Self::build_chat_method_responses(&model);
+        Self::from_model_with_provider(model, None)
+    }
+
+    /// 从 Model 转换为 ModelResponse，支持 provider 级别的参数覆盖
+    pub fn from_model_with_provider(model: Model, provider_type: Option<&str>) -> Self {
+        let chat_method_responses = Self::build_chat_method_responses(&model, provider_type);
 
         // 提取支持的聊天方法列表和推荐的方法
         let (supported_chat_methods, chat_method) = if let Some(methods) = chat_method_responses {
@@ -285,14 +312,23 @@ impl ModelResponse {
         }
     }
 
-    fn build_chat_method_responses(model: &Model) -> Option<Vec<ChatMethodResponse>> {
+    fn build_chat_method_responses(
+        model: &Model,
+        provider_type: Option<&str>,
+    ) -> Option<Vec<ChatMethodResponse>> {
         let config = get_global_llm_config();
         let supported_methods = model.supported_methods.as_ref();
 
         let responses: Vec<ChatMethodResponse> = ChatMethod::iter()
             .filter_map(|method| {
                 let method_supported = Self::is_method_supported(supported_methods, method);
-                let method_config = config.get_chat_method_config(method.as_str());
+
+                // 根据是否有 provider_type 选择合并策略
+                let method_config = if let Some(ptype) = provider_type {
+                    config.get_merged_config_with_provider(method.as_str(), ptype)
+                } else {
+                    config.get_chat_method_config(method.as_str())
+                };
 
                 // Convert Vec<String> to Vec<LlmModelParameter> for the parameters builder
                 // 过滤掉 Unknown 参数
@@ -495,6 +531,7 @@ impl ModelResponse {
             Some("responses_reasoning") => ParameterComponent::ResponsesReasoning,
             Some("completions_reasoning") => ParameterComponent::CompletionsReasoning,
             Some("thinking") => ParameterComponent::Thinking,
+            Some("openrouter_reasoning") => ParameterComponent::OpenrouterReasoning,
             _ => ParameterComponent::Slider, // 默认为 Slider
         };
 
@@ -593,6 +630,27 @@ impl ModelResponse {
                 include_thoughts_tip: config.include_thoughts_tip.clone(),
                 budget_tip: config.budget_tip.clone(),
             }),
+            ParameterComponent::OpenrouterReasoning => {
+                // effort_options 对于 OpenRouter 直接从配置中获取(已经是 Vec<String> 格式)
+                // 但配置中存储的是 HashMap<String, Vec<String>>，需要提取
+                let effort_opts = config.effort_options.as_ref().and_then(|opts| {
+                    // OpenRouter 使用 "common" 键或数组的第一个值
+                    opts.get("common")
+                        .or_else(|| opts.values().next())
+                        .cloned()
+                });
+
+                ComponentProps::OpenrouterReasoning(OpenrouterReasoningProps {
+                    name,
+                    tips: config.tips.clone(),
+                    effect_tips: config.effect_tips.clone(),
+                    max_tokens_tips: config.max_tokens_tips.clone(),
+                    default_props: config.default_props.clone(),
+                    special_props: config.special_props.clone(),
+                    effort_options: effort_opts,
+                    max_tokens: config.max_tokens.clone(),
+                })
+            }
         };
 
         (component, props, level)

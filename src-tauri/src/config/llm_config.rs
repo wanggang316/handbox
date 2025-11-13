@@ -31,7 +31,7 @@ pub struct BudgetConfig {
 /// 参数配置（合并了 default、max 和 UI 配置）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterConfig {
-    pub component: Option<String>, // "slider" | "switch" | "responses_reasoning" | "completions_reasoning" | "thinking"
+    pub component: Option<String>, // "slider" | "switch" | "responses_reasoning" | "completions_reasoning" | "thinking" | "openrouter_reasoning"
     pub level: Option<String>,     // "base" | "advance"
     pub step: Option<f64>,         // 仅滑块使用
     pub name: Option<String>,      // 显示名称
@@ -49,6 +49,17 @@ pub struct ParameterConfig {
     pub include_thoughts_tip: Option<String>, // thinking 参数：包含过程的提示文本
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tip: Option<String>, // thinking 参数：预算模式的提示文本
+    // OpenRouter reasoning 特定字段
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_tips: Option<String>, // openrouter_reasoning: effect 参数提示
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens_tips: Option<String>, // openrouter_reasoning: max_tokens 参数提示
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_props: Option<Vec<String>>, // openrouter_reasoning: 默认展示的属性
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub special_props: Option<HashMap<String, Vec<String>>>, // openrouter_reasoning: 特殊模型的属性映射
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<Vec<i32>>, // openrouter_reasoning: max_tokens 范围 [min, max]
 }
 
 /// 聊天方法配置
@@ -121,6 +132,8 @@ pub struct ProviderConfig {
     pub model_api_type: String, // "openai" | "google" | "anthropic" | "openrouter"
     pub supplement_file: Option<String>,
     pub supplement_fields: Option<Vec<SupplementField>>,
+    #[serde(default)]
+    pub parameters: HashMap<String, ParameterConfig>, // 供应商级别的参数配置
 }
 
 /// LLM 配置文件结构
@@ -205,6 +218,29 @@ impl LlmConfig {
     /// 根据聊天方法名称获取配置（返回合并后的配置）
     pub fn get_chat_method_config(&self, method_name: &str) -> ChatMethodConfig {
         self.chat_methods.get_merged_config(method_name)
+    }
+
+    /// 获取合并后的配置（包含 provider 级别的参数覆盖）
+    /// 合并顺序：base -> method -> provider（后者覆盖前者）
+    pub fn get_merged_config_with_provider(
+        &self,
+        method_name: &str,
+        provider_type: &str,
+    ) -> ChatMethodConfig {
+        // 首先获取 base + method 合并后的配置
+        let mut merged = self.get_chat_method_config(method_name);
+
+        // 查找 provider 配置
+        let provider_config = self.get_provider_config(provider_type);
+
+        // 如果 provider 有参数配置，覆盖到 merged 中
+        if let Some(provider) = provider_config {
+            for (key, value) in &provider.parameters {
+                merged.parameters.insert(key.clone(), value.clone());
+            }
+        }
+
+        merged
     }
 }
 

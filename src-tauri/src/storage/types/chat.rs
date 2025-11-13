@@ -41,6 +41,18 @@ pub struct Chat {
     pub updated_at: Timestamp,
 }
 
+/// OpenRouter 推理配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmOpenrouterReasoning {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<bool>,
+}
+
 /// 聊天级推理配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +63,8 @@ pub struct ChatReasoningConfig {
     pub reasoning_effort: Option<LlmReasoningEffortConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<LlmThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openrouter: Option<LlmOpenrouterReasoning>,
 }
 
 #[cfg(test)]

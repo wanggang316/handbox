@@ -13,8 +13,9 @@ use chrono::Utc;
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::create_llm_client;
 use handbox_llm::types::{
-    LlmMessage, LlmMessageRole, LlmProvider, LlmRequest, LlmRequestTool, LlmRequestToolFunction,
-    LlmResponse, LlmToolChoice, LlmToolFunction,
+    LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort, LlmReasoningEffortConfig,
+    LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse, LlmToolChoice,
+    LlmToolFunction,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1477,10 +1478,54 @@ impl MessageService {
                 );
                 reasoning
             },
-            reasoning_effort: reasoning_config
-                .as_ref()
-                .and_then(|cfg| cfg.reasoning_effort.clone())
-                .filter(|_| supports_reasoning),
+            reasoning_effort: {
+                // 优先使用 reasoning_effort，如果不存在则尝试从 openrouter 转换
+                let effort_config = reasoning_config
+                    .as_ref()
+                    .and_then(|cfg| {
+                        cfg.reasoning_effort.clone().or_else(|| {
+                            // 如果有 openrouter 配置，转换为 reasoning_effort
+                            cfg.openrouter.as_ref().and_then(|or_cfg| {
+                                // 如果 exclude 为 true，不发送推理参数
+                                if or_cfg.exclude == Some(true) {
+                                    return None;
+                                }
+
+                                // 将 String 转换为 LlmReasoningEffort 枚举
+                                let effort = or_cfg.effort.as_ref().and_then(|s| {
+                                    match s.to_lowercase().as_str() {
+                                        "minimal" => Some(LlmReasoningEffort::Minimal),
+                                        "low" => Some(LlmReasoningEffort::Low),
+                                        "medium" => Some(LlmReasoningEffort::Medium),
+                                        "high" => Some(LlmReasoningEffort::High),
+                                        _ => None,
+                                    }
+                                });
+
+                                // 构建 reasoning_effort 配置
+                                if effort.is_some() || or_cfg.exclude.is_some() {
+                                    Some(LlmReasoningEffortConfig {
+                                        effort,
+                                        include_reasoning: match or_cfg.exclude {
+                                            Some(false) => Some(true),
+                                            Some(true) => Some(false),
+                                            None => None,
+                                        },
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    })
+                    .filter(|_| supports_reasoning);
+
+                tracing::info!(
+                    "[MessageService::convert_to_api_request] Final reasoning_effort param: {:?}",
+                    effort_config
+                );
+                effort_config
+            },
             thinking: reasoning_config
                 .as_ref()
                 .and_then(|cfg| cfg.thinking.clone())

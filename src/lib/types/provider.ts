@@ -40,7 +40,8 @@ export type ParameterComponent =
   | "switch"
   | "responses_reasoning"
   | "completions_reasoning"
-  | "thinking";
+  | "thinking"
+  | "openrouter_reasoning";
 
 // 滑块组件属性
 export interface SliderProps {
@@ -101,13 +102,26 @@ export interface ThinkingProps {
   budget_tip?: string | null;
 }
 
+// OpenRouter 推理配置属性
+export interface OpenrouterReasoningProps {
+  name: string;
+  tips?: string | null;
+  effect_tips?: string | null;
+  max_tokens_tips?: string | null;
+  default_props?: string[] | null;
+  special_props?: Record<string, string[]> | null;
+  effort_options?: string[] | null;
+  max_tokens?: [number, number] | null;
+}
+
 // 组件属性联合类型
 export type ComponentProps =
   | SliderProps
   | SwitchProps
   | ResponsesReasoningProps
   | CompletionsReasoningProps
-  | ThinkingProps;
+  | ThinkingProps
+  | OpenrouterReasoningProps;
 
 // 参数响应 (替换原 ChatMethodParameter)
 export interface ModelParameterResponse {

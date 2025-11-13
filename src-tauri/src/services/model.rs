@@ -122,9 +122,11 @@ impl ModelService {
         };
 
         // 转换为 ModelResponse 并过滤掉 chat_method 为空的模型
+        // 传递 provider_type 以支持供应商级别的参数覆盖
+        let provider_type = provider.provider_type.clone();
         Ok(models
             .into_iter()
-            .map(ModelResponse::from_model)
+            .map(|model| ModelResponse::from_model_with_provider(model, Some(&provider_type)))
             .filter(|model| model.chat_method.is_some())
             .collect())
     }

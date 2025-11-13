@@ -9,6 +9,7 @@
   import ResponsesReasoningRow from "./ResponsesReasoningRow.svelte";
   import CompletionsReasoningRow from "./CompletionsReasoningRow.svelte";
   import GoogleGenaiThinkingRow from "./GoogleGenaiThinkingRow.svelte";
+  import OpenRouterReasoningRow from "./OpenRouterReasoningRow.svelte";
   import SwitchRow from "../../ui/table/SwitchRow.svelte";
   import TableGroup from "../../ui/table/TableGroup.svelte";
   import type {
@@ -17,6 +18,7 @@
     SwitchProps,
     ResponsesReasoningProps,
     CompletionsReasoningProps,
+    OpenrouterReasoningProps,
   } from "$lib/types/provider";
 
   type SaveStatus = "saved" | "saving" | "error";
@@ -280,6 +282,14 @@
               undefined}
             model={currentModel ?? null}
           />
+        {:else if param.component === "openrouter_reasoning" && isReasoningParamName(param.name)}
+          <OpenRouterReasoningRow
+            paramName={param.name}
+            label={(param.props as OpenrouterReasoningProps)?.name ?? param.name}
+            helpText={(param.props as OpenrouterReasoningProps)?.tips ??
+              undefined}
+            model={currentModel ?? null}
+          />
         {/if}
       {/each}
     </TableGroup>
@@ -333,6 +343,14 @@
           <GoogleGenaiThinkingRow
             label={(param.props as ResponsesReasoningProps)?.name ?? param.name}
             helpText={(param.props as ResponsesReasoningProps)?.tips ??
+              undefined}
+            model={currentModel ?? null}
+          />
+        {:else if param.component === "openrouter_reasoning" && isReasoningParamName(param.name)}
+          <OpenRouterReasoningRow
+            paramName={param.name}
+            label={(param.props as OpenrouterReasoningProps)?.name ?? param.name}
+            helpText={(param.props as OpenrouterReasoningProps)?.tips ??
               undefined}
             model={currentModel ?? null}
           />
