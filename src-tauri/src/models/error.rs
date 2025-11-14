@@ -136,7 +136,39 @@ impl From<sqlx::Error> for AppError {
 // MCP client 错误转换
 impl From<handbox_mcp::McpClientError> for AppError {
     fn from(error: handbox_mcp::McpClientError) -> Self {
-        Self::new("MCP_ERROR", &error.to_string())
+        use handbox_mcp::McpClientError;
+
+        match error {
+            McpClientError::TransportCreation(message) => AppError {
+                code: "MCP_TRANSPORT_ERROR".to_string(),
+                message: format!("无法连接 MCP 服务: {}", message),
+                hint: Some("请检查 MCP 服务器命令、端口或网络连通性".to_string()),
+            },
+            McpClientError::ClientInitialize(init_error) => AppError {
+                code: "MCP_INIT_ERROR".to_string(),
+                message: format!("MCP 客户端初始化失败: {}", init_error),
+                hint: Some("请确认 MCP 服务可用并返回有效响应".to_string()),
+            },
+            McpClientError::Service(service_error) => AppError {
+                code: "MCP_SERVICE_ERROR".to_string(),
+                message: format!("MCP 服务调用失败: {}", service_error),
+                hint: Some("请检查 MCP 服务日志，确保工具和资源配置正确".to_string()),
+            },
+            McpClientError::Runtime(runtime_error) => AppError {
+                code: "MCP_RUNTIME_ERROR".to_string(),
+                message: format!("MCP 运行时错误: {}", runtime_error),
+                hint: Some("后台任务异常终止，请重试或重新启动应用".to_string()),
+            },
+            McpClientError::InvalidToolArguments(message) => {
+                let detail = format!("工具参数无效: {}", message);
+                AppError::validation_error(&detail)
+            }
+            McpClientError::Shutdown(message) => AppError {
+                code: "MCP_SHUTDOWN_ERROR".to_string(),
+                message: format!("MCP 关闭失败: {}", message),
+                hint: Some("请确认 MCP 进程状态并重新尝试".to_string()),
+            },
+        }
     }
 }
 

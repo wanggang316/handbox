@@ -635,9 +635,7 @@ impl ModelResponse {
                 // 但配置中存储的是 HashMap<String, Vec<String>>，需要提取
                 let effort_opts = config.effort_options.as_ref().and_then(|opts| {
                     // OpenRouter 使用 "common" 键或数组的第一个值
-                    opts.get("common")
-                        .or_else(|| opts.values().next())
-                        .cloned()
+                    opts.get("common").or_else(|| opts.values().next()).cloned()
                 });
 
                 ComponentProps::OpenrouterReasoning(OpenrouterReasoningProps {

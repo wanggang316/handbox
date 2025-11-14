@@ -89,8 +89,11 @@ fn create_stream_error_callback(
             event_name,
             json!({
                 "streamId": stream_id,
-                "error": error.message,
-                "code": error.code
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "hint": error.hint,
+                }
             }),
         );
         tracing::error!(

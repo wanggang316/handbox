@@ -90,7 +90,7 @@ impl McpService {
             // 如果启用，尝试连接。连接失败则返回错误，不保存
             self.update_server_status(&mut server)
                 .await
-                .map_err(|e| AppError::internal_error(&e.to_string()))?;
+                .map_err(AppError::from)?;
         }
 
         self.repository.create_server(&server).await?;
@@ -206,7 +206,7 @@ impl McpService {
             // 如果需要刷新且连接失败，返回错误，不保存更新
             self.update_server_status(&mut existing)
                 .await
-                .map_err(|e| AppError::internal_error(&e.to_string()))?;
+                .map_err(AppError::from)?;
         }
 
         self.repository.update_server(&existing).await?;

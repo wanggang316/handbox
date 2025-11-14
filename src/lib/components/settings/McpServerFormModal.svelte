@@ -6,7 +6,7 @@
   import TextRow from "$lib/components/ui/table/TextRow.svelte";
   import TextareaRow from "$lib/components/ui/table/TextareaRow.svelte";
   import SelectRow from "$lib/components/ui/table/SelectRow.svelte";
-  import { toastActions } from "$lib/states/toast.svelte";
+  import { showAppError } from "$lib/utils";
   import type {
     CreateMcpServerRequest,
     McpConnectionType,
@@ -283,9 +283,9 @@
       // 保存成功，关闭弹窗
       closeModal();
     } catch (error) {
-      // 保存失败，显示错误提示（3秒自动消失）
-      const errorMessage = error instanceof Error ? error.message : '保存失败，请重试';
-      toastActions.error(errorMessage, 3000);
+      showAppError(error, {
+        fallbackMessage: '保存失败，请重试'
+      });
     } finally {
       isSubmitting = false;
     }

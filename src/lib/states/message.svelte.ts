@@ -16,6 +16,7 @@ import * as messageApi from '$lib/api/message';
 import { listenToStreamEvents } from '$lib/api/message';
 import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
 import { chatState } from './chat.svelte';
+import { showAppError, type ErrorDisplayOptions } from '$lib/utils';
 
 interface MessageState {
   // 按 chatId 组织消息
@@ -216,6 +217,19 @@ class MessageStore {
     this.state.error = error;
   }
 
+  private reportError(
+    error: unknown,
+    fallbackMessage: string,
+    options?: ErrorDisplayOptions
+  ) {
+    const normalized = showAppError(error, {
+      fallbackMessage,
+      ...options
+    });
+    this.setError(normalized.message);
+    return normalized;
+  }
+
   // 设置聊天的消息列表
   setMessages(chatId: string, messages: Message[]) {
     // 如果正在发送消息且本地已有消息，避免覆盖
@@ -367,13 +381,17 @@ class MessageStore {
         }
       },
 
-      onError: (error: any) => {
-        console.error('流式错误:', error);
-        this.setError(error.error || error.message || '流式响应错误');
+      onError: (payload: any) => {
+        console.error('流式错误:', payload);
+        const errorDetail = payload?.error ?? payload;
+        this.reportError(errorDetail, '流式响应错误', {
+          requiresAcknowledgement: true,
+          title: '对话失败'
+        });
 
         // 执行自定义错误回调
         if (onError) {
-          onError(error);
+          onError(payload);
         }
 
         // 错误时也清理监听器
@@ -466,7 +484,7 @@ class MessageStore {
       this.setMessages(chatId, messages);
 
     } catch (error) {
-      this.setError(error instanceof Error ? error.message : '加载消息失败');
+      this.reportError(error, '加载消息失败');
       throw error;
     } finally {
       this.setLoading(false);
@@ -541,7 +559,9 @@ class MessageStore {
       await messageApi.sendUserMessageStream(userMessageRequest);
 
     } catch (error) {
-      this.setError(error instanceof Error ? error.message : '发送消息失败');
+      this.reportError(error, '发送消息失败', {
+        title: '消息发送失败'
+      });
       this.setSending(false);
       throw error;
     }
@@ -555,7 +575,7 @@ class MessageStore {
       await messageApi.deleteMessage(messageId);
       this.deleteMessage(chatId, messageId);
     } catch (error) {
-      this.setError(error instanceof Error ? error.message : '删除消息失败');
+      this.reportError(error, '删除消息失败');
       throw error;
     }
   }
@@ -605,7 +625,9 @@ class MessageStore {
       console.log('[regenerateMessage] API 调用成功');
     } catch (error) {
       console.error('[regenerateMessage] 重新生成失败:', error);
-      this.setError(error instanceof Error ? error.message : '重新生成失败');
+      this.reportError(error, '重新生成失败', {
+        title: '重新生成失败'
+      });
       this.setSending(false);
       throw error;
     }
@@ -669,7 +691,9 @@ class MessageStore {
         this.currentStreamUnlisten = null;
       }
       console.error('重发消息失败:', error);
-      this.setError(error instanceof Error ? error.message : '重发消息失败');
+      this.reportError(error, '重发消息失败', {
+        title: '重发失败'
+      });
       this.setSending(false);
       throw error;
     }
@@ -779,7 +803,7 @@ class MessageStore {
         this.currentStreamUnlisten = null;
       }
       console.error('启动工具执行失败:', error);
-      this.setError(error instanceof Error ? error.message : '工具执行失败');
+      this.reportError(error, '工具执行失败');
       throw error;
     }
   }

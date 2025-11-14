@@ -19,7 +19,10 @@
           icon: 'text-success',
           title: 'text-success',
           message: 'text-success/80',
-          close: 'text-success/70 hover:text-success'
+          hint: 'text-success/70',
+          caption: 'text-success/60',
+          close: 'text-success/70 hover:text-success',
+          action: 'border-success/40 text-success hover:bg-success/10'
         };
       case 'warning':
         return {
@@ -27,7 +30,10 @@
           icon: 'text-warning',
           title: 'text-warning',
           message: 'text-warning/80',
-          close: 'text-warning/70 hover:text-warning'
+          hint: 'text-warning/70',
+          caption: 'text-warning/60',
+          close: 'text-warning/70 hover:text-warning',
+          action: 'border-warning/40 text-warning hover:bg-warning/10'
         };
       case 'info':
         return {
@@ -35,7 +41,10 @@
           icon: 'text-info',
           title: 'text-info',
           message: 'text-info/80',
-          close: 'text-info/70 hover:text-info'
+          hint: 'text-info/70',
+          caption: 'text-info/60',
+          close: 'text-info/70 hover:text-info',
+          action: 'border-info/40 text-info hover:bg-info/10'
         };
       default: // error
         return {
@@ -43,7 +52,10 @@
           icon: 'text-error',
           title: 'text-error',
           message: 'text-error/80',
-          close: 'text-error/70 hover:text-error'
+          hint: 'text-error/70',
+          caption: 'text-error/60',
+          close: 'text-error/70 hover:text-error',
+          action: 'border-error/40 text-error hover:bg-error/10'
         };
     }
   }
@@ -72,18 +84,37 @@
           <Icon class="h-5 w-5 mt-0.5 flex-shrink-0 {styles.icon}" />
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium {styles.title}">
-              {getTitle(toast.type)}
+              {toast.title ?? getTitle(toast.type)}
             </p>
+            {#if toast.code}
+              <p class="text-[11px] tracking-wide uppercase {styles.caption}">
+                {toast.code}
+              </p>
+            {/if}
             <p class="text-sm mt-1 {styles.message}">
               {toast.message}
             </p>
+            {#if toast.hint}
+              <p class="text-xs mt-1 leading-relaxed {styles.hint}">
+                {toast.hint}
+              </p>
+            {/if}
           </div>
-          <button 
-            onclick={() => toastActions.remove(toast.id)}
-            class="p-1 -m-1 {styles.close}"
-          >
-            <X class="h-4 w-4" />
-          </button>
+          {#if toast.requiresAcknowledgement}
+            <button
+              onclick={() => toastActions.remove(toast.id)}
+              class="px-3 py-1 text-xs font-medium rounded-full border transition-colors {styles.action}"
+            >
+              {toast.acknowledgeLabel ?? '我知道了'}
+            </button>
+          {:else}
+            <button 
+              onclick={() => toastActions.remove(toast.id)}
+              class="p-1 -m-1 {styles.close}"
+            >
+              <X class="h-4 w-4" />
+            </button>
+          {/if}
         </div>
       </div>
     </div>
