@@ -108,8 +108,7 @@ export interface OpenrouterReasoningProps {
   tips?: string | null;
   effect_tips?: string | null;
   max_tokens_tips?: string | null;
-  default_props?: string[] | null;
-  special_props?: Record<string, string[]> | null;
+  props?: string[] | null;
   effort_options?: string[] | null;
   max_tokens?: [number, number] | null;
 }

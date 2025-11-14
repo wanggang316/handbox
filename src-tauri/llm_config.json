@@ -244,7 +244,7 @@
           "max_tokens_tips": "为推理过程分配的 token 配额。更高的配额允许模型进行更深入的思考，但会增加成本。建议根据任务复杂度调整: 简单问题 1000-5000，中等复杂度 5000-20000，复杂推理任务 20000+。",
           "default_props": ["effect", "exclude"],
           "special_props": {
-            "anthropic/*": ["max_tokens"]
+            "^anthropic/.*$": ["max_tokens"]
           },
           "effort_options": {
             "common": ["low", "medium", "high"]

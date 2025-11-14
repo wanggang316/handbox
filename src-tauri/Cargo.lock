@@ -1689,6 +1689,7 @@ dependencies = [
  "once_cell",
  "openai-rust",
  "rand 0.8.5",
+ "regex",
  "reqwest",
  "rmcp",
  "serde",

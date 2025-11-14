@@ -176,10 +176,9 @@ pub struct OpenrouterReasoningProps {
     pub effect_tips: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens_tips: Option<String>,
+    /// 已解析的属性列表（backend 根据 model_id 和 special_props 解析后的结果）
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_props: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub special_props: Option<HashMap<String, Vec<String>>>,
+    pub props: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort_options: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -346,6 +345,8 @@ impl ModelResponse {
                     model.max_parameters.as_ref(),
                     &method_config,
                     model.output_max_tokens,
+                    &model.id,
+                    provider_type.unwrap_or(""),
                 );
 
                 if !method_supported {
@@ -386,6 +387,8 @@ impl ModelResponse {
         db_max: Option<&HashMap<String, serde_json::Value>>,
         method_config: &ChatMethodConfig,
         output_max_tokens: Option<i32>,
+        model_id: &str,
+        provider_type: &str,
     ) -> Option<Vec<ModelParameterResponse>> {
         let mut parameter_names: HashSet<String> = HashSet::new();
 
@@ -457,6 +460,8 @@ impl ModelResponse {
                 db_max,
                 Some(config),
                 output_max_tokens,
+                model_id,
+                provider_type,
             );
 
             parameters.push(ModelParameterResponse {
@@ -520,6 +525,8 @@ impl ModelResponse {
         db_max: Option<&HashMap<String, serde_json::Value>>,
         param_config: Option<&crate::config::llm_config::ParameterConfig>,
         output_max_tokens: Option<i32>,
+        model_id: &str,
+        _provider_type: &str,
     ) -> (ParameterComponent, ComponentProps, ParameterLevel) {
         // param_config 在调用前已经检查过，这里可以安全 unwrap
         let config = param_config.expect("param_config should not be None");
@@ -638,13 +645,21 @@ impl ModelResponse {
                     opts.get("common").or_else(|| opts.values().next()).cloned()
                 });
 
+                // 解析 special_props 模式匹配
+                // 对于 OpenRouter，model_id 本身已经包含了提供商前缀（如 anthropic/claude-xxx）
+                // 所以直接使用 model_id 作为匹配 key
+                let resolved_props = Self::resolve_openrouter_props(
+                    config.default_props.as_ref(),
+                    config.special_props.as_ref(),
+                    model_id,
+                );
+
                 ComponentProps::OpenrouterReasoning(OpenrouterReasoningProps {
                     name,
                     tips: config.tips.clone(),
                     effect_tips: config.effect_tips.clone(),
                     max_tokens_tips: config.max_tokens_tips.clone(),
-                    default_props: config.default_props.clone(),
-                    special_props: config.special_props.clone(),
+                    props: resolved_props,
                     effort_options: effort_opts,
                     max_tokens: config.max_tokens.clone(),
                 })
@@ -690,6 +705,30 @@ impl ModelResponse {
             serde_json::Value::String(text) => text.parse::<bool>().ok(),
             _ => None,
         }
+    }
+
+    /// 解析 OpenRouter reasoning 的 props
+    /// 根据 model_key 和 special_props 的正则模式，返回应该展示的属性列表
+    fn resolve_openrouter_props(
+        default_props: Option<&Vec<String>>,
+        special_props: Option<&HashMap<String, Vec<String>>>,
+        model_key: &str,
+    ) -> Option<Vec<String>> {
+        // 如果有 special_props，尝试匹配模型
+        if let Some(patterns) = special_props {
+            for (pattern, props_list) in patterns {
+                // 尝试将 pattern 编译为正则表达式
+                if let Ok(regex) = regex::Regex::new(pattern) {
+                    if regex.is_match(model_key) {
+                        // 匹配成功，返回特定的 props
+                        return Some(props_list.clone());
+                    }
+                }
+            }
+        }
+
+        // 没有匹配到特殊模式，返回 default_props
+        default_props.cloned()
     }
 }
 

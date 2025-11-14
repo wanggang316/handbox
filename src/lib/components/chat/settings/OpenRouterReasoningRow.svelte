@@ -123,49 +123,25 @@
     return param.props as OpenrouterReasoningProps;
   }
 
-  // 获取 default_props（默认展示的属性）
-  const defaultProps = $derived(() => {
+  // 获取已解析的 props（backend 已经根据模型匹配好了）
+  const resolvedProps = $derived(() => {
     const props = getReasoningProps();
-    return props?.default_props || ["effect", "exclude"];
+    return props?.props || ["effect", "exclude"];
   });
-
-  // 获取 special_props（特殊模型的属性映射）
-  function getPropsForModel(): string[] {
-    const props = getReasoningProps();
-    if (!props?.special_props || !model) return defaultProps();
-
-    // 尝试正则匹配
-    for (const [pattern, propsList] of Object.entries(props.special_props)) {
-      try {
-        // 将模式转换为正则表达式（支持 * 通配符）
-        const regexPattern = pattern.replace(/\*/g, ".*");
-        const regex = new RegExp(`^${regexPattern}$`);
-        const modelKey = `${model.providerType}/${model.id}`;
-
-        if (regex.test(modelKey)) {
-          return propsList;
-        }
-      } catch (e) {
-        console.error("Invalid regex pattern:", pattern, e);
-      }
-    }
-
-    return defaultProps();
-  }
 
   // 是否显示 effect 参数
   const showEffect = $derived(() => {
-    return getPropsForModel().includes("effect");
+    return resolvedProps().includes("effect");
   });
 
   // 是否显示 max_tokens 参数
   const showMaxTokens = $derived(() => {
-    return getPropsForModel().includes("max_tokens");
+    return resolvedProps().includes("max_tokens");
   });
 
   // 是否显示 exclude 参数
   const showExclude = $derived(() => {
-    return getPropsForModel().includes("exclude");
+    return resolvedProps().includes("exclude");
   });
 
   // 构建 effort 选项
