@@ -9,3 +9,5 @@ export * from './file';
 export * from './string';
 export * from './browser';
 export * from './markdown';
+export * from './code';
+export * from './error';

@@ -1,8 +1,10 @@
 // 消息相关 IPC 命令
 
-use crate::models::{AppError, Message, MessageRequest, MessageResponse, UUID};
-use crate::services::{message::StreamChunk, MessageService};
+use crate::models::{AppError, MessageResponse, StreamChunk, UserMessageSendRequest};
+use crate::services::MessageService;
+use crate::storage::types::{Message, MessageToolCall, UUID};
 use serde_json::json;
+use std::collections::HashMap;
 use tauri::{Emitter, State, Window};
 
 /// 创建流式开始回调
@@ -87,8 +89,11 @@ fn create_stream_error_callback(
             event_name,
             json!({
                 "streamId": stream_id,
-                "error": error.message,
-                "code": error.code
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "hint": error.hint,
+                }
             }),
         );
         tracing::error!(
@@ -100,14 +105,78 @@ fn create_stream_error_callback(
     }
 }
 
+/// 创建工具执行回调
+fn create_tool_execute_callback(
+    window: Window,
+    event_name: &'static str,
+) -> impl FnMut(String, HashMap<String, MessageToolCall>) {
+    move |message_id: String, tool_calls: HashMap<String, MessageToolCall>| {
+        let payload = json!({
+            "messageId": message_id,
+            "toolCalls": tool_calls
+        });
+
+        let _ = window.emit(event_name, payload);
+
+        tracing::info!(
+            "[{}] Tool execution status event for message {}",
+            event_name,
+            message_id
+        );
+    }
+}
+
+fn create_messages_delete_callback(
+    window: Window,
+    event_name: &'static str,
+) -> impl FnMut(String, Vec<String>) {
+    move |chat_id: String, message_ids: Vec<String>| {
+        let _ = window.emit(
+            event_name,
+            json!({
+                "chatId": chat_id,
+                "messageIds": message_ids
+            }),
+        );
+        tracing::info!(
+            "[{}] {} messages deleted for chat {}",
+            event_name,
+            message_ids.len(),
+            chat_id
+        );
+    }
+}
+
+/// 创建用户消息已保存回调 - 通知前端临时ID和真实ID的映射
+fn create_user_message_saved_callback(
+    window: Window,
+    event_name: &'static str,
+) -> impl FnMut(String, String) {
+    move |temp_message_id: String, saved_message_id: String| {
+        let _ = window.emit(
+            event_name,
+            json!({
+                "tempMessageId": temp_message_id,
+                "savedMessageId": saved_message_id
+            }),
+        );
+        tracing::info!(
+            "[{}] User message ID mapped: {} -> {}",
+            event_name,
+            temp_message_id,
+            saved_message_id
+        );
+    }
+}
+
 /// 发送聊天消息
 #[tauri::command]
-pub async fn message_send(
-    request: MessageRequest,
+pub async fn message_user_send(
+    request: UserMessageSendRequest,
     message_service: State<'_, MessageService>,
 ) -> Result<MessageResponse, AppError> {
     tracing::info!("[message_send] IPC command called");
-    match message_service.send_message(request).await {
+    match message_service.send_user_message(request).await {
         Ok(response) => {
             tracing::info!("[message_send] Command completed successfully");
             Ok(response)
@@ -211,32 +280,115 @@ pub async fn message_delete(
     }
 }
 
-/// 重新生成助手消息
+/// 流式重新生成助手消息
 #[tauri::command]
-pub async fn message_regenerate(
+pub async fn message_assistant_regenerate_stream(
     message_id: UUID,
+    window: Window,
     message_service: State<'_, MessageService>,
-) -> Result<MessageResponse, AppError> {
+) -> Result<(), AppError> {
     tracing::info!(
-        "[message_regenerate] IPC command called for message_id: {}",
+        "[message_regenerate_stream] IPC command called for message_id: {}",
         message_id
     );
-    match message_service.regenerate_message(message_id).await {
-        Ok(response) => {
-            tracing::info!("[message_regenerate] Command completed successfully");
-            Ok(response)
-        }
-        Err(e) => {
-            tracing::error!("[message_regenerate] Command failed: {:?}", e);
-            Err(e)
-        }
-    }
+
+    // 克隆必要的数据
+    let window_clone = window.clone();
+    let service_clone = message_service.inner().clone();
+    let message_id_clone = message_id.clone();
+
+    // 在后台任务中执行
+    tauri::async_runtime::spawn(async move {
+        // 创建事件回调
+        let start_callback =
+            create_stream_start_callback(window_clone.clone(), "message_stream_start", None);
+
+        let streaming_callback =
+            create_streaming_callback(window_clone.clone(), "message_stream_chunk");
+
+        let end_callback = create_stream_end_callback(window_clone.clone(), "message_stream_end");
+
+        let error_callback =
+            create_stream_error_callback(window_clone.clone(), "message_stream_error");
+
+        let messages_delete_callback =
+            create_messages_delete_callback(window_clone.clone(), "messages_deleted");
+
+        // 调用服务方法
+        service_clone
+            .regenerate_assistant_message_stream(
+                message_id_clone,
+                start_callback,
+                streaming_callback,
+                end_callback,
+                error_callback,
+                messages_delete_callback,
+            )
+            .await;
+    });
+
+    tracing::info!("[message_regenerate_stream] Command started in background");
+    Ok(())
+}
+
+/// 流式重发用户消息
+#[tauri::command]
+pub async fn message_user_resend_stream(
+    message_id: UUID,
+    content: Option<String>,
+    window: Window,
+    message_service: State<'_, MessageService>,
+) -> Result<(), AppError> {
+    tracing::info!(
+        "[message_resend_stream] IPC command called for message_id: {}",
+        message_id
+    );
+
+    // 克隆必要的数据
+    let window_clone = window.clone();
+    let service_clone = message_service.inner().clone();
+    let message_id_clone = message_id.clone();
+    let content_clone = content.clone();
+
+    // 在后台任务中执行
+    tauri::async_runtime::spawn(async move {
+        // 创建事件回调
+        let start_callback =
+            create_stream_start_callback(window_clone.clone(), "message_stream_start", None);
+
+        let streaming_callback =
+            create_streaming_callback(window_clone.clone(), "message_stream_chunk");
+
+        let end_callback = create_stream_end_callback(window_clone.clone(), "message_stream_end");
+
+        let error_callback =
+            create_stream_error_callback(window_clone.clone(), "message_stream_error");
+
+        let messages_delete_callback =
+            create_messages_delete_callback(window_clone.clone(), "messages_deleted");
+
+        // 调用服务方法
+        service_clone
+            .resend_user_message_stream(
+                message_id_clone,
+                content_clone,
+                start_callback,
+                streaming_callback,
+                end_callback,
+                error_callback,
+                messages_delete_callback,
+            )
+            .await;
+    });
+
+    tracing::info!("[message_resend_stream] Command started in background");
+    Ok(())
 }
 
 /// 发送流式消息
 #[tauri::command]
-pub async fn message_send_stream(
-    request: MessageRequest,
+pub async fn message_user_send_stream(
+    request: UserMessageSendRequest,
     window: Window,
     message_service: State<'_, MessageService>,
 ) -> Result<(), AppError> {
@@ -260,14 +412,18 @@ pub async fn message_send_stream(
         let error_callback =
             create_stream_error_callback(window_clone.clone(), "message_stream_error");
 
+        let user_message_saved_callback =
+            create_user_message_saved_callback(window_clone.clone(), "user_message_saved");
+
         // 调用真实的流式API
         service_clone
-            .send_message_stream(
+            .send_user_message_stream(
                 request_clone,
                 start_callback,
                 streaming_callback,
                 end_callback,
                 error_callback,
+                user_message_saved_callback,
             )
             .await;
     });
@@ -308,6 +464,17 @@ pub async fn message_execute_tool_calls(
             |_stream_id, error| {
                 // 错误回调
                 tracing::error!("[message_execute_tool_calls] Execution failed: {:?}", error);
+            },
+            |_message_id, _tool_calls| {
+                // 工具执行状态回调
+                tracing::info!(
+                    "[message_execute_tool_calls] Tool execution calls: {:?}",
+                    _tool_calls
+                );
+            },
+            |_chat_id, _deleted_message_ids| {
+                // 消息删除回调
+                tracing::info!("[message_execute_tool_calls] Messages deleted before re-execution");
             },
         )
         .await;
@@ -350,6 +517,12 @@ pub async fn message_execute_tool_calls_stream(
         let error_callback =
             create_stream_error_callback(window_clone.clone(), "tool_execute_stream_error");
 
+        let tool_execute_callback =
+            create_tool_execute_callback(window_clone.clone(), "tool_execute");
+
+        let messages_delete_callback =
+            create_messages_delete_callback(window_clone.clone(), "messages_deleted");
+
         // 调用真实的工具执行流式API
         service_clone
             .execute_tool_calls(
@@ -359,6 +532,8 @@ pub async fn message_execute_tool_calls_stream(
                 streaming_callback,
                 end_callback,
                 error_callback,
+                tool_execute_callback,
+                messages_delete_callback,
             )
             .await;
     });

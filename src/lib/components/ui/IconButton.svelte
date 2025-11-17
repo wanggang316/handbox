@@ -1,25 +1,37 @@
 <script lang="ts">
   import type { Icon as IconType } from '@lucide/svelte';
-  import { createEventDispatcher } from 'svelte';
 
-  export let icon: typeof IconType;
-  export let iconSize: number = 20;
-  export let ariaLabel: string = '';
+  interface Props {
+    icon: typeof IconType;
+    iconSize?: number;
+    ariaLabel?: string;
+    size?: string;
+    rounded?: string;
+    bgColor?: string;
+    hoverColor?: string;
+    textColor?: string;
+    disabled?: boolean;
+    customClass?: string;
+    onclick?: (event: MouseEvent) => void;
+  }
 
-  // 样式默认：圆角方形、深色图标、透明背景，悬浮显示浅色底
-  export let size: string = 'w-7 h-7';
-  export let rounded: string = 'rounded-md';
-  export let bgColor: string = 'bg-transparent';
-  export let hoverColor: string = 'hover:bg-base-300';
-  export let textColor: string = 'text-base-content';
-  export let disabled: boolean = false;
-  export let customClass: string = '';
-
-  const dispatch = createEventDispatcher();
+  let {
+    icon,
+    iconSize = 20,
+    ariaLabel = '',
+    size = 'w-7 h-7',
+    rounded = 'rounded-md',
+    bgColor = 'bg-transparent',
+    hoverColor = 'hover:bg-base-300',
+    textColor = 'text-base-content',
+    disabled = false,
+    customClass = '',
+    onclick,
+  }: Props = $props();
 
   function handleClick(event: MouseEvent) {
     if (!disabled) {
-      dispatch('click', event);
+      onclick?.(event);
     }
   }
 </script>
@@ -29,7 +41,7 @@
   class:opacity-80={disabled}
   class:cursor-not-allowed={disabled}
   aria-label={ariaLabel}
-  on:click={handleClick}
+  onclick={handleClick}
   {disabled}
 >
   {#if icon}

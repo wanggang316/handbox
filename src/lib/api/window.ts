@@ -8,10 +8,11 @@ import { invoke } from '@tauri-apps/api/core';
 
 /**
  * 打开设置窗口
+ * @param path 可选的路径参数，例如 '/mcp' 或 '/mcp/server-id'
  */
-export async function openSettingsWindow(): Promise<void> {
+export async function openSettingsWindow(path?: string): Promise<void> {
   try {
-    await invoke('open_settings_window');
+    await invoke('open_settings_window', { path: path || null });
   } catch (error) {
     console.error('Failed to open settings window:', error);
     throw error;

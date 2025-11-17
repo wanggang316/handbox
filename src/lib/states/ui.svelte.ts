@@ -192,7 +192,10 @@ class UIState {
     
     // 保存到 localStorage
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('theme', newTheme);
+      const current = localStorage.getItem('theme');
+      if (current !== newTheme) {
+        localStorage.setItem('theme', newTheme);
+      }
     }
     
     // 更新 HTML data-theme 属性以匹配 CSS 选择器
@@ -212,6 +215,13 @@ class UIState {
    */
   setThemeColor(color: ThemeColor): void {
     this.state.themeColor = color;
+    
+    if (typeof localStorage !== 'undefined') {
+      const current = localStorage.getItem('themeColor');
+      if (current !== color) {
+        localStorage.setItem('themeColor', color);
+      }
+    }
     
     // 更新 CSS 变量
     if (typeof document !== 'undefined') {

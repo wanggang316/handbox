@@ -1,6 +1,6 @@
 // Artifact 相关数据模型
 
-use super::{Timestamp, UUID};
+use crate::storage::types::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
 
 /// Artifact 配置

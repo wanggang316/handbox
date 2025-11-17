@@ -88,6 +88,34 @@ impl AppError {
             "请检查网络连接和配置",
         )
     }
+
+    /// 将 LLM API 错误转换为更友好的供应商错误
+    pub fn from_llm_fetch_error(error: handbox_llm::LlmClientError) -> Self {
+        let app_error: AppError = error.into();
+
+        // 检查是否是配置相关错误（API Key、端点等）
+        if app_error.code == "INTERNAL_ERROR"
+            && (app_error.message.contains("Incorrect API key")
+                || app_error.message.contains("invalid_api_key")
+                || app_error.message.contains("API key not valid")
+                || app_error.message.contains("400 Bad Request")
+                || app_error.message.contains("401 Unauthorized")
+                || app_error.message.contains("404 Not Found")
+                || app_error.message.contains("403 Forbidden"))
+        {
+            // 对于配置错误，返回特定的错误类型
+            if app_error.message.contains("404 Not Found") {
+                Self::provider_api_endpoint_invalid()
+            } else if app_error.message.contains("403 Forbidden") {
+                Self::provider_api_permission_denied()
+            } else {
+                Self::provider_api_key_invalid()
+            }
+        } else {
+            // 对于其他错误（如网络问题），返回原始错误
+            app_error
+        }
+    }
 }
 
 impl std::fmt::Display for AppError {
@@ -102,6 +130,61 @@ impl std::error::Error for AppError {}
 impl From<sqlx::Error> for AppError {
     fn from(error: sqlx::Error) -> Self {
         Self::internal_error(&format!("Database error: {}", error))
+    }
+}
+
+// MCP client 错误转换
+impl From<handbox_mcp::McpClientError> for AppError {
+    fn from(error: handbox_mcp::McpClientError) -> Self {
+        use handbox_mcp::McpClientError;
+
+        match error {
+            McpClientError::TransportCreation(message) => AppError {
+                code: "MCP_TRANSPORT_ERROR".to_string(),
+                message: format!("无法连接 MCP 服务: {}", message),
+                hint: Some("请检查 MCP 服务器命令、端口或网络连通性".to_string()),
+            },
+            McpClientError::ClientInitialize(init_error) => AppError {
+                code: "MCP_INIT_ERROR".to_string(),
+                message: format!("MCP 客户端初始化失败: {}", init_error),
+                hint: Some("请确认 MCP 服务可用并返回有效响应".to_string()),
+            },
+            McpClientError::Service(service_error) => AppError {
+                code: "MCP_SERVICE_ERROR".to_string(),
+                message: format!("MCP 服务调用失败: {}", service_error),
+                hint: Some("请检查 MCP 服务日志，确保工具和资源配置正确".to_string()),
+            },
+            McpClientError::Runtime(runtime_error) => AppError {
+                code: "MCP_RUNTIME_ERROR".to_string(),
+                message: format!("MCP 运行时错误: {}", runtime_error),
+                hint: Some("后台任务异常终止，请重试或重新启动应用".to_string()),
+            },
+            McpClientError::InvalidToolArguments(message) => {
+                let detail = format!("工具参数无效: {}", message);
+                AppError::validation_error(&detail)
+            }
+            McpClientError::Shutdown(message) => AppError {
+                code: "MCP_SHUTDOWN_ERROR".to_string(),
+                message: format!("MCP 关闭失败: {}", message),
+                hint: Some("请确认 MCP 进程状态并重新尝试".to_string()),
+            },
+        }
+    }
+}
+
+// LLM client 错误转换
+impl From<handbox_llm::LlmClientError> for AppError {
+    fn from(error: handbox_llm::LlmClientError) -> Self {
+        use handbox_llm::LlmClientError;
+
+        match error {
+            LlmClientError::Validation(message) => Self::validation_error(&message),
+            LlmClientError::Configuration(message)
+            | LlmClientError::ClientInitialization(message)
+            | LlmClientError::Unexpected(message) => Self::internal_error(&message),
+            LlmClientError::Transport(message) => Self::network_error(&message),
+            LlmClientError::Api(message) => Self::internal_error(&message),
+        }
     }
 }
 

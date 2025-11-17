@@ -3,17 +3,12 @@
  */
 
 import { apiCall } from './index';
-import type { 
-  Provider, 
-  AddProviderRequest, 
-  ListModelsRequest,
-  ListModelsResponse,
-  FrontendProviderConfig,
-  ProviderConfigsResponse,
-  ToggleModelFavoriteRequest,
-  ProviderWithModels,
-  Model,
-  UUID 
+import type {
+	Provider,
+	AddProviderRequest,
+	ProviderConfig,
+	ProviderConfigsResponse,
+	UUID
 } from '../types';
 
 /**
@@ -57,60 +52,13 @@ export async function deleteProvider(providerId: UUID): Promise<void> {
 /**
  * 启用/禁用供应商
  */
-export async function toggleProvider(
-  providerId: UUID,
-  enabled: boolean
-): Promise<Provider> {
-  return apiCall<Provider>('provider_toggle', { 
-    request: {
-      provider_id: providerId,
-      enabled
-    }
-  });
-}
-
-/**
- * 获取供应商模型列表
- */
-export async function getProviderModels(providerId: UUID, forceRefresh: boolean): Promise<ListModelsResponse> {
-  return apiCall<ListModelsResponse>('provider_list_models', { request: {
-    provider_id: providerId,
-    force_refresh: forceRefresh
-  }});
-}
-
-/**
- * 启用/禁用模型
- */
-export async function toggleModel(
-  providerId: UUID,
-  modelId: string,
-  enabled: boolean
-): Promise<void> {
-  return apiCall<void>('provider_toggle_model', { 
-    request: {
-      provider_id: providerId,
-      model_id: modelId,
-      enabled
-    }
-  });
-}
-
-/**
- * 切换模型收藏状态
- */
-export async function toggleModelFavorite(
-  providerId: UUID,
-  modelId: string,
-  favorite: boolean
-): Promise<void> {
-  return apiCall<void>('provider_toggle_model_favorite', { 
-    request: {
-      provider_id: providerId,
-      model_id: modelId,
-      favorite
-    }
-  });
+export async function toggleProvider(providerId: UUID, enabled: boolean): Promise<Provider> {
+	return apiCall<Provider>('provider_toggle', {
+		request: {
+			provider_id: providerId,
+			enabled
+		}
+	});
 }
 
 /**
@@ -123,22 +71,17 @@ export async function getProviderConfigs(): Promise<ProviderConfigsResponse> {
 /**
  * 根据类型获取供应商配置
  */
-export async function getProviderConfigByType(providerType: string): Promise<FrontendProviderConfig | null> {
-  return apiCall<FrontendProviderConfig | null>('get_provider_config_by_type', { provider_type: providerType });
+export async function getProviderConfigByType(
+	providerType: string
+): Promise<ProviderConfig | null> {
+	return apiCall<ProviderConfig | null>('get_provider_config_by_type', {
+		provider_type: providerType
+	});
 }
 
 /**
- * 获取所有供应商及其模型（包含收藏状态）
+ * 统计使用指定供应商的聊天数量
  */
-export async function getProvidersWithModels(forceRefresh: boolean = false): Promise<ProviderWithModels[]> {
-  return apiCall<ProviderWithModels[]>('provider_get_all_with_models', { 
-    force_refresh: forceRefresh 
-  });
-}
-
-/**
- * 获取所有收藏的模型
- */
-export async function getFavoriteModels(): Promise<Model[]> {
-  return apiCall<Model[]>('provider_get_favorite_models');
+export async function countChatsUsingProvider(providerId: string): Promise<number> {
+	return apiCall<number>('provider_count_chats', { providerId });
 }

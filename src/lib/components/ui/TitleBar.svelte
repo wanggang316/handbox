@@ -1,14 +1,26 @@
 <script lang="ts">
   import IconButton from "$lib/components/ui/IconButton.svelte";
-  import { PanelLeft } from '@lucide/svelte';
-  import { createEventDispatcher } from 'svelte';
+  import { PanelLeft } from "@lucide/svelte";
+  import { createEventDispatcher } from "svelte";
 
-  export let sidebarOpen: boolean = true;
-  export let showToggleButton: boolean = true;
+  interface Props {
+    sidebarOpen?: boolean;
+    showToggleButton?: boolean;
+    onToggle?: () => void;
+    children?: import("svelte").Snippet;
+  }
 
-  const dispatch = createEventDispatcher();
+  let {
+    sidebarOpen = true,
+    showToggleButton = true,
+    onToggle,
+    children,
+  }: Props = $props();
+  const dispatch = createEventDispatcher<{ toggle: void }>();
+
   function handleToggle() {
-    dispatch('toggle');
+    dispatch("toggle");
+    onToggle?.();
   }
 </script>
 
@@ -18,13 +30,12 @@
       <IconButton
         icon={PanelLeft}
         ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
-        on:click={handleToggle}
+        onclick={handleToggle}
       />
     </div>
   {/if}
-  <slot />
-  <!-- 如果未来还需要在标题栏放入其他控件，可通过 slot 注入 -->
-  
+  {@render children?.()}
+  <!-- 如果未来还需要在标题栏放入其他控件，可通过 snippet 注入 -->
 </div>
 
 <style>
@@ -52,7 +63,7 @@
   }
 
   .sidebar-toggle-button:hover {
-    opacity: 1.0;
+    opacity: 1;
   }
 
   /* 响应式设计：调整标题栏按钮位置 */
@@ -70,5 +81,3 @@
     }
   } */
 </style>
-
-

@@ -9,10 +9,11 @@
   } from "$lib/states/provider.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TextRow from "../ui/table/TextRow.svelte";
-  import DropDownRow from "../ui/table/DropDownRow.svelte";
+  import SelectRow from "../ui/table/SelectRow.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
   import Modal from "../ui/Modal.svelte";
   import { toastActions } from "$lib/states/toast.svelte";
+  import { showAppError } from "$lib/utils";
 
   // 使用 $props() 替代 export let
   const { open = false, onClose } = $props<{
@@ -61,20 +62,20 @@
   // Modal 引用
   let modalRef: Modal;
 
-  // 使用统一的工具函数获取供应商分组
-  const providerGroups = $derived(getProviderDropdownOptions());
+  // 使用统一的工具函数获取供应商分组，并扁平化为选项列表
+  const providerOptions = $derived(() => {
+    const groups = getProviderDropdownOptions();
+    return groups.flatMap(group => group.options);
+  });
 
   // 简化的错误处理，使用后端标准化错误码
-  function handleError(error: any) {
+  function handleError(error: unknown) {
     console.error("Operation failed:", error);
-    
-    if (error && typeof error === 'object' && error.message) {
-      // 直接使用后端返回的错误信息，后端已经处理了多语言和错误分类
-      toastActions.error(error.message);
-    } else {
-      // 默认错误信息
-      toastActions.error('操作失败，请稍后重试');
-    }
+    showAppError(error, {
+      requiresAcknowledgement: true,
+      title: '供应商配置错误',
+      fallbackMessage: '操作失败，请稍后重试'
+    });
   }
 
   function validate() {
@@ -231,12 +232,12 @@
 
     <div class="flex-1 min-h-0 px-6 py-2 space-y-4">
       <TableGroup>
-        <DropDownRow
+        <SelectRow
           label="供应商类型"
-          groups={providerGroups}
+          options={providerOptions()}
           selectedValue={formData.provider_type}
           onSelect={selectProviderType}
-        ></DropDownRow>
+        ></SelectRow>
         <TextRow label="供应商名称" bind:value={formData.name}></TextRow>
       </TableGroup>
       <TableGroup>

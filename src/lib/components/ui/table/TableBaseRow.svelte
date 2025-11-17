@@ -1,26 +1,40 @@
 <script lang="ts">
+  import InfoTooltip from "../InfoTooltip.svelte";
+
   interface Props {
     label?: string;
     icon?: any; // Lucide图标组件
-    layout?: 'horizontal' | 'vertical';
+    layout?: "horizontal" | "vertical";
     py?: string;
     rightContent?: any; // 标题行右边的内容
+    helpText?: string; // 可选的帮助提示文本，显示为问号图标
     children?: any;
   }
 
-  let { label, icon, layout = 'horizontal', py = '4', rightContent, children }: Props = $props();
+  let {
+    label,
+    icon,
+    layout = "horizontal",
+    py = "4",
+    rightContent,
+    helpText,
+    children,
+  }: Props = $props();
 </script>
 
 <div class="px-6 py-{py}">
   {#if label}
-    {#if layout === 'vertical'}
-      <div class="space-y-3">
+    {#if layout === "vertical"}
+      <div class="space-y-0">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             {#if icon}
               {@render icon({ class: "w-4 h-4 text-base-content/70" })}
             {/if}
-            <div class="text-sm font-medium text-base-content">{label}</div>
+            <div class="text-sm text-base-content">{label}</div>
+            {#if helpText}
+              <InfoTooltip content={helpText} />
+            {/if}
           </div>
           {#if rightContent}
             <div>
@@ -39,6 +53,9 @@
             {@render icon({ class: "w-4 h-4 text-base-content/70" })}
           {/if}
           <div class="text-sm text-base-content">{label}</div>
+          {#if helpText}
+            <InfoTooltip content={helpText} />
+          {/if}
         </div>
         <div class="flex justify-end flex-1 ml-4">
           {@render children?.()}

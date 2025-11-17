@@ -1,15 +1,29 @@
 <script lang="ts">
-  import TrafficLightsRedButton from './TrafficLightsRedButton.svelte';
-  import TitleBar from './TitleBar.svelte';
+  import { tick } from "svelte";
+  import TrafficLightsRedButton from "./TrafficLightsRedButton.svelte";
+  import TitleBar from "./TitleBar.svelte";
 
-  export let open = false;
-  export let title = '';
-  export let showCloseButton = true;
-  export let onClose: () => void = () => {};
-  
-  let closing = false;
-  let modalElement: HTMLDivElement;
-  
+  interface Props {
+    open?: boolean;
+    title?: string;
+    showCloseButton?: boolean;
+    closeOnBackdropClick?: boolean;
+    onClose?: () => void;
+    children?: import("svelte").Snippet;
+  }
+
+  let {
+    open = $bindable(false),
+    title = "",
+    showCloseButton = true,
+    closeOnBackdropClick = false,
+    onClose = () => {},
+    children,
+  }: Props = $props();
+
+  let closing = $state(false);
+  let modalElement = $state<HTMLDivElement>();
+
   export function handleClose() {
     closing = true;
     setTimeout(() => {
@@ -17,41 +31,52 @@
       onClose();
     }, 300);
   }
-  
-  $: if (open && modalElement) {
-    modalElement.focus();
+
+  function handleBackdropClick(e: MouseEvent) {
+    if (closeOnBackdropClick && e.target === e.currentTarget) {
+      handleClose();
+    }
   }
+
+  $effect(() => {
+    if (open && modalElement) {
+      tick().then(() => modalElement?.focus());
+    }
+  });
 </script>
 
 {#if open}
-  <div 
+  <div
     bind:this={modalElement}
-    class="fixed inset-0 bg-base-content/30 flex items-center justify-center z-[10010] animate-backdrop" 
+    class="fixed inset-0 flex items-center justify-center z-[10010] animate-backdrop"
+    style="background-color: var(--overlay);"
     class:animate-backdrop-close={closing}
-    role="dialog" 
+    role="dialog"
     aria-modal="true"
     tabindex="-1"
-    onkeydown={(e) => { if (e.key === 'Escape') handleClose(); }}
+    onclick={handleBackdropClick}
+    onkeydown={(e) => {
+      if (e.key === "Escape") handleClose();
+    }}
   >
     <TitleBar showToggleButton={false} />
     <!-- 外层容器：不裁切，允许下拉菜单溢出，负责动画 -->
-    <div 
-      class="relative animate-modal"
-      class:animate-modal-close={closing}
-    >
+    <div class="relative animate-modal" class:animate-modal-close={closing}>
       <!-- 背景层：负责视觉效果和边界裁切，但不影响内容层 -->
-      <div 
-        class="bg-base-100 max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative pointer-events-none" 
+      <div
+        class="bg-base-100 max-w-[90vw] max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden relative pointer-events-none border-[1px] border-base-200"
         style="border-radius: 20px; z-index: 1;"
       >
         <!-- 预留内容空间 -->
         <div class="px-0 py-0 invisible">
-          <slot />
+          {#if children}
+            {@render children()}
+          {/if}
         </div>
       </div>
-      
+
       <!-- 内容层：独立于背景层，不受裁切影响 -->
-      <div 
+      <div
         class="absolute inset-0 max-w-4xl bg-transparent"
         style="z-index: 2;"
       >
@@ -62,14 +87,18 @@
               <TrafficLightsRedButton onClick={handleClose} />
             {/if}
             {#if title}
-              <h3 class="text-base font-medium text-base-content/80 ml-4">{title}</h3>
+              <h3 class="ml-4 text-base font-medium text-base-content/80">
+                {title}
+              </h3>
             {/if}
           </div>
         {/if}
-        
+
         <!-- 内容区域：不受背景层裁切影响 -->
         <div class="px-0 py-0">
-          <slot />
+          {#if children}
+            {@render children()}
+          {/if}
         </div>
       </div>
     </div>
@@ -80,15 +109,15 @@
   .animate-backdrop {
     animation: backdropFadeIn 0.3s ease-out;
   }
-  
+
   .animate-backdrop-close {
     animation: backdropFadeOut 0.3s ease-out;
   }
-  
+
   .animate-modal {
     animation: modalSlideIn 0.3s ease-out;
   }
-  
+
   .animate-modal-close {
     animation: modalSlideOut 0.3s ease-out;
   }
@@ -101,7 +130,7 @@
       opacity: 1;
     }
   }
-  
+
   @keyframes backdropFadeOut {
     from {
       opacity: 1;
@@ -121,7 +150,7 @@
       transform: translateY(0);
     }
   }
-  
+
   @keyframes modalSlideOut {
     from {
       opacity: 1;

@@ -5,6 +5,8 @@
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TextRow from "$lib/components/ui/table/TextRow.svelte";
   import TextareaRow from "$lib/components/ui/table/TextareaRow.svelte";
+  import SelectRow from "$lib/components/ui/table/SelectRow.svelte";
+  import { showAppError } from "$lib/utils";
   import type {
     CreateMcpServerRequest,
     McpConnectionType,
@@ -28,7 +30,7 @@
     onSave?: (data: {
       mode: "create" | "update";
       data: CreateMcpServerRequest | UpdateMcpServerRequest;
-    }) => void;
+    }) => Promise<void>;
   }
 
   let {
@@ -253,7 +255,7 @@
           updatePayload.timeoutMs = formData.timeoutMs ? Number(formData.timeoutMs) : undefined;
         }
 
-        onSave?.({ mode: "update", data: updatePayload });
+        await onSave?.({ mode: "update", data: updatePayload });
       } else {
         // 创建模式
         const createPayload: CreateMcpServerRequest = {
@@ -275,10 +277,15 @@
           createPayload.timeoutMs = formData.timeoutMs ? Number(formData.timeoutMs) : undefined;
         }
 
-        onSave?.({ mode: "create", data: createPayload });
+        await onSave?.({ mode: "create", data: createPayload });
       }
 
+      // 保存成功，关闭弹窗
       closeModal();
+    } catch (error) {
+      showAppError(error, {
+        fallbackMessage: '保存失败，请重试'
+      });
     } finally {
       isSubmitting = false;
     }
@@ -317,18 +324,15 @@
           placeholder="可选的用户可读名称"
         />
 
-        <!-- 连接类型选择器 -->
-        <div class="flex items-center justify-between px-4 py-3 border-b border-base-300 last:border-b-0">
-          <span class="text-sm text-base-content/80">连接类型</span>
-          <select
-            class="px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
-            bind:value={formData.connectionType}
-          >
-            <option value="stdio">标准输入输出 (stdio)</option>
-            <option value="sse">服务器发送事件 (SSE)</option>
-            <option value="http">HTTP 端点</option>
-          </select>
-        </div>
+        <SelectRow
+          label="连接类型"
+          bind:selectedValue={formData.connectionType}
+          options={[
+            { value: "stdio", label: "标准输入输出 (stdio)" },
+            { value: "sse", label: "服务器发送事件 (SSE)" },
+            { value: "http", label: "流式传输HTTP" }
+          ]}
+        />
 
         {#if formData.connectionType === 'stdio'}
           <TextRow

@@ -8,8 +8,15 @@
     providerStateActions,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import type { Provider, AddProviderRequest } from "$lib/types/provider";
-  import { Trash2, ChevronLeft, SquarePen, Heart, Star } from "@lucide/svelte";
+  import type { Model } from "$lib/types/provider";
+  import {
+    Trash2,
+    ChevronLeft,
+    SquarePen,
+    Star,
+    Info,
+    RefreshCw,
+  } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
@@ -17,10 +24,19 @@
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
+  import ModelInfoModal from "$lib/components/settings/ModelInfoModal.svelte";
+  import { countChatsUsingProvider } from "$lib/api/provider";
+  import { countChatsUsingModel } from "$lib/api/model";
 
   let providerId = $state("");
   let showDeleteConfirm = $state(false);
+  let showDisableConfirm = $state(false);
+  let showModelDisableConfirm = $state(false);
   let showEditModal = $state(false);
+  let showModelInfo = $state(false);
+  let selectedModel = $state<Model | null>(null);
+  let modelToDisable = $state<Model | null>(null);
+  let relatedChatsCount = $state(0);
 
   let confirmModalRef: any;
 
@@ -35,7 +51,14 @@
 
   // 获取预定义供应商信息
   let providerIcon = $derived(
-    currentProvider ? getProviderIcon(currentProvider) : null,
+    currentProvider ? getProviderIcon(currentProvider) : null
+  );
+
+  const isRefreshing = $derived(
+    !!(
+      currentProvider?.id &&
+      providerState.isFetchingModels === currentProvider.id
+    )
   );
 
   onMount(() => {
@@ -100,15 +123,45 @@
     }
   });
 
+  async function handleToggleProviderBefore(
+    enabled: boolean,
+    previous: boolean
+  ) {
+    if (!currentProvider || !currentProvider.id) return true;
+
+    if (!enabled && previous && currentProvider.enabled) {
+      try {
+        const count = await countChatsUsingProvider(currentProvider.id);
+        relatedChatsCount = count;
+        if (count > 0) {
+          showDisableConfirm = true;
+          return false;
+        }
+      } catch (error) {
+        console.error("Failed to count related chats:", error);
+        // 如果检查失败，允许继续执行禁用操作
+        return true;
+      }
+    }
+
+    return true;
+  }
+
   async function handleToggleProvider(enabled: boolean) {
-    console.log("handleToggleProvider", enabled);
+    if (!currentProvider || !currentProvider.id) return;
+    await performProviderToggle(enabled);
+  }
+
+  async function performProviderToggle(enabled: boolean) {
     if (!currentProvider) return;
 
-    formData.enabled = enabled; // 立即更新UI
+    // 乐观更新UI
+    const previousState = formData.enabled;
+    formData.enabled = enabled;
 
     try {
       if (!currentProvider.id) {
-        throw new Error('Provider ID is undefined');
+        throw new Error("Provider ID is undefined");
       }
       console.log("handleToggleProvider", currentProvider.id, enabled);
       await providerActions.toggleProvider(currentProvider.id, enabled);
@@ -121,13 +174,90 @@
     } catch (error) {
       console.error("Failed to toggle provider:", error);
       // 发生错误时回滚UI状态
-      formData.enabled = !enabled;
+      formData.enabled = previousState;
     }
+  }
+
+  async function confirmDisableProvider() {
+    await performProviderToggle(false);
+    showDisableConfirm = false;
+  }
+
+  function cancelDisableProvider() {
+    if (currentProvider) {
+      formData.enabled = currentProvider.enabled;
+    }
+    showDisableConfirm = false;
+    // 保持当前 UI 状态不变
+  }
+
+  async function handleToggleModel(model: Model, enabled: boolean) {
+    if (!currentProvider) return;
+
+    // 如果是禁用操作，需要检查关联的聊天
+    if (!enabled && model.enabled) {
+      try {
+        const count = await countChatsUsingModel(model.id);
+        relatedChatsCount = count;
+        modelToDisable = model;
+        showModelDisableConfirm = true;
+      } catch (error) {
+        console.error("Failed to count related chats:", error);
+        // 如果检查失败，仍然允许禁用
+        performModelToggle(model, enabled);
+      }
+    } else {
+      // 启用操作直接执行
+      performModelToggle(model, enabled);
+    }
+  }
+
+  async function performModelToggle(model: Model, enabled: boolean) {
+    if (!currentProvider || !currentProvider.id) return;
+
+    try {
+      await providerActions.toggleModel(currentProvider.id, model.id, enabled);
+    } catch (error) {
+      console.error("Failed to toggle model:", error);
+    }
+  }
+
+  async function confirmDisableModel() {
+    if (modelToDisable) {
+      await performModelToggle(modelToDisable, false);
+      showModelDisableConfirm = false;
+      modelToDisable = null;
+    }
+  }
+
+  function cancelDisableModel() {
+    showModelDisableConfirm = false;
+    modelToDisable = null;
   }
 
   async function handleDelete() {
     if (!currentProvider) return;
     showDeleteConfirm = true;
+  }
+
+  function openModelInfo(model: Model) {
+    selectedModel = model;
+    showModelInfo = true;
+  }
+
+  function closeModelInfo() {
+    showModelInfo = false;
+    selectedModel = null;
+  }
+
+  async function refreshModels() {
+    if (!currentProvider?.id) return;
+
+    try {
+      await providerActions.fetchProviderModels(currentProvider.id, true);
+    } catch (error) {
+      console.error("Failed to refresh models", error);
+    }
   }
 
   async function confirmDelete() {
@@ -187,12 +317,21 @@
       <TableGroup>
         <TableBaseRow label={currentProvider.name} icon={iconSnippet}>
           <div class="flex flex-row items-center gap-4">
-            <IconButton icon={SquarePen} on:click={handleEdit} />
+            <IconButton icon={SquarePen} onclick={handleEdit} />
 
-            <IconButton icon={Trash2} on:click={handleDelete} />
+            <IconButton
+              icon={RefreshCw}
+              ariaLabel="刷新模型列表"
+              onclick={refreshModels}
+              disabled={isRefreshing}
+              customClass={`transition-transform ${isRefreshing ? "animate-spin text-primary" : ""}`}
+            />
+
+            <IconButton icon={Trash2} onclick={handleDelete} />
 
             <Toggle
               checked={formData.enabled}
+              onChangeBefore={handleToggleProviderBefore}
               onChange={handleToggleProvider}
             />
           </div>
@@ -215,13 +354,17 @@
             <div class="flex-1">Name</div>
             <div class="text-center w-16">Enabled</div>
             <div class="text-center w-16">Favorite</div>
+            <div class="text-center w-14">Info</div>
           </div>
 
           <!-- Model List -->
           <div class="bg-base-100">
             {#each providerModels as model, index}
               <div
-                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 === 0 ? 'bg-base-100' : 'bg-base-200'} hover:bg-base-300"
+                class="flex flex-row items-center gap-4 px-4 py-1 {index % 2 ===
+                0
+                  ? 'bg-base-100'
+                  : 'bg-base-200'} hover:bg-base-300"
               >
                 <!-- Model Name -->
                 <div class="flex items-center flex-1">
@@ -233,15 +376,12 @@
                 <div class="flex items-center justify-center w-16">
                   <input
                     type="checkbox"
-                    bind:checked={model.enabled}
+                    checked={model.enabled}
                     onchange={(e) => {
-                      if (currentProvider && currentProvider.id) {
-                        providerActions.toggleModel(
-                          currentProvider.id,
-                          model.id,
-                          (e.currentTarget as HTMLInputElement).checked,
-                        );
-                      }
+                      handleToggleModel(
+                        model,
+                        (e.currentTarget as HTMLInputElement).checked
+                      );
                     }}
                     class="w-4 h-4 text-primary bg-base-100 border-base-300 rounded focus:ring-primary focus:ring-2"
                   />
@@ -254,7 +394,7 @@
                         providerActions.toggleModelFavorite(
                           currentProvider.id,
                           model.id,
-                          !model.favorite,
+                          !model.favorite
                         );
                       }
                     }}
@@ -271,6 +411,16 @@
                     />
                   </button>
                 </div>
+
+                <div class="flex items-center justify-center w-14">
+                  <IconButton
+                    icon={Info}
+                    iconSize={16}
+                    size="w-6 h-6"
+                    ariaLabel="查看模型信息"
+                    onclick={() => openModelInfo(model)}
+                  />
+                </div>
               </div>
             {/each}
           </div>
@@ -283,6 +433,12 @@
     {/if}
   </main>
 </div>
+
+<ModelInfoModal
+  open={showModelInfo}
+  model={selectedModel}
+  onClose={closeModelInfo}
+/>
 
 <!-- 编辑供应商弹窗 -->
 <AddProviderModal
@@ -304,4 +460,34 @@
   onClose={() => (showDeleteConfirm = false)}
   onConfirm={confirmDelete}
   onCancel={() => {}}
+/>
+
+<!-- 禁用供应商确认弹窗 -->
+<ConfirmModal
+  open={showDisableConfirm}
+  title="关闭供应商"
+  message={relatedChatsCount > 0
+    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${currentProvider?.name}</span>。<br/><br/>关闭此供应商后，这些会话将无法使用该供应商的模型。<br/><br/>确定要关闭吗？`
+    : `确认关闭 <span class='font-medium'>${currentProvider?.name}</span> 吗？`}
+  confirmText="关闭"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  onClose={() => (showDisableConfirm = false)}
+  onConfirm={confirmDisableProvider}
+  onCancel={cancelDisableProvider}
+/>
+
+<!-- 禁用模型确认弹窗 -->
+<ConfirmModal
+  open={showModelDisableConfirm}
+  title="禁用模型"
+  message={relatedChatsCount > 0
+    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用模型 <span class='font-medium'>${modelToDisable?.name}</span>。<br/><br/>禁用此模型后，这些会话将无法使用该模型。<br/><br/>确定要禁用吗？`
+    : `确认禁用模型 <span class='font-medium'>${modelToDisable?.name}</span> 吗？`}
+  confirmText="禁用"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  onClose={() => (showModelDisableConfirm = false)}
+  onConfirm={confirmDisableModel}
+  onCancel={cancelDisableModel}
 />

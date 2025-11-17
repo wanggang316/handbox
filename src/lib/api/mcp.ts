@@ -4,7 +4,8 @@ import type {
   McpServer,
   RefreshMcpServerRequest,
   ToggleMcpServerRequest,
-  UpdateMcpServerRequest
+  UpdateMcpServerRequest,
+  UpdateToolEnabledRequest
 } from '../types';
 
 export async function listMcpServers(): Promise<McpServer[]> {
@@ -23,7 +24,7 @@ export async function updateMcpServer(
 }
 
 export async function deleteMcpServer(serverId: string): Promise<void> {
-  await apiCall<void>('mcp_delete_server', { server_id: serverId });
+  await apiCall<void>('mcp_delete_server', { serverId: serverId });
 }
 
 export async function toggleMcpServer(request: ToggleMcpServerRequest): Promise<McpServer> {
@@ -32,4 +33,16 @@ export async function toggleMcpServer(request: ToggleMcpServerRequest): Promise<
 
 export async function refreshMcpServer(request: RefreshMcpServerRequest): Promise<McpServer> {
   return apiCall<McpServer>('mcp_refresh_server', { request });
+}
+
+export async function updateToolEnabled(request: UpdateToolEnabledRequest): Promise<McpServer> {
+  return apiCall<McpServer>('mcp_update_tool_enabled', { request });
+}
+
+export async function countChatsUsingServer(serverId: string): Promise<number> {
+  return apiCall<number>('mcp_count_chats_using_server', { serverId });
+}
+
+export async function removeMcpServerFromChats(serverId: string): Promise<number> {
+  return apiCall<number>('mcp_remove_server_from_chats', { serverId });
 }

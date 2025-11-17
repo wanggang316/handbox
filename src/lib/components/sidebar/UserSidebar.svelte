@@ -9,22 +9,24 @@
     isPro?: boolean;
   }
 
-  // 外部传入的用户信息
-  export let user: UserInfo = {
-    isLoggedIn: false
-  };
+  interface Props {
+    user?: UserInfo;
+    onUserClick?: () => void;
+  }
 
-  // 点击处理函数
-  export let onUserClick: () => void = () => {};
+  let {
+    user = { isLoggedIn: false },
+    onUserClick = () => {}
+  }: Props = $props();
 
-  $: displayName = user.isLoggedIn ? user.username || '用户' : '未登录';
-  $: planText = user.isLoggedIn ? (user.isPro ? 'Pro Plan' : 'Free Plan') : '';
+  const displayName = $derived(user.isLoggedIn ? user.username || '用户' : '未登录');
+  const planText = $derived(user.isLoggedIn ? (user.isPro ? 'Pro Plan' : 'Free Plan') : '');
 </script>
 
-<div 
+<div
   class="flex items-center justify-center gap-3 p-2 cursor-pointer hover:bg-base-200 transition-colors rounded-lg"
-  on:click={onUserClick}
-  on:keydown={(e) => e.key === 'Enter' && onUserClick()}
+  onclick={onUserClick}
+  onkeydown={(e) => e.key === 'Enter' && onUserClick()}
   role="button"
   tabindex="0"
 >

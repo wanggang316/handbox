@@ -1,11 +1,13 @@
 // Message 数据访问层
 
-use crate::llm_client::types::ChatMessageRole;
-use crate::llm_client::ChatToolCall;
-use crate::models::{AppError, Message, MessageConfig, Timestamp, UUID};
+use crate::models::AppError;
+use crate::storage::types::{Message, MessageConfig, MessageToolCall, Timestamp, UUID};
 use crate::storage::Database;
+use handbox_llm::types::LlmMessageRole;
 use serde_json;
-use sqlx::Row;
+use sqlx::query::Query;
+use sqlx::sqlite::SqliteArguments;
+use sqlx::{Row, Sqlite};
 use std::sync::Arc;
 
 /// Message 仓储层
@@ -19,53 +21,73 @@ impl MessageRepository {
         Self { db }
     }
 
-    /// 创建消息
-    pub async fn create_message(&self, message: &Message) -> Result<(), AppError> {
-        let attachments_json =
-            if let Some(attachments) = &message.attachments {
-                Some(serde_json::to_string(attachments).map_err(|e| {
-                    AppError::validation_error(&format!("Invalid attachments: {}", e))
-                })?)
-            } else {
-                None
-            };
+    /// 序列化 attachments 字段
+    fn serialize_attachments(message: &Message) -> Result<Option<String>, AppError> {
+        message
+            .attachments
+            .as_ref()
+            .map(|attachments| {
+                serde_json::to_string(attachments)
+                    .map_err(|e| AppError::validation_error(&format!("Invalid attachments: {}", e)))
+            })
+            .transpose()
+    }
 
-        let config_json = if let Some(config) = &message.config {
-            Some(
+    /// 序列化 config 字段
+    fn serialize_config(message: &Message) -> Result<Option<String>, AppError> {
+        message
+            .config
+            .as_ref()
+            .map(|config| {
                 serde_json::to_string(config)
-                    .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))?,
-            )
-        } else {
-            None
-        };
+                    .map_err(|e| AppError::validation_error(&format!("Invalid config: {}", e)))
+            })
+            .transpose()
+    }
 
-        let tools_json = if let Some(tools) = &message.tool_calls {
-            Some(
+    /// 序列化 tool_calls 字段
+    fn serialize_tool_calls(message: &Message) -> Result<Option<String>, AppError> {
+        message
+            .tool_calls
+            .as_ref()
+            .map(|tools| {
                 serde_json::to_string(tools)
-                    .map_err(|e| AppError::validation_error(&format!("Invalid tools: {}", e)))?,
-            )
-        } else {
-            None
-        };
+                    .map_err(|e| AppError::validation_error(&format!("Invalid tools: {}", e)))
+            })
+            .transpose()
+    }
 
+    /// 创建并绑定插入消息的 SQL 查询
+    ///
+    /// # 为什么要分离序列化和绑定？
+    ///
+    /// 由于 Rust 的生命周期限制，我们不能在函数内部创建 JSON 字符串、
+    /// 借用它们给 Query、然后返回 Query 和字符串的所有权。
+    /// 因此必须让调用方持有 JSON 字符串，Query 只借用它们的引用。
+    fn create_insert_query<'a>(
+        message: &'a Message,
+        attachments_json: &'a Option<String>,
+        config_json: &'a Option<String>,
+        tools_json: &'a Option<String>,
+    ) -> Query<'a, Sqlite, SqliteArguments<'a>> {
         let role_str = message.role.as_str();
 
-        let query = r#"
+        let sql = r#"
             INSERT INTO messages (id, chat_id, role, content, reasoning, config, tools, attachments,
                                 input_tokens, output_tokens, total_tokens, start_time,
                                 end_time, duration, turn_id, tool_call_id, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
-        sqlx::query(query)
+        sqlx::query(sql)
             .bind(&message.id)
             .bind(&message.chat_id)
             .bind(role_str)
             .bind(&message.content)
             .bind(&message.reasoning)
-            .bind(&config_json)
-            .bind(&tools_json)
-            .bind(&attachments_json)
+            .bind(config_json)
+            .bind(tools_json)
+            .bind(attachments_json)
             .bind(message.input_tokens)
             .bind(message.output_tokens)
             .bind(message.total_tokens)
@@ -76,9 +98,54 @@ impl MessageRepository {
             .bind(&message.tool_call_id)
             .bind(message.created_at)
             .bind(message.updated_at)
+    }
+
+    /// 创建消息
+    pub async fn create_message(&self, message: &Message) -> Result<(), AppError> {
+        // 序列化 JSON 字段
+        let attachments_json = Self::serialize_attachments(message)?;
+        let config_json = Self::serialize_config(message)?;
+        let tools_json = Self::serialize_tool_calls(message)?;
+
+        // 创建并执行查询
+        Self::create_insert_query(message, &attachments_json, &config_json, &tools_json)
             .execute(self.db.pool())
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to create message: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 批量创建消息（在一个事务中）
+    pub async fn create_messages_batch(&self, messages: &[Message]) -> Result<(), AppError> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        // 开始事务
+        let mut tx = self.db.pool().begin().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to begin transaction: {}", e))
+        })?;
+
+        for message in messages {
+            // 序列化 JSON 字段
+            let attachments_json = Self::serialize_attachments(message)?;
+            let config_json = Self::serialize_config(message)?;
+            let tools_json = Self::serialize_tool_calls(message)?;
+
+            // 创建并执行查询
+            Self::create_insert_query(message, &attachments_json, &config_json, &tools_json)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to create message in batch: {}", e))
+                })?;
+        }
+
+        // 提交事务
+        tx.commit().await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to commit transaction: {}", e))
+        })?;
 
         Ok(())
     }
@@ -89,7 +156,7 @@ impl MessageRepository {
         chat_id: &UUID,
         limit: i32,
         offset: i32,
-        roles: Option<Vec<ChatMessageRole>>, // 指定要包含的角色，None表示包含所有角色
+        roles: Option<Vec<LlmMessageRole>>, // 指定要包含的角色，None表示包含所有角色
         order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
         let order_direction = if order_by_desc { "DESC" } else { "ASC" };
@@ -159,9 +226,9 @@ impl MessageRepository {
             limit,
             offset,
             Some(vec![
-                ChatMessageRole::User,
-                ChatMessageRole::Assistant,
-                ChatMessageRole::System,
+                LlmMessageRole::User,
+                LlmMessageRole::Assistant,
+                LlmMessageRole::System,
             ]), // 排除 Tool 角色
             false, // 升序排列
         )
@@ -188,7 +255,7 @@ impl MessageRepository {
         chat_id: &UUID,
         limit: i32,
         offset: i32,
-        role_filter: Option<&ChatMessageRole>,
+        role_filter: Option<&LlmMessageRole>,
         order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
         let roles = role_filter.map(|role| vec![role.clone()]);
@@ -200,7 +267,7 @@ impl MessageRepository {
     pub async fn get_latest_message_by_role(
         &self,
         chat_id: &UUID,
-        role: &ChatMessageRole,
+        role: &LlmMessageRole,
     ) -> Result<Option<Message>, AppError> {
         let messages = self
             .get_messages(chat_id, 1, 0, Some(vec![role.clone()]), true)
@@ -380,7 +447,7 @@ impl MessageRepository {
     pub async fn update_message_tools(
         &self,
         message_id: &UUID,
-        tools: Option<&Vec<ChatToolCall>>,
+        tools: Option<&Vec<MessageToolCall>>,
         updated_at: Timestamp,
     ) -> Result<(), AppError> {
         let tools_json = if let Some(tools) = tools {
@@ -442,6 +509,94 @@ impl MessageRepository {
             })?;
 
         Ok(())
+    }
+
+    /// 按 ID 列表批量删除消息（私有辅助方法）
+    async fn delete_messages_by_ids(&self, message_ids: &[String]) -> Result<(), AppError> {
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+
+        let placeholders = message_ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("${}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let delete_query = format!("DELETE FROM messages WHERE id IN ({})", placeholders);
+
+        let mut query = sqlx::query(&delete_query);
+        for id in message_ids {
+            query = query.bind(id);
+        }
+
+        query
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to delete messages: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 删除某个消息之后的所有消息（基于 created_at 时间戳）
+    pub async fn delete_messages_after(
+        &self,
+        chat_id: &UUID,
+        message_id: &UUID,
+    ) -> Result<Vec<String>, AppError> {
+        // 首先获取目标消息的创建时间
+        let target_message = self
+            .get_message_by_id(message_id)
+            .await?
+            .ok_or_else(|| AppError::not_found(&format!("Message not found: {}", message_id)))?;
+
+        // 查询要删除的消息ID列表
+        let rows = sqlx::query("SELECT id FROM messages WHERE chat_id = $1 AND created_at > $2")
+            .bind(chat_id)
+            .bind(target_message.created_at)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to query messages to delete: {}", e))
+            })?;
+
+        let message_ids: Vec<String> = rows.iter().map(|row| row.get::<String, _>("id")).collect();
+
+        // 批量删除
+        self.delete_messages_by_ids(&message_ids).await?;
+
+        Ok(message_ids)
+    }
+
+    /// 删除指定消息及之后的所有消息（包含当前消息）
+    pub async fn delete_message_and_after(
+        &self,
+        chat_id: &UUID,
+        message_id: &UUID,
+    ) -> Result<Vec<String>, AppError> {
+        // 首先获取目标消息的创建时间
+        let target_message = self
+            .get_message_by_id(message_id)
+            .await?
+            .ok_or_else(|| AppError::not_found(&format!("Message not found: {}", message_id)))?;
+
+        // 查询要删除的消息ID列表（包含当前消息，使用 >= 而不是 >）
+        let rows = sqlx::query("SELECT id FROM messages WHERE chat_id = $1 AND created_at >= $2")
+            .bind(chat_id)
+            .bind(target_message.created_at)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to query messages to delete: {}", e))
+            })?;
+
+        let message_ids: Vec<String> = rows.iter().map(|row| row.get::<String, _>("id")).collect();
+
+        // 批量删除
+        self.delete_messages_by_ids(&message_ids).await?;
+
+        Ok(message_ids)
     }
 
     /// 获取聊天的消息数量
@@ -524,6 +679,71 @@ impl MessageRepository {
         Ok(messages)
     }
 
+    /// 获取聊天中存在的所有 turn_id（去重并排序）
+    ///
+    /// # 参数
+    /// - `chat_id`: 聊天 ID
+    pub async fn get_turn_ids_by_chat(&self, chat_id: &UUID) -> Result<Vec<i32>, AppError> {
+        let query = r#"
+            SELECT DISTINCT turn_id
+            FROM messages
+            WHERE chat_id = $1 AND turn_id IS NOT NULL
+            ORDER BY turn_id ASC
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(chat_id)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to get turn ids: {}", e)))?;
+
+        let turn_ids = rows
+            .iter()
+            .map(|row| row.try_get::<i32, _>("turn_id"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::internal_error(&format!("Failed to parse turn_id: {}", e)))?;
+
+        Ok(turn_ids)
+    }
+
+    /// 根据 turn_id 范围获取消息（使用最小和最大 turn_id）
+    ///
+    /// # 参数
+    /// - `chat_id`: 聊天 ID
+    /// - `min_turn_id`: 最小轮次 ID（包含）
+    /// - `max_turn_id`: 最大轮次 ID（包含）
+    pub async fn get_messages_by_turn_id_range(
+        &self,
+        chat_id: &UUID,
+        min_turn_id: i32,
+        max_turn_id: i32,
+    ) -> Result<Vec<Message>, AppError> {
+        let query = r#"
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
+                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            FROM messages
+            WHERE chat_id = $1 AND turn_id >= $2 AND turn_id <= $3
+            ORDER BY created_at ASC
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(chat_id)
+            .bind(min_turn_id)
+            .bind(max_turn_id)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to get messages by turn id range: {}", e))
+            })?;
+
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(self.row_to_message(row)?);
+        }
+
+        Ok(messages)
+    }
+
     /// 获取聊天的下一个 turn_id
     pub async fn get_next_turn_id(&self, chat_id: &UUID) -> Result<i32, AppError> {
         let query =
@@ -546,8 +766,8 @@ impl MessageRepository {
     fn row_to_message(&self, row: sqlx::sqlite::SqliteRow) -> Result<Message, AppError> {
         let role_str: String = row.try_get("role").unwrap_or_default();
         let role = role_str
-            .parse::<ChatMessageRole>()
-            .unwrap_or(ChatMessageRole::User);
+            .parse::<LlmMessageRole>()
+            .unwrap_or(LlmMessageRole::User);
 
         let attachments_json: Option<String> = row.try_get("attachments").ok();
         let attachments = if let Some(json) = attachments_json {
@@ -563,7 +783,7 @@ impl MessageRepository {
             None
         };
 
-        let tool_calls: Option<Vec<ChatToolCall>> =
+        let tool_calls: Option<Vec<MessageToolCall>> =
             if let Ok(tools_json) = row.try_get::<String, _>("tools") {
                 serde_json::from_str(&tools_json).ok()
             } else {
@@ -596,7 +816,7 @@ impl MessageRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{models::MessageConfig, storage::Database};
+    use crate::{storage::types::MessageConfig, storage::Database};
     use tempfile::tempdir;
 
     async fn create_test_db() -> (Database, tempfile::TempDir) {
@@ -621,14 +841,15 @@ mod tests {
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
-            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#;
         sqlx::query(chat_query)
             .bind(&chat_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
+            .bind(Option::<String>::None)
             .bind(now)
             .bind(now)
             .execute(db_arc.pool())
@@ -638,18 +859,21 @@ mod tests {
         let message = Message {
             id: uuid::Uuid::new_v4().to_string(),
             chat_id: chat_id.clone(),
-            role: ChatMessageRole::User,
+            role: LlmMessageRole::User,
             content: "Hello, world!".to_string(),
             reasoning: None, // 用户消息没有推理过程
             config: Some(MessageConfig {
                 temperature: Some(0.7),
                 top_p: Some(0.9),
+                top_k: None,
                 max_tokens: Some(1000),
                 stream: Some(true),
                 model_id: Some("gpt-4o".to_string()),
                 provider_id: Some("openai".to_string()),
                 system_prompt: None,
                 mcp_servers: None,
+                turn_count: Some(5),
+                reasoning: None,
             }),
             tool_calls: None,
             turn_id: Some(1),
@@ -673,7 +897,7 @@ mod tests {
         assert!(fetched.is_some());
         let fetched_message = fetched.unwrap();
         assert_eq!(fetched_message.content, message.content);
-        assert_eq!(fetched_message.role, ChatMessageRole::User);
+        assert_eq!(fetched_message.role, LlmMessageRole::User);
 
         // Get by chat
         let messages = repo.get_messages_by_chat(&chat_id, 10, 0).await.unwrap();
@@ -712,14 +936,15 @@ mod tests {
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
-            INSERT INTO chats (id, name, system_prompt, mcp_servers, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#;
         sqlx::query(chat_query)
             .bind(&chat_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
+            .bind(Option::<String>::None)
             .bind(now)
             .bind(now)
             .execute(db_arc.pool())
@@ -734,7 +959,7 @@ mod tests {
         let message = Message {
             id: uuid::Uuid::new_v4().to_string(),
             chat_id: chat_id.clone(),
-            role: ChatMessageRole::User,
+            role: LlmMessageRole::User,
             content: "Hello".to_string(),
             reasoning: None,
             config: None,
@@ -757,5 +982,253 @@ mod tests {
         // 第二次调用应该返回 2
         let next_turn_id = repo.get_next_turn_id(&chat_id).await.unwrap();
         assert_eq!(next_turn_id, 2);
+    }
+
+    #[tokio::test]
+    async fn test_create_messages_batch() {
+        let (db_service, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db_service);
+        let repo = MessageRepository::new(db_arc.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let chat_id = uuid::Uuid::new_v4().to_string();
+
+        // 先创建一个 chat 以满足外键约束
+        let chat_query = r#"
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#;
+        sqlx::query(chat_query)
+            .bind(&chat_id)
+            .bind("Test Chat")
+            .bind(Option::<String>::None)
+            .bind("[]")
+            .bind(Option::<String>::None)
+            .bind(now)
+            .bind(now)
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // 创建多条消息
+        let messages = vec![
+            Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: LlmMessageRole::Tool,
+                content: "Tool result 1".to_string(),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(1),
+                tool_call_id: Some("tool_1".to_string()),
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now,
+                updated_at: now,
+            },
+            Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: LlmMessageRole::Tool,
+                content: "Tool result 2".to_string(),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(1),
+                tool_call_id: Some("tool_2".to_string()),
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + 1,
+                updated_at: now + 1,
+            },
+            Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: LlmMessageRole::Tool,
+                content: "Tool result 3".to_string(),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(1),
+                tool_call_id: Some("tool_3".to_string()),
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + 2,
+                updated_at: now + 2,
+            },
+        ];
+
+        // 批量创建
+        repo.create_messages_batch(&messages).await.unwrap();
+
+        // 验证所有消息都已创建
+        let all_messages = repo
+            .get_all_messages_by_chat(&chat_id, 100, 0)
+            .await
+            .unwrap();
+        assert_eq!(all_messages.len(), 3);
+        assert_eq!(all_messages[0].content, "Tool result 1");
+        assert_eq!(all_messages[1].content, "Tool result 2");
+        assert_eq!(all_messages[2].content, "Tool result 3");
+
+        // 验证每条消息都可以单独获取
+        for msg in &messages {
+            let fetched = repo.get_message_by_id(&msg.id).await.unwrap();
+            assert!(fetched.is_some());
+            assert_eq!(fetched.unwrap().content, msg.content);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_messages_batch_empty() {
+        let (db_service, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db_service);
+        let repo = MessageRepository::new(db_arc);
+
+        // 测试空数组不会报错
+        let result = repo.create_messages_batch(&[]).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_turn_ids_and_range() {
+        let (db_service, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db_service);
+        let repo = MessageRepository::new(db_arc.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let chat_id = uuid::Uuid::new_v4().to_string();
+
+        // 创建 chat
+        let chat_query = r#"
+            INSERT INTO chats (id, name, system_prompt, mcp_servers, reasoning, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#;
+        sqlx::query(chat_query)
+            .bind(&chat_id)
+            .bind("Test Chat")
+            .bind(Option::<String>::None)
+            .bind("[]")
+            .bind(Option::<String>::None)
+            .bind(now)
+            .bind(now)
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // 创建不连续的 turn_id: 1, 2, 4, 6, 7（缺失 3 和 5）
+        // 每轮 2 条消息（user + assistant）
+        let mut messages = Vec::new();
+        let turns = vec![1, 2, 4, 6, 7];
+
+        for &turn in &turns {
+            messages.push(Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: LlmMessageRole::User,
+                content: format!("User message turn {}", turn),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(turn),
+                tool_call_id: None,
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + (turn as i64) * 1000,
+                updated_at: now + (turn as i64) * 1000,
+            });
+
+            messages.push(Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                chat_id: chat_id.clone(),
+                role: LlmMessageRole::Assistant,
+                content: format!("Assistant message turn {}", turn),
+                reasoning: None,
+                config: None,
+                tool_calls: None,
+                turn_id: Some(turn),
+                tool_call_id: None,
+                attachments: None,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                start_time: None,
+                end_time: None,
+                duration: None,
+                created_at: now + (turn as i64) * 1000 + 500,
+                updated_at: now + (turn as i64) * 1000 + 500,
+            });
+        }
+
+        repo.create_messages_batch(&messages).await.unwrap();
+
+        // 测试 1: 获取所有 turn_id
+        let turn_ids = repo.get_turn_ids_by_chat(&chat_id).await.unwrap();
+        assert_eq!(turn_ids, vec![1, 2, 4, 6, 7]);
+
+        // 测试 2: 根据 turn_id 范围获取消息（turn 2-6，应该包含 2, 4, 6）
+        let result = repo
+            .get_messages_by_turn_id_range(&chat_id, 2, 6)
+            .await
+            .unwrap();
+
+        // 应该返回 6 条消息（3 个 turn × 2 条）
+        assert_eq!(result.len(), 6);
+        assert_eq!(result[0].content, "User message turn 2");
+        assert_eq!(result[1].content, "Assistant message turn 2");
+        assert_eq!(result[2].content, "User message turn 4");
+        assert_eq!(result[3].content, "Assistant message turn 4");
+        assert_eq!(result[4].content, "User message turn 6");
+        assert_eq!(result[5].content, "Assistant message turn 6");
+
+        // 测试 3: 范围只包含一个 turn
+        let result = repo
+            .get_messages_by_turn_id_range(&chat_id, 4, 4)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "User message turn 4");
+        assert_eq!(result[1].content, "Assistant message turn 4");
+
+        // 测试 4: 范围包含不存在的 turn（3, 5 不存在，但在范围内）
+        let result = repo
+            .get_messages_by_turn_id_range(&chat_id, 1, 7)
+            .await
+            .unwrap();
+
+        // 应该返回所有存在的消息（5 个 turn × 2 条 = 10 条）
+        assert_eq!(result.len(), 10);
+        assert_eq!(result[0].content, "User message turn 1");
+        assert_eq!(result[8].content, "User message turn 7");
     }
 }

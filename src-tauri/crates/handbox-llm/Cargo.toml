@@ -1,0 +1,25 @@
+[package]
+name = "handbox-llm"
+version = "0.1.0"
+edition = "2021"
+description = "Handbox LLM client library"
+license = "MIT"
+
+[dependencies]
+async-trait = "0.1"
+async-stream = "0.3"
+futures = "0.3"
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1.0"
+tracing = "0.1"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+openai-rust = { path = "../../../../../openai-rust/openai-rust" }
+google-genai-rust = { path = "../../../../../google-genai-rust/google-genai-rust" }
+rmcp = { version = "0.7", features = ["client"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1.0", features = ["macros", "rt", "sync"] }
+aliyun-oss-rs = { path = "/Users/wanggang/dev/opensource/aliyun-oss-rs" }
+regex = "1.0"

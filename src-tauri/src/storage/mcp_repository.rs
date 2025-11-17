@@ -1,7 +1,9 @@
 // MCP repository - data access for MCP server configurations
 
-use crate::models::{AppError, McpConnectionType, McpServer, McpServerStatus, McpTool};
+use crate::models::AppError;
+use crate::storage::types::{McpConnectionType, McpServer, McpServerStatus};
 use crate::storage::Database;
+use handbox_mcp::{McpPrompt, McpResource, McpTool};
 use sqlx::{sqlite::SqliteRow, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,8 +23,8 @@ impl McpRepository {
     pub async fn list_servers(&self) -> Result<Vec<McpServer>, AppError> {
         let query = r#"
             SELECT id, name, display_name, description, connection_type, command, args, working_dir, env,
-                   endpoint, headers, timeout_ms, enabled, status, tools, last_sync_at, last_error,
-                   created_at, updated_at
+                   endpoint, headers, timeout_ms, enabled, status, tools, prompts, resources, enabled_tools,
+                   last_sync_at, last_error, created_at, updated_at
             FROM mcps
             ORDER BY created_at DESC
         "#;
@@ -45,8 +47,8 @@ impl McpRepository {
 
         let mut query_builder = sqlx::QueryBuilder::new(
             "SELECT id, name, display_name, description, connection_type, command, args, working_dir, env, \
-                    endpoint, headers, timeout_ms, enabled, status, tools, last_sync_at, last_error, \
-                    created_at, updated_at \
+                    endpoint, headers, timeout_ms, enabled, status, tools, prompts, resources, enabled_tools, \
+                    last_sync_at, last_error, created_at, updated_at \
              FROM mcps WHERE id IN (",
         );
 
@@ -82,8 +84,8 @@ impl McpRepository {
     pub async fn get_server(&self, id: &str) -> Result<Option<McpServer>, AppError> {
         let query = r#"
             SELECT id, name, display_name, description, connection_type, command, args, working_dir, env,
-                   endpoint, headers, timeout_ms, enabled, status, tools, last_sync_at, last_error,
-                   created_at, updated_at
+                   endpoint, headers, timeout_ms, enabled, status, tools, prompts, resources, enabled_tools,
+                   last_sync_at, last_error, created_at, updated_at
             FROM mcps
             WHERE id = $1
         "#;
@@ -105,12 +107,12 @@ impl McpRepository {
         let query = r#"
             INSERT INTO mcps (
                 id, name, display_name, description, connection_type, command, args, working_dir, env,
-                endpoint, headers, timeout_ms, enabled, status, tools, last_sync_at, last_error,
-                created_at, updated_at
+                endpoint, headers, timeout_ms, enabled, status, tools, prompts, resources, enabled_tools,
+                last_sync_at, last_error, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14, $15, $16, $17,
-                $18, $19
+                $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20, $21, $22
             )
         "#;
 
@@ -130,8 +132,16 @@ impl McpRepository {
             .bind(server.enabled)
             .bind(server.status.to_string())
             .bind(serde_json::to_string(&server.tools).unwrap_or_else(|_| "[]".to_string()))
+            .bind(serde_json::to_string(&server.prompts).unwrap_or_else(|_| "[]".to_string()))
+            .bind(serde_json::to_string(&server.resources).unwrap_or_else(|_| "[]".to_string()))
+            .bind(serde_json::to_string(&server.enabled_tools).unwrap_or_else(|_| "[]".to_string()))
             .bind(server.last_sync_at)
-            .bind(&server.last_error)
+            .bind(
+                server
+                    .last_error
+                    .as_ref()
+                    .and_then(|e| serde_json::to_string(e).ok()),
+            )
             .bind(server.created_at)
             .bind(server.updated_at)
             .execute(self.db.pool())
@@ -161,10 +171,13 @@ impl McpRepository {
                 enabled = $12,
                 status = $13,
                 tools = $14,
-                last_sync_at = $15,
-                last_error = $16,
-                updated_at = $17
-            WHERE id = $18
+                prompts = $15,
+                resources = $16,
+                enabled_tools = $17,
+                last_sync_at = $18,
+                last_error = $19,
+                updated_at = $20
+            WHERE id = $21
         "#;
 
         let result = sqlx::query(query)
@@ -182,8 +195,16 @@ impl McpRepository {
             .bind(server.enabled)
             .bind(server.status.to_string())
             .bind(serde_json::to_string(&server.tools).unwrap_or_else(|_| "[]".to_string()))
+            .bind(serde_json::to_string(&server.prompts).unwrap_or_else(|_| "[]".to_string()))
+            .bind(serde_json::to_string(&server.resources).unwrap_or_else(|_| "[]".to_string()))
+            .bind(serde_json::to_string(&server.enabled_tools).unwrap_or_else(|_| "[]".to_string()))
             .bind(server.last_sync_at)
-            .bind(&server.last_error)
+            .bind(
+                server
+                    .last_error
+                    .as_ref()
+                    .and_then(|e| serde_json::to_string(e).ok()),
+            )
             .bind(server.updated_at)
             .bind(&server.id)
             .execute(self.db.pool())
@@ -310,6 +331,21 @@ impl McpRepository {
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
 
+        let prompts: Vec<McpPrompt> = row
+            .try_get::<Option<String>, _>("prompts")?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+
+        let resources: Vec<McpResource> = row
+            .try_get::<Option<String>, _>("resources")?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+
+        let enabled_tools: Vec<String> = row
+            .try_get::<Option<String>, _>("enabled_tools")?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+
         let status_value: String = row.try_get("status")?;
         let connection_type_value: String = row
             .try_get("connection_type")
@@ -333,8 +369,15 @@ impl McpRepository {
             enabled: row.try_get::<i64, _>("enabled")? != 0,
             status: McpServerStatus::from(status_value.as_str()),
             tools,
+            prompts,
+            resources,
+            enabled_tools,
             last_sync_at: row.try_get("last_sync_at").ok(),
-            last_error: row.try_get("last_error").ok(),
+            last_error: row
+                .try_get::<Option<String>, _>("last_error")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })

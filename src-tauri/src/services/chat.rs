@@ -1,11 +1,31 @@
 // 聊天服务实现
 
-use crate::llm_client::create_llm_client;
-use crate::llm_client::types::{ChatMessage, ChatMessageRole, ChatRequest};
-use crate::models::{AppError, Chat, UUID};
+use crate::models::AppError;
 use crate::services::{Database, ProviderService};
+use crate::storage::types::{Chat, ChatReasoningConfig, McpServerConfig, Provider, UUID};
 use crate::storage::{ChatRepository, MessageRepository};
+use handbox_llm::config::LlmConfigProvider;
+use handbox_llm::types::{LlmMessage, LlmMessageRole, LlmRequest};
+use handbox_llm::{create_llm_client, LlmProvider};
 use std::sync::Arc;
+
+/// 聊天参数类型
+pub enum ChatParameter {
+    Name(String),
+    Temperature(Option<f32>),
+    TopP(Option<f32>),
+    TopK(Option<i32>),
+    MaxTokens(Option<i32>),
+    Stream(Option<bool>),
+    Model {
+        model_id: String,
+        provider_id: String,
+    },
+    SystemPrompt(Option<String>),
+    McpServers(Vec<McpServerConfig>),
+    TurnCount(Option<i32>),
+    Reasoning(Option<ChatReasoningConfig>),
+}
 
 /// 聊天服务
 #[derive(Clone)]
@@ -13,14 +33,27 @@ pub struct ChatService {
     repository: ChatRepository,
     message_repository: MessageRepository,
     provider_service: Arc<ProviderService>,
+    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl ChatService {
-    pub fn new(db: Arc<Database>, provider_service: Arc<ProviderService>) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        provider_service: Arc<ProviderService>,
+        llm_config: Arc<dyn LlmConfigProvider>,
+    ) -> Self {
         Self {
             repository: ChatRepository::new(db.clone()),
             message_repository: MessageRepository::new(db),
             provider_service,
+            llm_config,
+        }
+    }
+
+    fn provider_context(provider: &Provider) -> LlmProvider {
+        LlmProvider {
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
         }
     }
 
@@ -30,12 +63,13 @@ impl ChatService {
         name: String,
         temperature: Option<f32>,
         top_p: Option<f32>,
+        top_k: Option<i32>,
         max_tokens: Option<i32>,
         stream: Option<bool>,
         model_id: Option<String>,
         provider_id: Option<String>,
         system_prompt: Option<String>,
-        mcp_servers: Option<Vec<String>>,
+        mcp_servers: Option<Vec<McpServerConfig>>,
     ) -> Result<Chat, AppError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -49,13 +83,16 @@ impl ChatService {
             message_count: 0,
             temperature,
             top_p,
+            top_k,
             max_tokens,
             stream,
             model_id,
             provider_id,
             system_prompt,
             mcp_servers: mcp_servers.unwrap_or_default(),
+            turn_count: Some(5), // 默认值为 5
             artifact_id: None,
+            reasoning: None,
             created_at: now,
             updated_at: now,
         };
@@ -84,49 +121,115 @@ impl ChatService {
         }
     }
 
-    /// 更新聊天
+    /// 统一的参数更新方法
+    pub async fn update_chat_parameter(
+        &self,
+        chat_id: UUID,
+        parameter: ChatParameter,
+    ) -> Result<Chat, AppError> {
+        let mut chat = self.get_chat(chat_id).await?;
+
+        match parameter {
+            ChatParameter::Name(name) => chat.name = name,
+            ChatParameter::Temperature(temp) => chat.temperature = temp,
+            ChatParameter::TopP(top_p) => chat.top_p = top_p,
+            ChatParameter::TopK(top_k) => chat.top_k = top_k,
+            ChatParameter::MaxTokens(max_tokens) => chat.max_tokens = max_tokens,
+            ChatParameter::Stream(stream) => chat.stream = stream,
+            ChatParameter::Model {
+                model_id,
+                provider_id,
+            } => {
+                chat.model_id = Some(model_id);
+                chat.provider_id = Some(provider_id);
+            }
+            ChatParameter::SystemPrompt(prompt) => chat.system_prompt = prompt,
+            ChatParameter::McpServers(servers) => chat.mcp_servers = servers,
+            ChatParameter::TurnCount(turn_count) => chat.turn_count = turn_count,
+            ChatParameter::Reasoning(reasoning) => chat.reasoning = reasoning,
+        }
+
+        chat.updated_at = Self::current_timestamp();
+        self.repository.update_chat(&chat).await?;
+        Ok(chat)
+    }
+
+    /// 批量更新聊天设置（保留用于兼容性）
     pub async fn update_chat(
         &self,
         chat_id: UUID,
         name: Option<String>,
-        temperature: Option<f32>,
-        top_p: Option<f32>,
-        max_tokens: Option<i32>,
-        stream: Option<bool>,
+        temperature: Option<Option<f32>>,
+        top_p: Option<Option<f32>>,
+        top_k: Option<Option<i32>>,
+        max_tokens: Option<Option<i32>>,
+        stream: Option<Option<bool>>,
         model_id: Option<String>,
         provider_id: Option<String>,
         system_prompt: Option<String>,
-        mcp_servers: Option<Vec<String>>,
+        mcp_servers: Option<Vec<McpServerConfig>>,
+        turn_count: Option<i32>,
     ) -> Result<Chat, AppError> {
-        let now = std::time::SystemTime::now()
+        let mut chat = self.get_chat(chat_id).await?;
+
+        if let Some(n) = name {
+            chat.name = n;
+        }
+        if let Some(t) = temperature {
+            chat.temperature = t;
+        }
+        if let Some(tp) = top_p {
+            chat.top_p = tp;
+        }
+        if let Some(tk) = top_k {
+            chat.top_k = tk;
+        }
+        if let Some(mt) = max_tokens {
+            chat.max_tokens = mt;
+        }
+        if let Some(s) = stream {
+            chat.stream = s;
+        }
+        if let Some(mid) = model_id {
+            chat.model_id = Some(mid);
+        }
+        if let Some(pid) = provider_id {
+            chat.provider_id = Some(pid);
+        }
+        if let Some(sp) = system_prompt {
+            chat.system_prompt = Some(sp);
+        }
+        if let Some(ms) = mcp_servers {
+            chat.mcp_servers = ms;
+        }
+        if let Some(tc) = turn_count {
+            chat.turn_count = Some(tc);
+        }
+
+        chat.updated_at = Self::current_timestamp();
+        self.repository.update_chat(&chat).await?;
+        Ok(chat)
+    }
+
+    /// 清空模型相关参数
+    pub async fn clear_model_parameters(&self, chat_id: UUID) -> Result<Chat, AppError> {
+        let mut chat = self.get_chat(chat_id).await?;
+        chat.temperature = None;
+        chat.top_p = None;
+        chat.top_k = None;
+        chat.max_tokens = None;
+        chat.stream = None;
+        chat.reasoning = None;
+        chat.updated_at = Self::current_timestamp();
+        self.repository.update_chat(&chat).await?;
+        Ok(chat)
+    }
+
+    fn current_timestamp() -> i64 {
+        std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_millis() as i64;
-
-        // 先检查聊天是否存在
-        let existing_chat = self.get_chat(chat_id.clone()).await?;
-
-        // 构建更新后的聊天数据
-        let updated_chat = Chat {
-            id: existing_chat.id,
-            name: name.unwrap_or(existing_chat.name),
-            last_message_at: existing_chat.last_message_at,
-            message_count: existing_chat.message_count,
-            temperature: temperature.or(existing_chat.temperature),
-            top_p: top_p.or(existing_chat.top_p),
-            max_tokens: max_tokens.or(existing_chat.max_tokens),
-            stream: stream.or(existing_chat.stream),
-            model_id: model_id.or(existing_chat.model_id),
-            provider_id: provider_id.or(existing_chat.provider_id),
-            system_prompt: system_prompt.or(existing_chat.system_prompt),
-            mcp_servers: mcp_servers.unwrap_or(existing_chat.mcp_servers),
-            artifact_id: existing_chat.artifact_id,
-            created_at: existing_chat.created_at,
-            updated_at: now,
-        };
-
-        self.repository.update_chat(&updated_chat).await?;
-        Ok(updated_chat)
+            .as_millis() as i64
     }
 
     /// 删除聊天
@@ -171,7 +274,7 @@ impl ChatService {
         // 4. 只获取用户发送的消息
         let user_messages: Vec<String> = messages
             .iter()
-            .filter(|msg| matches!(msg.role, ChatMessageRole::User))
+            .filter(|msg| matches!(msg.role, LlmMessageRole::User))
             .take(20)
             .map(|msg| msg.content.clone())
             .collect();
@@ -195,39 +298,57 @@ impl ChatService {
         let provider = self.provider_service.get_provider(&provider_id).await?;
 
         // 8. 创建LLM客户端
-        let llm_client = create_llm_client(&provider.provider_type).map_err(|e| {
-            let error = format!(
-                "Failed to create LLM client for provider type {}: {}",
-                provider.provider_type, e
+        let llm_client = create_llm_client(
+            &provider.provider_type,
+            Arc::clone(&self.llm_config),
+        )
+        .map_err(|e| {
+            let error: AppError = e.into();
+            tracing::error!(
+                "[ChatService::generate_title] Failed to create LLM client for provider type {}: {}",
+                provider.provider_type,
+                error.message
             );
-            tracing::error!("[ChatService::generate_title] {}", error);
-            AppError::internal_error(&error)
+            error
         })?;
 
         // 9. 构建API请求
-        let api_request = ChatRequest {
+        let api_request = LlmRequest {
             model: model_id,
-            messages: vec![ChatMessage {
-                role: ChatMessageRole::User,
+            messages: vec![LlmMessage {
+                role: LlmMessageRole::User,
                 content: title_prompt,
                 reasoning: None,
                 tool_calls: None,
                 tool_call_id: None,
             }],
             temperature: Some(0.1), // 使用低温度确保稳定输出
-            max_tokens: Some(50),   // 限制输出长度
+            top_p: None,
+            top_k: None,
+            max_tokens: Some(50), // 限制输出长度
             stream: Some(false),
+            reasoning: None,
+            reasoning_effort: None,
+            thinking: None,
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
         };
 
         // 10. 调用LLM API
-        let response = llm_client.chat(&provider, api_request).await.map_err(|e| {
-            let error = format!("Failed to call LLM API: {}", e);
-            tracing::error!("[ChatService::generate_title] {}", error);
-            AppError::internal_error(&error)
-        })?;
+        let provider_context = ChatService::provider_context(&provider);
+        let response = llm_client
+            .chat(&provider_context, api_request)
+            .await
+            .map_err(|e| {
+                let error: AppError = e.into();
+                tracing::error!(
+                    "[ChatService::generate_title] Failed to call LLM API for provider {}: {}",
+                    provider.provider_type,
+                    error.message
+                );
+                error
+            })?;
 
         // 11. 提取并清理标题
         let generated_title = if let Some(choice) = response.choices.first() {
@@ -263,6 +384,7 @@ impl ChatService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::llm_config::LlmConfig;
     use crate::models::ModelParameters;
     use crate::services::ProviderService;
     use crate::storage::Database;
@@ -282,27 +404,42 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let _service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let _service = ChatService::new(db, provider_service, llm_config_provider);
     }
 
     #[tokio::test]
     async fn creates_chat_with_all_fields() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let chat = service
             .create_chat(
                 "Test Chat".to_string(),
                 Some(0.7),
                 Some(0.9),
+                Some(40),
                 Some(2048),
                 Some(true),
                 Some("gpt-4o".to_string()),
                 Some("openai".to_string()),
                 Some("System prompt".to_string()),
-                Some(vec!["server1".to_string()]),
+                Some(vec![McpServerConfig {
+                    server_id: "server1".to_string(),
+                    execution_mode: "auto".to_string(),
+                    enabled_tools: vec!["tool1".to_string()],
+                }]),
             )
             .await
             .expect("chat creation failed");
@@ -310,12 +447,20 @@ mod tests {
         assert_eq!(chat.name, "Test Chat");
         assert_eq!(chat.temperature, Some(0.7));
         assert_eq!(chat.top_p, Some(0.9));
+        assert_eq!(chat.top_k, Some(40));
         assert_eq!(chat.max_tokens, Some(2048));
         assert_eq!(chat.stream, Some(true));
         assert_eq!(chat.model_id, Some("gpt-4o".to_string()));
         assert_eq!(chat.provider_id, Some("openai".to_string()));
         assert_eq!(chat.system_prompt, Some("System prompt".to_string()));
-        assert_eq!(chat.mcp_servers, vec!["server1".to_string()]);
+        assert_eq!(
+            chat.mcp_servers,
+            vec![McpServerConfig {
+                server_id: "server1".to_string(),
+                execution_mode: "auto".to_string(),
+                enabled_tools: vec!["tool1".to_string()],
+            }]
+        );
         assert_eq!(chat.message_count, 0);
         assert!(chat.last_message_at.is_none());
     }
@@ -323,12 +468,18 @@ mod tests {
     #[tokio::test]
     async fn lists_chats_sorted_by_updated_at() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         service
             .create_chat(
                 "Chat 1".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -354,6 +505,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -371,12 +523,18 @@ mod tests {
     #[tokio::test]
     async fn fetches_chat_by_id() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
                 "Test Chat".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -401,8 +559,13 @@ mod tests {
     #[tokio::test]
     async fn get_chat_returns_not_found_error() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let err = service
             .get_chat("nonexistent_chat".to_string())
@@ -415,8 +578,13 @@ mod tests {
     #[tokio::test]
     async fn updates_existing_chat() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -429,22 +597,39 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
+
+        let original_model_id = created.model_id.clone();
+        let original_provider_id = created.provider_id.clone();
 
         let updated = service
             .update_chat(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                Some(0.8),
-                Some(0.95),
-                Some(4096),
-                Some(false),
-                Some("claude-3".to_string()),
-                Some("anthropic".to_string()),
+                Some(Some(0.8)),   // Option<Option<f32>>
+                Some(Some(0.95)),  // Option<Option<f32>>
+                Some(Some(40)),    // Option<Option<i32>>
+                Some(Some(4096)),  // Option<Option<i32>>
+                Some(Some(false)), // Option<Option<bool>>
+                None,              // model unchanged
+                None,              // provider unchanged
                 Some("Updated prompt".to_string()),
-                Some(vec!["server1".to_string(), "server2".to_string()]),
+                Some(vec![
+                    McpServerConfig {
+                        server_id: "server1".to_string(),
+                        execution_mode: "auto".to_string(),
+                        enabled_tools: vec!["tool1".to_string(), "tool2".to_string()],
+                    },
+                    McpServerConfig {
+                        server_id: "server2".to_string(),
+                        execution_mode: "manual".to_string(),
+                        enabled_tools: vec!["tool3".to_string()],
+                    },
+                ]),
+                Some(10),
             )
             .await
             .expect("update failed");
@@ -452,23 +637,42 @@ mod tests {
         assert_eq!(updated.name, "Updated Name");
         assert_eq!(updated.temperature, Some(0.8));
         assert_eq!(updated.top_p, Some(0.95));
+        assert_eq!(updated.top_k, Some(40));
         assert_eq!(updated.max_tokens, Some(4096));
         assert_eq!(updated.stream, Some(false));
-        assert_eq!(updated.model_id, Some("claude-3".to_string()));
-        assert_eq!(updated.provider_id, Some("anthropic".to_string()));
         assert_eq!(updated.system_prompt, Some("Updated prompt".to_string()));
-        assert_eq!(updated.mcp_servers, vec!["server1", "server2"]);
+        assert_eq!(
+            updated.mcp_servers,
+            vec![
+                McpServerConfig {
+                    server_id: "server1".to_string(),
+                    execution_mode: "auto".to_string(),
+                    enabled_tools: vec!["tool1".to_string(), "tool2".to_string()],
+                },
+                McpServerConfig {
+                    server_id: "server2".to_string(),
+                    execution_mode: "manual".to_string(),
+                    enabled_tools: vec!["tool3".to_string()],
+                },
+            ]
+        );
     }
 
     #[tokio::test]
     async fn delete_chat_removes_record() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
                 "To Delete".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -497,12 +701,18 @@ mod tests {
     #[tokio::test]
     async fn generate_title_requires_messages() {
         let db = create_test_database().await;
-        let provider_service = Arc::new(ProviderService::new(db.clone()));
-        let service = ChatService::new(db, provider_service);
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
 
         let chat = service
             .create_chat(
                 "No Messages".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -538,5 +748,160 @@ mod tests {
         assert_eq!(params.max_tokens, Some(1024));
         assert_eq!(params.context_length, Some(2048));
         assert_eq!(params.stream, Some(false));
+    }
+
+    #[tokio::test]
+    async fn clears_parameters_when_passed_some_none() {
+        let db = create_test_database().await;
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
+
+        // 创建带有参数的聊天
+        let created = service
+            .create_chat(
+                "Test Chat".to_string(),
+                Some(0.7),
+                Some(0.9),
+                Some(40),
+                Some(2048),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(created.temperature, Some(0.7));
+        assert_eq!(created.top_p, Some(0.9));
+        assert_eq!(created.top_k, Some(40));
+        assert_eq!(created.max_tokens, Some(2048));
+        assert_eq!(created.stream, Some(true));
+
+        // 清空所有参数（通过传递 Some(None)）
+        let updated = service
+            .update_chat(
+                created.id.clone(),
+                None,
+                Some(None), // 清空 temperature
+                Some(None), // 清空 top_p
+                Some(None), // 清空 top_k
+                Some(None), // 清空 max_tokens
+                Some(None), // 清空 stream
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("update failed");
+
+        assert_eq!(updated.temperature, None);
+        assert_eq!(updated.top_p, None);
+        assert_eq!(updated.top_k, None);
+        assert_eq!(updated.max_tokens, None);
+        assert_eq!(updated.stream, None);
+    }
+
+    #[tokio::test]
+    async fn clears_parameters_via_service_method() {
+        let db = create_test_database().await;
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
+
+        let created = service
+            .create_chat(
+                "Test Chat".to_string(),
+                Some(0.8),
+                Some(0.6),
+                Some(20),
+                Some(1024),
+                Some(true),
+                Some("model-1".to_string()),
+                Some("provider-1".to_string()),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let cleared = service
+            .clear_model_parameters(created.id.clone())
+            .await
+            .expect("clear failed");
+
+        assert!(cleared.temperature.is_none());
+        assert!(cleared.top_p.is_none());
+        assert!(cleared.top_k.is_none());
+        assert!(cleared.max_tokens.is_none());
+        assert!(cleared.stream.is_none());
+        assert!(cleared.reasoning.is_none());
+    }
+
+    #[tokio::test]
+    async fn preserves_parameters_when_passed_none() {
+        let db = create_test_database().await;
+        let llm_config = Arc::new(LlmConfig::new());
+        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let provider_service = Arc::new(ProviderService::new(
+            db.clone(),
+            llm_config_provider.clone(),
+        ));
+        let service = ChatService::new(db, provider_service, llm_config_provider);
+
+        // 创建带有参数的聊天
+        let created = service
+            .create_chat(
+                "Test Chat".to_string(),
+                Some(0.7),
+                Some(0.9),
+                Some(40),
+                Some(2048),
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // 不传递参数（None），应该保持原值
+        let updated = service
+            .update_chat(
+                created.id.clone(),
+                Some("Updated Name".to_string()),
+                None, // 不修改 temperature，保持原值
+                None, // 不修改 top_p，保持原值
+                None, // 不修改 top_k，保持原值
+                None, // 不修改 max_tokens，保持原值
+                None, // 不修改 stream，保持原值
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("update failed");
+
+        assert_eq!(updated.name, "Updated Name");
+        assert_eq!(updated.temperature, Some(0.7)); // 保持原值
+        assert_eq!(updated.top_p, Some(0.9)); // 保持原值
+        assert_eq!(updated.top_k, Some(40)); // 保持原值
+        assert_eq!(updated.max_tokens, Some(2048)); // 保持原值
+        assert_eq!(updated.stream, Some(true)); // 保持原值
     }
 }

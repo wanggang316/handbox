@@ -2,21 +2,30 @@
  * 聊天相关类型定义 - 匹配后端 Rust 架构
  */
 
-import type { BaseEntity, UUID, Timestamp } from './index';
+import type { BaseEntity, UUID, Timestamp } from "./index";
 
 // 消息角色
-export type MessageRole = 'user' | 'assistant' | 'system';
+export type MessageRole = "user" | "assistant" | "system";
+
+// MCP 服务器配置
+export interface McpServerConfig {
+  serverId: string;
+  executionMode: "auto" | "manual";
+  enabledTools: string[]; // List of enabled tool names for this server
+}
 
 // 消息配置 - 每条消息可以有独立的配置参数
 export interface MessageConfig {
   temperature?: number;
   topP?: number;
+  topK?: number;
   maxTokens?: number;
   stream?: boolean;
   modelId?: string;
   providerId?: string;
   systemPrompt?: string;
-  mcpServers?: string[];
+  mcpServers?: McpServerConfig[];
+  turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
 }
 
 // 消息类型
@@ -53,32 +62,67 @@ export interface MessageAttachment {
   path: string;
 }
 
+// Reasoning/thinking support
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type ReasoningSummary = "auto" | "concise" | "detailed";
+
+export interface ResponsesReasoningConfig {
+  effort?: ReasoningEffort | null;
+  summary?: ReasoningSummary | null;
+}
+
+export interface ReasoningEffortConfig {
+  effort?: ReasoningEffort | null;
+  includeReasoning?: boolean | null;
+}
+
+export interface ThinkingConfig {
+  includeThoughts?: boolean | null;
+  thinkingBudget?: number | null;
+}
+
+export interface OpenrouterReasoningConfig {
+  effort?: ReasoningEffort | null;
+  maxTokens?: number | null;
+  exclude?: boolean | null;
+}
+
+export interface ChatReasoningConfig {
+  responses?: ResponsesReasoningConfig;
+  reasoningEffort?: ReasoningEffortConfig;
+  thinking?: ThinkingConfig;
+  openrouter?: OpenrouterReasoningConfig;
+}
+
 // 聊天实体
 export interface Chat extends BaseEntity {
   name: string;
   lastMessageAt?: Timestamp;
   messageCount: number;
-  
+
   // Chat-level configuration (default values)
   temperature?: number;
   topP?: number;
+  topK?: number;
   maxTokens?: number;
   stream?: boolean;
   modelId?: string;
   providerId?: string;
   systemPrompt?: string;
-  mcpServers: string[];
-  
-  artifactId?: UUID;
-}
+  mcpServers: McpServerConfig[];
+  turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
 
+  artifactId?: UUID;
+  reasoning?: ChatReasoningConfig | null;
+}
 
 // 模型参数
 export interface ModelParameters {
   temperature?: number;
   topP?: number;
+  topK?: number;
   maxTokens?: number;
-  contextLength?: number;
+  turnCount?: number; // 对话回合数 - 用于限制上下文中包含的历史对话轮数
   stream?: boolean;
 }
 
@@ -88,12 +132,15 @@ export interface MessageRequest {
   modelId: string;
   providerId: string;
   messages: ChatMessage[];
+  tempUserMessageId?: string;
   attachments?: ChatAttachment[];
 }
 
 // 简化的发送消息请求
-export interface SendMessageRequest {
+export interface UserMessageSendRequest {
+  chatId: UUID;
   content: string;
+  tempUserMessageId: string;
   attachments?: ChatAttachment[];
 }
 
@@ -102,6 +149,7 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   reasoning?: string; // 推理过程内容
+  id?: string; // 临时消息ID，仅用于前端发送消息时标识用户消息
 }
 
 // 聊天附件（请求中使用）
@@ -126,6 +174,15 @@ export interface MessageResponse {
   duration?: number;
 }
 
+// 工具调用执行模式
+export type ToolExecutionMode = "auto" | "manual";
+
+// 工具调用执行状态
+export type ToolExecutionStatus =
+  | "pending"
+  | "executing"
+  | "completed"
+  | "failed";
 
 // 工具函数信息
 export interface ToolFunction {
@@ -139,10 +196,16 @@ export interface ToolCall {
   id?: string;
   toolType?: string;
   function?: ToolFunction;
+  executionMode?: ToolExecutionMode;
+  executionStatus?: ToolExecutionStatus;
+  result?: string;
 }
 
 // 流式消息事件
-export type MessageStreamEvent = 
-  | { type: 'delta'; data: { content: string; reasoning?: string; tokens?: number } }
-  | { type: 'done'; data: MessageResponse }
-  | { type: 'error'; data: { error: string; code?: string } };
+export type MessageStreamEvent =
+  | {
+      type: "delta";
+      data: { content: string; reasoning?: string; tokens?: number };
+    }
+  | { type: "done"; data: MessageResponse }
+  | { type: "error"; data: { error: string; code?: string } };

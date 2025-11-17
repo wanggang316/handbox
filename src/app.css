@@ -26,6 +26,9 @@
   --color-error: oklch(71% 0.194 13.428);
   --color-error-content: oklch(27% 0.105 12.094);
 
+  /* 遮罩层颜色 (Modal/Drawer backdrop) */
+  --color-overlay: oklch(21% 0.006 285.885 / 0.3);
+
   --color-base-100-dark: oklch(0.2308 0 0);
   --color-base-200-dark: oklch(0.2838 0.0047 247.99);
   --color-base-300-dark: oklch(0.3268 0.0055 236.68);
@@ -46,6 +49,9 @@
   --color-warning-content-dark: oklch(41% 0.112 45.904);
   --color-error-dark: oklch(71% 0.194 13.428);
   --color-error-content-dark: oklch(27% 0.105 12.094);
+
+  /* 遮罩层颜色 (Modal/Drawer backdrop) - 深色模式 */
+  --color-overlay-dark: oklch(21% 0.006 285.885 / 0.6);
 }
 
 /* 禁用桌面应用的全局滚动，但保留内部组件滚动 */
@@ -79,6 +85,7 @@ body {
   --warning-content: var(--color-warning-content);
   --error: var(--color-error);
   --error-content: var(--color-error-content);
+  --overlay: var(--color-overlay);
 }
 
 /* 深色主题 */
@@ -126,6 +133,20 @@ body {
   --warning-content: var(--color-warning-content-dark);
   --error: var(--color-error-dark);
   --error-content: var(--color-error-content-dark);
+  --overlay: var(--color-overlay-dark);
+}
+
+[data-theme="dark"] .shadow-2xl {
+  --tw-shadow: 0 32px 64px -28px color-mix(in oklch, var(--overlay) 10%, var(
+          --base-100
+        )
+        5%);
+  --tw-shadow-colored: 0 32px 64px -28px color-mix(in oklch, var(--overlay) 10%, var(
+          --base-100
+        )
+        5%);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
 
 /* Markdown 样式 */
@@ -337,6 +358,34 @@ body {
   padding: 1.1rem 1.25rem;
 }
 
+pre.code-block {
+  margin: 0;
+  padding: 0;
+  font-family: "Fira Code", "Monaco", "Consolas", "Courier New", monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--base-content);
+  background-color: var(--base-200);
+  /* border: 1px solid var(--base-300); */
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  /* box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02); */
+}
+
+pre.code-block code {
+  display: block;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  /* white-space: pre; */
+}
+
+pre.code-block--compact {
+  /* padding: 0.6rem 0.85rem; */
+  font-size: 0.7rem;
+  border-radius: 0.65rem;
+}
+
 .markdown-content ul {
   margin: 0.75rem 0;
   padding-left: 1.5rem;
@@ -405,10 +454,10 @@ body {
   border-bottom: none;
 }
 
-/* 推理过程的特殊样式 */
+/* 推理过程的特殊样式 - 浅色模式 */
 .reasoning-content {
   line-height: 1.5;
-  color: #64748b;
+  color: color-mix(in oklch, var(--base-content) 60%, transparent);
 }
 
 .reasoning-content h1,
@@ -417,29 +466,34 @@ body {
 .reasoning-content h4,
 .reasoning-content h5,
 .reasoning-content h6 {
-  color: #1e40af;
-  border-color: #93c5fd;
+  color: color-mix(in oklch, var(--base-content) 70%, transparent);
+  border-color: color-mix(in oklch, var(--base-300) 80%, transparent);
 }
 
-.reasoning-content code {
-  background-color: #dbeafe;
-  color: #1e40af;
-  border-color: #93c5fd;
+.reasoning-content strong {
+  font-weight: 600;
+  color: color-mix(in oklch, var(--base-content) 65%, transparent);
+}
+
+.reasoning-content code:not(.hljs) {
+  background-color: color-mix(in oklch, var(--base-300) 50%, transparent);
+  color: color-mix(in oklch, var(--base-content) 70%, transparent);
+  border-color: color-mix(in oklch, var(--base-300) 60%, transparent);
 }
 
 .reasoning-content pre {
-  background-color: #dbeafe;
-  border-color: #93c5fd;
+  background-color: color-mix(in oklch, var(--base-200) 80%, transparent);
+  border-color: color-mix(in oklch, var(--base-300) 60%, transparent);
 }
 
 .reasoning-content pre code {
-  color: #1e40af;
+  color: color-mix(in oklch, var(--base-content) 70%, transparent);
 }
 
 .reasoning-content blockquote {
-  border-left-color: #3b82f6;
-  background-color: #dbeafe;
-  color: #1e40af;
+  border-left-color: color-mix(in oklch, var(--primary) 60%, transparent);
+  background-color: color-mix(in oklch, var(--base-200) 70%, transparent);
+  color: color-mix(in oklch, var(--base-content) 65%, transparent);
 }
 
 /* 动画：与类名 pulse-scale 对应，供 Tailwind 任意值动画使用 */

@@ -2,18 +2,27 @@
  * 消息状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Message, MessageResponse, MessageRequest, ChatAttachment, ChatMessage, ToolCall } from '$lib/types/chat';
-import type { FrontendProviderConfig, UUID } from '$lib/types';
+import type {
+  Message,
+  MessageResponse,
+  MessageRequest,
+  ChatAttachment,
+  ToolCall,
+  ToolExecutionStatus,
+  UserMessageSendRequest,
+} from '$lib/types/chat';
+import type { ProviderConfig, UUID } from '$lib/types';
 import * as messageApi from '$lib/api/message';
 import { listenToStreamEvents } from '$lib/api/message';
 import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
 import { chatState } from './chat.svelte';
+import { showAppError, type ErrorDisplayOptions } from '$lib/utils';
 
 interface MessageState {
   // 按 chatId 组织消息
   messagesByChat: Record<string, Message[]>;
   // providerId 到 providerConfig 的映射字典（用于快速获取 provider 图标等信息）
-  providerConfigsCache: Record<string, FrontendProviderConfig>;
+  providerConfigsCache: Record<string, ProviderConfig>;
   isLoading: boolean;
   isSending: boolean;
   error: string | null;
@@ -22,8 +31,11 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
-  // 工具执行状态 - 记录哪些工具调用正在执行
-  executingToolCalls: Set<string>; // 存储 messageId:toolCallId 的组合
+}
+
+interface ToolExecuteEventPayload {
+  messageId: string;
+  toolCalls?: Record<string, Partial<ToolCall>>;
 }
 
 class MessageStore {
@@ -37,7 +49,6 @@ class MessageStore {
     streamingContent: '',
     streamingReasoning: '',
     streamingToolCalls: null,
-    executingToolCalls: new Set(),
   });
 
   // 当前流式事件监听器的清理函数
@@ -82,12 +93,6 @@ class MessageStore {
     return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
   }
 
-  // 检查特定工具调用是否正在执行
-  isToolCallExecuting(messageId: string, toolCallId: string): boolean {
-    const key = `${messageId}:${toolCallId}`;
-    return this.state.executingToolCalls.has(key);
-  }
-
   // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
   getMessagesReactive(chatId: string) {
     return this.state.messagesByChat[chatId] || [];
@@ -99,7 +104,7 @@ class MessageStore {
   }
 
   // 根据 providerId 获取 providerConfig（带缓存）
-  getProviderConfig(providerId: string): FrontendProviderConfig | undefined {
+  getProviderConfig(providerId: string): ProviderConfig | undefined {
     // 先从缓存中查找
     if (this.state.providerConfigsCache[providerId]) {
       return this.state.providerConfigsCache[providerId];
@@ -212,6 +217,19 @@ class MessageStore {
     this.state.error = error;
   }
 
+  private reportError(
+    error: unknown,
+    fallbackMessage: string,
+    options?: ErrorDisplayOptions
+  ) {
+    const normalized = showAppError(error, {
+      fallbackMessage,
+      ...options
+    });
+    this.setError(normalized.message);
+    return normalized;
+  }
+
   // 设置聊天的消息列表
   setMessages(chatId: string, messages: Message[]) {
     // 如果正在发送消息且本地已有消息，避免覆盖
@@ -235,13 +253,25 @@ class MessageStore {
     this.cacheProviderConfigs([message]);
   }
 
+  // 根据ID获取消息
+  getMessageById(chatId: string, messageId: string): Message | undefined {
+    const messages = this.state.messagesByChat[chatId];
+    if (messages) {
+      return messages.find(m => m.id === messageId);
+    }
+    return undefined;
+  }
+
   // 更新消息
   updateMessage(chatId: string, messageId: string, updates: Partial<Message>) {
     const messages = this.state.messagesByChat[chatId];
     if (messages) {
       const index = messages.findIndex(m => m.id === messageId);
       if (index !== -1) {
-        messages[index] = { ...messages[index], ...updates };
+        const updatedMessage = { ...messages[index], ...updates };
+        const nextMessages = [...messages];
+        nextMessages[index] = updatedMessage;
+        this.state.messagesByChat[chatId] = nextMessages;
       }
     }
   }
@@ -351,13 +381,17 @@ class MessageStore {
         }
       },
 
-      onError: (error: any) => {
-        console.error('流式错误:', error);
-        this.setError(error.error || error.message || '流式响应错误');
+      onError: (payload: any) => {
+        console.error('流式错误:', payload);
+        const errorDetail = payload?.error ?? payload;
+        this.reportError(errorDetail, '流式响应错误', {
+          requiresAcknowledgement: true,
+          title: '对话失败'
+        });
 
         // 执行自定义错误回调
         if (onError) {
-          onError(error);
+          onError(payload);
         }
 
         // 错误时也清理监听器
@@ -366,6 +400,59 @@ class MessageStore {
           this.currentStreamUnlisten = null;
         }
       }
+    };
+  }
+
+  /**
+   * 处理消息删除 - 从状态中移除指定的消息
+   */
+  private handleMessagesDelete(chatId: string, messageIds: string[], source: string = 'unknown') {
+    console.log(`[${source}] 消息被删除:`, { chatId, messageIds });
+
+    // 从状态中删除这些消息
+    const messages = this.state.messagesByChat[chatId] || [];
+    const filteredMessages = messages.filter((m: Message) => m.id && !messageIds.includes(m.id));
+    this.state.messagesByChat[chatId] = filteredMessages;
+
+    console.log(`[${source}] 已从 chat ${chatId} 删除 ${messageIds.length} 条消息`);
+  }
+
+  /**
+   * 创建消息删除回调
+   */
+  private createMessagesDeleteCallback(source: string = 'unknown') {
+    return (data: { chatId: string; messageIds: string[] }) => {
+      this.handleMessagesDelete(data.chatId, data.messageIds, source);
+    };
+  }
+
+  /**
+   * 处理用户消息保存 - 替换临时ID为真实ID
+   */
+  private handleUserMessageSaved(tempMessageId: string, savedMessageId: string, chatId: string, source: string = 'unknown') {
+    console.log(`[${source}] 用户消息已保存，替换ID:`, { tempMessageId, savedMessageId, chatId });
+
+    const messages = this.state.messagesByChat[chatId] || [];
+    const messageIndex = messages.findIndex((m: Message) => m.id === tempMessageId);
+
+    if (messageIndex !== -1) {
+      messages[messageIndex] = {
+        ...messages[messageIndex],
+        id: savedMessageId
+      };
+      this.state.messagesByChat[chatId] = [...messages];
+      console.log(`[${source}] 已替换 chat ${chatId} 中的消息ID: ${tempMessageId} -> ${savedMessageId}`);
+    } else {
+      console.warn(`[${source}] 未找到临时消息ID: ${tempMessageId} in chat ${chatId}`);
+    }
+  }
+
+  /**
+   * 创建用户消息保存回调
+   */
+  private createUserMessageSavedCallback(chatId: string, source: string = 'unknown') {
+    return (data: { tempMessageId: string; savedMessageId: string }) => {
+      this.handleUserMessageSaved(data.tempMessageId, data.savedMessageId, chatId, source);
     };
   }
 
@@ -397,7 +484,7 @@ class MessageStore {
       this.setMessages(chatId, messages);
 
     } catch (error) {
-      this.setError(error instanceof Error ? error.message : '加载消息失败');
+      this.reportError(error, '加载消息失败');
       throw error;
     } finally {
       this.setLoading(false);
@@ -439,24 +526,13 @@ class MessageStore {
 
       this.addMessage(currentChat.id, userMessage);
 
-      // 构建消息数组，如果有系统提示词则添加到开头
-      const messages: ChatMessage[] = [];
-      if (currentChat.systemPrompt && currentChat.systemPrompt.trim()) {
-        messages.push({ role: 'system', content: currentChat.systemPrompt });
-      }
-      messages.push({ role: 'user', content: content });
-
-      // 构建完整的消息请求
-      const fullRequest: MessageRequest = {
+      // 构建完整的消息请求（不包含 system message，由后端构建）
+      const userMessageRequest: UserMessageSendRequest = {
         chatId: currentChat.id,
-        modelId: currentChat.modelId,
-        providerId: currentChat.providerId,
-        messages: messages,
+        content: content,
+        tempUserMessageId: userMessage.id || '',
         attachments: attachments
       };
-
-      // 设置流式响应参数
-      const streamRequest = { ...fullRequest };
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
@@ -465,8 +541,8 @@ class MessageStore {
       }
 
       // 先设置流式事件监听器，确保在发送消息前完全就绪
-      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
-        this.createStreamEventHandlers(
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents({
+        ...this.createStreamEventHandlers(
           // onComplete callback
           () => {
             this.setSending(false);
@@ -475,14 +551,17 @@ class MessageStore {
           () => {
             this.setSending(false);
           }
-        )
-      );
+        ),
+        onUserMessageSaved: this.createUserMessageSavedCallback(currentChat.id, 'sendMessage')
+      });
 
       // 事件监听器设置完成后，再发送流式消息
-      await messageApi.sendStreamMessage(streamRequest);
+      await messageApi.sendUserMessageStream(userMessageRequest);
 
     } catch (error) {
-      this.setError(error instanceof Error ? error.message : '发送消息失败');
+      this.reportError(error, '发送消息失败', {
+        title: '消息发送失败'
+      });
       this.setSending(false);
       throw error;
     }
@@ -496,24 +575,127 @@ class MessageStore {
       await messageApi.deleteMessage(messageId);
       this.deleteMessage(chatId, messageId);
     } catch (error) {
-      this.setError(error instanceof Error ? error.message : '删除消息失败');
+      this.reportError(error, '删除消息失败');
       throw error;
     }
   }
 
   /**
-   * 重新生成消息
+   * 流式重新生成消息 - 删除当前消息，根据本轮消息重新生成
    */
   async regenerateMessage(messageId: string): Promise<void> {
+    console.log('[regenerateMessage] 开始重新生成消息:', messageId);
+
     try {
       this.setSending(true);
-      const response = await messageApi.regenerateMessage(messageId as UUID);
-      this.applyMessageResponse(response.chatId, response);
+
+      // 清理之前的监听器（如果存在）
+      if (this.currentStreamUnlisten) {
+        console.log('[regenerateMessage] 清理之前的监听器');
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+
+      console.log('[regenerateMessage] 设置事件监听器...');
+
+      // 设置流式事件监听器
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
+        {
+          ...this.createStreamEventHandlers(
+            // onComplete callback
+            () => {
+              this.setSending(false);
+            },
+            // onError callback
+            () => {
+              this.setSending(false);
+            }
+          ),
+          // 添加消息删除回调
+          onMessagesDelete: this.createMessagesDeleteCallback('regenerateMessage')
+        },
+        'message_stream'
+      );
+
+      console.log('[regenerateMessage] 调用流式 API...');
+
+      // 调用流式 API
+      await messageApi.regenerateAssistantMessageStream(messageId as UUID);
+
+      console.log('[regenerateMessage] API 调用成功');
     } catch (error) {
-      this.setError(error instanceof Error ? error.message : '重新生成失败');
-      throw error;
-    } finally {
+      console.error('[regenerateMessage] 重新生成失败:', error);
+      this.reportError(error, '重新生成失败', {
+        title: '重新生成失败'
+      });
       this.setSending(false);
+      throw error;
+    }
+  }
+
+  /**
+   * 重发用户消息 - 删除该消息之后的所有消息，然后重新发送（流式）
+   * @param messageId 消息ID
+   * @param content 可选的新消息内容，如果提供则更新消息内容后重新发送
+   */
+  async resendMessage(chatId: string, messageId: string, content?: string): Promise<void> {
+    console.log('[resendMessage] 开始重发消息:', messageId, content ? '(带新内容)' : '');
+
+    try {
+      this.setSending(true);
+
+      if (typeof content === 'string') {
+        this.updateMessage(chatId, messageId, {
+          content,
+          updatedAt: Date.now()
+        });
+      }
+
+      // 清理之前的监听器（如果存在）
+      if (this.currentStreamUnlisten) {
+        console.log('[resendMessage] 清理之前的监听器');
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+
+      console.log('[resendMessage] 设置事件监听器...');
+
+      // 设置流式事件监听器
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
+        {
+          ...this.createStreamEventHandlers(
+            // onComplete callback
+            () => {
+              this.setSending(false);
+            },
+            // onError callback
+            () => {
+              this.setSending(false);
+            }
+          ),
+          // 添加消息删除回调
+          onMessagesDelete: this.createMessagesDeleteCallback('resendMessage')
+        }
+      );
+
+      console.log('[resendMessage] 调用 resendMessageStream API...');
+
+      // 调用流式重发API，传递可选的新内容
+      await messageApi.resendUserMessageStream(messageId as UUID, content);
+
+      console.log('[resendMessage] API 调用成功');
+    } catch (error) {
+      // 清理监听器
+      if (this.currentStreamUnlisten) {
+        this.currentStreamUnlisten();
+        this.currentStreamUnlisten = null;
+      }
+      console.error('重发消息失败:', error);
+      this.reportError(error, '重发消息失败', {
+        title: '重发失败'
+      });
+      this.setSending(false);
+      throw error;
     }
   }
 
@@ -521,60 +703,107 @@ class MessageStore {
    * 执行多个工具调用 - 使用流式API
    */
   async executeToolCalls(messageId: string, toolCallIds: string[]): Promise<void> {
+    console.log('[executeToolCalls] 开始执行工具调用:', { messageId, toolCallIds });
+
     if (toolCallIds.length === 0) {
+      console.warn('[executeToolCalls] 工具调用列表为空');
       return;
     }
 
-    const keys = toolCallIds.map((toolCallId) => `${messageId}:${toolCallId}`);
-    let cleaned = false;
-
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      for (const key of keys) {
-        this.state.executingToolCalls.delete(key);
-      }
-    };
-
     try {
-      // 设置执行状态
-      for (const key of keys) {
-        this.state.executingToolCalls.add(key);
-      }
       this.setError(null);
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
+        console.log('[executeToolCalls] 清理之前的监听器');
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
 
+      console.log('[executeToolCalls] 设置事件监听器...');
+
       // 监听工具执行流式事件
       this.currentStreamUnlisten = await listenToStreamEvents(
-        this.createStreamEventHandlers(
-          // onComplete callback
-          () => {
-            cleanup();
-          },
-          // onError callback
-          () => {
-            cleanup();
+        {
+          ...this.createStreamEventHandlers(),
+          // 添加消息删除回调
+          onMessagesDelete: this.createMessagesDeleteCallback('executeToolCalls'),
+          // 添加工具执行状态回调
+          onToolExecute: (data: ToolExecuteEventPayload) => {
+            console.log('[onToolExecute] 工具执行状态变化:', data);
+
+            // 查找消息所属的 chatId
+            let foundChatId: string | undefined;
+            let foundMessage: Message | undefined;
+
+            for (const [cid, messages] of Object.entries(this.state.messagesByChat)) {
+              const msg = messages.find(m => m.id === data.messageId);
+              if (msg) {
+                foundChatId = cid;
+                foundMessage = msg;
+                break;
+              }
+            }
+
+            if (!foundChatId || !foundMessage) {
+              console.warn('[onToolExecute] 未找到消息:', data.messageId);
+              return;
+            }
+
+            // 更新消息中工具调用的状态
+            if (foundMessage.toolCalls && data.toolCalls && typeof data.toolCalls === 'object') {
+              const updatesMap = new Map<string, Partial<ToolCall>>(
+                Object.entries(data.toolCalls).filter(([key, value]) => typeof value === 'object' && value !== null)
+              );
+
+              const updatedToolCalls = foundMessage.toolCalls.map(call => {
+                const callId = call.id || '';
+                const update = callId ? updatesMap.get(callId) : undefined;
+
+                if (update) {
+                  const executionStatus = update.executionStatus ?? call.executionStatus;
+                  const isFinalStatus = executionStatus === 'completed' || executionStatus === 'failed';
+                  const functionUpdate = update.function;
+
+                  return {
+                    ...call,
+                    executionStatus,
+                    executionMode: update.executionMode ?? call.executionMode,
+                    toolType: update.toolType ?? call.toolType,
+                    function: functionUpdate ? { ...call.function, ...functionUpdate } : call.function,
+                    result: isFinalStatus
+                      ? (typeof update.result === 'string' ? update.result : call.result)
+                      : undefined
+                  };
+                }
+
+                return call;
+              });
+
+              this.updateMessage(foundChatId, data.messageId, {
+                toolCalls: updatedToolCalls
+              });
+            }
           }
-        ),
+        },
         'tool_execute_stream'
       );
+
+      console.log('[executeToolCalls] 事件监听器设置完成，调用后端API...');
 
       // 调用流式工具执行API
       await messageApi.executeToolCallsStream(messageId, toolCallIds);
 
+      console.log('[executeToolCalls] 后端API调用完成');
+
     } catch (error) {
-      cleanup();
+      // 清理监听器
       if (this.currentStreamUnlisten) {
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
       console.error('启动工具执行失败:', error);
-      this.setError(error instanceof Error ? error.message : '工具执行失败');
+      this.reportError(error, '工具执行失败');
       throw error;
     }
   }
@@ -587,19 +816,25 @@ class MessageStore {
    * 批量执行消息中的所有工具调用
    */
   async executeAllToolCalls(messageId: string, toolCalls: ToolCall[]): Promise<void> {
+    console.log('[executeAllToolCalls] 开始:', { messageId, toolCallsCount: toolCalls.length });
+
     try {
       const toolCallIds = toolCalls
         .map(toolCall => toolCall.id)
         .filter((id): id is string => Boolean(id));
 
+      console.log('[executeAllToolCalls] 提取的工具调用IDs:', toolCallIds);
+
       if (toolCallIds.length === 0) {
-        console.warn('executeAllToolCalls: 未找到有效的工具调用 ID');
+        console.warn('[executeAllToolCalls] 未找到有效的工具调用 ID');
         return;
       }
 
+      console.log('[executeAllToolCalls] 调用 executeToolCalls...');
       await this.executeToolCalls(messageId, toolCallIds);
+      console.log('[executeAllToolCalls] executeToolCalls 完成');
     } catch (error) {
-      console.error('批量执行工具调用失败:', error);
+      console.error('[executeAllToolCalls] 批量执行工具调用失败:', error);
       throw error;
     }
   }
@@ -615,7 +850,6 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
-    this.state.executingToolCalls.clear();
   }
 
 }

@@ -125,9 +125,10 @@ pub fn handle_menu_event(app: &AppHandle, event_id: &str) {
     match event_id {
         "settings" => {
             // 打开设置窗口
-            if let Err(e) =
-                tauri::async_runtime::block_on(crate::commands::open_settings_window(app.clone()))
-            {
+            if let Err(e) = tauri::async_runtime::block_on(crate::commands::open_settings_window(
+                app.clone(),
+                None,
+            )) {
                 eprintln!("Failed to open settings window: {}", e);
             }
         }

@@ -1,240 +1,277 @@
 {
-    "providers":
-    [
-        {
-            "type": "openai",
-            "type_name": "OpenAI",
-            "default_name": "OpenAI",
-            "default_base_url": "https://api.openai.com/v1",
-            "icon": "/logo-openai.png",
-            "chat_api_type": "openai-responses",
-            "model_api_type": "openai+local",
-            "model_local":
-            {
-                "gpt-4":
-                {
-                    "name": "GPT-4",
-                    "context_length": 8192,
-                    "input_cost_per_1k": 0.03,
-                    "output_cost_per_1k": 0.06,
-                    "features":
-                    [
-                        "text",
-                        "vision",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "gpt-4-turbo":
-                {
-                    "name": "GPT-4 Turbo",
-                    "context_length": 128000,
-                    "input_cost_per_1k": 0.01,
-                    "output_cost_per_1k": 0.03,
-                    "features":
-                    [
-                        "text",
-                        "vision",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "gpt-4-turbo-preview":
-                {
-                    "name": "GPT-4 Turbo Preview",
-                    "context_length": 128000,
-                    "input_cost_per_1k": 0.01,
-                    "output_cost_per_1k": 0.03,
-                    "features":
-                    [
-                        "text",
-                        "vision",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "gpt-4o":
-                {
-                    "name": "GPT-4o",
-                    "context_length": 128000,
-                    "input_cost_per_1k": 0.005,
-                    "output_cost_per_1k": 0.015,
-                    "features":
-                    [
-                        "text",
-                        "vision",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "gpt-4o-mini":
-                {
-                    "name": "GPT-4o Mini",
-                    "context_length": 128000,
-                    "input_cost_per_1k": 0.00015,
-                    "output_cost_per_1k": 0.0006,
-                    "features":
-                    [
-                        "text",
-                        "vision",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "gpt-3.5-turbo":
-                {
-                    "name": "GPT-3.5 Turbo",
-                    "context_length": 16385,
-                    "input_cost_per_1k": 0.0015,
-                    "output_cost_per_1k": 0.002,
-                    "features":
-                    [
-                        "text",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "gpt-3.5-turbo-instruct":
-                {
-                    "name": "GPT-3.5 Turbo Instruct",
-                    "context_length": 4096,
-                    "input_cost_per_1k": 0.0015,
-                    "output_cost_per_1k": 0.002,
-                    "features":
-                    [
-                        "text",
-                        "streaming"
-                    ]
-                },
-                "o1-preview":
-                {
-                    "name": "o1 Preview",
-                    "context_length": 128000,
-                    "input_cost_per_1k": 0.015,
-                    "output_cost_per_1k": 0.06,
-                    "features":
-                    [
-                        "text",
-                        "reasoning"
-                    ]
-                },
-                "o1-mini":
-                {
-                    "name": "o1 Mini",
-                    "context_length": 128000,
-                    "input_cost_per_1k": 0.003,
-                    "output_cost_per_1k": 0.012,
-                    "features":
-                    [
-                        "text",
-                        "reasoning"
-                    ]
-                }
-            }
+  "chat_methods": {
+    "base": {
+      "default_supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "streaming"
+      ],
+      "additional_parameters": ["turn_count"],
+      "parameters": {
+        "temperature": {
+          "component": "slider",
+          "level": "base",
+          "step": 0.1,
+          "name": "Temperature",
+          "show_toggle": true,
+          "default": 1,
+          "max": 2.0,
+          "tips": "控制输出的随机性和创造性。值越高(接近2.0)，输出越多样化和创造性，但可能不够精确;值越低(接近0)，输出越确定和保守，更适合需要一致性和准确性的任务。推荐创意写作使用较高值(1.0-1.5)，技术问答使用较低值(0.3-0.7)。"
         },
-        {
-            "type": "google",
-            "type_name": "Google AI",
-            "default_name": "Google AI",
-            "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
-            "icon": "/logo-google.png",
-            "chat_api_type": "google",
-            "model_api_type": "google",
-            "model_local": null
+        "top_p": {
+          "component": "slider",
+          "level": "advance",
+          "step": 0.05,
+          "name": "Top-p",
+          "show_toggle": true,
+          "default": 1.0,
+          "max": 1.0,
+          "tips": "核采样参数，控制模型从概率累积达到该值的词汇中选择。例如 top_p=0.9 意味着只考虑累积概率达到 90% 的词汇。值越小，输出越集中和确定;值越大，输出越多样。通常与 temperature 二选一使用，推荐保持默认值 1.0，主要通过 temperature 调节。"
         },
-        {
-            "type": "deepseek",
-            "type_name": "DeepSeek",
-            "default_name": "DeepSeek",
-            "default_base_url": "https://api.deepseek.com",
-            "icon": "/logo-deepseek.png",
-            "chat_api_type": "openai-completions",
-            "model_api_type": "openai+local",
-            "model_local":
-            {
-                "deepseek-chat":
-                {
-                    "name": "DeepSeek Chat",
-                    "context_length": 32768,
-                    "input_cost_per_1k": 0.00014,
-                    "output_cost_per_1k": 0.00028,
-                    "features":
-                    [
-                        "text",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "deepseek-coder":
-                {
-                    "name": "DeepSeek Coder",
-                    "context_length": 16384,
-                    "input_cost_per_1k": 0.00014,
-                    "output_cost_per_1k": 0.00028,
-                    "features":
-                    [
-                        "text",
-                        "function_calling",
-                        "streaming"
-                    ]
-                },
-                "deepseek-reasoner":
-                {
-                    "name": "DeepSeek Reasoner",
-                    "context_length": 32768,
-                    "input_cost_per_1k": 0.00055,
-                    "output_cost_per_1k": 0.0019,
-                    "features":
-                    [
-                        "text",
-                        "reasoning",
-                        "streaming"
-                    ]
-                }
-            }
+        "top_k": {
+          "component": "slider",
+          "level": "advance",
+          "step": 1,
+          "name": "Top-k",
+          "show_toggle": true,
+          "tips": "限制模型每步只从概率最高的 K 个词汇中选择。较小的值(如 10-20)使输出更集中和可预测，较大的值(如 50-100)允许更多样的选择。此参数主要用于平衡输出的多样性和质量，过小可能导致重复，过大可能产生不相关内容。"
         },
-        {
-            "type": "anthropic",
-            "type_name": "Anthropic",
-            "default_name": "Anthropic",
-            "default_base_url": "https://api.anthropic.com",
-            "icon": "/logo-anthropic.png",
-            "chat_api_type": "anthropic",
-            "model_api_type": "anthropic",
-            "model_local": null
+        "max_tokens": {
+          "component": "slider",
+          "level": "advance",
+          "step": 1,
+          "name": "输出最大 Token",
+          "show_toggle": true,
+          "tips": "限制模型单次响应生成的最大 token 数量(一个 token 约为 0.75 个英文单词或 0.5 个中文字)。设置合理的上限可以控制成本和响应时间。注意:如果回答被截断，可能是达到了此限制，建议根据任务需要适当调整。"
         },
-        {
-            "type": "openrouter",
-            "type_name": "OpenRouter",
-            "default_name": "OpenRouter",
-            "default_base_url": "https://openrouter.ai/api/v1",
-            "icon": "/logo-openrouter.png",
-            "chat_api_type": "openai-completions",
-            "model_api_type": "openrouter",
-            "model_local": null
+        "streaming": {
+          "component": "switch",
+          "level": "advance",
+          "name": "流式输出",
+          "default": true,
+          "tips": "启用后，模型会逐字逐句返回回答，让你能实时看到生成过程，提升交互体验。禁用则等待完整回答生成后一次性返回，适合需要完整处理结果的场景。推荐保持启用以获得更好的使用体验。"
+        },
+        "turn_count": {
+          "component": "slider",
+          "level": "advance",
+          "step": 1,
+          "name": "上下文对话轮数",
+          "show_toggle": false,
+          "default": 10,
+          "max": 100,
+          "tips": "控制发送给模型的历史对话轮数。值越大，模型能记住的上下文越多，理解连贯性越好，但会增加 token 消耗和成本。建议日常对话使用 10-20 轮，深度讨论使用 30-50 轮。注意:过多的历史可能导致模型关注过时信息。"
         }
-    ],
-    "custom_providers":
-    [
-        {
-            "type": "openai-compatible",
-            "type_name": "OpenAI Compatible",
-            "default_name": "Custom Provider",
-            "default_base_url": "",
-            "icon": "/logo-openai-compatible.png",
-            "chat_api_type": "openai-completions",
-            "model_api_type": "openai",
-            "model_local": null
-        },
-        {
-            "type": "anthropic-compatible",
-            "type_name": "Anthropic Compatible",
-            "default_name": "Custom Provider",
-            "default_base_url": "",
-            "icon": "/logo-anthropic-compatible.png",
-            "chat_api_type": "anthropic",
-            "model_api_type": "anthropic",
-            "model_local": null
+      }
+    },
+    "completions": {
+      "parameters": {
+        "reasoning": {
+          "component": "completions_reasoning",
+          "level": "base",
+          "name": "Reasoning",
+          "tips": "OpenAI 推理模式通过内部思考过程增强模型处理复杂问题的能力。选择不同的努力程度来平衡推理深度和响应速度: minimal 适合简单任务，low 用于一般问题，medium 处理中等复杂度任务，high 专注于复杂推理、数学和编程等高难度问题。",
+          "include_reasoning": true,
+          "effort_options": {
+            "common": ["minimal", "low", "medium", "high"]
+          }
         }
-    ]
+      }
+    },
+    "responses": {
+      "parameters": {
+        "reasoning": {
+          "component": "responses_reasoning",
+          "level": "base",
+          "name": "Reasoning",
+          "tips": "OpenAI 扩展推理模式，提供更强的问题解决能力。effort 控制推理深度，summary 决定思考过程的展示方式: auto 让模型自动决定，detailed 显示完整推理过程，concise 提供简化的思考摘要。推荐复杂任务使用 high effort + detailed summary 组合。",
+          "effort_options": {
+            "common": ["minimal", "low", "medium", "high"],
+            "openai/gpt-5-pro": ["high"]
+          },
+          "summary_options": {
+            "common": ["auto", "detailed"],
+            "openai/computer-use-preview": ["auto", "concise", "detailed"]
+          }
+        }
+      }
+    },
+    "google_generate_content": {
+      "default_supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "streaming",
+        "thinking"
+      ],
+      "parameters": {
+        "reasoning": {
+          "component": "thinking",
+          "level": "base",
+          "name": "Thinking",
+          "tips": "Google Gemini 的思考模式通过内部推理过程提升复杂问题的解决能力。特别适用于编程、数学和数据分析等需要深度推理的任务。启用思考模式会增加响应时间和 token 消耗，但能显著提高输出质量。",
+          "include_thoughts_tip": "启用后，API 会返回模型思考过程的摘要版本，让你了解模型的推理路径。这对于调试意外回答或理解模型决策过程很有帮助。注意:思考内容不是原始内部数据，而是经过模型整理的易懂版本。",
+          "budget_tip": "控制模型用于思考的 token 配额。Dynamic(-1) 让模型根据任务复杂度自动调整深度，适合大多数场景;Disable(0) 完全关闭思考以降低延迟，适合简单的事实查询或分类任务;Custom 允许你手动设置具体 token 数，更高的预算支持更详细的推理，但会增加成本和响应时间。建议:简单任务禁用，中等任务使用动态模式，复杂编程/数学问题使用较高的自定义预算。",
+          "budget_configs": [
+            {
+              "models": ["google/gemini-2.5-pro"],
+              "options": {
+                "dynamic": -1,
+                "range": [128, 32768]
+              },
+              "default": "dynamic"
+            },
+            {
+              "models": [
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-flash-preview"
+              ],
+              "options": {
+                "dynamic": -1,
+                "disable": 0,
+                "range": [1, 24576]
+              },
+              "default": "dynamic"
+            },
+            {
+              "models": [
+                "google/gemini-2.5-flash-lite",
+                "google/gemini-2.5-flash-lite-preview"
+              ],
+              "options": {
+                "dynamic": -1,
+                "disable": 0,
+                "range": [512, 24576]
+              },
+              "default": "disable"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "providers": [
+    {
+      "type": "openai",
+      "type_name": "OpenAI",
+      "default_name": "OpenAI",
+      "default_base_url": "https://api.openai.com/v1",
+      "icon": "/logo-openai.png",
+      "chat_api_type": "openai-responses",
+      "model_api_type": "openai",
+      "supplement_file": "openai_models.json",
+      "supplement_fields": [
+        "name",
+        "description",
+        "input_modalities",
+        "output_modalities",
+        "context_length",
+        "output_max_tokens",
+        "pricing",
+        "url",
+        "supported_features",
+        "supported_methods",
+        "supported_parameters"
+      ]
+    },
+    {
+      "type": "google",
+      "type_name": "Google AI",
+      "default_name": "Google AI",
+      "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "icon": "/logo-google.png",
+      "chat_api_type": "google",
+      "model_api_type": "google",
+      "supplement_file": "google_models.json",
+      "supplement_fields": [
+        "input_modalities",
+        "output_modalities",
+        "context_length",
+        "output_max_tokens",
+        "pricing",
+        "url",
+        "supported_features",
+        "supported_parameters"
+      ]
+    },
+    {
+      "type": "deepseek",
+      "type_name": "DeepSeek",
+      "default_name": "DeepSeek",
+      "default_base_url": "https://api.deepseek.com",
+      "icon": "/logo-deepseek.png",
+      "chat_api_type": "openai-completions",
+      "model_api_type": "openai",
+      "supplement_file": "deepseek_models.json",
+      "supplement_fields": [
+        "name",
+        "description",
+        "input_modalities",
+        "output_modalities",
+        "context_length",
+        "output_max_tokens",
+        "pricing",
+        "url",
+        "supported_features",
+        "supported_methods",
+        "supported_parameters"
+      ]
+    },
+    {
+      "type": "anthropic",
+      "type_name": "Anthropic",
+      "default_name": "Anthropic",
+      "default_base_url": "https://api.anthropic.com",
+      "icon": "/logo-anthropic.png",
+      "chat_api_type": "anthropic",
+      "model_api_type": "anthropic"
+    },
+    {
+      "type": "openrouter",
+      "type_name": "OpenRouter",
+      "default_name": "OpenRouter",
+      "default_base_url": "https://openrouter.ai/api/v1",
+      "icon": "/logo-openrouter.png",
+      "chat_api_type": "openai-completions",
+      "model_api_type": "openrouter",
+      "parameters": {
+        "reasoning": {
+          "component": "openrouter_reasoning",
+          "level": "base",
+          "name": "Reasoning",
+          "tips": "OpenRouter 推理模式允许兼容的模型进行深度思考。通过调整努力程度来平衡推理质量和成本。对于 Anthropic 模型，还可以设置推理 token 配额以精确控制思考预算。",
+          "effect_tips": "控制模型推理的努力程度。low 适合简单任务，medium 处理中等复杂度问题，high 专注于需要深度推理的复杂任务。更高的努力程度会增加响应时间和成本，但能获得更好的推理质量。",
+          "max_tokens_tips": "为推理过程分配的 token 配额。更高的配额允许模型进行更深入的思考，但会增加成本。建议根据任务复杂度调整: 简单问题 1000-5000，中等复杂度 5000-20000，复杂推理任务 20000+。",
+          "default_props": ["effect", "exclude"],
+          "special_props": {
+            "^anthropic/.*$": ["max_tokens"]
+          },
+          "effort_options": {
+            "common": ["low", "medium", "high"]
+          },
+          "max_tokens": [1, 99999999]
+        }
+      }
+    }
+  ],
+  "custom_providers": [
+    {
+      "type": "openai-compatible",
+      "type_name": "OpenAI Compatible",
+      "default_name": "Custom Provider",
+      "default_base_url": "",
+      "icon": "/logo-openai-compatible.png",
+      "chat_api_type": "openai-completions",
+      "model_api_type": "openai"
+    },
+    {
+      "type": "anthropic-compatible",
+      "type_name": "Anthropic Compatible",
+      "default_name": "Custom Provider",
+      "default_base_url": "",
+      "icon": "/logo-anthropic-compatible.png",
+      "chat_api_type": "anthropic",
+      "model_api_type": "anthropic"
+    }
+  ]
 }

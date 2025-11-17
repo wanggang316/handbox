@@ -14,9 +14,9 @@
     showCharCount?: boolean;
   }
 
-  let { 
+  let {
     value = $bindable(),
-    placeholder = '',
+    placeholder = "",
     rows = 4,
     disabled = false,
     readonly = false,
@@ -26,7 +26,7 @@
     id,
     name,
 
-    showCharCount = false
+    showCharCount = false,
   }: Props = $props();
 
   function handleInput(event: Event) {
@@ -46,18 +46,17 @@
     {maxlength}
     {minlength}
     {required}
-
     {value}
     oninput={handleInput}
-    class="w-full px-3 py-2 border border-base-300 rounded-md resize-none 
-           focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent 
-           font-mono text-sm bg-base-100
-           scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200 
+    class="w-full px-3 py-2 border border-base-300 rounded-md resize-none
+           focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+           font-mono text-sm text-base-content bg-base-200
+           scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200
            hover:scrollbar-thumb-base-300/80
-           disabled:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50
-           readonly:bg-base-200"
+           disabled:bg-base-300 disabled:cursor-not-allowed disabled:opacity-50
+           readonly:bg-base-300"
   ></textarea>
-  
+
   {#if showCharCount}
     <div class="text-xs text-base-content/70 text-left">
       {#if maxlength}

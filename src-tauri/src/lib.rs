@@ -3,8 +3,6 @@
 // 声明模块
 pub mod commands;
 pub mod config;
-pub mod llm_client;
-pub mod mcp_client;
 pub mod menu;
 pub mod models;
 pub mod services;
@@ -13,11 +11,12 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ArtifactService, ChatService, McpService, MessageService, ProviderService, SearchService,
-    SettingsService, StorageService,
+    ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
+    StorageService, UserSessionService,
 };
 use crate::storage::Database;
 use crate::utils::logger;
+use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -42,14 +41,24 @@ async fn initialize_services(
             .map_err(|e| format!("Failed to initialize database: {e}"))?,
     );
 
+    let llm_config = Arc::new(crate::config::llm_config::LlmConfig::load());
+    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+
     // 初始化各个服务
-    let provider_service = ProviderService::new(database_service.clone());
+    let provider_service =
+        ProviderService::new(database_service.clone(), llm_config_provider.clone());
     let provider_service_shared = Arc::new(provider_service.clone());
+
+    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
 
     let mcp_service = McpService::new(database_service.clone());
     let mcp_service_shared = Arc::new(mcp_service.clone());
 
-    let chat_service = ChatService::new(database_service.clone(), provider_service_shared.clone());
+    let chat_service = ChatService::new(
+        database_service.clone(),
+        provider_service_shared.clone(),
+        llm_config_provider.clone(),
+    );
     let chat_service_shared = Arc::new(chat_service.clone());
 
     let message_service = MessageService::new(
@@ -57,20 +66,28 @@ async fn initialize_services(
         provider_service_shared,
         chat_service_shared,
         mcp_service_shared,
+        llm_config_provider,
     );
-    let artifact_service = ArtifactService::new(storage_service.clone());
-    let settings_service = SettingsService::new(storage_service.clone());
-    let search_service = SearchService::new(storage_service.clone());
+
+    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
+
+    // 初始化用户会话服务
+    let user_session_service = UserSessionService::new(database_service.clone());
+
+    // 从数据库恢复上次的用户会话
+    if let Err(e) = user_session_service.load_session_from_db().await {
+        tracing::warn!("恢复用户会话失败: {:?}", e);
+    }
 
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(chat_service);
     app.manage(message_service);
     app.manage(provider_service);
+    app.manage(model_service);
     app.manage(mcp_service);
-    app.manage(artifact_service);
-    app.manage(settings_service);
     app.manage(search_service);
+    app.manage(user_session_service);
 
     Ok(())
 }
@@ -83,6 +100,12 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 加载环境变量
+    if let Err(e) = dotenvy::dotenv() {
+        // .env 文件不存在不是致命错误，只记录日志
+        eprintln!("Warning: Failed to load .env file: {}", e);
+    }
+
     // 初始化日志系统
     if let Err(e) = logger::init_logger() {
         eprintln!("Failed to initialize logger: {}", e);
@@ -114,21 +137,33 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // 测试命令
             greet,
+            // 认证相关命令
+            auth_start_google_oauth,
+            auth_google_login,
+            auth_logout,
+            auth_refresh_token,
+            auth_get_user,
+            auth_update_profile,
+            auth_validate_token,
             // 聊天相关命令
             chat_create,
             chat_list,
             chat_get,
-            chat_update,
+            chat_update_field,
+            chat_update_model,
+            chat_clear_model_parameters,
+            chat_update_name,
             chat_delete,
             chat_generate_title,
             // 消息相关命令
-            message_send,
-            message_send_stream,
+            message_user_send,
+            message_user_send_stream,
             message_list,
             message_get,
             message_update,
             message_delete,
-            message_regenerate,
+            message_assistant_regenerate_stream,
+            message_user_resend_stream,
             // message_execute_mcp_call, // Temporarily removed
             message_execute_tool_calls,
             message_execute_tool_calls_stream,
@@ -139,16 +174,17 @@ pub fn run() {
             // 供应商相关命令
             provider_list,
             provider_get,
-            provider_get_with_models,
             provider_create,
             provider_update,
             provider_delete,
-            provider_list_models,
             provider_toggle,
-            provider_toggle_model,
-            provider_toggle_model_favorite,
-            provider_get_all_with_models,
-            provider_get_favorite_models,
+            provider_count_chats,
+            provider_list_with_models,
+            // 模型相关命令
+            model_list_by_provider,
+            model_toggle,
+            model_toggle_favorite,
+            model_count_chats,
             // MCP 管理命令
             mcp_list_servers,
             mcp_create_server,
@@ -156,9 +192,18 @@ pub fn run() {
             mcp_delete_server,
             mcp_toggle_server,
             mcp_refresh_server,
+            mcp_update_tool_enabled,
+            mcp_count_chats_using_server,
+            mcp_remove_server_from_chats,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
+            // 搜索相关命令
+            search_query,
+            search_history,
+            search_add_history,
+            search_clear_history,
+            search_suggestions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
