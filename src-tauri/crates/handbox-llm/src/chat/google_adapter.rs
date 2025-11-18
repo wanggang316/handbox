@@ -4,8 +4,8 @@
 use crate::chat::ChatClient;
 use crate::error::LlmClientError;
 use crate::types::{
-    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
-    LlmProvider, LlmRequest, LlmResponse, LlmThinkingConfig, LlmUsage,
+    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmGeneratedImage, LlmMessage,
+    LlmMessageRole, LlmProvider, LlmRequest, LlmResponse, LlmThinkingConfig, LlmUsage,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -23,7 +23,7 @@ impl GoogleChatClient {
 
     /// 将通用请求转换为 Google SDK GenerateContentRequest
     fn convert_to_google_request(&self, request: &LlmRequest) -> GenerateContentRequest {
-        use google_genai_rust::types::{Content, GenerationConfig};
+        use google_genai_rust::types::{Content, GenerationConfig, InlineData, Part};
 
         // 转换消息格式 - 将系统消息分离出来
         let mut system_instruction = None;
@@ -41,7 +41,38 @@ impl GoogleChatClient {
                     } else {
                         "user"
                     };
-                    let content = Content::from_text(role, msg.content.clone());
+
+                    // 构建 parts：文本 + 附件（如果有）
+                    let mut parts = Vec::new();
+
+                    // 添加文本内容
+                    if !msg.content.is_empty() {
+                        parts.push(Part::text(msg.content.clone()));
+                    }
+
+                    // 添加附件（图片等）
+                    if let Some(attachments) = &msg.attachments {
+                        for attachment in attachments {
+                            // 将二进制数据转换为 base64
+                            let base64_data = base64::Engine::encode(
+                                &base64::engine::general_purpose::STANDARD,
+                                &attachment.data,
+                            );
+
+                            let inline_data = InlineData {
+                                mime_type: attachment.mime_type.clone(),
+                                data: base64_data,
+                                size_bytes: None,
+                            };
+
+                            parts.push(Part::inline_data(inline_data));
+                        }
+                    }
+
+                    let content = Content {
+                        role: Some(role.to_string()),
+                        parts,
+                    };
                     contents.push(content);
                 }
                 _ => {
@@ -87,10 +118,70 @@ impl GoogleChatClient {
         let mut choices = Vec::new();
 
         for (index, candidate) in google_response.candidates.iter().enumerate() {
-            // 提取文本内容
+            // 提取文本内容和图片
             let mut content = String::new();
             let mut reasoning_text = String::new();
-            Self::collect_parts(candidate.iter_parts(), &mut content, &mut reasoning_text);
+            let mut generated_images = Vec::new();
+
+            for part in candidate.iter_parts() {
+                // 详细记录每个 part 的结构
+                tracing::info!(
+                    "[GoogleChatClient] Part: has_text={}, has_inline_data={}, has_generated_image={}, has_file_data={}, has_media_file_uri={}",
+                    part.text.is_some(),
+                    part.inline_data.is_some(),
+                    part.generated_image.is_some(),
+                    part.file_data.is_some(),
+                    part.media_file_uri.is_some()
+                );
+
+                if let Some(text) = part.text.as_ref() {
+                    if Self::is_reasoning_part(part) {
+                        Self::append_reasoning(&mut reasoning_text, text);
+                    } else {
+                        content.push_str(text);
+                    }
+                }
+
+                // 提取生成的图片 - 从 inline_data 中获取（gemini-2.5-flash-image 返回方式）
+                if let Some(inline_data) = &part.inline_data {
+                    tracing::info!(
+                        "[GoogleChatClient] Found inline_data in part, mime_type: {}, has_data: {}, data_length: {}",
+                        inline_data.mime_type,
+                        !inline_data.data.is_empty(),
+                        inline_data.data.len()
+                    );
+                    // 只处理图片类型的 inline_data
+                    if inline_data.mime_type.starts_with("image/") {
+                        generated_images.push(LlmGeneratedImage {
+                            mime_type: inline_data.mime_type.clone(),
+                            data: inline_data.data.clone(),
+                        });
+                    }
+                }
+
+                // 也检查 generated_image 字段（以防有些模型使用这个字段）
+                if let Some(generated_image) = &part.generated_image {
+                    tracing::info!(
+                        "[GoogleChatClient] Found generated_image in part, mime_type: {:?}, has_data: {}",
+                        generated_image.mime_type,
+                        generated_image.data.is_some()
+                    );
+                    if let Some(ref data) = generated_image.data {
+                        let mime_type = generated_image.mime_type.clone().unwrap_or_else(|| {
+                            "image/png".to_string() // Google 默认生成 PNG
+                        });
+                        tracing::info!(
+                            "[GoogleChatClient] Pushing generated image: mime_type={}, data_length={}",
+                            mime_type,
+                            data.len()
+                        );
+                        generated_images.push(LlmGeneratedImage {
+                            mime_type,
+                            data: data.clone(),
+                        });
+                    }
+                }
+            }
 
             // 转换完成原因
             let finish_reason = candidate.finish_reason.as_ref().map(|reason| {
@@ -104,6 +195,15 @@ impl GoogleChatClient {
                 .to_string()
             });
 
+            let has_images = !generated_images.is_empty();
+            tracing::info!(
+                "[GoogleChatClient] Creating LlmChoice: index={}, content_len={}, has_images={}, image_count={}",
+                index,
+                content.len(),
+                has_images,
+                generated_images.len()
+            );
+
             choices.push(LlmChoice {
                 index: index as i32,
                 delta: Some(LlmMessage {
@@ -112,8 +212,14 @@ impl GoogleChatClient {
                     reasoning: Self::normalize_reasoning(reasoning_text),
                     tool_calls: None,
                     tool_call_id: None,
+                    attachments: None,
                 }),
                 finish_reason,
+                generated_images: if generated_images.is_empty() {
+                    None
+                } else {
+                    Some(generated_images)
+                },
             });
         }
 
@@ -142,18 +248,75 @@ impl GoogleChatClient {
         response_id: &str,
         model: &str,
     ) -> Option<LlmChunkResponse> {
-        // 提取文本增量
+        // 提取文本增量和图片
         let mut delta_content = String::new();
         let mut finish_reason = None;
         let mut reasoning_text = String::new();
+        let mut generated_images = Vec::new();
 
         if let Some(candidates) = &stream_response.candidates {
             for candidate in candidates {
-                Self::collect_parts(
-                    candidate.iter_parts(),
-                    &mut delta_content,
-                    &mut reasoning_text,
-                );
+                // 提取文本内容
+                for part in candidate.iter_parts() {
+                    // 详细记录每个 part 的结构
+                    tracing::info!(
+                        "[GoogleChatClient Stream] Part: has_text={}, has_inline_data={}, has_generated_image={}, has_file_data={}, has_media_file_uri={}",
+                        part.text.is_some(),
+                        part.inline_data.is_some(),
+                        part.generated_image.is_some(),
+                        part.file_data.is_some(),
+                        part.media_file_uri.is_some()
+                    );
+
+                    if let Some(text) = part.text.as_ref() {
+                        if Self::is_reasoning_part(part) {
+                            Self::append_reasoning(&mut reasoning_text, text);
+                        } else {
+                            delta_content.push_str(text);
+                        }
+                    }
+
+                    // 提取生成的图片 - 从 inline_data 中获取（gemini-2.5-flash-image 返回方式）
+                    if let Some(inline_data) = &part.inline_data {
+                        tracing::info!(
+                            "[GoogleChatClient Stream] Found inline_data in part, mime_type: {}, has_data: {}, data_length: {}",
+                            inline_data.mime_type,
+                            !inline_data.data.is_empty(),
+                            inline_data.data.len()
+                        );
+                        // 只处理图片类型的 inline_data
+                        if inline_data.mime_type.starts_with("image/") {
+                            generated_images.push(LlmGeneratedImage {
+                                mime_type: inline_data.mime_type.clone(),
+                                data: inline_data.data.clone(),
+                            });
+                        }
+                    }
+
+                    // 也检查 generated_image 字段（以防有些模型使用这个字段）
+                    if let Some(generated_image) = &part.generated_image {
+                        tracing::info!(
+                            "[GoogleChatClient Stream] Found generated_image in stream part, mime_type: {:?}, has_data: {}",
+                            generated_image.mime_type,
+                            generated_image.data.is_some()
+                        );
+                        if let Some(ref data) = generated_image.data {
+                            let mime_type = generated_image
+                                .mime_type
+                                .clone()
+                                .unwrap_or_else(|| "image/png".to_string());
+                            tracing::info!(
+                                "[GoogleChatClient Stream] Adding image: mime_type={}, data_length={}",
+                                mime_type,
+                                data.len()
+                            );
+                            generated_images.push(LlmGeneratedImage {
+                                mime_type,
+                                data: data.clone(),
+                            });
+                        }
+                    }
+                }
 
                 // 检查完成原因
                 if let Some(reason) = &candidate.finish_reason {
@@ -171,9 +334,21 @@ impl GoogleChatClient {
             }
         }
 
-        if delta_content.is_empty() && reasoning_text.is_empty() && finish_reason.is_none() {
+        if delta_content.is_empty()
+            && reasoning_text.is_empty()
+            && finish_reason.is_none()
+            && generated_images.is_empty()
+        {
             return None;
         }
+
+        tracing::info!(
+            "[GoogleChatClient Stream] Creating chunk response: has_content={}, has_reasoning={}, has_finish={}, image_count={}",
+            !delta_content.is_empty(),
+            !reasoning_text.is_empty(),
+            finish_reason.is_some(),
+            generated_images.len()
+        );
 
         Some(LlmChunkResponse {
             id: response_id.to_string(),
@@ -192,25 +367,14 @@ impl GoogleChatClient {
                     tool_calls: None,
                 }),
                 finish_reason,
+                generated_images: if generated_images.is_empty() {
+                    None
+                } else {
+                    Some(generated_images)
+                },
             }],
             usage: None,
         })
-    }
-
-    fn collect_parts<'a>(
-        mut parts: impl Iterator<Item = &'a google_genai_rust::types::Part>,
-        content: &mut String,
-        reasoning: &mut String,
-    ) {
-        for part in parts.by_ref() {
-            if let Some(text) = part.text.as_ref() {
-                if Self::is_reasoning_part(part) {
-                    Self::append_reasoning(reasoning, text);
-                } else {
-                    content.push_str(text);
-                }
-            }
-        }
     }
 
     fn append_reasoning(buffer: &mut String, text: &str) {

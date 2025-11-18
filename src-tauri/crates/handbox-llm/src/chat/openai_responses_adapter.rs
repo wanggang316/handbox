@@ -15,9 +15,9 @@ use openai_rust::client::Error as OpenAIError;
 use openai_rust::types::{
     CreateResponseRequest, InputItem, InputMessage, InputMessageContent, InputMessageRole, Item,
     ItemFunctionCall, ItemFunctionCallOutput, ItemStatus, OutputItem, Reasoning as OpenAIReasoning,
-    ReasoningSummary as OpenAIReasoningSummary,
-    ResponsesReasoningEffort as OpenAIReasoningEffort, Response as OpenAIResponse, ResponseInput,
-    ResponseStreamEvent, ResponseUsage, ResponsesTool, ResponsesToolChoice,
+    ReasoningSummary as OpenAIReasoningSummary, Response as OpenAIResponse, ResponseInput,
+    ResponseStreamEvent, ResponseUsage, ResponsesReasoningEffort as OpenAIReasoningEffort,
+    ResponsesTool, ResponsesToolChoice,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -318,12 +318,14 @@ impl OpenAIResponsesChatClient {
                         Some(tool_calls)
                     },
                     tool_call_id: None,
+                    attachments: None,
                 }),
                 finish_reason: if response.status == "completed" {
                     Some("stop".to_string())
                 } else {
                     None
                 },
+                generated_images: None,
             };
             choices.push(choice);
         }
@@ -413,10 +415,9 @@ impl OpenAIResponsesChatClient {
                     delta,
                     output_index
                 );
-                Some(Ok(state.reasoning_summary_delta_chunk(
-                    output_index as i32,
-                    delta,
-                )))
+                Some(Ok(
+                    state.reasoning_summary_delta_chunk(output_index as i32, delta)
+                ))
             }
             ResponseStreamEvent::ReasoningSummaryTextDone { text, .. } => {
                 // 推理摘要文本完成 - 可选：发送完整推理摘要
@@ -442,14 +443,8 @@ impl OpenAIResponsesChatClient {
 impl OpenAIResponsesChatClient {
     fn map_reasoning(reasoning: &LlmResponsesReasoning) -> OpenAIReasoning {
         OpenAIReasoning {
-            effort: reasoning
-                .effort
-                .clone()
-                .map(Self::map_reasoning_effort),
-            summary: reasoning
-                .summary
-                .clone()
-                .map(Self::map_reasoning_summary),
+            effort: reasoning.effort.clone().map(Self::map_reasoning_effort),
+            summary: reasoning.summary.clone().map(Self::map_reasoning_summary),
             #[allow(deprecated)]
             generate_summary: None,
         }
@@ -653,6 +648,7 @@ impl StreamState {
                     tool_calls: None,
                 }),
                 finish_reason: None,
+                generated_images: None,
             }],
             usage: None,
         }
@@ -696,6 +692,7 @@ impl StreamState {
                     }]),
                 }),
                 finish_reason: None,
+                generated_images: None,
             }],
             usage: None,
         }
@@ -715,6 +712,7 @@ impl StreamState {
                     tool_calls: None,
                 }),
                 finish_reason: None,
+                generated_images: None,
             }],
             usage: None,
         }
@@ -734,6 +732,7 @@ impl StreamState {
                     tool_calls: None,
                 }),
                 finish_reason: None,
+                generated_images: None,
             }],
             usage: None,
         }
@@ -753,6 +752,7 @@ impl StreamState {
                     tool_calls: None,
                 }),
                 finish_reason: Some("stop".to_string()),
+                generated_images: None,
             }],
             usage,
         }

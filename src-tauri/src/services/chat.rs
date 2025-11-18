@@ -321,6 +321,7 @@ impl ChatService {
                 reasoning: None,
                 tool_calls: None,
                 tool_call_id: None,
+                attachments: None,
             }],
             temperature: Some(0.1), // 使用低温度确保稳定输出
             top_p: None,
@@ -333,6 +334,7 @@ impl ChatService {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
+            attachments: None,
         };
 
         // 10. 调用LLM API

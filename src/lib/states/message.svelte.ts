@@ -31,6 +31,7 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
+  streamingGeneratedImages: import('$lib/types/chat').GeneratedImage[];
 }
 
 interface ToolExecuteEventPayload {
@@ -49,6 +50,7 @@ class MessageStore {
     streamingContent: '',
     streamingReasoning: '',
     streamingToolCalls: null,
+    streamingGeneratedImages: [],
   });
 
   // 当前流式事件监听器的清理函数
@@ -81,6 +83,10 @@ class MessageStore {
 
   get streamingToolCalls() {
     return this.state.streamingToolCalls;
+  }
+
+  get streamingGeneratedImages() {
+    return this.state.streamingGeneratedImages;
   }
 
   // 判断是否正在推理中（有推理内容但还没有最终内容）
@@ -160,6 +166,7 @@ class MessageStore {
         content: response.content,
         reasoning: response.reasoning,
         toolCalls: response.toolCalls,
+        generatedImages: response.generatedImages,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,
@@ -176,6 +183,7 @@ class MessageStore {
         content: response.content,
         reasoning: response.reasoning,
         toolCalls: response.toolCalls,
+        generatedImages: response.generatedImages,
         config: {
           modelId: response.modelId,
           providerId: response.providerId,
@@ -290,6 +298,7 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
+    this.state.streamingGeneratedImages = [];
   }
 
   // 更新流式内容
@@ -312,6 +321,11 @@ class MessageStore {
     this.state.streamingToolCalls = toolCalls;
   }
 
+  // 添加流式生成的图片
+  appendStreamingGeneratedImages(images: import('$lib/types/chat').GeneratedImage[]) {
+    this.state.streamingGeneratedImages = [...this.state.streamingGeneratedImages, ...images];
+  }
+
   // 完成流式响应
   finishStreaming(chatId: string, response: MessageResponse) {
     this.applyMessageResponse(chatId, response);
@@ -321,6 +335,7 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
+    this.state.streamingGeneratedImages = [];
   }
 
   /**
@@ -346,6 +361,9 @@ class MessageStore {
         if (data.toolCalls) {
           this.setStreamingToolCalls(data.toolCalls);
         }
+        if (data.generatedImages) {
+          this.appendStreamingGeneratedImages(data.generatedImages);
+        }
       },
 
       onEnd: (data: any) => {
@@ -360,6 +378,7 @@ class MessageStore {
           modelId: data.modelId,
           providerId: data.providerId,
           toolCalls: data.toolCalls,
+          generatedImages: data.generatedImages,
           inputTokens: undefined,
           outputTokens: undefined,
           totalTokens: undefined,
@@ -468,6 +487,7 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
+    this.state.streamingGeneratedImages = [];
   }
 
 
@@ -850,6 +870,7 @@ class MessageStore {
     this.state.streamingContent = '';
     this.state.streamingReasoning = '';
     this.state.streamingToolCalls = null;
+    this.state.streamingGeneratedImages = [];
   }
 
 }

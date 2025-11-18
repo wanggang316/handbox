@@ -5,8 +5,8 @@ use crate::chat::ChatClient;
 use crate::error::LlmClientError;
 use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmDeltaToolCall,
-    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort,
-    LlmRequest, LlmResponse, LlmToolCall, LlmToolChoice, LlmToolFunction, LlmUsage,
+    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort, LlmRequest,
+    LlmResponse, LlmToolCall, LlmToolChoice, LlmToolFunction, LlmUsage,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -100,8 +100,10 @@ impl OpenAICompletionsChatClient {
                             .tool_calls
                             .map(|calls| calls.into_iter().map(convert_openai_tool_call).collect()),
                         tool_call_id: None,
+                        attachments: None,
                     }),
                     finish_reason: Some(choice.finish_reason),
+                    generated_images: None,
                 }
             })
             .collect();
@@ -144,6 +146,7 @@ impl OpenAICompletionsChatClient {
                         tool_calls,
                     }),
                     finish_reason: choice.finish_reason,
+                    generated_images: None,
                 }
             })
             .collect();

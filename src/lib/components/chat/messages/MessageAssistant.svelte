@@ -267,6 +267,21 @@
             {@html renderMarkdown(message?.content || "")}
           </div>
 
+          <!-- 生成的图片 -->
+          {#if message?.generatedImages?.length}
+            <div class="mt-4 space-y-2">
+              {#each message.generatedImages as image}
+                <div class="rounded-lg overflow-hidden border border-base-300">
+                  <img
+                    src={`data:${image.mimeType};base64,${image.data}`}
+                    alt=""
+                    class="w-full h-auto"
+                  />
+                </div>
+              {/each}
+            </div>
+          {/if}
+
           <!-- 工具调用记录 -->
           {#if message?.toolCalls?.length}
             <ToolCallList

@@ -42,6 +42,14 @@ pub struct StreamChunk {
     pub tool_calls: Option<Vec<MessageToolCall>>,
 }
 
+/// 生成的图片数据（用于响应）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedImage {
+    pub mime_type: String,
+    pub data: String, // Base64-encoded
+}
+
 /// 消息响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +66,8 @@ pub struct MessageResponse {
     pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
     pub duration: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_images: Option<Vec<GeneratedImage>>,
 }
 
 /// 待执行的 MCP 调用信息
@@ -91,6 +101,8 @@ pub enum MessageStreamEvent {
         content: String,
         reasoning: Option<String>,
         tokens: Option<i32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        generated_images: Option<Vec<GeneratedImage>>,
     },
     #[serde(rename = "done")]
     Done(MessageResponse),

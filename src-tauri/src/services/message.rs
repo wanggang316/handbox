@@ -226,6 +226,15 @@ impl MessageService {
             assistant_message_id
         );
 
+        tracing::info!(
+            "[MessageService::send_message] LLM response has {} generated images",
+            llm_response
+                .generated_images
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or(0)
+        );
+
         let response = MessageResponse {
             chat_id: chat_id.clone(),
             message_id: assistant_message_id.clone(),
@@ -238,7 +247,17 @@ impl MessageService {
             total_tokens: llm_response.total_tokens,
             duration: llm_response.duration,
             tool_calls: processed_tool_calls.clone(),
+            generated_images: llm_response.generated_images,
         };
+
+        tracing::info!(
+            "[MessageService::send_message] Final response has {} generated images",
+            response
+                .generated_images
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or(0)
+        );
 
         tracing::info!(
             "[MessageService::send_message] Successfully completed for chat_id: {}, message_id: {}",
@@ -1236,6 +1255,7 @@ impl MessageService {
 
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
+        let mut accumulated_generated_images: Vec<crate::models::GeneratedImage> = Vec::new();
         let mut all_tool_calls: Vec<handbox_llm::types::LlmToolCall> = Vec::new();
         let mut chunk_count = 0;
 
@@ -1261,7 +1281,32 @@ impl MessageService {
                                     accumulated_reasoning.len()
                                 );
                             }
+                        }
 
+                        // 处理生成的图片（在 choice 级别，不在 delta 中）
+                        if let Some(generated_images) = &choice.generated_images {
+                            tracing::info!(
+                                "[MessageService::call_llm_api_stream] Found {} generated images in chunk",
+                                generated_images.len()
+                            );
+                            for img in generated_images {
+                                tracing::info!(
+                                    "[MessageService::call_llm_api_stream] Adding image: mime_type={}, data_len={}",
+                                    img.mime_type,
+                                    img.data.len()
+                                );
+                                accumulated_generated_images.push(crate::models::GeneratedImage {
+                                    mime_type: img.mime_type.clone(),
+                                    data: img.data.clone(),
+                                });
+                            }
+                            tracing::info!(
+                                "[MessageService::call_llm_api_stream] Total accumulated images: {}",
+                                accumulated_generated_images.len()
+                            );
+                        }
+
+                        if let Some(delta) = &choice.delta {
                             // 积累工具调用信息
                             if let Some(tool_calls) = &delta.tool_calls {
                                 for tool_call_delta in tool_calls {
@@ -1382,6 +1427,11 @@ impl MessageService {
         };
 
         // 8. 构造 MessageResponse
+        tracing::info!(
+            "[MessageService::call_llm_api_stream] Creating final response with {} accumulated images",
+            accumulated_generated_images.len()
+        );
+
         let response = MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: message_id.clone(),
@@ -1398,7 +1448,21 @@ impl MessageService {
             output_tokens: None,
             total_tokens: None,
             duration: Some(duration),
+            generated_images: if accumulated_generated_images.is_empty() {
+                None
+            } else {
+                Some(accumulated_generated_images.clone())
+            },
         };
+
+        tracing::info!(
+            "[MessageService::call_llm_api_stream] Final response has {} images",
+            response
+                .generated_images
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or(0)
+        );
 
         tracing::info!(
             "[MessageService::call_llm_api_stream] Stream completed - content: {} chars, reasoning: {} chars",
@@ -1433,6 +1497,7 @@ impl MessageService {
                 reasoning: msg.reasoning.clone(),
                 tool_calls: msg.tool_calls.clone(),
                 tool_call_id: msg.tool_call_id.clone(),
+                attachments: msg.attachments.clone(),
             })
             .collect();
 
@@ -1467,6 +1532,16 @@ impl MessageService {
                 Some(LlmToolChoice::Auto)
             },
             parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
+            attachments: request.attachments.as_ref().map(|attachments| {
+                attachments
+                    .iter()
+                    .map(|att| handbox_llm::types::LlmMessageAttachment {
+                        name: att.name.clone(),
+                        mime_type: att.mime_type.clone(),
+                        data: att.data.clone(),
+                    })
+                    .collect()
+            }),
             reasoning: {
                 let reasoning = reasoning_config
                     .as_ref()
@@ -1810,6 +1885,7 @@ impl MessageService {
                     reasoning: None,
                     tool_calls: None,
                     tool_call_id: None,
+                    attachments: None,
                 });
             }
         }
@@ -1856,6 +1932,7 @@ impl MessageService {
                     .as_ref()
                     .map(|calls| calls.iter().map(|tc| tc.to_llm_tool_call()).collect()),
                 tool_call_id: m.tool_call_id.clone(),
+                attachments: None, // TODO: Load attachments from disk when needed
             }
         }));
 
@@ -1888,6 +1965,36 @@ impl MessageService {
 
         // 注意：这里暂时不转换 tool_calls，因为调用方需要使用原始的 LlmToolCall
         // 转换会在 save_assistant_message 或 prepare_tool_calls 中完成
+
+        let generated_images = choice.generated_images.map(|images| {
+            tracing::info!(
+                "[MessageService::convert_from_api_response] Converting {} generated images from LLM response",
+                images.len()
+            );
+            images
+                .into_iter()
+                .map(|img| {
+                    tracing::info!(
+                        "[MessageService::convert_from_api_response] Image: mime_type={}, data_len={}",
+                        img.mime_type,
+                        img.data.len()
+                    );
+                    crate::models::GeneratedImage {
+                        mime_type: img.mime_type,
+                        data: img.data,
+                    }
+                })
+                .collect()
+        });
+
+        tracing::info!(
+            "[MessageService::convert_from_api_response] Final MessageResponse has {} images",
+            generated_images
+                .as_ref()
+                .map(|v: &Vec<crate::models::GeneratedImage>| v.len())
+                .unwrap_or(0)
+        );
+
         Ok(MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: uuid::Uuid::new_v4().to_string(), // 临时ID，实际使用时会被覆盖
@@ -1906,6 +2013,7 @@ impl MessageService {
             output_tokens: api_response.usage.as_ref().map(|u| u.completion_tokens),
             total_tokens: api_response.usage.as_ref().map(|u| u.total_tokens),
             duration: Some(duration as i64),
+            generated_images,
         })
     }
 
