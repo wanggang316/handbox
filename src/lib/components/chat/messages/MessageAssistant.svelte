@@ -5,13 +5,17 @@
     Trash2,
     ChevronDown,
     ChevronRight,
+    X as CloseIcon,
   } from "lucide-svelte";
   import ToolCallList from "./ToolCallCard.svelte";
-  import type { Message } from "$lib/types";
+import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore } from "$lib/states";
-  import { openInBrowser, renderMarkdown } from "$lib/utils";
-  import { convertFileSrc } from "@tauri-apps/api/core";
-  import { isTauriEnvironment } from "$lib/utils/tauri";
+import { openInBrowser, renderMarkdown } from "$lib/utils";
+import {
+  resolveLocalAssetPath,
+  isTauriEnvironment,
+  openPathInSystem,
+} from "$lib/utils/tauri";
 
   interface Props {
     message?: Message;
@@ -44,6 +48,13 @@
       return messageStore.getProviderConfig(message.config.providerId);
     }
     return undefined;
+  });
+
+  let assets = $state<MessageAttachment[]>([]);
+  let isAssetsLoading = $state(false);
+  $effect(() => {
+    assets = message?.generatedAssets ?? [];
+    isAssetsLoading = Boolean(isStreaming && assets.length === 0);
   });
 
   // 格式化时间戳
@@ -193,17 +204,25 @@
     reasoningExpanded = !reasoningExpanded;
   }
 
-  function resolveAssetPath(path?: string) {
-    if (!path) return "";
-    if (
-      path.startsWith("data:") ||
-      path.startsWith("blob:") ||
-      path.startsWith("http://") ||
-      path.startsWith("https://")
-    ) {
-      return path;
+  const assetUrl = (path?: string) => resolveLocalAssetPath(path);
+
+  async function openAssetExternally(asset: MessageAttachment) {
+    const path = asset.path || "";
+    if (!path) {
+      console.warn("[MessageAssistant] No valid path to open", asset);
+      return;
     }
-    return isTauriEnvironment() ? convertFileSrc(path) : path;
+
+    if (
+      path.startsWith("http://") ||
+      path.startsWith("https://") ||
+      path.startsWith("data:")
+    ) {
+      await openInBrowser(path);
+      return;
+    }
+
+    await openPathInSystem(path);
   }
 </script>
 
@@ -282,14 +301,32 @@
             {@html renderMarkdown(message?.content || "")}
           </div>
 
-          {#if message?.generatedAssets?.length}
-            <div class="mt-4 space-y-2">
-              {#each message.generatedAssets as asset}
-                <div class="rounded-lg overflow-hidden border border-base-300">
+          {#if isAssetsLoading}
+            <div
+              class="mt-4 flex items-center gap-3 rounded-lg border border-dashed border-base-300 px-4 py-3 text-sm text-base-content/70"
+            >
+              <div
+                class="w-4 h-4 border-2 border-base-content/30 border-t-transparent rounded-full animate-spin"
+              ></div>
+              <span>图像生成中…</span>
+            </div>
+          {/if}
+
+          {#if assets?.length}
+            <div class="mt-4 flex flex-wrap gap-4">
+              {#each assets as asset (asset.id)}
+                <div
+                  class="relative rounded-lg border border-base-300 bg-base-100 p-2 max-w-[320px] cursor-zoom-in"
+                  title="双击在系统预览中打开"
+                  role="button"
+                  tabindex="0"
+                  ondblclick={() => openAssetExternally(asset)}
+                >
                   <img
-                    src={resolveAssetPath(asset.path)}
+                    src={assetUrl(asset.path)}
                     alt={asset.name}
-                    class="w-full h-auto"
+                    class="w-full h-auto max-w-[320px] object-contain rounded-md"
+                    ondblclick={() => openAssetExternally(asset)}
                   />
                 </div>
               {/each}
@@ -305,7 +342,7 @@
             />
           {/if}
 
-          {#if !isStreaming && !isMessageLoading}
+{#if !isStreaming && !isMessageLoading}
             <!-- 性能信息 -->
             <!-- <div class="flex flex-row gap-2 mt-6 text-xs text-base-content/60">
             {#if message?.createdAt}
@@ -329,8 +366,9 @@
               <span> | 耗时: {formatDuration(message.duration)}</span>
             {/if}
           </div> -->
-          {/if}
-        </div>
+  {/if}
+</div>
+
 
         <!-- 消息操作按钮 (仅在非流式且非加载状态下显示) -->
         {#if !isStreaming && !isMessageLoading}

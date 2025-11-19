@@ -88,7 +88,10 @@
     }
   }
 
-  function handleAddAttachment() {
+  let showAttachmentMenu = $state(false);
+
+  function handleAddAttachment(event?: MouseEvent) {
+    event?.stopPropagation();
     if (isEditing) return;
     fileInputRef?.click();
   }
@@ -151,6 +154,13 @@
 
   onDestroy(() => {
     resetAttachments();
+  });
+
+  $effect(() => {
+    if (!showAttachmentMenu) return;
+    const handler = () => (showAttachmentMenu = false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
   });
 </script>
 
@@ -227,7 +237,7 @@
     <!-- 左侧：添加按钮 -->
     <IconButton
       icon={Plus}
-      ariaLabel="上传图片"
+      ariaLabel="添加附件"
       onclick={handleAddAttachment}
       title="上传图片"
       disabled={isEditing}

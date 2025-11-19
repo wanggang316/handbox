@@ -1,8 +1,7 @@
 <script lang="ts">
   import { RotateCcw, Copy, Pencil } from "lucide-svelte";
   import type { Message } from "$lib/types";
-  import { convertFileSrc } from "@tauri-apps/api/core";
-  import { isTauriEnvironment } from "$lib/utils/tauri";
+  import { resolveLocalAssetPath } from "$lib/utils/tauri";
 
   interface Props {
     message: Message;
@@ -12,18 +11,7 @@
     onEdit?: (messageId: string, content: string) => void;
   }
 
-  function resolveAssetPath(path?: string) {
-    if (!path) return "";
-    if (
-      path.startsWith("data:") ||
-      path.startsWith("blob:") ||
-      path.startsWith("http://") ||
-      path.startsWith("https://")
-    ) {
-      return path;
-    }
-    return isTauriEnvironment() ? convertFileSrc(path) : path;
-  }
+  const assetUrl = (path?: string) => resolveLocalAssetPath(path);
 
   let { message, isOperating = false, onResend, onCopy, onEdit }: Props = $props();
 
@@ -68,17 +56,17 @@
           {message.content}
         </div>
         {#if message.attachments?.length}
-          <div class="mt-3 space-y-2 text-left">
+          <div class="mt-3 flex flex-wrap gap-3 justify-end">
             {#each message.attachments as attachment}
-              <div class="rounded-lg overflow-hidden border border-base-300">
+              <div class="rounded-lg overflow-hidden border border-base-300 bg-base-100 p-2 max-w-[300px]">
                 {#if attachment.mimeType?.startsWith("image/")}
                   <img
-                    src={resolveAssetPath(attachment.path)}
+                    src={assetUrl(attachment.path)}
                     alt={attachment.name}
-                    class="w-full h-auto"
+                    class="w-full h-auto max-w-[300px] object-contain rounded-md"
                   />
                 {:else}
-                  <div class="p-3 text-sm">
+                  <div class="p-3 text-sm text-left">
                     <p class="font-medium">{attachment.name}</p>
                     <p class="text-xs text-base-content/60">{attachment.mimeType}</p>
                   </div>

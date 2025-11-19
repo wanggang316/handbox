@@ -4,7 +4,8 @@
  * 提供统一的 Tauri 环境检测方法，用于判断代码是否运行在 Tauri 应用中
  */
 
-import { isTauri as isTauriCore } from "@tauri-apps/api/core";
+import { isTauri as isTauriCore, convertFileSrc } from "@tauri-apps/api/core";
+import { openPath as openSystemResource } from "@tauri-apps/plugin-opener";
 
 /**
  * 检测当前是否运行在 Tauri 环境中
@@ -140,4 +141,45 @@ export function getTauriEnvironmentInfo() {
     hasIsTauriProperty,
     platform: "browser",
   };
+}
+
+/**
+ * 将本地文件路径转换为 WebView 可访问的 URL。
+ * - data:/blob:/http(s) 链接直接返回
+ * - 绝对路径在 Tauri 中通过 convertFileSrc 包装
+ */
+export function resolveLocalAssetPath(path?: string): string {
+  if (!path) return "";
+  const lower = path.toLowerCase();
+  if (
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:") ||
+    lower.startsWith("http://") ||
+    lower.startsWith("https://")
+  ) {
+    return path;
+  }
+  return isTauriEnvironment() ? convertFileSrc(path) : path;
+}
+
+export async function openPathInSystem(path: string): Promise<void> {
+  if (!path) return;
+  const targetUrl = path.startsWith("file://") ? path : `file://${path}`;
+  const normalizedPath = path.replace(/^file:\/\//, "");
+
+  if (!isTauriEnvironment()) {
+    if (typeof window !== "undefined") {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    }
+    return;
+  }
+
+  try {
+    await openSystemResource(normalizedPath);
+  } catch (error) {
+    console.error("[openPathInSystem] Failed to open path:", error);
+    if (typeof window !== "undefined") {
+      window.open(targetUrl, "_blank", "noopener,noreferrer");
+    }
+  }
 }
