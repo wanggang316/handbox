@@ -283,6 +283,20 @@ class ArtifactState {
   }
 
   /**
+   * 初始化内置 Artifacts
+   */
+  async initBuiltinArtifacts(): Promise<Artifact[]> {
+    try {
+      const artifacts = await artifactApi.initBuiltinArtifacts();
+      console.log(`Initialized ${artifacts.length} builtin artifacts`);
+      return artifacts;
+    } catch (error) {
+      console.error('Failed to init builtin artifacts:', error);
+      return [];
+    }
+  }
+
+  /**
    * 清除错误状态
    */
   clearError(): void {

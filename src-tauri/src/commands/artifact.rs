@@ -72,21 +72,44 @@ pub async fn artifact_delete(
 /// 安装 artifact
 #[tauri::command]
 pub async fn artifact_install(
-    request: InstallArtifactRequest,
+    artifact_id: String,
+    model_id: Option<String>,
+    provider_id: Option<String>,
     service: State<'_, ArtifactService>,
 ) -> Result<Artifact, AppError> {
-    tracing::info!("Installing artifact: {}", request.artifact_id);
+    tracing::info!("Installing artifact: {}", artifact_id);
+    let request = InstallArtifactRequest {
+        artifact_id,
+        model_id,
+        provider_id,
+    };
     service.install_artifact(request).await
 }
 
 /// 执行 artifact
 #[tauri::command]
 pub async fn artifact_execute(
-    request: ExecuteArtifactRequest,
+    artifact_id: String,
+    args: Option<Vec<String>>,
+    env: Option<std::collections::HashMap<String, String>>,
     service: State<'_, ArtifactService>,
 ) -> Result<ExecutionResult, AppError> {
-    tracing::info!("Executing artifact: {}", request.artifact_id);
+    tracing::info!("Executing artifact: {}", artifact_id);
+    let request = ExecuteArtifactRequest {
+        artifact_id,
+        args,
+        env,
+    };
     service.execute_artifact(request).await
+}
+
+/// 初始化内置 artifacts (从 manifest.json 加载)
+#[tauri::command]
+pub async fn artifact_init_builtin(
+    service: State<'_, ArtifactService>,
+) -> Result<Vec<Artifact>, AppError> {
+    tracing::info!("Initializing builtin artifacts");
+    service.init_builtin_artifacts().await
 }
 
 #[cfg(test)]

@@ -235,6 +235,7 @@ pub fn run() {
             artifact_delete,
             artifact_install,
             artifact_execute,
+            artifact_init_builtin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

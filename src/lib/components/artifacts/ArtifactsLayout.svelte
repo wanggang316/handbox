@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Play, Download, Trash2, Search, X, Loader2 } from 'lucide-svelte';
-  import IconButton from '../ui/IconButton.svelte';
   import { artifactState } from '$lib/states/artifact.svelte';
   import type { Artifact, ArtifactType, ExecutionResult } from '$lib/types';
 
@@ -30,7 +29,6 @@
   async function loadArtifacts() {
     try {
       await artifactState.loadArtifacts({
-        isBuiltin: true, // 只加载内置应用
         limit: 100,
         offset: 0
       });
@@ -65,11 +63,15 @@
 
   async function installArtifact(artifact: Artifact) {
     try {
-      await artifactState.installArtifact({
+      const installed = await artifactState.installArtifact({
         artifactId: artifact.id
       });
       // 重新加载列表以获取最新状态
       await loadArtifacts();
+      // 更新选中的 artifact
+      if (selectedArtifact?.id === artifact.id) {
+        selectedArtifact = installed;
+      }
     } catch (error) {
       console.error('Failed to install artifact:', error);
     }
@@ -88,11 +90,6 @@
         artifactId: artifact.id
       });
       executionResult = result;
-
-      // 如果是 web 应用，在新窗口打开
-      if (artifact.type === 'web' && result.success && result.stdout) {
-        window.open(result.stdout, '_blank');
-      }
     } catch (error) {
       console.error('Failed to execute artifact:', error);
       executionResult = {
@@ -106,6 +103,7 @@
   }
 
   async function deleteArtifact(artifact: Artifact) {
+    if (!artifact.id) return;
     if (!confirm(`确定要删除 "${artifact.name}" 吗?`)) return;
 
     try {
@@ -137,12 +135,13 @@
         class="search-input"
       />
       {#if searchQuery}
-        <IconButton
-          icon={X}
-          ariaLabel="清除搜索"
+        <button
+          class="clear-btn"
           onclick={() => (searchQuery = '')}
-          customClass="clear-btn"
-        />
+          aria-label="清除搜索"
+        >
+          <X size={16} />
+        </button>
       {/if}
     </div>
 
@@ -398,17 +397,9 @@
     border-bottom: 1px solid var(--base-300);
   }
 
-  .search-icon {
-    position: absolute;
-    left: 1.75rem;
-    top: 50%;
-    transform: translateY(-50%);
-    color: color-mix(in oklch, var(--base-content) 60%, transparent);
-  }
-
   .search-input {
     width: 100%;
-    padding: 0.625rem 0.75rem 0.625rem 2.5rem;
+    padding: 0.625rem 2.5rem 0.625rem 2.5rem;
     border: 1px solid var(--base-300);
     border-radius: 8px;
     background: var(--base-100);
@@ -421,11 +412,33 @@
     outline-offset: 0;
   }
 
-  :global(.clear-btn) {
+  .search-box :global(.search-icon) {
+    position: absolute;
+    left: 1.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: color-mix(in oklch, var(--base-content) 60%, transparent);
+    pointer-events: none;
+  }
+
+  .clear-btn {
     position: absolute;
     right: 1.25rem;
     top: 50%;
     transform: translateY(-50%);
+    background: none;
+    border: none;
+    padding: 0.25rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: color-mix(in oklch, var(--base-content) 60%, transparent);
+    transition: color 0.2s;
+  }
+
+  .clear-btn:hover {
+    color: var(--base-content);
   }
 
   /* 类型过滤 */

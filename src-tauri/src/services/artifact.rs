@@ -3,7 +3,7 @@
 use crate::models::AppError;
 use crate::storage::types::{
     Artifact, ArtifactFilter, ArtifactType, CreateArtifactRequest, ExecuteArtifactRequest,
-    ExecutionResult, InstallArtifactRequest, UpdateArtifactRequest,
+    ExecutionConfig, ExecutionResult, InstallArtifactRequest, UpdateArtifactRequest,
 };
 use crate::storage::ArtifactRepository;
 use std::path::{Path, PathBuf};
@@ -114,9 +114,160 @@ impl ArtifactService {
             .ok_or_else(|| AppError::validation_error("Artifact not found"))
     }
 
-    /// 列出 Artifacts
+    /// 列出 Artifacts（合并内置的和已安装的）
     pub async fn list_artifacts(&self, filter: ArtifactFilter) -> Result<Vec<Artifact>, AppError> {
-        self.repo.list_artifacts(&filter).await
+        // 获取数据库中已安装的 artifacts
+        let installed = self.repo.list_artifacts(&filter).await?;
+
+        // 获取内置 artifacts 定义
+        let builtins = self.get_builtin_definitions();
+
+        // 合并：内置 artifacts 中，如果已在数据库中，使用数据库版本（包含安装状态）
+        let mut result_map: std::collections::HashMap<String, Artifact> = std::collections::HashMap::new();
+
+        // 先添加已安装的
+        for artifact in installed {
+            result_map.insert(artifact.name.clone(), artifact);
+        }
+
+        // 再添加内置的（如果不存在）
+        for builtin in builtins {
+            if !result_map.contains_key(&builtin.name) {
+                result_map.insert(builtin.name.clone(), builtin);
+            }
+        }
+
+        let mut results: Vec<Artifact> = result_map.into_values().collect();
+
+        // 应用过滤和排序
+        if let Some(ref search) = filter.search {
+            let search_lower = search.to_lowercase();
+            results.retain(|a| {
+                a.name.to_lowercase().contains(&search_lower) ||
+                a.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&search_lower))
+            });
+        }
+
+        if let Some(artifact_type) = filter.artifact_type {
+            results.retain(|a| a.artifact_type == artifact_type);
+        }
+
+        if let Some(is_builtin) = filter.is_builtin {
+            results.retain(|a| a.is_builtin == is_builtin);
+        }
+
+        if let Some(is_installed) = filter.is_installed {
+            results.retain(|a| a.is_installed == is_installed);
+        }
+
+        // 排序
+        if let Some(sort_by) = &filter.sort_by {
+            match sort_by.as_str() {
+                "updated_at" => results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),
+                "created_at" => results.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
+                "name" => results.sort_by(|a, b| a.name.cmp(&b.name)),
+                _ => {}
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// 获取内置 artifacts 定义（仅定义，不存数据库）
+    fn get_builtin_definitions(&self) -> Vec<Artifact> {
+        let now = chrono::Utc::now().timestamp_millis();
+        vec![
+            Artifact {
+                id: "builtin-shell-hello".to_string(),
+                name: "Shell Hello World".to_string(),
+                description: Some("A simple shell script that demonstrates artifact execution".to_string()),
+                artifact_type: ArtifactType::Shell,
+                entry_file: "main.sh".to_string(),
+                source_path: Some("shell-hello".to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: ExecutionConfig {
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                    permissions: vec![],
+                    timeout: 5000,
+                },
+                is_builtin: true,
+                is_installed: false,
+                installed_version: None,
+                installed_at: None,
+                last_run_at: None,
+                run_count: 0,
+                tags: vec!["demo".to_string(), "shell".to_string(), "hello-world".to_string()],
+                icon: Some("🐚".to_string()),
+                author: Some("HandBox Team".to_string()),
+                created_at: now,
+                updated_at: now,
+            },
+            Artifact {
+                id: "builtin-python-hello".to_string(),
+                name: "Python Hello World".to_string(),
+                description: Some("A simple Python script showcasing Python artifact execution".to_string()),
+                artifact_type: ArtifactType::Python,
+                entry_file: "main.py".to_string(),
+                source_path: Some("python-hello".to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: ExecutionConfig {
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                    permissions: vec![],
+                    timeout: 10000,
+                },
+                is_builtin: true,
+                is_installed: false,
+                installed_version: None,
+                installed_at: None,
+                last_run_at: None,
+                run_count: 0,
+                tags: vec!["demo".to_string(), "python".to_string(), "hello-world".to_string()],
+                icon: Some("🐍".to_string()),
+                author: Some("HandBox Team".to_string()),
+                created_at: now,
+                updated_at: now,
+            },
+            Artifact {
+                id: "builtin-web-chart".to_string(),
+                name: "Interactive Chart Demo".to_string(),
+                description: Some("An interactive chart web application with Chart.js".to_string()),
+                artifact_type: ArtifactType::Web,
+                entry_file: "index.html".to_string(),
+                source_path: Some("web-chart".to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: ExecutionConfig {
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                    permissions: vec![],
+                    timeout: 0,
+                },
+                is_builtin: true,
+                is_installed: false,
+                installed_version: None,
+                installed_at: None,
+                last_run_at: None,
+                run_count: 0,
+                tags: vec!["demo".to_string(), "web".to_string(), "chart".to_string(), "visualization".to_string()],
+                icon: Some("📊".to_string()),
+                author: Some("HandBox Team".to_string()),
+                created_at: now,
+                updated_at: now,
+            },
+        ]
     }
 
     /// 删除 Artifact
@@ -133,7 +284,21 @@ impl ArtifactService {
 
     /// 安装 Artifact
     pub async fn install_artifact(&self, request: InstallArtifactRequest) -> Result<Artifact, AppError> {
-        let mut artifact = self.get_artifact(&request.artifact_id).await?;
+        // 尝试从数据库获取，如果不存在，尝试从内置定义获取
+        let mut artifact = match self.repo.get_artifact_by_id(&request.artifact_id).await? {
+            Some(a) => a,
+            None => {
+                // 尝试从内置定义中查找
+                let builtins = self.get_builtin_definitions();
+                let builtin = builtins.into_iter()
+                    .find(|a| a.id == request.artifact_id)
+                    .ok_or_else(|| AppError::validation_error("Artifact not found"))?;
+
+                // 创建到数据库
+                self.repo.create_artifact(&builtin).await?;
+                builtin
+            }
+        };
 
         // 如果 artifact 需要模型但用户没有选择，报错
         if artifact.model_id.is_some() && request.model_id.is_none() {
@@ -155,7 +320,7 @@ impl ArtifactService {
 
         // 标记为已安装
         let now = chrono::Utc::now().timestamp_millis();
-        let version = artifact.installed_version.clone().unwrap_or_else(|| "1.0.0".to_string());
+        let version = "1.0.0".to_string();
         self.repo.mark_installed(&artifact.id, &version, now).await?;
 
         artifact.is_installed = true;
@@ -163,6 +328,148 @@ impl ArtifactService {
         artifact.installed_version = Some(version);
 
         Ok(artifact)
+    }
+
+    /// 列出内置 artifacts（不再需要初始化到数据库）
+    pub async fn init_builtin_artifacts(&self) -> Result<Vec<Artifact>, AppError> {
+        // 返回内置应用定义（仅用于向后兼容）
+        Ok(self.get_builtin_definitions())
+    }
+
+    /// 获取 artifact (优先数据库，再查内置定义)
+    pub async fn get_artifact_with_fallback(&self, id: &str) -> Result<Artifact, AppError> {
+        // 先从数据库查
+        if let Some(artifact) = self.repo.get_artifact_by_id(&id.to_string()).await? {
+            return Ok(artifact);
+        }
+
+        // 再从内置定义查
+        let builtins = self.get_builtin_definitions();
+        builtins.into_iter()
+            .find(|a| a.id == id)
+            .ok_or_else(|| AppError::validation_error("Artifact not found"))
+    }
+
+    /// 【已废弃】旧的初始化方法
+    #[allow(dead_code)]
+    async fn init_builtin_artifacts_old(&self) -> Result<Vec<Artifact>, AppError> {
+        // 定义内置应用
+        let builtins = vec![
+            CreateArtifactRequest {
+                name: "Shell Hello World".to_string(),
+                description: Some("A simple shell script that demonstrates artifact execution".to_string()),
+                artifact_type: ArtifactType::Shell,
+                entry_file: "main.sh".to_string(),
+                source_path: Some("shell-hello".to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: Some(ExecutionConfig {
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                    permissions: vec![],
+                    timeout: 5000,
+                }),
+                tags: Some(vec!["demo".to_string(), "shell".to_string(), "hello-world".to_string()]),
+                icon: Some("🐚".to_string()),
+            },
+            CreateArtifactRequest {
+                name: "Python Hello World".to_string(),
+                description: Some("A simple Python script showcasing Python artifact execution".to_string()),
+                artifact_type: ArtifactType::Python,
+                entry_file: "main.py".to_string(),
+                source_path: Some("python-hello".to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: Some(ExecutionConfig {
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                    permissions: vec![],
+                    timeout: 10000,
+                }),
+                tags: Some(vec!["demo".to_string(), "python".to_string(), "hello-world".to_string()]),
+                icon: Some("🐍".to_string()),
+            },
+            CreateArtifactRequest {
+                name: "Interactive Chart Demo".to_string(),
+                description: Some("An interactive chart web application with Chart.js".to_string()),
+                artifact_type: ArtifactType::Web,
+                entry_file: "index.html".to_string(),
+                source_path: Some("web-chart".to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: Some(ExecutionConfig {
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                    permissions: vec![],
+                    timeout: 0,
+                }),
+                tags: Some(vec!["demo".to_string(), "web".to_string(), "chart".to_string(), "visualization".to_string()]),
+                icon: Some("📊".to_string()),
+            },
+        ];
+
+        let mut created_artifacts = Vec::new();
+
+        for request in builtins {
+            // 检查是否已存在同名的内置应用
+            let filter = ArtifactFilter {
+                search: Some(request.name.clone()),
+                artifact_type: None,
+                is_builtin: Some(true),
+                is_installed: None,
+                tags: None,
+                sort_by: None,
+                sort_order: None,
+                limit: Some(1),
+                offset: Some(0),
+            };
+
+            let existing = self.repo.list_artifacts(&filter).await?;
+            if existing.is_empty() {
+                // 创建新的内置应用
+                let now = chrono::Utc::now().timestamp_millis();
+                let artifact = Artifact {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: request.name,
+                    description: request.description,
+                    artifact_type: request.artifact_type,
+                    entry_file: request.entry_file,
+                    source_path: request.source_path,
+                    model_id: request.model_id,
+                    provider_id: request.provider_id,
+                    system_prompt: request.system_prompt,
+                    model_parameters: request.model_parameters,
+                    tools: request.tools,
+                    execution_config: request.execution_config.unwrap_or_default(),
+                    is_builtin: true,  // 标记为内置应用
+                    is_installed: false,
+                    installed_version: Some("1.0.0".to_string()),
+                    installed_at: None,
+                    last_run_at: None,
+                    run_count: 0,
+                    tags: request.tags.unwrap_or_default(),
+                    icon: request.icon,
+                    author: Some("HandBox Team".to_string()),
+                    created_at: now,
+                    updated_at: now,
+                };
+
+                self.repo.create_artifact(&artifact).await?;
+                created_artifacts.push(artifact);
+            }
+        }
+
+        tracing::info!("Initialized {} builtin artifacts", created_artifacts.len());
+        Ok(created_artifacts)
     }
 
     /// 执行 Artifact
@@ -418,14 +725,13 @@ impl ArtifactService {
         Ok((stdout, stderr, exit_code))
     }
 
-    /// 执行 Web 应用（启动本地服务器或打开文件）
+    /// 执行 Web 应用（使用系统浏览器打开）
     async fn execute_web(
         &self,
         entry_path: &Path,
         _artifact: &Artifact,
     ) -> Result<(String, String, i32), AppError> {
-        // 简单实现：返回 HTML 文件路径，让前端通过 WebView 或浏览器打开
-        // 更复杂的实现可以启动本地 HTTP 服务器
+        use tauri_plugin_opener::OpenerExt;
 
         let absolute_path = entry_path
             .canonicalize()
@@ -435,8 +741,16 @@ impl ArtifactService {
             .to_str()
             .ok_or_else(|| AppError::internal_error("Invalid path encoding"))?;
 
+        let url = format!("file://{}", path_str);
+
+        // 使用 Tauri opener plugin 打开系统默认浏览器
+        self.app_handle
+            .opener()
+            .open_url(&url, None::<&str>)
+            .map_err(|e| AppError::internal_error(&format!("Failed to open browser: {}", e)))?;
+
         Ok((
-            format!("file://{}", path_str),
+            format!("Opened {} in system browser", path_str),
             String::new(),
             0,
         ))

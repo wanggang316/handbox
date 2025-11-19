@@ -72,3 +72,10 @@ export async function executeArtifact(
 ): Promise<ExecutionResult> {
   return apiCall<ExecutionResult>("artifact_execute", request);
 }
+
+/**
+ * 初始化内置 Artifacts
+ */
+export async function initBuiltinArtifacts(): Promise<Artifact[]> {
+  return apiCall<Artifact[]>("artifact_init_builtin");
+}
