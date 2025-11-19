@@ -60,6 +60,21 @@ impl StorageService {
         Ok(dir)
     }
 
+    /// 确保消息的附件目录存在（用于输入资源）
+    pub fn prepare_message_attachment_dir(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<PathBuf, AppError> {
+        let dir = self
+            .data_dir
+            .join("message_attachments")
+            .join(chat_id)
+            .join(message_id);
+        Self::ensure_dir(&dir)?;
+        Ok(dir)
+    }
+
     fn ensure_dir(path: &Path) -> Result<(), AppError> {
         if path.exists() {
             return Ok(());

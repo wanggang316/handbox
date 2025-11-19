@@ -41,6 +41,13 @@ async fn initialize_services(
         .allow_directory(&media_root, true)
         .map_err(|e| format!("Failed to allow asset protocol for generated media: {e}"))?;
 
+    let attachments_root = data_dir.join("message_attachments");
+    std::fs::create_dir_all(&attachments_root)
+        .map_err(|e| format!("Failed to create attachment directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&attachments_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for attachments: {e}"))?;
+
     // 初始化数据库服务
     let db_path = storage_service.get_database_path();
     let database_service = Arc::new(

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::storage::types::{MessageToolCall, UUID};
+use crate::storage::types::{MessageAttachment, MessageToolCall, UUID};
 use handbox_llm::types::LlmMessage;
 
 /// 消息请求附件
@@ -12,6 +12,8 @@ pub struct MessageRequestAttachment {
     pub name: String,
     pub mime_type: String,
     pub data: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<String>,
 }
 
 /// 消息请求
@@ -58,6 +60,8 @@ pub struct MessageResponse {
     pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
     pub duration: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_assets: Option<Vec<MessageAttachment>>,
 }
 
 /// 待执行的 MCP 调用信息

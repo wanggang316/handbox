@@ -21,6 +21,7 @@
   import * as chatApi from "$lib/api/chat";
   import { goto } from "$app/navigation";
   import { messageStore } from "$lib/states";
+  import type { ChatAttachment } from "$lib/types/chat";
 
   let chatId = $state("");
   let messageInput = $state("");
@@ -175,7 +176,10 @@
   }
 
   // 处理消息发送
-  async function handleSendMessage(message: string) {
+  async function handleSendMessage(
+    message: string,
+    attachments: ChatAttachment[],
+  ) {
     console.log("handleSendMessage:", { message, editingMessageId });
 
     // 检测已关闭的 MCP 服务器（仅在非编辑模式下检测）
@@ -192,11 +196,14 @@
     }
 
     // 实际发送消息
-    await sendMessageInternal(message);
+    await sendMessageInternal(message, attachments);
   }
 
   // 实际发送消息的内部方法
-  async function sendMessageInternal(message: string) {
+  async function sendMessageInternal(
+    message: string,
+    attachments: ChatAttachment[],
+  ) {
     try {
       // 如果是编辑模式，调用 resendMessage
       if (editingMessageId) {
@@ -234,7 +241,7 @@
       }
 
       // 使用简化的 messageStore 发送消息
-      await messageStore.sendMessage(message, []);
+        await messageStore.sendMessage(message, attachments);
     } catch (error) {
       console.error("Failed to send message:", error);
       // 如果是模型选择错误，可以在这里显示提示

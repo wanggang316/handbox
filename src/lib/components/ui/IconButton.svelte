@@ -13,6 +13,7 @@
     disabled?: boolean;
     customClass?: string;
     onclick?: (event: MouseEvent) => void;
+    title?: string;
   }
 
   let {
@@ -27,6 +28,7 @@
     disabled = false,
     customClass = '',
     onclick,
+    title = '',
   }: Props = $props();
 
   function handleClick(event: MouseEvent) {
@@ -42,11 +44,11 @@
   class:cursor-not-allowed={disabled}
   aria-label={ariaLabel}
   onclick={handleClick}
+  title={title}
   {disabled}
 >
   {#if icon}
     <svelte:component this={icon} size={iconSize} />
   {/if}
 </button>
-
 

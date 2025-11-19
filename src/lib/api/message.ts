@@ -146,6 +146,7 @@ export interface StreamEventHandlers {
     modelId: string;
     providerId: string;
     toolCalls?: any[];
+    generatedAssets?: any[];
     messageId?: string;
   }) => void;
   onError?: (error: any) => void;

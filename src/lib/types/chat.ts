@@ -44,6 +44,9 @@ export interface Message extends BaseEntity {
   // 附件
   attachments?: MessageAttachment[];
 
+  // 生成的资源（如模型输出的图片）
+  generatedAssets?: MessageAttachment[];
+
   // 使用统计和时序信息
   inputTokens?: number;
   outputTokens?: number;
@@ -60,6 +63,7 @@ export interface MessageAttachment {
   mimeType: string;
   size: number;
   path: string;
+  usage?: "input" | "output" | string;
 }
 
 // Reasoning/thinking support
@@ -127,23 +131,6 @@ export interface ModelParameters {
 }
 
 // 消息请求
-export interface MessageRequest {
-  chatId?: UUID;
-  modelId: string;
-  providerId: string;
-  messages: ChatMessage[];
-  tempUserMessageId?: string;
-  attachments?: ChatAttachment[];
-}
-
-// 简化的发送消息请求
-export interface UserMessageSendRequest {
-  chatId: UUID;
-  content: string;
-  tempUserMessageId: string;
-  attachments?: ChatAttachment[];
-}
-
 // 聊天消息（请求中使用）
 export interface ChatMessage {
   role: MessageRole;
@@ -159,6 +146,30 @@ export interface ChatAttachment {
   data: Uint8Array;
 }
 
+export interface MessageRequestAttachment {
+  name: string;
+  mime_type: string;
+  data: number[];
+  usage?: string;
+}
+
+export interface MessageRequest {
+  chatId?: UUID;
+  modelId: string;
+  providerId: string;
+  messages: ChatMessage[];
+  tempUserMessageId?: string;
+  attachments?: MessageRequestAttachment[];
+}
+
+// 简化的发送消息请求
+export interface UserMessageSendRequest {
+  chatId: UUID;
+  content: string;
+  tempUserMessageId: string;
+  attachments?: MessageRequestAttachment[];
+}
+
 // 消息响应
 export interface MessageResponse {
   chatId: UUID;
@@ -166,6 +177,7 @@ export interface MessageResponse {
   content: string;
   reasoning?: string;
   toolCalls?: ToolCall[];
+  generatedAssets?: MessageAttachment[];
   modelId: string;
   providerId: string;
   inputTokens?: number;

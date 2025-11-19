@@ -6,11 +6,13 @@
   import ChatModelSelectModal from "./ChatModelSelectModal.svelte";
   import { currentChatModel, chatActions } from "$lib/states/chat.svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
+  import type { ChatAttachment } from "$lib/types/chat";
+  import { onDestroy } from "svelte";
 
   interface Props {
     messageInput?: string;
     editingMessageId?: string | null;
-    onSendMessage?: (message: string) => void;
+    onSendMessage?: (message: string, attachments: ChatAttachment[]) => void;
     onCancelEdit?: () => void;
   }
 
@@ -23,7 +25,15 @@
   }: Props = $props();
 
   let textareaRef: HTMLTextAreaElement;
+  let fileInputRef: HTMLInputElement | null = null;
   let showModelModal = $state(false);
+
+  type AttachmentWithPreview = ChatAttachment & {
+    id: string;
+    size: number;
+    previewUrl: string;
+  };
+  let attachments = $state<AttachmentWithPreview[]>([]);
 
   // 直接使用 chatState 中的显示模型
   const currentModel = $derived(currentChatModel().model);
@@ -61,8 +71,14 @@
   }
 
   function sendMessage() {
-    if (!messageInput.trim()) return;
-    onSendMessage(messageInput);
+    if (!messageInput.trim() && attachments.length === 0) return;
+    const payloadAttachments = attachments.map(({ name, mimeType, data }) => ({
+      name,
+      mimeType,
+      data,
+    }));
+    onSendMessage(messageInput, payloadAttachments);
+    resetAttachments();
     messageInput = "";
   }
 
@@ -73,9 +89,79 @@
   }
 
   function handleAddAttachment() {
-    console.log("添加附加");
+    if (isEditing) return;
+    fileInputRef?.click();
   }
+
+  async function handleAttachmentChange(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const files = input.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const additions: AttachmentWithPreview[] = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      const buffer = await file.arrayBuffer();
+      additions.push({
+        id: crypto.randomUUID(),
+        name: file.name,
+        mimeType: file.type || "image/png",
+        data: new Uint8Array(buffer),
+        size: file.size,
+        previewUrl: URL.createObjectURL(file),
+      });
+    }
+
+    if (additions.length) {
+      attachments = [...attachments, ...additions];
+    }
+
+    if (fileInputRef) {
+      fileInputRef.value = "";
+    }
+  }
+
+  function removeAttachment(id: string) {
+    const target = attachments.find((item) => item.id === id);
+    if (target?.previewUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(target.previewUrl);
+    }
+    attachments = attachments.filter((item) => item.id !== id);
+  }
+
+  function resetAttachments() {
+    attachments.forEach((item) => {
+      if (item.previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+    attachments = [];
+    if (fileInputRef) {
+      fileInputRef.value = "";
+    }
+  }
+
+  $effect(() => {
+    if (isEditing && attachments.length) {
+      resetAttachments();
+    }
+  });
+
+  onDestroy(() => {
+    resetAttachments();
+  });
 </script>
+
+<input
+  type="file"
+  accept="image/*"
+  multiple
+  class="hidden"
+  bind:this={fileInputRef}
+  onchange={handleAttachmentChange}
+/>
 
 <div
   class="flex flex-col bg-base-200 rounded-xl border border-base-300 max-h-[300px] mx-auto w-full max-w-[800px]"
@@ -111,14 +197,40 @@
     class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
   ></textarea>
 
+  {#if attachments.length}
+    <div class="px-4 pb-2 flex flex-wrap gap-3">
+      {#each attachments as attachment (attachment.id)}
+        <div
+          class="relative w-20 h-20 rounded-lg overflow-hidden border border-base-300 bg-base-100"
+        >
+          <img
+            src={attachment.previewUrl}
+            alt={attachment.name}
+            class="w-full h-full object-cover"
+          />
+          <button
+            class="absolute top-1 right-1 p-1 bg-base-200/80 hover:bg-base-200 rounded-full text-base-content transition-colors"
+            type="button"
+            title="移除图片"
+            onclick={() => removeAttachment(attachment.id)}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
   <div
     class="flex flex-row justify-between items-center px-4 pt-0 pb-2 overflow-visible"
   >
     <!-- 左侧：添加按钮 -->
     <IconButton
       icon={Plus}
-      ariaLabel="添加附加"
+      ariaLabel="上传图片"
       onclick={handleAddAttachment}
+      title="上传图片"
+      disabled={isEditing}
     />
 
     <!-- 右侧：模型选择和发送按钮 -->

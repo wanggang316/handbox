@@ -1,6 +1,8 @@
 <script lang="ts">
   import { RotateCcw, Copy, Pencil } from "lucide-svelte";
   import type { Message } from "$lib/types";
+  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { isTauriEnvironment } from "$lib/utils/tauri";
 
   interface Props {
     message: Message;
@@ -8,6 +10,19 @@
     onCopy?: (content: string) => void;
     onResend?: (messageId: string) => void;
     onEdit?: (messageId: string, content: string) => void;
+  }
+
+  function resolveAssetPath(path?: string) {
+    if (!path) return "";
+    if (
+      path.startsWith("data:") ||
+      path.startsWith("blob:") ||
+      path.startsWith("http://") ||
+      path.startsWith("https://")
+    ) {
+      return path;
+    }
+    return isTauriEnvironment() ? convertFileSrc(path) : path;
   }
 
   let { message, isOperating = false, onResend, onCopy, onEdit }: Props = $props();
@@ -52,6 +67,26 @@
         <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
           {message.content}
         </div>
+        {#if message.attachments?.length}
+          <div class="mt-3 space-y-2 text-left">
+            {#each message.attachments as attachment}
+              <div class="rounded-lg overflow-hidden border border-base-300">
+                {#if attachment.mimeType?.startsWith("image/")}
+                  <img
+                    src={resolveAssetPath(attachment.path)}
+                    alt={attachment.name}
+                    class="w-full h-auto"
+                  />
+                {:else}
+                  <div class="p-3 text-sm">
+                    <p class="font-medium">{attachment.name}</p>
+                    <p class="text-xs text-base-content/60">{attachment.mimeType}</p>
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- 操作按钮 (hover显示) -->

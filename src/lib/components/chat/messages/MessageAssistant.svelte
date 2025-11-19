@@ -10,6 +10,8 @@
   import type { Message } from "$lib/types";
   import { messageStore } from "$lib/states";
   import { openInBrowser, renderMarkdown } from "$lib/utils";
+  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { isTauriEnvironment } from "$lib/utils/tauri";
 
   interface Props {
     message?: Message;
@@ -190,6 +192,19 @@
   function toggleReasoning() {
     reasoningExpanded = !reasoningExpanded;
   }
+
+  function resolveAssetPath(path?: string) {
+    if (!path) return "";
+    if (
+      path.startsWith("data:") ||
+      path.startsWith("blob:") ||
+      path.startsWith("http://") ||
+      path.startsWith("https://")
+    ) {
+      return path;
+    }
+    return isTauriEnvironment() ? convertFileSrc(path) : path;
+  }
 </script>
 
 <div
@@ -266,6 +281,20 @@
           >
             {@html renderMarkdown(message?.content || "")}
           </div>
+
+          {#if message?.generatedAssets?.length}
+            <div class="mt-4 space-y-2">
+              {#each message.generatedAssets as asset}
+                <div class="rounded-lg overflow-hidden border border-base-300">
+                  <img
+                    src={resolveAssetPath(asset.path)}
+                    alt={asset.name}
+                    class="w-full h-auto"
+                  />
+                </div>
+              {/each}
+            </div>
+          {/if}
 
           <!-- 工具调用记录 -->
           {#if message?.toolCalls?.length}

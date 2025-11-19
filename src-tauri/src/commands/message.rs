@@ -72,7 +72,8 @@ fn create_stream_end_callback(
                 "chatId": response.chat_id,
                 "modelId": response.model_id,
                 "providerId": response.provider_id,
-                "toolCalls": response.tool_calls
+                "toolCalls": response.tool_calls,
+                "generatedAssets": response.generated_assets
             }),
         );
         tracing::info!("[{}] Stream ended for stream {}", event_name, stream_id);

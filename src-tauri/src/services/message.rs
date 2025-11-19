@@ -1,11 +1,12 @@
 // 消息服务实现
 
 use crate::models::{
-    AppError, MessageRequest, MessageResponse, StreamChunk, UserMessageSendRequest,
+    AppError, MessageRequest, MessageRequestAttachment, MessageResponse, StreamChunk,
+    UserMessageSendRequest,
 };
 use crate::services::{ChatService, Database, McpService, ProviderService, StorageService};
 use crate::storage::types::{
-    Chat, McpServer, McpServerStatus, Message, MessageConfig, MessageToolCall,
+    Chat, McpServer, McpServerStatus, Message, MessageAttachment, MessageConfig, MessageToolCall,
     MessageToolExecutionMode, MessageToolExecutionStatus, Provider, UUID,
 };
 use crate::storage::MessageRepository;
@@ -18,9 +19,7 @@ use handbox_llm::types::{
     LlmReasoningEffortConfig, LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse,
     LlmToolChoice, LlmToolFunction,
 };
-use std::collections::HashMap;
-use std::sync::Arc;
-use url::Url;
+use std::{collections::HashMap, fs, sync::Arc};
 
 /// 流式回调 trait 定义
 ///
@@ -140,7 +139,7 @@ impl MessageService {
             chat_id,
             content,
             temp_user_message_id,
-            attachments: _attachments,
+            attachments,
         } = request;
 
         // 1. 获取聊天配置
@@ -164,7 +163,7 @@ impl MessageService {
         let turn_id = Some(turn_id_value);
 
         let user_message_id = self
-            .save_user_message(&chat_id, &content, config.clone(), turn_id)
+            .save_user_message(&chat_id, &content, config.clone(), turn_id, attachments)
             .await
             .map_err(|e| {
                 let error = format!("Failed to save user message: {}", e);
@@ -201,33 +200,21 @@ impl MessageService {
         );
 
         // 4. 调用实际的 LLM API
-        let (llm_response, generated_images) = self.call_llm_api(&final_request).await?;
+        let (mut llm_response, generated_images) = self.call_llm_api(&final_request).await?;
 
         // 5. 保存助手消息到数据库
-        let now = Utc::now().timestamp_millis();
-        let MessageResponse {
-            content,
-            reasoning,
-            tool_calls,
-            input_tokens,
-            output_tokens,
-            total_tokens,
-            duration,
-            ..
-        } = llm_response;
-
-        let (assistant_message_id, processed_tool_calls, final_content) = self
+        let (assistant_message_id, processed_tool_calls, generated_assets) = self
             .save_assistant_message(
                 &chat_id,
-                content,
-                reasoning.clone(),
-                tool_calls,
+                llm_response.content.clone(),
+                llm_response.reasoning.clone(),
+                llm_response.tool_calls.clone(),
                 Some(config.clone()),
-                now,
-                duration.unwrap_or(0),
-                input_tokens,
-                output_tokens,
-                total_tokens,
+                Utc::now().timestamp_millis(),
+                llm_response.duration.unwrap_or(0),
+                llm_response.input_tokens,
+                llm_response.output_tokens,
+                llm_response.total_tokens,
                 turn_id,
                 generated_images,
             )
@@ -243,19 +230,12 @@ impl MessageService {
             assistant_message_id
         );
 
-        let response = MessageResponse {
-            chat_id: chat_id.clone(),
-            message_id: assistant_message_id.clone(),
-            content: final_content,
-            reasoning,
-            model_id: final_request.model_id,
-            provider_id: final_request.provider_id,
-            input_tokens,
-            output_tokens,
-            total_tokens,
-            duration,
-            tool_calls: processed_tool_calls.clone(),
-        };
+        llm_response.chat_id = chat_id.clone();
+        llm_response.message_id = assistant_message_id.clone();
+        llm_response.tool_calls = processed_tool_calls.clone();
+        llm_response.generated_assets = generated_assets.clone();
+
+        let response = llm_response;
 
         tracing::info!(
             "[MessageService::send_message] Successfully completed for chat_id: {}, message_id: {}",
@@ -317,7 +297,13 @@ impl MessageService {
         };
 
         let user_message_id = match self
-            .save_user_message(chat_id, &request.content, config.clone(), turn_id.clone())
+            .save_user_message(
+                chat_id,
+                &request.content,
+                config.clone(),
+                turn_id.clone(),
+                request.attachments.clone(),
+            )
             .await
         {
             Ok(id) => id,
@@ -958,6 +944,7 @@ impl MessageService {
                             tool_call_id: Some(tool_call.id.clone()),
                             config: None,
                             attachments: None,
+                            generated_assets: None,
                             input_tokens: None,
                             output_tokens: None,
                             total_tokens: None,
@@ -1400,20 +1387,21 @@ impl MessageService {
         }
 
         let duration = start_time.elapsed().as_millis() as i64;
-        let mut final_content = accumulated_content.clone();
+        let final_content = accumulated_content.clone();
         let images_to_persist = accumulated_generated_images;
         let generated_image_count = images_to_persist.len();
+        let mut persisted_assets: Option<Vec<MessageAttachment>> = None;
 
         if generated_image_count > 0 {
             if let Some(chat_id) = request.chat_id.as_ref() {
-                if let Err(err) = self.persist_generated_images_and_update_content(
-                    chat_id,
-                    &message_id,
-                    &mut final_content,
-                    images_to_persist,
-                ) {
-                    error_callback(stream_id.clone(), err);
-                    return;
+                match self.persist_generated_assets(chat_id, &message_id, images_to_persist) {
+                    Ok(assets) => {
+                        persisted_assets = assets;
+                    }
+                    Err(err) => {
+                        error_callback(stream_id.clone(), err);
+                        return;
+                    }
                 }
             } else {
                 tracing::warn!(
@@ -1469,6 +1457,7 @@ impl MessageService {
             output_tokens: None,
             total_tokens: None,
             duration: Some(duration),
+            generated_assets: persisted_assets,
         };
 
         tracing::info!(
@@ -1722,9 +1711,13 @@ impl MessageService {
         content: &str,
         config: MessageConfig,
         turn_id: Option<i32>,
+        attachments: Option<Vec<MessageRequestAttachment>>,
     ) -> Result<String, AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
+
+        let stored_attachments =
+            self.persist_request_attachments(chat_id, &message_id, attachments)?;
 
         let message = Message {
             id: message_id.clone(),
@@ -1736,7 +1729,8 @@ impl MessageService {
             tool_calls: None,
             turn_id,
             tool_call_id: None, // 用户消息没有关联的工具调用
-            attachments: None,
+            attachments: stored_attachments,
+            generated_assets: None,
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
@@ -1750,6 +1744,59 @@ impl MessageService {
         self.repository.create_message(&message).await?;
         tracing::info!("[MessageService] User message saved: {}", message_id);
         Ok(message_id)
+    }
+
+    fn persist_request_attachments(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        attachments: Option<Vec<MessageRequestAttachment>>,
+    ) -> Result<Option<Vec<MessageAttachment>>, AppError> {
+        let Some(list) = attachments else {
+            return Ok(None);
+        };
+
+        if list.is_empty() {
+            return Ok(None);
+        }
+
+        let attachment_dir = self
+            .storage_service
+            .prepare_message_attachment_dir(chat_id, message_id)?;
+
+        let mut stored = Vec::new();
+        for (index, attachment) in list.into_iter().enumerate() {
+            let id = uuid::Uuid::new_v4().to_string();
+            let extension = Self::extension_from_mime(&attachment.mime_type);
+            let suggested_name = if attachment.name.trim().is_empty() {
+                format!("attachment-{:02}.{}", index + 1, extension)
+            } else {
+                let mut name = attachment.name.clone();
+                if !name.contains('.') {
+                    name.push('.');
+                    name.push_str(extension);
+                }
+                name
+            };
+            let file_path = attachment_dir.join(&suggested_name);
+            fs::write(&file_path, &attachment.data).map_err(|e| {
+                AppError::internal_error(&format!(
+                    "Failed to write attachment to disk ({}): {}",
+                    file_path.display(),
+                    e
+                ))
+            })?;
+
+            stored.push(MessageAttachment {
+                id,
+                name: suggested_name,
+                mime_type: attachment.mime_type,
+                size: attachment.data.len() as i64,
+                path: file_path.to_string_lossy().into_owned(),
+            });
+        }
+
+        Ok(Some(stored))
     }
 
     /// 处理工具调用的执行模式和状态
@@ -1813,39 +1860,34 @@ impl MessageService {
         total_tokens: Option<i32>,
         turn_id: Option<i32>,
         generated_images: Vec<LlmGeneratedImage>,
-    ) -> Result<(String, Option<Vec<MessageToolCall>>, String), AppError> {
+    ) -> Result<
+        (
+            String,
+            Option<Vec<MessageToolCall>>,
+            Option<Vec<MessageAttachment>>,
+        ),
+        AppError,
+    > {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
 
         // 处理工具调用的执行模式和状态
         let processed_tool_calls = Self::prepare_tool_calls(tool_calls, &config);
-
-        let mut final_content = content;
-        if let Err(err) = self.persist_generated_images_and_update_content(
-            chat_id,
-            &message_id,
-            &mut final_content,
-            generated_images,
-        ) {
-            tracing::error!(
-                "[MessageService::save_assistant_message] Failed to persist generated images for message {}: {}",
-                message_id,
-                err
-            );
-            return Err(err);
-        }
+        let generated_assets =
+            self.persist_generated_assets(chat_id, &message_id, generated_images)?;
 
         let message = Message {
             id: message_id.clone(),
             chat_id: chat_id.to_string(),
             role: LlmMessageRole::Assistant,
-            content: final_content.clone(),
+            content: content.clone(),
             reasoning,
             tool_calls: processed_tool_calls.clone(),
             config,
             turn_id,
-            tool_call_id: None, // 助手消息没有关联的工具调用ID（工具调用本身在tool_calls字段中）
+            tool_call_id: None,
             attachments: None,
+            generated_assets: generated_assets.clone(),
             input_tokens,
             output_tokens,
             total_tokens,
@@ -1858,7 +1900,7 @@ impl MessageService {
 
         self.repository.create_message(&message).await?;
         tracing::info!("[MessageService] Assistant message saved: {}", message_id);
-        Ok((message_id, processed_tool_calls, final_content))
+        Ok((message_id, processed_tool_calls, generated_assets))
     }
 
     /// 获取聊天配置
@@ -1866,63 +1908,67 @@ impl MessageService {
         self.chat_service.get_chat(chat_id.to_string()).await
     }
 
-    fn persist_generated_images_and_update_content(
+    fn persist_generated_assets(
         &self,
         chat_id: &str,
         message_id: &str,
-        content: &mut String,
         generated_images: Vec<LlmGeneratedImage>,
-    ) -> Result<(), AppError> {
+    ) -> Result<Option<Vec<MessageAttachment>>, AppError> {
         if generated_images.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
         let media_dir = self
             .storage_service
             .prepare_message_media_dir(chat_id, message_id)?;
-        let mut file_urls = Vec::new();
+        let mut stored_assets = Vec::new();
 
         for (index, image) in generated_images.into_iter().enumerate() {
             let data = BASE64_STANDARD.decode(image.data.as_bytes()).map_err(|e| {
                 AppError::internal_error(&format!("Failed to decode generated image: {e}"))
             })?;
             let extension = Self::extension_from_mime(&image.mime_type);
-            let file_path = media_dir.join(format!("image-{:02}.{}", index + 1, extension));
-            std::fs::write(&file_path, data).map_err(|e| {
+            let file_name = format!("image-{:02}.{}", index + 1, extension);
+            let file_path = media_dir.join(&file_name);
+            let size = data.len() as i64;
+            fs::write(&file_path, &data).map_err(|e| {
                 AppError::internal_error(&format!(
                     "Failed to write generated image to disk ({}): {}",
                     file_path.display(),
                     e
                 ))
             })?;
-            // 使用 file:// URL，Url::from_file_path 会自动处理空格等特殊字符的编码
-            let file_url = Url::from_file_path(&file_path).map_err(|_| {
-                AppError::internal_error("Failed to convert generated image path to URL")
-            })?;
-            file_urls.push(file_url.to_string());
+
+            stored_assets.push(MessageAttachment {
+                id: uuid::Uuid::new_v4().to_string(),
+                name: file_name,
+                mime_type: image.mime_type.clone(),
+                size,
+                path: file_path.to_string_lossy().into_owned(),
+            });
         }
 
-        Self::append_image_markdown(content, &file_urls);
-        Ok(())
+        Ok(Some(stored_assets))
     }
 
-    fn append_image_markdown(content: &mut String, file_urls: &[String]) {
-        if file_urls.is_empty() {
-            return;
+    fn load_llm_attachments(
+        attachments: &[MessageAttachment],
+    ) -> Result<Vec<handbox_llm::types::LlmMessageAttachment>, AppError> {
+        let mut resources = Vec::new();
+        for attachment in attachments {
+            let data = fs::read(&attachment.path).map_err(|e| {
+                AppError::internal_error(&format!(
+                    "Failed to read attachment {} from {}: {}",
+                    attachment.name, attachment.path, e
+                ))
+            })?;
+            resources.push(handbox_llm::types::LlmMessageAttachment {
+                name: attachment.name.clone(),
+                mime_type: attachment.mime_type.clone(),
+                data,
+            });
         }
-
-        while content.ends_with('\n') {
-            content.pop();
-        }
-        if !content.is_empty() {
-            content.push_str("\n\n");
-        }
-        for (index, url) in file_urls.iter().enumerate() {
-            content.push_str(&format!("![Generated image {}]({})\n\n", index + 1, url));
-        }
-        while content.ends_with('\n') {
-            content.pop();
-        }
+        Ok(resources)
     }
 
     fn extension_from_mime(mime_type: &str) -> &'static str {
@@ -2015,8 +2061,14 @@ impl MessageService {
             .get_messages_by_turn_id_range(&chat_id.to_string(), min_turn_id, max_turn_id)
             .await?;
 
-        request_messages.extend(turn_messages.iter().map(|m| {
-            LlmMessage {
+        for m in turn_messages.iter() {
+            let attachments = if let Some(atts) = m.attachments.as_ref() {
+                Some(Self::load_llm_attachments(atts)?)
+            } else {
+                None
+            };
+
+            request_messages.push(LlmMessage {
                 role: m.role.clone(),
                 content: m.content.clone(),
                 reasoning: m.reasoning.clone(),
@@ -2026,9 +2078,9 @@ impl MessageService {
                     .as_ref()
                     .map(|calls| calls.iter().map(|tc| tc.to_llm_tool_call()).collect()),
                 tool_call_id: m.tool_call_id.clone(),
-                attachments: None, // TODO: Load attachments from disk when needed
-            }
-        }));
+                attachments,
+            });
+        }
 
         // 8. 构建请求
         Ok(MessageRequest {
@@ -2082,6 +2134,7 @@ impl MessageService {
                 output_tokens: api_response.usage.as_ref().map(|u| u.completion_tokens),
                 total_tokens: api_response.usage.as_ref().map(|u| u.total_tokens),
                 duration: Some(duration as i64),
+                generated_assets: None,
             },
             generated_images,
         ))
@@ -2432,6 +2485,7 @@ impl MessageService {
                         turn_id,
                         tool_call_id: None,
                         attachments: None,
+                        generated_assets: response_clone.generated_assets.clone(),
                         input_tokens: response_clone.input_tokens,
                         output_tokens: response_clone.output_tokens,
                         total_tokens: response_clone.total_tokens,

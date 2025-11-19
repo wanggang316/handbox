@@ -17,7 +17,10 @@ pub async fn debug_check_file(file_path: String) -> Result<String, AppError> {
             info.push_str(&format!("Is file: {}\n", metadata.is_file()));
             info.push_str(&format!("Is dir: {}\n", metadata.is_dir()));
             info.push_str(&format!("Size: {} bytes\n", metadata.len()));
-            info.push_str(&format!("Permissions: {:o}\n", metadata.permissions().mode()));
+            info.push_str(&format!(
+                "Permissions: {:o}\n",
+                metadata.permissions().mode()
+            ));
         }
 
         // Try to read the file

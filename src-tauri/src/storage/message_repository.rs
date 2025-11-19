@@ -64,9 +64,22 @@ impl MessageRepository {
     /// 由于 Rust 的生命周期限制，我们不能在函数内部创建 JSON 字符串、
     /// 借用它们给 Query、然后返回 Query 和字符串的所有权。
     /// 因此必须让调用方持有 JSON 字符串，Query 只借用它们的引用。
+    fn serialize_generated_assets(message: &Message) -> Result<Option<String>, AppError> {
+        message
+            .generated_assets
+            .as_ref()
+            .map(|assets| {
+                serde_json::to_string(assets).map_err(|e| {
+                    AppError::validation_error(&format!("Invalid generated assets: {}", e))
+                })
+            })
+            .transpose()
+    }
+
     fn create_insert_query<'a>(
         message: &'a Message,
         attachments_json: &'a Option<String>,
+        generated_assets_json: &'a Option<String>,
         config_json: &'a Option<String>,
         tools_json: &'a Option<String>,
     ) -> Query<'a, Sqlite, SqliteArguments<'a>> {
@@ -74,9 +87,9 @@ impl MessageRepository {
 
         let sql = r#"
             INSERT INTO messages (id, chat_id, role, content, reasoning, config, tools, attachments,
-                                input_tokens, output_tokens, total_tokens, start_time,
+                                generated_assets, input_tokens, output_tokens, total_tokens, start_time,
                                 end_time, duration, turn_id, tool_call_id, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         "#;
 
         sqlx::query(sql)
@@ -88,6 +101,7 @@ impl MessageRepository {
             .bind(config_json)
             .bind(tools_json)
             .bind(attachments_json)
+            .bind(generated_assets_json)
             .bind(message.input_tokens)
             .bind(message.output_tokens)
             .bind(message.total_tokens)
@@ -104,14 +118,21 @@ impl MessageRepository {
     pub async fn create_message(&self, message: &Message) -> Result<(), AppError> {
         // 序列化 JSON 字段
         let attachments_json = Self::serialize_attachments(message)?;
+        let generated_assets_json = Self::serialize_generated_assets(message)?;
         let config_json = Self::serialize_config(message)?;
         let tools_json = Self::serialize_tool_calls(message)?;
 
         // 创建并执行查询
-        Self::create_insert_query(message, &attachments_json, &config_json, &tools_json)
-            .execute(self.db.pool())
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to create message: {}", e)))?;
+        Self::create_insert_query(
+            message,
+            &attachments_json,
+            &generated_assets_json,
+            &config_json,
+            &tools_json,
+        )
+        .execute(self.db.pool())
+        .await
+        .map_err(|e| AppError::internal_error(&format!("Failed to create message: {}", e)))?;
 
         Ok(())
     }
@@ -130,16 +151,23 @@ impl MessageRepository {
         for message in messages {
             // 序列化 JSON 字段
             let attachments_json = Self::serialize_attachments(message)?;
+            let generated_assets_json = Self::serialize_generated_assets(message)?;
             let config_json = Self::serialize_config(message)?;
             let tools_json = Self::serialize_tool_calls(message)?;
 
             // 创建并执行查询
-            Self::create_insert_query(message, &attachments_json, &config_json, &tools_json)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    AppError::internal_error(&format!("Failed to create message in batch: {}", e))
-                })?;
+            Self::create_insert_query(
+                message,
+                &attachments_json,
+                &generated_assets_json,
+                &config_json,
+                &tools_json,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to create message in batch: {}", e))
+            })?;
         }
 
         // 提交事务
@@ -188,8 +216,9 @@ impl MessageRepository {
 
         let query = format!(
             r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
-                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+                   input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
+                   turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE {} ORDER BY created_at {} LIMIT {} OFFSET {}
         "#,
             where_clause, order_direction, limit_param, offset_param
@@ -284,8 +313,9 @@ impl MessageRepository {
         );
 
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
-                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+                   input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
+                   turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE id = $1
         "#;
 
@@ -629,8 +659,9 @@ impl MessageRepository {
     /// 根据 turn_id 获取所有相关消息
     pub async fn get_messages_by_turn_id(&self, turn_id: i32) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
-                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+                   input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
+                   turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE turn_id = $1 ORDER BY created_at ASC
         "#;
 
@@ -657,8 +688,9 @@ impl MessageRepository {
         turn_id: i32,
     ) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
-                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+                   input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
+                   turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE chat_id = $1 AND turn_id = $2 ORDER BY created_at ASC
         "#;
 
@@ -719,8 +751,9 @@ impl MessageRepository {
         max_turn_id: i32,
     ) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, input_tokens, output_tokens,
-                   total_tokens, start_time, end_time, duration, turn_id, tool_call_id, created_at, updated_at
+            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+                   input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
+                   turn_id, tool_call_id, created_at, updated_at
             FROM messages
             WHERE chat_id = $1 AND turn_id >= $2 AND turn_id <= $3
             ORDER BY created_at ASC
@@ -776,6 +809,13 @@ impl MessageRepository {
             None
         };
 
+        let generated_assets_json: Option<String> = row.try_get("generated_assets").ok();
+        let generated_assets = if let Some(json) = generated_assets_json {
+            serde_json::from_str(&json).unwrap_or_default()
+        } else {
+            None
+        };
+
         let config_json: Option<String> = row.try_get("config").ok();
         let config = if let Some(json) = config_json {
             serde_json::from_str(&json).unwrap_or_default()
@@ -801,6 +841,7 @@ impl MessageRepository {
             turn_id: row.try_get("turn_id").ok(),
             tool_call_id: row.try_get("tool_call_id").ok(),
             attachments,
+            generated_assets,
             input_tokens: row.try_get("input_tokens").ok(),
             output_tokens: row.try_get("output_tokens").ok(),
             total_tokens: row.try_get("total_tokens").ok(),
@@ -879,6 +920,7 @@ mod tests {
             turn_id: Some(1),
             tool_call_id: None,
             attachments: None,
+            generated_assets: None,
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
@@ -967,6 +1009,7 @@ mod tests {
             turn_id: Some(1),
             tool_call_id: None,
             attachments: None,
+            generated_assets: None,
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
@@ -1027,6 +1070,7 @@ mod tests {
                 turn_id: Some(1),
                 tool_call_id: Some("tool_1".to_string()),
                 attachments: None,
+                generated_assets: None,
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
@@ -1047,6 +1091,7 @@ mod tests {
                 turn_id: Some(1),
                 tool_call_id: Some("tool_2".to_string()),
                 attachments: None,
+                generated_assets: None,
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
@@ -1067,6 +1112,7 @@ mod tests {
                 turn_id: Some(1),
                 tool_call_id: Some("tool_3".to_string()),
                 attachments: None,
+                generated_assets: None,
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
@@ -1157,6 +1203,7 @@ mod tests {
                 turn_id: Some(turn),
                 tool_call_id: None,
                 attachments: None,
+                generated_assets: None,
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
@@ -1178,6 +1225,7 @@ mod tests {
                 turn_id: Some(turn),
                 tool_call_id: None,
                 attachments: None,
+                generated_assets: None,
                 input_tokens: None,
                 output_tokens: None,
                 total_tokens: None,

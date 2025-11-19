@@ -7,6 +7,7 @@ import type {
   MessageResponse,
   MessageRequest,
   ChatAttachment,
+  MessageRequestAttachment,
   ToolCall,
   ToolExecutionStatus,
   UserMessageSendRequest,
@@ -174,6 +175,7 @@ class MessageStore {
         content: response.content,
         reasoning: response.reasoning,
         toolCalls: response.toolCalls,
+        generatedAssets: response.generatedAssets,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,
@@ -190,6 +192,7 @@ class MessageStore {
         content: response.content,
         reasoning: response.reasoning,
         toolCalls: response.toolCalls,
+        generatedAssets: response.generatedAssets,
         config: {
           modelId: response.modelId,
           providerId: response.providerId,
@@ -381,6 +384,7 @@ class MessageStore {
           modelId: data.modelId,
           providerId: data.providerId,
           toolCalls: data.toolCalls,
+          generatedAssets: data.generatedAssets,
           inputTokens: undefined,
           outputTokens: undefined,
           totalTokens: undefined,
@@ -564,6 +568,14 @@ class MessageStore {
       this.setSending(true);
       this.setError(null);
 
+      const apiAttachments: MessageRequestAttachment[] = attachments.map(
+        (attachment) => ({
+          name: attachment.name,
+          mime_type: attachment.mimeType,
+          data: Array.from(attachment.data ?? []),
+        }),
+      );
+
       // 添加用户消息到本地状态
       const userMessage: Message = {
         id: crypto.randomUUID(),
@@ -577,6 +589,7 @@ class MessageStore {
         },
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        attachments: this.createLocalMessageAttachments(attachments),
       };
 
       this.addMessage(currentChat.id, userMessage);
@@ -586,7 +599,7 @@ class MessageStore {
         chatId: currentChat.id,
         content: content,
         tempUserMessageId: userMessage.id || "",
-        attachments: attachments,
+        attachments: apiAttachments,
       };
 
       // 清理之前的监听器（如果存在）
@@ -622,6 +635,40 @@ class MessageStore {
       this.setSending(false);
       throw error;
     }
+  }
+
+  private createLocalMessageAttachments(
+    attachments: ChatAttachment[],
+  ): Message["attachments"] {
+    if (!attachments?.length) {
+      return undefined;
+    }
+
+    return attachments.map((attachment, index) => ({
+      id: crypto.randomUUID(),
+      name: attachment.name || `附件${index + 1}`,
+      mimeType: attachment.mimeType,
+      size: attachment.data?.length ?? 0,
+      path: this.convertAttachmentToDataUrl(attachment),
+    }));
+  }
+
+  private convertAttachmentToDataUrl(attachment: ChatAttachment): string {
+    const data = attachment.data;
+    if (!data || data.length === 0) {
+      return "";
+    }
+
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let i = 0; i < data.length; i += chunkSize) {
+      const chunk = data.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+
+    const base64 = btoa(binary);
+    const mime = attachment.mimeType || "application/octet-stream";
+    return `data:${mime};base64,${base64}`;
   }
 
   /**
