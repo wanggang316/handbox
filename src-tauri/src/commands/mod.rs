@@ -1,4 +1,5 @@
 // IPC 命令模块
+pub mod artifact;
 pub mod auth;
 pub mod chat;
 pub mod debug;
@@ -11,6 +12,7 @@ pub mod search;
 pub mod window;
 
 // 重新导出所有命令
+pub use artifact::*;
 pub use auth::*;
 pub use chat::*;
 pub use debug::*;

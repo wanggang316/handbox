@@ -11,10 +11,10 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
-    StorageService, UserSessionService,
+    ArtifactService, ChatService, McpService, MessageService, ModelService, ProviderService,
+    SearchService, StorageService, UserSessionService,
 };
-use crate::storage::Database;
+use crate::storage::{ArtifactRepository, Database};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
@@ -95,6 +95,10 @@ async fn initialize_services(
         tracing::warn!("恢复用户会话失败: {:?}", e);
     }
 
+    // 初始化 Artifact 服务
+    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
+    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(chat_service);
@@ -104,6 +108,7 @@ async fn initialize_services(
     app.manage(mcp_service);
     app.manage(search_service);
     app.manage(user_session_service);
+    app.manage(artifact_service);
 
     Ok(())
 }
@@ -222,6 +227,14 @@ pub fn run() {
             search_add_history,
             search_clear_history,
             search_suggestions,
+            // Artifact 相关命令
+            artifact_create,
+            artifact_update,
+            artifact_get,
+            artifact_list,
+            artifact_delete,
+            artifact_install,
+            artifact_execute,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
