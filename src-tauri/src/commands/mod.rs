@@ -1,6 +1,7 @@
 // IPC 命令模块
 pub mod auth;
 pub mod chat;
+pub mod debug;
 pub mod llm_config;
 pub mod mcp;
 pub mod message;
@@ -12,6 +13,7 @@ pub mod window;
 // 重新导出所有命令
 pub use auth::*;
 pub use chat::*;
+pub use debug::*;
 pub use llm_config::*;
 pub use mcp::*;
 pub use message::*;

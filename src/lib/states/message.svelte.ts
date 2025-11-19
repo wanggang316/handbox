@@ -10,13 +10,16 @@ import type {
   ToolCall,
   ToolExecutionStatus,
   UserMessageSendRequest,
-} from '$lib/types/chat';
-import type { ProviderConfig, UUID } from '$lib/types';
-import * as messageApi from '$lib/api/message';
-import { listenToStreamEvents } from '$lib/api/message';
-import { getProviderConfigById, getProviderConfig as getProviderConfigByType } from './provider.svelte';
-import { chatState } from './chat.svelte';
-import { showAppError, type ErrorDisplayOptions } from '$lib/utils';
+} from "$lib/types/chat";
+import type { ProviderConfig, UUID } from "$lib/types";
+import * as messageApi from "$lib/api/message";
+import { listenToStreamEvents } from "$lib/api/message";
+import {
+  getProviderConfigById,
+  getProviderConfig as getProviderConfigByType,
+} from "./provider.svelte";
+import { chatState } from "./chat.svelte";
+import { showAppError, type ErrorDisplayOptions } from "$lib/utils";
 
 interface MessageState {
   // 按 chatId 组织消息
@@ -31,7 +34,6 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
-  streamingGeneratedImages: import('$lib/types/chat').GeneratedImage[];
 }
 
 interface ToolExecuteEventPayload {
@@ -47,10 +49,9 @@ class MessageStore {
     isSending: false,
     error: null,
     streamingMessageId: null,
-    streamingContent: '',
-    streamingReasoning: '',
+    streamingContent: "",
+    streamingReasoning: "",
     streamingToolCalls: null,
-    streamingGeneratedImages: [],
   });
 
   // 当前流式事件监听器的清理函数
@@ -85,10 +86,6 @@ class MessageStore {
     return this.state.streamingToolCalls;
   }
 
-  get streamingGeneratedImages() {
-    return this.state.streamingGeneratedImages;
-  }
-
   // 判断是否正在推理中（有推理内容但还没有最终内容）
   get isReasoning() {
     return this.state.streamingReasoning && !this.state.streamingContent;
@@ -96,7 +93,11 @@ class MessageStore {
 
   // 判断是否在等待消息响应（发送中但还没有任何流式内容）
   get isMessageLoading() {
-    return this.state.isSending && !this.state.streamingReasoning && !this.state.streamingContent;
+    return (
+      this.state.isSending &&
+      !this.state.streamingReasoning &&
+      !this.state.streamingContent
+    );
   }
 
   // 响应式getter用于UI绑定 - 直接返回内部状态以确保响应性
@@ -138,8 +139,10 @@ class MessageStore {
 
   // 批量缓存 providerConfigs（在加载消息时调用）
   private cacheProviderConfigs(messages: Message[]): void {
-    const providerIds = new Set(messages.map(m => m.config?.providerId).filter(Boolean) as string[]);
-    
+    const providerIds = new Set(
+      messages.map((m) => m.config?.providerId).filter(Boolean) as string[],
+    );
+
     for (const providerId of providerIds) {
       if (!this.state.providerConfigsCache[providerId]) {
         const config = getProviderConfigById(providerId);
@@ -150,13 +153,18 @@ class MessageStore {
     }
   }
 
-  private applyMessageResponse(chatId: string, response: MessageResponse): void {
+  private applyMessageResponse(
+    chatId: string,
+    response: MessageResponse,
+  ): void {
     if (!this.state.messagesByChat[chatId]) {
       this.state.messagesByChat[chatId] = [];
     }
 
     const messages = this.state.messagesByChat[chatId];
-    const index = messages.findIndex(message => message.id === response.messageId);
+    const index = messages.findIndex(
+      (message) => message.id === response.messageId,
+    );
 
     if (index !== -1) {
       const existing = messages[index];
@@ -166,7 +174,6 @@ class MessageStore {
         content: response.content,
         reasoning: response.reasoning,
         toolCalls: response.toolCalls,
-        generatedImages: response.generatedImages,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         totalTokens: response.totalTokens,
@@ -179,11 +186,10 @@ class MessageStore {
       const newMessage: Message = {
         id: response.messageId,
         chatId,
-        role: 'assistant',
+        role: "assistant",
         content: response.content,
         reasoning: response.reasoning,
         toolCalls: response.toolCalls,
-        generatedImages: response.generatedImages,
         config: {
           modelId: response.modelId,
           providerId: response.providerId,
@@ -209,7 +215,7 @@ class MessageStore {
   // 获取指定消息
   getMessage(chatId: string, messageId: string): Message | null {
     const messages = this.getMessages(chatId);
-    return messages.find(m => m.id === messageId) || null;
+    return messages.find((m) => m.id === messageId) || null;
   }
 
   // Actions
@@ -228,11 +234,11 @@ class MessageStore {
   private reportError(
     error: unknown,
     fallbackMessage: string,
-    options?: ErrorDisplayOptions
+    options?: ErrorDisplayOptions,
   ) {
     const normalized = showAppError(error, {
       fallbackMessage,
-      ...options
+      ...options,
     });
     this.setError(normalized.message);
     return normalized;
@@ -242,7 +248,11 @@ class MessageStore {
   setMessages(chatId: string, messages: Message[]) {
     // 如果正在发送消息且本地已有消息，避免覆盖
     const existingMessages = this.state.messagesByChat[chatId] || [];
-    if (this.isSending && existingMessages.length > 0 && messages.length === 0) {
+    if (
+      this.isSending &&
+      existingMessages.length > 0 &&
+      messages.length === 0
+    ) {
       return;
     }
 
@@ -265,7 +275,7 @@ class MessageStore {
   getMessageById(chatId: string, messageId: string): Message | undefined {
     const messages = this.state.messagesByChat[chatId];
     if (messages) {
-      return messages.find(m => m.id === messageId);
+      return messages.find((m) => m.id === messageId);
     }
     return undefined;
   }
@@ -274,7 +284,7 @@ class MessageStore {
   updateMessage(chatId: string, messageId: string, updates: Partial<Message>) {
     const messages = this.state.messagesByChat[chatId];
     if (messages) {
-      const index = messages.findIndex(m => m.id === messageId);
+      const index = messages.findIndex((m) => m.id === messageId);
       if (index !== -1) {
         const updatedMessage = { ...messages[index], ...updates };
         const nextMessages = [...messages];
@@ -288,17 +298,18 @@ class MessageStore {
   deleteMessage(chatId: string, messageId: string) {
     const messages = this.state.messagesByChat[chatId];
     if (messages) {
-      this.state.messagesByChat[chatId] = messages.filter(m => m.id !== messageId);
+      this.state.messagesByChat[chatId] = messages.filter(
+        (m) => m.id !== messageId,
+      );
     }
   }
 
   // 开始流式响应
   startStreaming(messageId: string) {
     this.state.streamingMessageId = messageId;
-    this.state.streamingContent = '';
-    this.state.streamingReasoning = '';
+    this.state.streamingContent = "";
+    this.state.streamingReasoning = "";
     this.state.streamingToolCalls = null;
-    this.state.streamingGeneratedImages = [];
   }
 
   // 更新流式内容
@@ -322,20 +333,15 @@ class MessageStore {
   }
 
   // 添加流式生成的图片
-  appendStreamingGeneratedImages(images: import('$lib/types/chat').GeneratedImage[]) {
-    this.state.streamingGeneratedImages = [...this.state.streamingGeneratedImages, ...images];
-  }
-
   // 完成流式响应
   finishStreaming(chatId: string, response: MessageResponse) {
     this.applyMessageResponse(chatId, response);
 
     // 清理流式状态
     this.state.streamingMessageId = null;
-    this.state.streamingContent = '';
-    this.state.streamingReasoning = '';
+    this.state.streamingContent = "";
+    this.state.streamingReasoning = "";
     this.state.streamingToolCalls = null;
-    this.state.streamingGeneratedImages = [];
   }
 
   /**
@@ -343,16 +349,16 @@ class MessageStore {
    */
   private createStreamEventHandlers(
     onComplete?: (response: MessageResponse) => void,
-    onError?: (error: any) => void
+    onError?: (error: any) => void,
   ) {
     return {
       onStart: (data: any) => {
-        console.log('流式开始:', data);
+        console.log("流式开始:", data);
         this.startStreaming(data.messageId);
       },
 
       onChunk: (data: any) => {
-        console.log('流式数据:', data);
+        console.log("流式数据:", data);
         this.setStreamingContent(data.content);
         if (data.reasoning) {
           // 累积推理过程内容，因为后端发送的是增量内容
@@ -361,28 +367,24 @@ class MessageStore {
         if (data.toolCalls) {
           this.setStreamingToolCalls(data.toolCalls);
         }
-        if (data.generatedImages) {
-          this.appendStreamingGeneratedImages(data.generatedImages);
-        }
       },
 
       onEnd: (data: any) => {
-        console.log('流式完成:', data);
+        console.log("流式完成:", data);
 
         // 构造 MessageResponse 对象
         const response: MessageResponse = {
           chatId: data.chatId,
-          messageId: data.messageId || '',
+          messageId: data.messageId || "",
           content: data.finalContent,
           reasoning: data.finalReasoning,
           modelId: data.modelId,
           providerId: data.providerId,
           toolCalls: data.toolCalls,
-          generatedImages: data.generatedImages,
           inputTokens: undefined,
           outputTokens: undefined,
           totalTokens: undefined,
-          duration: undefined
+          duration: undefined,
         };
 
         // 使用统一的流式完成方法
@@ -401,11 +403,11 @@ class MessageStore {
       },
 
       onError: (payload: any) => {
-        console.error('流式错误:', payload);
+        console.error("流式错误:", payload);
         const errorDetail = payload?.error ?? payload;
-        this.reportError(errorDetail, '流式响应错误', {
+        this.reportError(errorDetail, "流式响应错误", {
           requiresAcknowledgement: true,
-          title: '对话失败'
+          title: "对话失败",
         });
 
         // 执行自定义错误回调
@@ -418,28 +420,36 @@ class MessageStore {
           this.currentStreamUnlisten();
           this.currentStreamUnlisten = null;
         }
-      }
+      },
     };
   }
 
   /**
    * 处理消息删除 - 从状态中移除指定的消息
    */
-  private handleMessagesDelete(chatId: string, messageIds: string[], source: string = 'unknown') {
+  private handleMessagesDelete(
+    chatId: string,
+    messageIds: string[],
+    source: string = "unknown",
+  ) {
     console.log(`[${source}] 消息被删除:`, { chatId, messageIds });
 
     // 从状态中删除这些消息
     const messages = this.state.messagesByChat[chatId] || [];
-    const filteredMessages = messages.filter((m: Message) => m.id && !messageIds.includes(m.id));
+    const filteredMessages = messages.filter(
+      (m: Message) => m.id && !messageIds.includes(m.id),
+    );
     this.state.messagesByChat[chatId] = filteredMessages;
 
-    console.log(`[${source}] 已从 chat ${chatId} 删除 ${messageIds.length} 条消息`);
+    console.log(
+      `[${source}] 已从 chat ${chatId} 删除 ${messageIds.length} 条消息`,
+    );
   }
 
   /**
    * 创建消息删除回调
    */
-  private createMessagesDeleteCallback(source: string = 'unknown') {
+  private createMessagesDeleteCallback(source: string = "unknown") {
     return (data: { chatId: string; messageIds: string[] }) => {
       this.handleMessagesDelete(data.chatId, data.messageIds, source);
     };
@@ -448,30 +458,53 @@ class MessageStore {
   /**
    * 处理用户消息保存 - 替换临时ID为真实ID
    */
-  private handleUserMessageSaved(tempMessageId: string, savedMessageId: string, chatId: string, source: string = 'unknown') {
-    console.log(`[${source}] 用户消息已保存，替换ID:`, { tempMessageId, savedMessageId, chatId });
+  private handleUserMessageSaved(
+    tempMessageId: string,
+    savedMessageId: string,
+    chatId: string,
+    source: string = "unknown",
+  ) {
+    console.log(`[${source}] 用户消息已保存，替换ID:`, {
+      tempMessageId,
+      savedMessageId,
+      chatId,
+    });
 
     const messages = this.state.messagesByChat[chatId] || [];
-    const messageIndex = messages.findIndex((m: Message) => m.id === tempMessageId);
+    const messageIndex = messages.findIndex(
+      (m: Message) => m.id === tempMessageId,
+    );
 
     if (messageIndex !== -1) {
       messages[messageIndex] = {
         ...messages[messageIndex],
-        id: savedMessageId
+        id: savedMessageId,
       };
       this.state.messagesByChat[chatId] = [...messages];
-      console.log(`[${source}] 已替换 chat ${chatId} 中的消息ID: ${tempMessageId} -> ${savedMessageId}`);
+      console.log(
+        `[${source}] 已替换 chat ${chatId} 中的消息ID: ${tempMessageId} -> ${savedMessageId}`,
+      );
     } else {
-      console.warn(`[${source}] 未找到临时消息ID: ${tempMessageId} in chat ${chatId}`);
+      console.warn(
+        `[${source}] 未找到临时消息ID: ${tempMessageId} in chat ${chatId}`,
+      );
     }
   }
 
   /**
    * 创建用户消息保存回调
    */
-  private createUserMessageSavedCallback(chatId: string, source: string = 'unknown') {
+  private createUserMessageSavedCallback(
+    chatId: string,
+    source: string = "unknown",
+  ) {
     return (data: { tempMessageId: string; savedMessageId: string }) => {
-      this.handleUserMessageSaved(data.tempMessageId, data.savedMessageId, chatId, source);
+      this.handleUserMessageSaved(
+        data.tempMessageId,
+        data.savedMessageId,
+        chatId,
+        source,
+      );
     };
   }
 
@@ -484,15 +517,13 @@ class MessageStore {
   clearAllMessages() {
     this.state.messagesByChat = {};
     this.state.streamingMessageId = null;
-    this.state.streamingContent = '';
-    this.state.streamingReasoning = '';
+    this.state.streamingContent = "";
+    this.state.streamingReasoning = "";
     this.state.streamingToolCalls = null;
-    this.state.streamingGeneratedImages = [];
   }
 
-
   // API 操作方法
-  
+
   /**
    * 加载指定聊天的消息
    */
@@ -502,9 +533,8 @@ class MessageStore {
       this.setError(null);
       const messages = await messageApi.getMessages(chatId);
       this.setMessages(chatId, messages);
-
     } catch (error) {
-      this.reportError(error, '加载消息失败');
+      this.reportError(error, "加载消息失败");
       throw error;
     } finally {
       this.setLoading(false);
@@ -514,15 +544,20 @@ class MessageStore {
   /**
    * 发送消息（使用流式响应）- 简化版本，只需要内容和附件
    */
-  async sendMessage(content: string, attachments: ChatAttachment[]): Promise<void> {
+  async sendMessage(
+    content: string,
+    attachments: ChatAttachment[],
+  ): Promise<void> {
     // 获取当前聊天信息
     const currentChat = chatState.currentChat;
     if (!currentChat || !currentChat.id) {
-      throw new Error('没有活跃的聊天');
+      throw new Error("没有活跃的聊天");
     }
 
     if (!currentChat.modelId || !currentChat.providerId) {
-      throw new Error('请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。');
+      throw new Error(
+        "请先为当前聊天选择模型。如果供应商列表为空，请先配置AI供应商。",
+      );
     }
 
     try {
@@ -533,7 +568,7 @@ class MessageStore {
       const userMessage: Message = {
         id: crypto.randomUUID(),
         chatId: currentChat.id,
-        role: 'user',
+        role: "user",
         content: content,
         config: {
           modelId: currentChat.modelId,
@@ -541,7 +576,7 @@ class MessageStore {
           stream: true,
         },
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       };
 
       this.addMessage(currentChat.id, userMessage);
@@ -550,8 +585,8 @@ class MessageStore {
       const userMessageRequest: UserMessageSendRequest = {
         chatId: currentChat.id,
         content: content,
-        tempUserMessageId: userMessage.id || '',
-        attachments: attachments
+        tempUserMessageId: userMessage.id || "",
+        attachments: attachments,
       };
 
       // 清理之前的监听器（如果存在）
@@ -570,17 +605,19 @@ class MessageStore {
           // onError callback
           () => {
             this.setSending(false);
-          }
+          },
         ),
-        onUserMessageSaved: this.createUserMessageSavedCallback(currentChat.id, 'sendMessage')
+        onUserMessageSaved: this.createUserMessageSavedCallback(
+          currentChat.id,
+          "sendMessage",
+        ),
       });
 
       // 事件监听器设置完成后，再发送流式消息
       await messageApi.sendUserMessageStream(userMessageRequest);
-
     } catch (error) {
-      this.reportError(error, '发送消息失败', {
-        title: '消息发送失败'
+      this.reportError(error, "发送消息失败", {
+        title: "消息发送失败",
       });
       this.setSending(false);
       throw error;
@@ -595,7 +632,7 @@ class MessageStore {
       await messageApi.deleteMessage(messageId);
       this.deleteMessage(chatId, messageId);
     } catch (error) {
-      this.reportError(error, '删除消息失败');
+      this.reportError(error, "删除消息失败");
       throw error;
     }
   }
@@ -604,19 +641,19 @@ class MessageStore {
    * 流式重新生成消息 - 删除当前消息，根据本轮消息重新生成
    */
   async regenerateMessage(messageId: string): Promise<void> {
-    console.log('[regenerateMessage] 开始重新生成消息:', messageId);
+    console.log("[regenerateMessage] 开始重新生成消息:", messageId);
 
     try {
       this.setSending(true);
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
-        console.log('[regenerateMessage] 清理之前的监听器');
+        console.log("[regenerateMessage] 清理之前的监听器");
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
 
-      console.log('[regenerateMessage] 设置事件监听器...');
+      console.log("[regenerateMessage] 设置事件监听器...");
 
       // 设置流式事件监听器
       this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
@@ -629,24 +666,25 @@ class MessageStore {
             // onError callback
             () => {
               this.setSending(false);
-            }
+            },
           ),
           // 添加消息删除回调
-          onMessagesDelete: this.createMessagesDeleteCallback('regenerateMessage')
+          onMessagesDelete:
+            this.createMessagesDeleteCallback("regenerateMessage"),
         },
-        'message_stream'
+        "message_stream",
       );
 
-      console.log('[regenerateMessage] 调用流式 API...');
+      console.log("[regenerateMessage] 调用流式 API...");
 
       // 调用流式 API
       await messageApi.regenerateAssistantMessageStream(messageId as UUID);
 
-      console.log('[regenerateMessage] API 调用成功');
+      console.log("[regenerateMessage] API 调用成功");
     } catch (error) {
-      console.error('[regenerateMessage] 重新生成失败:', error);
-      this.reportError(error, '重新生成失败', {
-        title: '重新生成失败'
+      console.error("[regenerateMessage] 重新生成失败:", error);
+      this.reportError(error, "重新生成失败", {
+        title: "重新生成失败",
       });
       this.setSending(false);
       throw error;
@@ -658,61 +696,67 @@ class MessageStore {
    * @param messageId 消息ID
    * @param content 可选的新消息内容，如果提供则更新消息内容后重新发送
    */
-  async resendMessage(chatId: string, messageId: string, content?: string): Promise<void> {
-    console.log('[resendMessage] 开始重发消息:', messageId, content ? '(带新内容)' : '');
+  async resendMessage(
+    chatId: string,
+    messageId: string,
+    content?: string,
+  ): Promise<void> {
+    console.log(
+      "[resendMessage] 开始重发消息:",
+      messageId,
+      content ? "(带新内容)" : "",
+    );
 
     try {
       this.setSending(true);
 
-      if (typeof content === 'string') {
+      if (typeof content === "string") {
         this.updateMessage(chatId, messageId, {
           content,
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
         });
       }
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
-        console.log('[resendMessage] 清理之前的监听器');
+        console.log("[resendMessage] 清理之前的监听器");
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
 
-      console.log('[resendMessage] 设置事件监听器...');
+      console.log("[resendMessage] 设置事件监听器...");
 
       // 设置流式事件监听器
-      this.currentStreamUnlisten = await messageApi.listenToStreamEvents(
-        {
-          ...this.createStreamEventHandlers(
-            // onComplete callback
-            () => {
-              this.setSending(false);
-            },
-            // onError callback
-            () => {
-              this.setSending(false);
-            }
-          ),
-          // 添加消息删除回调
-          onMessagesDelete: this.createMessagesDeleteCallback('resendMessage')
-        }
-      );
+      this.currentStreamUnlisten = await messageApi.listenToStreamEvents({
+        ...this.createStreamEventHandlers(
+          // onComplete callback
+          () => {
+            this.setSending(false);
+          },
+          // onError callback
+          () => {
+            this.setSending(false);
+          },
+        ),
+        // 添加消息删除回调
+        onMessagesDelete: this.createMessagesDeleteCallback("resendMessage"),
+      });
 
-      console.log('[resendMessage] 调用 resendMessageStream API...');
+      console.log("[resendMessage] 调用 resendMessageStream API...");
 
       // 调用流式重发API，传递可选的新内容
       await messageApi.resendUserMessageStream(messageId as UUID, content);
 
-      console.log('[resendMessage] API 调用成功');
+      console.log("[resendMessage] API 调用成功");
     } catch (error) {
       // 清理监听器
       if (this.currentStreamUnlisten) {
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
-      console.error('重发消息失败:', error);
-      this.reportError(error, '重发消息失败', {
-        title: '重发失败'
+      console.error("重发消息失败:", error);
+      this.reportError(error, "重发消息失败", {
+        title: "重发失败",
       });
       this.setSending(false);
       throw error;
@@ -722,11 +766,17 @@ class MessageStore {
   /**
    * 执行多个工具调用 - 使用流式API
    */
-  async executeToolCalls(messageId: string, toolCallIds: string[]): Promise<void> {
-    console.log('[executeToolCalls] 开始执行工具调用:', { messageId, toolCallIds });
+  async executeToolCalls(
+    messageId: string,
+    toolCallIds: string[],
+  ): Promise<void> {
+    console.log("[executeToolCalls] 开始执行工具调用:", {
+      messageId,
+      toolCallIds,
+    });
 
     if (toolCallIds.length === 0) {
-      console.warn('[executeToolCalls] 工具调用列表为空');
+      console.warn("[executeToolCalls] 工具调用列表为空");
       return;
     }
 
@@ -735,29 +785,32 @@ class MessageStore {
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
-        console.log('[executeToolCalls] 清理之前的监听器');
+        console.log("[executeToolCalls] 清理之前的监听器");
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
 
-      console.log('[executeToolCalls] 设置事件监听器...');
+      console.log("[executeToolCalls] 设置事件监听器...");
 
       // 监听工具执行流式事件
       this.currentStreamUnlisten = await listenToStreamEvents(
         {
           ...this.createStreamEventHandlers(),
           // 添加消息删除回调
-          onMessagesDelete: this.createMessagesDeleteCallback('executeToolCalls'),
+          onMessagesDelete:
+            this.createMessagesDeleteCallback("executeToolCalls"),
           // 添加工具执行状态回调
           onToolExecute: (data: ToolExecuteEventPayload) => {
-            console.log('[onToolExecute] 工具执行状态变化:', data);
+            console.log("[onToolExecute] 工具执行状态变化:", data);
 
             // 查找消息所属的 chatId
             let foundChatId: string | undefined;
             let foundMessage: Message | undefined;
 
-            for (const [cid, messages] of Object.entries(this.state.messagesByChat)) {
-              const msg = messages.find(m => m.id === data.messageId);
+            for (const [cid, messages] of Object.entries(
+              this.state.messagesByChat,
+            )) {
+              const msg = messages.find((m) => m.id === data.messageId);
               if (msg) {
                 foundChatId = cid;
                 foundMessage = msg;
@@ -766,23 +819,32 @@ class MessageStore {
             }
 
             if (!foundChatId || !foundMessage) {
-              console.warn('[onToolExecute] 未找到消息:', data.messageId);
+              console.warn("[onToolExecute] 未找到消息:", data.messageId);
               return;
             }
 
             // 更新消息中工具调用的状态
-            if (foundMessage.toolCalls && data.toolCalls && typeof data.toolCalls === 'object') {
+            if (
+              foundMessage.toolCalls &&
+              data.toolCalls &&
+              typeof data.toolCalls === "object"
+            ) {
               const updatesMap = new Map<string, Partial<ToolCall>>(
-                Object.entries(data.toolCalls).filter(([key, value]) => typeof value === 'object' && value !== null)
+                Object.entries(data.toolCalls).filter(
+                  ([key, value]) => typeof value === "object" && value !== null,
+                ),
               );
 
-              const updatedToolCalls = foundMessage.toolCalls.map(call => {
-                const callId = call.id || '';
+              const updatedToolCalls = foundMessage.toolCalls.map((call) => {
+                const callId = call.id || "";
                 const update = callId ? updatesMap.get(callId) : undefined;
 
                 if (update) {
-                  const executionStatus = update.executionStatus ?? call.executionStatus;
-                  const isFinalStatus = executionStatus === 'completed' || executionStatus === 'failed';
+                  const executionStatus =
+                    update.executionStatus ?? call.executionStatus;
+                  const isFinalStatus =
+                    executionStatus === "completed" ||
+                    executionStatus === "failed";
                   const functionUpdate = update.function;
 
                   return {
@@ -790,10 +852,14 @@ class MessageStore {
                     executionStatus,
                     executionMode: update.executionMode ?? call.executionMode,
                     toolType: update.toolType ?? call.toolType,
-                    function: functionUpdate ? { ...call.function, ...functionUpdate } : call.function,
+                    function: functionUpdate
+                      ? { ...call.function, ...functionUpdate }
+                      : call.function,
                     result: isFinalStatus
-                      ? (typeof update.result === 'string' ? update.result : call.result)
-                      : undefined
+                      ? typeof update.result === "string"
+                        ? update.result
+                        : call.result
+                      : undefined,
                   };
                 }
 
@@ -801,29 +867,28 @@ class MessageStore {
               });
 
               this.updateMessage(foundChatId, data.messageId, {
-                toolCalls: updatedToolCalls
+                toolCalls: updatedToolCalls,
               });
             }
-          }
+          },
         },
-        'tool_execute_stream'
+        "tool_execute_stream",
       );
 
-      console.log('[executeToolCalls] 事件监听器设置完成，调用后端API...');
+      console.log("[executeToolCalls] 事件监听器设置完成，调用后端API...");
 
       // 调用流式工具执行API
       await messageApi.executeToolCallsStream(messageId, toolCallIds);
 
-      console.log('[executeToolCalls] 后端API调用完成');
-
+      console.log("[executeToolCalls] 后端API调用完成");
     } catch (error) {
       // 清理监听器
       if (this.currentStreamUnlisten) {
         this.currentStreamUnlisten();
         this.currentStreamUnlisten = null;
       }
-      console.error('启动工具执行失败:', error);
-      this.reportError(error, '工具执行失败');
+      console.error("启动工具执行失败:", error);
+      this.reportError(error, "工具执行失败");
       throw error;
     }
   }
@@ -835,26 +900,32 @@ class MessageStore {
   /**
    * 批量执行消息中的所有工具调用
    */
-  async executeAllToolCalls(messageId: string, toolCalls: ToolCall[]): Promise<void> {
-    console.log('[executeAllToolCalls] 开始:', { messageId, toolCallsCount: toolCalls.length });
+  async executeAllToolCalls(
+    messageId: string,
+    toolCalls: ToolCall[],
+  ): Promise<void> {
+    console.log("[executeAllToolCalls] 开始:", {
+      messageId,
+      toolCallsCount: toolCalls.length,
+    });
 
     try {
       const toolCallIds = toolCalls
-        .map(toolCall => toolCall.id)
+        .map((toolCall) => toolCall.id)
         .filter((id): id is string => Boolean(id));
 
-      console.log('[executeAllToolCalls] 提取的工具调用IDs:', toolCallIds);
+      console.log("[executeAllToolCalls] 提取的工具调用IDs:", toolCallIds);
 
       if (toolCallIds.length === 0) {
-        console.warn('[executeAllToolCalls] 未找到有效的工具调用 ID');
+        console.warn("[executeAllToolCalls] 未找到有效的工具调用 ID");
         return;
       }
 
-      console.log('[executeAllToolCalls] 调用 executeToolCalls...');
+      console.log("[executeAllToolCalls] 调用 executeToolCalls...");
       await this.executeToolCalls(messageId, toolCallIds);
-      console.log('[executeAllToolCalls] executeToolCalls 完成');
+      console.log("[executeAllToolCalls] executeToolCalls 完成");
     } catch (error) {
-      console.error('[executeAllToolCalls] 批量执行工具调用失败:', error);
+      console.error("[executeAllToolCalls] 批量执行工具调用失败:", error);
       throw error;
     }
   }
@@ -867,12 +938,10 @@ class MessageStore {
     this.state.isSending = false;
     this.state.error = null;
     this.state.streamingMessageId = null;
-    this.state.streamingContent = '';
-    this.state.streamingReasoning = '';
+    this.state.streamingContent = "";
+    this.state.streamingReasoning = "";
     this.state.streamingToolCalls = null;
-    this.state.streamingGeneratedImages = [];
   }
-
 }
 
 // Export singleton instance

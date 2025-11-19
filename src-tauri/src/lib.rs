@@ -33,6 +33,14 @@ async fn initialize_services(
     // 初始化存储服务
     let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
 
+    // 允许前端通过 asset protocol 访问生成的媒体目录
+    let media_root = data_dir.join("generated_media");
+    std::fs::create_dir_all(&media_root)
+        .map_err(|e| format!("Failed to create generated media directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&media_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for generated media: {e}"))?;
+
     // 初始化数据库服务
     let db_path = storage_service.get_database_path();
     let database_service = Arc::new(
@@ -66,6 +74,7 @@ async fn initialize_services(
         provider_service_shared,
         chat_service_shared,
         mcp_service_shared,
+        storage_service.clone(),
         llm_config_provider,
     );
 
@@ -137,6 +146,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // 测试命令
             greet,
+            // 调试命令
+            debug_check_file,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,

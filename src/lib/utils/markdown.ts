@@ -3,6 +3,8 @@ import { markedHighlight } from "marked-highlight";
 import type { Tokens } from "marked";
 import hljs from "highlight.js/lib/common";
 import katex from "katex";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { isTauriEnvironment } from "./tauri";
 
 const CODE_BLOCK_LANG_PATTERN = /\s+/;
 
@@ -77,12 +79,13 @@ function formatLanguageLabel(language?: string): string {
   if (!language) return "纯文本";
   const mapped = LANGUAGE_LABEL_MAP[language];
   if (mapped) return mapped;
-  return language
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ")
-    || language.toUpperCase();
+  return (
+    language
+      .split(/[-_]/)
+      .filter(Boolean)
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(" ") || language.toUpperCase()
+  );
 }
 
 function renderMath(value: string, displayMode: boolean): string {
@@ -112,7 +115,10 @@ const markedRenderer = new Marked(
           return hljs.highlight(code, { language: resolvedLanguage }).value;
         } catch (error) {
           if (import.meta.env.DEV) {
-            console.warn("highlight.js failed", { language: resolvedLanguage, error });
+            console.warn("highlight.js failed", {
+              language: resolvedLanguage,
+              error,
+            });
           }
         }
       }
@@ -126,7 +132,7 @@ const markedRenderer = new Marked(
         return escapeHtml(code);
       }
     },
-  })
+  }),
 );
 
 const blockMathExtension = {
@@ -163,10 +169,7 @@ const inlineMathExtension = {
     const match = src.match(/^\$(?!\$)(?:(?:\\.)|[^$\n\\])+?\$/);
     if (!match) return undefined;
 
-    const text = match[0]
-      .slice(1, -1)
-      .replace(/\\\$/g, "$")
-      .trim();
+    const text = match[0].slice(1, -1).replace(/\\\$/g, "$").trim();
 
     if (!text) return undefined;
 
@@ -213,6 +216,12 @@ markedRenderer.use({
   <pre><code class="${classNames.join(" ")}">${codeHtml}\n</code></pre>
 </figure>`;
     },
+    image({ href, title, text }: Tokens.Image) {
+      const src = resolveImageSource(href ?? "");
+      const alt = escapeHtml(text ?? "");
+      const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+      return `<img src="${escapeHtml(src)}" alt="${alt}"${titleAttr} />`;
+    },
   },
 });
 
@@ -223,4 +232,80 @@ export function renderMarkdown(content: string | undefined | null): string {
 
   const result = markedRenderer.parse(content);
   return typeof result === "string" ? result : "";
+}
+
+const FILE_PROTOCOL = "file://";
+
+function isLikelyAbsolutePath(value: string): boolean {
+  return (
+    value.startsWith("/") ||
+    /^[a-zA-Z]:[\\/]/.test(value) ||
+    value.startsWith("\\\\")
+  );
+}
+
+function decodeFileUrlPath(raw: string): string {
+  let path = raw.slice(FILE_PROTOCOL.length);
+  if (/^\/[A-Za-z]:/.test(path)) {
+    path = path.slice(1);
+  }
+  try {
+    return decodeURIComponent(path);
+  } catch (error) {
+    console.error("Failed to decode file URL path:", { raw, path, error });
+    return path;
+  }
+}
+
+function resolveImageSource(rawSrc: unknown): string {
+  const normalized =
+    typeof rawSrc === "string" ? rawSrc : rawSrc == null ? "" : String(rawSrc);
+  const trimmed = normalized.trim();
+
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+
+  // 允许 HTTP(S) 和 data: URLs 直接通过
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("data:")
+  ) {
+    return trimmed;
+  }
+
+  // 非 Tauri 环境直接返回
+  if (!isTauriEnvironment()) {
+    return trimmed;
+  }
+
+  try {
+    // 处理 file:// URL（旧格式，兼容性处理）
+    if (trimmed.startsWith(FILE_PROTOCOL)) {
+      const localPath = decodeFileUrlPath(trimmed);
+      if (typeof localPath !== "string" || !localPath) {
+        console.error("[resolveImageSource] Invalid decoded path:", {
+          trimmed,
+          localPath,
+        });
+        return trimmed;
+      }
+      return convertFileSrc(localPath);
+    }
+
+    // 处理绝对路径（降级支持，不推荐）
+    if (isLikelyAbsolutePath(trimmed)) {
+      return convertFileSrc(trimmed);
+    }
+  } catch (error) {
+    console.error(
+      "[resolveImageSource] Failed to convert local image source:",
+      {
+        rawSrc,
+        error,
+      },
+    );
+  }
+
+  return trimmed;
 }

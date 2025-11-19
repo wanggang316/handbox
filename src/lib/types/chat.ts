@@ -44,9 +44,6 @@ export interface Message extends BaseEntity {
   // 附件
   attachments?: MessageAttachment[];
 
-  // 生成的图片
-  generatedImages?: GeneratedImage[];
-
   // 使用统计和时序信息
   inputTokens?: number;
   outputTokens?: number;
@@ -63,12 +60,6 @@ export interface MessageAttachment {
   mimeType: string;
   size: number;
   path: string;
-}
-
-// 生成的图片
-export interface GeneratedImage {
-  mimeType: string;
-  data: string; // Base64-encoded
 }
 
 // Reasoning/thinking support
@@ -175,7 +166,6 @@ export interface MessageResponse {
   content: string;
   reasoning?: string;
   toolCalls?: ToolCall[];
-  generatedImages?: GeneratedImage[];
   modelId: string;
   providerId: string;
   inputTokens?: number;
@@ -219,7 +209,6 @@ export type MessageStreamEvent =
         content: string;
         reasoning?: string;
         tokens?: number;
-        generatedImages?: GeneratedImage[];
       };
     }
   | { type: "done"; data: MessageResponse }

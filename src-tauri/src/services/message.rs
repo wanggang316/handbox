@@ -3,22 +3,24 @@
 use crate::models::{
     AppError, MessageRequest, MessageResponse, StreamChunk, UserMessageSendRequest,
 };
-use crate::services::{ChatService, Database, McpService, ProviderService};
+use crate::services::{ChatService, Database, McpService, ProviderService, StorageService};
 use crate::storage::types::{
     Chat, McpServer, McpServerStatus, Message, MessageConfig, MessageToolCall,
     MessageToolExecutionMode, MessageToolExecutionStatus, Provider, UUID,
 };
 use crate::storage::MessageRepository;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::Utc;
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::create_llm_client;
 use handbox_llm::types::{
-    LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort, LlmReasoningEffortConfig,
-    LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse, LlmToolChoice,
-    LlmToolFunction,
+    LlmGeneratedImage, LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort,
+    LlmReasoningEffortConfig, LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse,
+    LlmToolChoice, LlmToolFunction,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use url::Url;
 
 /// 流式回调 trait 定义
 ///
@@ -97,6 +99,7 @@ pub struct MessageService {
     provider_service: Arc<ProviderService>,
     chat_service: Arc<ChatService>,
     mcp_service: Arc<McpService>,
+    storage_service: Arc<StorageService>,
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
@@ -106,6 +109,7 @@ impl MessageService {
         provider_service: Arc<ProviderService>,
         chat_service: Arc<ChatService>,
         mcp_service: Arc<McpService>,
+        storage_service: Arc<StorageService>,
         llm_config: Arc<dyn LlmConfigProvider>,
     ) -> Self {
         Self {
@@ -113,6 +117,7 @@ impl MessageService {
             provider_service,
             chat_service,
             mcp_service,
+            storage_service,
             llm_config,
         }
     }
@@ -196,23 +201,35 @@ impl MessageService {
         );
 
         // 4. 调用实际的 LLM API
-        let llm_response = self.call_llm_api(&final_request).await?;
+        let (llm_response, generated_images) = self.call_llm_api(&final_request).await?;
 
         // 5. 保存助手消息到数据库
         let now = Utc::now().timestamp_millis();
-        let (assistant_message_id, processed_tool_calls) = self
+        let MessageResponse {
+            content,
+            reasoning,
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            duration,
+            ..
+        } = llm_response;
+
+        let (assistant_message_id, processed_tool_calls, final_content) = self
             .save_assistant_message(
                 &chat_id,
-                &llm_response.content,
-                llm_response.reasoning.clone(),
-                llm_response.tool_calls.clone(),
+                content,
+                reasoning.clone(),
+                tool_calls,
                 Some(config.clone()),
                 now,
-                llm_response.duration.unwrap_or(0),
-                llm_response.input_tokens,
-                llm_response.output_tokens,
-                llm_response.total_tokens,
+                duration.unwrap_or(0),
+                input_tokens,
+                output_tokens,
+                total_tokens,
                 turn_id,
+                generated_images,
             )
             .await
             .map_err(|e| {
@@ -226,38 +243,19 @@ impl MessageService {
             assistant_message_id
         );
 
-        tracing::info!(
-            "[MessageService::send_message] LLM response has {} generated images",
-            llm_response
-                .generated_images
-                .as_ref()
-                .map(|v| v.len())
-                .unwrap_or(0)
-        );
-
         let response = MessageResponse {
             chat_id: chat_id.clone(),
             message_id: assistant_message_id.clone(),
-            content: llm_response.content,
-            reasoning: llm_response.reasoning,
+            content: final_content,
+            reasoning,
             model_id: final_request.model_id,
             provider_id: final_request.provider_id,
-            input_tokens: llm_response.input_tokens,
-            output_tokens: llm_response.output_tokens,
-            total_tokens: llm_response.total_tokens,
-            duration: llm_response.duration,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            duration,
             tool_calls: processed_tool_calls.clone(),
-            generated_images: llm_response.generated_images,
         };
-
-        tracing::info!(
-            "[MessageService::send_message] Final response has {} generated images",
-            response
-                .generated_images
-                .as_ref()
-                .map(|v| v.len())
-                .unwrap_or(0)
-        );
 
         tracing::info!(
             "[MessageService::send_message] Successfully completed for chat_id: {}, message_id: {}",
@@ -1047,7 +1045,10 @@ impl MessageService {
     }
 
     /// 调用 LLM API
-    async fn call_llm_api(&self, request: &MessageRequest) -> Result<MessageResponse, AppError> {
+    async fn call_llm_api(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<(MessageResponse, Vec<LlmGeneratedImage>), AppError> {
         tracing::info!(
             "[MessageService::call_llm_api] Calling LLM API with provider: {}, model: {}",
             request.provider_id,
@@ -1122,14 +1123,15 @@ impl MessageService {
             })?;
 
         let duration = start_time.elapsed().as_millis() as f64;
-        let llm_response = self.convert_from_api_response(api_response, duration, request)?;
+        let (llm_response, generated_images) =
+            self.convert_from_api_response(api_response, duration, request)?;
 
         tracing::info!(
             "[MessageService::call_llm_api] API call successful, duration: {}ms",
             duration
         );
 
-        Ok(llm_response)
+        Ok((llm_response, generated_images))
     }
 
     /// 流式调用 LLM API
@@ -1255,7 +1257,7 @@ impl MessageService {
 
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
-        let mut accumulated_generated_images: Vec<crate::models::GeneratedImage> = Vec::new();
+        let mut accumulated_generated_images: Vec<LlmGeneratedImage> = Vec::new();
         let mut all_tool_calls: Vec<handbox_llm::types::LlmToolCall> = Vec::new();
         let mut chunk_count = 0;
 
@@ -1295,10 +1297,7 @@ impl MessageService {
                                     img.mime_type,
                                     img.data.len()
                                 );
-                                accumulated_generated_images.push(crate::models::GeneratedImage {
-                                    mime_type: img.mime_type.clone(),
-                                    data: img.data.clone(),
-                                });
+                                accumulated_generated_images.push(img.clone());
                             }
                             tracing::info!(
                                 "[MessageService::call_llm_api_stream] Total accumulated images: {}",
@@ -1401,6 +1400,28 @@ impl MessageService {
         }
 
         let duration = start_time.elapsed().as_millis() as i64;
+        let mut final_content = accumulated_content.clone();
+        let images_to_persist = accumulated_generated_images;
+        let generated_image_count = images_to_persist.len();
+
+        if generated_image_count > 0 {
+            if let Some(chat_id) = request.chat_id.as_ref() {
+                if let Err(err) = self.persist_generated_images_and_update_content(
+                    chat_id,
+                    &message_id,
+                    &mut final_content,
+                    images_to_persist,
+                ) {
+                    error_callback(stream_id.clone(), err);
+                    return;
+                }
+            } else {
+                tracing::warn!(
+                    "[MessageService::call_llm_api_stream] Missing chat_id for generated images; skipping persistence"
+                );
+            }
+        }
+
         tracing::info!(
             "[MessageService::call_llm_api_stream] Real streaming API call completed, chunks: {}, total_content_length: {}, duration: {}ms",
             chunk_count, accumulated_content.len(), duration
@@ -1428,14 +1449,14 @@ impl MessageService {
 
         // 8. 构造 MessageResponse
         tracing::info!(
-            "[MessageService::call_llm_api_stream] Creating final response with {} accumulated images",
-            accumulated_generated_images.len()
+            "[MessageService::call_llm_api_stream] Creating final response with {} persisted images",
+            generated_image_count
         );
 
         let response = MessageResponse {
             chat_id: request.chat_id.clone().unwrap_or_default(),
             message_id: message_id.clone(),
-            content: accumulated_content.clone(),
+            content: final_content,
             reasoning: if accumulated_reasoning.is_empty() {
                 None
             } else {
@@ -1448,21 +1469,7 @@ impl MessageService {
             output_tokens: None,
             total_tokens: None,
             duration: Some(duration),
-            generated_images: if accumulated_generated_images.is_empty() {
-                None
-            } else {
-                Some(accumulated_generated_images.clone())
-            },
         };
-
-        tracing::info!(
-            "[MessageService::call_llm_api_stream] Final response has {} images",
-            response
-                .generated_images
-                .as_ref()
-                .map(|v| v.len())
-                .unwrap_or(0)
-        );
 
         tracing::info!(
             "[MessageService::call_llm_api_stream] Stream completed - content: {} chars, reasoning: {} chars",
@@ -1795,7 +1802,7 @@ impl MessageService {
     async fn save_assistant_message(
         &self,
         chat_id: &str,
-        content: &str,
+        content: String,
         reasoning: Option<String>,
         tool_calls: Option<Vec<MessageToolCall>>,
         config: Option<MessageConfig>,
@@ -1805,18 +1812,34 @@ impl MessageService {
         output_tokens: Option<i32>,
         total_tokens: Option<i32>,
         turn_id: Option<i32>,
-    ) -> Result<(String, Option<Vec<MessageToolCall>>), AppError> {
+        generated_images: Vec<LlmGeneratedImage>,
+    ) -> Result<(String, Option<Vec<MessageToolCall>>, String), AppError> {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
 
         // 处理工具调用的执行模式和状态
         let processed_tool_calls = Self::prepare_tool_calls(tool_calls, &config);
 
+        let mut final_content = content;
+        if let Err(err) = self.persist_generated_images_and_update_content(
+            chat_id,
+            &message_id,
+            &mut final_content,
+            generated_images,
+        ) {
+            tracing::error!(
+                "[MessageService::save_assistant_message] Failed to persist generated images for message {}: {}",
+                message_id,
+                err
+            );
+            return Err(err);
+        }
+
         let message = Message {
             id: message_id.clone(),
             chat_id: chat_id.to_string(),
             role: LlmMessageRole::Assistant,
-            content: content.to_string(),
+            content: final_content.clone(),
             reasoning,
             tool_calls: processed_tool_calls.clone(),
             config,
@@ -1835,12 +1858,83 @@ impl MessageService {
 
         self.repository.create_message(&message).await?;
         tracing::info!("[MessageService] Assistant message saved: {}", message_id);
-        Ok((message_id, processed_tool_calls))
+        Ok((message_id, processed_tool_calls, final_content))
     }
 
     /// 获取聊天配置
     async fn get_chat_config(&self, chat_id: &str) -> Result<Chat, AppError> {
         self.chat_service.get_chat(chat_id.to_string()).await
+    }
+
+    fn persist_generated_images_and_update_content(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        content: &mut String,
+        generated_images: Vec<LlmGeneratedImage>,
+    ) -> Result<(), AppError> {
+        if generated_images.is_empty() {
+            return Ok(());
+        }
+
+        let media_dir = self
+            .storage_service
+            .prepare_message_media_dir(chat_id, message_id)?;
+        let mut file_urls = Vec::new();
+
+        for (index, image) in generated_images.into_iter().enumerate() {
+            let data = BASE64_STANDARD.decode(image.data.as_bytes()).map_err(|e| {
+                AppError::internal_error(&format!("Failed to decode generated image: {e}"))
+            })?;
+            let extension = Self::extension_from_mime(&image.mime_type);
+            let file_path = media_dir.join(format!("image-{:02}.{}", index + 1, extension));
+            std::fs::write(&file_path, data).map_err(|e| {
+                AppError::internal_error(&format!(
+                    "Failed to write generated image to disk ({}): {}",
+                    file_path.display(),
+                    e
+                ))
+            })?;
+            // 使用 file:// URL，Url::from_file_path 会自动处理空格等特殊字符的编码
+            let file_url = Url::from_file_path(&file_path).map_err(|_| {
+                AppError::internal_error("Failed to convert generated image path to URL")
+            })?;
+            file_urls.push(file_url.to_string());
+        }
+
+        Self::append_image_markdown(content, &file_urls);
+        Ok(())
+    }
+
+    fn append_image_markdown(content: &mut String, file_urls: &[String]) {
+        if file_urls.is_empty() {
+            return;
+        }
+
+        while content.ends_with('\n') {
+            content.pop();
+        }
+        if !content.is_empty() {
+            content.push_str("\n\n");
+        }
+        for (index, url) in file_urls.iter().enumerate() {
+            content.push_str(&format!("![Generated image {}]({})\n\n", index + 1, url));
+        }
+        while content.ends_with('\n') {
+            content.pop();
+        }
+    }
+
+    fn extension_from_mime(mime_type: &str) -> &'static str {
+        match mime_type {
+            "image/jpeg" | "image/jpg" => "jpg",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            "image/png" => "png",
+            other if other.ends_with("jpeg") => "jpg",
+            other if other.ends_with("png") => "png",
+            _ => "png",
+        }
     }
 
     /// 根据 chat_id 和 turn_id 构建 MessageRequest
@@ -1952,7 +2046,7 @@ impl MessageService {
         api_response: LlmResponse,
         duration: f64,
         request: &MessageRequest,
-    ) -> Result<MessageResponse, AppError> {
+    ) -> Result<(MessageResponse, Vec<LlmGeneratedImage>), AppError> {
         let choice = api_response
             .choices
             .into_iter()
@@ -1963,58 +2057,34 @@ impl MessageService {
             .delta
             .ok_or_else(|| AppError::internal_error("No message in API choice"))?;
 
-        // 注意：这里暂时不转换 tool_calls，因为调用方需要使用原始的 LlmToolCall
-        // 转换会在 save_assistant_message 或 prepare_tool_calls 中完成
-
-        let generated_images = choice.generated_images.map(|images| {
-            tracing::info!(
-                "[MessageService::convert_from_api_response] Converting {} generated images from LLM response",
-                images.len()
-            );
-            images
-                .into_iter()
-                .map(|img| {
-                    tracing::info!(
-                        "[MessageService::convert_from_api_response] Image: mime_type={}, data_len={}",
-                        img.mime_type,
-                        img.data.len()
-                    );
-                    crate::models::GeneratedImage {
-                        mime_type: img.mime_type,
-                        data: img.data,
-                    }
-                })
-                .collect()
-        });
-
+        let generated_images = choice.generated_images.unwrap_or_default();
         tracing::info!(
-            "[MessageService::convert_from_api_response] Final MessageResponse has {} images",
-            generated_images
-                .as_ref()
-                .map(|v: &Vec<crate::models::GeneratedImage>| v.len())
-                .unwrap_or(0)
+            "[MessageService::convert_from_api_response] Response includes {} generated images",
+            generated_images.len()
         );
 
-        Ok(MessageResponse {
-            chat_id: request.chat_id.clone().unwrap_or_default(),
-            message_id: uuid::Uuid::new_v4().to_string(), // 临时ID，实际使用时会被覆盖
-            content: message.content,
-            reasoning: message.reasoning,
-            // 临时转换为 MessageToolCall（默认状态）
-            tool_calls: message.tool_calls.map(|calls| {
-                calls
-                    .into_iter()
-                    .map(|tc| MessageToolCall::from(tc))
-                    .collect()
-            }),
-            model_id: request.model_id.clone(),
-            provider_id: request.provider_id.clone(),
-            input_tokens: api_response.usage.as_ref().map(|u| u.prompt_tokens),
-            output_tokens: api_response.usage.as_ref().map(|u| u.completion_tokens),
-            total_tokens: api_response.usage.as_ref().map(|u| u.total_tokens),
-            duration: Some(duration as i64),
+        Ok((
+            MessageResponse {
+                chat_id: request.chat_id.clone().unwrap_or_default(),
+                message_id: uuid::Uuid::new_v4().to_string(), // 临时ID，实际使用时会被覆盖
+                content: message.content,
+                reasoning: message.reasoning,
+                // 临时转换为 MessageToolCall（默认状态）
+                tool_calls: message.tool_calls.map(|calls| {
+                    calls
+                        .into_iter()
+                        .map(|tc| MessageToolCall::from(tc))
+                        .collect()
+                }),
+                model_id: request.model_id.clone(),
+                provider_id: request.provider_id.clone(),
+                input_tokens: api_response.usage.as_ref().map(|u| u.prompt_tokens),
+                output_tokens: api_response.usage.as_ref().map(|u| u.completion_tokens),
+                total_tokens: api_response.usage.as_ref().map(|u| u.total_tokens),
+                duration: Some(duration as i64),
+            },
             generated_images,
-        })
+        ))
     }
 
     /// 获取消息
@@ -2396,11 +2466,10 @@ impl MessageService {
 mod tests {
     use super::*;
     use crate::config::llm_config::LlmConfig;
-    use crate::models::{MessageRequest, ModelParameters, UserMessageSendRequest};
-    use crate::services::{ChatService, McpService, ProviderService};
+    use crate::models::{ModelParameters, UserMessageSendRequest};
+    use crate::services::{ChatService, McpService, ProviderService, StorageService};
     use crate::storage::types::MessageConfig;
     use crate::storage::Database;
-    use handbox_llm::types::{LlmMessage, LlmMessageRole};
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -2428,11 +2497,17 @@ mod tests {
             provider_service.clone(),
             llm_config_provider.clone(),
         ));
+        let storage_dir = TempDir::new().expect("Failed to create temp storage dir");
+        let storage_path = storage_dir.path().to_path_buf();
+        let storage_service =
+            Arc::new(StorageService::new(storage_path).expect("Failed to init storage service"));
+        std::mem::forget(storage_dir);
         let message_service = MessageService::new(
             db,
             provider_service,
             chat_service.clone(),
             mcp_service,
+            storage_service,
             llm_config_provider,
         );
 
@@ -2470,11 +2545,17 @@ mod tests {
             provider_service.clone(),
             llm_config_provider.clone(),
         ));
+        let storage_dir = TempDir::new().expect("Failed to create temp storage dir");
+        let storage_path = storage_dir.path().to_path_buf();
+        let storage_service =
+            Arc::new(StorageService::new(storage_path).expect("Failed to init storage service"));
+        std::mem::forget(storage_dir);
         let _service = MessageService::new(
             db,
             provider_service,
             chat_service,
             mcp_service,
+            storage_service,
             llm_config_provider,
         );
     }
