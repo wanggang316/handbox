@@ -8,14 +8,14 @@
     X as CloseIcon,
   } from "lucide-svelte";
   import ToolCallList from "./ToolCallCard.svelte";
-import type { Message, MessageAttachment } from "$lib/types";
+  import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore } from "$lib/states";
-import { openInBrowser, renderMarkdown } from "$lib/utils";
-import {
-  resolveLocalAssetPath,
-  isTauriEnvironment,
-  openPathInSystem,
-} from "$lib/utils/tauri";
+  import { openInBrowser, renderMarkdown } from "$lib/utils";
+  import {
+    resolveLocalAssetPath,
+    isTauriEnvironment,
+    openPathInSystem,
+  } from "$lib/utils/tauri";
 
   interface Props {
     message?: Message;
@@ -316,17 +316,22 @@ import {
             <div class="mt-4 flex flex-wrap gap-4">
               {#each assets as asset (asset.id)}
                 <div
-                  class="relative rounded-lg border border-base-300 bg-base-100 p-2 max-w-[320px] cursor-zoom-in"
-                  title="双击在系统预览中打开"
+                  class="relative rounded-lg bg-base-100 max-w-[320px]"
+                  title="点击在系统预览中打开"
                   role="button"
                   tabindex="0"
-                  ondblclick={() => openAssetExternally(asset)}
+                  onclick={() => openAssetExternally(asset)}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openAssetExternally(asset);
+                    }
+                  }}
                 >
                   <img
                     src={assetUrl(asset.path)}
                     alt={asset.name}
                     class="w-full h-auto max-w-[320px] object-contain rounded-md"
-                    ondblclick={() => openAssetExternally(asset)}
                   />
                 </div>
               {/each}
@@ -342,7 +347,7 @@ import {
             />
           {/if}
 
-{#if !isStreaming && !isMessageLoading}
+          {#if !isStreaming && !isMessageLoading}
             <!-- 性能信息 -->
             <!-- <div class="flex flex-row gap-2 mt-6 text-xs text-base-content/60">
             {#if message?.createdAt}
@@ -366,9 +371,8 @@ import {
               <span> | 耗时: {formatDuration(message.duration)}</span>
             {/if}
           </div> -->
-  {/if}
-</div>
-
+          {/if}
+        </div>
 
         <!-- 消息操作按钮 (仅在非流式且非加载状态下显示) -->
         {#if !isStreaming && !isMessageLoading}

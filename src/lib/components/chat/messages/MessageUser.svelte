@@ -1,7 +1,7 @@
 <script lang="ts">
   import { RotateCcw, Copy, Pencil } from "lucide-svelte";
   import type { Message } from "$lib/types";
-  import { resolveLocalAssetPath } from "$lib/utils/tauri";
+  import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
 
   interface Props {
     message: Message;
@@ -40,6 +40,14 @@
       onEdit?.(message.id, message.content);
     }
   }
+
+  async function openAttachmentExternally(path?: string) {
+    if (!path) {
+      console.warn("[MessageUser] No valid path to open");
+      return;
+    }
+    await openPathInSystem(path);
+  }
 </script>
 
 <div class="group relative" id={"message-" + message.id}>
@@ -58,20 +66,34 @@
         {#if message.attachments?.length}
           <div class="mt-3 flex flex-wrap gap-3 justify-end">
             {#each message.attachments as attachment}
-              <div class="rounded-lg overflow-hidden border border-base-300 bg-base-100 p-2 max-w-[300px]">
-                {#if attachment.mimeType?.startsWith("image/")}
+              {#if attachment.mimeType?.startsWith("image/")}
+                <div
+                  class="relative rounded-lg max-w-[300px]"
+                  title="点击在系统预览中打开"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => openAttachmentExternally(attachment.path)}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openAttachmentExternally(attachment.path);
+                    }
+                  }}
+                >
                   <img
                     src={assetUrl(attachment.path)}
                     alt={attachment.name}
                     class="w-full h-auto max-w-[300px] object-contain rounded-md"
                   />
-                {:else}
+                </div>
+              {:else}
+                <div class="rounded-lg overflow-hidden border border-base-300 bg-base-100 p-2 max-w-[300px]">
                   <div class="p-3 text-sm text-left">
                     <p class="font-medium">{attachment.name}</p>
                     <p class="text-xs text-base-content/60">{attachment.mimeType}</p>
                   </div>
-                {/if}
-              </div>
+                </div>
+              {/if}
             {/each}
           </div>
         {/if}
