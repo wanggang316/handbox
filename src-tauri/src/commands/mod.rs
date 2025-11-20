@@ -2,6 +2,7 @@
 pub mod artifact;
 pub mod auth;
 pub mod chat;
+pub mod clipboard;
 pub mod debug;
 pub mod llm_config;
 pub mod mcp;
@@ -15,6 +16,7 @@ pub mod window;
 pub use artifact::*;
 pub use auth::*;
 pub use chat::*;
+pub use clipboard::*;
 pub use debug::*;
 pub use llm_config::*;
 pub use mcp::*;

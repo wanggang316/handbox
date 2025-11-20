@@ -6,6 +6,8 @@
     ChevronDown,
     ChevronRight,
     X as CloseIcon,
+    Save,
+    FolderOpen,
   } from "lucide-svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
@@ -55,6 +57,19 @@
   $effect(() => {
     assets = message?.generatedAssets ?? [];
     isAssetsLoading = Boolean(isStreaming && assets.length === 0);
+  });
+
+  // 右键菜单状态
+  let contextMenu = $state<{
+    show: boolean;
+    x: number;
+    y: number;
+    asset: MessageAttachment | null;
+  }>({
+    show: false,
+    x: 0,
+    y: 0,
+    asset: null,
   });
 
   // 格式化时间戳
@@ -224,6 +239,98 @@
 
     await openPathInSystem(path);
   }
+
+  // 处理右键菜单
+  function handleContextMenu(event: MouseEvent, asset: MessageAttachment) {
+    event.preventDefault();
+    contextMenu = {
+      show: true,
+      x: event.clientX,
+      y: event.clientY,
+      asset,
+    };
+  }
+
+  function closeContextMenu() {
+    contextMenu = { show: false, x: 0, y: 0, asset: null };
+  }
+
+  // 右键菜单操作
+  async function copyImage() {
+    if (!contextMenu.asset?.path) return;
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("clipboard_copy_image", { path: contextMenu.asset.path });
+      console.log("[MessageAssistant] Image copied to clipboard");
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to copy image", error);
+    }
+    closeContextMenu();
+  }
+
+  async function saveImage() {
+    if (!contextMenu.asset?.path) return;
+
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { copyFile } = await import("@tauri-apps/plugin-fs");
+
+      const savePath = await save({
+        defaultPath: contextMenu.asset.name,
+        filters: [
+          {
+            name: "Images",
+            extensions: ["png", "jpg", "jpeg", "gif", "webp"],
+          },
+        ],
+      });
+
+      if (savePath) {
+        await copyFile(contextMenu.asset.path, savePath);
+        console.log("[MessageAssistant] Image saved to", savePath);
+      }
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to save image", error);
+    }
+    closeContextMenu();
+  }
+
+  async function showInFinder() {
+    if (!contextMenu.asset?.path) return;
+
+    try {
+      const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+      await revealItemInDir(contextMenu.asset.path);
+      console.log("[MessageAssistant] Revealed item in Finder");
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to show in Finder", error);
+    }
+    closeContextMenu();
+  }
+
+  // 点击外部关闭菜单
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.context-menu')) {
+      closeContextMenu();
+    }
+  }
+
+  // 监听点击事件来关闭菜单
+  $effect(() => {
+    if (contextMenu.show) {
+      // 延迟添加事件监听器，避免立即触发
+      const timer = setTimeout(() => {
+        document.addEventListener('click', handleClickOutside);
+      }, 0);
+
+      return () => {
+        clearTimeout(timer);
+        document.removeEventListener('click', handleClickOutside);
+      };
+    }
+  });
 </script>
 
 <div
@@ -321,6 +428,7 @@
                   role="button"
                   tabindex="0"
                   onclick={() => openAssetExternally(asset)}
+                  oncontextmenu={(e) => handleContextMenu(e, asset)}
                   onkeydown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
@@ -427,3 +535,41 @@
     </div>
   </div>
 </div>
+
+<!-- 右键菜单 -->
+{#if contextMenu.show}
+  <div
+    class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
+    style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+    role="menu"
+    tabindex="-1"
+    onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => {
+      if (e.key === 'Escape') {
+        closeContextMenu();
+      }
+    }}
+  >
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={copyImage}
+    >
+      <Copy size={14} />
+      <span>复制图片</span>
+    </button>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={saveImage}
+    >
+      <Save size={14} />
+      <span>保存图片</span>
+    </button>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={showInFinder}
+    >
+      <FolderOpen size={14} />
+      <span>在 Finder 中打开</span>
+    </button>
+  </div>
+{/if}

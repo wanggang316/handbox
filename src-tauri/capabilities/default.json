@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "opener:allow-reveal-item-in-dir",
     {
       "identifier": "opener:allow-open-path",
       "allow": [
@@ -24,6 +25,26 @@
     "core:window:allow-create",
     "core:window:allow-close",
     "core:window:allow-set-focus",
-    "core:menu:default"
+    "core:menu:default",
+    "clipboard-manager:default",
+    "clipboard-manager:allow-write-text",
+    "dialog:default",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-copy-file",
+    "fs:allow-read-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "$APPDATA/generated_media/**"
+        },
+        {
+          "path": "$APPDATA/message_attachments/**"
+        }
+      ]
+    },
+    "shell:default",
+    "shell:allow-execute"
   ]
 }
