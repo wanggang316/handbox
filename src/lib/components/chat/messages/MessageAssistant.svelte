@@ -309,17 +309,16 @@
     closeContextMenu();
   }
 
-  // 点击外部关闭菜单
-  function handleClickOutside(event: MouseEvent) {
-    const target = event.target as HTMLElement;
-    if (!target.closest('.context-menu')) {
-      closeContextMenu();
-    }
-  }
-
   // 监听点击事件来关闭菜单
   $effect(() => {
     if (contextMenu.show) {
+      const handleClickOutside = (event: MouseEvent) => {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.context-menu')) {
+          contextMenu = { show: false, x: 0, y: 0, asset: null };
+        }
+      };
+
       // 延迟添加事件监听器，避免立即触发
       const timer = setTimeout(() => {
         document.addEventListener('click', handleClickOutside);
