@@ -9,7 +9,6 @@
     Save,
     FolderOpen,
   } from "lucide-svelte";
-  import { untrack } from "svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore } from "$lib/states";
@@ -244,16 +243,36 @@
   // 处理右键菜单
   function handleContextMenu(event: MouseEvent, asset: MessageAttachment) {
     event.preventDefault();
+
+    // 先移除旧的监听器（如果有）
+    if (contextMenu.show) {
+      document.removeEventListener('click', handleClickOutsideRef);
+    }
+
     contextMenu = {
       show: true,
       x: event.clientX,
       y: event.clientY,
       asset,
     };
+
+    // 延迟添加点击外部监听器
+    setTimeout(() => {
+      document.addEventListener('click', handleClickOutsideRef);
+    }, 0);
   }
 
   function closeContextMenu() {
     contextMenu = { show: false, x: 0, y: 0, asset: null };
+    document.removeEventListener('click', handleClickOutsideRef);
+  }
+
+  // 创建稳定的引用函数
+  function handleClickOutsideRef(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.context-menu')) {
+      closeContextMenu();
+    }
   }
 
   // 右键菜单操作
@@ -309,33 +328,6 @@
     }
     closeContextMenu();
   }
-
-  // 监听点击事件来关闭菜单
-  $effect(() => {
-    const isMenuOpen = contextMenu.show;
-
-    if (isMenuOpen) {
-      const handleClickOutside = (event: MouseEvent) => {
-        const target = event.target as HTMLElement;
-        if (!target.closest('.context-menu')) {
-          // 使用 untrack 避免触发 effect 重新运行
-          untrack(() => {
-            contextMenu = { show: false, x: 0, y: 0, asset: null };
-          });
-        }
-      };
-
-      // 延迟添加事件监听器，避免立即触发
-      const timer = setTimeout(() => {
-        document.addEventListener('click', handleClickOutside);
-      }, 0);
-
-      return () => {
-        clearTimeout(timer);
-        document.removeEventListener('click', handleClickOutside);
-      };
-    }
-  });
 </script>
 
 <div
