@@ -9,6 +9,7 @@
     Save,
     FolderOpen,
   } from "lucide-svelte";
+  import { untrack } from "svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore } from "$lib/states";
@@ -311,11 +312,16 @@
 
   // 监听点击事件来关闭菜单
   $effect(() => {
-    if (contextMenu.show) {
+    const isMenuOpen = contextMenu.show;
+
+    if (isMenuOpen) {
       const handleClickOutside = (event: MouseEvent) => {
         const target = event.target as HTMLElement;
         if (!target.closest('.context-menu')) {
-          contextMenu = { show: false, x: 0, y: 0, asset: null };
+          // 使用 untrack 避免触发 effect 重新运行
+          untrack(() => {
+            contextMenu = { show: false, x: 0, y: 0, asset: null };
+          });
         }
       };
 
