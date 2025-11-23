@@ -43,6 +43,11 @@
     editingMessageId !== null && editingMessageId !== undefined
   );
 
+  // 检查当前模型是否支持非文本输入模态（如图片、PDF等）
+  const supportsNonTextInput = $derived(
+    currentModel?.input_modalities?.some((m) => m !== "text") ?? false
+  );
+
   // 自动调整 textarea 高度
   function adjustTextareaHeight() {
     if (textareaRef) {
@@ -232,16 +237,20 @@
   {/if}
 
   <div
-    class="flex flex-row justify-between items-center px-4 pt-0 pb-2 overflow-visible"
+    class="flex flex-row items-center px-4 pt-0 pb-2 overflow-visible"
+    class:justify-between={supportsNonTextInput}
+    class:justify-end={!supportsNonTextInput}
   >
-    <!-- 左侧：添加按钮 -->
-    <IconButton
-      icon={Plus}
-      ariaLabel="添加附件"
-      onclick={handleAddAttachment}
-      title="上传图片"
-      disabled={isEditing}
-    />
+    <!-- 左侧：添加按钮（仅当模型支持非文本输入时显示） -->
+    {#if supportsNonTextInput}
+      <IconButton
+        icon={Plus}
+        ariaLabel="添加附件"
+        onclick={handleAddAttachment}
+        title="上传图片"
+        disabled={isEditing}
+      />
+    {/if}
 
     <!-- 右侧：模型选择和发送按钮 -->
     <div class="flex items-center gap-3">
