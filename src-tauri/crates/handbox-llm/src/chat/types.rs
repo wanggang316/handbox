@@ -114,8 +114,6 @@ pub struct LlmRequest {
     pub tool_choice: Option<LlmToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<Vec<LlmMessageAttachment>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

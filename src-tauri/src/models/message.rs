@@ -23,7 +23,6 @@ pub struct MessageRequest {
     pub model_id: String,
     pub provider_id: String,
     pub messages: Vec<LlmMessage>,
-    pub attachments: Option<Vec<MessageRequestAttachment>>,
 }
 
 /// 用户消息流式发送请求

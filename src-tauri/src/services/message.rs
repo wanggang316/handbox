@@ -1528,16 +1528,6 @@ impl MessageService {
                 Some(LlmToolChoice::Auto)
             },
             parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
-            attachments: request.attachments.as_ref().map(|attachments| {
-                attachments
-                    .iter()
-                    .map(|att| handbox_llm::types::LlmMessageAttachment {
-                        name: att.name.clone(),
-                        mime_type: att.mime_type.clone(),
-                        data: att.data.clone(),
-                    })
-                    .collect()
-            }),
             reasoning: {
                 let reasoning = reasoning_config
                     .as_ref()
@@ -2062,11 +2052,13 @@ impl MessageService {
             .await?;
 
         for m in turn_messages.iter() {
-            let attachments = if let Some(atts) = m.attachments.as_ref() {
-                Some(Self::load_llm_attachments(atts)?)
-            } else {
-                None
-            };
+            let mut attachments = Vec::new();
+            if let Some(atts) = m.attachments.as_ref() {
+                attachments.extend(Self::load_llm_attachments(atts)?);
+            }
+            if let Some(generated_assets) = m.generated_assets.as_ref() {
+                attachments.extend(Self::load_llm_attachments(generated_assets)?);
+            }
 
             request_messages.push(LlmMessage {
                 role: m.role.clone(),
@@ -2078,7 +2070,11 @@ impl MessageService {
                     .as_ref()
                     .map(|calls| calls.iter().map(|tc| tc.to_llm_tool_call()).collect()),
                 tool_call_id: m.tool_call_id.clone(),
-                attachments,
+                attachments: if attachments.is_empty() {
+                    None
+                } else {
+                    Some(attachments)
+                },
             });
         }
 
@@ -2088,7 +2084,6 @@ impl MessageService {
             model_id: message_config.model_id.clone().unwrap_or_default(),
             provider_id: message_config.provider_id.clone().unwrap_or_default(),
             messages: request_messages,
-            attachments: None,
         })
     }
 

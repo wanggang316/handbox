@@ -334,7 +334,6 @@ impl ChatService {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
-            attachments: None,
         };
 
         // 10. 调用LLM API

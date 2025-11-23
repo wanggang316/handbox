@@ -27,7 +27,6 @@ export async function sendUserMessage(
       model_id: request.modelId,
       provider_id: request.providerId,
       messages: request.messages,
-      attachments: request.attachments,
     },
   };
 

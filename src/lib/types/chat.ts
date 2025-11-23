@@ -159,7 +159,6 @@ export interface MessageRequest {
   providerId: string;
   messages: ChatMessage[];
   tempUserMessageId?: string;
-  attachments?: MessageRequestAttachment[];
 }
 
 // 简化的发送消息请求
