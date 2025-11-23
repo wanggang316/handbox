@@ -156,6 +156,7 @@ export interface Model {
   supported_parameters?: string[] | null;
   supported_chat_methods?: ChatMethodName[] | null;
   chat_method?: ChatMethodResponse | null;
+  support_tools: boolean;
   enabled: boolean;
   favorite: boolean;
   created_at: number;

@@ -24,7 +24,10 @@ impl ArtifactService {
     }
 
     /// 创建 Artifact
-    pub async fn create_artifact(&self, request: CreateArtifactRequest) -> Result<Artifact, AppError> {
+    pub async fn create_artifact(
+        &self,
+        request: CreateArtifactRequest,
+    ) -> Result<Artifact, AppError> {
         let now = chrono::Utc::now().timestamp_millis();
         let artifact = Artifact {
             id: uuid::Uuid::new_v4().to_string(),
@@ -57,7 +60,10 @@ impl ArtifactService {
     }
 
     /// 更新 Artifact
-    pub async fn update_artifact(&self, request: UpdateArtifactRequest) -> Result<Artifact, AppError> {
+    pub async fn update_artifact(
+        &self,
+        request: UpdateArtifactRequest,
+    ) -> Result<Artifact, AppError> {
         let mut artifact = self
             .repo
             .get_artifact_by_id(&request.id)
@@ -123,7 +129,8 @@ impl ArtifactService {
         let builtins = self.get_builtin_definitions();
 
         // 合并：内置 artifacts 中，如果已在数据库中，使用数据库版本（包含安装状态）
-        let mut result_map: std::collections::HashMap<String, Artifact> = std::collections::HashMap::new();
+        let mut result_map: std::collections::HashMap<String, Artifact> =
+            std::collections::HashMap::new();
 
         // 先添加已安装的
         for artifact in installed {
@@ -143,8 +150,10 @@ impl ArtifactService {
         if let Some(ref search) = filter.search {
             let search_lower = search.to_lowercase();
             results.retain(|a| {
-                a.name.to_lowercase().contains(&search_lower) ||
-                a.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&search_lower))
+                a.name.to_lowercase().contains(&search_lower)
+                    || a.description
+                        .as_ref()
+                        .map_or(false, |d| d.to_lowercase().contains(&search_lower))
             });
         }
 
@@ -180,7 +189,9 @@ impl ArtifactService {
             Artifact {
                 id: "builtin-shell-hello".to_string(),
                 name: "Shell Hello World".to_string(),
-                description: Some("A simple shell script that demonstrates artifact execution".to_string()),
+                description: Some(
+                    "A simple shell script that demonstrates artifact execution".to_string(),
+                ),
                 artifact_type: ArtifactType::Shell,
                 entry_file: "main.sh".to_string(),
                 source_path: Some("shell-hello".to_string()),
@@ -201,7 +212,11 @@ impl ArtifactService {
                 installed_at: None,
                 last_run_at: None,
                 run_count: 0,
-                tags: vec!["demo".to_string(), "shell".to_string(), "hello-world".to_string()],
+                tags: vec![
+                    "demo".to_string(),
+                    "shell".to_string(),
+                    "hello-world".to_string(),
+                ],
                 icon: Some("🐚".to_string()),
                 author: Some("HandBox Team".to_string()),
                 created_at: now,
@@ -210,7 +225,9 @@ impl ArtifactService {
             Artifact {
                 id: "builtin-python-hello".to_string(),
                 name: "Python Hello World".to_string(),
-                description: Some("A simple Python script showcasing Python artifact execution".to_string()),
+                description: Some(
+                    "A simple Python script showcasing Python artifact execution".to_string(),
+                ),
                 artifact_type: ArtifactType::Python,
                 entry_file: "main.py".to_string(),
                 source_path: Some("python-hello".to_string()),
@@ -231,7 +248,11 @@ impl ArtifactService {
                 installed_at: None,
                 last_run_at: None,
                 run_count: 0,
-                tags: vec!["demo".to_string(), "python".to_string(), "hello-world".to_string()],
+                tags: vec![
+                    "demo".to_string(),
+                    "python".to_string(),
+                    "hello-world".to_string(),
+                ],
                 icon: Some("🐍".to_string()),
                 author: Some("HandBox Team".to_string()),
                 created_at: now,
@@ -261,7 +282,12 @@ impl ArtifactService {
                 installed_at: None,
                 last_run_at: None,
                 run_count: 0,
-                tags: vec!["demo".to_string(), "web".to_string(), "chart".to_string(), "visualization".to_string()],
+                tags: vec![
+                    "demo".to_string(),
+                    "web".to_string(),
+                    "chart".to_string(),
+                    "visualization".to_string(),
+                ],
                 icon: Some("📊".to_string()),
                 author: Some("HandBox Team".to_string()),
                 created_at: now,
@@ -283,14 +309,18 @@ impl ArtifactService {
     }
 
     /// 安装 Artifact
-    pub async fn install_artifact(&self, request: InstallArtifactRequest) -> Result<Artifact, AppError> {
+    pub async fn install_artifact(
+        &self,
+        request: InstallArtifactRequest,
+    ) -> Result<Artifact, AppError> {
         // 尝试从数据库获取，如果不存在，尝试从内置定义获取
         let mut artifact = match self.repo.get_artifact_by_id(&request.artifact_id).await? {
             Some(a) => a,
             None => {
                 // 尝试从内置定义中查找
                 let builtins = self.get_builtin_definitions();
-                let builtin = builtins.into_iter()
+                let builtin = builtins
+                    .into_iter()
                     .find(|a| a.id == request.artifact_id)
                     .ok_or_else(|| AppError::validation_error("Artifact not found"))?;
 
@@ -321,7 +351,9 @@ impl ArtifactService {
         // 标记为已安装
         let now = chrono::Utc::now().timestamp_millis();
         let version = "1.0.0".to_string();
-        self.repo.mark_installed(&artifact.id, &version, now).await?;
+        self.repo
+            .mark_installed(&artifact.id, &version, now)
+            .await?;
 
         artifact.is_installed = true;
         artifact.installed_at = Some(now);
@@ -345,7 +377,8 @@ impl ArtifactService {
 
         // 再从内置定义查
         let builtins = self.get_builtin_definitions();
-        builtins.into_iter()
+        builtins
+            .into_iter()
             .find(|a| a.id == id)
             .ok_or_else(|| AppError::validation_error("Artifact not found"))
     }
@@ -357,7 +390,9 @@ impl ArtifactService {
         let builtins = vec![
             CreateArtifactRequest {
                 name: "Shell Hello World".to_string(),
-                description: Some("A simple shell script that demonstrates artifact execution".to_string()),
+                description: Some(
+                    "A simple shell script that demonstrates artifact execution".to_string(),
+                ),
                 artifact_type: ArtifactType::Shell,
                 entry_file: "main.sh".to_string(),
                 source_path: Some("shell-hello".to_string()),
@@ -372,12 +407,18 @@ impl ArtifactService {
                     permissions: vec![],
                     timeout: 5000,
                 }),
-                tags: Some(vec!["demo".to_string(), "shell".to_string(), "hello-world".to_string()]),
+                tags: Some(vec![
+                    "demo".to_string(),
+                    "shell".to_string(),
+                    "hello-world".to_string(),
+                ]),
                 icon: Some("🐚".to_string()),
             },
             CreateArtifactRequest {
                 name: "Python Hello World".to_string(),
-                description: Some("A simple Python script showcasing Python artifact execution".to_string()),
+                description: Some(
+                    "A simple Python script showcasing Python artifact execution".to_string(),
+                ),
                 artifact_type: ArtifactType::Python,
                 entry_file: "main.py".to_string(),
                 source_path: Some("python-hello".to_string()),
@@ -392,7 +433,11 @@ impl ArtifactService {
                     permissions: vec![],
                     timeout: 10000,
                 }),
-                tags: Some(vec!["demo".to_string(), "python".to_string(), "hello-world".to_string()]),
+                tags: Some(vec![
+                    "demo".to_string(),
+                    "python".to_string(),
+                    "hello-world".to_string(),
+                ]),
                 icon: Some("🐍".to_string()),
             },
             CreateArtifactRequest {
@@ -412,7 +457,12 @@ impl ArtifactService {
                     permissions: vec![],
                     timeout: 0,
                 }),
-                tags: Some(vec!["demo".to_string(), "web".to_string(), "chart".to_string(), "visualization".to_string()]),
+                tags: Some(vec![
+                    "demo".to_string(),
+                    "web".to_string(),
+                    "chart".to_string(),
+                    "visualization".to_string(),
+                ]),
                 icon: Some("📊".to_string()),
             },
         ];
@@ -450,7 +500,7 @@ impl ArtifactService {
                     model_parameters: request.model_parameters,
                     tools: request.tools,
                     execution_config: request.execution_config.unwrap_or_default(),
-                    is_builtin: true,  // 标记为内置应用
+                    is_builtin: true, // 标记为内置应用
                     is_installed: false,
                     installed_version: Some("1.0.0".to_string()),
                     installed_at: None,
@@ -473,7 +523,10 @@ impl ArtifactService {
     }
 
     /// 执行 Artifact
-    pub async fn execute_artifact(&self, request: ExecuteArtifactRequest) -> Result<ExecutionResult, AppError> {
+    pub async fn execute_artifact(
+        &self,
+        request: ExecuteArtifactRequest,
+    ) -> Result<ExecutionResult, AppError> {
         let artifact = self.get_artifact(&request.artifact_id).await?;
 
         if !artifact.is_installed {
@@ -525,11 +578,10 @@ impl ArtifactService {
 
     /// 获取沙盒基础路径
     fn get_sandbox_base_path(&self) -> Result<PathBuf, AppError> {
-        let app_data_dir = self
-            .app_handle
-            .path()
-            .app_data_dir()
-            .map_err(|e| AppError::internal_error(&format!("Failed to get app data dir: {}", e)))?;
+        let app_data_dir =
+            self.app_handle.path().app_data_dir().map_err(|e| {
+                AppError::internal_error(&format!("Failed to get app data dir: {}", e))
+            })?;
 
         Ok(app_data_dir.join("artifacts"))
     }
@@ -543,18 +595,15 @@ impl ArtifactService {
     /// 获取内置 artifact 源路径（从资源目录）
     fn get_builtin_source_path(&self, artifact: &Artifact) -> Result<PathBuf, AppError> {
         // 内置 artifacts 存储在 resources 目录
-        let resource_dir = self
-            .app_handle
-            .path()
-            .resource_dir()
-            .map_err(|e| AppError::internal_error(&format!("Failed to get resource dir: {}", e)))?;
+        let resource_dir =
+            self.app_handle.path().resource_dir().map_err(|e| {
+                AppError::internal_error(&format!("Failed to get resource dir: {}", e))
+            })?;
 
         let source = if let Some(source_path) = &artifact.source_path {
             resource_dir.join("internal_artifacts").join(source_path)
         } else {
-            resource_dir
-                .join("internal_artifacts")
-                .join(&artifact.id)
+            resource_dir.join("internal_artifacts").join(&artifact.id)
         };
 
         Ok(source)
@@ -565,9 +614,9 @@ impl ArtifactService {
         let dest = self.get_sandbox_path(artifact)?;
 
         // 创建目标目录
-        tokio::fs::create_dir_all(&dest)
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to create sandbox dir: {}", e)))?;
+        tokio::fs::create_dir_all(&dest).await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to create sandbox dir: {}", e))
+        })?;
 
         if artifact.is_builtin {
             // 内置应用：从资源目录复制
@@ -581,9 +630,9 @@ impl ArtifactService {
             } else {
                 // 单文件应用，创建空入口文件
                 let entry_file = dest.join(&artifact.entry_file);
-                tokio::fs::write(&entry_file, "")
-                    .await
-                    .map_err(|e| AppError::internal_error(&format!("Failed to create entry file: {}", e)))?;
+                tokio::fs::write(&entry_file, "").await.map_err(|e| {
+                    AppError::internal_error(&format!("Failed to create entry file: {}", e))
+                })?;
             }
         }
 
@@ -591,39 +640,45 @@ impl ArtifactService {
     }
 
     /// 递归复制目录
-    fn copy_dir_recursive<'a>(&'a self, source: &'a Path, dest: &'a Path) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>> {
+    fn copy_dir_recursive<'a>(
+        &'a self,
+        source: &'a Path,
+        dest: &'a Path,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>>
+    {
         Box::pin(async move {
-        tokio::fs::create_dir_all(dest)
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to create directory: {}", e)))?;
+            tokio::fs::create_dir_all(dest).await.map_err(|e| {
+                AppError::internal_error(&format!("Failed to create directory: {}", e))
+            })?;
 
-        let mut entries = tokio::fs::read_dir(source)
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to read source directory: {}", e)))?;
+            let mut entries = tokio::fs::read_dir(source).await.map_err(|e| {
+                AppError::internal_error(&format!("Failed to read source directory: {}", e))
+            })?;
 
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to read entry: {}", e)))?
-        {
-            let file_type = entry
-                .file_type()
+            while let Some(entry) = entries
+                .next_entry()
                 .await
-                .map_err(|e| AppError::internal_error(&format!("Failed to get file type: {}", e)))?;
+                .map_err(|e| AppError::internal_error(&format!("Failed to read entry: {}", e)))?
+            {
+                let file_type = entry.file_type().await.map_err(|e| {
+                    AppError::internal_error(&format!("Failed to get file type: {}", e))
+                })?;
 
-            let source_path = entry.path();
-            let dest_path = dest.join(entry.file_name());
+                let source_path = entry.path();
+                let dest_path = dest.join(entry.file_name());
 
-            if file_type.is_dir() {
-                self.copy_dir_recursive(&source_path, &dest_path).await?;
-            } else {
-                tokio::fs::copy(&source_path, &dest_path)
-                    .await
-                    .map_err(|e| AppError::internal_error(&format!("Failed to copy file: {}", e)))?;
+                if file_type.is_dir() {
+                    self.copy_dir_recursive(&source_path, &dest_path).await?;
+                } else {
+                    tokio::fs::copy(&source_path, &dest_path)
+                        .await
+                        .map_err(|e| {
+                            AppError::internal_error(&format!("Failed to copy file: {}", e))
+                        })?;
+                }
             }
-        }
 
-        Ok(())
+            Ok(())
         })
     }
 
@@ -634,7 +689,9 @@ impl ArtifactService {
         if sandbox_path.exists() {
             tokio::fs::remove_dir_all(&sandbox_path)
                 .await
-                .map_err(|e| AppError::internal_error(&format!("Failed to remove sandbox files: {}", e)))?;
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to remove sandbox files: {}", e))
+                })?;
         }
 
         Ok(())
@@ -716,7 +773,9 @@ impl ArtifactService {
         )
         .await
         .map_err(|_| AppError::internal_error("Execution timeout"))?
-        .map_err(|e| AppError::internal_error(&format!("Failed to execute Python script: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal_error(&format!("Failed to execute Python script: {}", e))
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();

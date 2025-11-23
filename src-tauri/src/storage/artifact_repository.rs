@@ -1,7 +1,9 @@
 // Artifact 数据访问层
 
 use crate::models::AppError;
-use crate::storage::types::{Artifact, ArtifactFilter, ArtifactType, ModelParameters, ExecutionConfig, UUID};
+use crate::storage::types::{
+    Artifact, ArtifactFilter, ArtifactType, ExecutionConfig, ModelParameters, UUID,
+};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
@@ -221,11 +223,7 @@ impl ArtifactRepository {
     }
 
     /// 更新运行统计
-    pub async fn update_run_stats(
-        &self,
-        id: &UUID,
-        last_run_at: i64,
-    ) -> Result<(), AppError> {
+    pub async fn update_run_stats(&self, id: &UUID, last_run_at: i64) -> Result<(), AppError> {
         let query = r#"
             UPDATE artifacts
             SET last_run_at = $2, run_count = run_count + 1, updated_at = $2
@@ -261,7 +259,9 @@ impl ArtifactRepository {
             .bind(installed_at)
             .execute(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to mark as installed: {}", e)))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to mark as installed: {}", e))
+            })?;
 
         Ok(())
     }
@@ -269,7 +269,8 @@ impl ArtifactRepository {
     // 辅助方法：将数据库行转换为 Artifact
     fn row_to_artifact(&self, row: sqlx::sqlite::SqliteRow) -> Result<Artifact, AppError> {
         let artifact_type_str: String = row.try_get("type")?;
-        let artifact_type = artifact_type_str.parse::<ArtifactType>()
+        let artifact_type = artifact_type_str
+            .parse::<ArtifactType>()
             .map_err(|e| AppError::internal_error(&e))?;
 
         let model_parameters: Option<ModelParameters> = row
@@ -281,8 +282,8 @@ impl ArtifactRepository {
             .and_then(|s| serde_json::from_str(&s).ok());
 
         let execution_config_str: String = row.try_get("execution_config")?;
-        let execution_config: ExecutionConfig = serde_json::from_str(&execution_config_str)
-            .unwrap_or_default();
+        let execution_config: ExecutionConfig =
+            serde_json::from_str(&execution_config_str).unwrap_or_default();
 
         let tags: Vec<String> = row
             .try_get::<Option<String>, _>("tags")?
@@ -389,12 +390,22 @@ mod tests {
         let new_time = chrono::Utc::now().timestamp_millis();
         repo.update_run_stats(&artifact.id, new_time).await.unwrap();
 
-        let updated = repo.get_artifact_by_id(&artifact.id).await.unwrap().unwrap();
+        let updated = repo
+            .get_artifact_by_id(&artifact.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(updated.run_count, 1);
 
         // Mark as installed
-        repo.mark_installed(&artifact.id, "1.0.0", new_time).await.unwrap();
-        let installed = repo.get_artifact_by_id(&artifact.id).await.unwrap().unwrap();
+        repo.mark_installed(&artifact.id, "1.0.0", new_time)
+            .await
+            .unwrap();
+        let installed = repo
+            .get_artifact_by_id(&artifact.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(installed.is_installed);
 
         // Delete
