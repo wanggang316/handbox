@@ -55,8 +55,9 @@
   let assets = $state<MessageAttachment[]>([]);
   let isAssetsLoading = $state(false);
   $effect(() => {
-    assets = message?.generatedAssets ?? [];
-    isAssetsLoading = Boolean(isStreaming && assets.length === 0);
+    const newAssets = message?.generatedAssets ?? [];
+    assets = newAssets;
+    isAssetsLoading = Boolean(isStreaming && newAssets.length === 0);
   });
 
   // 右键菜单状态
