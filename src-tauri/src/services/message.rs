@@ -1487,15 +1487,28 @@ impl MessageService {
         let messages: Vec<LlmMessage> = request
             .messages
             .iter()
-            .map(|msg| LlmMessage {
-                role: msg.role.clone(),
-                content: msg.content.clone(),
-                reasoning: msg.reasoning.clone(),
-                tool_calls: msg.tool_calls.clone(),
-                tool_call_id: msg.tool_call_id.clone(),
-                attachments: msg.attachments.clone(),
+            .map(|msg| {
+                // tracing::info!(
+                //     "[convert_to_api_request] Message: role={:?}, has_attachments={}, content_preview={}",
+                //     msg.role,
+                //     msg.attachments.as_ref().map(|a| a.len()).unwrap_or(0),
+                //     if msg.content.len() > 100 { &msg.content[..100] } else { &msg.content }
+                // );
+                LlmMessage {
+                    role: msg.role.clone(),
+                    content: msg.content.clone(),
+                    reasoning: msg.reasoning.clone(),
+                    tool_calls: msg.tool_calls.clone(),
+                    tool_call_id: msg.tool_call_id.clone(),
+                    attachments: msg.attachments.clone(),
+                }
             })
             .collect();
+
+        tracing::info!(
+            "[convert_to_api_request] Total messages to send: {}",
+            messages.len()
+        );
 
         let tools = self.prepare_tools(&chat).await?;
         let reasoning_config = chat.reasoning.clone();
@@ -2053,11 +2066,31 @@ impl MessageService {
 
         for m in turn_messages.iter() {
             let mut attachments = Vec::new();
+
+            // tracing::info!(
+            //     "[build_message_request] Processing message: role={:?}, has_attachments={}, has_generated_assets={}, content_preview={}",
+            //     m.role,
+            //     m.attachments.as_ref().map(|a| a.len()).unwrap_or(0),
+            //     m.generated_assets.as_ref().map(|g| g.len()).unwrap_or(0),
+            //     if m.content.len() > 100 { &m.content[..100] } else { &m.content }
+            // );
+
+            // 恢复原来的逻辑：加载所有 attachments 和 generated_assets
             if let Some(atts) = m.attachments.as_ref() {
-                attachments.extend(Self::load_llm_attachments(atts)?);
+                let loaded = Self::load_llm_attachments(atts)?;
+                tracing::info!(
+                    "[build_message_request] Loaded {} attachments",
+                    loaded.len()
+                );
+                attachments.extend(loaded);
             }
             if let Some(generated_assets) = m.generated_assets.as_ref() {
-                attachments.extend(Self::load_llm_attachments(generated_assets)?);
+                let loaded = Self::load_llm_attachments(generated_assets)?;
+                tracing::info!(
+                    "[build_message_request] Loaded {} generated_assets as attachments",
+                    loaded.len()
+                );
+                attachments.extend(loaded);
             }
 
             request_messages.push(LlmMessage {
