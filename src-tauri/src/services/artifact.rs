@@ -8,18 +8,18 @@ use crate::storage::types::{
 use crate::storage::ArtifactRepository;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime, Wry};
 use tokio::process::Command;
 
 /// Artifact 服务
 #[derive(Clone)]
-pub struct ArtifactService {
+pub struct ArtifactService<R: Runtime = Wry> {
     repo: Arc<ArtifactRepository>,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
 }
 
-impl ArtifactService {
-    pub fn new(repo: Arc<ArtifactRepository>, app_handle: AppHandle) -> Self {
+impl<R: Runtime> ArtifactService<R> {
+    pub fn new(repo: Arc<ArtifactRepository>, app_handle: AppHandle<R>) -> Self {
         Self { repo, app_handle }
     }
 

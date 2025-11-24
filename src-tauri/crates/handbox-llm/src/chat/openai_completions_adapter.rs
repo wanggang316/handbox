@@ -5,16 +5,19 @@ use crate::chat::ChatClient;
 use crate::error::LlmClientError;
 use crate::types::{
     LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmDeltaToolCall,
-    LlmDeltaToolFunction, LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort, LlmRequest,
-    LlmResponse, LlmToolCall, LlmToolChoice, LlmToolFunction, LlmUsage,
+    LlmDeltaToolFunction, LlmGeneratedImage, LlmMessage, LlmMessageAttachment, LlmMessageRole,
+    LlmProvider, LlmReasoningEffort, LlmRequest, LlmResponse, LlmToolCall, LlmToolChoice,
+    LlmToolFunction, LlmUsage,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
+use openai_rust::types::{Content, ContentPart, ImageUrl};
 use openai_rust::types::{
     CompletionChunkResponse, CompletionRequest, CompletionResponse, DeltaToolCall, Function,
     FunctionCall, ReasoningEffort as CompletionReasoningEffort, RequestMessage, Role, Tool,
     ToolCall as OpenAIToolCall, ToolChoice,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 
 /// OpenAI Completions 风格聊天客户端
 pub struct OpenAICompletionsChatClient {}
@@ -30,7 +33,8 @@ impl OpenAICompletionsChatClient {
             .messages
             .iter()
             .map(|msg| {
-                let mut message = RequestMessage::new(map_role(&msg.role), msg.content.clone());
+                let mut message =
+                    RequestMessage::new(map_role(&msg.role), build_message_content(msg));
 
                 if let Some(tool_calls) = &msg.tool_calls {
                     message.tool_calls =
@@ -90,11 +94,12 @@ impl OpenAICompletionsChatClient {
             .into_iter()
             .map(|choice| {
                 let message = choice.message;
+                let (content, generated_images) = parse_response_content(message.content);
                 LlmChoice {
                     index: choice.index as i32,
                     delta: Some(LlmMessage {
                         role: map_role_to_chat_message_role(message.role),
-                        content: message.content.unwrap_or_default(),
+                        content,
                         reasoning: message.reasoning,
                         tool_calls: message
                             .tool_calls
@@ -103,7 +108,7 @@ impl OpenAICompletionsChatClient {
                         attachments: None,
                     }),
                     finish_reason: Some(choice.finish_reason),
-                    generated_images: None,
+                    generated_images: (!generated_images.is_empty()).then_some(generated_images),
                 }
             })
             .collect();
@@ -136,17 +141,22 @@ impl OpenAICompletionsChatClient {
                         .map(convert_openai_delta_tool_call)
                         .collect::<Vec<LlmDeltaToolCall>>()
                 });
+                let (content, generated_images) = parse_response_content(choice.delta.content);
 
                 LlmChunkChoice {
                     index: choice.index as i32,
                     delta: Some(LlmDeltaMessage {
                         role: delta_role,
-                        content: choice.delta.content.clone(),
+                        content: if content.is_empty() {
+                            None
+                        } else {
+                            Some(content)
+                        },
                         reasoning: choice.delta.reasoning.clone(),
                         tool_calls,
                     }),
                     finish_reason: choice.finish_reason,
-                    generated_images: None,
+                    generated_images: (!generated_images.is_empty()).then_some(generated_images),
                 }
             })
             .collect();
@@ -357,4 +367,79 @@ fn convert_openai_delta_tool_call(call: DeltaToolCall) -> LlmDeltaToolCall {
             arguments: f.arguments.clone(),
         }),
     }
+}
+
+fn build_message_content(msg: &LlmMessage) -> Content {
+    let mut parts: Vec<ContentPart> = Vec::new();
+
+    if !msg.content.is_empty() {
+        parts.push(ContentPart::Text {
+            text: msg.content.clone(),
+        });
+    }
+
+    if let Some(attachments) = &msg.attachments {
+        for attachment in attachments {
+            parts.push(encode_attachment_as_image_part(attachment));
+        }
+    }
+
+    if parts.is_empty() {
+        Content::Text(msg.content.clone())
+    } else {
+        Content::Array(parts)
+    }
+}
+
+fn encode_attachment_as_image_part(attachment: &LlmMessageAttachment) -> ContentPart {
+    let data_url = format!(
+        "data:{};base64,{}",
+        attachment.mime_type,
+        BASE64_STANDARD.encode(&attachment.data)
+    );
+
+    ContentPart::ImageUrl {
+        image_url: ImageUrl {
+            url: data_url,
+            detail: None,
+        },
+    }
+}
+
+fn parse_response_content(content: Option<Content>) -> (String, Vec<LlmGeneratedImage>) {
+    match content {
+        Some(Content::Text(text)) => (text, Vec::new()),
+        Some(Content::Array(parts)) => {
+            let mut text = String::new();
+            let mut images = Vec::new();
+
+            for part in parts {
+                match part {
+                    ContentPart::Text { text: part_text } => text.push_str(&part_text),
+                    ContentPart::ImageUrl { image_url } => {
+                        if let Some(image) = parse_data_url(&image_url.url) {
+                            images.push(image);
+                        }
+                    }
+                }
+            }
+
+            (text, images)
+        }
+        None => (String::new(), Vec::new()),
+    }
+}
+
+fn parse_data_url(url: &str) -> Option<LlmGeneratedImage> {
+    let data = url.strip_prefix("data:")?;
+    let (mime_type, encoded) = data.split_once(";base64,")?;
+
+    Some(LlmGeneratedImage {
+        mime_type: if mime_type.is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            mime_type.to_string()
+        },
+        data: encoded.to_string(),
+    })
 }

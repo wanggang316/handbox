@@ -4,23 +4,24 @@
 use crate::chat::ChatClient;
 use crate::error::LlmClientError;
 use crate::types::{
-    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole,
-    LlmProvider, LlmReasoningEffort, LlmReasoningSummary, LlmRequest, LlmResponse,
-    LlmResponsesReasoning, LlmToolChoice, LlmUsage,
+    LlmChoice, LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmGeneratedImage, LlmMessage,
+    LlmMessageAttachment, LlmMessageRole, LlmProvider, LlmReasoningEffort, LlmReasoningSummary,
+    LlmRequest, LlmResponse, LlmResponsesReasoning, LlmToolChoice, LlmUsage,
 };
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::StreamExt;
 use openai_rust::client::Error as OpenAIError;
 use openai_rust::types::{
-    CreateResponseRequest, InputItem, InputMessage, InputMessageContent, InputMessageRole, Item,
-    ItemFunctionCall, ItemFunctionCallOutput, ItemStatus, OutputItem, Reasoning as OpenAIReasoning,
-    ReasoningSummary as OpenAIReasoningSummary, Response as OpenAIResponse, ResponseInput,
-    ResponseStreamEvent, ResponseUsage, ResponsesReasoningEffort as OpenAIReasoningEffort,
-    ResponsesTool, ResponsesToolChoice,
+    CreateResponseRequest, ImageDetail, InputContent, InputItem, InputMessage, InputMessageContent,
+    InputMessageRole, Item, ItemFunctionCall, ItemFunctionCallOutput, ItemStatus, OutputItem,
+    Reasoning as OpenAIReasoning, ReasoningSummary as OpenAIReasoningSummary,
+    Response as OpenAIResponse, ResponseInput, ResponseStreamEvent, ResponseUsage,
+    ResponsesReasoningEffort as OpenAIReasoningEffort, ResponsesTool, ResponsesToolChoice,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 
 /// OpenAI Responses 风格聊天客户端
 pub struct OpenAIResponsesChatClient;
@@ -93,10 +94,13 @@ impl OpenAIResponsesChatClient {
 
                     // 即使是 Assistant 消息，也作为 InputMessage 传递（如果有内容的话）
                     // 如果没有 tool_calls，则正常传递消息内容
-                    if !msg.content.is_empty() || msg.tool_calls.is_none() {
+                    if !msg.content.is_empty()
+                        || msg.tool_calls.is_none()
+                        || msg.attachments.is_some()
+                    {
                         input_items.push(InputItem::InputMessage(InputMessage {
                             role: InputMessageRole::Assistant,
-                            content: InputMessageContent::Text(msg.content.clone()),
+                            content: build_input_message_content(msg),
                             message_type: Some("message".to_string()),
                         }));
                     }
@@ -118,7 +122,7 @@ impl OpenAIResponsesChatClient {
 
                     input_items.push(InputItem::InputMessage(InputMessage {
                         role,
-                        content: InputMessageContent::Text(msg.content.clone()),
+                        content: build_input_message_content(msg),
                         message_type: Some("message".to_string()),
                     }));
                 }
@@ -252,6 +256,7 @@ impl OpenAIResponsesChatClient {
         let mut content = String::new();
         let mut reasoning_text = String::new();
         let mut tool_calls = Vec::new();
+        let mut generated_images = Vec::new();
 
         for item in &response.output {
             match item {
@@ -294,6 +299,9 @@ impl OpenAIResponsesChatClient {
                         reasoning_text.push('\n');
                     }
                 }
+                OutputItem::ImageGen { data, .. } => {
+                    generated_images.extend(extract_generated_images_from_data(data));
+                }
                 _ => {
                     // 其他类型暂不处理
                 }
@@ -325,7 +333,7 @@ impl OpenAIResponsesChatClient {
                 } else {
                     None
                 },
-                generated_images: None,
+                generated_images: (!generated_images.is_empty()).then_some(generated_images),
             };
             choices.push(choice);
         }
@@ -390,6 +398,14 @@ impl OpenAIResponsesChatClient {
                             )))
                         } else {
                             None
+                        }
+                    }
+                    OutputItem::ImageGen { data, .. } => {
+                        let images = extract_generated_images_from_data(&data);
+                        if images.is_empty() {
+                            None
+                        } else {
+                            Some(Ok(state.image_chunk(output_index as i32, images)))
                         }
                     }
                     _ => None,
@@ -698,6 +714,26 @@ impl StreamState {
         }
     }
 
+    fn image_chunk(&self, index: i32, images: Vec<LlmGeneratedImage>) -> LlmChunkResponse {
+        LlmChunkResponse {
+            id: self.response_id.clone(),
+            object: "chat.completion.chunk".to_string(),
+            model: self.model.clone(),
+            choices: vec![LlmChunkChoice {
+                index,
+                delta: Some(LlmDeltaMessage {
+                    role: Some(LlmMessageRole::Assistant),
+                    content: None,
+                    reasoning: None,
+                    tool_calls: None,
+                }),
+                finish_reason: None,
+                generated_images: Some(images),
+            }],
+            usage: None,
+        }
+    }
+
     fn reasoning_chunk(&self, index: i32, reasoning: String) -> LlmChunkResponse {
         LlmChunkResponse {
             id: self.response_id.clone(),
@@ -789,6 +825,96 @@ fn provider_error_message(body: &str) -> Option<String> {
         .and_then(|err| err.get("message"))
         .and_then(|msg| msg.as_str())
         .map(|s| s.to_string())
+}
+
+fn build_input_message_content(msg: &LlmMessage) -> InputMessageContent {
+    if msg.attachments.is_none() {
+        return InputMessageContent::Text(msg.content.clone());
+    }
+
+    let mut parts = Vec::new();
+
+    if !msg.content.is_empty() {
+        parts.push(InputContent::Text {
+            text: msg.content.clone(),
+        });
+    }
+
+    if let Some(attachments) = &msg.attachments {
+        for attachment in attachments {
+            parts.push(encode_attachment_as_input_image(attachment));
+        }
+    }
+
+    InputMessageContent::Parts(parts)
+}
+
+fn encode_attachment_as_input_image(attachment: &LlmMessageAttachment) -> InputContent {
+    let data_url = format!(
+        "data:{};base64,{}",
+        attachment.mime_type,
+        BASE64_STANDARD.encode(&attachment.data)
+    );
+
+    InputContent::Image {
+        image_url: Some(data_url),
+        file_id: None,
+        detail: ImageDetail::Auto,
+    }
+}
+
+fn extract_generated_images_from_data(data: &serde_json::Value) -> Vec<LlmGeneratedImage> {
+    let mut images = Vec::new();
+
+    if let Some(b64) = data.get("b64_json").and_then(|v| v.as_str()) {
+        images.push(LlmGeneratedImage {
+            mime_type: data
+                .get("mime_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("image/png")
+                .to_string(),
+            data: b64.to_string(),
+        });
+    }
+
+    if let Some(list) = data.get("images").and_then(|v| v.as_array()) {
+        for item in list {
+            if let Some(b64) = item.get("b64_json").and_then(|v| v.as_str()) {
+                images.push(LlmGeneratedImage {
+                    mime_type: item
+                        .get("mime_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("image/png")
+                        .to_string(),
+                    data: b64.to_string(),
+                });
+            } else if let Some(url) = item.get("url").and_then(|v| v.as_str()) {
+                if let Some(image) = parse_data_url(url) {
+                    images.push(image);
+                }
+            }
+        }
+    } else if let Some(url) = data.get("url").and_then(|v| v.as_str()) {
+        if let Some(image) = parse_data_url(url) {
+            images.push(image);
+        }
+    }
+
+    images
+}
+
+fn parse_data_url(url: &str) -> Option<LlmGeneratedImage> {
+    let data = url.strip_prefix("data:")?;
+    let (mime_type, encoded) = data.split_once(";base64,")?;
+
+    Some(LlmGeneratedImage {
+        mime_type: if mime_type.is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            mime_type.to_string()
+        },
+        data: encoded.to_string(),
+    })
 }
 
 #[cfg(test)]

@@ -119,16 +119,19 @@ mod tests {
     use crate::storage::types::{ArtifactType, ExecutionConfig};
     use crate::storage::{ArtifactRepository, Database};
     use std::sync::Arc;
-    use tauri::test::{mock_builder, MockRuntime};
+    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
     use tempfile::tempdir;
 
-    async fn create_test_service() -> (ArtifactService, tempfile::TempDir) {
+    async fn create_test_service() -> (ArtifactService<MockRuntime>, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let db = Arc::new(Database::new(&db_path).await.unwrap());
         let repo = Arc::new(ArtifactRepository::new(db));
 
-        let app = mock_builder().build();
+        let context = mock_context::<MockRuntime, _>(noop_assets());
+        let app = mock_builder()
+            .build(context)
+            .expect("failed to build app for tests");
         let app_handle = app.handle();
 
         let service = ArtifactService::new(repo, app_handle.clone());
@@ -161,7 +164,7 @@ mod tests {
         let filter = ArtifactFilter {
             search: None,
             artifact_type: Some(ArtifactType::Shell),
-            is_builtin: None,
+            is_builtin: Some(false),
             is_installed: None,
             tags: None,
             sort_by: None,
