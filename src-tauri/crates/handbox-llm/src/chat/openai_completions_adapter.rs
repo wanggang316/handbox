@@ -10,14 +10,13 @@ use crate::types::{
     LlmToolFunction, LlmUsage,
 };
 use async_trait::async_trait;
-use futures::StreamExt;
-use openai_rust::types::{Content, ContentPart, ImageUrl};
-use openai_rust::types::{
-    CompletionChunkResponse, CompletionRequest, CompletionResponse, DeltaToolCall, Function,
-    FunctionCall, ReasoningEffort as CompletionReasoningEffort, RequestMessage, Role, Tool,
-    ToolCall as OpenAIToolCall, ToolChoice,
-};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use futures::StreamExt;
+use openai_rust::types::{
+    CompletionChunkResponse, CompletionRequest, CompletionResponse, Content, ContentPart,
+    DeltaToolCall, Function, FunctionCall, ImageUrl, ReasoningEffort as CompletionReasoningEffort,
+    RequestMessage, Role, Tool, ToolCall as OpenAIToolCall, ToolChoice,
+};
 
 /// OpenAI Completions 风格聊天客户端
 pub struct OpenAICompletionsChatClient {}
@@ -94,7 +93,16 @@ impl OpenAICompletionsChatClient {
             .into_iter()
             .map(|choice| {
                 let message = choice.message;
+                tracing::info!(
+                    "[OpenAI Completions] Processing choice message, has_content: {}",
+                    message.content.is_some()
+                );
                 let (content, generated_images) = parse_response_content(message.content);
+                tracing::info!(
+                    "[OpenAI Completions] Parsed response: content_len={}, generated_images={}",
+                    content.len(),
+                    generated_images.len()
+                );
                 LlmChoice {
                     index: choice.index as i32,
                     delta: Some(LlmMessage {
@@ -141,6 +149,22 @@ impl OpenAICompletionsChatClient {
                         .map(convert_openai_delta_tool_call)
                         .collect::<Vec<LlmDeltaToolCall>>()
                 });
+                // Log the delta content type for debugging
+                if let Some(ref content) = choice.delta.content {
+                    match content {
+                        Content::Text(text) => {
+                            if text.contains("data:") || text.contains("image") {
+                                tracing::info!(
+                                    "[OpenAI Completions Chunk] Delta content (Text) preview: {}",
+                                    if text.len() > 200 { &text[..200] } else { text }
+                                );
+                            }
+                        }
+                        Content::Array(_) => {
+                            tracing::info!("[OpenAI Completions Chunk] Delta content is Array type");
+                        }
+                    }
+                }
                 let (content, generated_images) = parse_response_content(choice.delta.content);
 
                 LlmChunkChoice {
@@ -408,25 +432,82 @@ fn encode_attachment_as_image_part(attachment: &LlmMessageAttachment) -> Content
 
 fn parse_response_content(content: Option<Content>) -> (String, Vec<LlmGeneratedImage>) {
     match content {
-        Some(Content::Text(text)) => (text, Vec::new()),
+        Some(Content::Text(text)) => {
+            tracing::info!(
+                "[OpenAI Completions] Parsing text content, length: {}, starts_with_data: {}",
+                text.len(),
+                text.trim().starts_with("data:")
+            );
+            // 如果文本本身是 data URL，视为图片
+            if let Some(image) = parse_data_url(text.trim()) {
+                tracing::info!("[OpenAI Completions] Parsed data URL as image from text content");
+                (String::new(), vec![image])
+            } else {
+                (text, Vec::new())
+            }
+        }
         Some(Content::Array(parts)) => {
+            tracing::info!(
+                "[OpenAI Completions] Parsing array content with {} parts",
+                parts.len()
+            );
             let mut text = String::new();
             let mut images = Vec::new();
 
-            for part in parts {
+            for (idx, part) in parts.into_iter().enumerate() {
                 match part {
-                    ContentPart::Text { text: part_text } => text.push_str(&part_text),
+                    ContentPart::Text { text: part_text } => {
+                        tracing::info!(
+                            "[OpenAI Completions] Part {}: Text, length: {}",
+                            idx,
+                            part_text.len()
+                        );
+                        text.push_str(&part_text);
+                    }
                     ContentPart::ImageUrl { image_url } => {
+                        tracing::info!(
+                            "[OpenAI Completions] Part {}: ImageUrl, url_prefix: {}",
+                            idx,
+                            if image_url.url.len() > 50 {
+                                &image_url.url[..50]
+                            } else {
+                                &image_url.url
+                            }
+                        );
                         if let Some(image) = parse_data_url(&image_url.url) {
+                            tracing::info!(
+                                "[OpenAI Completions] Successfully parsed image from part {}, mime_type: {}, data_len: {}",
+                                idx,
+                                image.mime_type,
+                                image.data.len()
+                            );
                             images.push(image);
+                        } else {
+                            tracing::warn!(
+                                "[OpenAI Completions] Failed to parse data URL from part {}, url_prefix: {}",
+                                idx,
+                                if image_url.url.len() > 100 {
+                                    &image_url.url[..100]
+                                } else {
+                                    &image_url.url
+                                }
+                            );
                         }
                     }
                 }
             }
 
+            tracing::info!(
+                "[OpenAI Completions] Parsed array: text_len={}, images={}",
+                text.len(),
+                images.len()
+            );
             (text, images)
         }
-        None => (String::new(), Vec::new()),
+        None => {
+            tracing::info!("[OpenAI Completions] Content is None");
+            (String::new(), Vec::new())
+        }
     }
 }
 
