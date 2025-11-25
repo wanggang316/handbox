@@ -242,6 +242,8 @@ pub fn run() {
             artifact_init_builtin,
             // 剪贴板相关命令
             clipboard_copy_image,
+            // 图片相关命令
+            image_proxy,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

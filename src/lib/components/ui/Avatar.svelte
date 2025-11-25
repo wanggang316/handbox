@@ -1,5 +1,6 @@
 <script lang="ts">
   import { User, Edit } from '@lucide/svelte';
+  import { proxyImage, shouldProxyImage } from '$lib/api/image';
 
   interface Props {
     src?: string;      // 头像 URL
@@ -15,6 +16,11 @@
   // 文件上传引用
   let fileInput = $state<HTMLInputElement>();
 
+  // 代理后的图片 URL
+  let proxiedSrc = $state<string | null>(null);
+  let isLoading = $state(false);
+  let hasError = $state(false);
+
   // 尺寸映射
   const sizeClasses = {
     sm: 'w-8 h-8',
@@ -28,10 +34,42 @@
     lg: 32
   };
 
-  const avatarSrc = $derived(src || null);
+  const avatarSrc = $derived(proxiedSrc || src || null);
   const sizeClass = $derived(sizeClasses[size]);
   const iconSize = $derived(iconSizes[size]);
   const fallbackLetter = $derived(letter ? letter.charAt(0).toUpperCase() : '');
+
+  // 处理图片代理加载
+  async function loadProxiedImage(url: string) {
+    if (!shouldProxyImage(url)) {
+      proxiedSrc = url;
+      return;
+    }
+
+    isLoading = true;
+    hasError = false;
+
+    try {
+      const dataUrl = await proxyImage(url);
+      proxiedSrc = dataUrl;
+    } catch (error) {
+      console.error('Failed to load proxied image:', error);
+      hasError = true;
+      proxiedSrc = null;
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  // 监听 src 变化
+  $effect(() => {
+    if (src) {
+      loadProxiedImage(src);
+    } else {
+      proxiedSrc = null;
+      hasError = false;
+    }
+  });
 
   // 处理文件上传
   function handleFileUpload() {
