@@ -222,6 +222,7 @@ pub struct ModelResponse {
     pub supported_chat_methods: Option<Vec<ChatMethod>>,
     pub chat_method: Option<ChatMethodResponse>,
     pub support_tools: bool,
+    pub support_image: bool,
     pub enabled: bool,
     pub favorite: bool,
     pub created_at: Timestamp,
@@ -283,6 +284,18 @@ impl ModelResponse {
             })
             .unwrap_or(false);
 
+        // 检查是否支持图片生成
+        let support_image = model
+            .supported_features
+            .as_ref()
+            .map(|features| features.iter().any(|f| f == "image_generation"))
+            .unwrap_or(false)
+            || model
+                .output_modalities
+                .as_ref()
+                .map(|modalities| modalities.contains(&ModelModality::Image))
+                .unwrap_or(false);
+
         Self {
             id: model.id,
             provider_id: model.provider_id,
@@ -301,6 +314,7 @@ impl ModelResponse {
             supported_chat_methods,
             chat_method,
             support_tools,
+            support_image,
             enabled: model.enabled,
             favorite: model.favorite,
             created_at: model.created_at,

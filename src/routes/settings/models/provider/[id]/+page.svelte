@@ -16,6 +16,7 @@
     Star,
     Info,
     RefreshCw,
+    Eye as EyeIcon,
   } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
@@ -367,8 +368,15 @@
                   : 'bg-base-200'} hover:bg-base-300"
               >
                 <!-- Model Name -->
-                <div class="flex items-center flex-1">
+                <div class="flex items-center flex-1 gap-2">
                   <span class="text-base-content text-xs">{model.name}</span>
+                  {#if model.support_image}
+                    <EyeIcon
+                      size={14}
+                      class="text-info"
+                      title="支持图片生成"
+                    />
+                  {/if}
                 </div>
 
                 <!-- Enabled Toggle -->

@@ -8,6 +8,7 @@
     Star,
     Check,
     ChevronDown,
+    Eye as EyeIcon,
   } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
   import {
@@ -273,6 +274,13 @@
                     <div class="flex items-center gap-2">
                       <span class="text-base-content text-sm">{model.name}</span
                       >
+                      {#if model.support_image}
+                        <EyeIcon
+                          size={14}
+                          class="text-info"
+                          title="支持图片生成"
+                        />
+                      {/if}
                       {#if model.id === selectedModelId}
                         <Check size={16} class="text-primary" />
                       {/if}
@@ -318,8 +326,15 @@
               class="h-3.5 w-3.5 rounded-md object-contain flex-shrink-0"
             />
           {/if}
-          <div class="text-base text-base-content">
+          <div class="text-base text-base-content flex items-center gap-2">
             {hoveredModel.name}
+            {#if hoveredModel.support_image}
+              <EyeIcon
+                size={14}
+                class="text-info"
+                title="支持图片生成"
+              />
+            {/if}
           </div>
         </div>
 
