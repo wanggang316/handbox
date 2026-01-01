@@ -57,27 +57,26 @@
         onclick={handleToggle}
       />
     </div>
+    <!-- 中间：头部操作按钮 -->
+    <div class="header-actions">
+      <IconButton
+        icon={MessageSquarePlus}
+        iconSize={18}
+        ariaLabel="新建会话"
+        onclick={handleNewChat}
+        customClass="new-chat-button"
+        title="新建会话"
+      />
+      <IconButton
+        icon={MessageSquareDashed}
+        iconSize={18}
+        ariaLabel="临时会话"
+        onclick={handleImplicitCreate}
+        customClass="implicit-create-button"
+        title="临时会话"
+      />
+    </div>
   {/if}
-
-  <!-- 中间：头部操作按钮 -->
-  <div class="header-actions">
-    <IconButton
-      icon={MessageSquarePlus}
-      iconSize={18}
-      ariaLabel="新建会话"
-      onclick={handleNewChat}
-      customClass="new-chat-button"
-      title="新建会话"
-    />
-    <IconButton
-      icon={MessageSquareDashed}
-      iconSize={18}
-      ariaLabel="临时会话"
-      onclick={handleImplicitCreate}
-      customClass="implicit-create-button"
-      title="临时会话"
-    />
-  </div>
 
   {@render children?.()}
   <!-- 如果未来还需要在标题栏放入其他控件，可通过 snippet 注入 -->
