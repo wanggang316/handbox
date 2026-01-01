@@ -95,27 +95,27 @@
   {/if}
 
   <!-- 用户信息卡片 -->
-  <TableGroup>
-    <div class="px-6 py-6 flex flex-row gap-y-4">
-      <div class="flex-1">
-        <UserAccount {user} />
-      </div>
-      {#if user.isLoggedIn}
-        <div class="flex items-center">
-          <Button
-            variant="gray"
-            size="sm"
-            on:click={handleEditProfile}
-            disabled={isLoading}
-          >
-            编辑资料
-          </Button>
-        </div>
-      {/if}
-    </div>
-  </TableGroup>
-
   {#if user.isLoggedIn}
+    <TableGroup>
+      <div class="px-6 py-6 flex flex-row gap-y-4">
+        <div class="flex-1">
+          <UserAccount {user} />
+        </div>
+        {#if user.isLoggedIn}
+          <div class="flex items-center">
+            <Button
+              variant="gray"
+              size="sm"
+              on:click={handleEditProfile}
+              disabled={isLoading}
+            >
+              编辑资料
+            </Button>
+          </div>
+        {/if}
+      </div>
+    </TableGroup>
+
     <!-- 退出登录按钮 -->
     <div>
       <Button
