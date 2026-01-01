@@ -20,6 +20,11 @@
   let autoHidden = $state(false); // 标记是否是自动隐藏
   let userOverrideInNarrowMode = $state(false); // 标记用户在窄屏模式下手动打开了侧边栏
 
+  // 同步 sidebarWidth 到 uiState
+  $effect(() => {
+    uiState.setSidebarWidth(sidebarWidth);
+  });
+
   // 切换侧边栏显示状态
   function toggleSidebar() {
     uiState.toggleSidebar();

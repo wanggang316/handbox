@@ -5,10 +5,8 @@
   import { goto } from "$app/navigation";
   import ChatList from "$lib/components/ui/ChatList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
-  import RoundButton from "$lib/components/ui/RoundButton.svelte";
-  import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
-  import { Box, Plus, Search } from "@lucide/svelte";
+  import { Box, Search } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login } from "$lib/states/auth.svelte";
   import SearchModal from "$lib/components/search/SearchModal.svelte";
@@ -39,16 +37,7 @@
     goto(`/artifacts`);
   }
 
-  function handleNewChatClick() {
-    console.log("Clicked new chat");
-    goto("/chat");
-  }
-
   let showSearchModal = $state(false);
-
-  function handleSearchClick() {
-    showSearchModal = true;
-  }
 
   async function handleUserClick() {
     if (currentUser.isLoggedIn) {
@@ -107,28 +96,30 @@
     username: authState.user?.username,
     email: authState.user?.email,
     avatar: authState.user?.avatar,
-    isPro: authState.user?.isPro || false
+    isPro: authState.user?.isPro || false,
   });
 </script>
 
 <div
-  class="h-full flex flex-col bg-base-200 p-0 pt-15 rounded-2xl overflow-hidden"
+  class="h-full flex flex-col bg-base-200 p-0 pt-12 rounded-2xl overflow-hidden"
 >
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-6 mb-6">
-    <!-- 顶部操作 -->
-    <div class="flex gap-2 px-4">
-      <RoundButton
-        customClass="flex-1"
-        label="New chat"
-        icon={Plus}
-        onclick={handleNewChatClick}
-      />
-      <CircleButton
-        icon={Search}
-        ariaLabel="搜索"
-        onclick={handleSearchClick}
-      />
+    <!-- 搜索框 -->
+    <div class="px-2">
+      <div class="relative">
+        <Search
+          class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
+          size={16}
+        />
+        <input
+          type="text"
+          placeholder="搜索..."
+          class="w-full h-8 pl-10 pr-4 bg-base-300 rounded-lg text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+          onfocus={() => (showSearchModal = true)}
+          readonly
+        />
+      </div>
     </div>
 
     <div class="flex px-2">

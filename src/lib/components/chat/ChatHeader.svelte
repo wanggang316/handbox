@@ -33,7 +33,11 @@
 <header
   class="h-[50px] px-4 border-b border-base-300 flex items-center justify-between"
 >
-  <div class="transition-all duration-300" class:ml-[120px]={!sidebarOpen}>
+  <div
+    style="margin-left: {!sidebarOpen
+      ? '190px'
+      : '0'}; transition: margin-left 0.25s ease-in-out;"
+  >
     <h1 class="text-base font-medium text-base-content">
       {title}
       <!-- {#if chatId}
