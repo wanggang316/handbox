@@ -1,6 +1,13 @@
 <script lang="ts">
-  import { PencilLine, Trash2, Sparkles, Copy, Hash, LoaderCircle } from '@lucide/svelte';
-  import * as chatApi from '$lib/api/chat';
+  import {
+    PencilLine,
+    Trash2,
+    Sparkles,
+    Copy,
+    Hash,
+    LoaderCircle,
+  } from "@lucide/svelte";
+  import * as chatApi from "$lib/api/chat";
 
   interface Chat {
     id: string;
@@ -22,7 +29,7 @@
     onChatClick = () => {},
     onRename,
     onDelete,
-    onGenerateTitle
+    onGenerateTitle,
   }: Props = $props();
 
   // 右键菜单状态
@@ -65,7 +72,9 @@
     // 在下一个 tick 中聚焦输入框
     setTimeout(() => {
       if (!selectedChat) return;
-      const input = document.querySelector(`input[data-chat-id="${selectedChat.id}"]`) as HTMLInputElement;
+      const input = document.querySelector(
+        `input[data-chat-id="${selectedChat.id}"]`
+      ) as HTMLInputElement;
       if (input) {
         input.focus();
         input.select();
@@ -75,8 +84,13 @@
 
   // 确认重命名
   function confirmRename() {
-    const chat = chats.find(c => c.id === renamingChatId);
-    if (chat && onRename && renameValue.trim() && renameValue.trim() !== chat.title) {
+    const chat = chats.find((c) => c.id === renamingChatId);
+    if (
+      chat &&
+      onRename &&
+      renameValue.trim() &&
+      renameValue.trim() !== chat.title
+    ) {
       onRename(chat, renameValue.trim());
     }
     cancelRename();
@@ -115,7 +129,7 @@
         onGenerateTitle(selectedChat, generatedTitle);
       }
     } catch (error) {
-      console.error('Failed to generate title:', error);
+      console.error("Failed to generate title:", error);
     } finally {
       // 清除 loading 状态
       isGeneratingTitle = false;
@@ -129,9 +143,9 @@
 
     try {
       await navigator.clipboard.writeText(selectedChat.title);
-      console.log('Title copied to clipboard');
+      console.log("Title copied to clipboard");
     } catch (error) {
-      console.error('Failed to copy title:', error);
+      console.error("Failed to copy title:", error);
     }
     showContextMenu = false;
   }
@@ -142,9 +156,9 @@
 
     try {
       await navigator.clipboard.writeText(selectedChat.id);
-      console.log('Chat ID copied to clipboard');
+      console.log("Chat ID copied to clipboard");
     } catch (error) {
-      console.error('Failed to copy chat ID:', error);
+      console.error("Failed to copy chat ID:", error);
     }
     showContextMenu = false;
   }
@@ -152,9 +166,9 @@
   // 键盘事件处理
   function handleKeydown(event: KeyboardEvent) {
     if (isRenaming) {
-      if (event.key === 'Enter') {
+      if (event.key === "Enter") {
         confirmRename();
-      } else if (event.key === 'Escape') {
+      } else if (event.key === "Escape") {
         cancelRename();
       }
     }
@@ -164,7 +178,7 @@
   function handleClickOutside(event: MouseEvent) {
     // 检查点击是否在右键菜单外部
     const target = event.target as HTMLElement;
-    if (!target.closest('.context-menu')) {
+    if (!target.closest(".context-menu")) {
       showContextMenu = false;
     }
   }
@@ -189,7 +203,7 @@
         <div class="relative">
           <input
             data-chat-id={chat.id}
-            class="w-full p-2 text-[14px] bg-base-100 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+            class="w-full py-1 px-2 text-[14px] bg-base-100 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={renameValue}
             onkeydown={handleKeydown}
             onblur={confirmRename}
@@ -199,14 +213,20 @@
       {:else}
         <!-- 聊天项 -->
         <button
-          class="w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 {chat.id === activeId ? 'bg-base-300' : ''}"
+          class="w-full py-1 px-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 {chat.id ===
+          activeId
+            ? 'bg-base-300'
+            : ''}"
           onclick={() => handleChatClick(chat)}
           oncontextmenu={(e) => handleContextMenu(e, chat)}
         >
           <div class="flex items-center justify-between">
             <span class="truncate">{chat.title}</span>
             {#if isGeneratingTitle && generatingChatId === chat.id}
-              <LoaderCircle size={12} class="text-base-content/60 animate-spin flex-shrink-0 ml-2" />
+              <LoaderCircle
+                size={12}
+                class="text-base-content/60 animate-spin flex-shrink-0 ml-2"
+              />
             {/if}
           </div>
         </button>
@@ -242,7 +262,7 @@
     {/if}
 
     <!-- 分隔线 -->
-    {#if (onGenerateTitle || onRename) && (onDelete)}
+    {#if (onGenerateTitle || onRename) && onDelete}
       <div class="border-t border-base-300 my-1 mx-2"></div>
     {/if}
 
