@@ -4,7 +4,7 @@
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import AccountEdit from "$lib/components/settings/AccountEdit.svelte";
   import GoogleLoginButton from "$lib/components/auth/GoogleLoginButton.svelte";
-  import { authState, logout as authLogout } from "$lib/states/auth.svelte";
+  import { authState, logout as authLogout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateUserProfile } from "$lib/api/auth";
   import { AppError } from "$lib/api";
 
@@ -67,7 +67,7 @@
   }
 
   async function handleLogout() {
-    if (!confirm("确定要退出登录吗？")) {
+    if (!(await confirmLogout())) {
       return;
     }
 
