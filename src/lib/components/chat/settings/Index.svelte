@@ -6,6 +6,7 @@
   import McpSettings from "./Tools.svelte";
   import { providerActions } from "$lib/states/provider.svelte";
   import { mcpActions } from "$lib/states/mcp.svelte";
+  import { currentChatModel } from "$lib/states/chat.svelte";
 
   interface Props {
     open: boolean;
@@ -13,6 +14,9 @@
   }
 
   let { open, onClose }: Props = $props();
+
+  // 检查当前模型是否支持工具调用
+  const supportsTools = $derived(currentChatModel().model?.support_tools ?? false);
 
   let isRefreshing = $state(false);
 
@@ -55,6 +59,8 @@
     <ModelSelection />
     <PromptSettings />
     <ModelParameters />
-    <McpSettings />
+    {#if supportsTools}
+      <McpSettings />
+    {/if}
   </div>
 </Drawer>

@@ -1,6 +1,10 @@
 <script lang="ts">
   import IconButton from "$lib/components/ui/IconButton.svelte";
-  import { PanelLeft } from "@lucide/svelte";
+  import {
+    PanelLeft,
+    MessageSquarePlus,
+    MessageSquareDashed,
+  } from "@lucide/svelte";
   import { createEventDispatcher } from "svelte";
 
   interface Props {
@@ -8,6 +12,8 @@
     showToggleButton?: boolean;
     onToggle?: () => void;
     children?: import("svelte").Snippet;
+    onNewChat?: () => void;
+    onImplicitCreate?: () => void;
   }
 
   let {
@@ -15,16 +21,34 @@
     showToggleButton = true,
     onToggle,
     children,
+    onNewChat,
+    onImplicitCreate,
   }: Props = $props();
-  const dispatch = createEventDispatcher<{ toggle: void }>();
+
+  const dispatch = createEventDispatcher<{
+    toggle: void;
+    newChat: void;
+    implicitCreate: void;
+  }>();
 
   function handleToggle() {
     dispatch("toggle");
     onToggle?.();
   }
+
+  function handleNewChat() {
+    dispatch("newChat");
+    onNewChat?.();
+  }
+
+  function handleImplicitCreate() {
+    dispatch("implicitCreate");
+    onImplicitCreate?.();
+  }
 </script>
 
 <div class="drag-region" data-tauri-drag-region>
+  <!-- 左侧：侧边栏切换按钮 -->
   {#if showToggleButton}
     <div class="sidebar-toggle-button">
       <IconButton
@@ -33,7 +57,27 @@
         onclick={handleToggle}
       />
     </div>
+    <!-- 中间：头部操作按钮 -->
+    <div class="header-actions">
+      <IconButton
+        icon={MessageSquarePlus}
+        iconSize={18}
+        ariaLabel="新建会话"
+        onclick={handleNewChat}
+        customClass="new-chat-button"
+        title="新建会话"
+      />
+      <IconButton
+        icon={MessageSquareDashed}
+        iconSize={18}
+        ariaLabel="临时会话"
+        onclick={handleImplicitCreate}
+        customClass="implicit-create-button"
+        title="临时会话"
+      />
+    </div>
   {/if}
+
   {@render children?.()}
   <!-- 如果未来还需要在标题栏放入其他控件，可通过 snippet 注入 -->
 </div>
@@ -66,11 +110,38 @@
     opacity: 1;
   }
 
+  /* 头部操作按钮区域 */
+  .header-actions {
+    position: absolute;
+    top: 11px;
+    left: 140px; /* 侧边栏切换按钮右侧 */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    pointer-events: auto;
+    z-index: 10000;
+  }
+
+  /* New Chat 按钮样式 */
+  :global(.new-chat-button) {
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  /* 隐式创建按钮样式 */
+  :global(.implicit-create-button) {
+    width: 28px;
+    height: 28px;
+  }
+
   /* 响应式设计：调整标题栏按钮位置 */
   /* @media (max-width: 500px) {
     .sidebar-toggle-button {
       left: 20px;
       top: 12px;
+    }
+    .header-actions {
+      left: 60px;
     }
   } */
 
@@ -78,6 +149,9 @@
     .sidebar-toggle-button {
       left: 15px;
       top: 10px;
+    }
+    .header-actions {
+      left: 50px;
     }
   } */
 </style>

@@ -128,6 +128,8 @@ pub struct Message {
     pub tool_call_id: Option<String>,
     pub config: Option<MessageConfig>,
     pub attachments: Option<Vec<MessageAttachment>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_assets: Option<Vec<MessageAttachment>>,
     pub input_tokens: Option<i32>,
     pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
@@ -156,6 +158,7 @@ mod tests {
             tool_call_id: None,
             config: None,
             attachments: None,
+            generated_assets: None,
             input_tokens: Some(10),
             output_tokens: Some(20),
             total_tokens: Some(30),

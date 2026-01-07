@@ -116,8 +116,10 @@ impl AnthropicChatClient {
                     reasoning: None, // Anthropic API 不支持推理过程
                     tool_calls: None,
                     tool_call_id: None,
+                    attachments: None,
                 }),
                 finish_reason,
+                generated_images: None,
             }],
             usage,
         })
@@ -252,6 +254,7 @@ impl ChatClient for AnthropicChatClient {
                                                     tool_calls: None,
                                                 }),
                                                 finish_reason: None,
+                                                generated_images: None,
                                             }],
                                             usage: None,
                                         };
@@ -276,6 +279,7 @@ impl ChatClient for AnthropicChatClient {
                                                 tool_calls: None,
                                             }),
                                             finish_reason: Some("stop".to_string()),
+                                            generated_images: None,
                                         }],
                                         usage: None,
                                     };

@@ -5,11 +5,19 @@
     Trash2,
     ChevronDown,
     ChevronRight,
+    X as CloseIcon,
+    Save,
+    FolderOpen,
   } from "lucide-svelte";
   import ToolCallList from "./ToolCallCard.svelte";
-  import type { Message } from "$lib/types";
+  import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore } from "$lib/states";
   import { openInBrowser, renderMarkdown } from "$lib/utils";
+  import {
+    resolveLocalAssetPath,
+    isTauriEnvironment,
+    openPathInSystem,
+  } from "$lib/utils/tauri";
 
   interface Props {
     message?: Message;
@@ -42,6 +50,27 @@
       return messageStore.getProviderConfig(message.config.providerId);
     }
     return undefined;
+  });
+
+  let assets = $state<MessageAttachment[]>([]);
+  let isAssetsLoading = $state(false);
+  $effect(() => {
+    const newAssets = message?.generatedAssets ?? [];
+    assets = newAssets;
+    isAssetsLoading = Boolean(isStreaming && newAssets.length === 0);
+  });
+
+  // 右键菜单状态
+  let contextMenu = $state<{
+    show: boolean;
+    x: number;
+    y: number;
+    asset: MessageAttachment | null;
+  }>({
+    show: false,
+    x: 0,
+    y: 0,
+    asset: null,
   });
 
   // 格式化时间戳
@@ -190,6 +219,116 @@
   function toggleReasoning() {
     reasoningExpanded = !reasoningExpanded;
   }
+
+  const assetUrl = (path?: string) => resolveLocalAssetPath(path);
+
+  async function openAssetExternally(asset: MessageAttachment) {
+    const path = asset.path || "";
+    if (!path) {
+      console.warn("[MessageAssistant] No valid path to open", asset);
+      return;
+    }
+
+    if (
+      path.startsWith("http://") ||
+      path.startsWith("https://") ||
+      path.startsWith("data:")
+    ) {
+      await openInBrowser(path);
+      return;
+    }
+
+    await openPathInSystem(path);
+  }
+
+  // 处理右键菜单
+  function handleContextMenu(event: MouseEvent, asset: MessageAttachment) {
+    event.preventDefault();
+
+    // 先移除旧的监听器（如果有）
+    if (contextMenu.show) {
+      document.removeEventListener('click', handleClickOutsideRef);
+    }
+
+    contextMenu = {
+      show: true,
+      x: event.clientX,
+      y: event.clientY,
+      asset,
+    };
+
+    // 延迟添加点击外部监听器
+    setTimeout(() => {
+      document.addEventListener('click', handleClickOutsideRef);
+    }, 0);
+  }
+
+  function closeContextMenu() {
+    contextMenu = { show: false, x: 0, y: 0, asset: null };
+    document.removeEventListener('click', handleClickOutsideRef);
+  }
+
+  // 创建稳定的引用函数
+  function handleClickOutsideRef(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.context-menu')) {
+      closeContextMenu();
+    }
+  }
+
+  // 右键菜单操作
+  async function copyImage() {
+    if (!contextMenu.asset?.path) return;
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("clipboard_copy_image", { path: contextMenu.asset.path });
+      console.log("[MessageAssistant] Image copied to clipboard");
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to copy image", error);
+    }
+    closeContextMenu();
+  }
+
+  async function saveImage() {
+    if (!contextMenu.asset?.path) return;
+
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { copyFile } = await import("@tauri-apps/plugin-fs");
+
+      const savePath = await save({
+        defaultPath: contextMenu.asset.name,
+        filters: [
+          {
+            name: "Images",
+            extensions: ["png", "jpg", "jpeg", "gif", "webp"],
+          },
+        ],
+      });
+
+      if (savePath) {
+        await copyFile(contextMenu.asset.path, savePath);
+        console.log("[MessageAssistant] Image saved to", savePath);
+      }
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to save image", error);
+    }
+    closeContextMenu();
+  }
+
+  async function showInFinder() {
+    if (!contextMenu.asset?.path) return;
+
+    try {
+      const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+      await revealItemInDir(contextMenu.asset.path);
+      console.log("[MessageAssistant] Revealed item in Finder");
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to show in Finder", error);
+    }
+    closeContextMenu();
+  }
 </script>
 
 <div
@@ -266,6 +405,44 @@
           >
             {@html renderMarkdown(message?.content || "")}
           </div>
+
+          {#if isAssetsLoading}
+            <div
+              class="mt-4 flex items-center gap-3 rounded-lg border border-dashed border-base-300 px-4 py-3 text-sm text-base-content/70"
+            >
+              <div
+                class="w-4 h-4 border-2 border-base-content/30 border-t-transparent rounded-full animate-spin"
+              ></div>
+              <span>图像生成中…</span>
+            </div>
+          {/if}
+
+          {#if assets?.length}
+            <div class="mt-4 flex flex-wrap gap-4">
+              {#each assets as asset (asset.id)}
+                <div
+                  class="relative rounded-lg bg-base-100 max-w-[320px]"
+                  title="点击在系统预览中打开"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => openAssetExternally(asset)}
+                  oncontextmenu={(e) => handleContextMenu(e, asset)}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openAssetExternally(asset);
+                    }
+                  }}
+                >
+                  <img
+                    src={assetUrl(asset.path)}
+                    alt={asset.name}
+                    class="w-full h-auto max-w-[320px] object-contain rounded-md"
+                  />
+                </div>
+              {/each}
+            </div>
+          {/if}
 
           <!-- 工具调用记录 -->
           {#if message?.toolCalls?.length}
@@ -356,3 +533,41 @@
     </div>
   </div>
 </div>
+
+<!-- 右键菜单 -->
+{#if contextMenu.show}
+  <div
+    class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
+    style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+    role="menu"
+    tabindex="-1"
+    onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => {
+      if (e.key === 'Escape') {
+        closeContextMenu();
+      }
+    }}
+  >
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={copyImage}
+    >
+      <Copy size={14} />
+      <span>复制图片</span>
+    </button>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={saveImage}
+    >
+      <Save size={14} />
+      <span>保存图片</span>
+    </button>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={showInFinder}
+    >
+      <FolderOpen size={14} />
+      <span>在 Finder 中打开</span>
+    </button>
+  </div>
+{/if}

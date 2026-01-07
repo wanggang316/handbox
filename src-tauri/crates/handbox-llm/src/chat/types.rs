@@ -11,6 +11,14 @@ pub struct LlmProvider {
     pub api_key: String,
 }
 
+/// 消息附件（图片、文件等）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmMessageAttachment {
+    pub name: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
 /// 通用-消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmMessage {
@@ -21,6 +29,8 @@ pub struct LlmMessage {
     pub tool_calls: Option<Vec<LlmToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<LlmMessageAttachment>>,
 }
 
 /// 通用-工具调用信息
@@ -132,6 +142,13 @@ pub struct LlmRequestToolFunction {
     pub parameters: Value,
 }
 
+/// 生成的图片数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmGeneratedImage {
+    pub mime_type: String, // e.g., "image/png", "image/jpeg"
+    pub data: String,      // Base64-encoded image data
+}
+
 // 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmResponse {
@@ -147,6 +164,8 @@ pub struct LlmChoice {
     pub index: i32,
     pub delta: Option<LlmMessage>,
     pub finish_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_images: Option<Vec<LlmGeneratedImage>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,6 +190,8 @@ pub struct LlmChunkChoice {
     pub index: i32,
     pub delta: Option<LlmDeltaMessage>,
     pub finish_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_images: Option<Vec<LlmGeneratedImage>>,
 }
 
 // 响应-消息-增量

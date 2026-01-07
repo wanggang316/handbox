@@ -159,32 +159,68 @@ impl GoogleOAuthService {
                         <html>
                         <head>
                             <meta charset="UTF-8">
-                            <title>认证成功</title>
+                            <meta name="viewport" content="width=device-width, initial-scale=1">
+                            <title>Signed in to HandBox</title>
                             <style>
+                                :root {
+                                    color-scheme: light;
+                                    --text: #111827;
+                                    --muted: #6b7280;
+                                    --card: #ffffff;
+                                    --shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.06);
+                                }
+                                * { box-sizing: border-box; }
                                 body {
-                                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                                    display: flex;
-                                    align-items: center;
-                                    justify-content: center;
-                                    height: 100vh;
                                     margin: 0;
-                                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                    min-height: 100vh;
+                                    display: grid;
+                                    place-items: center;
+                                    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                                        "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+                                    background:
+                                        radial-gradient(1200px 600px at 50% -10%, #f4f5f7 0%, #ffffff 45%, #ffffff 100%);
+                                    color: var(--text);
                                 }
                                 .container {
-                                    background: white;
-                                    padding: 2rem;
-                                    border-radius: 10px;
-                                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                                    width: min(520px, calc(100% - 48px));
+                                    padding: 48px 56px 44px;
                                     text-align: center;
                                 }
-                                h1 { color: #667eea; margin: 0 0 1rem 0; }
-                                p { color: #666; margin: 0; }
+                                .card {
+                                    background: var(--card);
+                                    border-radius: 18px;
+                                    /*box-shadow: var(--shadow);*/
+                                    padding: 40px 44px;
+                                }
+                                .icon {
+                                    width: 40px;
+                                    height: 40px;
+                                    margin: 0 auto 16px;
+                                }
+                                h1 {
+                                    font-size: 24px;
+                                    font-weight: 600;
+                                    margin: 0 0 10px 0;
+                                    letter-spacing: -0.01em;
+                                }
+                                p {
+                                    margin: 0;
+                                    color: var(--muted);
+                                    font-size: 14px;
+                                }
                             </style>
                         </head>
                         <body>
                             <div class="container">
-                                <h1>✓ 认证成功！</h1>
-                                <p>您可以关闭此窗口，返回应用继续操作。</p>
+                                <div class="card">
+                                    <svg class="icon" width="52" height="52" viewBox="0 0 733 912" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect width="733" height="733" fill='#3D49DA'/>
+                                        <circle cx="161.5" cy="143.5" r="100.5" fill='#FBBC05'/>
+                                        <path d="M733 733L526 733L629.5 912L733 733Z" fill='#34A853'/>
+                                    </svg>
+                                    <h1>Signed in to HandBox</h1>
+                                    <p>You may now close this page</p>
+                                </div>
                             </div>
                             <script>
                                 setTimeout(() => window.close(), 2000);

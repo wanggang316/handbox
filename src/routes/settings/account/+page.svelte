@@ -4,7 +4,7 @@
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import AccountEdit from "$lib/components/settings/AccountEdit.svelte";
   import GoogleLoginButton from "$lib/components/auth/GoogleLoginButton.svelte";
-  import { authState, logout as authLogout } from "$lib/states/auth.svelte";
+  import { authState, logout as authLogout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateUserProfile } from "$lib/api/auth";
   import { AppError } from "$lib/api";
 
@@ -67,7 +67,7 @@
   }
 
   async function handleLogout() {
-    if (!confirm("确定要退出登录吗？")) {
+    if (!(await confirmLogout())) {
       return;
     }
 
@@ -95,27 +95,27 @@
   {/if}
 
   <!-- 用户信息卡片 -->
-  <TableGroup>
-    <div class="px-6 py-6 flex flex-row gap-y-4">
-      <div class="flex-1">
-        <UserAccount {user} />
-      </div>
-      {#if user.isLoggedIn}
-        <div class="flex items-center">
-          <Button
-            variant="gray"
-            size="sm"
-            on:click={handleEditProfile}
-            disabled={isLoading}
-          >
-            编辑资料
-          </Button>
-        </div>
-      {/if}
-    </div>
-  </TableGroup>
-
   {#if user.isLoggedIn}
+    <TableGroup>
+      <div class="px-6 py-6 flex flex-row gap-y-4">
+        <div class="flex-1">
+          <UserAccount {user} />
+        </div>
+        {#if user.isLoggedIn}
+          <div class="flex items-center">
+            <Button
+              variant="gray"
+              size="sm"
+              on:click={handleEditProfile}
+              disabled={isLoading}
+            >
+              编辑资料
+            </Button>
+          </div>
+        {/if}
+      </div>
+    </TableGroup>
+
     <!-- 退出登录按钮 -->
     <div>
       <Button

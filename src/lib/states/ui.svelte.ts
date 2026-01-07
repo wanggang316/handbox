@@ -2,12 +2,12 @@
  * UI 状态管理 - Svelte 5
  */
 
-import type { Theme, ThemeColor, Language } from '../types';
+import type { Theme, ThemeColor, Language } from "../types";
 
 // 通知消息接口
 export interface Notification {
   id: string;
-  type: 'info' | 'success' | 'warning' | 'error';
+  type: "info" | "success" | "warning" | "error";
   title: string;
   message?: string;
   duration?: number;
@@ -16,6 +16,7 @@ export interface Notification {
 
 interface UIStateData {
   sidebarOpen: boolean;
+  sidebarWidth: number;
   currentPage: string;
   modals: Record<string, boolean>;
   notifications: Notification[];
@@ -28,18 +29,23 @@ interface UIStateData {
 class UIState {
   private state = $state<UIStateData>({
     sidebarOpen: true,
-    currentPage: 'chat',
+    sidebarWidth: 240,
+    currentPage: "chat",
     modals: {},
     notifications: [],
-    theme: 'system',
-    themeColor: 'blue',
-    language: 'zh-CN',
+    theme: "system",
+    themeColor: "blue",
+    language: "zh-CN",
     globalLoading: false,
   });
 
   // Getters
   get sidebarOpen() {
     return this.state.sidebarOpen;
+  }
+
+  get sidebarWidth() {
+    return this.state.sidebarWidth;
   }
 
   get currentPage() {
@@ -73,12 +79,12 @@ class UIState {
   // 派生状态：是否为暗色主题
   get isDarkMode(): boolean {
     const theme = this.state.theme;
-    if (theme === 'dark') return true;
-    if (theme === 'light') return false;
-    
+    if (theme === "dark") return true;
+    if (theme === "light") return false;
+
     // 跟随系统 - 需要检查浏览器环境
-    if (typeof window !== 'undefined') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (typeof window !== "undefined") {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
     }
     return false;
   }
@@ -86,6 +92,10 @@ class UIState {
   // Actions
   setSidebarOpen(open: boolean) {
     this.state.sidebarOpen = open;
+  }
+
+  setSidebarWidth(width: number) {
+    this.state.sidebarWidth = width;
   }
 
   setCurrentPage(page: string) {
@@ -141,21 +151,21 @@ class UIState {
    * 切换模态框状态
    */
   toggleModal(modalId: string): void {
-    this.state.modals = { 
-      ...this.state.modals, 
-      [modalId]: !this.state.modals[modalId] 
+    this.state.modals = {
+      ...this.state.modals,
+      [modalId]: !this.state.modals[modalId],
     };
   }
 
   /**
    * 显示通知
    */
-  showNotification(notification: Omit<Notification, 'id'>): string {
+  showNotification(notification: Omit<Notification, "id">): string {
     const id = crypto.randomUUID();
     const newNotification: Notification = {
       id,
       duration: 5000,
-      ...notification
+      ...notification,
     };
 
     this.state.notifications = [...this.state.notifications, newNotification];
@@ -174,7 +184,9 @@ class UIState {
    * 移除通知
    */
   removeNotification(id: string): void {
-    this.state.notifications = this.state.notifications.filter(n => n.id !== id);
+    this.state.notifications = this.state.notifications.filter(
+      (n) => n.id !== id,
+    );
   }
 
   /**
@@ -189,23 +201,28 @@ class UIState {
    */
   setTheme(newTheme: Theme): void {
     this.state.theme = newTheme;
-    
+
     // 保存到 localStorage
-    if (typeof localStorage !== 'undefined') {
-      const current = localStorage.getItem('theme');
+    if (typeof localStorage !== "undefined") {
+      const current = localStorage.getItem("theme");
       if (current !== newTheme) {
-        localStorage.setItem('theme', newTheme);
+        localStorage.setItem("theme", newTheme);
       }
     }
-    
+
     // 更新 HTML data-theme 属性以匹配 CSS 选择器
-    if (typeof document !== 'undefined') {
-      if (newTheme === 'system') {
+    if (typeof document !== "undefined") {
+      if (newTheme === "system") {
         // 跟随系统主题
-        const systemIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.setAttribute('data-theme', systemIsDark ? 'dark' : 'light');
+        const systemIsDark = window.matchMedia(
+          "(prefers-color-scheme: dark)",
+        ).matches;
+        document.documentElement.setAttribute(
+          "data-theme",
+          systemIsDark ? "dark" : "light",
+        );
       } else {
-        document.documentElement.setAttribute('data-theme', newTheme);
+        document.documentElement.setAttribute("data-theme", newTheme);
       }
     }
   }
@@ -215,17 +232,17 @@ class UIState {
    */
   setThemeColor(color: ThemeColor): void {
     this.state.themeColor = color;
-    
-    if (typeof localStorage !== 'undefined') {
-      const current = localStorage.getItem('themeColor');
+
+    if (typeof localStorage !== "undefined") {
+      const current = localStorage.getItem("themeColor");
       if (current !== color) {
-        localStorage.setItem('themeColor', color);
+        localStorage.setItem("themeColor", color);
       }
     }
-    
+
     // 更新 CSS 变量
-    if (typeof document !== 'undefined') {
-      document.documentElement.style.setProperty('--theme-color', color);
+    if (typeof document !== "undefined") {
+      document.documentElement.style.setProperty("--theme-color", color);
     }
   }
 
@@ -234,9 +251,9 @@ class UIState {
    */
   setLanguage(lang: Language): void {
     this.state.language = lang;
-    
+
     // 更新 HTML lang 属性
-    if (typeof document !== 'undefined') {
+    if (typeof document !== "undefined") {
       document.documentElement.lang = lang;
     }
   }

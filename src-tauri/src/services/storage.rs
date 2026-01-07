@@ -1,7 +1,7 @@
 // 存储服务实现
 
 use crate::models::AppError;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 存储服务
 pub struct StorageService {
@@ -43,6 +43,45 @@ impl StorageService {
     /// 获取日志目录
     pub fn get_logs_dir(&self) -> PathBuf {
         self.data_dir.join("logs")
+    }
+
+    /// 确保消息的媒体目录存在（按 chat/message 组织）
+    pub fn prepare_message_media_dir(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<PathBuf, AppError> {
+        let dir = self
+            .data_dir
+            .join("generated_media")
+            .join(chat_id)
+            .join(message_id);
+        Self::ensure_dir(&dir)?;
+        Ok(dir)
+    }
+
+    /// 确保消息的附件目录存在（用于输入资源）
+    pub fn prepare_message_attachment_dir(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<PathBuf, AppError> {
+        let dir = self
+            .data_dir
+            .join("message_attachments")
+            .join(chat_id)
+            .join(message_id);
+        Self::ensure_dir(&dir)?;
+        Ok(dir)
+    }
+
+    fn ensure_dir(path: &Path) -> Result<(), AppError> {
+        if path.exists() {
+            return Ok(());
+        }
+        std::fs::create_dir_all(path).map_err(|e| {
+            AppError::internal_error(&format!("Failed to create storage directory: {e}"))
+        })
     }
 
     /// 初始化数据库

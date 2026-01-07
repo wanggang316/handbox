@@ -1,4 +1,5 @@
 // 服务层模块
+pub mod artifact;
 pub mod auth;
 pub mod chat;
 pub mod mcp;
@@ -11,6 +12,7 @@ pub mod user_session;
 
 // 重新导出服务
 pub use crate::storage::Database;
+pub use artifact::ArtifactService;
 pub use auth::GoogleOAuthService;
 pub use chat::{ChatParameter, ChatService};
 pub use mcp::McpService;

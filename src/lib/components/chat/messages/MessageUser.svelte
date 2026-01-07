@@ -1,6 +1,7 @@
 <script lang="ts">
   import { RotateCcw, Copy, Pencil } from "lucide-svelte";
   import type { Message } from "$lib/types";
+  import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
 
   interface Props {
     message: Message;
@@ -10,7 +11,15 @@
     onEdit?: (messageId: string, content: string) => void;
   }
 
-  let { message, isOperating = false, onResend, onCopy, onEdit }: Props = $props();
+  const assetUrl = (path?: string) => resolveLocalAssetPath(path);
+
+  let {
+    message,
+    isOperating = false,
+    onResend,
+    onCopy,
+    onEdit,
+  }: Props = $props();
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -37,26 +46,72 @@
       onEdit?.(message.id, message.content);
     }
   }
+
+  async function openAttachmentExternally(path?: string) {
+    if (!path) {
+      console.warn("[MessageUser] No valid path to open");
+      return;
+    }
+    await openPathInSystem(path);
+  }
 </script>
 
 <div class="group relative" id={"message-" + message.id}>
   <!-- 消息容器 -->
   <div class="flex justify-end">
     <!-- 消息内容 -->
-    <div class="flex-1 min-w-0 text-right">
+    <div class="flex flex-col items-end">
       <!-- 消息气泡 -->
       <div
         class="inline-block max-w-full px-4 py-3 rounded-2xl bg-base-200 text-base-content"
       >
         <!-- 消息内容 -->
-        <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6]">
+        <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
           {message.content}
         </div>
+        {#if message.attachments?.length}
+          <div class="mt-3 flex flex-wrap gap-3">
+            {#each message.attachments as attachment}
+              {#if attachment.mimeType?.startsWith("image/")}
+                <div
+                  class="relative rounded-lg max-w-[300px]"
+                  title="点击在系统预览中打开"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => openAttachmentExternally(attachment.path)}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openAttachmentExternally(attachment.path);
+                    }
+                  }}
+                >
+                  <img
+                    src={assetUrl(attachment.path)}
+                    alt={attachment.name}
+                    class="w-full h-auto max-w-[300px] object-contain rounded-md"
+                  />
+                </div>
+              {:else}
+                <div
+                  class="rounded-lg overflow-hidden border border-base-300 bg-base-100 p-2 max-w-[300px]"
+                >
+                  <div class="p-3 text-sm text-left">
+                    <p class="font-medium">{attachment.name}</p>
+                    <p class="text-xs text-base-content/60">
+                      {attachment.mimeType}
+                    </p>
+                  </div>
+                </div>
+              {/if}
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- 操作按钮 (hover显示) -->
       <div
-        class="mt-2 gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex justify-end"
+        class="mt-2 gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex"
       >
         <!-- 复制按钮 -->
         <button

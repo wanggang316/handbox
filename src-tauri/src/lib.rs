@@ -11,10 +11,10 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
-    StorageService, UserSessionService,
+    ArtifactService, ChatService, McpService, MessageService, ModelService, ProviderService,
+    SearchService, StorageService, UserSessionService,
 };
-use crate::storage::Database;
+use crate::storage::{ArtifactRepository, Database};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
@@ -32,6 +32,21 @@ async fn initialize_services(
 
     // 初始化存储服务
     let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
+
+    // 允许前端通过 asset protocol 访问生成的媒体目录
+    let media_root = data_dir.join("generated_media");
+    std::fs::create_dir_all(&media_root)
+        .map_err(|e| format!("Failed to create generated media directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&media_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for generated media: {e}"))?;
+
+    let attachments_root = data_dir.join("message_attachments");
+    std::fs::create_dir_all(&attachments_root)
+        .map_err(|e| format!("Failed to create attachment directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&attachments_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for attachments: {e}"))?;
 
     // 初始化数据库服务
     let db_path = storage_service.get_database_path();
@@ -66,6 +81,7 @@ async fn initialize_services(
         provider_service_shared,
         chat_service_shared,
         mcp_service_shared,
+        storage_service.clone(),
         llm_config_provider,
     );
 
@@ -79,6 +95,10 @@ async fn initialize_services(
         tracing::warn!("恢复用户会话失败: {:?}", e);
     }
 
+    // 初始化 Artifact 服务
+    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
+    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(chat_service);
@@ -88,6 +108,7 @@ async fn initialize_services(
     app.manage(mcp_service);
     app.manage(search_service);
     app.manage(user_session_service);
+    app.manage(artifact_service);
 
     Ok(())
 }
@@ -115,6 +136,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // 创建菜单
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
@@ -137,6 +162,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // 测试命令
             greet,
+            // 调试命令
+            debug_check_file,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,
@@ -204,6 +231,19 @@ pub fn run() {
             search_add_history,
             search_clear_history,
             search_suggestions,
+            // Artifact 相关命令
+            artifact_create,
+            artifact_update,
+            artifact_get,
+            artifact_list,
+            artifact_delete,
+            artifact_install,
+            artifact_execute,
+            artifact_init_builtin,
+            // 剪贴板相关命令
+            clipboard_copy_image,
+            // 图片相关命令
+            image_proxy,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

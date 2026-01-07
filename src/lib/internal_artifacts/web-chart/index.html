@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chart Demo - HandBox Artifact</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-bottom: 30px;
+        }
+
+        canvas {
+            max-width: 100%;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #667eea;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Interactive Chart Demo</h1>
+        <p class="subtitle">HandBox Web Artifact Example</p>
+
+        <div class="chart-container">
+            <canvas id="myChart"></canvas>
+        </div>
+
+        <div class="controls">
+            <button onclick="updateChart('bar')">Bar Chart</button>
+            <button onclick="updateChart('line')">Line Chart</button>
+            <button onclick="updateChart('pie')">Pie Chart</button>
+            <button onclick="randomizeData()">Randomize Data</button>
+        </div>
+
+        <div class="info">
+            ✨ This is a demo web artifact running in HandBox.
+            Click the buttons above to interact with the chart!11111
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        let myChart;
+        let currentType = 'bar';
+
+        const colors = {
+            primary: 'rgba(102, 126, 234, 0.8)',
+            secondary: 'rgba(118, 75, 162, 0.8)',
+            success: 'rgba(72, 187, 120, 0.8)',
+            warning: 'rgba(237, 137, 54, 0.8)',
+            danger: 'rgba(245, 101, 101, 0.8)',
+        };
+
+        const initialData = {
+            labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+            datasets: [{
+                label: 'Sales Data',
+                data: [65, 59, 80, 81, 56, 55],
+                backgroundColor: Object.values(colors),
+                borderColor: 'rgba(102, 126, 234, 1)',
+                borderWidth: 2,
+                tension: 0.4
+            }]
+        };
+
+        function initChart() {
+            const ctx = document.getElementById('myChart').getContext('2d');
+            myChart = new Chart(ctx, {
+                type: currentType,
+                data: JSON.parse(JSON.stringify(initialData)),
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: currentType !== 'pie',
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Monthly Sales Overview'
+                        }
+                    },
+                    scales: currentType !== 'pie' ? {
+                        y: {
+                            beginAtZero: true
+                        }
+                    } : {}
+                }
+            });
+        }
+
+        function updateChart(type) {
+            currentType = type;
+            myChart.destroy();
+            initChart();
+        }
+
+        function randomizeData() {
+            const newData = myChart.data.datasets[0].data.map(() =>
+                Math.floor(Math.random() * 100)
+            );
+            myChart.data.datasets[0].data = newData;
+            myChart.update();
+        }
+
+        // Initialize chart on load
+        initChart();
+    </script>
+</body>
+</html>
