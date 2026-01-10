@@ -11,6 +11,9 @@ export type ThemeColor = 'blue' | 'green' | 'red' | 'yellow' | 'purple' | 'orang
 // 语言
 export type Language = 'zh-CN' | 'en-US';
 
+// 翻译目标语言（支持 system 或任意语言标签）
+export type TranslationTargetLanguage = 'system' | string;
+
 // 快捷键配置
 export interface ShortcutConfig {
   sendMessage: string;
@@ -25,6 +28,13 @@ export interface GeneralSettings {
   language: Language;
   autoScroll: boolean;
   shortcuts: ShortcutConfig;
+}
+
+// 翻译设置
+export interface TranslationSettings {
+  modelId?: string | null;
+  providerId?: string | null;
+  targetLanguage: TranslationTargetLanguage;
 }
 
 // MCP 服务器配置
@@ -62,6 +72,7 @@ export interface AppSettings {
   general: GeneralSettings;
   mcp: MCPSettings;
   account: AccountSettings;
+  translation: TranslationSettings;
 }
 
 // 设置更新请求

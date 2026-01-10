@@ -11,7 +11,9 @@ pub mod message;
 pub mod model;
 pub mod provider;
 pub mod search;
+pub mod settings;
 pub mod window;
+pub mod word;
 
 // 重新导出所有命令
 pub use artifact::*;
@@ -26,4 +28,6 @@ pub use message::*;
 pub use model::*;
 pub use provider::*;
 pub use search::*;
+pub use settings::*;
 pub use window::*;
+pub use word::*;

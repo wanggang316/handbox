@@ -12,9 +12,9 @@ pub mod utils;
 use crate::commands::*;
 use crate::services::{
     ArtifactService, ChatService, McpService, MessageService, ModelService, ProviderService,
-    SearchService, StorageService, UserSessionService,
+    SearchService, SettingsService, StorageService, UserSessionService, WordService,
 };
-use crate::storage::{ArtifactRepository, Database};
+use crate::storage::{ArtifactRepository, Database, WordRepository};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
@@ -78,14 +78,24 @@ async fn initialize_services(
 
     let message_service = MessageService::new(
         database_service.clone(),
-        provider_service_shared,
+        provider_service_shared.clone(),
         chat_service_shared,
         mcp_service_shared,
         storage_service.clone(),
-        llm_config_provider,
+        llm_config_provider.clone(),
     );
 
     let search_service = SearchService::new(database_service.clone(), storage_service.clone());
+
+    let settings_service = SettingsService::new(storage_service.clone());
+
+    let word_repo = Arc::new(WordRepository::new(database_service.clone()));
+    let word_service = WordService::new(
+        word_repo,
+        provider_service_shared.clone(),
+        settings_service.clone(),
+        llm_config_provider.clone(),
+    );
 
     // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());
@@ -107,6 +117,8 @@ async fn initialize_services(
     app.manage(model_service);
     app.manage(mcp_service);
     app.manage(search_service);
+    app.manage(settings_service);
+    app.manage(word_service);
     app.manage(user_session_service);
     app.manage(artifact_service);
 
@@ -222,6 +234,24 @@ pub fn run() {
             mcp_update_tool_enabled,
             mcp_count_chats_using_server,
             mcp_remove_server_from_chats,
+            // 设置相关命令
+            settings_get,
+            settings_update,
+            settings_reset,
+            settings_export,
+            settings_import,
+            settings_validate_mcp,
+            settings_test_mcp_server,
+            settings_system_info,
+            settings_check_updates,
+            // 单词相关命令
+            word_create,
+            word_list,
+            word_get,
+            word_update,
+            word_delete,
+            word_review,
+            word_translate,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,

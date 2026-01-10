@@ -38,6 +38,7 @@ pub enum Language {
 
 /// 快捷键配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ShortcutConfig {
     pub send_message: String,
     pub new_line: String,
@@ -46,6 +47,7 @@ pub struct ShortcutConfig {
 
 /// 通用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeneralSettings {
     pub theme: Theme,
     pub theme_color: ThemeColor,
@@ -54,8 +56,19 @@ pub struct GeneralSettings {
     pub shortcuts: ShortcutConfig,
 }
 
+/// 翻译设置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationSettings {
+    pub model_id: Option<String>,
+    pub provider_id: Option<String>,
+    /// 目标语言，支持 "system" 或 IETF 语言标签（如 "en-US"）
+    pub target_language: String,
+}
+
 /// MCP 服务器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MCPServer {
     pub name: String,
     pub command: String,
@@ -67,12 +80,14 @@ pub struct MCPServer {
 
 /// MCP 设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MCPSettings {
     pub servers: Vec<MCPServer>,
 }
 
 /// 用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserInfo {
     pub id: Option<String>,
     pub name: Option<String>,
@@ -83,6 +98,7 @@ pub struct UserInfo {
 
 /// 账户设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountSettings {
     pub user: Option<UserInfo>,
     pub is_logged_in: bool,
@@ -90,10 +106,12 @@ pub struct AccountSettings {
 
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub general: GeneralSettings,
     pub mcp: MCPSettings,
     pub account: AccountSettings,
+    pub translation: TranslationSettings,
 }
 
 /// 设置更新请求

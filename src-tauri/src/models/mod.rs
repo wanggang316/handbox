@@ -11,6 +11,7 @@ pub mod provider;
 pub mod search;
 pub mod settings;
 pub mod user;
+pub mod word;
 
 // 重新导出常用类型
 pub use artifact::*;
@@ -24,3 +25,4 @@ pub use provider::*;
 pub use search::*;
 pub use settings::*;
 pub use user::*;
+pub use word::*;
