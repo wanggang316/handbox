@@ -457,9 +457,9 @@ export const providerActions = {
         };
       }
 
-      if (refreshFromRemote) {
-        providerState.providersWithModelsNeedRefresh = true;
-      }
+      // 移除了错误的标志设置
+      // 远程刷新后数据已经是最新的，不需要标记为需要刷新
+      // loadProvidersWithModels 成功后会自动设置 providersWithModelsNeedRefresh = false
     } catch (error) {
       providerState.error =
         error instanceof Error ? error.message : "获取模型列表失败";

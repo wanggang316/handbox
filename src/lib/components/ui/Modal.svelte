@@ -29,7 +29,7 @@
     setTimeout(() => {
       closing = false;
       onClose();
-    }, 300);
+    }, 250);
   }
 
   function handleBackdropClick(e: MouseEvent) {
@@ -107,19 +107,19 @@
 
 <style>
   .animate-backdrop {
-    animation: backdropFadeIn 0.3s ease-out;
+    animation: backdropFadeIn 0.25s ease-out;
   }
 
   .animate-backdrop-close {
-    animation: backdropFadeOut 0.3s ease-out;
+    animation: backdropFadeOut 0.25s ease-out;
   }
 
   .animate-modal {
-    animation: modalSlideIn 0.3s ease-out;
+    animation: modalSlideIn 0.25s ease-out;
   }
 
   .animate-modal-close {
-    animation: modalSlideOut 0.3s ease-out;
+    animation: modalSlideOut 0.25s ease-out;
   }
 
   @keyframes backdropFadeIn {
@@ -143,7 +143,7 @@
   @keyframes modalSlideIn {
     from {
       opacity: 0;
-      transform: translateY(-40px);
+      transform: translateY(-30px);
     }
     to {
       opacity: 1;
@@ -158,7 +158,7 @@
     }
     to {
       opacity: 0;
-      transform: translateY(-40px);
+      transform: translateY(-30px);
     }
   }
 </style>

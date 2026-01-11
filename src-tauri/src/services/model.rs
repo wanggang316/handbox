@@ -7,6 +7,7 @@ use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
 use crate::storage::{ChatRepository, ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -162,6 +163,112 @@ impl ModelService {
         self.model_repo
             .toggle_favorite_model(provider_id, model_id, favorite)
             .await
+    }
+
+    /// 批量获取多个供应商的模型列表
+    pub async fn get_providers_models_batch(
+        &self,
+        provider_ids: &[UUID],
+        refresh_from_remote: bool,
+    ) -> Result<HashMap<UUID, Vec<ModelResponse>>, AppError> {
+        if provider_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        if !refresh_from_remote {
+            // 从数据库批量获取所有模型
+            let all_models = self
+                .model_repo
+                .get_models_by_providers(provider_ids)
+                .await?;
+
+            // 按 provider_id 分组
+            let mut result: HashMap<UUID, Vec<ModelResponse>> = HashMap::new();
+            for provider_id in provider_ids {
+                let provider = self
+                    .provider_repo
+                    .get_provider_by_id(provider_id)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::validation_error(&format!("Provider {} not found", provider_id))
+                    })?;
+
+                let provider_models: Vec<ModelResponse> = all_models
+                    .iter()
+                    .filter(|m| &m.provider_id == provider_id)
+                    .map(|m| {
+                        ModelResponse::from_model_with_provider(
+                            m.clone(),
+                            Some(&provider.provider_type),
+                        )
+                    })
+                    .filter(|m| m.chat_method.is_some())
+                    .collect();
+
+                result.insert(provider_id.clone(), provider_models);
+            }
+
+            Ok(result)
+        } else {
+            // 远程刷新：并行获取每个供应商的模型
+            use futures::future::join_all;
+
+            let fetch_futures: Vec<_> = provider_ids
+                .iter()
+                .map(|provider_id| {
+                    let provider_id = provider_id.clone();
+                    async move {
+                        let provider_result =
+                            self.provider_repo.get_provider_by_id(&provider_id).await;
+                        match provider_result {
+                            Ok(Some(provider)) => match self
+                                .fetch_and_sync_models(&provider, true)
+                                .await
+                            {
+                                Ok(()) => {
+                                    let models = self
+                                        .model_repo
+                                        .get_models_by_provider(&provider_id)
+                                        .await
+                                        .ok();
+                                    let provider_type = provider.provider_type.clone();
+                                    (provider_id.clone(), models, Some(provider_type))
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to fetch models for {}: {}",
+                                        provider_id,
+                                        e
+                                    );
+                                    (provider_id.clone(), None, None)
+                                }
+                            },
+                            Ok(None) => (provider_id.clone(), None, None),
+                            Err(e) => {
+                                tracing::error!("Failed to get provider {}: {}", provider_id, e);
+                                (provider_id.clone(), None, None)
+                            }
+                        }
+                    }
+                })
+                .collect();
+
+            let results = join_all(fetch_futures).await;
+
+            let mut result: HashMap<UUID, Vec<ModelResponse>> = HashMap::new();
+            for (provider_id, models_opt, provider_type_opt) in results {
+                if let (Some(models), Some(provider_type)) = (models_opt, provider_type_opt) {
+                    let model_responses: Vec<ModelResponse> = models
+                        .into_iter()
+                        .map(|m| ModelResponse::from_model_with_provider(m, Some(&provider_type)))
+                        .filter(|m| m.chat_method.is_some())
+                        .collect();
+                    result.insert(provider_id, model_responses);
+                }
+            }
+
+            Ok(result)
+        }
     }
 
     // === 私有辅助方法 ===

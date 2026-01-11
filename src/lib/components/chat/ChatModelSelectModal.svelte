@@ -37,8 +37,8 @@
   let hoveredModel = $state<ModelWithProvider | null>(null);
   let tooltipPosition = $state({ x: 0, y: 0 });
   // 从 provider 状态派生可用模型，仅关注已启用的供应商与模型
-  const allModels = $derived(() => {
-    return providerState.providersWithModels
+  const allModels = $derived(
+    providerState.providersWithModels
       .filter((provider) => provider.enabled)
       .flatMap((provider) =>
         provider.models
@@ -48,29 +48,31 @@
             providerName: provider.name,
             providerType: provider.provider_type,
           }))
-      );
-  });
+      )
+  );
 
-  const favoriteModels = $derived(() => {
-    return allModels().filter((model) => model.favorite);
-  });
+  const favoriteModels = $derived(allModels.filter((model) => model.favorite));
   const selectedModelId = $derived(selectedModel?.id || "");
-  const isLoadingModels = $derived(() => providerState.isLoadingWithModels);
+  const isLoadingModels = $derived(providerState.isLoadingWithModels);
 
   // 获取所有可用的供应商列表（用于筛选下拉框）
-  const availableProviders = $derived(() => {
+  let availableProvidersResult: string[] = $state([]);
+
+  $effect(() => {
     const providers = new Set<string>();
-    allModels().forEach((model) => {
+    for (const model of allModels) {
       if (model.providerName) {
         providers.add(model.providerName);
       }
-    });
-    return Array.from(providers).sort();
+    }
+    availableProvidersResult = Array.from(providers).sort();
   });
 
   // 过滤后的模型
-  const filteredModels = $derived(() => {
-    let models = showFavoritesOnly ? favoriteModels() : allModels();
+  let filteredModelsResult: ModelWithProvider[] = $state([]);
+
+  $effect(() => {
+    let models = showFavoritesOnly ? favoriteModels : allModels;
 
     // 按供应商筛选
     if (selectedProviderFilter !== "all") {
@@ -89,37 +91,43 @@
       );
     }
 
-    return models;
+    filteredModelsResult = models;
   });
 
   // 按供应商分组
-  const groupedModels = $derived(() => {
+  let groupedModelsResult: Record<string, ModelWithProvider[]> = $state({});
+
+  $effect(() => {
     const groups: Record<string, ModelWithProvider[]> = {};
 
-    filteredModels().forEach((model: ModelWithProvider) => {
+    for (const model of filteredModelsResult) {
       const key = model.providerName || "Unknown";
       if (!groups[key]) {
         groups[key] = [];
       }
       groups[key].push(model);
-    });
+    }
 
-    return groups;
+    groupedModelsResult = groups;
   });
 
   // 当 Modal 打开时检查是否需要刷新数据
   $effect(() => {
-    if (!open || providerState.isLoadingWithModels) {
+    if (!open) {
       return;
     }
 
-    // 如果需要刷新或者数据为空，则加载数据
+    // 移除了对 isLoadingWithModels 的检查
+    // 这样即使正在加载，Modal 也会立即显示
     if (
       providerState.providersWithModelsNeedRefresh ||
       providerState.providersWithModels.length === 0
     ) {
       console.log("ChatModelSelectModal: Loading providers with models");
-      providerActions.loadProvidersWithModels();
+      // 使用 .catch() 避免未处理的 Promise rejection
+      providerActions.loadProvidersWithModels().catch((err) => {
+        console.error("Failed to load models:", err);
+      });
     }
   });
 
@@ -199,10 +207,10 @@
       <!-- 过滤器按钮 -->
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs text-base-content/70">
-          {#if isLoadingModels()}
+          {#if isLoadingModels}
             正在加载模型...
           {:else}
-            共找到 {filteredModels().length} 个模型
+            共找到 {filteredModelsResult.length} 个模型
           {/if}
         </div>
 
@@ -212,7 +220,7 @@
             bind:value={selectedProviderFilter}
             options={[
               { value: "all", label: "全部供应商" },
-              ...availableProviders().map((p) => ({ value: p, label: p })),
+              ...availableProvidersResult.map((p) => ({ value: p, label: p })),
             ]}
             autoWidth={true}
             size="sm"
@@ -239,7 +247,7 @@
 
     <!-- 模型列表 -->
     <div class="flex-1 overflow-y-auto">
-      {#if filteredModels().length === 0}
+      {#if filteredModelsResult.length === 0}
         <div
           class="flex flex-col items-center justify-center py-12 text-base-content/70"
         >
@@ -250,7 +258,7 @@
       {:else}
         <!-- 分组模型列表 -->
         <div class="px-4 py-4 space-y-2">
-          {#each Object.entries(groupedModels()) as [providerName, models]}
+          {#each Object.entries(groupedModelsResult) as [providerName, models]}
             <TableGroup
               title={providerName}
               collapsible={true}
@@ -278,7 +286,7 @@
                         <EyeIcon
                           size={14}
                           class="text-info"
-                          title="支持图片生成"
+                          aria-label="支持图片生成"
                         />
                       {/if}
                       {#if model.id === selectedModelId}
@@ -329,11 +337,7 @@
           <div class="text-base text-base-content flex items-center gap-2">
             {hoveredModel.name}
             {#if hoveredModel.support_image}
-              <EyeIcon
-                size={14}
-                class="text-info"
-                title="支持图片生成"
-              />
+              <EyeIcon size={14} class="text-info" aria-label="支持图片生成" />
             {/if}
           </div>
         </div>

@@ -72,42 +72,36 @@ pub async fn provider_list_with_models(
 ) -> Result<Vec<ProviderWithModels>, AppError> {
     let refresh_from_remote = refresh_from_remote.unwrap_or(false);
     let providers = provider_service.list_providers().await?;
-    let mut result = Vec::new();
 
-    for provider in providers {
-        match model_service
-            .get_provider_models(&provider.id, refresh_from_remote)
-            .await
-        {
-            Ok(models) => {
-                result.push(ProviderWithModels {
-                    id: provider.id,
-                    name: provider.name,
-                    provider_type: provider.provider_type,
-                    base_url: provider.base_url,
-                    api_key: provider.api_key,
-                    enabled: provider.enabled,
-                    created_at: provider.created_at,
-                    updated_at: provider.updated_at,
-                    models,
-                });
-            }
-            Err(_) => {
-                // 即使获取模型失败，也返回供应商信息（空模型列表）
-                result.push(ProviderWithModels {
-                    id: provider.id,
-                    name: provider.name,
-                    provider_type: provider.provider_type,
-                    base_url: provider.base_url,
-                    api_key: provider.api_key,
-                    enabled: provider.enabled,
-                    created_at: provider.created_at,
-                    updated_at: provider.updated_at,
-                    models: Vec::new(),
-                });
-            }
-        }
+    if providers.is_empty() {
+        return Ok(Vec::new());
     }
+
+    let provider_ids: Vec<String> = providers.iter().map(|p| p.id.clone()).collect();
+
+    // 批量获取所有模型
+    let models_map = model_service
+        .get_providers_models_batch(&provider_ids, refresh_from_remote)
+        .await?;
+
+    // 组装结果，保持原有顺序
+    let result = providers
+        .into_iter()
+        .map(|provider| {
+            let models = models_map.get(&provider.id).cloned().unwrap_or_default();
+            ProviderWithModels {
+                id: provider.id,
+                name: provider.name,
+                provider_type: provider.provider_type,
+                base_url: provider.base_url,
+                api_key: provider.api_key,
+                enabled: provider.enabled,
+                created_at: provider.created_at,
+                updated_at: provider.updated_at,
+                models,
+            }
+        })
+        .collect();
 
     Ok(result)
 }
