@@ -1,14 +1,23 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { createWord, listWords, reviewWord, translateWord } from "$lib/api/word";
-  import ChatModelSelectModal from "$lib/components/chat/ChatModelSelectModal.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
+  import {
+    createWord,
+    deleteLookupHistory,
+    listLookupHistory,
+    listWords,
+    recordLookup,
+    reviewWord,
+    deleteWord,
+    translateWord,
+  } from "$lib/api/word";
+  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import LookupResultRow from "$lib/components/words/LookupResultRow.svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import { settingsState } from "$lib/states";
   import { providerActions, providerState } from "$lib/states/provider.svelte";
   import type { Word } from "$lib/types";
-  import { ChevronsUpDown } from "@lucide/svelte";
+  import { Trash2 } from "@lucide/svelte";
 
   type TabId = "lookup" | "learn" | "review";
 
@@ -18,6 +27,7 @@
     sourceLanguage: string;
     targetLanguage: string;
     phonetic?: string | null;
+    explanation?: string | null;
     exists: boolean;
   };
 
@@ -33,13 +43,25 @@
   let words = $state<Word[]>([]);
   let listQuery = $state("");
   let lookupQuery = $state("");
-  let showModelModal = $state(false);
   let translationProviderId = $state("");
   let translationModelId = $state("");
   let targetLanguage = $state("system");
   let customTargetLanguage = $state("");
 
   let lookupResult = $state<LookupResult | null>(null);
+  let lookupHistory = $state<
+    Array<{
+      id: string;
+      term: string;
+      translation?: string | null;
+      phonetic?: string | null;
+      explanation?: string | null;
+      sourceLanguage?: string | null;
+      targetLanguage?: string | null;
+      exists?: boolean;
+      createdAt: number;
+    }>
+  >([]);
 
   const targetLanguageOptions = [
     { value: "system", label: "跟随系统" },
@@ -57,21 +79,23 @@
     { value: "custom", label: "自定义" },
   ];
 
-  const selectedModel = $derived(() => {
-    if (!translationProviderId || !translationModelId) return null;
-    const provider = providerState.providersWithModels.find(
-      (item) => item.id === translationProviderId
-    );
-    const model = provider?.models.find(
-      (item) => item.id === translationModelId
-    );
-    if (!model || !provider) return null;
-    return {
-      ...model,
-      providerName: provider.name,
-      providerType: provider.provider_type,
-    };
-  });
+  const selectedModel = $derived(
+    (() => {
+      if (!translationProviderId || !translationModelId) return null;
+      const provider = providerState.providersWithModels.find(
+        (item) => item.id === translationProviderId
+      );
+      const model = provider?.models.find(
+        (item) => item.id === translationModelId
+      );
+      if (!model || !provider) return null;
+      return {
+        ...model,
+        providerName: provider.name,
+        providerType: provider.provider_type,
+      };
+    })()
+  );
 
   async function loadWords() {
     try {
@@ -82,12 +106,24 @@
         limit: 100,
         offset: 0,
       });
+      syncLookupHistoryWithWords();
     } catch (error) {
       console.error("Failed to load words:", error);
       errorMessage = "加载单词失败";
     } finally {
       isLoading = false;
     }
+  }
+
+  function syncLookupHistoryWithWords() {
+    if (!lookupHistory.length) return;
+    const existing = new Set(
+      words.map((word) => word.term.trim().toLowerCase())
+    );
+    lookupHistory = lookupHistory.map((item) => ({
+      ...item,
+      exists: existing.has(item.term.trim().toLowerCase()),
+    }));
   }
 
   async function handleLookup() {
@@ -114,8 +150,9 @@
           term: exact.term,
           translation: exact.translation,
           sourceLanguage: exact.language,
-          targetLanguage: "",
+          targetLanguage: targetLanguage,
           phonetic: exact.phonetic,
+          explanation: exact.explanation,
           exists: true,
         };
       } else {
@@ -129,10 +166,31 @@
           translation: translation.translation,
           sourceLanguage: "auto",
           targetLanguage: translation.targetLanguage,
-          phonetic: null,
+          phonetic: translation.phonetic,
+          explanation: translation.explanation,
           exists: false,
         };
       }
+
+      const recorded = await recordLookup({
+        term: lookupResult.term,
+        translation: lookupResult.translation,
+        phonetic: lookupResult.phonetic,
+        explanation: lookupResult.explanation,
+        sourceLanguage: lookupResult.sourceLanguage,
+        targetLanguage: lookupResult.targetLanguage,
+      });
+      lookupHistory = [
+        {
+          ...recorded,
+          exists: words.some(
+            (word) =>
+              word.term.trim().toLowerCase() ===
+              recorded.term.trim().toLowerCase()
+          ),
+        },
+        ...lookupHistory,
+      ];
     } catch (error) {
       console.error("Failed to lookup word:", error);
       errorMessage = "查词失败";
@@ -153,10 +211,18 @@
         term: lookupResult.term,
         translation: lookupResult.translation,
         language: lookupResult.sourceLanguage || "auto",
+        phonetic: lookupResult.phonetic,
+        explanation: lookupResult.explanation,
         source: "lookup",
       });
       lookupResult = { ...lookupResult, exists: true };
       await loadWords();
+      lookupHistory = lookupHistory.map((item) =>
+        item.term.trim().toLowerCase() ===
+        lookupResult.term.trim().toLowerCase()
+          ? { ...item, exists: true }
+          : item
+      );
     } catch (error) {
       console.error("Failed to add lookup word:", error);
       errorMessage = "添加单词失败";
@@ -172,6 +238,57 @@
     } catch (error) {
       console.error("Failed to review word:", error);
       errorMessage = "更新复习失败";
+    }
+  }
+
+  async function handleDeleteWord(wordId: string) {
+    try {
+      await deleteWord(wordId);
+      await loadWords();
+    } catch (error) {
+      console.error("Failed to delete word:", error);
+      errorMessage = "删除单词失败";
+    }
+  }
+
+  async function handleDeleteLookup(historyId: string) {
+    try {
+      await deleteLookupHistory(historyId);
+      lookupHistory = lookupHistory.filter((item) => item.id !== historyId);
+    } catch (error) {
+      console.error("Failed to delete lookup history:", error);
+      errorMessage = "删除查询记录失败";
+    }
+  }
+
+  async function handleAddHistory(item: {
+    term: string;
+    translation?: string | null;
+    phonetic?: string | null;
+    explanation?: string | null;
+    sourceLanguage?: string | null;
+    exists?: boolean;
+  }) {
+    if (!item.translation || item.exists) {
+      errorMessage = "查询结果不完整，无法添加";
+      return;
+    }
+    try {
+      await createWord({
+        term: item.term,
+        translation: item.translation,
+        language: item.sourceLanguage || "auto",
+        phonetic: item.phonetic,
+        explanation: item.explanation,
+        source: "lookup",
+      });
+      await loadWords();
+      lookupHistory = lookupHistory.map((history) =>
+        history.id === item.id ? { ...history, exists: true } : history
+      );
+    } catch (error) {
+      console.error("Failed to add history word:", error);
+      errorMessage = "添加单词失败";
     }
   }
 
@@ -241,6 +358,12 @@
   onMount(async () => {
     await loadWords();
     await loadTranslationSettings();
+    try {
+      lookupHistory = await listLookupHistory({ limit: 20, offset: 0 });
+      syncLookupHistoryWithWords();
+    } catch (error) {
+      console.error("Failed to load lookup history:", error);
+    }
   });
 </script>
 
@@ -248,7 +371,6 @@
   <div class="flex items-center justify-between">
     <div>
       <h1 class="text-xl font-semibold text-base-content">单词本</h1>
-      <p class="text-sm text-base-content/60">管理、学习与复习你的单词</p>
     </div>
   </div>
 
@@ -302,7 +424,8 @@
           rows={2}
           placeholder="输入单词、短语或句子"
           bind:value={lookupQuery}
-          onkeydown={(event) => event.key === "Enter" && !event.shiftKey && handleLookup()}
+          onkeydown={(event) =>
+            event.key === "Enter" && !event.shiftKey && handleLookup()}
         ></textarea>
         <div class="flex flex-wrap items-center gap-3">
           <div class="flex items-center gap-2">
@@ -320,64 +443,54 @@
               placeholder="语言标签，如 en-US"
               bind:value={customTargetLanguage}
               oninput={(event) =>
-                handleCustomTargetChange((event.target as HTMLInputElement).value)
-              }
+                handleCustomTargetChange(
+                  (event.target as HTMLInputElement).value
+                )}
             />
           {/if}
-          <Button variant="clear" size="sm" onclick={() => (showModelModal = true)}>
-            {selectedModel ? selectedModel.name : "选择模型"}
-            <ChevronsUpDown size={14} />
-          </Button>
+          <ChatModelSelectButton
+            {selectedModel}
+            variant="gray"
+            size="sm"
+            onModelSelect={(model) => handleModelSelect(model)}
+          />
           <button
             class="h-8 px-4 rounded-lg bg-primary text-base-100 text-sm"
             onclick={handleLookup}
-            disabled={isLoading || !translationProviderId || !translationModelId}
+            disabled={isLoading ||
+              !translationProviderId ||
+              !translationModelId}
           >
-            查询
+            {isLoading ? "查询中..." : "查询"}
           </button>
         </div>
       </div>
-
-      {#if lookupResult}
-        <div class="mt-4 rounded-xl border border-base-200 bg-base-200/30 p-4">
-          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <div class="text-base font-medium flex items-center gap-2">
-                <span>{lookupResult.term}</span>
-                {#if lookupResult.phonetic}
-                  <span class="text-xs text-base-content/50">
-                    {lookupResult.phonetic}
-                  </span>
-                {/if}
-              </div>
-              <div class="text-sm text-base-content/60">
-                {lookupResult.translation || "等待翻译结果"}
-              </div>
-              <div class="text-xs text-base-content/50 mt-1">
-                {lookupResult.targetLanguage || lookupResult.sourceLanguage}
-              </div>
-            </div>
-            <div>
-              {#if lookupResult.exists}
-                <span class="text-xs text-base-content/60">已在单词本</span>
-              {:else}
-                <button
-                  class="px-3 py-1 rounded-full text-xs bg-primary text-base-100"
-                  onclick={handleAddLookup}
-                  disabled={!lookupResult.translation || isLoading}
-                >
-                  添加到单词本
-                </button>
-              {/if}
-            </div>
-          </div>
-        </div>
-      {/if}
     </div>
+
+    {#if lookupHistory.length > 0}
+      <div class="rounded-2xl bg-base-100 p-4 shadow-sm border border-base-200">
+        <div class="text-xs text-base-content/60 mb-3">历史查询</div>
+        <div class="divide-y divide-base-200">
+          {#each lookupHistory as item}
+            <div class="py-3">
+              <LookupResultRow
+                {item}
+                busy={isLoading}
+                showDelete={true}
+                onAdd={() => handleAddHistory(item)}
+                onDelete={() => handleDeleteLookup(item.id)}
+              />
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
   {/if}
 
   {#if activeTab !== "lookup"}
-    <div class="flex-1 overflow-auto rounded-2xl bg-base-100 border border-base-200">
+    <div
+      class="flex-1 overflow-auto rounded-2xl bg-base-100 border border-base-200"
+    >
       {#if isLoading}
         <div class="p-6 text-sm text-base-content/60">加载中...</div>
       {:else if words.length === 0}
@@ -386,18 +499,34 @@
         <div class="divide-y divide-base-200">
           {#each words as word}
             <div
-              class="p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 hover:bg-base-200/40 cursor-pointer"
+              class="p-4 flex flex-col gap-3 hover:bg-base-200/40 cursor-pointer"
               onclick={() => goto(`/words/${word.id}`)}
             >
-              <div>
-                <div class="text-base font-medium">{word.term}</div>
+              <div
+                class="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+              >
+                <div class="flex-1">
+                  <div class="text-base font-medium flex items-center gap-2">
+                    <span>{word.term}</span>
+                    {#if word.phonetic}
+                      <span class="text-xs text-base-content/50">
+                        {word.phonetic}
+                      </span>
+                    {/if}
+                  </div>
                 <div class="text-sm text-base-content/60">
                   {word.translation}
                 </div>
+                {#if word.explanation}
+                  <div class="text-xs text-base-content/50 mt-1">
+                    {word.explanation}
+                  </div>
+                {/if}
               </div>
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-base-content/50">{word.language}</span>
-                <div class="flex items-center gap-2" onclick={handleActionClick}>
+                <div
+                  class="flex items-center gap-2"
+                  onclick={handleActionClick}
+                >
                   <button
                     class="px-3 py-1 rounded-full text-xs bg-success/10 text-success"
                     onclick={() => handleReview(word.id, true)}
@@ -410,7 +539,18 @@
                   >
                     忘记
                   </button>
+                  <button
+                    class="px-3 py-1 rounded-full text-xs bg-error/10 text-error"
+                    onclick={() => handleDeleteWord(word.id)}
+                  >
+                    删除
+                  </button>
                 </div>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-base-content/50">
+                <span>{word.language}</span>
+                <span>·</span>
+                <span>{new Date(word.updatedAt).toLocaleDateString()}</span>
               </div>
             </div>
           {/each}
@@ -419,9 +559,3 @@
     </div>
   {/if}
 </div>
-
-<ChatModelSelectModal
-  bind:open={showModelModal}
-  selectedModel={selectedModel}
-  onModelSelect={(model) => handleModelSelect(model)}
-/>

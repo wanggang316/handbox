@@ -4,6 +4,7 @@ export interface Word {
   language: string;
   translation: string;
   phonetic?: string | null;
+  explanation?: string | null;
   note?: string | null;
   tags: string[];
   source: string;
@@ -46,6 +47,7 @@ export interface CreateWordRequest {
   language: string;
   translation: string;
   phonetic?: string | null;
+  explanation?: string | null;
   note?: string | null;
   tags?: string[];
   source: string;
@@ -58,6 +60,7 @@ export interface UpdateWordRequest {
   language?: string;
   translation?: string;
   phonetic?: string | null;
+  explanation?: string | null;
   note?: string | null;
   tags?: string[];
   source?: string;
@@ -83,4 +86,31 @@ export interface TranslateWordResponse {
   term: string;
   translation: string;
   targetLanguage: string;
+  phonetic?: string | null;
+  explanation?: string | null;
+}
+
+export interface WordLookupHistory {
+  id: string;
+  term: string;
+  translation?: string | null;
+  phonetic?: string | null;
+  explanation?: string | null;
+  sourceLanguage?: string | null;
+  targetLanguage?: string | null;
+  createdAt: number;
+}
+
+export interface CreateWordLookupRequest {
+  term: string;
+  translation?: string | null;
+  phonetic?: string | null;
+  explanation?: string | null;
+  sourceLanguage?: string | null;
+  targetLanguage?: string | null;
+}
+
+export interface ListWordLookupHistoryRequest {
+  limit?: number;
+  offset?: number;
 }

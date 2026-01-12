@@ -1,9 +1,9 @@
 <script lang="ts">
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import { ChevronsUpDown, Plus, ArrowUp, X, Pencil } from "@lucide/svelte";
+  import { Plus, ArrowUp, X, Pencil } from "@lucide/svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Button from "../ui/Button.svelte";
-  import ChatModelSelectModal from "./ChatModelSelectModal.svelte";
+  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import { currentChatModel, chatActions } from "$lib/states/chat.svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
   import type { ChatAttachment } from "$lib/types/chat";
@@ -26,7 +26,6 @@
 
   let textareaRef: HTMLTextAreaElement;
   let fileInputRef: HTMLInputElement | null = null;
-  let showModelModal = $state(false);
 
   type AttachmentWithPreview = ChatAttachment & {
     id: string;
@@ -254,14 +253,12 @@
 
     <!-- 右侧：模型选择和发送按钮 -->
     <div class="flex items-center gap-3">
-      <Button
-        variant="clear"
-        size="sm"
-        on:click={() => (showModelModal = true)}
-      >
-        {currentModel ? currentModel.name : "选择模型"}
-        <ChevronsUpDown size={14} />
-      </Button>
+      <ChatModelSelectButton
+        selectedModel={currentModel}
+        onModelSelect={(model) => {
+          chatActions.updateChatModel(model.id, model.provider_id);
+        }}
+      />
       <CircleButton
         icon={ArrowUp}
         iconSize={18}
@@ -272,13 +269,3 @@
     </div>
   </div>
 </div>
-
-<!-- 模型选择模态框 -->
-<ChatModelSelectModal
-  bind:open={showModelModal}
-  selectedModel={currentModel}
-  onModelSelect={(model) => {
-    // 通过 chatActions 更新当前聊天的模型
-    chatActions.updateChatModel(model.id, model.provider_id);
-  }}
-/>

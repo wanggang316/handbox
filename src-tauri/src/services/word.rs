@@ -1,11 +1,13 @@
 // 单词业务逻辑
 
 use crate::models::{
-    AppError, CreateWordRequest, ReviewWordRequest, TranslateWordRequest, TranslateWordResponse,
-    UpdateWordRequest, WordDetail,
+    AppError, CreateWordLookupRequest, CreateWordRequest, ListWordLookupHistoryRequest,
+    ReviewWordRequest, TranslateWordRequest, TranslateWordResponse, UpdateWordRequest, WordDetail,
 };
 use crate::services::{ProviderService, SettingsService};
-use crate::storage::types::{Timestamp, UUID, Word, WordContext, WordReview};
+use crate::storage::types::{
+    Timestamp, UUID, Word, WordContext, WordLookupHistory, WordReview,
+};
 use crate::storage::word_repository::next_review_timestamp;
 use crate::storage::WordRepository;
 use handbox_llm::config::LlmConfigProvider;
@@ -48,6 +50,7 @@ impl WordService {
             language: request.language,
             translation: request.translation,
             phonetic: request.phonetic,
+            explanation: request.explanation,
             note: request.note,
             tags: request.tags.unwrap_or_default(),
             source: request.source,
@@ -117,6 +120,9 @@ impl WordService {
         }
         if let Some(phonetic) = request.phonetic {
             word.phonetic = Some(phonetic);
+        }
+        if let Some(explanation) = request.explanation {
+            word.explanation = Some(explanation);
         }
         if let Some(note) = request.note {
             word.note = Some(note);
@@ -211,7 +217,7 @@ impl WordService {
             })?;
 
         let prompt = format!(
-            "请将下面的词或短语翻译为目标语言（{}），只返回翻译结果，不要附加解释。",
+            "请将下面的词、短语或句子翻译为目标语言（{}）。只返回 JSON，格式：{{\"translation\":\"...\",\"phonetic\":\"...\",\"explanation\":\"...\"}}。其中 phonetic 为源词/短语的音标（如果适用，句子可为空），explanation 为简短解释（单行，不换行）。",
             target_language
         );
 
@@ -265,7 +271,7 @@ impl WordService {
                 error
             })?;
 
-        let translation = response
+        let raw_content = response
             .choices
             .first()
             .and_then(|choice| choice.delta.as_ref())
@@ -273,11 +279,66 @@ impl WordService {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| AppError::internal_error("翻译结果为空"))?;
 
+        let parsed = parse_translation_json(&raw_content);
+        let (translation, phonetic, explanation) = match parsed {
+            Some(parsed) => (
+                parsed.translation,
+                normalize_optional(parsed.phonetic),
+                normalize_optional(parsed.explanation),
+            ),
+            None => {
+                tracing::warn!(
+                    "[WordService::translate_word] Failed to parse translation JSON: {}",
+                    raw_content
+                );
+                (raw_content.clone(), None, None)
+            }
+        };
+
         Ok(TranslateWordResponse {
             term: request.term,
             translation,
             target_language,
+            phonetic,
+            explanation,
         })
+    }
+
+    pub async fn record_lookup_history(
+        &self,
+        request: CreateWordLookupRequest,
+    ) -> Result<WordLookupHistory, AppError> {
+        if request.term.trim().is_empty() {
+            return Err(AppError::validation_error("查询内容不能为空"));
+        }
+
+        let now = now_millis();
+        let history = WordLookupHistory {
+            id: uuid::Uuid::new_v4().to_string(),
+            term: request.term,
+            translation: request.translation,
+            phonetic: request.phonetic,
+            explanation: request.explanation,
+            source_language: request.source_language,
+            target_language: request.target_language,
+            created_at: now,
+        };
+
+        self.repo.create_lookup_history(&history).await?;
+        Ok(history)
+    }
+
+    pub async fn list_lookup_history(
+        &self,
+        request: ListWordLookupHistoryRequest,
+    ) -> Result<Vec<WordLookupHistory>, AppError> {
+        let limit = request.limit.unwrap_or(20);
+        let offset = request.offset.unwrap_or(0);
+        self.repo.list_lookup_history(limit, offset).await
+    }
+
+    pub async fn delete_lookup_history(&self, history_id: &UUID) -> Result<(), AppError> {
+        self.repo.delete_lookup_history(history_id).await
     }
 }
 
@@ -286,4 +347,49 @@ fn now_millis() -> Timestamp {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64
+}
+
+#[derive(serde::Deserialize)]
+struct TranslationPayload {
+    translation: String,
+    phonetic: Option<String>,
+    explanation: Option<String>,
+}
+
+fn parse_translation_json(input: &str) -> Option<TranslationPayload> {
+    let trimmed = input.trim();
+    let json_text = if trimmed.starts_with("```") {
+        trimmed
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim()
+            .to_string()
+    } else {
+        trimmed.to_string()
+    };
+
+    if let Ok(parsed) = serde_json::from_str::<TranslationPayload>(&json_text) {
+        return Some(parsed);
+    }
+
+    // Fallback: extract the first JSON object if extra text exists.
+    let start = json_text.find('{')?;
+    let end = json_text.rfind('}')?;
+    if start >= end {
+        return None;
+    }
+    let slice = json_text[start..=end].trim();
+    serde_json::from_str::<TranslationPayload>(slice).ok()
+}
+
+fn normalize_optional(value: Option<String>) -> Option<String> {
+    value.and_then(|item| {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }

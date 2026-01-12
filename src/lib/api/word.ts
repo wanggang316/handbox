@@ -13,6 +13,9 @@ import type {
   WordReview,
   TranslateWordRequest,
   TranslateWordResponse,
+  CreateWordLookupRequest,
+  ListWordLookupHistoryRequest,
+  WordLookupHistory,
 } from '../types';
 
 export async function createWord(request: CreateWordRequest): Promise<Word> {
@@ -45,4 +48,20 @@ export async function translateWord(
   request: TranslateWordRequest
 ): Promise<TranslateWordResponse> {
   return apiCall<TranslateWordResponse>('word_translate', { request });
+}
+
+export async function recordLookup(
+  request: CreateWordLookupRequest
+): Promise<WordLookupHistory> {
+  return apiCall<WordLookupHistory>('word_lookup_record', { request });
+}
+
+export async function listLookupHistory(
+  request?: ListWordLookupHistoryRequest
+): Promise<WordLookupHistory[]> {
+  return apiCall<WordLookupHistory[]>('word_lookup_history', { request });
+}
+
+export async function deleteLookupHistory(historyId: string): Promise<void> {
+  return apiCall<void>('word_lookup_delete', { historyId });
 }

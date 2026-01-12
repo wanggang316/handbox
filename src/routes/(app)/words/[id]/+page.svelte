@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
+  import { ArrowLeft } from "@lucide/svelte";
   import { getWord, reviewWord } from "$lib/api/word";
   import type { WordDetail } from "$lib/types";
 
@@ -39,12 +40,15 @@
 </script>
 
 <div class="h-full flex flex-col gap-4 p-6">
-  <button
-    class="text-sm text-base-content/60 hover:text-base-content w-fit"
-    onclick={() => goto("/words")}
-  >
-    返回单词本
-  </button>
+  <div class="pt-6">
+    <button
+      class="flex items-center gap-2 text-sm text-base-content/70 hover:text-base-content w-fit"
+      onclick={() => goto("/words")}
+    >
+      <ArrowLeft size={14} />
+      返回单词本
+    </button>
+  </div>
 
   {#if errorMessage}
     <div class="p-3 rounded-lg bg-error/10 text-error text-sm">
@@ -58,13 +62,19 @@
     <div class="rounded-2xl bg-base-100 border border-base-200 p-6">
       <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <div class="text-2xl font-semibold">{detail.word.term}</div>
-          <div class="text-sm text-base-content/60">{detail.word.translation}</div>
+          <div class="text-2xl font-semibold flex items-center gap-3">
+            <span>{detail.word.term}</span>
+            {#if detail.word.phonetic}
+              <span class="text-sm text-base-content/50">
+                {detail.word.phonetic}
+              </span>
+            {/if}
+          </div>
+          <div class="text-sm text-base-content/60 mt-1">
+            {detail.word.translation}
+          </div>
           <div class="text-xs text-base-content/50 mt-1">
             {detail.word.language}
-            {#if detail.word.phonetic}
-              · {detail.word.phonetic}
-            {/if}
           </div>
         </div>
         <div class="flex gap-2">
@@ -85,6 +95,12 @@
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="rounded-2xl bg-base-100 border border-base-200 p-6">
+        <h2 class="text-sm font-medium text-base-content/70 mb-3">简明解释</h2>
+        <p class="text-sm text-base-content/70">
+          {detail.word.explanation || "暂无解释"}
+        </p>
+      </div>
       <div class="rounded-2xl bg-base-100 border border-base-200 p-6">
         <h2 class="text-sm font-medium text-base-content/70 mb-3">备注</h2>
         <p class="text-sm text-base-content/70">

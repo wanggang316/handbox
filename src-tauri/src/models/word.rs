@@ -18,6 +18,7 @@ pub struct CreateWordRequest {
     pub language: String,
     pub translation: String,
     pub phonetic: Option<String>,
+    pub explanation: Option<String>,
     pub note: Option<String>,
     pub tags: Option<Vec<String>>,
     pub source: String,
@@ -32,6 +33,7 @@ pub struct UpdateWordRequest {
     pub language: Option<String>,
     pub translation: Option<String>,
     pub phonetic: Option<String>,
+    pub explanation: Option<String>,
     pub note: Option<String>,
     pub tags: Option<Vec<String>>,
     pub source: Option<String>,
@@ -65,6 +67,26 @@ pub struct TranslateWordResponse {
     pub term: String,
     pub translation: String,
     pub target_language: String,
+    pub phonetic: Option<String>,
+    pub explanation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWordLookupRequest {
+    pub term: String,
+    pub translation: Option<String>,
+    pub phonetic: Option<String>,
+    pub explanation: Option<String>,
+    pub source_language: Option<String>,
+    pub target_language: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListWordLookupHistoryRequest {
+    pub limit: Option<i32>,
+    pub offset: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

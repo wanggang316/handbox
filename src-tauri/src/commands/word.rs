@@ -1,8 +1,9 @@
 // 单词相关 IPC 命令
 
 use crate::models::{
-    AppError, CreateWordRequest, ListWordsRequest, ReviewWordRequest, TranslateWordRequest,
-    TranslateWordResponse, UpdateWordRequest, WordDetail,
+    AppError, CreateWordLookupRequest, CreateWordRequest, ListWordLookupHistoryRequest,
+    ListWordsRequest, ReviewWordRequest, TranslateWordRequest, TranslateWordResponse,
+    UpdateWordRequest, WordDetail,
 };
 use crate::services::WordService;
 use crate::storage::types::Word;
@@ -74,4 +75,32 @@ pub async fn word_translate(
     word_service: State<'_, WordService>,
 ) -> Result<TranslateWordResponse, AppError> {
     word_service.translate_word(request).await
+}
+
+#[tauri::command]
+pub async fn word_lookup_record(
+    request: CreateWordLookupRequest,
+    word_service: State<'_, WordService>,
+) -> Result<crate::storage::types::WordLookupHistory, AppError> {
+    word_service.record_lookup_history(request).await
+}
+
+#[tauri::command]
+pub async fn word_lookup_history(
+    request: Option<ListWordLookupHistoryRequest>,
+    word_service: State<'_, WordService>,
+) -> Result<Vec<crate::storage::types::WordLookupHistory>, AppError> {
+    let request = request.unwrap_or(ListWordLookupHistoryRequest {
+        limit: Some(20),
+        offset: Some(0),
+    });
+    word_service.list_lookup_history(request).await
+}
+
+#[tauri::command]
+pub async fn word_lookup_delete(
+    history_id: String,
+    word_service: State<'_, WordService>,
+) -> Result<(), AppError> {
+    word_service.delete_lookup_history(&history_id).await
 }

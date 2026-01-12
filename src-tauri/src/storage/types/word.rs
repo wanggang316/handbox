@@ -9,6 +9,7 @@ pub struct Word {
     pub language: String,
     pub translation: String,
     pub phonetic: Option<String>,
+    pub explanation: Option<String>,
     pub note: Option<String>,
     pub tags: Vec<String>,
     pub source: String,
@@ -36,4 +37,17 @@ pub struct WordReview {
     pub next_review_at: Timestamp,
     pub last_reviewed_at: Option<Timestamp>,
     pub review_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WordLookupHistory {
+    pub id: UUID,
+    pub term: String,
+    pub translation: Option<String>,
+    pub phonetic: Option<String>,
+    pub explanation: Option<String>,
+    pub source_language: Option<String>,
+    pub target_language: Option<String>,
+    pub created_at: Timestamp,
 }

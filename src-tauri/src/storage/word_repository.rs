@@ -1,7 +1,9 @@
 // 单词数据访问层
 
 use crate::models::AppError;
-use crate::storage::types::{Timestamp, UUID, Word, WordContext, WordReview};
+use crate::storage::types::{
+    Timestamp, UUID, Word, WordContext, WordLookupHistory, WordReview,
+};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
@@ -21,8 +23,8 @@ impl WordRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid tags: {e}")))?;
 
         let query = r#"
-            INSERT INTO words (id, term, language, translation, phonetic, note, tags, source, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO words (id, term, language, translation, phonetic, explanation, note, tags, source, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         "#;
 
         sqlx::query(query)
@@ -31,6 +33,7 @@ impl WordRepository {
             .bind(&word.language)
             .bind(&word.translation)
             .bind(&word.phonetic)
+            .bind(&word.explanation)
             .bind(&word.note)
             .bind(&tags_json)
             .bind(&word.source)
@@ -71,7 +74,7 @@ impl WordRepository {
         offset: i32,
     ) -> Result<Vec<Word>, AppError> {
         let mut sql = String::from(
-            "SELECT id, term, language, translation, phonetic, note, tags, source, created_at, updated_at FROM words",
+            "SELECT id, term, language, translation, phonetic, explanation, note, tags, source, created_at, updated_at FROM words",
         );
         let mut conditions: Vec<String> = Vec::new();
 
@@ -116,7 +119,7 @@ impl WordRepository {
 
     pub async fn get_word(&self, word_id: &UUID) -> Result<Option<Word>, AppError> {
         let query = r#"
-            SELECT id, term, language, translation, phonetic, note, tags, source, created_at, updated_at
+            SELECT id, term, language, translation, phonetic, explanation, note, tags, source, created_at, updated_at
             FROM words WHERE id = $1
         "#;
 
@@ -165,8 +168,8 @@ impl WordRepository {
 
         let query = r#"
             UPDATE words
-            SET term = $1, language = $2, translation = $3, phonetic = $4, note = $5, tags = $6, source = $7, updated_at = $8
-            WHERE id = $9
+            SET term = $1, language = $2, translation = $3, phonetic = $4, explanation = $5, note = $6, tags = $7, source = $8, updated_at = $9
+            WHERE id = $10
         "#;
 
         let result = sqlx::query(query)
@@ -174,6 +177,7 @@ impl WordRepository {
             .bind(&word.language)
             .bind(&word.translation)
             .bind(&word.phonetic)
+            .bind(&word.explanation)
             .bind(&word.note)
             .bind(&tags_json)
             .bind(&word.source)
@@ -255,6 +259,85 @@ impl WordRepository {
         Ok(())
     }
 
+    pub async fn create_lookup_history(
+        &self,
+        history: &WordLookupHistory,
+    ) -> Result<(), AppError> {
+        let query = r#"
+            INSERT INTO word_lookup_history (id, term, translation, phonetic, explanation, source_language, target_language, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#;
+
+        sqlx::query(query)
+            .bind(&history.id)
+            .bind(&history.term)
+            .bind(&history.translation)
+            .bind(&history.phonetic)
+            .bind(&history.explanation)
+            .bind(&history.source_language)
+            .bind(&history.target_language)
+            .bind(history.created_at)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to create lookup history: {e}"))
+            })?;
+
+        Ok(())
+    }
+
+    pub async fn list_lookup_history(
+        &self,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<WordLookupHistory>, AppError> {
+        let query = r#"
+            SELECT id, term, translation, phonetic, explanation, source_language, target_language, created_at
+            FROM word_lookup_history ORDER BY created_at DESC LIMIT $1 OFFSET $2
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to list lookup history: {e}"))
+            })?;
+
+        let mut histories = Vec::new();
+        for row in rows {
+            histories.push(WordLookupHistory {
+                id: row.try_get("id").unwrap_or_default(),
+                term: row.try_get("term").unwrap_or_default(),
+                translation: row.try_get("translation").ok(),
+                phonetic: row.try_get("phonetic").ok(),
+                explanation: row.try_get("explanation").ok(),
+                source_language: row.try_get("source_language").ok(),
+                target_language: row.try_get("target_language").ok(),
+                created_at: row.try_get("created_at").unwrap_or_default(),
+            });
+        }
+
+        Ok(histories)
+    }
+
+    pub async fn delete_lookup_history(&self, history_id: &UUID) -> Result<(), AppError> {
+        let result = sqlx::query("DELETE FROM word_lookup_history WHERE id = $1")
+            .bind(history_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to delete lookup history: {e}"))
+            })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found("History item not found"));
+        }
+
+        Ok(())
+    }
+
     fn row_to_word(&self, row: sqlx::sqlite::SqliteRow) -> Result<Word, AppError> {
         let tags_json: String = row.try_get("tags").unwrap_or_else(|_| "[]".to_string());
         let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
@@ -265,6 +348,7 @@ impl WordRepository {
             language: row.try_get("language").unwrap_or_default(),
             translation: row.try_get("translation").unwrap_or_default(),
             phonetic: row.try_get("phonetic").ok(),
+            explanation: row.try_get("explanation").ok(),
             note: row.try_get("note").ok(),
             tags,
             source: row.try_get("source").unwrap_or_default(),
