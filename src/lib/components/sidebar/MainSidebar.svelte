@@ -6,7 +6,7 @@
   import ChatList from "$lib/components/ui/ChatList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
-  import { Box, Search, Settings, User, LogOut } from "@lucide/svelte";
+  import { BookOpen, Box, Search, Settings, User, LogOut } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import SearchModal from "$lib/components/search/SearchModal.svelte";
@@ -35,6 +35,11 @@
   function handleArtifactClick() {
     console.log("Clicked artifact menu");
     goto(`/artifacts`);
+  }
+
+  function handleWordsClick() {
+    console.log("Clicked words menu");
+    goto(`/words`);
   }
 
   let showSearchModal = $state(false);
@@ -182,6 +187,12 @@
         icon={Box}
         iconSize={20}
         onClick={() => handleArtifactClick()}
+      />
+      <MenuButton
+        title="单词本"
+        icon={BookOpen}
+        iconSize={20}
+        onClick={() => handleWordsClick()}
       />
     </div>
   </div>

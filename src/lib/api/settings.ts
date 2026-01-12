@@ -22,7 +22,7 @@ export async function getSettings(): Promise<AppSettings> {
  * 更新设置
  */
 export async function updateSettings(request: UpdateSettingsRequest): Promise<AppSettings> {
-  return apiCall<AppSettings>('settings_update', request);
+  return apiCall<AppSettings>('settings_update', { request });
 }
 
 /**
@@ -43,7 +43,7 @@ export async function exportSettings(options?: ExportSettingsOptions): Promise<s
  * 导入设置
  */
 export async function importSettings(request: ImportSettingsRequest): Promise<AppSettings> {
-  return apiCall<AppSettings>('settings_import', request);
+  return apiCall<AppSettings>('settings_import', { request });
 }
 
 /**

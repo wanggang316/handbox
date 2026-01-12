@@ -50,6 +50,7 @@
         uiState.setLanguage(language);
         uiState.setThemeColor(themeColor);
       }
+
     } catch (error) {
       console.error("加载通用设置失败:", error);
     }
@@ -93,6 +94,7 @@
     autoScroll = checked;
     updateGeneralSetting("autoScroll", autoScroll);
   }
+
 </script>
 
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">

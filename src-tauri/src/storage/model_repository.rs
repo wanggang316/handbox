@@ -359,6 +359,78 @@ impl ModelRepository {
         Ok(models)
     }
 
+    /// 批量获取多个供应商的所有模型
+    pub async fn get_models_by_providers(
+        &self,
+        provider_ids: &[String],
+    ) -> Result<Vec<Model>, AppError> {
+        if provider_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // 动态构建 IN 子句的占位符
+        let placeholders = provider_ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("${}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let query = format!(
+            r#"
+            SELECT
+                id,
+                provider_id,
+                name,
+                description,
+                context_length,
+                output_max_tokens,
+                pricing,
+                input_modalities,
+                output_modalities,
+                supported_parameters,
+                default_parameters,
+                max_parameters,
+                supported_features,
+                supported_methods,
+                metadata,
+                url,
+                model_created_at,
+                enabled,
+                favorite,
+                created_at,
+                updated_at
+            FROM models
+            WHERE provider_id IN ({})
+            ORDER BY
+                CASE
+                    WHEN model_created_at IS NOT NULL THEN model_created_at
+                    ELSE created_at
+                END DESC
+        "#,
+            placeholders
+        );
+
+        let mut query_builder = sqlx::query(&query);
+        for provider_id in provider_ids {
+            query_builder = query_builder.bind(provider_id);
+        }
+
+        let rows = query_builder
+            .fetch_all(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to get models by providers: {}", e))
+            })?;
+
+        let mut models = Vec::new();
+        for row in rows {
+            models.push(self.row_to_model(row)?);
+        }
+
+        Ok(models)
+    }
+
     /// 根据 provider 和 model_id 获取单个模型
     pub async fn get_model(
         &self,

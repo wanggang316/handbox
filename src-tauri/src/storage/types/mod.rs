@@ -5,6 +5,7 @@ pub mod mcp;
 pub mod message;
 pub mod model;
 pub mod provider;
+pub mod word;
 
 pub use artifact::{
     Artifact, ArtifactFilter, ArtifactType, CreateArtifactRequest, ExecuteArtifactRequest,
@@ -23,3 +24,4 @@ pub use message::{
 };
 pub use model::{Model, ModelModality};
 pub use provider::Provider;
+pub use word::{Word, WordContext, WordLookupHistory, WordReview};
