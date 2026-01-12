@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { RotateCcw, Copy, Pencil } from "lucide/svelte";
+  import { RotateCcw, Copy, Pencil } from "@lucide/svelte";
   import type { Message } from "$lib/types";
   import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
+  import TextSelectionMenu from "$lib/components/favorite/TextSelectionMenu.svelte";
 
   interface Props {
     message: Message;
@@ -62,15 +63,28 @@
   <div class="flex justify-end">
     <!-- 消息内容 -->
     <div class="flex flex-col items-end">
-      <!-- 消息气泡 -->
-      <div
-        class="inline-block max-w-full px-4 py-3 rounded-2xl bg-base-200 text-base-content"
-      >
-        <!-- 消息内容 -->
-        <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
-          {message.content}
-        </div>
-        {#if message.attachments?.length}
+         <!-- 消息气泡 -->
+        <div
+          class="inline-block max-w-full px-4 py-3 rounded-2xl bg-base-200 text-base-content"
+        >
+          {#if message.id && message.chatId}
+            <TextSelectionMenu
+              messageId={message.id}
+              chatId={message.chatId}
+              content={message.content}
+              role={message.role}
+            >
+              <!-- 消息内容 -->
+              <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
+                {message.content}
+              </div>
+            </TextSelectionMenu>
+          {:else}
+            <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
+              {message.content}
+            </div>
+          {/if}
+          {#if message.attachments?.length}
           <div class="mt-3 flex flex-wrap gap-3">
             {#each message.attachments as attachment}
               {#if attachment.mimeType?.startsWith("image/")}

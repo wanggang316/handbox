@@ -10,21 +10,25 @@ export async function toggleFavorite(
   messageType: FavoriteMessageType,
   tags: string[] = [],
   note?: string,
+  selectedText?: string,
 ): Promise<boolean> {
   return apiCall<boolean>("favorite_toggle", {
-    message_id: messageId,
-    chat_id: chatId,
-    content,
-    role,
-    message_type: messageType,
-    tags,
-    note,
+    request: {
+      messageId,
+      chatId,
+      content,
+      role,
+      messageType,
+      tags,
+      note,
+      selectedText,
+    },
   });
 }
 
 export async function isFavorited(messageId: UUID): Promise<boolean> {
   return apiCall<boolean>("favorite_is_favorited", {
-    message_id: messageId,
+    request: { messageId },
   });
 }
 
@@ -34,20 +38,18 @@ export async function getFavorites(): Promise<Favorite[]> {
 
 export async function getFavoritesByChat(chatId: UUID): Promise<Favorite[]> {
   return apiCall<Favorite[]>("favorite_list_by_chat", {
-    chat_id: chatId,
+    request: { chatId },
   });
 }
 
 export async function addTag(favoriteId: UUID, tag: string): Promise<void> {
   return apiCall<void>("favorite_add_tag", {
-    favorite_id: favoriteId,
-    tag,
+    request: { favoriteId, tag },
   });
 }
 
 export async function removeTag(favoriteId: UUID, tag: string): Promise<void> {
   return apiCall<void>("favorite_remove_tag", {
-    favorite_id: favoriteId,
-    tag,
+    request: { favoriteId, tag },
   });
 }

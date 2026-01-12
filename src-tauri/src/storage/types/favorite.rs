@@ -42,6 +42,8 @@ pub struct Favorite {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_text: Option<String>,
     pub created_at: Timestamp,
 }
 
@@ -70,5 +72,6 @@ pub struct CreateFavoriteRequest {
     pub message_type: FavoriteMessageType,
     pub tags: Vec<String>,
     pub note: Option<String>,
+    pub selected_text: Option<String>,
     pub created_at: i64,
 }

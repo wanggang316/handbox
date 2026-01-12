@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
-  import { Search, Filter, X, Star, Copy, ExternalLink, Tag, Trash2 } from "lucide/svelte";
+  import { Search, Filter, X, Star, Copy, ExternalLink, Tag, Trash2, Plus, ChevronDown, ChevronUp } from "@lucide/svelte";
   import { favoriteStore } from "$lib/states";
   import type { Favorite, FavoriteMessageType } from "$lib/types/favorite";
 
@@ -10,6 +10,8 @@
   let selectedType = $state<FavoriteMessageType | "all">("all");
   let selectedTags = $state<string[]>([]);
   let newTagInput = $state("");
+  let addingTagId = $state<string | null>(null);
+  let expandedFavorites = $state<Record<string, boolean>>({});
 
   const messageTypes: { value: FavoriteMessageType | "all"; label: string }[] = [
     { value: "all", label: "全部" },
@@ -28,6 +30,7 @@
       result = result.filter(
         (f) =>
           f.content.toLowerCase().includes(query) ||
+          f.selectedText?.toLowerCase().includes(query) ||
           f.tags.some((t) => t.toLowerCase().includes(query)),
       );
     }
@@ -55,6 +58,27 @@
     return Array.from(tags).sort();
   });
 
+  function toggleExpand(favoriteId: string) {
+    expandedFavorites[favoriteId] = !expandedFavorites[favoriteId];
+  }
+
+  function isExpanded(favoriteId: string): boolean {
+    return expandedFavorites[favoriteId] ?? false;
+  }
+
+  function shouldShowExpandButton(favorite: Favorite): boolean {
+    if (!favorite.id) return false;
+    const lines = favorite.content.split("\n");
+    return lines.length > 3 || favorite.content.length > 300;
+  }
+
+  function getDisplayContent(favorite: Favorite): string {
+    if (favorite.selectedText) {
+      return favorite.selectedText;
+    }
+    return favorite.content;
+  }
+
   async function handleCopyContent(content: string) {
     try {
       await navigator.clipboard.writeText(content);
@@ -81,11 +105,22 @@
     }
   }
 
+  function showTagInput(favoriteId: string) {
+    addingTagId = favoriteId;
+    newTagInput = "";
+  }
+
+  function hideTagInput() {
+    addingTagId = null;
+    newTagInput = "";
+  }
+
   async function handleAddTag(favoriteId: string, tag: string) {
     if (!tag.trim()) return;
     try {
       await favoriteStore.addTag(favoriteId, tag);
       newTagInput = "";
+      hideTagInput();
     } catch (error) {
       console.error("Failed to add tag:", error);
     }
@@ -127,6 +162,22 @@
       default:
         return role;
     }
+  }
+
+  function getMessageTypeLabel(type: FavoriteMessageType): string {
+    const labels: Record<FavoriteMessageType, string> = {
+      text: "文本",
+      image: "图片",
+      message: "消息",
+      chat: "对话",
+      other: "其它",
+    };
+    return labels[type] || type;
+  }
+
+  function getImageSrc(content: string): string | null {
+    const match = content.match(/!\[.*?\]\((.*?)\)/);
+    return match ? match[1] : null;
   }
 
   onMount(() => {
@@ -254,6 +305,9 @@
                   >
                     {getRoleLabel(favorite.role)}
                   </span>
+                  <span class="px-2 py-0.5 text-xs rounded-full bg-info/20 text-info">
+                    {getMessageTypeLabel(favorite.messageType)}
+                  </span>
                   <span class="text-xs text-base-content/50">
                     {formatTime(favorite.createdAt)}
                   </span>
@@ -266,9 +320,83 @@
                   </button>
                 </div>
 
-                <p class="text-sm text-base-content line-clamp-3 whitespace-pre-wrap">
-                  {favorite.content}
-                </p>
+                <!-- 图片展示 -->
+                {#if favorite.messageType === 'image'}
+                  {#if getImageSrc(favorite.content)}
+                    <div class="mb-2">
+                      <img
+                        src={getImageSrc(favorite.content)}
+                        alt="收藏的图片"
+                        class="max-h-48 rounded-lg object-contain"
+                      />
+                    </div>
+                  {:else}
+                    <div class="text-sm text-base-content/70 italic mb-2">
+                      {favorite.content}
+                    </div>
+                  {/if}
+                {:else}
+                  <!-- 文本/消息/对话内容 -->
+                  <div class="text-sm text-base-content">
+                    {#if favorite.selectedText}
+                      <div class="mb-2">
+                        <div class="px-3 py-2 bg-amber-500/20 border-l-2 border-amber-500 rounded">
+                          {favorite.selectedText}
+                        </div>
+                      </div>
+                      {#if favorite.id && !isExpanded(favorite.id!)}
+
+                      {#if favorite.id && !isExpanded(favorite.id!)}
+                        <p class="text-xs text-base-content/50 italic mt-2">
+                          消息上下文
+                        </p>
+                      {/if}
+                    {/if}
+
+                    <p
+                      class="whitespace-pre-wrap {favorite.id && isExpanded(favorite.id!) ? '' : 'line-clamp-3'}"
+                    >
+                      {favorite.content}
+                    </p>
+
+                    {#if favorite.id && shouldShowExpandButton(favorite)}
+                      <button
+                        class="text-xs text-primary hover:underline mt-2 cursor-pointer flex items-center gap-1"
+                        onclick={() => toggleExpand(favorite.id!)}
+                      >
+                        {#if isExpanded(favorite.id!)}
+                          <ChevronUp size={12} />
+                          收起
+                        {:else}
+                          <ChevronDown size={12} />
+                          查看详情
+                        {/if}
+                      </button>
+                    {/if}
+                    {/if}
+
+                    <p
+                      class="whitespace-pre-wrap {isExpanded(favorite.id) ? '' : 'line-clamp-3'}"
+                    >
+                      {favorite.content}
+                    </p>
+
+                    {#if shouldShowExpandButton(favorite)}
+                      <button
+                        class="text-xs text-primary hover:underline mt-2 cursor-pointer flex items-center gap-1"
+                        onclick={() => toggleExpand(favorite.id!)}
+                      >
+                        {#if isExpanded(favorite.id)}
+                          <ChevronUp size={12} />
+                          收起
+                        {:else}
+                          <ChevronDown size={12} />
+                          查看详情
+                        {/if}
+                      </button>
+                    {/if}
+                  </div>
+                {/if}
 
                 {#if favorite.tags.length > 0}
                   <div class="flex flex-wrap gap-1 mt-2">
@@ -290,17 +418,37 @@
                 {/if}
 
                 <div class="flex items-center gap-2 mt-3">
-                  <input
-                    type="text"
-                    placeholder="添加标签..."
-                    class="h-7 px-2 text-xs bg-base-100 rounded border border-base-300 focus:outline-none focus:border-primary"
-                    bind:value={newTagInput}
-                    onkeydown={(e) => {
-                      if (e.key === "Enter") {
-                        handleAddTag(favorite.id!, newTagInput);
-                      }
-                    }}
-                  />
+                  {#if addingTagId !== favorite.id}
+                    <button
+                      class="flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-base-100 text-base-content/70 hover:bg-base-200 cursor-pointer"
+                      onclick={() => showTagInput(favorite.id!)}
+                    >
+                      <Plus size={10} />
+                      添加标签
+                    </button>
+                  {:else}
+                    <div class="flex items-center gap-2 flex-1">
+                      <input
+                        type="text"
+                        placeholder="输入标签..."
+                        class="h-7 flex-1 px-2 text-xs bg-base-100 rounded border border-base-300 focus:outline-none focus:border-primary"
+                        bind:value={newTagInput}
+                        onkeydown={(e: KeyboardEvent) => {
+                          if (e.key === "Enter") {
+                            handleAddTag(favorite.id!, newTagInput);
+                          } else if (e.key === "Escape") {
+                            hideTagInput();
+                          }
+                        }}
+                      />
+                      <button
+                        class="p-1 text-xs text-base-content/50 hover:text-error cursor-pointer"
+                        onclick={hideTagInput}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  {/if}
                 </div>
               </div>
 

@@ -46,8 +46,8 @@ impl FavoriteRepository {
         sqlx::query(
             r#"
                 INSERT INTO favorites (
-                    id, message_id, chat_id, content, role, message_type, tags, note, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    id, message_id, chat_id, content, role, message_type, tags, note, selected_text, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
         )
         .bind(uuid::Uuid::new_v4().to_string())
@@ -58,6 +58,7 @@ impl FavoriteRepository {
         .bind(format!("{:?}", request.message_type).to_lowercase())
         .bind(tags_json.as_deref())
         .bind(request.note.as_deref())
+        .bind(request.selected_text.as_deref())
         .bind(request.created_at)
         .execute(self.db.pool())
         .await
@@ -81,7 +82,7 @@ impl FavoriteRepository {
     pub async fn get_all_favorites(&self) -> Result<Vec<Favorite>, AppError> {
         let rows = sqlx::query(
             r#"
-                SELECT id, message_id, chat_id, content, role, message_type, tags, note, created_at
+                SELECT id, message_id, chat_id, content, role, message_type, tags, note, selected_text, created_at
                 FROM favorites
                 ORDER BY created_at DESC
             "#,
@@ -101,6 +102,7 @@ impl FavoriteRepository {
                 message_type: FavoriteMessageType::from_str(&row.get::<String, _>("message_type")),
                 tags: Favorite::tags_from_json(row.get::<Option<&str>, _>("tags")),
                 note: row.get("note"),
+                selected_text: row.get("selected_text"),
                 created_at: row.get("created_at"),
             });
         }
@@ -111,7 +113,7 @@ impl FavoriteRepository {
     pub async fn get_favorites_by_chat(&self, chat_id: &UUID) -> Result<Vec<Favorite>, AppError> {
         let rows = sqlx::query(
             r#"
-                SELECT id, message_id, chat_id, content, role, message_type, tags, note, created_at
+                SELECT id, message_id, chat_id, content, role, message_type, tags, note, selected_text, created_at
                 FROM favorites
                 WHERE chat_id = $1
                 ORDER BY created_at DESC
@@ -133,6 +135,7 @@ impl FavoriteRepository {
                 message_type: FavoriteMessageType::from_str(&row.get::<String, _>("message_type")),
                 tags: Favorite::tags_from_json(row.get::<Option<&str>, _>("tags")),
                 note: row.get("note"),
+                selected_text: row.get("selected_text"),
                 created_at: row.get("created_at"),
             });
         }

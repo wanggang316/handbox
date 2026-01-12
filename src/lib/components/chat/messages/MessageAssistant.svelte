@@ -9,7 +9,7 @@
     Save,
     FolderOpen,
     Star,
-  } from "lucide/svelte";
+  } from "@lucide/svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore } from "$lib/states";
@@ -20,6 +20,7 @@
     openPathInSystem,
   } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
+  import TextSelectionMenu from "$lib/components/favorite/TextSelectionMenu.svelte";
 
   interface Props {
     message?: Message;
@@ -400,13 +401,29 @@
             </div>
           {/if}
 
-          <!-- 消息内容 -->
-          <div
-            class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-            use:markdownInteractions
-          >
-            {@html renderMarkdown(message?.content || "")}
-          </div>
+  <!-- 消息内容 -->
+          {#if message && message.id && message.chatId}
+            <TextSelectionMenu
+              messageId={message.id}
+              chatId={message.chatId}
+              content={message.content}
+              role={message.role}
+            >
+              <div
+                class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+                use:markdownInteractions
+              >
+                {@html renderMarkdown(message.content || "")}
+              </div>
+            </TextSelectionMenu>
+          {:else if message}
+            <div
+              class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+              use:markdownInteractions
+            >
+              {@html renderMarkdown(message.content || "")}
+            </div>
+          {/if}
 
           {#if isAssetsLoading}
             <div
