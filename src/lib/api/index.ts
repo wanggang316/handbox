@@ -64,3 +64,5 @@ export * from './window';
 export * from './mcp';
 export * from './auth';
 export * from './word';
+export * from './favorite';
+

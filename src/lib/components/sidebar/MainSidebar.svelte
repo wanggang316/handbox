@@ -6,7 +6,7 @@
   import ChatList from "$lib/components/ui/ChatList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
-  import { BookOpen, Box, Search, Settings, User, LogOut } from "@lucide/svelte";
+  import { BookOpen, Box, Search, Settings, User, LogOut, Star } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import SearchModal from "$lib/components/search/SearchModal.svelte";
@@ -35,6 +35,11 @@
   function handleArtifactClick() {
     console.log("Clicked artifact menu");
     goto(`/artifacts`);
+  }
+
+  function handleFavoriteClick() {
+    console.log("Clicked favorite menu");
+    goto(`/favorites`);
   }
 
   function handleWordsClick() {
@@ -182,6 +187,12 @@
     </div>
 
     <div class="flex px-2">
+      <MenuButton
+        title="收藏"
+        icon={Star}
+        iconSize={20}
+        onClick={() => handleFavoriteClick()}
+      />
       <MenuButton
         title="Artifacts"
         icon={Box}

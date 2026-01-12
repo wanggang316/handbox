@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { RotateCcw, Copy, Pencil } from "lucide-svelte";
+  import { RotateCcw, Copy, Pencil } from "lucide/svelte";
   import type { Message } from "$lib/types";
   import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
+  import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
 
   interface Props {
     message: Message;
@@ -113,6 +114,16 @@
       <div
         class="mt-2 gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex"
       >
+        <!-- 收藏按钮 -->
+        {#if message && message.id}
+          <FavoriteButton
+            messageId={message.id}
+            chatId={message.chatId}
+            content={message.content}
+            role={message.role}
+          />
+        {/if}
+
         <!-- 复制按钮 -->
         <button
           class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"

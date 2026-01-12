@@ -8,7 +8,8 @@
     X as CloseIcon,
     Save,
     FolderOpen,
-  } from "lucide-svelte";
+    Star,
+  } from "lucide/svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore } from "$lib/states";
@@ -18,6 +19,7 @@
     isTauriEnvironment,
     openPathInSystem,
   } from "$lib/utils/tauri";
+  import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
 
   interface Props {
     message?: Message;
@@ -486,6 +488,16 @@
             class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
           >
             <div class="inline-flex gap-1">
+              <!-- 收藏按钮 -->
+              {#if message && message.id}
+                <FavoriteButton
+                  messageId={message.id}
+                  chatId={message.chatId}
+                  content={message.content}
+                  role={message.role}
+                />
+              {/if}
+
               <!-- 复制按钮 -->
               <button
                 class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"

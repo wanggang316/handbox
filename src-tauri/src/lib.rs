@@ -14,7 +14,7 @@ use crate::services::{
     ArtifactService, ChatService, McpService, MessageService, ModelService, ProviderService,
     SearchService, SettingsService, StorageService, UserSessionService, WordService,
 };
-use crate::storage::{ArtifactRepository, Database, WordRepository};
+use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
@@ -109,6 +109,9 @@ async fn initialize_services(
     let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
     let artifact_service = ArtifactService::new(artifact_repo, app.clone());
 
+    // 初始化 Favorite 服务
+    let favorite_repo = FavoriteRepository::new(database_service.clone());
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(chat_service);
@@ -121,6 +124,7 @@ async fn initialize_services(
     app.manage(word_service);
     app.manage(user_session_service);
     app.manage(artifact_service);
+    app.manage(favorite_repo);
 
     Ok(())
 }
@@ -277,6 +281,13 @@ pub fn run() {
             clipboard_copy_image,
             // 图片相关命令
             image_proxy,
+            // 收藏相关命令
+            favorite_toggle,
+            favorite_is_favorited,
+            favorite_list,
+            favorite_list_by_chat,
+            favorite_add_tag,
+            favorite_remove_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

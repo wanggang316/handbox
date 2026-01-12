@@ -35,3 +35,6 @@ export { uiState, type Notification } from './ui.svelte';
 
 // Toast 相关
 export { toastStore, toastActions, type ToastMessage } from './toast.svelte';
+
+// 收藏相关
+export { favoriteStore } from './favorite.svelte';

@@ -1,6 +1,7 @@
 pub mod artifact;
 pub mod chat;
 pub mod common;
+pub mod favorite;
 pub mod mcp;
 pub mod message;
 pub mod model;
@@ -14,6 +15,7 @@ pub use artifact::{
 };
 pub use chat::{Chat, ChatReasoningConfig, McpServerConfig};
 pub use common::{Timestamp, UUID};
+pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType};
 pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,
     McpServerStatus, McpTool,
