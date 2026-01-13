@@ -67,16 +67,12 @@
         return;
       }
 
-      await favoriteStore.toggleFavorite(
+      await favoriteStore.addTextRange(
         messageId,
         chatId,
-        JSON.stringify(selectedRange),
+        selectedRange,
         role,
-        "text",
-        [],
-        undefined,
         content,
-        false, // 文本收藏不应该影响消息的收藏按钮状态
       );
       showMenu = false;
     } catch (error) {

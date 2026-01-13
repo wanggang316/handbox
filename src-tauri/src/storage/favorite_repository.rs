@@ -218,4 +218,85 @@ impl FavoriteRepository {
 
         Ok(())
     }
+
+    pub async fn upsert_text_favorite(
+        &self,
+        request: &CreateFavoriteRequest,
+    ) -> Result<(), AppError> {
+        let existing_id: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM favorites WHERE message_id = $1 AND chat_id = $2 AND message_type = $3",
+        )
+        .bind(&request.message_id)
+        .bind(&request.chat_id)
+        .bind(format!("{:?}", request.message_type).to_lowercase())
+        .fetch_optional(self.db.pool())
+        .await
+        .map_err(|e| AppError::internal_error(&format!("Failed to check favorite: {}", e)))?;
+
+        let tags_json = if request.tags.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&request.tags).ok()
+        };
+
+        if let Some(id) = existing_id {
+            sqlx::query(
+                r#"
+                    UPDATE favorites
+                    SET content = $1, role = $2, tags = $3, note = $4, context = $5
+                    WHERE id = $6
+                "#,
+            )
+            .bind(&request.content)
+            .bind(&request.role)
+            .bind(tags_json.as_deref())
+            .bind(request.note.as_deref())
+            .bind(request.context.as_deref())
+            .bind(&id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to update favorite: {}", e)))?;
+        } else {
+            sqlx::query(
+                r#"
+                    INSERT INTO favorites (
+                        id, message_id, chat_id, content, role, message_type, tags, note, context, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                "#,
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&request.message_id)
+            .bind(&request.chat_id)
+            .bind(&request.content)
+            .bind(&request.role)
+            .bind(format!("{:?}", request.message_type).to_lowercase())
+            .bind(tags_json.as_deref())
+            .bind(request.note.as_deref())
+            .bind(request.context.as_deref())
+            .bind(request.created_at)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to create favorite: {}", e)))?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_text_favorite(
+        &self,
+        message_id: &UUID,
+        chat_id: &UUID,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "DELETE FROM favorites WHERE message_id = $1 AND chat_id = $2 AND message_type = $3",
+        )
+        .bind(message_id)
+        .bind(chat_id)
+        .bind("text")
+        .execute(self.db.pool())
+        .await
+        .map_err(|e| AppError::internal_error(&format!("Failed to delete favorite: {}", e)))?;
+
+        Ok(())
+    }
 }

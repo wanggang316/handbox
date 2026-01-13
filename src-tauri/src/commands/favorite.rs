@@ -173,6 +173,27 @@ pub struct FavoriteRemoveTagRequest {
     pub tag_name: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TextRange {
+    pub start: i64,
+    pub end: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FavoriteSaveTextRangesRequest {
+    #[serde(rename = "messageId")]
+    pub message_id: UUID,
+    #[serde(rename = "chatId")]
+    pub chat_id: UUID,
+    pub ranges: Vec<TextRange>,
+    pub role: String,
+    #[serde(default)]
+    pub tags: Vec<FavoriteTag>,
+    pub note: Option<String>,
+    #[serde(rename = "context")]
+    pub context: Option<String>,
+}
+
 #[tauri::command]
 pub async fn favorite_remove_tag(
     request: FavoriteRemoveTagRequest,
@@ -190,4 +211,44 @@ pub async fn favorite_remove_tag(
             Err(e)
         }
     }
+}
+
+#[tauri::command]
+pub async fn favorite_save_text_ranges(
+    request: FavoriteSaveTextRangesRequest,
+    favorite_repo: State<'_, FavoriteRepository>,
+) -> Result<(), AppError> {
+    tracing::info!(
+        "[favorite_save_text_ranges] IPC command called for message_id: {}",
+        request.message_id
+    );
+
+    if request.ranges.is_empty() {
+        favorite_repo
+            .delete_text_favorite(&request.message_id, &request.chat_id)
+            .await?;
+        return Ok(());
+    }
+
+    let content = serde_json::to_string(&request.ranges).map_err(|e| {
+        AppError::internal_error(&format!("Failed to serialize text ranges: {}", e))
+    })?;
+
+    let create_request = CreateFavoriteRequest {
+        message_id: request.message_id,
+        chat_id: request.chat_id,
+        content,
+        role: request.role,
+        message_type: FavoriteMessageType::Text,
+        tags: request.tags,
+        note: request.note,
+        context: request.context,
+        created_at: chrono::Utc::now().timestamp_millis(),
+    };
+
+    favorite_repo
+        .upsert_text_favorite(&create_request)
+        .await?;
+
+    Ok(())
 }

@@ -12,6 +12,7 @@
   } from "@lucide/svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
+  import type { TextRange } from "$lib/types/favorite";
   import { messageStore, favoriteStore } from "$lib/states";
   import { highlightRange, openInBrowser, renderMarkdown } from "$lib/utils";
   import {
@@ -55,12 +56,69 @@
     return undefined;
   });
 
-  const textRanges = $derived(() => {
+  const textRanges = $derived.by(() => {
     if (!message?.id || !message.chatId) return [];
-    if (favoriteStore.textRangesChatId !== message.chatId) return [];
-    return favoriteStore.textRangesByMessageId[message.id] ?? [];
+    const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
+    return ranges.map((range) => ({ start: range.start, end: range.end }));
   });
 
+  $effect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!message?.id || !message.chatId) return;
+    const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
+    console.debug("[MessageAssistant] highlight payload", {
+      messageId: message.id,
+      chatId: message.chatId,
+      ranges,
+      version: favoriteStore.textRangesVersion,
+    });
+  });
+
+  let showRangeMenu = $state(false);
+  let rangeMenuX = $state(0);
+  let rangeMenuY = $state(0);
+  let hoveredRange = $state<TextRange | null>(null);
+  let isRangeMenuHovering = $state(false);
+
+  function handleRangeHover(payload: { range: TextRange; rect: DOMRect }) {
+    hoveredRange = payload.range;
+    rangeMenuX = payload.rect.left + payload.rect.width / 2;
+    rangeMenuY = payload.rect.top - 8;
+    showRangeMenu = true;
+  }
+
+  function handleRangeLeave() {
+    if (isRangeMenuHovering || showRangeMenu) return;
+    showRangeMenu = false;
+    hoveredRange = null;
+  }
+
+  async function handleRemoveRange() {
+    if (!hoveredRange || !message?.id || !message.chatId) return;
+    try {
+      await favoriteStore.removeTextRange(
+        message.id,
+        message.chatId,
+        hoveredRange,
+        message.role,
+        message.content,
+      );
+    } catch (error) {
+      console.error("Failed to remove text favorite range:", error);
+    } finally {
+      showRangeMenu = false;
+      hoveredRange = null;
+    }
+  }
+
+  function handleRangeMenuOutside(event: MouseEvent) {
+    if (!showRangeMenu) return;
+    const target = event.target as HTMLElement;
+    if (!target.closest(".favorite-range-menu")) {
+      showRangeMenu = false;
+      hoveredRange = null;
+    }
+  }
 
   let assets = $state<MessageAttachment[]>([]);
   let isAssetsLoading = $state(false);
@@ -447,11 +505,14 @@
               <div
                 class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
                 data-message-id={message.id}
-                data-message-chat-id={message.chatId ?? ""}
-                data-favorite-chat-id={favoriteStore.textRangesChatId ?? ""}
-                data-favorite-range-count={favoriteStore.textRangesByMessageId[message.id]?.length ?? 0}
-                data-favorite-message-match={(favoriteStore.textRangesByMessageId[message.id]?.length ?? 0) > 0}
-                use:highlightRange={favoriteStore.textRangesByMessageId[message.id] ?? []}
+                use:highlightRange={{
+                  ranges: textRanges,
+                  onRangeHover: handleRangeHover,
+                  onRangeLeave: handleRangeLeave,
+                  hoverDelayMs: 2000,
+                  version: favoriteStore.textRangesVersion,
+                }}
+                data-favorite-highlight-version={favoriteStore.textRangesVersion}
                 use:markdownInteractions
               >
                 {@html renderMarkdown(message.content || "")}
@@ -653,3 +714,25 @@
     </button>
   </div>
 {/if}
+
+{#if showRangeMenu && hoveredRange}
+  <div
+    class="favorite-range-menu fixed z-[10040] bg-base-100 border border-base-300 rounded-lg shadow-lg px-2 py-1 text-xs"
+    style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
+    onmouseenter={() => (isRangeMenuHovering = true)}
+    onmouseleave={() => {
+      isRangeMenuHovering = false;
+      showRangeMenu = false;
+      hoveredRange = null;
+    }}
+  >
+    <button
+      class="px-2 py-1 rounded hover:bg-error/10 text-error"
+      onclick={handleRemoveRange}
+    >
+      取消收藏
+    </button>
+  </div>
+{/if}
+
+<svelte:window on:click={handleRangeMenuOutside} />

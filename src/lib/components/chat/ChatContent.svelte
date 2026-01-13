@@ -220,11 +220,14 @@
     if (!import.meta.env.DEV) return;
     if (!currentChatId) return;
     if (favoriteStore.textRangesChatId !== currentChatId) return;
-    const messageIds = Object.keys(favoriteStore.textRangesByMessageId);
-    if (messageIds.length === 0) return;
+    const favoriteIds = Object.keys(favoriteStore.textRangesByMessageId);
+    if (favoriteIds.length === 0) return;
+    const messageIds = new Set(messages.map((message) => message.id));
+    const missing = favoriteIds.filter((id) => !messageIds.has(id));
     console.debug('[ChatContent] text favorites keys', {
       chatId: currentChatId,
-      messageIds,
+      favoriteIds,
+      missing,
     });
   });
   

@@ -1,6 +1,7 @@
 import { apiCall } from "./index";
 import type { Favorite, FavoriteMessageType, FavoriteTag } from "$lib/types/favorite";
 import type { UUID } from "$lib/types";
+import type { TextRange } from "$lib/types/favorite";
 
 export async function toggleFavorite(
   messageId: UUID,
@@ -39,6 +40,24 @@ export async function getFavorites(): Promise<Favorite[]> {
 export async function getFavoritesByChat(chatId: UUID): Promise<Favorite[]> {
   return apiCall<Favorite[]>("favorite_list_by_chat", {
     request: { chatId },
+  });
+}
+
+export async function saveTextRanges(
+  messageId: UUID,
+  chatId: UUID,
+  ranges: TextRange[],
+  role: 'user' | 'assistant' | 'system',
+  context?: string,
+): Promise<void> {
+  return apiCall<void>("favorite_save_text_ranges", {
+    request: {
+      messageId,
+      chatId,
+      ranges,
+      role,
+      context,
+    },
   });
 }
 

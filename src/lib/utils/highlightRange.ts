@@ -2,11 +2,27 @@ import type { TextRange } from "$lib/types/favorite";
 
 const HIGHLIGHT_CLASS = "favorite-highlight bg-amber-500/20 px-1 rounded";
 const HIGHLIGHT_ATTR = "data-favorite-highlight";
+const HIGHLIGHT_INDEX_ATTR = "data-favorite-range-index";
 
-function normalizeRanges(
-  ranges: TextRange[] | TextRange | null | undefined,
-): TextRange[] {
-  const list = toRangeList(ranges);
+type HighlightRangeOptions =
+  | TextRange[]
+  | TextRange
+  | null
+  | undefined
+  | {
+      ranges?: TextRange[] | TextRange | null;
+      onRangeHover?: (payload: { range: TextRange; rect: DOMRect }) => void;
+      onRangeLeave?: () => void;
+      hoverDelayMs?: number;
+      version?: number;
+    };
+
+function isTextRange(value: unknown): value is TextRange {
+  return Boolean(value) && typeof value === "object" && "start" in value && "end" in value;
+}
+
+function normalizeRanges(input: HighlightRangeOptions): TextRange[] {
+  const list = toRangeList(input);
   return list
     .map((range) => ({
       start: Math.max(0, Math.floor(range.start)),
@@ -16,15 +32,21 @@ function normalizeRanges(
     .sort((a, b) => a.start - b.start);
 }
 
-function toRangeList(
-  ranges: TextRange[] | TextRange | null | undefined,
-): TextRange[] {
-  if (!ranges) return [];
-  if (Array.isArray(ranges)) return ranges;
-  if (typeof ranges === "object" && "length" in ranges) {
-    return Array.from(ranges as ArrayLike<TextRange>);
+function toRangeList(input: HighlightRangeOptions): TextRange[] {
+  if (!input) return [];
+  if (typeof input === "object" && "ranges" in input) {
+    return toRangeList(input.ranges ?? []);
   }
-  return [ranges];
+  if (Array.isArray(input)) return input;
+  if (typeof input === "object" && "length" in input) {
+    return Array.from(input as ArrayLike<TextRange>);
+  }
+  if (isTextRange(input)) return [input];
+  if (typeof input === "object") {
+    const values = Object.values(input).filter(isTextRange);
+    if (values.length > 0) return values;
+  }
+  return [];
 }
 
 function mergeRanges(ranges: TextRange[]): TextRange[] {
@@ -68,7 +90,10 @@ function collectTextNodes(root: HTMLElement): Text[] {
   return nodes;
 }
 
-function buildFragment(text: string, ranges: Array<{ start: number; end: number }>): DocumentFragment {
+function buildFragment(
+  text: string,
+  ranges: Array<{ start: number; end: number; rangeIndex: number }>,
+): DocumentFragment {
   const fragment = document.createDocumentFragment();
   let cursor = 0;
 
@@ -83,6 +108,7 @@ function buildFragment(text: string, ranges: Array<{ start: number; end: number 
     } else {
       const highlight = document.createElement("span");
       highlight.setAttribute(HIGHLIGHT_ATTR, "true");
+      highlight.setAttribute(HIGHLIGHT_INDEX_ATTR, String(range.rangeIndex));
       highlight.className = HIGHLIGHT_CLASS;
       highlight.textContent = selectedText;
       fragment.append(highlight);
@@ -97,24 +123,20 @@ function buildFragment(text: string, ranges: Array<{ start: number; end: number 
   return fragment;
 }
 
-function applyHighlights(
-  node: HTMLElement,
-  ranges: TextRange[] | TextRange | null | undefined,
-): void {
+function applyHighlights(node: HTMLElement, input: HighlightRangeOptions): void {
   clearHighlights(node);
-  const normalized = mergeRanges(normalizeRanges(ranges));
-  node.dataset.favoriteHighlightCount = String(normalized.length);
-  if (normalized.length === 0) return;
-
+  const normalized = mergeRanges(normalizeRanges(input));
+  node.dataset.favoriteRangeCount = String(normalized.length);
+  let highlightCount = 0;
   if (import.meta.env.DEV) {
-    const textLength = node.textContent?.length ?? 0;
-    const maxEnd = Math.max(...normalized.map((range) => range.end));
-    if (maxEnd > textLength) {
-      console.debug("[highlightRange] range exceeds text length", {
-        textLength,
-        maxEnd,
-      });
-    }
+    console.debug("[highlightRange] update", {
+      count: normalized.length,
+      textLength: node.textContent?.length ?? 0,
+    });
+  }
+  if (normalized.length === 0) {
+    node.dataset.favoriteHighlightCount = "0";
+    return;
   }
 
   const textNodes = collectTextNodes(node);
@@ -146,12 +168,16 @@ function applyHighlights(
       continue;
     }
 
-    const segments: Array<{ start: number; end: number }> = [];
+    const segments: Array<{ start: number; end: number; rangeIndex: number }> = [];
     while (currentRange && currentRange.start < nodeEnd) {
       const start = Math.max(currentRange.start, nodeStart) - nodeStart;
       const end = Math.min(currentRange.end, nodeEnd) - nodeStart;
       if (end > start) {
-        segments.push({ start, end });
+        segments.push({ start, end, rangeIndex });
+        const selectedText = text.slice(start, end);
+        if (selectedText.trim()) {
+          highlightCount += 1;
+        }
       }
 
       if (currentRange.end <= nodeEnd) {
@@ -172,13 +198,16 @@ function applyHighlights(
 
     globalIndex = nodeEnd;
   }
+
+  node.dataset.favoriteHighlightCount = String(highlightCount);
 }
 
 function getOffsetInContainer(container: HTMLElement, node: Node, offset: number): number {
   const range = document.createRange();
   range.selectNodeContents(container);
   range.setEnd(node, offset);
-  return range.toString().length;
+  const fragment = range.cloneContents();
+  return fragment.textContent?.length ?? 0;
 }
 
 export function getSelectionTextRange(
@@ -202,23 +231,68 @@ export function getSelectionTextRange(
   return { start: Math.min(start, end), end: Math.max(start, end) };
 }
 
-export function highlightRange(
-  node: HTMLElement,
-  ranges: TextRange[] | TextRange | null | undefined,
-) {
-  const run = (nextRanges: TextRange[] | TextRange | null | undefined) => {
-    applyHighlights(node, nextRanges);
+export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) {
+  let options: HighlightRangeOptions = input;
+  let hoverTimer: number | null = null;
+  let lastTarget: HTMLElement | null = null;
+
+  const handleMouseOver = (event: MouseEvent) => {
+    if (!options || typeof options !== "object" || !("onRangeHover" in options)) {
+      return;
+    }
+    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+      `[${HIGHLIGHT_ATTR}]`,
+    );
+    if (!target || !node.contains(target)) return;
+    if (target === lastTarget) return;
+    lastTarget = target;
+
+    const ranges = normalizeRanges(options);
+    const index = Number(target.getAttribute(HIGHLIGHT_INDEX_ATTR));
+    if (!Number.isFinite(index) || !ranges[index]) return;
+
+    if (hoverTimer) {
+      window.clearTimeout(hoverTimer);
+    }
+    hoverTimer = window.setTimeout(() => {
+      const rect = target.getBoundingClientRect();
+      options.onRangeHover?.({ range: ranges[index], rect });
+    }, options.hoverDelayMs ?? 2000);
   };
 
-  run(ranges);
+  const handleMouseOut = (event: MouseEvent) => {
+    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+      `[${HIGHLIGHT_ATTR}]`,
+    );
+    if (!target || !node.contains(target)) return;
+    if (hoverTimer) {
+      window.clearTimeout(hoverTimer);
+      hoverTimer = null;
+    }
+    lastTarget = null;
+    if (options && typeof options === "object" && "onRangeLeave" in options) {
+      options.onRangeLeave?.();
+    }
+  };
+
+  node.addEventListener("mouseover", handleMouseOver);
+  node.addEventListener("mouseout", handleMouseOut);
+
+  const run = (nextInput: HighlightRangeOptions) => {
+    options = nextInput;
+    applyHighlights(node, options);
+  };
+
+  run(input);
 
   return {
-    update(nextRanges: TextRange[] | TextRange | null | undefined) {
-      run(nextRanges);
+    update(nextInput: HighlightRangeOptions) {
+      run(nextInput);
     },
     destroy() {
       clearHighlights(node);
-      delete node.dataset.favoriteHighlightCount;
+      node.removeEventListener("mouseover", handleMouseOver);
+      node.removeEventListener("mouseout", handleMouseOut);
     },
   };
 }

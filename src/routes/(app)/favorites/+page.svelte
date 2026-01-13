@@ -6,6 +6,7 @@
   import { favoriteStore } from "$lib/states";
   import type { Favorite, FavoriteMessageType, FavoriteTag, TagColor, TextRange } from "$lib/types/favorite";
   import { highlightRange, renderMarkdown } from "$lib/utils";
+  import { escapeHtml } from "$lib/utils/string";
   import { resolveLocalAssetPath } from "$lib/utils/tauri";
 
   let searchQuery = $state("");
@@ -96,12 +97,76 @@
     }
   }
 
-  function parseTextRange(content: string): TextRange | null {
+  function parseTextRanges(content: string): TextRange[] {
     try {
-      return JSON.parse(content) as TextRange;
+      const parsed = JSON.parse(content) as TextRange[] | TextRange;
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === "object") return [parsed];
+      return [];
     } catch {
-      return null;
+      return [];
     }
+  }
+
+  function mergeTextRanges(ranges: TextRange[]): TextRange[] {
+    const normalized = ranges
+      .map((range) => ({
+        start: Math.max(0, Math.floor(range.start)),
+        end: Math.max(0, Math.floor(range.end)),
+      }))
+      .filter((range) => range.end > range.start)
+      .sort((a, b) => a.start - b.start);
+
+    if (normalized.length <= 1) return normalized;
+
+    const merged: TextRange[] = [];
+    let current = normalized[0];
+    for (let i = 1; i < normalized.length; i += 1) {
+      const next = normalized[i];
+      if (next.start <= current.end) {
+        current = { start: current.start, end: Math.max(current.end, next.end) };
+      } else {
+        merged.push(current);
+        current = next;
+      }
+    }
+    merged.push(current);
+    return merged;
+  }
+
+  function getPlainTextFromMarkdown(markdown: string): string {
+    if (!browser) return markdown;
+    const html = renderMarkdown(markdown);
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    return container.textContent ?? "";
+  }
+
+  function isTextContentLong(content: string): boolean {
+    if (!content) return false;
+    const length = content.length;
+    const paragraphCount = content.split(/\n{2,}/).filter(Boolean).length;
+    const lineCount = content.split(/\n/).length;
+    return length > 200 || paragraphCount > 2 || lineCount > 6;
+  }
+
+  function buildRangeSummary(text: string, ranges: TextRange[]): string {
+    if (!browser) return text;
+    const normalized = mergeTextRanges(ranges);
+    if (normalized.length === 0) return escapeHtml(text);
+
+    const pieces: string[] = [];
+    normalized.forEach((range, index) => {
+      const snippet = escapeHtml(text.slice(range.start, range.end));
+      pieces.push(`<span class="text-base-content/50 text-xs">段落${index + 1}</span>`);
+      pieces.push("<br />");
+      pieces.push(`<span class="favorite-highlight bg-amber-500/20 px-1 rounded">${snippet}</span>`);
+      if (index < normalized.length - 1) {
+        pieces.push("<br />");
+      }
+    });
+
+    return pieces.join("");
   }
 
   function getImageSrc(content: string): string | null {
@@ -121,6 +186,9 @@
 
   function shouldShowExpandButton(favorite: Favorite): boolean {
     if (!favorite.id) return false;
+    if (favorite.messageType === "text" && favorite.context) {
+      return isTextContentLong(favorite.context);
+    }
     const content = getDisplayContent(favorite);
     const lines = content.split("\n");
     return lines.length > 3 || content.length > 300;
@@ -175,13 +243,23 @@
   async function handleDeleteFavorite(favorite: Favorite) {
     closeContextMenu();
     try {
-      await favoriteStore.toggleFavorite(
-        favorite.messageId,
-        favorite.chatId,
-        favorite.content,
-        favorite.role,
-        favorite.messageType,
-      );
+      if (favorite.messageType === "text") {
+        await favoriteStore.saveTextRanges(
+          favorite.messageId,
+          favorite.chatId,
+          [],
+          favorite.role,
+          favorite.context,
+        );
+      } else {
+        await favoriteStore.toggleFavorite(
+          favorite.messageId,
+          favorite.chatId,
+          favorite.content,
+          favorite.role,
+          favorite.messageType,
+        );
+      }
     } catch (error) {
       console.error("Failed to remove favorite:", error);
     }
@@ -423,32 +501,46 @@
                     {@html renderMarkdown(favorite.content || "")}
                   </div>
                 {:else if favorite.messageType === 'text'}
-                  {@const range = parseTextRange(favorite.content)}
-                  {#if favorite.context && range}
-                    <div
-                      class="break-words text-[15px] leading-[1.6] markdown-content {favorite.id && !isExpanded(favorite.id) ? 'line-clamp-3' : ''}"
-                      use:highlightRange={[range]}
-                    >
-                      {@html renderMarkdown(favorite.context || "")}
-                    </div>
-                    {#if favorite.id && shouldShowExpandButton(favorite)}
+                  {@const ranges = mergeTextRanges(parseTextRanges(favorite.content))}
+                  {#if favorite.context && ranges.length > 0}
+                    {@const isLong = isTextContentLong(favorite.context)}
+                    {#if isLong && favorite.id && !isExpanded(favorite.id)}
+                      {@const plainText = getPlainTextFromMarkdown(favorite.context)}
+                      <div class="whitespace-pre-wrap text-[15px] leading-[1.6]">
+                        {@html buildRangeSummary(plainText, ranges)}
+                      </div>
                       <button
                         class="text-xs text-primary hover:underline mt-2 cursor-pointer flex items-center gap-1"
                         onclick={() => toggleExpand(favorite.id)}
                       >
-                        {#if isExpanded(favorite.id)}
-                          收起
-                        {:else}
-                          查看详情
-                        {/if}
+                        查看详情
                       </button>
+                    {:else}
+                      <div
+                        class="break-words text-[15px] leading-[1.6] markdown-content {favorite.id && !isExpanded(favorite.id) ? 'line-clamp-3' : ''}"
+                        use:highlightRange={ranges}
+                      >
+                        {@html renderMarkdown(favorite.context || "")}
+                      </div>
+                      {#if favorite.id && shouldShowExpandButton(favorite)}
+                        <button
+                          class="text-xs text-primary hover:underline mt-2 cursor-pointer flex items-center gap-1"
+                          onclick={() => toggleExpand(favorite.id)}
+                        >
+                          {#if isExpanded(favorite.id)}
+                            收起
+                          {:else}
+                            查看详情
+                          {/if}
+                        </button>
+                      {/if}
                     {/if}
-                   {:else if favorite.context}
+                  {:else if favorite.context}
                     <p class="text-sm text-base-content/70 italic">无效的文本范围</p>
                   {:else}
                     <p class="text-sm text-base-content/70 italic">数据格式已更新，请重新收藏</p>
-                   {/if}
-                 {/if}
+                  {/if}
+                {/if}
                </div>
             </div>
 
