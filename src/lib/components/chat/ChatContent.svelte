@@ -1,5 +1,6 @@
 <script lang="ts">
   import { chatState } from '$lib/states/chat.svelte';
+  import { favoriteStore } from '$lib/states';
   import { messageStore } from '$lib/states/message.svelte';
   import { Bot } from 'lucide-svelte';
   import type { Message } from '$lib/types';
@@ -206,6 +207,25 @@
         lastLoadedChatId = currentChatId;
       }
     }
+  });
+
+  $effect(() => {
+    if (!currentChatId) return;
+    favoriteStore.loadTextFavoritesByChat(currentChatId).catch((error) => {
+      console.error('Failed to load text favorites for chat:', error);
+    });
+  });
+
+  $effect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!currentChatId) return;
+    if (favoriteStore.textRangesChatId !== currentChatId) return;
+    const messageIds = Object.keys(favoriteStore.textRangesByMessageId);
+    if (messageIds.length === 0) return;
+    console.debug('[ChatContent] text favorites keys', {
+      chatId: currentChatId,
+      messageIds,
+    });
   });
   
   // 消息容器引用

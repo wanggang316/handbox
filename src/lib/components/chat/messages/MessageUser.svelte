@@ -1,6 +1,8 @@
 <script lang="ts">
   import { RotateCcw, Copy, Pencil } from "@lucide/svelte";
   import type { Message } from "$lib/types";
+  import { favoriteStore } from "$lib/states";
+  import { highlightRange } from "$lib/utils";
   import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
   import TextSelectionMenu from "$lib/components/favorite/TextSelectionMenu.svelte";
@@ -22,6 +24,12 @@
     onCopy,
     onEdit,
   }: Props = $props();
+
+  const textRanges = $derived(() => {
+    if (!message?.id || !message.chatId) return [];
+    if (favoriteStore.textRangesChatId !== message.chatId) return [];
+    return favoriteStore.textRangesByMessageId[message.id] ?? [];
+  });
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -75,7 +83,13 @@
               role={message.role}
             >
               <!-- 消息内容 -->
-              <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
+              <div
+                class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+                data-favorite-range-count={favoriteStore.textRangesByMessageId[message.id]?.length ?? 0}
+                data-message-chat-id={message.chatId ?? ""}
+                data-favorite-chat-id={favoriteStore.textRangesChatId ?? ""}
+                use:highlightRange={favoriteStore.textRangesByMessageId[message.id] ?? []}
+              >
                 {message.content}
               </div>
             </TextSelectionMenu>

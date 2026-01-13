@@ -12,3 +12,4 @@ export * from "./markdown";
 export * from "./code";
 export * from "./error";
 export * from "./tauri";
+export * from "./highlightRange";

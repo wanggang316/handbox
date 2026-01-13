@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Star } from "@lucide/svelte";
   import { favoriteStore } from "$lib/states";
-  import * as favoriteApi from "$lib/api/favorite";
   import type { UUID } from "$lib/types";
+  import { getSelectionTextRange } from "$lib/utils/highlightRange";
 
   interface Props {
     messageId: UUID;
@@ -22,12 +22,15 @@
   let menuX = $state(0);
   let menuY = $state(0);
   let selectedText = $state("");
+  let selectedRange = $state<{ start: number; end: number } | null>(null);
   let isFavoriting = $state(false);
+  let container: HTMLDivElement | null = null;
 
   function handleSelection() {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) {
       showMenu = false;
+      selectedRange = null;
       return;
     }
 
@@ -35,50 +38,16 @@
     const rect = range.getBoundingClientRect();
 
     selectedText = selection.toString().trim();
-    if (selectedText.length > 0) {
+    selectedRange = container
+      ? getSelectionTextRange(container, selection)
+      : null;
+    if (selectedText.length > 0 && selectedRange) {
       menuX = rect.left + rect.width / 2;
       menuY = rect.top - 50;
       showMenu = true;
     } else {
       showMenu = false;
     }
-  }
-
-  function getTextRange(content: string, selectedText: string): { start: number; end: number } | null {
-    // 尝试精确匹配
-    let index = content.indexOf(selectedText);
-    if (index !== -1) {
-      return { start: index, end: index + selectedText.length };
-    }
-
-    // 尝试去除首尾空格后匹配
-    const trimmedSelected = selectedText.trim();
-    const trimmedContent = content.trim();
-    index = trimmedContent.indexOf(trimmedSelected);
-    if (index !== -1) {
-      // 计算在原始content中的位置
-      const contentStart = content.indexOf(trimmedContent);
-      if (contentStart !== -1) {
-        return { start: contentStart + index, end: contentStart + index + trimmedSelected.length };
-      }
-    }
-
-    // 尝试去除所有空白字符后匹配
-    const normalizedContent = content.replace(/\s+/g, ' ').trim();
-    const normalizedSelected = selectedText.replace(/\s+/g, ' ').trim();
-    const normalizedIndex = normalizedContent.indexOf(normalizedSelected);
-    if (normalizedIndex !== -1) {
-      // 找到第一个非空白的位置
-      const firstNonSpace = content.indexOf(normalizedSelected[0]);
-      if (firstNonSpace !== -1) {
-        return { start: firstNonSpace, end: firstNonSpace + normalizedSelected.length };
-      }
-    }
-
-    console.warn('TextRange: Could not find selected text in content');
-    console.warn('Selected text:', selectedText);
-    console.warn('Content:', content);
-    return null;
   }
 
   function handleClickOutside(e: MouseEvent) {
@@ -92,8 +61,7 @@
 
     isFavoriting = true;
     try {
-      const textRange = getTextRange(content, selectedText);
-      if (!textRange) {
+      if (!selectedRange) {
         console.error("Failed to find text range");
         alert("无法在消息内容中找到选中的文本，可能是因为文本格式或编码差异。");
         return;
@@ -102,7 +70,7 @@
       await favoriteStore.toggleFavorite(
         messageId,
         chatId,
-        JSON.stringify(textRange),
+        JSON.stringify(selectedRange),
         role,
         "text",
         [],
@@ -125,6 +93,7 @@
   <div
     class="select-text"
     onmouseup={handleSelection}
+    bind:this={container}
   >
     <slot />
   </div>

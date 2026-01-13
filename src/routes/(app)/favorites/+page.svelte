@@ -5,7 +5,7 @@
   import { Search, Filter, X, ExternalLink, Tag, Trash2, MoreVertical, Pencil, Star } from "@lucide/svelte";
   import { favoriteStore } from "$lib/states";
   import type { Favorite, FavoriteMessageType, FavoriteTag, TagColor, TextRange } from "$lib/types/favorite";
-  import { renderMarkdown } from "$lib/utils";
+  import { highlightRange, renderMarkdown } from "$lib/utils";
   import { resolveLocalAssetPath } from "$lib/utils/tauri";
 
   let searchQuery = $state("");
@@ -86,14 +86,7 @@
       case "chat":
         return favorite.content;
       case "text":
-        if (favorite.context) {
-          const range = parseTextRange(favorite.content);
-          if (range) {
-            return favorite.context.slice(range.start, range.end);
-          }
-          return favorite.context;
-        }
-        return favorite.content;
+        return favorite.context ?? favorite.content;
       case "image":
         const match = favorite.content.match(/!\[.*?\]\((.*?)\)/);
         return match ? match[1] : favorite.content;
@@ -109,13 +102,6 @@
     } catch {
       return null;
     }
-  }
-
-  function highlightSelectedText(content: string, range: TextRange): string {
-    const before = content.slice(0, range.start);
-    const selected = content.slice(range.start, range.end);
-    const after = content.slice(range.end);
-    return `${before}<span class="bg-amber-500/20 px-1 rounded">${selected}</span>${after}`;
   }
 
   function getImageSrc(content: string): string | null {
@@ -439,8 +425,11 @@
                 {:else if favorite.messageType === 'text'}
                   {@const range = parseTextRange(favorite.content)}
                   {#if favorite.context && range}
-                    <div class="whitespace-pre-wrap {favorite.id && !isExpanded(favorite.id) ? 'line-clamp-3' : ''}">
-                      {@html highlightSelectedText(favorite.context, range)}
+                    <div
+                      class="break-words text-[15px] leading-[1.6] markdown-content {favorite.id && !isExpanded(favorite.id) ? 'line-clamp-3' : ''}"
+                      use:highlightRange={[range]}
+                    >
+                      {@html renderMarkdown(favorite.context || "")}
                     </div>
                     {#if favorite.id && shouldShowExpandButton(favorite)}
                       <button

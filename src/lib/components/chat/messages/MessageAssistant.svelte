@@ -13,7 +13,7 @@
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
   import { messageStore, favoriteStore } from "$lib/states";
-  import { openInBrowser, renderMarkdown } from "$lib/utils";
+  import { highlightRange, openInBrowser, renderMarkdown } from "$lib/utils";
   import {
     resolveLocalAssetPath,
     isTauriEnvironment,
@@ -54,6 +54,13 @@
     }
     return undefined;
   });
+
+  const textRanges = $derived(() => {
+    if (!message?.id || !message.chatId) return [];
+    if (favoriteStore.textRangesChatId !== message.chatId) return [];
+    return favoriteStore.textRangesByMessageId[message.id] ?? [];
+  });
+
 
   let assets = $state<MessageAttachment[]>([]);
   let isAssetsLoading = $state(false);
@@ -439,6 +446,12 @@
             >
               <div
                 class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+                data-message-id={message.id}
+                data-message-chat-id={message.chatId ?? ""}
+                data-favorite-chat-id={favoriteStore.textRangesChatId ?? ""}
+                data-favorite-range-count={favoriteStore.textRangesByMessageId[message.id]?.length ?? 0}
+                data-favorite-message-match={(favoriteStore.textRangesByMessageId[message.id]?.length ?? 0) > 0}
+                use:highlightRange={favoriteStore.textRangesByMessageId[message.id] ?? []}
                 use:markdownInteractions
               >
                 {@html renderMarkdown(message.content || "")}

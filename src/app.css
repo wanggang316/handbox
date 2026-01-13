@@ -401,6 +401,7 @@ pre.code-block--compact {
   line-height: 1.6;
 }
 
+
 .markdown-content blockquote {
   border-left: 4px solid var(--primary);
   background-color: var(--base-200);

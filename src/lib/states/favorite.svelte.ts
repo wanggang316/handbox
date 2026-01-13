@@ -2,7 +2,7 @@
  * 收藏状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Favorite, FavoriteMessageType } from "$lib/types/favorite";
+import type { Favorite, FavoriteMessageType, TextRange } from "$lib/types/favorite";
 import type { UUID } from "$lib/types";
 import * as favoriteApi from "$lib/api/favorite";
 
@@ -10,6 +10,8 @@ interface FavoriteState {
   favorites: Favorite[];
   isFavoritedMap: Record<string, boolean>;
   isLoading: boolean;
+  textRangesByMessageId: Record<string, TextRange[]>;
+  textRangesChatId: string | null;
 }
 
 class FavoriteStore {
@@ -17,6 +19,8 @@ class FavoriteStore {
     favorites: [],
     isFavoritedMap: {},
     isLoading: false,
+    textRangesByMessageId: {},
+    textRangesChatId: null,
   });
 
   get favorites() {
@@ -25,6 +29,21 @@ class FavoriteStore {
 
   get isLoading() {
     return this.state.isLoading;
+  }
+
+  get textRangesByMessageId() {
+    return this.state.textRangesByMessageId;
+  }
+
+  get textRangesChatId() {
+    return this.state.textRangesChatId;
+  }
+
+  getTextRanges(messageId: UUID, chatId?: UUID): TextRange[] {
+    if (chatId && this.state.textRangesChatId !== chatId) {
+      return [];
+    }
+    return this.state.textRangesByMessageId[messageId] ?? [];
   }
 
   isFavorited(messageId: string, chatId: string, messageType: FavoriteMessageType): boolean {
@@ -76,6 +95,10 @@ class FavoriteStore {
           (f) => f.messageId !== messageId,
         );
       }
+
+      if (inferredType === "text") {
+        await this.loadTextFavoritesByChat(chatId);
+      }
       return isFavorited;
     } catch (error) {
       console.error("Failed to toggle favorite:", error);
@@ -98,6 +121,28 @@ class FavoriteStore {
       console.error("Failed to load favorites:", error);
     } finally {
       this.state.isLoading = false;
+    }
+  }
+
+  async loadTextFavoritesByChat(chatId: UUID): Promise<void> {
+    try {
+      const favorites = await favoriteApi.getFavoritesByChat(chatId);
+      const rangesByMessageId: Record<string, TextRange[]> = {};
+
+      for (const favorite of favorites) {
+        if (favorite.messageType !== "text") continue;
+        const range = parseTextRange(favorite.content);
+        if (!range) continue;
+        if (!rangesByMessageId[favorite.messageId]) {
+          rangesByMessageId[favorite.messageId] = [];
+        }
+        rangesByMessageId[favorite.messageId].push(range);
+      }
+
+      this.state.textRangesByMessageId = rangesByMessageId;
+      this.state.textRangesChatId = chatId;
+    } catch (error) {
+      console.error("Failed to load text favorites:", error);
     }
   }
 
@@ -125,11 +170,21 @@ class FavoriteStore {
     this.state.favorites = [];
     this.state.isFavoritedMap = {};
     this.state.isLoading = false;
+    this.state.textRangesByMessageId = {};
+    this.state.textRangesChatId = null;
   }
 }
 
 function inferMessageType(content: string): FavoriteMessageType {
   return 'message';
+}
+
+function parseTextRange(content: string): TextRange | null {
+  try {
+    return JSON.parse(content) as TextRange;
+  } catch {
+    return null;
+  }
 }
 
 export const favoriteStore = new FavoriteStore();
