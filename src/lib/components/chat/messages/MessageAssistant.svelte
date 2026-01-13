@@ -12,7 +12,7 @@
   } from "@lucide/svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
-  import { messageStore } from "$lib/states";
+  import { messageStore, favoriteStore } from "$lib/states";
   import { openInBrowser, renderMarkdown } from "$lib/utils";
   import {
     resolveLocalAssetPath,
@@ -75,6 +75,9 @@
     y: 0,
     asset: null,
   });
+
+  // 收藏图片状态
+  let isFavoritingImage = $state(false);
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -332,6 +335,31 @@
     }
     closeContextMenu();
   }
+
+  async function favoriteImage() {
+    if (!contextMenu.asset || !message) return;
+
+    isFavoritingImage = true;
+    try {
+      const imageMarkdown = `![${contextMenu.asset.name}](${contextMenu.asset.path})`;
+      await favoriteStore.toggleFavorite(
+        message.id ?? "",
+        message.chatId,
+        imageMarkdown,
+        message.role ?? "assistant",
+        "image",
+        [],
+        undefined,
+        undefined,
+        message.id ?? "",
+      );
+      closeContextMenu();
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to favorite image", error);
+    } finally {
+      isFavoritingImage = false;
+    }
+  }
 </script>
 
 <div
@@ -563,7 +591,7 @@
   </div>
 </div>
 
-<!-- 右键菜单 -->
+  <!-- 右键菜单 -->
 {#if contextMenu.show}
   <div
     class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
@@ -590,6 +618,18 @@
     >
       <Save size={14} />
       <span>保存图片</span>
+    </button>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={favoriteImage}
+      disabled={isFavoritingImage}
+    >
+      {#if isFavoritingImage}
+        <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+      {:else}
+        <Star size={14} />
+      {/if}
+      <span>收藏图片</span>
     </button>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"

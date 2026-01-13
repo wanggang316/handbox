@@ -28,7 +28,7 @@
     lg: "w-5 h-5",
   };
 
-  let isFavorited = $derived(favoriteStore.isFavorited(messageId));
+  let isFavorited = $derived(favoriteStore.isFavorited(messageId, chatId, messageType ?? 'message'));
   let isLoading = $state(false);
 
   async function handleToggle() {

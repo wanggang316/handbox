@@ -2,6 +2,7 @@
 
 use crate::models::AppError;
 use crate::storage::types::{CreateFavoriteRequest, Favorite, FavoriteMessageType, UUID};
+use crate::storage::types::favorite::FavoriteTag;
 use crate::storage::FavoriteRepository;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -16,10 +17,20 @@ pub struct FavoriteToggleRequest {
     pub role: String,
     #[serde(rename = "messageType")]
     pub message_type: String,
-    pub tags: Vec<String>,
+    pub tags: Vec<FavoriteTag>,
     pub note: Option<String>,
-    #[serde(rename = "selectedText")]
-    pub selected_text: Option<String>,
+    #[serde(rename = "context")]
+    pub context: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FavoriteIsFavoritedRequest {
+    #[serde(rename = "messageId")]
+    pub message_id: UUID,
+    #[serde(rename = "chatId")]
+    pub chat_id: UUID,
+    #[serde(rename = "messageType")]
+    pub message_type: String,
 }
 
 #[tauri::command]
@@ -33,7 +44,6 @@ pub async fn favorite_toggle(
         "text" => FavoriteMessageType::Text,
         "image" => FavoriteMessageType::Image,
         "chat" => FavoriteMessageType::Chat,
-        "other" => FavoriteMessageType::Other,
         _ => FavoriteMessageType::Message,
     };
 
@@ -45,7 +55,7 @@ pub async fn favorite_toggle(
         message_type: message_type_enum,
         tags: request.tags,
         note: request.note,
-        selected_text: request.selected_text,
+        context: request.context,
         created_at: chrono::Utc::now().timestamp_millis(),
     };
 
@@ -61,12 +71,6 @@ pub async fn favorite_toggle(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FavoriteIsFavoritedRequest {
-    #[serde(rename = "messageId")]
-    pub message_id: UUID,
-}
-
 #[tauri::command]
 pub async fn favorite_is_favorited(
     request: FavoriteIsFavoritedRequest,
@@ -74,7 +78,14 @@ pub async fn favorite_is_favorited(
 ) -> Result<bool, AppError> {
     tracing::info!("[favorite_is_favorited] IPC command called for message_id: {}", request.message_id);
 
-    match favorite_repo.is_favorited(&request.message_id).await {
+    let message_type_enum = match request.message_type.as_str() {
+        "text" => FavoriteMessageType::Text,
+        "image" => FavoriteMessageType::Image,
+        "chat" => FavoriteMessageType::Chat,
+        _ => FavoriteMessageType::Message,
+    };
+
+    match favorite_repo.is_favorited(&request.message_id, &request.chat_id, &message_type_enum).await {
         Ok(is_favorited) => {
             tracing::info!("[favorite_is_favorited] Command completed, result: {}", is_favorited);
             Ok(is_favorited)
@@ -133,7 +144,7 @@ pub async fn favorite_list_by_chat(
 pub struct FavoriteAddTagRequest {
     #[serde(rename = "favoriteId")]
     pub favorite_id: UUID,
-    pub tag: String,
+    pub tag: FavoriteTag,
 }
 
 #[tauri::command]
@@ -155,14 +166,21 @@ pub async fn favorite_add_tag(
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FavoriteRemoveTagRequest {
+    #[serde(rename = "favoriteId")]
+    pub favorite_id: UUID,
+    pub tag_name: String,
+}
+
 #[tauri::command]
 pub async fn favorite_remove_tag(
-    request: FavoriteAddTagRequest,
+    request: FavoriteRemoveTagRequest,
     favorite_repo: State<'_, FavoriteRepository>,
 ) -> Result<(), AppError> {
     tracing::info!("[favorite_remove_tag] IPC command called for favorite_id: {}", request.favorite_id);
 
-    match favorite_repo.remove_tag(&request.favorite_id, &request.tag).await {
+    match favorite_repo.remove_tag(&request.favorite_id, &request.tag_name).await {
         Ok(()) => {
             tracing::info!("[favorite_remove_tag] Command completed successfully");
             Ok(())

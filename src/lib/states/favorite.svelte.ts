@@ -27,8 +27,16 @@ class FavoriteStore {
     return this.state.isLoading;
   }
 
-  isFavorited(messageId: string): boolean {
-    return this.state.isFavoritedMap[messageId] ?? false;
+  isFavorited(messageId: string, chatId: string, messageType: FavoriteMessageType): boolean {
+    const key = `${messageId}_${chatId}_${messageType}`;
+    return this.state.isFavoritedMap[key] ?? false;
+  }
+
+  async checkFavorited(messageId: UUID, chatId: UUID, messageType: FavoriteMessageType): Promise<boolean> {
+    const key = `${messageId}_${chatId}_${messageType}`;
+    const isFavorited = await favoriteApi.isFavorited(messageId, chatId, messageType);
+    this.state.isFavoritedMap[key] = isFavorited;
+    return isFavorited;
   }
 
   async toggleFavorite(
@@ -37,6 +45,10 @@ class FavoriteStore {
     content: string,
     role: 'user' | 'assistant' | 'system',
     messageType?: FavoriteMessageType,
+    tags?: any[],
+    note?: string,
+    context?: string,
+    updateFavoritedMap: boolean = true,
   ): Promise<boolean> {
     const inferredType = messageType ?? inferMessageType(content);
     try {
@@ -46,8 +58,17 @@ class FavoriteStore {
         content,
         role,
         inferredType,
+        tags ?? [],
+        note,
+        context,
       );
-      this.state.isFavoritedMap[messageId] = isFavorited;
+      
+      // 只有收藏消息类型时才更新isFavoritedMap
+      // 文本/图片/对话类型的收藏不应该影响消息的收藏按钮状态
+      if (updateFavoritedMap && inferredType === 'message') {
+        this.state.isFavoritedMap[messageId] = isFavorited;
+      }
+      
       if (isFavorited) {
         await this.loadFavorites();
       } else {
@@ -69,7 +90,8 @@ class FavoriteStore {
       this.state.favorites = favorites;
       const map: Record<string, boolean> = {};
       for (const f of favorites) {
-        map[f.messageId] = true;
+        const key = `${f.messageId}_${f.chatId}_${f.messageType}`;
+        map[key] = true;
       }
       this.state.isFavoritedMap = map;
     } catch (error) {
@@ -79,20 +101,9 @@ class FavoriteStore {
     }
   }
 
-  async checkFavorited(messageId: UUID): Promise<boolean> {
+  async addTag(favoriteId: UUID, tag: string, color: string): Promise<void> {
     try {
-      const isFavorited = await favoriteApi.isFavorited(messageId);
-      this.state.isFavoritedMap[messageId] = isFavorited;
-      return isFavorited;
-    } catch (error) {
-      console.error("Failed to check favorite:", error);
-      return false;
-    }
-  }
-
-  async addTag(favoriteId: UUID, tag: string): Promise<void> {
-    try {
-      await favoriteApi.addTag(favoriteId, tag);
+      await favoriteApi.addTag(favoriteId, { name: tag, color: color as any });
       await this.loadFavorites();
     } catch (error) {
       console.error("Failed to add tag:", error);
@@ -100,9 +111,9 @@ class FavoriteStore {
     }
   }
 
-  async removeTag(favoriteId: UUID, tag: string): Promise<void> {
+  async removeTag(favoriteId: UUID, tagName: string): Promise<void> {
     try {
-      await favoriteApi.removeTag(favoriteId, tag);
+      await favoriteApi.removeTag(favoriteId, tagName);
       await this.loadFavorites();
     } catch (error) {
       console.error("Failed to remove tag:", error);
@@ -118,14 +129,6 @@ class FavoriteStore {
 }
 
 function inferMessageType(content: string): FavoriteMessageType {
-  if (content.length >= 500 || content.includes('```')) {
-    return 'chat';
-  }
-
-  if (content.length < 200 && !content.includes('```')) {
-    return 'text';
-  }
-
   return 'message';
 }
 

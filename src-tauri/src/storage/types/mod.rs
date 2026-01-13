@@ -15,7 +15,7 @@ pub use artifact::{
 };
 pub use chat::{Chat, ChatReasoningConfig, McpServerConfig};
 pub use common::{Timestamp, UUID};
-pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType};
+pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag};
 pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,
     McpServerStatus, McpTool,

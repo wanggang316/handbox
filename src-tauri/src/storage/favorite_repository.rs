@@ -1,9 +1,9 @@
 // Favorite 数据访问层
 
 use crate::models::AppError;
-use crate::storage::types::{CreateFavoriteRequest, Favorite, FavoriteMessageType, UUID};
+use crate::storage::types::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag, UUID};
 use crate::storage::Database;
-use sqlx::Row;
+use sqlx::{Error, Row};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -20,15 +20,17 @@ impl FavoriteRepository {
         &self,
         request: &CreateFavoriteRequest,
     ) -> Result<bool, AppError> {
-        let existing: Option<(String,)> = sqlx::query_as::<_, (String,)>(
-            "SELECT id FROM favorites WHERE message_id = $1",
+        // 检查该chat_id和message_type的组合是否已存在
+        let existing: Option<(String, String)> = sqlx::query_as::<_, (String, String)>(
+            "SELECT id, message_type FROM favorites WHERE chat_id = $1 AND message_type = $2",
         )
-        .bind(&request.message_id)
+        .bind(&request.chat_id)
+        .bind(format!("{:?}", request.message_type).to_lowercase())
         .fetch_optional(self.db.pool())
         .await
         .map_err(|e| AppError::internal_error(&format!("Failed to check favorite: {}", e)))?;
 
-        if let Some((id,)) = existing {
+        if let Some((id, _)) = existing {
             sqlx::query("DELETE FROM favorites WHERE id = $1")
                 .bind(&id)
                 .execute(self.db.pool())
@@ -46,7 +48,7 @@ impl FavoriteRepository {
         sqlx::query(
             r#"
                 INSERT INTO favorites (
-                    id, message_id, chat_id, content, role, message_type, tags, note, selected_text, created_at
+                    id, message_id, chat_id, content, role, message_type, tags, note, context, created_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
         )
@@ -58,7 +60,7 @@ impl FavoriteRepository {
         .bind(format!("{:?}", request.message_type).to_lowercase())
         .bind(tags_json.as_deref())
         .bind(request.note.as_deref())
-        .bind(request.selected_text.as_deref())
+        .bind(request.context.as_deref())
         .bind(request.created_at)
         .execute(self.db.pool())
         .await
@@ -67,14 +69,21 @@ impl FavoriteRepository {
         Ok(true)
     }
 
-    pub async fn is_favorited(&self, message_id: &UUID) -> Result<bool, AppError> {
+    pub async fn is_favorited(
+        &self,
+        message_id: &UUID,
+        chat_id: &UUID,
+        message_type: &FavoriteMessageType,
+    ) -> Result<bool, AppError> {
         let result: Option<(i64,)> = sqlx::query_as::<_, (i64,)>(
-            "SELECT 1 FROM favorites WHERE message_id = $1",
+            "SELECT 1 FROM favorites WHERE message_id = $1 AND chat_id = $2 AND message_type = $3",
         )
         .bind(message_id)
+        .bind(chat_id)
+        .bind(format!("{:?}", message_type).to_lowercase())
         .fetch_optional(self.db.pool())
         .await
-        .map_err(|e| AppError::internal_error(&format!("Failed to check favorite: {}", e)))?;
+        .map_err(|e: Error| AppError::internal_error(&format!("Failed to check favorite: {}", e)))?;
 
         Ok(result.is_some())
     }
@@ -82,14 +91,14 @@ impl FavoriteRepository {
     pub async fn get_all_favorites(&self) -> Result<Vec<Favorite>, AppError> {
         let rows = sqlx::query(
             r#"
-                SELECT id, message_id, chat_id, content, role, message_type, tags, note, selected_text, created_at
+                SELECT id, message_id, chat_id, content, role, message_type, tags, note, context, created_at
                 FROM favorites
                 ORDER BY created_at DESC
             "#,
         )
         .fetch_all(self.db.pool())
         .await
-        .map_err(|e| AppError::internal_error(&format!("Failed to get favorites: {}", e)))?;
+        .map_err(|e: Error| AppError::internal_error(&format!("Failed to get favorites: {}", e)))?;
 
         let mut favorites = Vec::new();
         for row in rows {
@@ -102,7 +111,7 @@ impl FavoriteRepository {
                 message_type: FavoriteMessageType::from_str(&row.get::<String, _>("message_type")),
                 tags: Favorite::tags_from_json(row.get::<Option<&str>, _>("tags")),
                 note: row.get("note"),
-                selected_text: row.get("selected_text"),
+                context: row.get("context"),
                 created_at: row.get("created_at"),
             });
         }
@@ -113,7 +122,7 @@ impl FavoriteRepository {
     pub async fn get_favorites_by_chat(&self, chat_id: &UUID) -> Result<Vec<Favorite>, AppError> {
         let rows = sqlx::query(
             r#"
-                SELECT id, message_id, chat_id, content, role, message_type, tags, note, selected_text, created_at
+                SELECT id, message_id, chat_id, content, role, message_type, tags, note, context, created_at
                 FROM favorites
                 WHERE chat_id = $1
                 ORDER BY created_at DESC
@@ -122,7 +131,7 @@ impl FavoriteRepository {
         .bind(chat_id)
         .fetch_all(self.db.pool())
         .await
-        .map_err(|e| AppError::internal_error(&format!("Failed to get favorites: {}", e)))?;
+        .map_err(|e: Error| AppError::internal_error(&format!("Failed to get favorites: {}", e)))?;
 
         let mut favorites = Vec::new();
         for row in rows {
@@ -135,7 +144,7 @@ impl FavoriteRepository {
                 message_type: FavoriteMessageType::from_str(&row.get::<String, _>("message_type")),
                 tags: Favorite::tags_from_json(row.get::<Option<&str>, _>("tags")),
                 note: row.get("note"),
-                selected_text: row.get("selected_text"),
+                context: row.get("context"),
                 created_at: row.get("created_at"),
             });
         }
@@ -143,7 +152,7 @@ impl FavoriteRepository {
         Ok(favorites)
     }
 
-    pub async fn add_tag(&self, favorite_id: &UUID, tag: &str) -> Result<(), AppError> {
+    pub async fn add_tag(&self, favorite_id: &UUID, tag: &FavoriteTag) -> Result<(), AppError> {
         let row = sqlx::query(
             "SELECT tags FROM favorites WHERE id = $1",
         )
@@ -154,9 +163,9 @@ impl FavoriteRepository {
 
         let tags_json: Option<String> = row.get("tags");
 
-        let mut tags: Vec<String> = Favorite::tags_from_json(tags_json.as_deref());
-        if !tags.contains(&tag.to_string()) {
-            tags.push(tag.to_string());
+        let mut tags: Vec<FavoriteTag> = Favorite::tags_from_json(tags_json.as_deref());
+        if !tags.iter().any(|t| t.name == tag.name) {
+            tags.push(tag.clone());
             let new_json = serde_json::to_string(&tags).map_err(|e| {
                 AppError::internal_error(&format!("Failed to serialize tags: {}", e))
             })?;
@@ -172,7 +181,7 @@ impl FavoriteRepository {
         Ok(())
     }
 
-    pub async fn remove_tag(&self, favorite_id: &UUID, tag: &str) -> Result<(), AppError> {
+    pub async fn remove_tag(&self, favorite_id: &UUID, tag_name: &str) -> Result<(), AppError> {
         let row = sqlx::query(
             "SELECT tags FROM favorites WHERE id = $1",
         )
@@ -183,8 +192,8 @@ impl FavoriteRepository {
 
         let tags_json: Option<String> = row.get("tags");
 
-        let mut tags: Vec<String> = Favorite::tags_from_json(tags_json.as_deref());
-        tags.retain(|t| t != tag);
+        let mut tags: Vec<FavoriteTag> = Favorite::tags_from_json(tags_json.as_deref());
+        tags.retain(|t| t.name != tag_name);
 
         let new_json = serde_json::to_string(&tags).map_err(|e| {
             AppError::internal_error(&format!("Failed to serialize tags: {}", e))

@@ -1,5 +1,5 @@
 import { apiCall } from "./index";
-import type { Favorite, FavoriteMessageType } from "$lib/types/favorite";
+import type { Favorite, FavoriteMessageType, FavoriteTag } from "$lib/types/favorite";
 import type { UUID } from "$lib/types";
 
 export async function toggleFavorite(
@@ -8,9 +8,9 @@ export async function toggleFavorite(
   content: string,
   role: 'user' | 'assistant' | 'system',
   messageType: FavoriteMessageType,
-  tags: string[] = [],
+  tags: FavoriteTag[] = [],
   note?: string,
-  selectedText?: string,
+  context?: string,
 ): Promise<boolean> {
   return apiCall<boolean>("favorite_toggle", {
     request: {
@@ -21,14 +21,14 @@ export async function toggleFavorite(
       messageType,
       tags,
       note,
-      selectedText,
+      context,
     },
   });
 }
 
-export async function isFavorited(messageId: UUID): Promise<boolean> {
+export async function isFavorited(messageId: UUID, chatId: UUID, messageType: FavoriteMessageType): Promise<boolean> {
   return apiCall<boolean>("favorite_is_favorited", {
-    request: { messageId },
+    request: { messageId, chatId, messageType },
   });
 }
 
@@ -42,14 +42,14 @@ export async function getFavoritesByChat(chatId: UUID): Promise<Favorite[]> {
   });
 }
 
-export async function addTag(favoriteId: UUID, tag: string): Promise<void> {
+export async function addTag(favoriteId: UUID, tag: FavoriteTag): Promise<void> {
   return apiCall<void>("favorite_add_tag", {
     request: { favoriteId, tag },
   });
 }
 
-export async function removeTag(favoriteId: UUID, tag: string): Promise<void> {
+export async function removeTag(favoriteId: UUID, tagName: string): Promise<void> {
   return apiCall<void>("favorite_remove_tag", {
-    request: { favoriteId, tag },
+    request: { favoriteId, tagName },
   });
 }

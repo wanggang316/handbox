@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Star } from "@lucide/svelte";
   import { favoriteStore } from "$lib/states";
+  import * as favoriteApi from "$lib/api/favorite";
   import type { UUID } from "$lib/types";
 
   interface Props {
@@ -43,6 +44,43 @@
     }
   }
 
+  function getTextRange(content: string, selectedText: string): { start: number; end: number } | null {
+    // 尝试精确匹配
+    let index = content.indexOf(selectedText);
+    if (index !== -1) {
+      return { start: index, end: index + selectedText.length };
+    }
+
+    // 尝试去除首尾空格后匹配
+    const trimmedSelected = selectedText.trim();
+    const trimmedContent = content.trim();
+    index = trimmedContent.indexOf(trimmedSelected);
+    if (index !== -1) {
+      // 计算在原始content中的位置
+      const contentStart = content.indexOf(trimmedContent);
+      if (contentStart !== -1) {
+        return { start: contentStart + index, end: contentStart + index + trimmedSelected.length };
+      }
+    }
+
+    // 尝试去除所有空白字符后匹配
+    const normalizedContent = content.replace(/\s+/g, ' ').trim();
+    const normalizedSelected = selectedText.replace(/\s+/g, ' ').trim();
+    const normalizedIndex = normalizedContent.indexOf(normalizedSelected);
+    if (normalizedIndex !== -1) {
+      // 找到第一个非空白的位置
+      const firstNonSpace = content.indexOf(normalizedSelected[0]);
+      if (firstNonSpace !== -1) {
+        return { start: firstNonSpace, end: firstNonSpace + normalizedSelected.length };
+      }
+    }
+
+    console.warn('TextRange: Could not find selected text in content');
+    console.warn('Selected text:', selectedText);
+    console.warn('Content:', content);
+    return null;
+  }
+
   function handleClickOutside(e: MouseEvent) {
     if (e.target instanceof HTMLElement && !e.target.closest(".text-selection-menu")) {
       showMenu = false;
@@ -54,11 +92,23 @@
 
     isFavoriting = true;
     try {
+      const textRange = getTextRange(content, selectedText);
+      if (!textRange) {
+        console.error("Failed to find text range");
+        alert("无法在消息内容中找到选中的文本，可能是因为文本格式或编码差异。");
+        return;
+      }
+
       await favoriteStore.toggleFavorite(
         messageId,
         chatId,
-        content,
+        JSON.stringify(textRange),
         role,
+        "text",
+        [],
+        undefined,
+        content,
+        false, // 文本收藏不应该影响消息的收藏按钮状态
       );
       showMenu = false;
     } catch (error) {

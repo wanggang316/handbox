@@ -196,8 +196,12 @@
         await favoriteStore.toggleFavorite(
           message.id ?? "",
           selectedChat.id,
-          message.content ?? "",
+          selectedChat.title,
           message.role ?? "assistant",
+          "chat",
+          [],
+          undefined,
+          undefined,
         );
       }
     } catch (error) {
@@ -290,7 +294,7 @@
       onclick={handleFavoriteChat}
       disabled={isFavoriting || !selectedChat}
     >
-      {#if isFavoriting && favoritingChatId === selectedChat.id}
+      {#if isFavoriting && selectedChat && favoritingChatId === selectedChat.id}
         <LoaderCircle size={14} class="animate-spin" />
       {:else}
         <Star size={14} />

@@ -8,7 +8,6 @@ pub enum FavoriteMessageType {
     Image,
     Message,
     Chat,
-    Other,
 }
 
 impl Default for FavoriteMessageType {
@@ -23,10 +22,16 @@ impl FavoriteMessageType {
             "text" => FavoriteMessageType::Text,
             "image" => FavoriteMessageType::Image,
             "chat" => FavoriteMessageType::Chat,
-            "other" => FavoriteMessageType::Other,
             _ => FavoriteMessageType::Message,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteTag {
+    pub name: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,11 +44,11 @@ pub struct Favorite {
     pub role: String,
     pub message_type: FavoriteMessageType,
     #[serde(default)]
-    pub tags: Vec<String>,
+    pub tags: Vec<FavoriteTag>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub selected_text: Option<String>,
+    pub context: Option<String>,
     pub created_at: Timestamp,
 }
 
@@ -56,7 +61,7 @@ impl Favorite {
         }
     }
 
-    pub fn tags_from_json(json: Option<&str>) -> Vec<String> {
+    pub fn tags_from_json(json: Option<&str>) -> Vec<FavoriteTag> {
         match json {
             Some(s) => serde_json::from_str(s).unwrap_or_default(),
             None => vec![],
@@ -70,8 +75,8 @@ pub struct CreateFavoriteRequest {
     pub content: String,
     pub role: String,
     pub message_type: FavoriteMessageType,
-    pub tags: Vec<String>,
+    pub tags: Vec<FavoriteTag>,
     pub note: Option<String>,
-    pub selected_text: Option<String>,
+    pub context: Option<String>,
     pub created_at: i64,
 }
