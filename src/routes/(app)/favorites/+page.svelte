@@ -533,32 +533,37 @@
               : ''}"
             oncontextmenu={(e) => handleContextMenu(e, favorite)}
           >
-            <div class="flex items-start justify-between mb-2">
-              <div class="flex items-center gap-2">
-                <span
-                  class="px-2 py-0.5 text-xs rounded-full
-                    {favorite.role === 'user'
-                    ? 'bg-primary/20 text-primary'
-                    : favorite.role === 'assistant'
-                      ? 'bg-success/20 text-success'
-                      : 'bg-base-300 text-base-content/60'}"
-                >
-                  {getRoleLabel(favorite.role)}
-                </span>
-                <span
-                  class="px-2 py-0.5 text-xs rounded-full bg-info/20 text-info"
-                >
+            <div class="flex items-start justify-between mb-2 gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="px-2 py-0.5 text-xs rounded-full bg-info/20 text-info">
                   {getMessageTypeLabel(favorite.messageType)}
                 </span>
+                {#if favorite.tags.length > 0}
+                  <div class="flex flex-wrap items-center gap-1">
+                    {#each favorite.tags as tag}
+                      <span
+                        class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(
+                          tag.color
+                        )}"
+                      >
+                        <Tag size={10} />
+                        {tag.name}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
               </div>
 
-              <button
-                class="text-xs text-base-content/50 hover:text-primary flex items-center gap-1 cursor-pointer"
-                onclick={() => handleNavigate(favorite)}
-              >
-                <ExternalLink size={12} />
-                {getNavigateLabel(favorite)}
-              </button>
+              <div class="flex items-center gap-3 text-xs text-base-content/50 whitespace-nowrap">
+                <span>{formatTime(favorite.createdAt)}</span>
+                <button
+                  class="text-xs text-base-content/50 hover:text-primary flex items-center gap-1 cursor-pointer"
+                  onclick={() => handleNavigate(favorite)}
+                >
+                  <ExternalLink size={12} />
+                  {getNavigateLabel(favorite)}
+                </button>
+              </div>
             </div>
 
             <div class="mb-2">
@@ -647,27 +652,6 @@
               </div>
             </div>
 
-            {#if favorite.tags.length > 0}
-              <div class="flex flex-wrap gap-1 mb-2">
-                {#each favorite.tags as tag}
-                  <span
-                    class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(
-                      tag.color
-                    )}"
-                  >
-                    <Tag size={10} />
-                    {tag.name}
-                  </span>
-                {/each}
-              </div>
-            {/if}
-
-            <div
-              class="flex items-center justify-between text-xs text-base-content/50"
-            >
-              <div></div>
-              <div>{formatTime(favorite.createdAt)}</div>
-            </div>
           </div>
         {/each}
       </div>
