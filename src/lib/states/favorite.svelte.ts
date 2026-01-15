@@ -47,13 +47,6 @@ class FavoriteStore {
 
   getTextRanges(messageId: UUID, chatId?: UUID): TextRange[] {
     if (chatId && this.state.textRangesChatId && this.state.textRangesChatId !== chatId) {
-      if (import.meta.env.DEV) {
-        console.debug("[favoriteStore] text ranges chat mismatch", {
-          messageId,
-          chatId,
-          storeChatId: this.state.textRangesChatId,
-        });
-      }
       return [];
     }
     return this.state.textRangesByMessageId[messageId] ?? [];
@@ -144,12 +137,6 @@ class FavoriteStore {
 
       for (const favorite of favorites) {
         if (favorite.messageType !== "text") continue;
-        if (import.meta.env.DEV) {
-          console.debug("[favoriteStore] text favorite raw", {
-            messageId: favorite.messageId,
-            content: favorite.content,
-          });
-        }
         const ranges = parseTextRanges(favorite.content);
         if (ranges.length === 0) continue;
         if (!rangesByMessageId[favorite.messageId]) {
@@ -161,12 +148,6 @@ class FavoriteStore {
       this.state.textRangesByMessageId = normalizeTextRangesMap(rangesByMessageId);
       this.state.textRangesChatId = chatId;
       this.state.textRangesVersion += 1;
-      if (import.meta.env.DEV) {
-        console.debug("[favoriteStore] text ranges loaded", {
-          chatId,
-          messageIds: Object.keys(this.state.textRangesByMessageId),
-        });
-      }
     } catch (error) {
       console.error("Failed to load text favorites:", error);
     }
@@ -264,20 +245,8 @@ function parseTextRanges(content: string): TextRange[] {
     if (parsed && typeof parsed === "object") {
       return [parsed];
     }
-    if (import.meta.env.DEV) {
-      console.debug("[favoriteStore] invalid text range payload", {
-        content,
-        parsedType: typeof parsed,
-      });
-    }
     return [];
   } catch (error) {
-    if (import.meta.env.DEV) {
-      console.debug("[favoriteStore] failed to parse text ranges", {
-        content,
-        error,
-      });
-    }
     return [];
   }
 }

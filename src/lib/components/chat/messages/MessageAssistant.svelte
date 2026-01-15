@@ -62,18 +62,6 @@
     return ranges.map((range) => ({ start: range.start, end: range.end }));
   });
 
-  $effect(() => {
-    if (!import.meta.env.DEV) return;
-    if (!message?.id || !message.chatId) return;
-    const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
-    console.debug("[MessageAssistant] highlight payload", {
-      messageId: message.id,
-      chatId: message.chatId,
-      ranges,
-      version: favoriteStore.textRangesVersion,
-    });
-  });
-
   let showRangeMenu = $state(false);
   let rangeMenuX = $state(0);
   let rangeMenuY = $state(0);

@@ -123,26 +123,13 @@ function buildFragment(
   return fragment;
 }
 
-function applyHighlights(node: HTMLElement, input: HighlightRangeOptions): void {
+function applyHighlights(node: HTMLElement, ranges: TextRange[]): number {
   clearHighlights(node);
-  const normalized = mergeRanges(normalizeRanges(input));
-  node.dataset.favoriteRangeCount = String(normalized.length);
   let highlightCount = 0;
-  if (import.meta.env.DEV) {
-    console.debug("[highlightRange] update", {
-      count: normalized.length,
-      textLength: node.textContent?.length ?? 0,
-    });
-  }
-  if (normalized.length === 0) {
-    node.dataset.favoriteHighlightCount = "0";
-    return;
-  }
-
   const textNodes = collectTextNodes(node);
   let globalIndex = 0;
   let rangeIndex = 0;
-  let currentRange = normalized[rangeIndex];
+  let currentRange = ranges[rangeIndex];
 
   for (const textNode of textNodes) {
     const text = textNode.textContent ?? "";
@@ -156,7 +143,7 @@ function applyHighlights(node: HTMLElement, input: HighlightRangeOptions): void 
 
     while (currentRange && currentRange.end <= nodeStart) {
       rangeIndex += 1;
-      currentRange = normalized[rangeIndex];
+      currentRange = ranges[rangeIndex];
     }
 
     if (!currentRange) {
@@ -182,7 +169,7 @@ function applyHighlights(node: HTMLElement, input: HighlightRangeOptions): void 
 
       if (currentRange.end <= nodeEnd) {
         rangeIndex += 1;
-        currentRange = normalized[rangeIndex];
+        currentRange = ranges[rangeIndex];
       } else {
         break;
       }
@@ -199,7 +186,7 @@ function applyHighlights(node: HTMLElement, input: HighlightRangeOptions): void 
     globalIndex = nodeEnd;
   }
 
-  node.dataset.favoriteHighlightCount = String(highlightCount);
+  return highlightCount;
 }
 
 function getOffsetInContainer(container: HTMLElement, node: Node, offset: number): number {
@@ -235,6 +222,10 @@ export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) 
   let options: HighlightRangeOptions = input;
   let hoverTimer: number | null = null;
   let lastTarget: HTMLElement | null = null;
+  let lastSignature = "";
+  let lastTextLength = -1;
+  let lastRangeCount = 0;
+  let lastVersion: number | undefined;
 
   const handleMouseOver = (event: MouseEvent) => {
     if (!options || typeof options !== "object" || !("onRangeHover" in options)) {
@@ -280,7 +271,39 @@ export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) 
 
   const run = (nextInput: HighlightRangeOptions) => {
     options = nextInput;
-    applyHighlights(node, options);
+    const normalized = mergeRanges(normalizeRanges(options));
+    const signature = normalized.map((range) => `${range.start}-${range.end}`).join(",");
+    const textLength = node.textContent?.length ?? 0;
+    const version =
+      typeof options === "object" && options && "version" in options
+        ? options.version
+        : undefined;
+
+    if (
+      signature === lastSignature &&
+      textLength === lastTextLength &&
+      version === lastVersion
+    ) {
+      return;
+    }
+
+    lastSignature = signature;
+    lastTextLength = textLength;
+    lastVersion = version;
+
+    node.dataset.favoriteRangeCount = String(normalized.length);
+    if (normalized.length === 0) {
+      if (lastRangeCount > 0) {
+        clearHighlights(node);
+      }
+      node.dataset.favoriteHighlightCount = "0";
+      lastRangeCount = 0;
+      return;
+    }
+
+    const highlightCount = applyHighlights(node, normalized);
+    node.dataset.favoriteHighlightCount = String(highlightCount);
+    lastRangeCount = normalized.length;
   };
 
   run(input);
