@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Star } from "@lucide/svelte";
+  import type { Snippet } from "svelte";
   import { favoriteStore } from "$lib/states";
   import type { UUID } from "$lib/types";
   import { getSelectionTextRange } from "$lib/utils/highlightRange";
@@ -9,6 +10,7 @@
     chatId: UUID;
     content: string;
     role: 'user' | 'assistant' | 'system';
+    children?: Snippet;
   }
 
   let {
@@ -16,6 +18,7 @@
     chatId,
     content,
     role,
+    children,
   }: Props = $props();
 
   let showMenu = $state(false);
@@ -90,8 +93,11 @@
     class="select-text"
     onmouseup={handleSelection}
     bind:this={container}
+    role="textbox"
+    aria-label="可选文本"
+    tabindex="0"
   >
-    <slot />
+    {@render children?.()}
   </div>
 
   {#if showMenu}

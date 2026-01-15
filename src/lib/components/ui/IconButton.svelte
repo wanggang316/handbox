@@ -55,6 +55,7 @@
   bind:this={buttonEl}
 >
   {#if icon}
-    <svelte:component this={icon} size={iconSize} />
+    {@const Icon = icon}
+    <Icon size={iconSize} />
   {/if}
 </button>

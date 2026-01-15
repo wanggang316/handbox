@@ -687,7 +687,7 @@
       disabled={isFavoritingImage}
     >
       {#if isFavoritingImage}
-        <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
       {:else}
         <Star size={14} />
       {/if}
@@ -707,6 +707,8 @@
   <div
     class="favorite-range-menu fixed z-[10040] bg-base-100 border border-base-300 rounded-lg shadow-lg px-2 py-1 text-xs"
     style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
+    role="menu"
+    aria-label="收藏范围操作"
     onmouseenter={() => (isRangeMenuHovering = true)}
     onmouseleave={() => {
       isRangeMenuHovering = false;
