@@ -2,7 +2,7 @@
  * 收藏状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Favorite, FavoriteMessageType, TextRange } from "$lib/types/favorite";
+import type { Favorite, FavoriteMessageType, FavoriteTag, TextRange } from "$lib/types/favorite";
 import type { UUID } from "$lib/types";
 import * as favoriteApi from "$lib/api/favorite";
 
@@ -10,6 +10,7 @@ interface FavoriteState {
   favorites: Favorite[];
   isFavoritedMap: Record<string, boolean>;
   isLoading: boolean;
+  tags: FavoriteTag[];
   textRangesByMessageId: Record<string, TextRange[]>;
   textRangesChatId: string | null;
   textRangesVersion: number;
@@ -20,6 +21,7 @@ class FavoriteStore {
     favorites: [],
     isFavoritedMap: {},
     isLoading: false,
+    tags: [],
     textRangesByMessageId: {},
     textRangesChatId: null,
     textRangesVersion: 0,
@@ -31,6 +33,10 @@ class FavoriteStore {
 
   get isLoading() {
     return this.state.isLoading;
+  }
+
+  get tags() {
+    return this.state.tags;
   }
 
   get textRangesByMessageId() {
@@ -70,7 +76,7 @@ class FavoriteStore {
     content: string,
     role: 'user' | 'assistant' | 'system',
     messageType?: FavoriteMessageType,
-    tags?: any[],
+    tags?: FavoriteTag[],
     note?: string,
     context?: string,
     updateFavoritedMap: boolean = true,
@@ -127,6 +133,15 @@ class FavoriteStore {
       console.error("Failed to load favorites:", error);
     } finally {
       this.state.isLoading = false;
+    }
+  }
+
+  async loadTags(): Promise<void> {
+    try {
+      const tags = await favoriteApi.listTags();
+      this.state.tags = tags;
+    } catch (error) {
+      console.error("Failed to load tags:", error);
     }
   }
 
@@ -206,6 +221,7 @@ class FavoriteStore {
     try {
       await favoriteApi.addTag(favoriteId, { name: tag, color: color as any });
       await this.loadFavorites();
+      await this.loadTags();
     } catch (error) {
       console.error("Failed to add tag:", error);
       throw error;
@@ -216,6 +232,7 @@ class FavoriteStore {
     try {
       await favoriteApi.removeTag(favoriteId, tagName);
       await this.loadFavorites();
+      await this.loadTags();
     } catch (error) {
       console.error("Failed to remove tag:", error);
       throw error;
@@ -226,6 +243,7 @@ class FavoriteStore {
     this.state.favorites = [];
     this.state.isFavoritedMap = {};
     this.state.isLoading = false;
+    this.state.tags = [];
     this.state.textRangesByMessageId = {};
     this.state.textRangesChatId = null;
     this.state.textRangesVersion = 0;

@@ -2,9 +2,25 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
-  import { Search, Filter, X, ExternalLink, Tag, Trash2, MoreVertical, Pencil, Star } from "@lucide/svelte";
+  import {
+    Search,
+    Filter,
+    X,
+    ExternalLink,
+    Tag,
+    Trash2,
+    MoreVertical,
+    Pencil,
+    Star,
+  } from "@lucide/svelte";
   import { favoriteStore } from "$lib/states";
-  import type { Favorite, FavoriteMessageType, FavoriteTag, TagColor, TextRange } from "$lib/types/favorite";
+  import type {
+    Favorite,
+    FavoriteMessageType,
+    FavoriteTag,
+    TagColor,
+    TextRange,
+  } from "$lib/types/favorite";
   import { highlightRange, renderMarkdown } from "$lib/utils";
   import { escapeHtml } from "$lib/utils/string";
   import { resolveLocalAssetPath } from "$lib/utils/tauri";
@@ -26,20 +42,37 @@
   let newTagName = $state("");
   let newTagColor = $state<TagColor>("info");
 
-  const messageTypes: { value: FavoriteMessageType | "all"; label: string }[] = [
-    { value: "all", label: "全部" },
-    { value: "text", label: "文本" },
-    { value: "image", label: "图片" },
-    { value: "message", label: "消息" },
-    { value: "chat", label: "对话" },
-  ];
+  const messageTypes: { value: FavoriteMessageType | "all"; label: string }[] =
+    [
+      { value: "all", label: "全部" },
+      { value: "text", label: "文本" },
+      { value: "image", label: "图片" },
+      { value: "message", label: "消息" },
+      { value: "chat", label: "对话" },
+    ];
 
   const tagColors: { value: TagColor; label: string; class: string }[] = [
-    { value: "primary", label: "主色", class: "bg-primary text-primary-content" },
-    { value: "secondary", label: "次要", class: "bg-secondary text-secondary-content" },
+    {
+      value: "primary",
+      label: "主色",
+      class: "bg-primary text-primary-content",
+    },
+    {
+      value: "secondary",
+      label: "次要",
+      class: "bg-secondary text-secondary-content",
+    },
     { value: "accent", label: "强调", class: "bg-accent text-accent-content" },
-    { value: "success", label: "成功", class: "bg-success text-success-content" },
-    { value: "warning", label: "警告", class: "bg-warning text-warning-content" },
+    {
+      value: "success",
+      label: "成功",
+      class: "bg-success text-success-content",
+    },
+    {
+      value: "warning",
+      label: "警告",
+      class: "bg-warning text-warning-content",
+    },
     { value: "error", label: "错误", class: "bg-error text-error-content" },
     { value: "info", label: "信息", class: "bg-info text-info-content" },
     { value: "gray", label: "灰色", class: "bg-base-300 text-base-content" },
@@ -65,7 +98,7 @@
 
     if (selectedTags.length > 0) {
       result = result.filter((f) =>
-        selectedTags.some((tag) => f.tags.some((t) => t.name === tag)),
+        selectedTags.some((tag) => f.tags.some((t) => t.name === tag))
       );
     }
 
@@ -74,10 +107,8 @@
 
   let allTags = $derived.by(() => {
     const tags = new Set<string>();
-    for (const f of favoriteStore.favorites) {
-      for (const tag of f.tags) {
-        tags.add(tag.name);
-      }
+    for (const tag of favoriteStore.tags) {
+      tags.add(tag.name);
     }
     return Array.from(tags).sort();
   });
@@ -124,7 +155,10 @@
     for (let i = 1; i < normalized.length; i += 1) {
       const next = normalized[i];
       if (next.start <= current.end) {
-        current = { start: current.start, end: Math.max(current.end, next.end) };
+        current = {
+          start: current.start,
+          end: Math.max(current.end, next.end),
+        };
       } else {
         merged.push(current);
         current = next;
@@ -158,9 +192,13 @@
     const pieces: string[] = [];
     normalized.forEach((range, index) => {
       const snippet = escapeHtml(text.slice(range.start, range.end));
-      pieces.push(`<span class="text-base-content/50 text-xs">段落${index + 1}</span>`);
+      pieces.push(
+        `<span class="text-base-content/50 text-xs">段落${index + 1}</span>`
+      );
       pieces.push("<br />");
-      pieces.push(`<span class="favorite-highlight bg-amber-500/20 px-1 rounded">${snippet}</span>`);
+      pieces.push(
+        `<span class="favorite-highlight px-1 rounded">${snippet}</span>`
+      );
       if (index < normalized.length - 1) {
         pieces.push("<br />");
       }
@@ -199,8 +237,9 @@
     event.stopPropagation();
 
     selectedFavorite = favorite;
-    contextMenuX = event.clientX;
-    contextMenuY = event.clientY;
+    const position = clampOverlayPosition(event.clientX, event.clientY, 180, 110);
+    contextMenuX = position.x;
+    contextMenuY = position.y;
     showContextMenu = true;
   }
 
@@ -212,8 +251,9 @@
   function handleEditTags(favorite: Favorite) {
     closeContextMenu();
     editingFavoriteId = favorite.id ?? null;
-    editorX = contextMenuX;
-    editorY = contextMenuY;
+    const position = clampOverlayPosition(contextMenuX, contextMenuY, 320, 360);
+    editorX = position.x;
+    editorY = position.y;
     showTagEditor = true;
     newTagName = "";
     newTagColor = "info";
@@ -223,7 +263,11 @@
     if (!editingFavoriteId || !newTagName.trim()) return;
 
     try {
-      await favoriteStore.addTag(editingFavoriteId, newTagName.trim(), newTagColor);
+      await favoriteStore.addTag(
+        editingFavoriteId,
+        newTagName.trim(),
+        newTagColor
+      );
       newTagName = "";
       newTagColor = "info";
     } catch (error) {
@@ -240,6 +284,15 @@
     }
   }
 
+  async function handlePickTag(tag: FavoriteTag) {
+    if (!editingFavoriteId) return;
+    try {
+      await favoriteStore.addTag(editingFavoriteId, tag.name, tag.color);
+    } catch (error) {
+      console.error("Failed to add tag:", error);
+    }
+  }
+
   async function handleDeleteFavorite(favorite: Favorite) {
     closeContextMenu();
     try {
@@ -249,7 +302,7 @@
           favorite.chatId,
           [],
           favorite.role,
-          favorite.context,
+          favorite.context
         );
       } else {
         await favoriteStore.toggleFavorite(
@@ -257,7 +310,7 @@
           favorite.chatId,
           favorite.content,
           favorite.role,
-          favorite.messageType,
+          favorite.messageType
         );
       }
     } catch (error) {
@@ -266,7 +319,7 @@
   }
 
   function handleNavigate(favorite: Favorite) {
-    if (favorite.messageType === 'chat') {
+    if (favorite.messageType === "chat") {
       goto(`/chat?id=${favorite.chatId}`);
     } else {
       goto(`/chat?id=${favorite.chatId}#message-${favorite.messageId}`);
@@ -331,19 +384,40 @@
     if (!showContextMenu && !showTagEditor) return;
     const target = event.target as HTMLElement;
     if (!target.closest(".context-menu") && !target.closest(".tag-editor")) {
-      closeContextMenu();
-      showTagEditor = false;
-      editingFavoriteId = null;
+      closeOverlays();
     }
   }
 
+  function handleOverlayScroll() {
+    if (!showContextMenu && !showTagEditor) return;
+    closeOverlays();
+  }
+
+  function closeOverlays() {
+    closeContextMenu();
+    showTagEditor = false;
+    editingFavoriteId = null;
+  }
+
+  function clampOverlayPosition(x: number, y: number, width: number, height: number) {
+    if (!browser) return { x, y };
+    const padding = 12;
+    const maxX = Math.max(padding, window.innerWidth - width - padding);
+    const maxY = Math.max(padding, window.innerHeight - height - padding);
+    return {
+      x: Math.min(Math.max(x, padding), maxX),
+      y: Math.min(Math.max(y, padding), maxY),
+    };
+  }
+
   function getNavigateLabel(favorite: Favorite): string {
-    return favorite.messageType === 'chat' ? '查看对话' : '查看消息';
+    return favorite.messageType === "chat" ? "查看对话" : "查看消息";
   }
 
   onMount(() => {
     if (browser) {
       favoriteStore.loadFavorites();
+      favoriteStore.loadTags();
     }
   });
 </script>
@@ -401,8 +475,8 @@
           <button
             class="px-2 py-1 text-xs rounded-full border transition-colors cursor-pointer
               {selectedTags.includes(tag)
-                ? 'bg-primary text-primary-content border-primary'
-                : 'bg-base-200 text-base-content border-base-300 hover:border-primary/50'}"
+              ? 'bg-primary text-primary-content border-primary'
+              : 'bg-base-200 text-base-content border-base-300 hover:border-primary/50'}"
             onclick={() => toggleTag(tag)}
           >
             {tag}
@@ -420,7 +494,7 @@
     {/if}
   </div>
 
-  <div class="flex-1 min-h-0 overflow-y-auto p-4">
+  <div class="flex-1 min-h-0 overflow-y-auto p-4" onscroll={handleOverlayScroll}>
     {#if favoriteStore.isLoading}
       <div class="flex items-center justify-center h-full">
         <div
@@ -428,7 +502,9 @@
         ></div>
       </div>
     {:else if filteredFavorites.length === 0}
-      <div class="flex flex-col items-center justify-center h-full text-base-content/50">
+      <div
+        class="flex flex-col items-center justify-center h-full text-base-content/50"
+      >
         <Star size={48} class="mb-4 opacity-20" />
         {#if searchQuery || selectedType !== "all" || selectedTags.length > 0}
           <p class="mb-2">没有找到匹配的收藏</p>
@@ -451,7 +527,10 @@
       <div class="space-y-3">
         {#each filteredFavorites as favorite (favorite.id)}
           <div
-            class="bg-base-200 rounded-xl p-4 hover:bg-base-300 transition-colors relative"
+            class="bg-base-200 rounded-xl p-4 hover:bg-base-300 transition-colors relative {selectedFavorite?.id ===
+              favorite.id && showContextMenu
+              ? 'bg-base-300'
+              : ''}"
             oncontextmenu={(e) => handleContextMenu(e, favorite)}
           >
             <div class="flex items-start justify-between mb-2">
@@ -459,14 +538,16 @@
                 <span
                   class="px-2 py-0.5 text-xs rounded-full
                     {favorite.role === 'user'
-                      ? 'bg-primary/20 text-primary'
-                      : favorite.role === 'assistant'
-                        ? 'bg-success/20 text-success'
-                        : 'bg-base-300 text-base-content/60'}"
+                    ? 'bg-primary/20 text-primary'
+                    : favorite.role === 'assistant'
+                      ? 'bg-success/20 text-success'
+                      : 'bg-base-300 text-base-content/60'}"
                 >
                   {getRoleLabel(favorite.role)}
                 </span>
-                <span class="px-2 py-0.5 text-xs rounded-full bg-info/20 text-info">
+                <span
+                  class="px-2 py-0.5 text-xs rounded-full bg-info/20 text-info"
+                >
                   {getMessageTypeLabel(favorite.messageType)}
                 </span>
               </div>
@@ -481,12 +562,14 @@
             </div>
 
             <div class="mb-2">
-              {#if favorite.messageType === 'chat'}
-                <h3 class="font-medium text-base-content mb-1">{favorite.content}</h3>
+              {#if favorite.messageType === "chat"}
+                <h3 class="font-medium text-base-content mb-1">
+                  {favorite.content}
+                </h3>
               {/if}
 
               <div class="text-sm text-base-content">
-                {#if favorite.messageType === 'image'}
+                {#if favorite.messageType === "image"}
                   {#if getImageSrc(favorite.content)}
                     <img
                       src={getImageSrc(favorite.content)}
@@ -494,30 +577,46 @@
                       class="max-h-48 rounded-lg object-contain"
                     />
                   {:else}
-                    <p class="text-sm text-base-content/70 italic">{favorite.content}</p>
+                    <p class="text-sm text-base-content/70 italic">
+                      {favorite.content}
+                    </p>
                   {/if}
-                {:else if favorite.messageType === 'message'}
-                  <div class="break-words text-[15px] leading-[1.6] markdown-content {favorite.id && !isExpanded(favorite.id) ? 'line-clamp-3' : ''}">
+                {:else if favorite.messageType === "message"}
+                  <div
+                    class="break-words text-[15px] leading-[1.6] markdown-content {favorite.id &&
+                    !isExpanded(favorite.id)
+                      ? 'line-clamp-3'
+                      : ''}"
+                  >
                     {@html renderMarkdown(favorite.content || "")}
                   </div>
-                {:else if favorite.messageType === 'text'}
-                  {@const ranges = mergeTextRanges(parseTextRanges(favorite.content))}
+                {:else if favorite.messageType === "text"}
+                  {@const ranges = mergeTextRanges(
+                    parseTextRanges(favorite.content)
+                  )}
                   {#if favorite.context && ranges.length > 0}
                     {@const isLong = isTextContentLong(favorite.context)}
                     {#if isLong && favorite.id && !isExpanded(favorite.id)}
-                      {@const plainText = getPlainTextFromMarkdown(favorite.context)}
-                      <div class="whitespace-pre-wrap text-[15px] leading-[1.6]">
+                      {@const plainText = getPlainTextFromMarkdown(
+                        favorite.context
+                      )}
+                      <div
+                        class="whitespace-pre-wrap text-[15px] leading-[1.6]"
+                      >
                         {@html buildRangeSummary(plainText, ranges)}
                       </div>
                       <button
                         class="text-xs text-primary hover:underline mt-2 cursor-pointer flex items-center gap-1"
                         onclick={() => toggleExpand(favorite.id)}
                       >
-                        查看详情
+                        展开消息
                       </button>
                     {:else}
                       <div
-                        class="break-words text-[15px] leading-[1.6] markdown-content {favorite.id && !isExpanded(favorite.id) ? 'line-clamp-3' : ''}"
+                        class="break-words text-[15px] leading-[1.6] markdown-content {favorite.id &&
+                        !isExpanded(favorite.id)
+                          ? 'line-clamp-3'
+                          : ''}"
                         use:highlightRange={ranges}
                       >
                         {@html renderMarkdown(favorite.context || "")}
@@ -530,25 +629,31 @@
                           {#if isExpanded(favorite.id)}
                             收起
                           {:else}
-                            查看详情
+                            展开消息
                           {/if}
                         </button>
                       {/if}
                     {/if}
                   {:else if favorite.context}
-                    <p class="text-sm text-base-content/70 italic">无效的文本范围</p>
+                    <p class="text-sm text-base-content/70 italic">
+                      无效的文本范围
+                    </p>
                   {:else}
-                    <p class="text-sm text-base-content/70 italic">数据格式已更新，请重新收藏</p>
+                    <p class="text-sm text-base-content/70 italic">
+                      数据格式已更新，请重新收藏
+                    </p>
                   {/if}
                 {/if}
-               </div>
+              </div>
             </div>
 
             {#if favorite.tags.length > 0}
               <div class="flex flex-wrap gap-1 mb-2">
                 {#each favorite.tags as tag}
                   <span
-                    class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(tag.color)}"
+                    class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(
+                      tag.color
+                    )}"
                   >
                     <Tag size={10} />
                     {tag.name}
@@ -557,7 +662,9 @@
               </div>
             {/if}
 
-            <div class="flex items-center justify-between text-xs text-base-content/50">
+            <div
+              class="flex items-center justify-between text-xs text-base-content/50"
+            >
               <div></div>
               <div>{formatTime(favorite.createdAt)}</div>
             </div>
@@ -573,6 +680,7 @@
   <div
     class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenuX}px; top: {contextMenuY}px;"
+    onclick={(event) => event.stopPropagation()}
   >
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
@@ -594,18 +702,28 @@
 
 <!-- 标签编辑弹窗 -->
 {#if showTagEditor && editingFavoriteId}
-  {#await favoriteStore.favorites}
-    <div class="tag-editor fixed z-[10030] bg-base-100 border border-base-300 rounded-xl shadow-xl p-4 min-w-[280px]"
-         style="left: {editorX}px; top: {editorY}px;">
-      <div class="flex items-center gap-2 mb-3">
-        <Tag size={16} />
-        <h3 class="text-sm font-medium">编辑标签</h3>
-      </div>
+  <div
+    class="tag-editor fixed z-[10030] bg-base-100 border border-base-300 rounded-xl shadow-xl p-4 min-w-[280px]"
+    style="left: {editorX}px; top: {editorY}px;"
+    onclick={(event) => event.stopPropagation()}
+  >
+    <div class="flex items-center gap-2 mb-3">
+      <Tag size={16} />
+      <h3 class="text-sm font-medium">编辑标签</h3>
+    </div>
+
+    {#if editingFavoriteId}
+      {@const currentTags =
+        favoriteStore.favorites.find((f) => f.id === editingFavoriteId)?.tags ??
+        []}
+      {@const currentTagNames = new Set(currentTags.map((tag) => tag.name))}
 
       <div class="flex flex-wrap gap-1 mb-3">
-        {#each favoriteStore.favorites.find(f => f.id === editingFavoriteId)?.tags ?? [] as tag}
+        {#each currentTags as tag}
           <span
-            class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(tag.color)}"
+            class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(
+              tag.color
+            )}"
           >
             {tag.name}
             <button
@@ -618,39 +736,56 @@
         {/each}
       </div>
 
-      <div class="flex gap-2 mb-3">
-        <input
-          type="text"
-          placeholder="标签名称..."
-          class="flex-1 h-8 px-2 text-xs bg-base-200 rounded border border-base-300 focus:outline-none focus:border-primary"
-          bind:value={newTagName}
-          onkeydown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleAddTag();
-            }
-          }}
-        />
-        <button
-          class="h-8 px-3 text-xs rounded bg-primary text-primary-content hover:bg-primary/90"
-          onclick={handleAddTag}
-        >
-          添加
-        </button>
-      </div>
+      {#if favoriteStore.tags.length > 0}
+        <div class="mb-3">
+          <p class="text-xs text-base-content/60 mb-1">已有标签</p>
+          <div class="flex flex-wrap gap-1">
+            {#each favoriteStore.tags.filter((tag) => !currentTagNames.has(tag.name)) as tag}
+              <button
+                class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(
+                  tag.color
+                )} hover:opacity-80 transition-opacity"
+                onclick={() => handlePickTag(tag)}
+              >
+                {tag.name}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    {/if}
 
-      <div class="flex flex-wrap gap-1">
-        {#each tagColors as color}
-          <button
-            class="w-6 h-6 rounded-full {color.class} border-2 border-transparent hover:border-base-content/30 transition-colors"
-            class:border-base-content={newTagColor === color.value}
-            title={color.label}
-            onclick={() => newTagColor = color.value}
-          ></button>
-        {/each}
-      </div>
+    <div class="flex gap-2 mb-3">
+      <input
+        type="text"
+        placeholder="标签名称..."
+        class="flex-1 h-8 px-2 text-xs bg-base-200 rounded border border-base-300 focus:outline-none focus:border-primary"
+        bind:value={newTagName}
+        onkeydown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            handleAddTag();
+          }
+        }}
+      />
+      <button
+        class="h-8 px-3 text-xs rounded bg-primary text-primary-content hover:bg-primary/90"
+        onclick={handleAddTag}
+      >
+        添加
+      </button>
     </div>
-  {/await}
+
+    <div class="flex flex-wrap gap-1">
+      {#each tagColors as color}
+        <button
+          class={`w-6 h-6 rounded-full ${color.class} border-2 border-transparent hover:border-base-content/30 transition-colors ${newTagColor === color.value ? "ring-2 ring-offset-2 ring-offset-base-100 ring-base-content/40" : ""}`}
+          title={color.label}
+          onclick={() => (newTagColor = color.value)}
+        ></button>
+      {/each}
+    </div>
+  </div>
 {/if}
 
-<svelte:window onclick={handleClickOutside} />
+<svelte:window onclick={handleClickOutside} onresize={handleOverlayScroll} />

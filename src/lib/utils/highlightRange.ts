@@ -1,6 +1,6 @@
 import type { TextRange } from "$lib/types/favorite";
 
-const HIGHLIGHT_CLASS = "favorite-highlight bg-amber-500/20 px-1 rounded";
+const HIGHLIGHT_CLASS = "favorite-highlight px-1 rounded";
 const HIGHLIGHT_ATTR = "data-favorite-highlight";
 const HIGHLIGHT_INDEX_ATTR = "data-favorite-range-index";
 

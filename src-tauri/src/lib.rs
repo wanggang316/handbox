@@ -286,6 +286,7 @@ pub fn run() {
             favorite_is_favorited,
             favorite_list,
             favorite_list_by_chat,
+            favorite_list_tags,
             favorite_save_text_ranges,
             favorite_add_tag,
             favorite_remove_tag,

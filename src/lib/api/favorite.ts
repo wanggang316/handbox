@@ -43,6 +43,10 @@ export async function getFavoritesByChat(chatId: UUID): Promise<Favorite[]> {
   });
 }
 
+export async function listTags(): Promise<FavoriteTag[]> {
+  return apiCall<FavoriteTag[]>("favorite_list_tags", {});
+}
+
 export async function saveTextRanges(
   messageId: UUID,
   chatId: UUID,

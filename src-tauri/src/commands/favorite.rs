@@ -140,6 +140,27 @@ pub async fn favorite_list_by_chat(
     }
 }
 
+#[tauri::command]
+pub async fn favorite_list_tags(
+    favorite_repo: State<'_, FavoriteRepository>,
+) -> Result<Vec<FavoriteTag>, AppError> {
+    tracing::info!("[favorite_list_tags] IPC command called");
+
+    match favorite_repo.list_tags().await {
+        Ok(tags) => {
+            tracing::info!(
+                "[favorite_list_tags] Command completed, returned {} tags",
+                tags.len()
+            );
+            Ok(tags)
+        }
+        Err(e) => {
+            tracing::error!("[favorite_list_tags] Command failed: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FavoriteAddTagRequest {
     #[serde(rename = "favoriteId")]
@@ -170,6 +191,7 @@ pub async fn favorite_add_tag(
 pub struct FavoriteRemoveTagRequest {
     #[serde(rename = "favoriteId")]
     pub favorite_id: UUID,
+    #[serde(rename = "tagName", alias = "tag_name")]
     pub tag_name: String,
 }
 
