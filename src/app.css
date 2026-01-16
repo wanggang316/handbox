@@ -508,3 +508,11 @@ pre.code-block--compact {
     opacity: 1;
   }
 }
+
+.favorite-highlight {
+  background-color: color-mix(in oklch, var(--color-warning) 22%, transparent);
+}
+
+[data-theme="dark"] .favorite-highlight {
+  background-color: color-mix(in oklch, var(--color-warning) 30%, transparent);
+}

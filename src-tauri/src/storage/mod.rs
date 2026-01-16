@@ -3,6 +3,7 @@
 pub mod artifact_repository;
 pub mod chat_repository;
 pub mod database;
+pub mod favorite_repository;
 pub mod mcp_repository;
 pub mod message_repository;
 pub mod model_repository;
@@ -13,6 +14,7 @@ pub mod types;
 pub use artifact_repository::ArtifactRepository;
 pub use chat_repository::ChatRepository;
 pub use database::Database;
+pub use favorite_repository::FavoriteRepository;
 pub use mcp_repository::McpRepository;
 pub use message_repository::MessageRepository;
 pub use model_repository::ModelRepository;

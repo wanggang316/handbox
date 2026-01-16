@@ -1,7 +1,12 @@
 <script lang="ts">
-  import { RotateCcw, Copy, Pencil } from "lucide-svelte";
+  import { RotateCcw, Copy, Pencil } from "@lucide/svelte";
   import type { Message } from "$lib/types";
+  import type { TextRange } from "$lib/types/favorite";
+  import { favoriteStore } from "$lib/states";
+  import { highlightRange } from "$lib/utils";
   import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
+  import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
+  import TextSelectionMenu from "$lib/components/favorite/TextSelectionMenu.svelte";
 
   interface Props {
     message: Message;
@@ -20,6 +25,58 @@
     onCopy,
     onEdit,
   }: Props = $props();
+
+  const textRanges = $derived.by(() => {
+    if (!message?.id || !message.chatId) return [];
+    const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
+    return ranges.map((range) => ({ start: range.start, end: range.end }));
+  });
+
+  let showRangeMenu = $state(false);
+  let rangeMenuX = $state(0);
+  let rangeMenuY = $state(0);
+  let hoveredRange = $state<TextRange | null>(null);
+  let isRangeMenuHovering = $state(false);
+
+  function handleRangeHover(payload: { range: TextRange; rect: DOMRect }) {
+    hoveredRange = payload.range;
+    rangeMenuX = payload.rect.left + payload.rect.width / 2;
+    rangeMenuY = payload.rect.top - 8;
+    showRangeMenu = true;
+  }
+
+  function handleRangeLeave() {
+    if (isRangeMenuHovering || showRangeMenu) return;
+    showRangeMenu = false;
+    hoveredRange = null;
+  }
+
+  async function handleRemoveRange() {
+    if (!hoveredRange || !message?.id || !message.chatId) return;
+    try {
+      await favoriteStore.removeTextRange(
+        message.id,
+        message.chatId,
+        hoveredRange,
+        message.role,
+        message.content,
+      );
+    } catch (error) {
+      console.error("Failed to remove text favorite range:", error);
+    } finally {
+      showRangeMenu = false;
+      hoveredRange = null;
+    }
+  }
+
+  function handleRangeMenuOutside(event: MouseEvent) {
+    if (!showRangeMenu) return;
+    const target = event.target as HTMLElement;
+    if (!target.closest(".favorite-range-menu")) {
+      showRangeMenu = false;
+      hoveredRange = null;
+    }
+  }
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -61,15 +118,38 @@
   <div class="flex justify-end">
     <!-- 消息内容 -->
     <div class="flex flex-col items-end">
-      <!-- 消息气泡 -->
-      <div
-        class="inline-block max-w-full px-4 py-3 rounded-2xl bg-base-200 text-base-content"
-      >
-        <!-- 消息内容 -->
-        <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
-          {message.content}
-        </div>
-        {#if message.attachments?.length}
+         <!-- 消息气泡 -->
+        <div
+          class="inline-block max-w-full px-4 py-3 rounded-2xl bg-base-200 text-base-content"
+        >
+          {#if message.id && message.chatId}
+            <TextSelectionMenu
+              messageId={message.id}
+              chatId={message.chatId}
+              content={message.content}
+              role={message.role}
+            >
+              <!-- 消息内容 -->
+              <div
+                class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+                use:highlightRange={{
+                  ranges: textRanges,
+                  onRangeHover: handleRangeHover,
+                  onRangeLeave: handleRangeLeave,
+                  hoverDelayMs: 2000,
+                  version: favoriteStore.textRangesVersion,
+                }}
+                data-favorite-highlight-version={favoriteStore.textRangesVersion}
+              >
+                {message.content}
+              </div>
+            </TextSelectionMenu>
+          {:else}
+            <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
+              {message.content}
+            </div>
+          {/if}
+          {#if message.attachments?.length}
           <div class="mt-3 flex flex-wrap gap-3">
             {#each message.attachments as attachment}
               {#if attachment.mimeType?.startsWith("image/")}
@@ -113,6 +193,16 @@
       <div
         class="mt-2 gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex"
       >
+        <!-- 收藏按钮 -->
+        {#if message && message.id}
+          <FavoriteButton
+            messageId={message.id}
+            chatId={message.chatId}
+            content={message.content}
+            role={message.role}
+          />
+        {/if}
+
         <!-- 复制按钮 -->
         <button
           class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"
@@ -149,3 +239,27 @@
     </div>
   </div>
 </div>
+
+{#if showRangeMenu && hoveredRange}
+  <div
+    class="favorite-range-menu fixed z-[10040] bg-base-100 border border-base-300 rounded-lg shadow-lg px-2 py-1 text-xs"
+    style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
+    role="menu"
+    aria-label="收藏范围操作"
+    onmouseenter={() => (isRangeMenuHovering = true)}
+    onmouseleave={() => {
+      isRangeMenuHovering = false;
+      showRangeMenu = false;
+      hoveredRange = null;
+    }}
+  >
+    <button
+      class="px-2 py-1 rounded hover:bg-error/10 text-error"
+      onclick={handleRemoveRange}
+    >
+      取消收藏
+    </button>
+  </div>
+{/if}
+
+<svelte:window on:click={handleRangeMenuOutside} />

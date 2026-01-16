@@ -1,0 +1,125 @@
+<script lang="ts">
+  import { Star } from "@lucide/svelte";
+  import type { Snippet } from "svelte";
+  import { favoriteStore } from "$lib/states";
+  import type { UUID } from "$lib/types";
+  import { getSelectionTextRange } from "$lib/utils/highlightRange";
+
+  interface Props {
+    messageId: UUID;
+    chatId: UUID;
+    content: string;
+    role: 'user' | 'assistant' | 'system';
+    children?: Snippet;
+  }
+
+  let {
+    messageId,
+    chatId,
+    content,
+    role,
+    children,
+  }: Props = $props();
+
+  let showMenu = $state(false);
+  let menuX = $state(0);
+  let menuY = $state(0);
+  let selectedText = $state("");
+  let selectedRange = $state<{ start: number; end: number } | null>(null);
+  let isFavoriting = $state(false);
+  let container: HTMLDivElement | null = null;
+
+  function handleSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      showMenu = false;
+      selectedRange = null;
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+
+    selectedText = selection.toString().trim();
+    selectedRange = container
+      ? getSelectionTextRange(container, selection)
+      : null;
+    if (selectedText.length > 0 && selectedRange) {
+      menuX = rect.left + rect.width / 2;
+      menuY = rect.top - 50;
+      showMenu = true;
+    } else {
+      showMenu = false;
+    }
+  }
+
+  function handleClickOutside(e: MouseEvent) {
+    if (e.target instanceof HTMLElement && !e.target.closest(".text-selection-menu")) {
+      showMenu = false;
+    }
+  }
+
+  async function handleFavoriteText() {
+    if (!selectedText) return;
+
+    isFavoriting = true;
+    try {
+      if (!selectedRange) {
+        console.error("Failed to find text range");
+        alert("无法在消息内容中找到选中的文本，可能是因为文本格式或编码差异。");
+        return;
+      }
+
+      await favoriteStore.addTextRange(
+        messageId,
+        chatId,
+        selectedRange,
+        role,
+        content,
+      );
+      showMenu = false;
+    } catch (error) {
+      console.error("Failed to favorite text:", error);
+    } finally {
+      isFavoriting = false;
+    }
+  }
+</script>
+
+<svelte:window on:click={handleClickOutside} />
+
+<div class="relative text-selection-menu">
+  <div
+    class="select-text"
+    onmouseup={handleSelection}
+    bind:this={container}
+    role="textbox"
+    aria-label="可选文本"
+    tabindex="0"
+  >
+    {@render children?.()}
+  </div>
+
+  {#if showMenu}
+    <div
+      class="fixed z-[10030] bg-base-100 border border-base-300 rounded-lg shadow-xl px-3 py-2 flex items-center gap-2"
+      style="left: {menuX}px; top: {menuY}px; transform: translateX(-50%);"
+    >
+      <span class="text-xs text-base-content/70 truncate max-w-[200px]">
+        {selectedText}
+      </span>
+      <button
+        class="flex items-center gap-1 px-2 py-1 text-xs rounded bg-primary text-primary-content hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        onclick={handleFavoriteText}
+        disabled={isFavoriting}
+      >
+        {#if isFavoriting}
+          <div class="w-3 h-3 border border-t-transparent rounded-full animate-spin"></div>
+        {:else}
+          <Star size={12} />
+          收藏文字
+        {/if}
+      </button>
+    </div>
+  {/if}
+</div>

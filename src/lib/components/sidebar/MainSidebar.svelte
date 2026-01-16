@@ -6,7 +6,7 @@
   import ChatList from "$lib/components/ui/ChatList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
-  import { BookOpen, Box, Search, Settings, User, LogOut } from "@lucide/svelte";
+  import { BookOpen, Box, Search, Settings, User, LogOut, Star } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import SearchModal from "$lib/components/search/SearchModal.svelte";
@@ -14,6 +14,11 @@
   // 获取当前选中的聊天 ID
   let currentChatId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : ""
+  );
+
+  // 获取当前路由
+  let currentRoute = $derived(
+    browser && $page.url ? $page.url.pathname : ""
   );
 
   // 将真实聊天数据转换为 Menu 组件期望的格式
@@ -35,6 +40,11 @@
   function handleArtifactClick() {
     console.log("Clicked artifact menu");
     goto(`/artifacts`);
+  }
+
+  function handleFavoriteClick() {
+    console.log("Clicked favorite menu");
+    goto(`/favorites`);
   }
 
   function handleWordsClick() {
@@ -181,17 +191,26 @@
       </div>
     </div>
 
-    <div class="flex px-2">
+    <div class="flex flex-col px-2 space-y-1">
+      <MenuButton
+        title="收藏"
+        icon={Star}
+        iconSize={20}
+        isActive={currentRoute === "/favorites"}
+        onClick={() => handleFavoriteClick()}
+      />
       <MenuButton
         title="Artifacts"
         icon={Box}
         iconSize={20}
+        isActive={currentRoute === "/artifacts"}
         onClick={() => handleArtifactClick()}
       />
       <MenuButton
         title="单词本"
         icon={BookOpen}
         iconSize={20}
+        isActive={currentRoute === "/words"}
         onClick={() => handleWordsClick()}
       />
     </div>

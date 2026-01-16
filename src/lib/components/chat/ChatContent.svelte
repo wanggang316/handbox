@@ -1,5 +1,6 @@
 <script lang="ts">
   import { chatState } from '$lib/states/chat.svelte';
+  import { favoriteStore } from '$lib/states';
   import { messageStore } from '$lib/states/message.svelte';
   import { Bot } from 'lucide-svelte';
   import type { Message } from '$lib/types';
@@ -207,7 +208,14 @@
       }
     }
   });
-  
+
+  $effect(() => {
+    if (!currentChatId) return;
+    favoriteStore.loadTextFavoritesByChat(currentChatId).catch((error) => {
+      console.error('Failed to load text favorites for chat:', error);
+    });
+  });
+
   // 消息容器引用
   let messagesContainer: HTMLDivElement;
   let currentHighlightElement: HTMLElement | null = null;

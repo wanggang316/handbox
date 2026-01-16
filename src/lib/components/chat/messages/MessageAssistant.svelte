@@ -8,16 +8,20 @@
     X as CloseIcon,
     Save,
     FolderOpen,
-  } from "lucide-svelte";
+    Star,
+  } from "@lucide/svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
-  import { messageStore } from "$lib/states";
-  import { openInBrowser, renderMarkdown } from "$lib/utils";
+  import type { TextRange } from "$lib/types/favorite";
+  import { messageStore, favoriteStore } from "$lib/states";
+  import { highlightRange, openInBrowser, renderMarkdown } from "$lib/utils";
   import {
     resolveLocalAssetPath,
     isTauriEnvironment,
     openPathInSystem,
   } from "$lib/utils/tauri";
+  import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
+  import TextSelectionMenu from "$lib/components/favorite/TextSelectionMenu.svelte";
 
   interface Props {
     message?: Message;
@@ -52,6 +56,58 @@
     return undefined;
   });
 
+  const textRanges = $derived.by(() => {
+    if (!message?.id || !message.chatId) return [];
+    const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
+    return ranges.map((range) => ({ start: range.start, end: range.end }));
+  });
+
+  let showRangeMenu = $state(false);
+  let rangeMenuX = $state(0);
+  let rangeMenuY = $state(0);
+  let hoveredRange = $state<TextRange | null>(null);
+  let isRangeMenuHovering = $state(false);
+
+  function handleRangeHover(payload: { range: TextRange; rect: DOMRect }) {
+    hoveredRange = payload.range;
+    rangeMenuX = payload.rect.left + payload.rect.width / 2;
+    rangeMenuY = payload.rect.top - 8;
+    showRangeMenu = true;
+  }
+
+  function handleRangeLeave() {
+    if (isRangeMenuHovering || showRangeMenu) return;
+    showRangeMenu = false;
+    hoveredRange = null;
+  }
+
+  async function handleRemoveRange() {
+    if (!hoveredRange || !message?.id || !message.chatId) return;
+    try {
+      await favoriteStore.removeTextRange(
+        message.id,
+        message.chatId,
+        hoveredRange,
+        message.role,
+        message.content,
+      );
+    } catch (error) {
+      console.error("Failed to remove text favorite range:", error);
+    } finally {
+      showRangeMenu = false;
+      hoveredRange = null;
+    }
+  }
+
+  function handleRangeMenuOutside(event: MouseEvent) {
+    if (!showRangeMenu) return;
+    const target = event.target as HTMLElement;
+    if (!target.closest(".favorite-range-menu")) {
+      showRangeMenu = false;
+      hoveredRange = null;
+    }
+  }
+
   let assets = $state<MessageAttachment[]>([]);
   let isAssetsLoading = $state(false);
   $effect(() => {
@@ -72,6 +128,9 @@
     y: 0,
     asset: null,
   });
+
+  // 收藏图片状态
+  let isFavoritingImage = $state(false);
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -329,6 +388,31 @@
     }
     closeContextMenu();
   }
+
+  async function favoriteImage() {
+    if (!contextMenu.asset || !message) return;
+
+    isFavoritingImage = true;
+    try {
+      const imageMarkdown = `![${contextMenu.asset.name}](${contextMenu.asset.path})`;
+      await favoriteStore.toggleFavorite(
+        message.id ?? "",
+        message.chatId,
+        imageMarkdown,
+        message.role ?? "assistant",
+        "image",
+        [],
+        undefined,
+        undefined,
+        message.id ?? "",
+      );
+      closeContextMenu();
+    } catch (error) {
+      console.error("[MessageAssistant] Failed to favorite image", error);
+    } finally {
+      isFavoritingImage = false;
+    }
+  }
 </script>
 
 <div
@@ -398,13 +482,38 @@
             </div>
           {/if}
 
-          <!-- 消息内容 -->
-          <div
-            class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-            use:markdownInteractions
-          >
-            {@html renderMarkdown(message?.content || "")}
-          </div>
+  <!-- 消息内容 -->
+          {#if message && message.id && message.chatId}
+            <TextSelectionMenu
+              messageId={message.id}
+              chatId={message.chatId}
+              content={message.content}
+              role={message.role}
+            >
+              <div
+                class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+                data-message-id={message.id}
+                use:highlightRange={{
+                  ranges: textRanges,
+                  onRangeHover: handleRangeHover,
+                  onRangeLeave: handleRangeLeave,
+                  hoverDelayMs: 2000,
+                  version: favoriteStore.textRangesVersion,
+                }}
+                data-favorite-highlight-version={favoriteStore.textRangesVersion}
+                use:markdownInteractions
+              >
+                {@html renderMarkdown(message.content || "")}
+              </div>
+            </TextSelectionMenu>
+          {:else if message}
+            <div
+              class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+              use:markdownInteractions
+            >
+              {@html renderMarkdown(message.content || "")}
+            </div>
+          {/if}
 
           {#if isAssetsLoading}
             <div
@@ -486,6 +595,16 @@
             class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
           >
             <div class="inline-flex gap-1">
+              <!-- 收藏按钮 -->
+              {#if message && message.id}
+                <FavoriteButton
+                  messageId={message.id}
+                  chatId={message.chatId}
+                  content={message.content}
+                  role={message.role}
+                />
+              {/if}
+
               <!-- 复制按钮 -->
               <button
                 class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"
@@ -534,7 +653,7 @@
   </div>
 </div>
 
-<!-- 右键菜单 -->
+  <!-- 右键菜单 -->
 {#if contextMenu.show}
   <div
     class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
@@ -564,6 +683,18 @@
     </button>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={favoriteImage}
+      disabled={isFavoritingImage}
+    >
+      {#if isFavoritingImage}
+        <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+      {:else}
+        <Star size={14} />
+      {/if}
+      <span>收藏图片</span>
+    </button>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
       onclick={showInFinder}
     >
       <FolderOpen size={14} />
@@ -571,3 +702,27 @@
     </button>
   </div>
 {/if}
+
+{#if showRangeMenu && hoveredRange}
+  <div
+    class="favorite-range-menu fixed z-[10040] bg-base-100 border border-base-300 rounded-lg shadow-lg px-2 py-1 text-xs"
+    style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
+    role="menu"
+    aria-label="收藏范围操作"
+    onmouseenter={() => (isRangeMenuHovering = true)}
+    onmouseleave={() => {
+      isRangeMenuHovering = false;
+      showRangeMenu = false;
+      hoveredRange = null;
+    }}
+  >
+    <button
+      class="px-2 py-1 rounded hover:bg-error/10 text-error"
+      onclick={handleRemoveRange}
+    >
+      取消收藏
+    </button>
+  </div>
+{/if}
+
+<svelte:window on:click={handleRangeMenuOutside} />

@@ -105,6 +105,7 @@
     messageFocusKey = newFocusKey;
   });
 
+
   // 派生状态：当前聊天信息
   let currentChat = $derived(chatState.currentChat);
 
