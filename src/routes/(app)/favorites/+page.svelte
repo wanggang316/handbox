@@ -196,9 +196,7 @@
         `<span class="text-base-content/50 text-xs">段落${index + 1}</span>`
       );
       pieces.push("<br />");
-      pieces.push(
-        `<span class="favorite-highlight px-1 rounded">${snippet}</span>`
-      );
+      pieces.push(`<span class="px-1 rounded">${snippet}</span>`);
       if (index < normalized.length - 1) {
         pieces.push("<br />");
       }
@@ -595,6 +593,18 @@
                   >
                     {@html renderMarkdown(favorite.content || "")}
                   </div>
+                  {#if favorite.id && shouldShowExpandButton(favorite)}
+                    <button
+                      class="text-xs text-primary hover:underline mt-2 cursor-pointer flex items-center gap-1"
+                      onclick={() => toggleExpand(favorite.id)}
+                    >
+                      {#if isExpanded(favorite.id)}
+                        收起
+                      {:else}
+                        展开消息
+                      {/if}
+                    </button>
+                  {/if}
                 {:else if favorite.messageType === "text"}
                   {@const ranges = mergeTextRanges(
                     parseTextRanges(favorite.content)
