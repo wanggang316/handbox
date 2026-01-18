@@ -29,7 +29,7 @@ use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::time::Duration;
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
 use serde::Serialize;
 #[cfg(target_os = "macos")]
 use once_cell::sync::Lazy;
@@ -91,12 +91,14 @@ pub fn start_selection_observer(app: AppHandle) {
         let mut overlay_visible = false;
 
         let mut interval = tokio::time::interval(Duration::from_millis(POLL_INTERVAL_MS));
+        tracing::info!("Selection observer started, polling every {}ms", POLL_INTERVAL_MS);
         loop {
             interval.tick().await;
 
             let snapshot = fetch_selection_snapshot();
             let Some(snapshot) = snapshot else {
                 if overlay_visible {
+                    tracing::debug!("No selection detected, hiding overlay");
                     hide_overlay_window(&app_handle);
                     overlay_visible = false;
                     last_signature = None;
@@ -105,7 +107,13 @@ pub fn start_selection_observer(app: AppHandle) {
             };
 
             if let Some(bundle_id) = snapshot.payload.source_bundle_id.as_ref() {
+                tracing::debug!(
+                    "Selection from bundle_id: {}, app_identifier: {}",
+                    bundle_id,
+                    app_identifier
+                );
                 if bundle_id == &app_identifier {
+                    tracing::debug!("Ignoring selection from our own app");
                     if overlay_visible {
                         continue;
                     }
@@ -147,26 +155,27 @@ fn ensure_accessibility_permission() {
 
 #[cfg(target_os = "macos")]
 fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
+    tracing::info!("show_overlay_window called for text: '{}'", &payload.text[..payload.text.len().min(50)]);
+
     let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
-        tracing::warn!("Selection overlay window not found.");
+        tracing::error!("Selection overlay window not found!");
         return;
     };
 
     let (x, y) = compute_overlay_position(payload.rect.as_ref());
 
     if let Err(error) = window.set_size(LogicalSize::new(OVERLAY_WIDTH, OVERLAY_HEIGHT)) {
-        tracing::warn!("Failed to resize overlay window: {error}");
+        tracing::error!("Failed to resize overlay window: {error}");
         return;
     }
 
     if let Err(error) = window.set_position(LogicalPosition::new(x, y)) {
-        tracing::warn!("Failed to position overlay window: {error}");
+        tracing::error!("Failed to position overlay window: {error}");
     }
     if let Err(error) = window.show() {
-        tracing::warn!("Failed to show overlay window: {error}");
-    }
-    if let Err(error) = window.emit("selection_update", payload) {
-        tracing::warn!("Failed to emit selection update: {error}");
+        tracing::error!("Failed to show overlay window: {error}");
+    } else {
+        tracing::info!("Overlay window shown successfully");
     }
     tracing::info!(
         "Selection overlay shown (text_len={}, x={}, y={})",
@@ -189,18 +198,38 @@ fn compute_overlay_position(rect: Option<&SelectionRect>) -> (f64, f64) {
     let screen_width = display_bounds.size.width;
     let screen_height = display_bounds.size.height;
 
+    tracing::info!(
+        "Screen bounds: width={}, height={}",
+        screen_width,
+        screen_height
+    );
+    tracing::info!("Selection rect: {:?}", rect);
+
     let (anchor_x, anchor_y, anchor_height) = if let Some(rect) = rect {
         (rect.x + rect.width / 2.0, rect.y, rect.height)
     } else if let Some(point) = current_mouse_location() {
+        tracing::debug!("Using mouse location: {:?}", point);
         (point.x, point.y, 0.0)
     } else {
+        tracing::debug!("Using screen center as fallback");
         (screen_width / 2.0, screen_height / 2.0, 0.0)
     };
 
     let mut x = anchor_x - OVERLAY_WIDTH / 2.0;
     let mut y = anchor_y - OVERLAY_HEIGHT - 8.0;
+
+    tracing::info!(
+        "Initial position: x={}, y={} (anchor_x={}, anchor_y={}, anchor_height={})",
+        x,
+        y,
+        anchor_x,
+        anchor_y,
+        anchor_height
+    );
+
     if y < OVERLAY_PADDING {
         y = anchor_y + anchor_height + 8.0;
+        tracing::info!("Adjusted y to below selection: {}", y);
     }
 
     x = x.clamp(
@@ -211,6 +240,8 @@ fn compute_overlay_position(rect: Option<&SelectionRect>) -> (f64, f64) {
         OVERLAY_PADDING,
         screen_height - OVERLAY_HEIGHT - OVERLAY_PADDING,
     );
+
+    tracing::info!("Final clamped position: x={}, y={}", x, y);
 
     (x, y)
 }

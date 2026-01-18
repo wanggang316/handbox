@@ -177,6 +177,8 @@ pub fn run() {
             .visible(false)
             .always_on_top(true)
             .skip_taskbar(true)
+            .accept_first_mouse(true)
+            .visible_on_all_workspaces(true)
             .build()
             .expect("Failed to create selection overlay window");
 
