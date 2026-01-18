@@ -204,22 +204,22 @@
       return;
     }
 
+    const currentLookup = lookupResult;
     try {
       isLoading = true;
       errorMessage = null;
       await createWord({
-        term: lookupResult.term,
-        translation: lookupResult.translation,
-        language: lookupResult.sourceLanguage || "auto",
-        phonetic: lookupResult.phonetic,
-        explanation: lookupResult.explanation,
+        term: currentLookup.term,
+        translation: currentLookup.translation,
+        language: currentLookup.sourceLanguage || "auto",
+        phonetic: currentLookup.phonetic,
+        explanation: currentLookup.explanation,
         source: "lookup",
       });
-      lookupResult = { ...lookupResult, exists: true };
+      lookupResult = { ...currentLookup, exists: true };
       await loadWords();
       lookupHistory = lookupHistory.map((item) =>
-        item.term.trim().toLowerCase() ===
-        lookupResult.term.trim().toLowerCase()
+        item.term.trim().toLowerCase() === currentLookup.term.trim().toLowerCase()
           ? { ...item, exists: true }
           : item
       );
@@ -262,6 +262,7 @@
   }
 
   async function handleAddHistory(item: {
+    id?: string;
     term: string;
     translation?: string | null;
     phonetic?: string | null;

@@ -13,6 +13,10 @@
   const wordId = $derived($page.params.id);
 
   async function loadDetail() {
+    if (!wordId) {
+      errorMessage = "无效的单词 ID";
+      return;
+    }
     try {
       isLoading = true;
       errorMessage = null;

@@ -1,7 +1,9 @@
 // Favorite 数据访问层
 
 use crate::models::AppError;
-use crate::storage::types::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag, UUID};
+use crate::storage::types::{
+    CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag, UUID,
+};
 use crate::storage::Database;
 use sqlx::{Error, Row};
 use std::collections::HashMap;
@@ -17,10 +19,7 @@ impl FavoriteRepository {
         Self { db }
     }
 
-    pub async fn toggle_favorite(
-        &self,
-        request: &CreateFavoriteRequest,
-    ) -> Result<bool, AppError> {
+    pub async fn toggle_favorite(&self, request: &CreateFavoriteRequest) -> Result<bool, AppError> {
         // 检查该chat_id和message_type的组合是否已存在
         let existing: Option<(String, String)> = sqlx::query_as::<_, (String, String)>(
             "SELECT id, message_type FROM favorites WHERE chat_id = $1 AND message_type = $2",
@@ -36,7 +35,9 @@ impl FavoriteRepository {
                 .bind(&id)
                 .execute(self.db.pool())
                 .await
-                .map_err(|e| AppError::internal_error(&format!("Failed to delete favorite: {}", e)))?;
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to delete favorite: {}", e))
+                })?;
             return Ok(false);
         }
 
@@ -84,7 +85,9 @@ impl FavoriteRepository {
         .bind(format!("{:?}", message_type).to_lowercase())
         .fetch_optional(self.db.pool())
         .await
-        .map_err(|e: Error| AppError::internal_error(&format!("Failed to check favorite: {}", e)))?;
+        .map_err(|e: Error| {
+            AppError::internal_error(&format!("Failed to check favorite: {}", e))
+        })?;
 
         Ok(result.is_some())
     }
@@ -92,7 +95,11 @@ impl FavoriteRepository {
     pub async fn get_all_favorites(&self) -> Result<Vec<Favorite>, AppError> {
         let rows = sqlx::query(
             r#"
-                SELECT id, message_id, chat_id, content, role, message_type, note, context, created_at
+                SELECT id, message_id, chat_id, content, role, message_type, note, context, created_at,
+                       selection_text_raw, source_app_name, source_bundle_id, source_pid,
+                       source_app_path, source_app_version, source_window_title, source_url,
+                       source_domain, source_tab_title, selection_rect, capture_method,
+                       locale, input_language
                 FROM favorites
                 ORDER BY created_at DESC
             "#,
@@ -113,6 +120,20 @@ impl FavoriteRepository {
                 tags: vec![],
                 note: row.get("note"),
                 context: row.get("context"),
+                selection_text_raw: row.get("selection_text_raw"),
+                source_app_name: row.get("source_app_name"),
+                source_bundle_id: row.get("source_bundle_id"),
+                source_pid: row.get("source_pid"),
+                source_app_path: row.get("source_app_path"),
+                source_app_version: row.get("source_app_version"),
+                source_window_title: row.get("source_window_title"),
+                source_url: row.get("source_url"),
+                source_domain: row.get("source_domain"),
+                source_tab_title: row.get("source_tab_title"),
+                selection_rect: row.get("selection_rect"),
+                capture_method: row.get("capture_method"),
+                locale: row.get("locale"),
+                input_language: row.get("input_language"),
                 created_at: row.get("created_at"),
             });
         }
@@ -124,7 +145,11 @@ impl FavoriteRepository {
     pub async fn get_favorites_by_chat(&self, chat_id: &UUID) -> Result<Vec<Favorite>, AppError> {
         let rows = sqlx::query(
             r#"
-                SELECT id, message_id, chat_id, content, role, message_type, note, context, created_at
+                SELECT id, message_id, chat_id, content, role, message_type, note, context, created_at,
+                       selection_text_raw, source_app_name, source_bundle_id, source_pid,
+                       source_app_path, source_app_version, source_window_title, source_url,
+                       source_domain, source_tab_title, selection_rect, capture_method,
+                       locale, input_language
                 FROM favorites
                 WHERE chat_id = $1
                 ORDER BY created_at DESC
@@ -147,6 +172,20 @@ impl FavoriteRepository {
                 tags: vec![],
                 note: row.get("note"),
                 context: row.get("context"),
+                selection_text_raw: row.get("selection_text_raw"),
+                source_app_name: row.get("source_app_name"),
+                source_bundle_id: row.get("source_bundle_id"),
+                source_pid: row.get("source_pid"),
+                source_app_path: row.get("source_app_path"),
+                source_app_version: row.get("source_app_version"),
+                source_window_title: row.get("source_window_title"),
+                source_url: row.get("source_url"),
+                source_domain: row.get("source_domain"),
+                source_tab_title: row.get("source_tab_title"),
+                selection_rect: row.get("selection_rect"),
+                capture_method: row.get("capture_method"),
+                locale: row.get("locale"),
+                input_language: row.get("input_language"),
                 created_at: row.get("created_at"),
             });
         }
@@ -189,6 +228,80 @@ impl FavoriteRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to delete favorite: {}", e)))?;
 
         Ok(())
+    }
+
+    pub async fn delete_by_id(&self, favorite_id: &UUID) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM favorite_tags WHERE favorite_id = $1")
+            .bind(favorite_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to delete favorite tags: {}", e))
+            })?;
+
+        sqlx::query("DELETE FROM favorites WHERE id = $1")
+            .bind(favorite_id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| AppError::internal_error(&format!("Failed to delete favorite: {}", e)))?;
+
+        Ok(())
+    }
+
+    pub async fn create_external_favorite(
+        &self,
+        request: &CreateFavoriteRequest,
+    ) -> Result<UUID, AppError> {
+        let favorite_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            r#"
+                INSERT INTO favorites (
+                    id, message_id, chat_id, content, role, message_type, note, context, created_at,
+                    selection_text_raw, source_app_name, source_bundle_id, source_pid, source_app_path,
+                    source_app_version, source_window_title, source_url, source_domain, source_tab_title,
+                    selection_rect, capture_method, locale, input_language
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                    $10, $11, $12, $13, $14,
+                    $15, $16, $17, $18, $19,
+                    $20, $21, $22, $23
+                )
+            "#,
+        )
+        .bind(&favorite_id)
+        .bind(&request.message_id)
+        .bind(&request.chat_id)
+        .bind(&request.content)
+        .bind(&request.role)
+        .bind(format!("{:?}", request.message_type).to_lowercase())
+        .bind(request.note.as_deref())
+        .bind(request.context.as_deref())
+        .bind(request.created_at)
+        .bind(request.selection_text_raw.as_deref())
+        .bind(request.source_app_name.as_deref())
+        .bind(request.source_bundle_id.as_deref())
+        .bind(request.source_pid)
+        .bind(request.source_app_path.as_deref())
+        .bind(request.source_app_version.as_deref())
+        .bind(request.source_window_title.as_deref())
+        .bind(request.source_url.as_deref())
+        .bind(request.source_domain.as_deref())
+        .bind(request.source_tab_title.as_deref())
+        .bind(request.selection_rect.as_deref())
+        .bind(request.capture_method.as_deref())
+        .bind(request.locale.as_deref())
+        .bind(request.input_language.as_deref())
+        .execute(self.db.pool())
+        .await
+        .map_err(|e| AppError::internal_error(&format!("Failed to create external favorite: {}", e)))?;
+
+        if !request.tags.is_empty() {
+            self.attach_tags_to_favorite(&favorite_id, &request.tags)
+                .await?;
+        }
+
+        Ok(favorite_id)
     }
 
     pub async fn upsert_text_favorite(
@@ -305,7 +418,9 @@ impl FavoriteRepository {
                     .bind(&id)
                     .execute(self.db.pool())
                     .await
-                    .map_err(|e| AppError::internal_error(&format!("Failed to update tag: {}", e)))?;
+                    .map_err(|e| {
+                        AppError::internal_error(&format!("Failed to update tag: {}", e))
+                    })?;
             }
             return Ok(id);
         }

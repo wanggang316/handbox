@@ -8,8 +8,8 @@ pub mod mcp_repository;
 pub mod message_repository;
 pub mod model_repository;
 pub mod provider_repository;
-pub mod word_repository;
 pub mod types;
+pub mod word_repository;
 
 pub use artifact_repository::ArtifactRepository;
 pub use chat_repository::ChatRepository;

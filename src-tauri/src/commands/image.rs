@@ -36,8 +36,10 @@ pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
     }
 
     // 构建 HTTP 客户端
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
+    let client_builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
+    #[cfg(test)]
+    let client_builder = client_builder.no_proxy();
+    let client = client_builder
         .build()
         .map_err(|e| AppError::internal_error(&format!("创建 HTTP 客户端失败: {e}")))?;
 

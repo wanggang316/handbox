@@ -28,15 +28,13 @@ impl SettingsService {
 
         match section {
             "general" => {
-                settings.general =
-                    self.merge_section(settings.general, request.data, "general")?;
+                settings.general = self.merge_section(settings.general, request.data, "general")?;
             }
             "mcp" => {
                 settings.mcp = self.merge_section(settings.mcp, request.data, "mcp")?;
             }
             "account" => {
-                settings.account =
-                    self.merge_section(settings.account, request.data, "account")?;
+                settings.account = self.merge_section(settings.account, request.data, "account")?;
             }
             "translation" => {
                 settings.translation =
@@ -51,10 +49,7 @@ impl SettingsService {
         Ok(settings)
     }
 
-    pub fn reset_settings(
-        &self,
-        sections: Option<Vec<String>>,
-    ) -> Result<AppSettings, AppError> {
+    pub fn reset_settings(&self, sections: Option<Vec<String>>) -> Result<AppSettings, AppError> {
         let default_settings = default_settings();
         let settings = match sections {
             None => default_settings,
@@ -65,9 +60,7 @@ impl SettingsService {
                         "general" => current.general = default_settings.general.clone(),
                         "mcp" => current.mcp = default_settings.mcp.clone(),
                         "account" => current.account = default_settings.account.clone(),
-                        "translation" => {
-                            current.translation = default_settings.translation.clone()
-                        }
+                        "translation" => current.translation = default_settings.translation.clone(),
                         _ => return Err(AppError::validation_error("未知设置分组")),
                     }
                 }
@@ -87,22 +80,18 @@ impl SettingsService {
             return Ok(settings);
         }
 
-        let content =
-            std::fs::read_to_string(&path).map_err(|e| {
-                AppError::internal_error(&format!("读取设置失败: {e}"))
-            })?;
-        let settings: AppSettings = serde_json::from_str(&content).map_err(|e| {
-            AppError::internal_error(&format!("解析设置失败: {e}"))
-        })?;
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| AppError::internal_error(&format!("读取设置失败: {e}")))?;
+        let settings: AppSettings = serde_json::from_str(&content)
+            .map_err(|e| AppError::internal_error(&format!("解析设置失败: {e}")))?;
 
         Ok(settings)
     }
 
     fn save_settings(&self, settings: &AppSettings) -> Result<(), AppError> {
         let path = self.storage.get_config_path();
-        let content = serde_json::to_string_pretty(settings).map_err(|e| {
-            AppError::internal_error(&format!("序列化设置失败: {e}"))
-        })?;
+        let content = serde_json::to_string_pretty(settings)
+            .map_err(|e| AppError::internal_error(&format!("序列化设置失败: {e}")))?;
         std::fs::write(&path, content)
             .map_err(|e| AppError::internal_error(&format!("写入设置失败: {e}")))?;
         Ok(())
@@ -147,7 +136,9 @@ fn default_settings() -> AppSettings {
                 switch_model: None,
             },
         },
-        mcp: MCPSettings { servers: Vec::new() },
+        mcp: MCPSettings {
+            servers: Vec::new(),
+        },
         account: AccountSettings {
             user: None,
             is_logged_in: false,

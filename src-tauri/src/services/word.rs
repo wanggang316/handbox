@@ -5,9 +5,7 @@ use crate::models::{
     ReviewWordRequest, TranslateWordRequest, TranslateWordResponse, UpdateWordRequest, WordDetail,
 };
 use crate::services::{ProviderService, SettingsService};
-use crate::storage::types::{
-    Timestamp, UUID, Word, WordContext, WordLookupHistory, WordReview,
-};
+use crate::storage::types::{Timestamp, Word, WordContext, WordLookupHistory, WordReview, UUID};
 use crate::storage::word_repository::next_review_timestamp;
 use crate::storage::WordRepository;
 use handbox_llm::config::LlmConfigProvider;
@@ -208,13 +206,13 @@ impl WordService {
 
         let llm_client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
             .map_err(|e| {
-                let error: AppError = e.into();
-                tracing::error!(
-                    "[WordService::translate_word] Failed to create LLM client: {}",
-                    error.message
-                );
-                error
-            })?;
+            let error: AppError = e.into();
+            tracing::error!(
+                "[WordService::translate_word] Failed to create LLM client: {}",
+                error.message
+            );
+            error
+        })?;
 
         let prompt = format!(
             "请将下面的词、短语或句子翻译为目标语言（{}）。只返回一行 JSON，不要使用 Markdown 代码块，不要输出额外文本。格式：{{\"translation\":\"...\",\"phonetic\":\"...\",\"explanation\":\"...\"}}。其中 phonetic 为源词/短语的音标（如果适用，句子可为空），explanation 为简短解释（单行，不换行）。",
@@ -330,7 +328,8 @@ impl WordService {
                 parallel_tool_calls: None,
             };
 
-            if let Ok(fallback_response) = llm_client.chat(&provider_context, fallback_request).await
+            if let Ok(fallback_response) =
+                llm_client.chat(&provider_context, fallback_request).await
             {
                 if let Ok(fallback_content) = extract_first_choice_content(fallback_response) {
                     let fallback_text = fallback_content.trim();

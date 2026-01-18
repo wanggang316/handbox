@@ -38,10 +38,12 @@
   async function loadProviders() {
     try {
       await providerActions.loadProvidersWithModels(false);
-      providerOptions = providerState.providersWithModels.map((provider) => ({
-        value: provider.id,
-        label: provider.name,
-      }));
+      providerOptions = providerState.providersWithModels
+        .filter((provider) => Boolean(provider.id))
+        .map((provider) => ({
+          value: provider.id ?? "",
+          label: provider.name,
+        }));
     } catch (error) {
       console.error("Failed to load providers:", error);
       errorMessage = "加载供应商失败";

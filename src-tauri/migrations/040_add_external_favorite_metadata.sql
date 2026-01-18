@@ -1,0 +1,15 @@
+-- Add external selection metadata to favorites
+ALTER TABLE favorites ADD COLUMN selection_text_raw TEXT;
+ALTER TABLE favorites ADD COLUMN source_app_name TEXT;
+ALTER TABLE favorites ADD COLUMN source_bundle_id TEXT;
+ALTER TABLE favorites ADD COLUMN source_pid INTEGER;
+ALTER TABLE favorites ADD COLUMN source_app_path TEXT;
+ALTER TABLE favorites ADD COLUMN source_app_version TEXT;
+ALTER TABLE favorites ADD COLUMN source_window_title TEXT;
+ALTER TABLE favorites ADD COLUMN source_url TEXT;
+ALTER TABLE favorites ADD COLUMN source_domain TEXT;
+ALTER TABLE favorites ADD COLUMN source_tab_title TEXT;
+ALTER TABLE favorites ADD COLUMN selection_rect TEXT;
+ALTER TABLE favorites ADD COLUMN capture_method TEXT;
+ALTER TABLE favorites ADD COLUMN locale TEXT;
+ALTER TABLE favorites ADD COLUMN input_language TEXT;

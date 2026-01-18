@@ -371,11 +371,9 @@
                 <div class="flex items-center flex-1 gap-2">
                   <span class="text-base-content text-xs">{model.name}</span>
                   {#if model.support_image}
-                    <EyeIcon
-                      size={14}
-                      class="text-info"
-                      title="支持图片生成"
-                    />
+                    <span title="支持图片生成">
+                      <EyeIcon size={14} class="text-info" />
+                    </span>
                   {/if}
                 </div>
 

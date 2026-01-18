@@ -2,7 +2,13 @@
  * 收藏状态管理 - 使用 Svelte 5 响应式最佳实践
  */
 
-import type { Favorite, FavoriteMessageType, FavoriteTag, TextRange } from "$lib/types/favorite";
+import type {
+  CreateExternalFavoriteDto,
+  Favorite,
+  FavoriteMessageType,
+  FavoriteTag,
+  TextRange,
+} from "$lib/types/favorite";
 import type { UUID } from "$lib/types";
 import * as favoriteApi from "$lib/api/favorite";
 
@@ -235,6 +241,26 @@ class FavoriteStore {
       await this.loadTags();
     } catch (error) {
       console.error("Failed to remove tag:", error);
+      throw error;
+    }
+  }
+
+  async deleteFavoriteById(favoriteId: UUID): Promise<void> {
+    try {
+      await favoriteApi.deleteFavorite(favoriteId);
+      await this.loadFavorites();
+    } catch (error) {
+      console.error("Failed to delete favorite:", error);
+      throw error;
+    }
+  }
+
+  async createExternalFavorite(payload: CreateExternalFavoriteDto): Promise<void> {
+    try {
+      await favoriteApi.createExternalFavorite(payload);
+      await this.loadFavorites();
+    } catch (error) {
+      console.error("Failed to create external favorite:", error);
       throw error;
     }
   }

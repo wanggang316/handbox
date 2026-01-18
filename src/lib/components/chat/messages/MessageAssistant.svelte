@@ -403,8 +403,7 @@
         "image",
         [],
         undefined,
-        undefined,
-        message.id ?? "",
+        undefined
       );
       closeContextMenu();
     } catch (error) {

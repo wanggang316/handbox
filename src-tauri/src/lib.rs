@@ -11,14 +11,15 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    ArtifactService, ChatService, McpService, MessageService, ModelService, ProviderService,
-    SearchService, SettingsService, StorageService, UserSessionService, WordService,
+    start_selection_observer, ArtifactService, ChatService, McpService, MessageService,
+    ModelService, ProviderService, SearchService, SettingsService, StorageService,
+    UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// 初始化服务
 async fn initialize_services(
@@ -161,6 +162,24 @@ pub fn run() {
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
 
+            // 创建系统划词悬浮窗口
+            let _overlay_window = WebviewWindowBuilder::new(
+                app,
+                "selection_overlay",
+                WebviewUrl::App("/selection".into()),
+            )
+            .title("Selection Overlay")
+            .inner_size(420.0, 260.0)
+            .resizable(false)
+            .decorations(false)
+            .transparent(true)
+            .focused(false)
+            .visible(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .build()
+            .expect("Failed to create selection overlay window");
+
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -169,6 +188,8 @@ pub fn run() {
                     std::process::exit(1);
                 }
             });
+
+            start_selection_observer(app.handle().clone());
 
             Ok(())
         })
@@ -180,6 +201,8 @@ pub fn run() {
             greet,
             // 调试命令
             debug_check_file,
+            debug_show_selection_overlay,
+            selection_get_last_payload,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,
@@ -290,6 +313,8 @@ pub fn run() {
             favorite_save_text_ranges,
             favorite_add_tag,
             favorite_remove_tag,
+            favorite_delete,
+            favorite_create_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

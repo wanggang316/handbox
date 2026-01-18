@@ -1,7 +1,7 @@
 // 单词相关请求类型
 
-use serde::{Deserialize, Serialize};
 use crate::storage::types::{Word, WordContext, WordReview};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
