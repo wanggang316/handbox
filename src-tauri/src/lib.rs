@@ -151,12 +151,36 @@ pub fn run() {
         tracing::info!("Logger initialized successfully");
     }
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_shell::init());
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
+                .on_event(|app, event| {
+                    if let tauri::RunEvent::Reopen {
+                        has_visible_windows,
+                        ..
+                    } = event
+                    {
+                        if !has_visible_windows {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(),
+        );
+    }
+
+    builder
         .setup(|app| {
             // 创建菜单
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
@@ -169,11 +193,12 @@ pub fn run() {
                 WebviewUrl::App("/selection".into()),
             )
             .title("Selection Overlay")
-            .inner_size(420.0, 260.0)
-            .resizable(false)
+            .inner_size(360.0, 44.0)
+            .resizable(true)
             .decorations(false)
             .transparent(true)
             .focused(false)
+            .focusable(false)
             .visible(false)
             .always_on_top(true)
             .skip_taskbar(true)
@@ -181,6 +206,9 @@ pub fn run() {
             .visible_on_all_workspaces(true)
             .build()
             .expect("Failed to create selection overlay window");
+
+            #[cfg(target_os = "macos")]
+            configure_selection_overlay_panel(&_overlay_window);
 
             // 异步初始化服务
             let app_handle = app.handle().clone();
@@ -205,6 +233,7 @@ pub fn run() {
             debug_check_file,
             debug_show_selection_overlay,
             selection_get_last_payload,
+            selection_overlay_hide,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,
@@ -320,4 +349,36 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(target_os = "macos")]
+fn configure_selection_overlay_panel(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{
+        NSPanel, NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    };
+
+    let window = window.clone();
+    let window_for_thread = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let Ok(ns_window_ptr) = window_for_thread.ns_window() else {
+            return;
+        };
+
+        let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
+        let mut style_mask = ns_window.styleMask();
+        style_mask.insert(NSWindowStyleMask::NonactivatingPanel);
+        ns_window.setStyleMask(style_mask);
+        ns_window.setLevel(NSStatusWindowLevel);
+
+        let mut behavior = ns_window.collectionBehavior();
+        behavior.insert(NSWindowCollectionBehavior::CanJoinAllSpaces);
+        behavior.insert(NSWindowCollectionBehavior::Transient);
+        behavior.insert(NSWindowCollectionBehavior::IgnoresCycle);
+        ns_window.setCollectionBehavior(behavior);
+
+        let ns_panel: &NSPanel = unsafe { &*(ns_window_ptr as *mut NSPanel) };
+        ns_panel.setFloatingPanel(true);
+        ns_panel.setBecomesKeyOnlyIfNeeded(true);
+        ns_panel.setHidesOnDeactivate(false);
+    });
 }

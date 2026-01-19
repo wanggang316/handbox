@@ -67,8 +67,11 @@ handbox-mcp = { path = "crates/handbox-mcp" }
 core-foundation = "0.10"
 core-graphics = "0.23"
 objc2 = "0.6.3"
-objc2-app-kit = { version = "0.3.2", features = ["NSRunningApplication", "NSWorkspace", "libc"] }
-objc2-foundation = { version = "0.3.2", features = ["NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSEvent", "NSPanel", "NSResponder", "NSRunningApplication", "NSScreen", "NSWindow", "NSWorkspace", "libc"] }
+objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "NSURL"] }
 
 [dev-dependencies]
 tempfile = "3.21.0"
+
+[patch.crates-io]
+tao = { path = "crates/tao" }

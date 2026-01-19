@@ -1,11 +1,22 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { Copy, Languages, Star, X as CloseIcon } from "@lucide/svelte";
+  import { onMount, tick } from "svelte";
+  import {
+    Copy,
+    Languages,
+    Search,
+    Star,
+    X as CloseIcon,
+  } from "@lucide/svelte";
+  import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
   import { translateWord } from "$lib/api/word";
   import { favoriteStore } from "$lib/states";
   import { showAppError } from "$lib/utils/error";
-  import type { CreateExternalFavoriteDto, SelectionRect } from "$lib/types/favorite";
+  import type {
+    CreateExternalFavoriteDto,
+    SelectionRect,
+  } from "$lib/types/favorite";
 
   interface SelectionPayload {
     text: string;
@@ -32,6 +43,7 @@
   let isLoadingSelection = $state(false);
   let isFavoriting = $state(false);
   let isTranslating = $state(false);
+  let showSelectionPanel = $state(false);
   let showTranslatePanel = $state(false);
   let translateResult = $state<{
     translation: string;
@@ -40,6 +52,171 @@
     explanation?: string | null;
   } | null>(null);
   let translateError = $state<string | null>(null);
+  let overlayWindow = $state<ReturnType<typeof getCurrentWebviewWindow> | null>(
+    null,
+  );
+  let isDragging = $state(false);
+  let dragPointerId = $state<number | null>(null);
+  let dragStart = $state({ x: 0, y: 0 });
+  let dragWindowStart = $state({ x: 0, y: 0 });
+  let menuContainer = $state<HTMLDivElement | null>(null);
+  let resizeFrameId = 0;
+  let lastWindowSize = { width: 0, height: 0 };
+  let resizeObserver: ResizeObserver | null = null;
+
+  onMount(() => {
+    overlayWindow = getCurrentWebviewWindow();
+    scheduleWindowResize();
+
+    setupResizeObserver();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        scheduleWindowResize();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+    };
+  });
+
+  function setupResizeObserver() {
+    const container = menuContainer;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    resizeObserver?.disconnect();
+    resizeObserver = new ResizeObserver(() => {
+      scheduleWindowResize();
+    });
+    resizeObserver.observe(container);
+    scheduleWindowResize();
+  }
+
+  function scheduleWindowResize() {
+    if (typeof window === "undefined" || resizeFrameId) return;
+    resizeFrameId = window.requestAnimationFrame(() => {
+      resizeFrameId = 0;
+      void syncWindowSize();
+    });
+  }
+
+  async function syncWindowSize() {
+    const container = menuContainer;
+    if (!container) {
+      console.log("[syncWindowSize] No container");
+      return;
+    }
+    overlayWindow ??= getCurrentWebviewWindow();
+    const windowHandle = overlayWindow;
+    if (!windowHandle) {
+      console.log("[syncWindowSize] No window handle");
+      return;
+    }
+
+    await tick();
+    const rect = container.getBoundingClientRect();
+    const width = Math.ceil(rect.width);
+    const height = Math.ceil(rect.height);
+    console.log("[syncWindowSize] Calculated size:", { width, height });
+    if (!width || !height) {
+      console.log("[syncWindowSize] Invalid size");
+      return;
+    }
+    if (width === lastWindowSize.width && height === lastWindowSize.height) {
+      console.log("[syncWindowSize] Size unchanged, skipping");
+      return;
+    }
+    lastWindowSize = { width, height };
+
+    try {
+      console.log("[syncWindowSize] Setting window size to:", { width, height });
+      await windowHandle.setSize(new LogicalSize(width, height));
+      console.log("[syncWindowSize] Window resized successfully");
+    } catch (error) {
+      console.error("Failed to resize selection overlay:", error);
+    }
+  }
+
+  $effect(() => {
+    if (menuContainer && !resizeObserver) {
+      setupResizeObserver();
+    }
+  });
+
+  $effect(() => {
+    menuContainer;
+    showSelectionPanel;
+    showTranslatePanel;
+    isTranslating;
+    translateResult;
+    translateError;
+    selectedText;
+    selectedTextRaw;
+    scheduleWindowResize();
+  });
+
+  function canStartDrag(event: PointerEvent) {
+    if (event.button !== 0) return false;
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest("button")) {
+      return false;
+    }
+    return true;
+  }
+
+  async function handlePointerDown(event: PointerEvent) {
+    if (!canStartDrag(event)) return;
+    try {
+      overlayWindow ??= getCurrentWebviewWindow();
+      const windowHandle = overlayWindow;
+      if (!windowHandle) return;
+
+      const position = await windowHandle.outerPosition();
+      isDragging = true;
+      dragPointerId = event.pointerId;
+
+      const scale = window.devicePixelRatio || 1;
+      dragStart = { x: event.screenX * scale, y: event.screenY * scale };
+      dragWindowStart = { x: position.x, y: position.y };
+
+      const target = event.currentTarget as HTMLElement | null;
+      target?.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    } catch (error) {
+      console.error("Failed to start dragging overlay:", error);
+    }
+  }
+
+  async function handlePointerMove(event: PointerEvent) {
+    if (!isDragging || dragPointerId !== event.pointerId) return;
+    try {
+      overlayWindow ??= getCurrentWebviewWindow();
+      const windowHandle = overlayWindow;
+      if (!windowHandle) return;
+
+      const scale = window.devicePixelRatio || 1;
+      const deltaX = event.screenX * scale - dragStart.x;
+      const deltaY = event.screenY * scale - dragStart.y;
+      const nextX = Math.round(dragWindowStart.x + deltaX);
+      const nextY = Math.round(dragWindowStart.y + deltaY);
+      await windowHandle.setPosition(new PhysicalPosition(nextX, nextY));
+    } catch (error) {
+      console.error("Failed to drag selection overlay:", error);
+    }
+  }
+
+  function handlePointerUp(event: PointerEvent) {
+    if (dragPointerId !== event.pointerId) return;
+    isDragging = false;
+    dragPointerId = null;
+    const target = event.currentTarget as HTMLElement | null;
+    try {
+      target?.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      console.error("Failed to release pointer capture:", error);
+    }
+  }
 
   function resetTranslationState() {
     showTranslatePanel = false;
@@ -48,16 +225,28 @@
     isTranslating = false;
   }
 
+  function resetPanels() {
+    showSelectionPanel = false;
+    resetTranslationState();
+  }
+
   async function hideOverlay() {
     showMenu = false;
     payload = null;
-    resetTranslationState();
+    resetPanels();
     try {
-      const currentWindow = getCurrentWebviewWindow();
-      await currentWindow.hide();
-      // 不要激活其他窗口,保持当前焦点在原应用
+      await invoke("selection_overlay_hide");
     } catch (error) {
-      console.error("Failed to hide selection overlay:", error);
+      console.error("Failed to hide selection overlay via IPC:", error);
+      try {
+        const currentWindow = getCurrentWebviewWindow();
+        await currentWindow.hide();
+      } catch (fallbackError) {
+        console.error(
+          "Failed to hide selection overlay window:",
+          fallbackError,
+        );
+      }
     }
   }
 
@@ -74,6 +263,7 @@
     selectedTextRaw = raw;
     payload = next;
     showMenu = true;
+    showSelectionPanel = false;
     console.log("[Selection] Menu should be visible now, showMenu=", showMenu);
     resetTranslationState();
   }
@@ -82,10 +272,15 @@
     if (isLoadingSelection) return;
     isLoadingSelection = true;
     try {
-      const value = await invoke<SelectionPayload | null>("selection_get_last_payload");
+      const value = await invoke<SelectionPayload | null>(
+        "selection_get_last_payload",
+      );
       console.log("[Selection] Last payload loaded:", value);
       if (value) {
         applySelection(value);
+        showSelectionPanel = true;
+        showTranslatePanel = false;
+        await syncWindowSize();
       }
     } catch (error) {
       console.error("Failed to load last selection payload:", error);
@@ -122,21 +317,40 @@
 
   async function handleTranslateText() {
     if (!selectedText) return;
+    console.log("[handleTranslateText] Starting translation...");
     showTranslatePanel = true;
+    showSelectionPanel = false;
     translateResult = null;
     translateError = null;
     isTranslating = true;
-    showMenu = false;
+
+    console.log("[handleTranslateText] Waiting for DOM update (loading state)...");
+    await tick();
+    await syncWindowSize();
 
     try {
+      console.log("[handleTranslateText] Calling translateWord API...");
       const response = await translateWord({ term: selectedText });
       translateResult = response;
+      console.log("[handleTranslateText] Translation result received:", response);
+
+      console.log("[handleTranslateText] Waiting for DOM update (result)...");
+      await tick();
+      await syncWindowSize();
     } catch (error) {
       console.error("Failed to translate selection:", error);
       const normalized = showAppError(error, { fallbackMessage: "翻译失败" });
       translateError = normalized.message;
+
+      console.log("[handleTranslateText] Waiting for DOM update (error)...");
+      await tick();
+      await syncWindowSize();
     } finally {
       isTranslating = false;
+      console.log("[handleTranslateText] Waiting for DOM update (finished)...");
+      await tick();
+      await syncWindowSize();
+      console.log("[handleTranslateText] Translation flow completed");
     }
   }
 
@@ -182,50 +396,48 @@
     if (selectedText) {
       showMenu = true;
     }
+    scheduleWindowResize();
   }
 
+  function closeSelectionPanel() {
+    showSelectionPanel = false;
+    scheduleWindowResize();
+  }
 </script>
 
 <svelte:head>
   <style>
     :global(body) {
-      background: red !important;
-      opacity: 1 !important;
+      background: transparent !important;
     }
   </style>
 </svelte:head>
 
-<div class="w-full h-full p-2 bg-red-500">
-  <!-- 调试信息 -->
-  <div class="text-white text-xs mb-2 bg-black p-1 rounded">
-    showMenu: {showMenu}<br>
-    selectedText: "{selectedText || 'empty'}"<br>
-    selectedTextRaw: "{selectedTextRaw || 'empty'}"
-  </div>
-
-  <div
-    class="pointer-events-auto bg-yellow-400 border-4 border-black rounded-lg shadow-xl px-3 py-2 flex flex-col gap-2 w-[260px]"
-    role="menu"
-    aria-label="划词操作"
-    tabindex="0"
+<div
+  bind:this={menuContainer}
+  class="w-[360px] max-w-[92vw] rounded-[18px] bg-white px-2.5 py-1 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing"
+    onpointerdown={handlePointerDown}
+    onpointermove={handlePointerMove}
+    onpointerup={handlePointerUp}
+    onpointercancel={handlePointerUp}
   >
-    <span class="text-xs text-black font-bold truncate max-w-[240px]">
-      {selectedText || '等待选择文字...'}
-    </span>
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-1.5">
       <button
-        class="flex items-center gap-1 px-2 py-1 text-xs rounded bg-white text-black hover:bg-gray-200 border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         onclick={loadLatestSelection}
         disabled={isLoadingSelection}
       >
         {#if isLoadingSelection}
-          <div class="w-3 h-3 border border-t-transparent rounded-full animate-spin"></div>
+          <div
+            class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+          ></div>
         {:else}
+          <Search size={12} />
           显示
         {/if}
       </button>
       <button
-        class="flex items-center gap-1 px-2 py-1 text-xs rounded bg-white text-black hover:bg-gray-200 border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         onclick={handleCopyText}
         disabled={!selectedText}
       >
@@ -233,82 +445,120 @@
         复制
       </button>
       <button
-        class="flex items-center gap-1 px-2 py-1 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         onclick={handleTranslateText}
         disabled={!selectedText || isTranslating}
       >
         {#if isTranslating}
-          <div class="w-3 h-3 border border-t-transparent rounded-full animate-spin"></div>
+          <div
+            class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+          ></div>
         {:else}
           <Languages size={12} />
           翻译
         {/if}
       </button>
       <button
-        class="flex items-center gap-1 px-2 py-1 text-xs rounded bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         onclick={handleFavoriteText}
         disabled={!selectedText || isFavoriting}
       >
         {#if isFavoriting}
-          <div class="w-3 h-3 border border-t-transparent rounded-full animate-spin"></div>
+          <div
+            class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+          ></div>
         {:else}
           <Star size={12} />
           收藏
         {/if}
       </button>
     </div>
-  </div>
 
-  {#if showTranslatePanel}
-    <div
-      class="pointer-events-auto mt-2 bg-base-100 border border-base-300 rounded-xl shadow-xl p-3 w-[400px] max-w-[90vw] h-[200px] flex flex-col"
-      role="dialog"
-      aria-label="翻译结果"
-      tabindex="0"
-    >
-      <div class="flex items-center justify-between">
-        <div class="text-xs text-base-content/60">翻译结果</div>
-        <button
-          class="p-1 rounded hover:bg-base-200 text-base-content/60 hover:text-base-content"
-          onclick={closeTranslatePanel}
-          aria-label="关闭翻译结果"
+    {#if showSelectionPanel}
+      <div
+        class="rounded-2xl bg-slate-50 p-3"
+        role="dialog"
+        aria-label="选区内容"
+        tabindex="0"
+      >
+        <div class="flex items-center justify-between">
+          <div class="text-[11px] uppercase tracking-wide text-slate-500">
+            选区内容
+          </div>
+          <button
+            class="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800"
+            onclick={closeSelectionPanel}
+            aria-label="关闭选区内容"
+          >
+            <CloseIcon size={14} />
+          </button>
+        </div>
+        <div class="mt-1 text-[11px] text-slate-500 truncate">
+          {payload?.sourceAppName ?? "—"} · {payload?.sourceWindowTitle ?? "—"}
+        </div>
+        <div
+          class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700 min-h-[80px] max-h-40 overflow-auto"
         >
-          <CloseIcon size={14} />
-        </button>
+          {selectedTextRaw || selectedText || "暂无内容"}
+        </div>
       </div>
-      <div class="mt-1 text-xs text-base-content/70 truncate">
-        {selectedText}
-      </div>
-      <div class="mt-2 flex-1 min-h-0 rounded-lg bg-base-200 px-3 py-2 text-sm overflow-auto">
-        {#if isTranslating}
-          <div class="flex items-center gap-2 text-base-content/60">
-            <div class="w-3 h-3 border border-t-transparent rounded-full animate-spin"></div>
-            <span>翻译中…</span>
+    {/if}
+
+    {#if showTranslatePanel}
+      <div
+        class="rounded-2xl bg-slate-50 p-3"
+        role="dialog"
+        aria-label="翻译结果"
+        tabindex="0"
+      >
+        <div class="flex items-center justify-between">
+          <div class="text-[11px] uppercase tracking-wide text-slate-500">
+            翻译结果
           </div>
-        {:else if translateError}
-          <div class="text-error text-sm">{translateError}</div>
-        {:else if translateResult}
-          <div class="text-base-content text-sm font-medium">
-            {translateResult.translation}
-          </div>
-          {#if translateResult.phonetic}
-            <div class="mt-1 text-xs text-base-content/70">
-              [{translateResult.phonetic}]
+          <button
+            class="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800"
+            onclick={closeTranslatePanel}
+            aria-label="关闭翻译结果"
+          >
+            <CloseIcon size={14} />
+          </button>
+        </div>
+        <div class="mt-1 text-[11px] text-slate-500 truncate">
+          {selectedText}
+        </div>
+        <div
+          class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700"
+        >
+          {#if isTranslating}
+            <div class="flex items-center gap-2 text-slate-500">
+              <div
+                class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+              ></div>
+              <span>翻译中…</span>
             </div>
-          {/if}
-          {#if translateResult.explanation}
-            <div class="mt-1 text-xs text-base-content/60">
-              {translateResult.explanation}
+          {:else if translateError}
+            <div class="text-red-600 text-xs">{translateError}</div>
+          {:else if translateResult}
+            <div class="text-slate-900 text-sm font-semibold">
+              {translateResult.translation}
             </div>
+            {#if translateResult.phonetic}
+              <div class="mt-1 text-[11px] text-slate-500">
+                [{translateResult.phonetic}]
+              </div>
+            {/if}
+            {#if translateResult.explanation}
+              <div class="mt-1 text-[11px] text-slate-500">
+                {translateResult.explanation}
+              </div>
+            {/if}
+            <div class="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
+              目标语言: {translateResult.targetLanguage}
+            </div>
+          {:else}
+            <div class="text-slate-500 text-xs">暂无翻译结果</div>
           {/if}
-        {:else}
-          <div class="text-base-content/60 text-sm">暂无翻译结果</div>
-        {/if}
+        </div>
       </div>
-      <div class="mt-1 text-[11px] text-base-content/50">
-        目标语言:
-        {translateResult?.targetLanguage ?? "—"}
-      </div>
-    </div>
-  {/if}
+    {/if}
 </div>

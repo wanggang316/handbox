@@ -57,6 +57,19 @@ pub async fn debug_show_selection_overlay(app: AppHandle) -> Result<(), AppError
     });
 
     let _ = window.set_position(LogicalPosition::new(200.0, 200.0));
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSWindow;
+        let window_for_thread = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            let Ok(ns_window_ptr) = window_for_thread.ns_window() else {
+                return;
+            };
+            let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
+            ns_window.orderFront(None);
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
     let _ = window.show();
     let _ = window.emit("selection_update", payload);
 

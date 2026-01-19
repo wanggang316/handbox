@@ -19,7 +19,9 @@ use core_graphics::geometry::CGRect;
 #[cfg(target_os = "macos")]
 use objc2::rc::autoreleasepool;
 #[cfg(target_os = "macos")]
-use objc2_app_kit::NSWorkspace;
+use objc2_app_kit::{NSEvent, NSScreen, NSWorkspace};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
 #[cfg(target_os = "macos")]
@@ -27,18 +29,23 @@ use std::process::Command;
 #[cfg(target_os = "macos")]
 use std::sync::Mutex;
 #[cfg(target_os = "macos")]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
+use tauri::{AppHandle, Manager};
 use serde::Serialize;
 #[cfg(target_os = "macos")]
 use once_cell::sync::Lazy;
 
 const OVERLAY_WINDOW_LABEL: &str = "selection_overlay";
-const OVERLAY_WIDTH: f64 = 420.0;
-const OVERLAY_HEIGHT: f64 = 260.0;
+const OVERLAY_WIDTH: f64 = 360.0;
+const OVERLAY_HEIGHT: f64 = 44.0;
+const OVERLAY_MENU_HEIGHT: f64 = 32.0;
+const OVERLAY_VERTICAL_GAP: f64 = 34.0;
 const OVERLAY_PADDING: f64 = 12.0;
-const POLL_INTERVAL_MS: u64 = 250;
+const SELECTION_HOVER_PADDING: f64 = 6.0;
+const MOUSE_STILL_THRESHOLD: f64 = 2.0;
+const POLL_INTERVAL_MS: u64 = 100;
+const HOVER_DELAY_MS: u64 = 300;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +86,9 @@ struct SelectionSnapshot {
 #[cfg(target_os = "macos")]
 static LAST_SELECTION_PAYLOAD: Lazy<Mutex<Option<SelectionPayload>>> =
     Lazy::new(|| Mutex::new(None));
+#[cfg(target_os = "macos")]
+static LAST_SELECTION_ANCHOR: Lazy<Mutex<Option<SelectionRect>>> =
+    Lazy::new(|| Mutex::new(None));
 
 #[cfg(target_os = "macos")]
 pub fn start_selection_observer(app: AppHandle) {
@@ -89,6 +99,8 @@ pub fn start_selection_observer(app: AppHandle) {
         let app_identifier = app_handle.config().identifier.clone();
         let mut last_signature: Option<String> = None;
         let mut overlay_visible = false;
+        let mut hover_started_at: Option<Instant> = None;
+        let mut last_mouse_position: Option<SelectionRect> = None;
 
         let mut interval = tokio::time::interval(Duration::from_millis(POLL_INTERVAL_MS));
         tracing::info!("Selection observer started, polling every {}ms", POLL_INTERVAL_MS);
@@ -99,10 +111,12 @@ pub fn start_selection_observer(app: AppHandle) {
             let Some(snapshot) = snapshot else {
                 if overlay_visible {
                     tracing::debug!("No selection detected, hiding overlay");
-                    hide_overlay_window(&app_handle);
+                    hide_overlay_window_and_restore(&app_handle);
                     overlay_visible = false;
-                    last_signature = None;
                 }
+                hover_started_at = None;
+                last_mouse_position = None;
+                last_signature = None;
                 continue;
             };
 
@@ -122,13 +136,88 @@ pub fn start_selection_observer(app: AppHandle) {
                 }
             }
 
-            if last_signature.as_ref() == Some(&snapshot.signature) {
-                continue;
+            let signature_changed = last_signature
+                .as_ref()
+                .map(|signature| signature != &snapshot.signature)
+                .unwrap_or(true);
+
+            if signature_changed {
+                if overlay_visible {
+                    hide_overlay_window_and_restore(&app_handle);
+                    overlay_visible = false;
+                }
+                hover_started_at = None;
+                last_mouse_position = None;
+                last_signature = Some(snapshot.signature.clone());
             }
 
-            last_signature = Some(snapshot.signature);
-            overlay_visible = true;
-            show_overlay_window(&app_handle, &snapshot.payload);
+            let mut payload = snapshot.payload.clone();
+            let rect_valid = payload
+                .rect
+                .as_ref()
+                .map(is_valid_selection_rect)
+                .unwrap_or(false);
+            let mouse = current_mouse_location();
+            let mut rect_from_mouse = false;
+
+            if rect_valid {
+                if let Ok(mut anchor) = LAST_SELECTION_ANCHOR.lock() {
+                    *anchor = payload.rect.clone();
+                }
+            } else {
+                let anchor = mouse
+                    .clone()
+                    .map(selection_rect_from_point)
+                    .or_else(|| {
+                        LAST_SELECTION_ANCHOR
+                            .lock()
+                            .ok()
+                            .and_then(|slot| slot.clone())
+                    })
+                    .or_else(|| payload.rect.clone());
+
+                if let Some(anchor) = anchor {
+                    rect_from_mouse = mouse.is_some();
+                    payload.rect = Some(anchor);
+                }
+            }
+
+            if !overlay_visible {
+                let is_hovering = if rect_from_mouse {
+                    is_mouse_still(&mut last_mouse_position, mouse.clone())
+                } else {
+                    payload
+                        .rect
+                        .as_ref()
+                        .map(is_mouse_over_selection)
+                        .unwrap_or(false)
+                };
+
+                tracing::debug!(
+                    "Overlay pending: hovering={}, rect={:?}, rect_from_mouse={}, mouse={:?}",
+                    is_hovering,
+                    payload.rect,
+                    rect_from_mouse,
+                    mouse
+                );
+
+                if is_hovering {
+                    let elapsed = hover_started_at
+                        .get_or_insert_with(Instant::now)
+                        .elapsed();
+                    if elapsed >= Duration::from_millis(HOVER_DELAY_MS) {
+                        if let Ok(mut slot) = LAST_SELECTION_PAYLOAD.lock() {
+                            *slot = Some(payload.clone());
+                        }
+                        overlay_visible = true;
+                        show_overlay_window(&app_handle, &payload);
+                    }
+                } else {
+                    hover_started_at = None;
+                }
+            } else if signature_changed {
+                hover_started_at = None;
+            }
         }
     });
 }
@@ -162,26 +251,10 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
         return;
     };
 
-    let (x, y) = compute_overlay_position(payload.rect.as_ref());
-
-    if let Err(error) = window.set_size(LogicalSize::new(OVERLAY_WIDTH, OVERLAY_HEIGHT)) {
-        tracing::error!("Failed to resize overlay window: {error}");
-        return;
-    }
-
-    if let Err(error) = window.set_position(LogicalPosition::new(x, y)) {
-        tracing::error!("Failed to position overlay window: {error}");
-    }
-    if let Err(error) = window.show() {
-        tracing::error!("Failed to show overlay window: {error}");
-    } else {
-        tracing::info!("Overlay window shown successfully");
-    }
+    show_overlay_window_nonactivating(&window);
     tracing::info!(
-        "Selection overlay shown (text_len={}, x={}, y={})",
-        payload.text.len(),
-        x,
-        y
+        "Selection overlay shown (text_len={})",
+        payload.text.len()
     );
 }
 
@@ -193,57 +266,146 @@ fn hide_overlay_window(app: &AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
-fn compute_overlay_position(rect: Option<&SelectionRect>) -> (f64, f64) {
-    let display_bounds = CGDisplay::main().bounds();
-    let screen_width = display_bounds.size.width;
-    let screen_height = display_bounds.size.height;
+pub fn hide_overlay_window_and_restore(app: &AppHandle) {
+    hide_overlay_window(app);
+}
 
-    tracing::info!(
-        "Screen bounds: width={}, height={}",
-        screen_width,
-        screen_height
-    );
-    tracing::info!("Selection rect: {:?}", rect);
 
-    let (anchor_x, anchor_y, anchor_height) = if let Some(rect) = rect {
-        (rect.x + rect.width / 2.0, rect.y, rect.height)
-    } else if let Some(point) = current_mouse_location() {
-        tracing::debug!("Using mouse location: {:?}", point);
-        (point.x, point.y, 0.0)
-    } else {
-        tracing::debug!("Using screen center as fallback");
-        (screen_width / 2.0, screen_height / 2.0, 0.0)
-    };
+#[cfg(target_os = "macos")]
+fn show_overlay_window_nonactivating(window: &tauri::WebviewWindow) {
+    show_overlay_window_nonactivating_with_size(window, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+}
 
-    let mut x = anchor_x - OVERLAY_WIDTH / 2.0;
-    let mut y = anchor_y - OVERLAY_HEIGHT - 8.0;
+#[cfg(target_os = "macos")]
+fn show_overlay_window_nonactivating_with_size(
+    window: &tauri::WebviewWindow,
+    width: f64,
+    height: f64,
+) {
+    use objc2_app_kit::NSWindow;
 
-    tracing::info!(
-        "Initial position: x={}, y={} (anchor_x={}, anchor_y={}, anchor_height={})",
-        x,
-        y,
-        anchor_x,
-        anchor_y,
-        anchor_height
-    );
+    let window_for_thread = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let Ok(ns_window_ptr) = window_for_thread.ns_window() else {
+            return;
+        };
+        let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
+        let mtm = unsafe { MainThreadMarker::new_unchecked() };
+        let anchor = NSEvent::mouseLocation();
+        let screen_frame = screen_frame_for_point(mtm, anchor)
+            .unwrap_or_else(|| NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)));
 
-    if y < OVERLAY_PADDING {
-        y = anchor_y + anchor_height + 8.0;
-        tracing::info!("Adjusted y to below selection: {}", y);
+        let (x, y) = overlay_top_left_for_anchor(anchor, screen_frame, width, height);
+        ns_window.setFrameTopLeftPoint(NSPoint::new(x, y));
+        ns_window.orderFront(None);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn screen_frame_for_point(
+    mtm: MainThreadMarker,
+    point: NSPoint,
+) -> Option<NSRect> {
+    let screens = NSScreen::screens(mtm);
+    let count = screens.count();
+    for i in 0..count {
+        let screen = screens.objectAtIndex(i);
+        let frame = screen.frame();
+        if point_in_nsrect(point, frame) {
+            return Some(frame);
+        }
     }
 
-    x = x.clamp(
-        OVERLAY_PADDING,
-        screen_width - OVERLAY_WIDTH - OVERLAY_PADDING,
-    );
-    y = y.clamp(
-        OVERLAY_PADDING,
-        screen_height - OVERLAY_HEIGHT - OVERLAY_PADDING,
-    );
+    NSScreen::mainScreen(mtm).map(|screen| screen.frame())
+}
 
-    tracing::info!("Final clamped position: x={}, y={}", x, y);
+#[cfg(target_os = "macos")]
+fn point_in_nsrect(point: NSPoint, rect: NSRect) -> bool {
+    point.x >= rect.origin.x
+        && point.x <= rect.origin.x + rect.size.width
+        && point.y >= rect.origin.y
+        && point.y <= rect.origin.y + rect.size.height
+}
+
+#[cfg(target_os = "macos")]
+fn overlay_top_left_for_anchor(
+    anchor: NSPoint,
+    screen_frame: NSRect,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let mut x = anchor.x - width / 2.0;
+    let mut y = anchor.y + OVERLAY_MENU_HEIGHT + OVERLAY_VERTICAL_GAP;
+
+    let min_x = screen_frame.origin.x + OVERLAY_PADDING;
+    let max_x = screen_frame.origin.x + screen_frame.size.width - width - OVERLAY_PADDING;
+    let min_y = screen_frame.origin.y + height + OVERLAY_PADDING;
+    let max_y = screen_frame.origin.y + screen_frame.size.height - OVERLAY_PADDING;
+
+    if max_x >= min_x {
+        x = x.clamp(min_x, max_x);
+    } else {
+        x = min_x;
+    }
+
+    if max_y >= min_y {
+        y = y.clamp(min_y, max_y);
+    } else {
+        y = min_y;
+    }
 
     (x, y)
+}
+
+#[cfg(target_os = "macos")]
+fn is_valid_selection_rect(rect: &SelectionRect) -> bool {
+    rect.width > 1.0 && rect.height > 1.0
+}
+
+#[cfg(target_os = "macos")]
+fn selection_rect_from_point(point: SelectionRect) -> SelectionRect {
+    SelectionRect {
+        x: point.x,
+        y: point.y,
+        width: 2.0,
+        height: 2.0,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn is_mouse_over_selection(rect: &SelectionRect) -> bool {
+    let Some(point) = current_mouse_location() else {
+        return false;
+    };
+
+    let min_x = rect.x - SELECTION_HOVER_PADDING;
+    let max_x = rect.x + rect.width + SELECTION_HOVER_PADDING;
+    let min_y = rect.y - SELECTION_HOVER_PADDING;
+    let max_y = rect.y + rect.height + SELECTION_HOVER_PADDING;
+
+    point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
+}
+
+#[cfg(target_os = "macos")]
+fn is_mouse_still(
+    last_mouse_position: &mut Option<SelectionRect>,
+    current_mouse: Option<SelectionRect>,
+) -> bool {
+    let Some(current) = current_mouse else {
+        *last_mouse_position = None;
+        return false;
+    };
+
+    let still = last_mouse_position
+        .as_ref()
+        .map(|prev| {
+            (prev.x - current.x).abs() <= MOUSE_STILL_THRESHOLD
+                && (prev.y - current.y).abs() <= MOUSE_STILL_THRESHOLD
+        })
+        .unwrap_or(false);
+
+    *last_mouse_position = Some(current);
+    still
 }
 
 #[cfg(target_os = "macos")]
@@ -333,7 +495,17 @@ fn get_focused_selection() -> Option<(
         let rect = range.and_then(|range| ax_copy_bounds_for_range(focused, range));
         let window_title = ax_copy_window_title(focused);
 
-        let normalized_rect = rect.map(|rect| rect_to_top_left(rect));
+        let normalized_rect = rect
+            .and_then(normalize_selection_rect)
+            .filter(is_valid_selection_rect);
+
+        let mouse = current_mouse_location();
+        tracing::debug!(
+            "Selection rect raw={:?}, normalized={:?}, mouse={:?}",
+            rect,
+            normalized_rect,
+            mouse
+        );
 
         Some((
             focused,
@@ -468,6 +640,29 @@ fn rect_to_top_left(rect: CGRect) -> SelectionRect {
 }
 
 #[cfg(target_os = "macos")]
+fn normalize_selection_rect(rect: CGRect) -> Option<SelectionRect> {
+    let top_left = rect_to_top_left(rect);
+    let as_is = SelectionRect {
+        x: rect.origin.x,
+        y: rect.origin.y,
+        width: rect.size.width,
+        height: rect.size.height,
+    };
+
+    if let Some(mouse) = current_mouse_location() {
+        if is_point_in_rect(&mouse, &as_is) {
+            return Some(as_is);
+        }
+        if is_point_in_rect(&mouse, &top_left) {
+            return Some(top_left);
+        }
+        return None;
+    }
+
+    Some(top_left)
+}
+
+#[cfg(target_os = "macos")]
 fn current_mouse_location() -> Option<SelectionRect> {
     let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
     let event = CGEvent::new(source).ok()?;
@@ -479,6 +674,16 @@ fn current_mouse_location() -> Option<SelectionRect> {
         width: 0.0,
         height: 0.0,
     })
+}
+
+#[cfg(target_os = "macos")]
+fn is_point_in_rect(point: &SelectionRect, rect: &SelectionRect) -> bool {
+    let min_x = rect.x - SELECTION_HOVER_PADDING;
+    let max_x = rect.x + rect.width + SELECTION_HOVER_PADDING;
+    let min_y = rect.y - SELECTION_HOVER_PADDING;
+    let max_y = rect.y + rect.height + SELECTION_HOVER_PADDING;
+
+    point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
 }
 
 #[cfg(target_os = "macos")]
