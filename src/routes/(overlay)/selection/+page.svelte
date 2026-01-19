@@ -127,12 +127,8 @@
 
   function getContainerSize(container: HTMLElement) {
     const rect = container.getBoundingClientRect();
-    const width = Math.ceil(
-      Math.max(rect.width, container.scrollWidth),
-    );
-    const height = Math.ceil(
-      Math.max(rect.height, container.scrollHeight),
-    );
+    const width = Math.ceil(Math.max(rect.width, container.scrollWidth));
+    const height = Math.ceil(Math.max(rect.height, container.scrollHeight));
     return { width, height };
   }
 
@@ -219,8 +215,13 @@
 
     const minX = monitor.position.x + WINDOW_EDGE_PADDING;
     const minY = monitor.position.y + WINDOW_EDGE_PADDING;
-    const maxX = monitor.position.x + monitor.size.width - nextWidth - WINDOW_EDGE_PADDING;
-    const maxY = monitor.position.y + monitor.size.height - nextHeight - WINDOW_EDGE_PADDING;
+    const maxX =
+      monitor.position.x + monitor.size.width - nextWidth - WINDOW_EDGE_PADDING;
+    const maxY =
+      monitor.position.y +
+      monitor.size.height -
+      nextHeight -
+      WINDOW_EDGE_PADDING;
 
     const clampedX =
       maxX < minX ? minX : Math.min(Math.max(position.x, minX), maxX);
@@ -240,7 +241,10 @@
     }
     const container = menuContainer ?? translatePanelContainer;
     const { width, height } = getContainerSize(container);
-    console.log("[syncWindowSizeForTranslatePanel] Container size:", { width, height });
+    console.log("[syncWindowSizeForTranslatePanel] Container size:", {
+      width,
+      height,
+    });
 
     if (!width || !height) {
       console.log("[syncWindowSizeForTranslatePanel] Invalid size");
@@ -250,7 +254,9 @@
     lastWindowSize = { width, height };
 
     await applyOverlaySize(width, height);
-    console.log("[syncWindowSizeForTranslatePanel] Window resized successfully");
+    console.log(
+      "[syncWindowSizeForTranslatePanel] Window resized successfully",
+    );
   }
 
   $effect(() => {
@@ -521,151 +527,153 @@
 
 <div
   bind:this={menuContainer}
-  class="w-[360px] max-w-[92vw] rounded-[18px] bg-white px-2.5 py-1 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing"
-    onpointerdown={handlePointerDown}
-    onpointermove={handlePointerMove}
-    onpointerup={handlePointerUp}
-    onpointercancel={handlePointerUp}
-  >
-    <div class="flex items-center gap-1.5">
-      <button
-        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-        onclick={loadLatestSelection}
-        disabled={isLoadingSelection}
+  class="w-[320px] rounded-[18px] bg-red-200 px-2.5 py-1 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing"
+  onpointerdown={handlePointerDown}
+  onpointermove={handlePointerMove}
+  onpointerup={handlePointerUp}
+  onpointercancel={handlePointerUp}
+>
+  <div class="flex items-center gap-1.5">
+    <button
+      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      onclick={loadLatestSelection}
+      disabled={isLoadingSelection}
+    >
+      {#if isLoadingSelection}
+        <div
+          class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+        ></div>
+      {:else}
+        <Search size={12} />
+        显示
+      {/if}
+    </button>
+    <button
+      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      onclick={handleCopyText}
+      disabled={!selectedText}
+    >
+      <Copy size={12} />
+      复制
+    </button>
+    <button
+      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      onclick={handleTranslateText}
+      disabled={!selectedText || isTranslating}
+    >
+      {#if isTranslating}
+        <div
+          class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+        ></div>
+      {:else}
+        <Languages size={12} />
+        翻译
+      {/if}
+    </button>
+    <button
+      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      onclick={handleFavoriteText}
+      disabled={!selectedText || isFavoriting}
+    >
+      {#if isFavoriting}
+        <div
+          class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+        ></div>
+      {:else}
+        <Star size={12} />
+        收藏
+      {/if}
+    </button>
+  </div>
+
+  {#if showSelectionPanel}
+    <div
+      class="rounded-2xl bg-slate-50 p-3"
+      role="dialog"
+      aria-label="选区内容"
+      tabindex="0"
+    >
+      <div class="flex items-center justify-between">
+        <div class="text-[11px] uppercase tracking-wide text-slate-500">
+          选区内容
+        </div>
+        <button
+          class="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800"
+          onclick={closeSelectionPanel}
+          aria-label="关闭选区内容"
+        >
+          <CloseIcon size={14} />
+        </button>
+      </div>
+      <div class="mt-1 text-[11px] text-slate-500 truncate">
+        {payload?.sourceAppName ?? "—"} · {payload?.sourceWindowTitle ?? "—"}
+      </div>
+      <div
+        class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700 min-h-[80px] max-h-40 overflow-auto"
       >
-        {#if isLoadingSelection}
-          <div
-            class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
-          ></div>
-        {:else}
-          <Search size={12} />
-          显示
-        {/if}
-      </button>
-      <button
-        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-        onclick={handleCopyText}
-        disabled={!selectedText}
-      >
-        <Copy size={12} />
-        复制
-      </button>
-      <button
-        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-        onclick={handleTranslateText}
-        disabled={!selectedText || isTranslating}
+        {selectedTextRaw || selectedText || "暂无内容"}
+      </div>
+    </div>
+  {/if}
+
+  {#if showTranslatePanel}
+    <div
+      bind:this={translatePanelContainer}
+      class="rounded-2xl bg-slate-50 p-3"
+      role="dialog"
+      aria-label="翻译结果"
+      tabindex="0"
+    >
+      <div class="flex items-center justify-between">
+        <div class="text-[11px] uppercase tracking-wide text-slate-500">
+          翻译结果
+        </div>
+        <button
+          class="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800"
+          onclick={closeTranslatePanel}
+          aria-label="关闭翻译结果"
+        >
+          <CloseIcon size={14} />
+        </button>
+      </div>
+      <div class="mt-1 text-[11px] text-slate-500 truncate">
+        {selectedText}
+      </div>
+      <div
+        class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700 max-h-[400px] overflow-auto"
       >
         {#if isTranslating}
-          <div
-            class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
-          ></div>
-        {:else}
-          <Languages size={12} />
-          翻译
-        {/if}
-      </button>
-      <button
-        class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-        onclick={handleFavoriteText}
-        disabled={!selectedText || isFavoriting}
-      >
-        {#if isFavoriting}
-          <div
-            class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
-          ></div>
-        {:else}
-          <Star size={12} />
-          收藏
-        {/if}
-      </button>
-    </div>
-
-    {#if showSelectionPanel}
-      <div
-        class="rounded-2xl bg-slate-50 p-3"
-        role="dialog"
-        aria-label="选区内容"
-        tabindex="0"
-      >
-        <div class="flex items-center justify-between">
-          <div class="text-[11px] uppercase tracking-wide text-slate-500">
-            选区内容
+          <div class="flex items-center gap-2 text-slate-500">
+            <div
+              class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
+            ></div>
+            <span>翻译中…</span>
           </div>
-          <button
-            class="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800"
-            onclick={closeSelectionPanel}
-            aria-label="关闭选区内容"
-          >
-            <CloseIcon size={14} />
-          </button>
-        </div>
-        <div class="mt-1 text-[11px] text-slate-500 truncate">
-          {payload?.sourceAppName ?? "—"} · {payload?.sourceWindowTitle ?? "—"}
-        </div>
-        <div
-          class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700 min-h-[80px] max-h-40 overflow-auto"
-        >
-          {selectedTextRaw || selectedText || "暂无内容"}
-        </div>
-      </div>
-    {/if}
-
-    {#if showTranslatePanel}
-      <div
-        bind:this={translatePanelContainer}
-        class="rounded-2xl bg-slate-50 p-3"
-        role="dialog"
-        aria-label="翻译结果"
-        tabindex="0"
-      >
-        <div class="flex items-center justify-between">
-          <div class="text-[11px] uppercase tracking-wide text-slate-500">
-            翻译结果
+        {:else if translateError}
+          <div class="text-red-600 text-xs">{translateError}</div>
+        {:else if translateResult}
+          <div class="text-slate-900 text-sm font-semibold">
+            {translateResult.translation}
           </div>
-          <button
-            class="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800"
-            onclick={closeTranslatePanel}
-            aria-label="关闭翻译结果"
-          >
-            <CloseIcon size={14} />
-          </button>
-        </div>
-        <div class="mt-1 text-[11px] text-slate-500 truncate">
-          {selectedText}
-        </div>
-         <div
-           class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700 max-h-[400px] overflow-auto"
-         >
-          {#if isTranslating}
-            <div class="flex items-center gap-2 text-slate-500">
-              <div
-                class="w-3 h-3 border border-t-transparent rounded-full animate-spin"
-              ></div>
-              <span>翻译中…</span>
+          {#if translateResult.phonetic}
+            <div class="mt-1 text-[11px] text-slate-500">
+              [{translateResult.phonetic}]
             </div>
-          {:else if translateError}
-            <div class="text-red-600 text-xs">{translateError}</div>
-          {:else if translateResult}
-            <div class="text-slate-900 text-sm font-semibold">
-              {translateResult.translation}
-            </div>
-            {#if translateResult.phonetic}
-              <div class="mt-1 text-[11px] text-slate-500">
-                [{translateResult.phonetic}]
-              </div>
-            {/if}
-            {#if translateResult.explanation}
-              <div class="mt-1 text-[11px] text-slate-500">
-                {translateResult.explanation}
-              </div>
-            {/if}
-            <div class="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
-              目标语言: {translateResult.targetLanguage}
-            </div>
-          {:else}
-            <div class="text-slate-500 text-xs">暂无翻译结果</div>
           {/if}
-        </div>
+          {#if translateResult.explanation}
+            <div class="mt-1 text-[11px] text-slate-500">
+              {translateResult.explanation}
+            </div>
+          {/if}
+          <div
+            class="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500"
+          >
+            目标语言: {translateResult.targetLanguage}
+          </div>
+        {:else}
+          <div class="text-slate-500 text-xs">暂无翻译结果</div>
+        {/if}
       </div>
-    {/if}
+    </div>
+  {/if}
 </div>

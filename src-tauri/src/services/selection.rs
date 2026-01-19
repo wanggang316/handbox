@@ -23,6 +23,9 @@ use objc2_app_kit::{NSEvent, NSScreen, NSWorkspace};
 #[cfg(target_os = "macos")]
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 #[cfg(target_os = "macos")]
+use once_cell::sync::Lazy;
+use serde::Serialize;
+#[cfg(target_os = "macos")]
 use std::ffi::c_void;
 #[cfg(target_os = "macos")]
 use std::process::Command;
@@ -32,9 +35,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
-use serde::Serialize;
-#[cfg(target_os = "macos")]
-use once_cell::sync::Lazy;
 
 const OVERLAY_WINDOW_LABEL: &str = "selection_overlay";
 const OVERLAY_WIDTH: f64 = 360.0;
@@ -87,8 +87,7 @@ struct SelectionSnapshot {
 static LAST_SELECTION_PAYLOAD: Lazy<Mutex<Option<SelectionPayload>>> =
     Lazy::new(|| Mutex::new(None));
 #[cfg(target_os = "macos")]
-static LAST_SELECTION_ANCHOR: Lazy<Mutex<Option<SelectionRect>>> =
-    Lazy::new(|| Mutex::new(None));
+static LAST_SELECTION_ANCHOR: Lazy<Mutex<Option<SelectionRect>>> = Lazy::new(|| Mutex::new(None));
 
 #[cfg(target_os = "macos")]
 pub fn start_selection_observer(app: AppHandle) {
@@ -103,7 +102,10 @@ pub fn start_selection_observer(app: AppHandle) {
         let mut last_mouse_position: Option<SelectionRect> = None;
 
         let mut interval = tokio::time::interval(Duration::from_millis(POLL_INTERVAL_MS));
-        tracing::info!("Selection observer started, polling every {}ms", POLL_INTERVAL_MS);
+        tracing::info!(
+            "Selection observer started, polling every {}ms",
+            POLL_INTERVAL_MS
+        );
         loop {
             interval.tick().await;
 
@@ -202,9 +204,7 @@ pub fn start_selection_observer(app: AppHandle) {
                 );
 
                 if is_hovering {
-                    let elapsed = hover_started_at
-                        .get_or_insert_with(Instant::now)
-                        .elapsed();
+                    let elapsed = hover_started_at.get_or_insert_with(Instant::now).elapsed();
                     if elapsed >= Duration::from_millis(HOVER_DELAY_MS) {
                         if let Ok(mut slot) = LAST_SELECTION_PAYLOAD.lock() {
                             *slot = Some(payload.clone());
@@ -244,7 +244,10 @@ fn ensure_accessibility_permission() {
 
 #[cfg(target_os = "macos")]
 fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
-    tracing::info!("show_overlay_window called for text: '{}'", &payload.text[..payload.text.len().min(50)]);
+    tracing::info!(
+        "show_overlay_window called for text: '{}'",
+        &payload.text[..payload.text.len().min(50)]
+    );
 
     let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
         tracing::error!("Selection overlay window not found!");
@@ -252,10 +255,7 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
     };
 
     show_overlay_window_nonactivating(&window);
-    tracing::info!(
-        "Selection overlay shown (text_len={})",
-        payload.text.len()
-    );
+    tracing::info!("Selection overlay shown (text_len={})", payload.text.len());
 }
 
 #[cfg(target_os = "macos")]
@@ -269,7 +269,6 @@ fn hide_overlay_window(app: &AppHandle) {
 pub fn hide_overlay_window_and_restore(app: &AppHandle) {
     hide_overlay_window(app);
 }
-
 
 #[cfg(target_os = "macos")]
 fn show_overlay_window_nonactivating(window: &tauri::WebviewWindow) {
@@ -302,10 +301,7 @@ fn show_overlay_window_nonactivating_with_size(
 }
 
 #[cfg(target_os = "macos")]
-fn screen_frame_for_point(
-    mtm: MainThreadMarker,
-    point: NSPoint,
-) -> Option<NSRect> {
+fn screen_frame_for_point(mtm: MainThreadMarker, point: NSPoint) -> Option<NSRect> {
     let screens = NSScreen::screens(mtm);
     let count = screens.count();
     for i in 0..count {
