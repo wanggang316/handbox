@@ -234,6 +234,7 @@ pub fn run() {
             debug_show_selection_overlay,
             selection_get_last_payload,
             selection_overlay_hide,
+            selection_overlay_resize,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,
@@ -367,6 +368,8 @@ fn configure_selection_overlay_panel(window: &tauri::WebviewWindow) {
         let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
         let mut style_mask = ns_window.styleMask();
         style_mask.insert(NSWindowStyleMask::NonactivatingPanel);
+        // 确保窗口可以调整大小 - 这是关键！
+        style_mask.insert(NSWindowStyleMask::Resizable);
         ns_window.setStyleMask(style_mask);
         ns_window.setLevel(NSStatusWindowLevel);
 

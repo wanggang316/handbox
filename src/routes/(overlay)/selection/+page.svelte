@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { onMount, tick } from "svelte";
   import {
@@ -52,6 +53,9 @@
     explanation?: string | null;
   } | null>(null);
   let translateError = $state<string | null>(null);
+  let overlayWebview = $state<ReturnType<typeof getCurrentWebview> | null>(
+    null,
+  );
   let overlayWindow = $state<ReturnType<typeof getCurrentWebviewWindow> | null>(
     null,
   );
@@ -60,12 +64,30 @@
   let dragStart = $state({ x: 0, y: 0 });
   let dragWindowStart = $state({ x: 0, y: 0 });
   let menuContainer = $state<HTMLDivElement | null>(null);
+  let translatePanelContainer = $state<HTMLDivElement | null>(null);
   let resizeFrameId = 0;
   let lastWindowSize = { width: 0, height: 0 };
   let resizeObserver: ResizeObserver | null = null;
+  const WINDOW_EDGE_PADDING = 12;
 
   onMount(() => {
     overlayWindow = getCurrentWebviewWindow();
+    overlayWebview = getCurrentWebview();
+    overlayWindow
+      ?.setResizable(true)
+      .catch((error) =>
+        console.error("Failed to set overlay resizable:", error),
+      );
+    overlayWindow
+      ?.setMinSize(null)
+      .catch((error) =>
+        console.error("Failed to clear overlay min size:", error),
+      );
+    overlayWindow
+      ?.setMaxSize(null)
+      .catch((error) =>
+        console.error("Failed to clear overlay max size:", error),
+      );
     scheduleWindowResize();
 
     setupResizeObserver();
@@ -79,6 +101,8 @@
       document.removeEventListener("visibilitychange", handleVisibility);
       resizeObserver?.disconnect();
       resizeObserver = null;
+      overlayWebview = null;
+      overlayWindow = null;
     };
   });
 
@@ -101,6 +125,53 @@
     });
   }
 
+  function getContainerSize(container: HTMLElement) {
+    const rect = container.getBoundingClientRect();
+    const width = Math.ceil(
+      Math.max(rect.width, container.scrollWidth),
+    );
+    const height = Math.ceil(
+      Math.max(rect.height, container.scrollHeight),
+    );
+    return { width, height };
+  }
+
+  async function applyOverlaySize(width: number, height: number) {
+    overlayWindow ??= getCurrentWebviewWindow();
+    overlayWebview ??= getCurrentWebview();
+    const windowHandle = overlayWindow;
+    if (!windowHandle) {
+      console.log("[applyOverlaySize] No window handle");
+      return;
+    }
+
+    const size = new LogicalSize(width, height);
+    try {
+      await invoke("selection_overlay_resize", { width, height });
+    } catch (error) {
+      console.error("Failed to resize overlay via IPC:", error);
+    }
+    try {
+      await windowHandle.setSize(size);
+    } catch (error) {
+      console.error("Failed to resize selection overlay:", error);
+    }
+
+    if (overlayWebview) {
+      try {
+        await overlayWebview.setSize(size);
+      } catch (error) {
+        console.error("Failed to resize selection webview:", error);
+      }
+    }
+
+    try {
+      await clampOverlayPosition(width, height);
+    } catch (error) {
+      console.error("Failed to clamp overlay position:", error);
+    }
+  }
+
   async function syncWindowSize() {
     const container = menuContainer;
     if (!container) {
@@ -115,9 +186,7 @@
     }
 
     await tick();
-    const rect = container.getBoundingClientRect();
-    const width = Math.ceil(rect.width);
-    const height = Math.ceil(rect.height);
+    const { width, height } = getContainerSize(container);
     console.log("[syncWindowSize] Calculated size:", { width, height });
     if (!width || !height) {
       console.log("[syncWindowSize] Invalid size");
@@ -129,13 +198,59 @@
     }
     lastWindowSize = { width, height };
 
-    try {
-      console.log("[syncWindowSize] Setting window size to:", { width, height });
-      await windowHandle.setSize(new LogicalSize(width, height));
-      console.log("[syncWindowSize] Window resized successfully");
-    } catch (error) {
-      console.error("Failed to resize selection overlay:", error);
+    console.log("[syncWindowSize] Setting window size to:", { width, height });
+    await applyOverlaySize(width, height);
+    console.log("[syncWindowSize] Window resized successfully");
+  }
+
+  async function clampOverlayPosition(width: number, height: number) {
+    if (typeof window === "undefined") return;
+    overlayWindow ??= getCurrentWebviewWindow();
+    const windowHandle = overlayWindow;
+    if (!windowHandle) return;
+
+    const monitor = await windowHandle.currentMonitor();
+    if (!monitor) return;
+
+    const scale = window.devicePixelRatio || 1;
+    const nextWidth = Math.round(width * scale);
+    const nextHeight = Math.round(height * scale);
+    const position = await windowHandle.outerPosition();
+
+    const minX = monitor.position.x + WINDOW_EDGE_PADDING;
+    const minY = monitor.position.y + WINDOW_EDGE_PADDING;
+    const maxX = monitor.position.x + monitor.size.width - nextWidth - WINDOW_EDGE_PADDING;
+    const maxY = monitor.position.y + monitor.size.height - nextHeight - WINDOW_EDGE_PADDING;
+
+    const clampedX =
+      maxX < minX ? minX : Math.min(Math.max(position.x, minX), maxX);
+    const clampedY =
+      maxY < minY ? minY : Math.min(Math.max(position.y, minY), maxY);
+
+    if (clampedX !== position.x || clampedY !== position.y) {
+      await windowHandle.setPosition(new PhysicalPosition(clampedX, clampedY));
     }
+  }
+
+  async function syncWindowSizeForTranslatePanel() {
+    await tick();
+    if (!translatePanelContainer) {
+      console.log("[syncWindowSizeForTranslatePanel] No container");
+      return;
+    }
+    const container = menuContainer ?? translatePanelContainer;
+    const { width, height } = getContainerSize(container);
+    console.log("[syncWindowSizeForTranslatePanel] Container size:", { width, height });
+
+    if (!width || !height) {
+      console.log("[syncWindowSizeForTranslatePanel] Invalid size");
+      return;
+    }
+
+    lastWindowSize = { width, height };
+
+    await applyOverlaySize(width, height);
+    console.log("[syncWindowSizeForTranslatePanel] Window resized successfully");
   }
 
   $effect(() => {
@@ -317,40 +432,27 @@
 
   async function handleTranslateText() {
     if (!selectedText) return;
-    console.log("[handleTranslateText] Starting translation...");
+
     showTranslatePanel = true;
     showSelectionPanel = false;
     translateResult = null;
     translateError = null;
     isTranslating = true;
-
-    console.log("[handleTranslateText] Waiting for DOM update (loading state)...");
-    await tick();
-    await syncWindowSize();
+    await syncWindowSizeForTranslatePanel();
 
     try {
-      console.log("[handleTranslateText] Calling translateWord API...");
       const response = await translateWord({ term: selectedText });
       translateResult = response;
-      console.log("[handleTranslateText] Translation result received:", response);
-
-      console.log("[handleTranslateText] Waiting for DOM update (result)...");
       await tick();
-      await syncWindowSize();
+      await syncWindowSizeForTranslatePanel();
     } catch (error) {
       console.error("Failed to translate selection:", error);
       const normalized = showAppError(error, { fallbackMessage: "翻译失败" });
       translateError = normalized.message;
-
-      console.log("[handleTranslateText] Waiting for DOM update (error)...");
       await tick();
-      await syncWindowSize();
+      await syncWindowSizeForTranslatePanel();
     } finally {
       isTranslating = false;
-      console.log("[handleTranslateText] Waiting for DOM update (finished)...");
-      await tick();
-      await syncWindowSize();
-      console.log("[handleTranslateText] Translation flow completed");
     }
   }
 
@@ -407,8 +509,12 @@
 
 <svelte:head>
   <style>
+    :global(html),
     :global(body) {
       background: transparent !important;
+      height: auto !important;
+      min-height: 100% !important;
+      overflow: visible !important;
     }
   </style>
 </svelte:head>
@@ -506,6 +612,7 @@
 
     {#if showTranslatePanel}
       <div
+        bind:this={translatePanelContainer}
         class="rounded-2xl bg-slate-50 p-3"
         role="dialog"
         aria-label="翻译结果"
@@ -526,9 +633,9 @@
         <div class="mt-1 text-[11px] text-slate-500 truncate">
           {selectedText}
         </div>
-        <div
-          class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700"
-        >
+         <div
+           class="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-slate-700 max-h-[400px] overflow-auto"
+         >
           {#if isTranslating}
             <div class="flex items-center gap-2 text-slate-500">
               <div
