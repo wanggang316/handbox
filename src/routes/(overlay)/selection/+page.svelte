@@ -7,6 +7,8 @@
     ChevronDown,
     Copy,
     Languages,
+    MessageCircle,
+    MoreVertical,
     Pin,
     RotateCcw,
     Search,
@@ -16,6 +18,7 @@
     Zap,
   } from "@lucide/svelte";
   import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
+  import { openSettingsWindow } from "$lib/api/window";
   import { translateWord } from "$lib/api/word";
   import { favoriteStore } from "$lib/states";
   import { showAppError } from "$lib/utils/error";
@@ -49,8 +52,7 @@
   let isLoadingSelection = $state(false);
   let isFavoriting = $state(false);
   let isTranslating = $state(false);
-  type PanelMode = "translate" | "selection" | "lookup";
-  const MENU_WIDTH = 360;
+  type PanelMode = "translate" | "ask" | "selection" | "lookup";
   const PANEL_WIDTH = 520;
   const PANEL_MIN_HEIGHT = 220;
   const PANEL_MAX_HEIGHT = 420;
@@ -90,12 +92,14 @@
 
   const panelModeOptions: { value: PanelMode; label: string }[] = [
     { value: "translate", label: "翻译" },
+    { value: "ask", label: "问AI" },
     { value: "selection", label: "选区" },
     { value: "lookup", label: "查询" },
   ];
 
   const panelModeIcons = {
     translate: Languages,
+    ask: MessageCircle,
     selection: Search,
     lookup: Search,
   } as const;
@@ -121,6 +125,11 @@
       ?.setResizable(true)
       .catch((error) =>
         console.error("Failed to set overlay resizable:", error),
+      );
+    overlayWindow
+      ?.setShadow(false)
+      .catch((error) =>
+        console.error("Failed to disable overlay shadow:", error),
       );
     overlayWindow
       ?.setMinSize(null)
@@ -569,6 +578,22 @@
     }
   }
 
+  async function handleAskText() {
+    if (!selectedText) return;
+    resetTranslationState();
+    await openPanel("ask");
+  }
+
+  async function handleOpenSettings() {
+    try {
+      await openSettingsWindow("general");
+      await hideOverlay();
+    } catch (error) {
+      console.error("Failed to open settings window:", error);
+      showAppError(error, { fallbackMessage: "打开设置失败，请重试" });
+    }
+  }
+
   async function handleFavoriteText() {
     if (!selectedText || !payload) return;
 
@@ -649,15 +674,14 @@
 {#if showMenu}
   <div
     bind:this={menuContainer}
-    style={`width: ${MENU_WIDTH}px;`}
-    class="rounded-[18px] bg-white/95 border border-slate-200 px-2.5 py-1 flex items-center gap-1.5 shadow-lg backdrop-blur cursor-grab active:cursor-grabbing"
+    class="rounded-[18px] bg-white border border-slate-200 px-2.5 py-1 inline-flex w-max flex-nowrap items-center gap-1.5 cursor-grab active:cursor-grabbing"
     onpointerdown={handlePointerDown}
     onpointermove={handlePointerMove}
     onpointerup={handlePointerUp}
     onpointercancel={handlePointerUp}
   >
     <button
-      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      class="inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
       onclick={loadLatestSelection}
       disabled={isLoadingSelection}
     >
@@ -671,7 +695,7 @@
       {/if}
     </button>
     <button
-      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      class="inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
       onclick={handleCopyText}
       disabled={!selectedText}
     >
@@ -679,7 +703,7 @@
       复制
     </button>
     <button
-      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      class="inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
       onclick={handleTranslateText}
       disabled={!selectedText || isTranslating}
     >
@@ -693,7 +717,15 @@
       {/if}
     </button>
     <button
-      class="inline-flex items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      class="inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+      onclick={handleAskText}
+      disabled={!selectedText}
+    >
+      <MessageCircle size={12} />
+      问AI
+    </button>
+    <button
+      class="inline-flex shrink-0 items-center gap-1.5 rounded-[12px] px-2 py-1 text-[12px] font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
       onclick={handleFavoriteText}
       disabled={!selectedText || isFavoriting}
     >
@@ -706,6 +738,13 @@
         收藏
       {/if}
     </button>
+    <button
+      class="shrink-0 p-1.5 rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-300"
+      onclick={handleOpenSettings}
+      aria-label="打开设置"
+    >
+      <MoreVertical size={14} />
+    </button>
   </div>
 {/if}
 
@@ -713,7 +752,7 @@
   <div
     bind:this={panelContainer}
     style={`width: ${PANEL_WIDTH}px; height: ${panelHeight}px;`}
-    class="rounded-[24px] bg-white/95 border border-slate-200 shadow-xl px-4 py-3 flex flex-col gap-3 backdrop-blur cursor-grab active:cursor-grabbing overflow-hidden"
+    class="rounded-[24px] bg-white border border-slate-200 px-4 py-3 flex flex-col gap-3 cursor-grab active:cursor-grabbing overflow-hidden"
     role="dialog"
     aria-label="操作面板"
     tabindex="0"
@@ -801,6 +840,13 @@
               <div class="text-slate-500 text-sm">暂无翻译结果</div>
             {/if}
           </div>
+        {:else if panelMode === "ask"}
+          <div class="text-[11px] text-slate-500 truncate">
+            {selectedText}
+          </div>
+          <div class="mt-3 text-sm text-slate-500">
+            聊天功能暂未接入。
+          </div>
         {:else if panelMode === "selection"}
           <div class="text-[11px] text-slate-500 truncate">
             {payload?.sourceAppName ?? "—"} · {payload?.sourceWindowTitle ??
@@ -817,7 +863,7 @@
 
     <div
       bind:this={panelFooter}
-      class="flex items-center justify-between border-t border-slate-200/70 pt-2 text-slate-500"
+      class="flex items-center justify-between border-t border-slate-200 pt-2 text-slate-500"
     >
       <div class="flex items-center gap-1.5">
         <button class="p-1.5 rounded-lg hover:bg-slate-100" aria-label="复制">
