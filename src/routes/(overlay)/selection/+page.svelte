@@ -84,11 +84,15 @@
   let panelFooter = $state<HTMLDivElement | null>(null);
   let panelHeight = $state(PANEL_MIN_HEIGHT);
   let unlistenSelectionUpdate: (() => void) | null = null;
+  let unlistenFocusChange: (() => void) | null = null;
+  let translationRequestId = 0;
   let resizeFrameId = 0;
   let lastWindowSize = { width: 0, height: 0 };
   let resizeObserver: ResizeObserver | null = null;
   const WINDOW_EDGE_PADDING = 12;
+  const FOCUS_LOSS_GUARD_MS = 250;
   let resizeAnchor = $state<"top" | "bottom">("top");
+  let focusLossGuardUntil = 0;
 
   const panelModeOptions: { value: PanelMode; label: string }[] = [
     { value: "translate", label: "翻译" },
@@ -120,6 +124,18 @@
         .catch((error) =>
           console.error("Failed to listen for selection updates:", error),
         );
+      void overlayWindow
+        .onFocusChanged((event) => {
+          if (event.payload || !showPanel) return;
+          if (Date.now() < focusLossGuardUntil) return;
+          void closePanel();
+        })
+        .then((unlisten) => {
+          unlistenFocusChange = unlisten;
+        })
+        .catch((error) =>
+          console.error("Failed to listen for focus changes:", error),
+        );
     }
     overlayWindow
       ?.setResizable(true)
@@ -150,12 +166,22 @@
         scheduleWindowResize();
       }
     };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (!showPanel) return;
+      event.preventDefault();
+      void closePanel();
+    };
     document.addEventListener("visibilitychange", handleVisibility);
+    document.addEventListener("keydown", handleKeyDown);
     void syncLatestSelection();
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
+      document.removeEventListener("keydown", handleKeyDown);
       unlistenSelectionUpdate?.();
       unlistenSelectionUpdate = null;
+      unlistenFocusChange?.();
+      unlistenFocusChange = null;
       resizeObserver?.disconnect();
       resizeObserver = null;
       overlayWebview = null;
@@ -373,13 +399,25 @@
   function canStartDrag(event: PointerEvent) {
     if (event.button !== 0) return false;
     const target = event.target;
-    if (target instanceof HTMLElement && target.closest("button")) {
+    if (
+      target instanceof HTMLElement &&
+      target.closest("button, select, option, input, textarea, [contenteditable='true']")
+    ) {
       return false;
     }
     return true;
   }
 
   async function handlePointerDown(event: PointerEvent) {
+    if (showPanel) {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("[data-focus-guard]")
+      ) {
+        guardFocusLoss();
+      }
+    }
     if (!canStartDrag(event)) return;
     try {
       overlayWindow ??= getCurrentWebviewWindow();
@@ -432,35 +470,122 @@
     }
   }
 
-  function resetTranslationState() {
-    translateResult = null;
-    translateError = null;
+  function cancelTranslation() {
+    translationRequestId += 1;
     isTranslating = false;
   }
 
+  function resetTranslationState() {
+    cancelTranslation();
+    translateResult = null;
+    translateError = null;
+  }
+
+  function guardFocusLoss() {
+    focusLossGuardUntil = Date.now() + FOCUS_LOSS_GUARD_MS;
+  }
+
+  async function setOverlayLocked(locked: boolean) {
+    try {
+      await invoke("selection_overlay_lock", { locked });
+    } catch (error) {
+      console.error("Failed to update overlay lock:", error);
+    }
+  }
+
+  async function setOverlayInteractive(interactive: boolean) {
+    try {
+      await invoke("selection_overlay_set_interactive", { interactive });
+    } catch (error) {
+      console.error("Failed to update overlay interactive state:", error);
+    }
+  }
+
+  async function dismissOverlaySelection() {
+    try {
+      await invoke("selection_overlay_dismiss");
+    } catch (error) {
+      console.error("Failed to dismiss overlay selection:", error);
+    }
+  }
+
+  async function setOverlayFocusable(focusable: boolean, focus = false) {
+    overlayWindow ??= getCurrentWebviewWindow();
+    const windowHandle = overlayWindow;
+    if (!windowHandle) return;
+    try {
+      await windowHandle.setFocusable(focusable);
+    } catch (error) {
+      console.error("Failed to update overlay focusable:", error);
+    }
+    if (focusable && focus) {
+      try {
+        await windowHandle.setFocus();
+      } catch (error) {
+        console.error("Failed to focus overlay window:", error);
+      }
+    }
+  }
+
+  async function runTranslation(term: string) {
+    translationRequestId += 1;
+    const requestId = translationRequestId;
+    translateResult = null;
+    translateError = null;
+    isTranslating = true;
+
+    try {
+      const response = await translateWord({ term });
+      if (requestId !== translationRequestId) return;
+      translateResult = response;
+      await tick();
+      await syncWindowSize();
+    } catch (error) {
+      if (requestId !== translationRequestId) return;
+      console.error("Failed to translate selection:", error);
+      const normalized = showAppError(error, { fallbackMessage: "翻译失败" });
+      translateError = normalized.message;
+      await tick();
+      await syncWindowSize();
+    } finally {
+      if (requestId === translationRequestId) {
+        isTranslating = false;
+      }
+    }
+  }
+
   async function openPanel(mode: PanelMode) {
+    guardFocusLoss();
     panelMode = mode;
     showPanel = true;
     showMenu = false;
     panelHeight = PANEL_MIN_HEIGHT;
     resizeAnchor = "bottom";
+    await setOverlayInteractive(true);
+    await setOverlayLocked(true);
     await tick();
+    await setOverlayFocusable(true, true);
+    panelContainer?.focus();
     scheduleWindowResize();
   }
 
   async function closePanel() {
-    showPanel = false;
-    showMenu = true;
-    resizeAnchor = "bottom";
-    await tick();
-    scheduleWindowResize();
+    cancelTranslation();
+    await hideOverlay({ dismissSelection: true });
   }
 
-  async function hideOverlay() {
+  async function hideOverlay(options?: { dismissSelection?: boolean }) {
+    const { dismissSelection = false } = options ?? {};
     showMenu = false;
     showPanel = false;
     payload = null;
     resetTranslationState();
+    await setOverlayInteractive(false);
+    await setOverlayLocked(false);
+    await setOverlayFocusable(false);
+    if (dismissSelection) {
+      await dismissOverlaySelection();
+    }
     try {
       await invoke("selection_overlay_hide");
     } catch (error) {
@@ -483,16 +608,39 @@
     const trimmed = raw.trim();
     if (!trimmed) {
       console.log("[Selection] Empty text, hiding overlay");
-      hideOverlay();
+      selectedText = "";
+      selectedTextRaw = "";
+      payload = null;
+      hideOverlay({ dismissSelection: false });
       return;
     }
     selectedText = trimmed;
     selectedTextRaw = raw;
     payload = next;
+    panelMode = "translate";
     showMenu = true;
     showPanel = false;
+    void setOverlayInteractive(false);
+    void setOverlayLocked(false);
+    void setOverlayFocusable(false);
     resizeAnchor = "top";
     console.log("[Selection] Menu should be visible now, showMenu=", showMenu);
+    resetTranslationState();
+  }
+
+  function applySelectionData(next: SelectionPayload) {
+    const raw = next.rawText || next.text || "";
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      selectedText = "";
+      selectedTextRaw = "";
+      payload = null;
+      resetTranslationState();
+      return;
+    }
+    selectedText = trimmed;
+    selectedTextRaw = raw;
+    payload = next;
     resetTranslationState();
   }
 
@@ -500,14 +648,9 @@
     if (isLoadingSelection) return;
     isLoadingSelection = true;
     try {
-      const value = await invoke<SelectionPayload | null>(
-        "selection_get_last_payload",
-      );
-      console.log("[Selection] Last payload loaded:", value);
-      if (value) {
-        applySelection(value);
-        await openPanel("selection");
-      }
+      const value = await refreshLatestSelection({ applyView: false });
+      if (!value || !selectedText) return;
+      await openPanel("selection");
     } catch (error) {
       console.error("Failed to load last selection payload:", error);
     } finally {
@@ -515,15 +658,30 @@
     }
   }
 
-  async function syncLatestSelection() {
-    if (showMenu || showPanel) return;
+  async function refreshLatestSelection(options?: { applyView?: boolean }) {
     try {
       const value = await invoke<SelectionPayload | null>(
         "selection_get_last_payload",
       );
+      console.log("[Selection] Last payload loaded:", value);
       if (value) {
-        applySelection(value);
+        if (options?.applyView === false) {
+          applySelectionData(value);
+        } else {
+          applySelection(value);
+        }
       }
+      return value;
+    } catch (error) {
+      console.error("Failed to sync selection payload:", error);
+      return null;
+    }
+  }
+
+  async function syncLatestSelection() {
+    if (showMenu || showPanel) return;
+    try {
+      await refreshLatestSelection();
     } catch (error) {
       console.error("Failed to sync selection payload:", error);
     }
@@ -533,7 +691,7 @@
     if (!selectedTextRaw) return;
     try {
       await navigator.clipboard.writeText(selectedTextRaw);
-      await hideOverlay();
+      await hideOverlay({ dismissSelection: true });
     } catch (error) {
       console.error("Failed to copy text:", error);
       const textarea = document.createElement("textarea");
@@ -545,7 +703,7 @@
       textarea.select();
       try {
         document.execCommand("copy");
-        await hideOverlay();
+        await hideOverlay({ dismissSelection: true });
       } catch (fallbackError) {
         console.error("Fallback copy also failed:", fallbackError);
         showAppError(fallbackError, { fallbackMessage: "复制失败，请重试" });
@@ -556,30 +714,15 @@
   }
 
   async function handleTranslateText() {
-    if (!selectedText) return;
-
-    resetTranslationState();
-    isTranslating = true;
+    const latest = await refreshLatestSelection({ applyView: false });
+    if (!latest || !selectedText) return;
     await openPanel("translate");
-
-    try {
-      const response = await translateWord({ term: selectedText });
-      translateResult = response;
-      await tick();
-      await syncWindowSize();
-    } catch (error) {
-      console.error("Failed to translate selection:", error);
-      const normalized = showAppError(error, { fallbackMessage: "翻译失败" });
-      translateError = normalized.message;
-      await tick();
-      await syncWindowSize();
-    } finally {
-      isTranslating = false;
-    }
+    void runTranslation(selectedText);
   }
 
   async function handleAskText() {
-    if (!selectedText) return;
+    const latest = await refreshLatestSelection({ applyView: false });
+    if (!latest || !selectedText) return;
     resetTranslationState();
     await openPanel("ask");
   }
@@ -587,7 +730,7 @@
   async function handleOpenSettings() {
     try {
       await openSettingsWindow("general");
-      await hideOverlay();
+      await hideOverlay({ dismissSelection: true });
     } catch (error) {
       console.error("Failed to open settings window:", error);
       showAppError(error, { fallbackMessage: "打开设置失败，请重试" });
@@ -622,7 +765,7 @@
         inputLanguage: payload.inputLanguage,
       };
       await favoriteStore.createExternalFavorite(request);
-      await hideOverlay();
+      await hideOverlay({ dismissSelection: true });
     } catch (error) {
       console.error("Failed to favorite text:", error);
       showAppError(error, { fallbackMessage: "收藏失败，请重试" });
@@ -635,23 +778,7 @@
     if (panelMode === nextMode) return;
     panelMode = nextMode;
     if (panelMode === "translate" && selectedText) {
-      resetTranslationState();
-      isTranslating = true;
-      void translateWord({ term: selectedText })
-        .then((response) => {
-          translateResult = response;
-        })
-        .catch((error) => {
-          console.error("Failed to translate selection:", error);
-          const normalized = showAppError(error, {
-            fallbackMessage: "翻译失败",
-          });
-          translateError = normalized.message;
-        })
-        .finally(() => {
-          isTranslating = false;
-          void tick().then(syncWindowSize);
-        });
+      void runTranslation(selectedText);
     } else {
       resetTranslationState();
     }
@@ -764,7 +891,7 @@
     <div bind:this={panelHeader} class="flex items-center justify-between">
       <div class="flex items-center gap-2 text-slate-700">
         <ActivePanelIcon size={18} />
-        <div class="relative">
+        <div class="relative" data-focus-guard>
           <select
             class="appearance-none bg-transparent text-[15px] font-semibold text-slate-800 pr-5 focus:outline-none"
             value={panelMode}

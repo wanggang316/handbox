@@ -235,6 +235,9 @@ pub fn run() {
             selection_get_last_payload,
             selection_overlay_hide,
             selection_overlay_resize,
+            selection_overlay_lock,
+            selection_overlay_dismiss,
+            selection_overlay_set_interactive,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,

@@ -30,6 +30,8 @@ use std::ffi::c_void;
 #[cfg(target_os = "macos")]
 use std::process::Command;
 #[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
 use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
@@ -40,7 +42,7 @@ const OVERLAY_WINDOW_LABEL: &str = "selection_overlay";
 const OVERLAY_WIDTH: f64 = 360.0;
 const OVERLAY_HEIGHT: f64 = 44.0;
 const OVERLAY_MENU_HEIGHT: f64 = 32.0;
-const OVERLAY_VERTICAL_GAP: f64 = 34.0;
+const OVERLAY_VERTICAL_GAP: f64 = 24.0;
 const OVERLAY_PADDING: f64 = 12.0;
 const SELECTION_HOVER_PADDING: f64 = 6.0;
 const MOUSE_STILL_THRESHOLD: f64 = 2.0;
@@ -88,6 +90,30 @@ static LAST_SELECTION_PAYLOAD: Lazy<Mutex<Option<SelectionPayload>>> =
     Lazy::new(|| Mutex::new(None));
 #[cfg(target_os = "macos")]
 static LAST_SELECTION_ANCHOR: Lazy<Mutex<Option<SelectionRect>>> = Lazy::new(|| Mutex::new(None));
+#[cfg(target_os = "macos")]
+static LAST_SELECTION_SIGNATURE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+#[cfg(target_os = "macos")]
+static LAST_DISMISSED_SIGNATURE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+#[cfg(target_os = "macos")]
+static OVERLAY_LOCKED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+pub fn set_overlay_locked(locked: bool) {
+    OVERLAY_LOCKED.store(locked, Ordering::SeqCst);
+}
+
+#[cfg(target_os = "macos")]
+pub fn dismiss_current_selection_signature() {
+    let signature = LAST_SELECTION_SIGNATURE
+        .lock()
+        .ok()
+        .and_then(|value| value.clone());
+    if let Some(signature) = signature {
+        if let Ok(mut slot) = LAST_DISMISSED_SIGNATURE.lock() {
+            *slot = Some(signature);
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 pub fn start_selection_observer(app: AppHandle) {
@@ -109,16 +135,19 @@ pub fn start_selection_observer(app: AppHandle) {
         loop {
             interval.tick().await;
 
+            let overlay_locked = OVERLAY_LOCKED.load(Ordering::SeqCst);
             let snapshot = fetch_selection_snapshot();
             let Some(snapshot) = snapshot else {
-                if overlay_visible {
+                if overlay_visible && !overlay_locked {
                     tracing::debug!("No selection detected, hiding overlay");
                     hide_overlay_window_and_restore(&app_handle);
                     overlay_visible = false;
                 }
-                hover_started_at = None;
-                last_mouse_position = None;
-                last_signature = None;
+                if !overlay_locked {
+                    hover_started_at = None;
+                    last_mouse_position = None;
+                    last_signature = None;
+                }
                 continue;
             };
 
@@ -151,6 +180,9 @@ pub fn start_selection_observer(app: AppHandle) {
                 hover_started_at = None;
                 last_mouse_position = None;
                 last_signature = Some(snapshot.signature.clone());
+                if let Ok(mut slot) = LAST_DISMISSED_SIGNATURE.lock() {
+                    *slot = None;
+                }
             }
 
             let mut payload = snapshot.payload.clone();
@@ -206,6 +238,13 @@ pub fn start_selection_observer(app: AppHandle) {
                 if is_hovering {
                     let elapsed = hover_started_at.get_or_insert_with(Instant::now).elapsed();
                     if elapsed >= Duration::from_millis(HOVER_DELAY_MS) {
+                        let dismissed = LAST_DISMISSED_SIGNATURE
+                            .lock()
+                            .ok()
+                            .and_then(|slot| slot.clone());
+                        if dismissed.as_deref() == Some(snapshot.signature.as_str()) {
+                            continue;
+                        }
                         if let Ok(mut slot) = LAST_SELECTION_PAYLOAD.lock() {
                             *slot = Some(payload.clone());
                         }
@@ -463,6 +502,9 @@ fn fetch_selection_snapshot() -> Option<SelectionSnapshot> {
         payload.rect.as_ref().map(|r| (r.x, r.y, r.width, r.height)),
         payload.source_url.as_deref()
     );
+    if let Ok(mut slot) = LAST_SELECTION_SIGNATURE.lock() {
+        *slot = Some(signature.clone());
+    }
 
     unsafe { CFRelease(focused_element as CFTypeRef) };
 
