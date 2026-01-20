@@ -19,25 +19,30 @@ pub async fn selection_overlay_resize(
     app: tauri::AppHandle,
     width: f64,
     height: f64,
+    anchor: Option<String>,
 ) -> Result<(), AppError> {
     use objc2_app_kit::NSWindow;
     use objc2_foundation::{NSPoint, NSSize};
-    use tauri::{LogicalSize, Manager};
+    use tauri::Manager;
 
     let Some(window) = app.get_webview_window("selection_overlay") else {
         return Ok(());
     };
 
-    let _ = window.set_size(LogicalSize::new(width, height));
-
     let window_for_thread = window.clone();
+    let keep_bottom = matches!(anchor.as_deref(), Some("bottom"));
     let _ = window.run_on_main_thread(move || {
         let Ok(ns_window_ptr) = window_for_thread.ns_window() else {
             return;
         };
         let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
         let frame = ns_window.frame();
-        let top_left = NSPoint::new(frame.origin.x, frame.origin.y + frame.size.height);
+        let origin_x = frame.origin.x + (frame.size.width - width) / 2.0;
+        let top_left = if keep_bottom {
+            NSPoint::new(origin_x, frame.origin.y + height)
+        } else {
+            NSPoint::new(origin_x, frame.origin.y + frame.size.height)
+        };
         ns_window.setContentSize(NSSize::new(width, height));
         ns_window.setFrameTopLeftPoint(top_left);
     });
@@ -63,6 +68,7 @@ pub async fn selection_overlay_resize(
     _app: tauri::AppHandle,
     _width: f64,
     _height: f64,
+    _anchor: Option<String>,
 ) -> Result<(), AppError> {
     Ok(())
 }

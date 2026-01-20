@@ -34,7 +34,7 @@ use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const OVERLAY_WINDOW_LABEL: &str = "selection_overlay";
 const OVERLAY_WIDTH: f64 = 360.0;
@@ -246,7 +246,7 @@ fn ensure_accessibility_permission() {
 fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
     tracing::info!(
         "show_overlay_window called for text: '{}'",
-        &payload.text[..payload.text.len().min(50)]
+        payload.text.chars().take(50).collect::<String>()
     );
 
     let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
@@ -255,6 +255,7 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
     };
 
     show_overlay_window_nonactivating(&window);
+    let _ = window.emit("selection_update", payload.clone());
     tracing::info!("Selection overlay shown (text_len={})", payload.text.len());
 }
 
