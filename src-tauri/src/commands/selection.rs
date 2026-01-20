@@ -70,7 +70,7 @@ pub async fn selection_overlay_set_interactive(
     app: tauri::AppHandle,
     interactive: bool,
 ) -> Result<(), AppError> {
-    use objc2_app_kit::{NSPanel, NSWindow, NSWindowStyleMask};
+    use objc2_app_kit::NSWindow;
     use std::sync::mpsc;
     use std::time::Duration;
     use tauri::Manager;
@@ -84,16 +84,7 @@ pub async fn selection_overlay_set_interactive(
     let _ = window.run_on_main_thread(move || {
         if let Ok(ns_window_ptr) = window_for_thread.ns_window() {
             let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
-            let mut style_mask = ns_window.styleMask();
-            if interactive {
-                style_mask.remove(NSWindowStyleMask::NonactivatingPanel);
-            } else {
-                style_mask.insert(NSWindowStyleMask::NonactivatingPanel);
-            }
-            ns_window.setStyleMask(style_mask);
-
-            let ns_panel: &NSPanel = unsafe { &*(ns_window_ptr as *mut NSPanel) };
-            ns_panel.setBecomesKeyOnlyIfNeeded(!interactive);
+            ns_window.setHidesOnDeactivate(interactive);
         }
         let _ = tx.send(());
     });

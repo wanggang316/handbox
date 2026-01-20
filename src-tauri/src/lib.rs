@@ -207,8 +207,31 @@ pub fn run() {
             .build()
             .expect("Failed to create selection overlay window");
 
+            // 创建系统划词功能面板窗口
+            let _panel_window = WebviewWindowBuilder::new(
+                app,
+                "selection_panel",
+                WebviewUrl::App("/selection".into()),
+            )
+            .title("Selection Panel")
+            .inner_size(520.0, 220.0)
+            .resizable(true)
+            .decorations(false)
+            .transparent(true)
+            .focused(false)
+            .focusable(false)
+            .visible(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .accept_first_mouse(true)
+            .visible_on_all_workspaces(true)
+            .build()
+            .expect("Failed to create selection panel window");
+
             #[cfg(target_os = "macos")]
             configure_selection_overlay_panel(&_overlay_window);
+            #[cfg(target_os = "macos")]
+            configure_selection_overlay_panel(&_panel_window);
 
             // 异步初始化服务
             let app_handle = app.handle().clone();
