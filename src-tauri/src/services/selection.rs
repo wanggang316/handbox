@@ -36,11 +36,10 @@ use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
-const OVERLAY_WINDOW_LABEL: &str = "selection_overlay";
-const OVERLAY_WIDTH: f64 = 360.0;
-const OVERLAY_HEIGHT: f64 = 44.0;
+const MENU_WIDTH: f64 = 360.0;
+const MENU_HEIGHT: f64 = 44.0;
 const OVERLAY_MENU_HEIGHT: f64 = 32.0;
 const OVERLAY_VERTICAL_GAP: f64 = 24.0;
 const OVERLAY_PADDING: f64 = 12.0;
@@ -283,26 +282,49 @@ fn ensure_accessibility_permission() {
 
 #[cfg(target_os = "macos")]
 fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
+    use crate::services::selection_panel::get_menu_panel;
+
     tracing::info!(
         "show_overlay_window called for text: '{}'",
         payload.text.chars().take(50).collect::<String>()
     );
 
-    let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) else {
-        tracing::error!("Selection overlay window not found!");
+    let Some(panel) = get_menu_panel(app) else {
+        tracing::error!("Selection menu panel not found!");
         return;
     };
 
-    show_overlay_window_nonactivating(&window);
-    let _ = window.emit("selection_update", payload.clone());
-    tracing::info!("Selection overlay shown (text_len={})", payload.text.len());
+    // 发送选择数据到面板
+    if let Some(window) = panel.to_window() {
+        let _ = window.emit("selection_update", payload.clone());
+    }
+
+    // 定位并显示面板（必须在主线程执行）
+    let panel_clone = panel.clone();
+    let payload_rect = payload.rect.clone();
+    let app_clone = app.clone();
+
+    app.run_on_main_thread(move || {
+        position_panel_at_selection(&app_clone, panel_clone.as_ref(), payload_rect.as_ref());
+
+        // 显示面板并设置为可交互
+        panel_clone.show();
+        panel_clone.order_front_regardless(); // 确保面板在最前面
+        panel_clone.make_key_window(); // 让面板可以接收键盘和鼠标事件
+    })
+    .ok();
+
+    tracing::info!("Selection menu panel shown (text_len={})", payload.text.len());
 }
 
 #[cfg(target_os = "macos")]
 fn hide_overlay_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(OVERLAY_WINDOW_LABEL) {
-        let _ = window.hide();
-    }
+    let app_clone = app.clone();
+    app.run_on_main_thread(move || {
+        use crate::services::selection_panel::hide_all_panels;
+        hide_all_panels(&app_clone);
+    })
+    .ok();
 }
 
 #[cfg(target_os = "macos")]
@@ -311,33 +333,67 @@ pub fn hide_overlay_window_and_restore(app: &AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
-fn show_overlay_window_nonactivating(window: &tauri::WebviewWindow) {
-    show_overlay_window_nonactivating_with_size(window, OVERLAY_WIDTH, OVERLAY_HEIGHT);
-}
-
-#[cfg(target_os = "macos")]
-fn show_overlay_window_nonactivating_with_size(
-    window: &tauri::WebviewWindow,
-    width: f64,
-    height: f64,
+fn position_panel_at_selection(
+    _app: &AppHandle,
+    panel: &dyn tauri_nspanel::Panel<tauri::Wry>,
+    rect: Option<&SelectionRect>,
 ) {
-    use objc2_app_kit::NSWindow;
+    use objc2_foundation::MainThreadMarker;
+    use tauri_nspanel::NSPoint;
 
-    let window_for_thread = window.clone();
-    let _ = window.run_on_main_thread(move || {
-        let Ok(ns_window_ptr) = window_for_thread.ns_window() else {
-            return;
-        };
-        let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
-        let mtm = unsafe { MainThreadMarker::new_unchecked() };
-        let anchor = NSEvent::mouseLocation();
-        let screen_frame = screen_frame_for_point(mtm, anchor)
-            .unwrap_or_else(|| NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)));
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
 
-        let (x, y) = overlay_top_left_for_anchor(anchor, screen_frame, width, height);
-        ns_window.setFrameTopLeftPoint(NSPoint::new(x, y));
-        ns_window.orderFront(None);
+    // 获取屏幕信息
+    let screen = if let Some(rect) = rect {
+        let anchor = NSPoint::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+        screen_frame_for_point(mtm, anchor)
+    } else {
+        let mouse = NSEvent::mouseLocation();
+        screen_frame_for_point(mtm, mouse)
+    }
+    .unwrap_or_else(|| {
+        objc2_app_kit::NSScreen::mainScreen(mtm)
+            .map(|s| s.frame())
+            .unwrap_or_else(|| NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1920.0, 1080.0)))
     });
+
+    // 计算面板位置 (使用 SelectionRect 坐标系统,已经是 top-left 原点)
+    let (panel_x, panel_y) = if let Some(rect) = rect {
+        // 面板居中于选中文字,显示在上方
+        let x = rect.x + (rect.width - MENU_WIDTH) / 2.0;
+        let y = rect.y - MENU_HEIGHT - OVERLAY_VERTICAL_GAP;
+
+        tracing::info!(
+            "Position calculation: rect=({}, {}, {}x{}), panel_before_clamp=({}, {}), screen=({}, {}x{})",
+            rect.x, rect.y, rect.width, rect.height, x, y,
+            screen.origin.x, screen.size.width, screen.size.height
+        );
+
+        // 限制在屏幕范围内
+        let x = x.clamp(OVERLAY_PADDING, screen.size.width - MENU_WIDTH - OVERLAY_PADDING);
+        let y = y.clamp(OVERLAY_PADDING, screen.size.height - MENU_HEIGHT - OVERLAY_PADDING);
+
+        (x, y)
+    } else {
+        // 没有选区信息,使用鼠标位置
+        let mouse = current_mouse_location().unwrap_or(SelectionRect {
+            x: 100.0,
+            y: 100.0,
+            width: 0.0,
+            height: 0.0,
+        });
+        (mouse.x, mouse.y - MENU_HEIGHT - OVERLAY_VERTICAL_GAP)
+    };
+
+    tracing::info!("Final panel position: ({}, {})", panel_x, panel_y);
+
+    // 设置面板位置
+    if let Some(window) = panel.to_window() {
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: panel_x as i32,
+            y: panel_y as i32,
+        }));
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -370,14 +426,17 @@ fn overlay_top_left_for_anchor(
     width: f64,
     height: f64,
 ) -> (f64, f64) {
+    // macOS 坐标系统: (0,0) 在屏幕左下角，y 轴向上增长
+    // 面板应该显示在选择文字的上方
     let mut x = anchor.x - width / 2.0;
-    let mut y = anchor.y + OVERLAY_MENU_HEIGHT + OVERLAY_VERTICAL_GAP;
+    let mut y = anchor.y - height - OVERLAY_VERTICAL_GAP;
 
     let min_x = screen_frame.origin.x + OVERLAY_PADDING;
     let max_x = screen_frame.origin.x + screen_frame.size.width - width - OVERLAY_PADDING;
-    let min_y = screen_frame.origin.y + height + OVERLAY_PADDING;
-    let max_y = screen_frame.origin.y + screen_frame.size.height - OVERLAY_PADDING;
+    let min_y = screen_frame.origin.y + OVERLAY_PADDING;
+    let max_y = screen_frame.origin.y + screen_frame.size.height - height - OVERLAY_PADDING;
 
+    // 限制在屏幕范围内
     if max_x >= min_x {
         x = x.clamp(min_x, max_x);
     } else {
@@ -400,11 +459,12 @@ fn is_valid_selection_rect(rect: &SelectionRect) -> bool {
 
 #[cfg(target_os = "macos")]
 fn selection_rect_from_point(point: SelectionRect) -> SelectionRect {
+    // 创建一个合理大小的模拟选区(宽100px, 高20px, 以鼠标为中心)
     SelectionRect {
-        x: point.x,
-        y: point.y,
-        width: 2.0,
-        height: 2.0,
+        x: point.x - 50.0,  // 鼠标水平居中
+        y: point.y - 10.0,  // 鼠标垂直居中
+        width: 100.0,
+        height: 20.0,
     }
 }
 
@@ -534,14 +594,16 @@ fn get_focused_selection() -> Option<(
         let rect = range.and_then(|range| ax_copy_bounds_for_range(focused, range));
         let window_title = ax_copy_window_title(focused);
 
-        let normalized_rect = rect
-            .and_then(normalize_selection_rect)
+        let normalized_rect_before_filter = rect.and_then(normalize_selection_rect);
+        let normalized_rect = normalized_rect_before_filter
+            .clone()
             .filter(is_valid_selection_rect);
 
         let mouse = current_mouse_location();
-        tracing::debug!(
-            "Selection rect raw={:?}, normalized={:?}, mouse={:?}",
+        tracing::info!(
+            "Selection rect: raw={:?}, normalized_before_filter={:?}, normalized_after_filter={:?}, mouse={:?}",
             rect,
+            normalized_rect_before_filter,
             normalized_rect,
             mouse
         );
@@ -688,14 +750,28 @@ fn normalize_selection_rect(rect: CGRect) -> Option<SelectionRect> {
         height: rect.size.height,
     };
 
+    tracing::info!(
+        "normalize_selection_rect: CGRect=({}, {}, {}x{}), as_is=({}, {}, {}x{}), top_left=({}, {}, {}x{})",
+        rect.origin.x, rect.origin.y, rect.size.width, rect.size.height,
+        as_is.x, as_is.y, as_is.width, as_is.height,
+        top_left.x, top_left.y, top_left.width, top_left.height
+    );
+
+    // 优先使用 top_left 坐标系(Tauri 标准)
+    // 如果有鼠标位置,验证哪个坐标系正确
     if let Some(mouse) = current_mouse_location() {
-        if is_point_in_rect(&mouse, &as_is) {
-            return Some(as_is);
-        }
+        tracing::info!("Mouse location: ({}, {})", mouse.x, mouse.y);
+
         if is_point_in_rect(&mouse, &top_left) {
+            tracing::info!("Using top_left coordinate system");
             return Some(top_left);
         }
-        return None;
+        if is_point_in_rect(&mouse, &as_is) {
+            tracing::info!("Using as_is coordinate system");
+            return Some(as_is);
+        }
+        // 即使鼠标不在矩形内,也返回 top_left (用户可能移动了鼠标)
+        tracing::info!("Mouse not in rect, using top_left anyway");
     }
 
     Some(top_left)

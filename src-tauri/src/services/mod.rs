@@ -8,6 +8,7 @@ pub mod model;
 pub mod provider;
 pub mod search;
 pub mod selection;
+pub mod selection_panel;
 pub mod settings;
 pub mod storage;
 pub mod user_session;

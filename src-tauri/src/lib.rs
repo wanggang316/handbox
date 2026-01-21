@@ -11,15 +11,15 @@ pub mod utils;
 
 use crate::commands::*;
 use crate::services::{
-    start_selection_observer, ArtifactService, ChatService, McpService, MessageService,
-    ModelService, ProviderService, SearchService, SettingsService, StorageService,
-    UserSessionService, WordService,
+    selection_panel::setup_selection_panels, start_selection_observer, ArtifactService,
+    ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
+    SettingsService, StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
 
 /// 初始化服务
 async fn initialize_services(
@@ -160,6 +160,9 @@ pub fn run() {
 
     #[cfg(target_os = "macos")]
     {
+        // 初始化 NSPanel 插件
+        builder = builder.plugin(tauri_nspanel::init());
+
         builder = builder.plugin(
             tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
                 .on_event(|app, event| {
@@ -186,52 +189,14 @@ pub fn run() {
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
 
-            // 创建系统划词悬浮窗口
-            let _overlay_window = WebviewWindowBuilder::new(
-                app,
-                "selection_overlay",
-                WebviewUrl::App("/selection".into()),
-            )
-            .title("Selection Overlay")
-            .inner_size(360.0, 44.0)
-            .resizable(true)
-            .decorations(false)
-            .transparent(true)
-            .focused(false)
-            .focusable(false)
-            .visible(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .accept_first_mouse(true)
-            .visible_on_all_workspaces(true)
-            .build()
-            .expect("Failed to create selection overlay window");
-
-            // 创建系统划词功能面板窗口
-            let _panel_window = WebviewWindowBuilder::new(
-                app,
-                "selection_panel",
-                WebviewUrl::App("/selection".into()),
-            )
-            .title("Selection Panel")
-            .inner_size(520.0, 220.0)
-            .resizable(true)
-            .decorations(false)
-            .transparent(true)
-            .focused(false)
-            .focusable(false)
-            .visible(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .accept_first_mouse(true)
-            .visible_on_all_workspaces(true)
-            .build()
-            .expect("Failed to create selection panel window");
-
+            // 创建选择面板 (NSPanel)
             #[cfg(target_os = "macos")]
-            configure_selection_overlay_panel(&_overlay_window);
-            #[cfg(target_os = "macos")]
-            configure_selection_overlay_panel(&_panel_window);
+            {
+                if let Err(e) = setup_selection_panels(&app.handle()) {
+                    eprintln!("Failed to setup selection panels: {e}");
+                    // 不退出应用，因为选择面板是可选功能
+                }
+            }
 
             // 异步初始化服务
             let app_handle = app.handle().clone();
@@ -255,7 +220,11 @@ pub fn run() {
             // 调试命令
             debug_check_file,
             debug_show_selection_overlay,
+            // 选择相关命令
             selection_get_last_payload,
+            selection_hide_menu_panel,
+            selection_hide_action_panel,
+            selection_show_action_panel,
             selection_overlay_hide,
             selection_overlay_resize,
             selection_overlay_lock,
@@ -378,36 +347,4 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-#[cfg(target_os = "macos")]
-fn configure_selection_overlay_panel(window: &tauri::WebviewWindow) {
-    use objc2_app_kit::{
-        NSPanel, NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
-    };
-
-    let window = window.clone();
-    let window_for_thread = window.clone();
-    let _ = window.run_on_main_thread(move || {
-        let Ok(ns_window_ptr) = window_for_thread.ns_window() else {
-            return;
-        };
-
-        let ns_window: &NSWindow = unsafe { &*(ns_window_ptr as *mut NSWindow) };
-        let mut style_mask = ns_window.styleMask();
-        style_mask.insert(NSWindowStyleMask::NonactivatingPanel);
-        // 确保窗口可以调整大小 - 这是关键！
-        style_mask.insert(NSWindowStyleMask::Resizable);
-        ns_window.setStyleMask(style_mask);
-        ns_window.setLevel(NSStatusWindowLevel);
-
-        let mut behavior = ns_window.collectionBehavior();
-        behavior.insert(NSWindowCollectionBehavior::CanJoinAllSpaces);
-        behavior.insert(NSWindowCollectionBehavior::Transient);
-        behavior.insert(NSWindowCollectionBehavior::IgnoresCycle);
-        ns_window.setCollectionBehavior(behavior);
-
-        let ns_panel: &NSPanel = unsafe { &*(ns_window_ptr as *mut NSPanel) };
-        ns_panel.setFloatingPanel(true);
-        ns_panel.setBecomesKeyOnlyIfNeeded(true);
-        ns_panel.setHidesOnDeactivate(false);
-    });
-}
+// 旧的窗口配置函数已移除，现在使用 tauri-nspanel

@@ -69,6 +69,7 @@ core-graphics = "0.23"
 objc2 = "0.6.3"
 objc2-app-kit = { version = "0.3.2", features = ["NSEvent", "NSPanel", "NSResponder", "NSRunningApplication", "NSScreen", "NSWindow", "NSWorkspace", "libc"] }
 objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "NSURL"] }
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 
 [dev-dependencies]
 tempfile = "3.21.0"
