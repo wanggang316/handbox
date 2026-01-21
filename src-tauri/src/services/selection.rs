@@ -164,7 +164,7 @@ pub fn start_selection_observer(app: AppHandle) {
 
         // 建议在外部加上 catch_unwind，防止 rdev 内部因无法解析某些 macOS 按键而 Panic
         let _ = std::panic::catch_unwind(move || {
-            let _ = listen(move |event| {
+            let _ = listen(move |event: Event| {
                 match event.event_type {
                     // 仅记录坐标
                     EventType::MouseMove { x, y } => {

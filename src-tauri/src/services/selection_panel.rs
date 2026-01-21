@@ -67,7 +67,7 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
     tracing::info!("Creating menu panel with label: {}", MENU_PANEL_LABEL);
     // let menu_panel =
     PanelBuilder::<tauri::Wry, MenuPanel>::new(app, MENU_PANEL_LABEL)
-        .url(WebviewUrl::App("/selection/menu".into()))
+        .url(WebviewUrl::App("/floating".into()))
         .title("Selection Menu")
         .size(Size::Logical(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT)))
         .level(PanelLevel::Floating) // PopUpMenu 级别适合菜单

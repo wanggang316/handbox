@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+swift-rs = "1.0"
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset", "test", "macos-private-api"] }
@@ -72,6 +73,8 @@ objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "N
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 rdev = { git = "https://github.com/Narsil/rdev", branch = "main" }
 accessibility = { git = "https://github.com/eiz/accessibility" }
+# Swift 桥接
+swift-rs = "1.0"
 
 [dev-dependencies]
 tempfile = "3.21.0"

@@ -9,6 +9,15 @@ pub mod services;
 pub mod storage;
 pub mod utils;
 
+mod accessibility;
+
+use std::ffi::c_void;
+use std::sync::OnceLock;
+use std::thread;
+use std::time::Duration;
+use swift_rs::swift;
+use tauri::{AppHandle, Emitter, Manager}; // 导入 c_void
+
 use crate::commands::*;
 use crate::services::{
     selection_panel::setup_selection_panels, start_selection_observer, ArtifactService,
@@ -19,7 +28,6 @@ use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepos
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
-use tauri::Manager;
 
 /// 初始化服务
 async fn initialize_services(
@@ -136,6 +144,39 @@ fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
 }
 
+// 使用 OnceLock 安全地在全局存储 AppHandle，方便 C 回调使用
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+// 声明 Swift 函数签名
+swift!(fn start_mouse_observer(callback_ptr: *const c_void));
+
+// 被 Swift 调用的 C 回调函数
+extern "C" fn on_mouse_up_callback(x: f64, y: f64) {
+    if let Some(handle) = APP_HANDLE.get() {
+        let handle_clone = handle.clone();
+
+        // 在新线程执行耗时的文本抓取逻辑，绝对不阻塞系统事件
+        thread::spawn(move || {
+            // 稍微延迟 250ms，等待系统完成选区渲染
+            thread::sleep(Duration::from_millis(250));
+
+            if let Some(text) = accessibility::get_ax_selected_text() {
+                // 将文字和坐标打包发送给前端
+                // payload 包含: { text, x, y }
+                tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
+                let _ = handle_clone.emit(
+                    "global-selection",
+                    serde_json::json!({
+                        "text": text,
+                        "x": x,
+                        "y": y
+                    }),
+                );
+            }
+        });
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 加载环境变量
@@ -190,14 +231,14 @@ pub fn run() {
             app.set_menu(menu).expect("Failed to set menu");
 
             // 创建选择面板 (NSPanel) - 必须在setup中同步创建
-            // #[cfg(target_os = "macos")]
-            // {
-            //     if let Err(e) = setup_selection_panels(&app.handle()) {
-            //         tracing::error!("Failed to setup selection panels: {e}");
-            //         eprintln!("Failed to setup selection panels: {e}");
-            //         // 不退出应用，因为选择面板是可选功能
-            //     }
-            // }
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(e) = setup_selection_panels(&app.handle()) {
+                    tracing::error!("Failed to setup selection panels: {e}");
+                    eprintln!("Failed to setup selection panels: {e}");
+                    // 不退出应用，因为选择面板是可选功能
+                }
+            }
 
             // 异步初始化服务
             let app_handle = app.handle().clone();
@@ -208,7 +249,20 @@ pub fn run() {
                 }
             });
 
-            start_selection_observer(app.handle().clone());
+            // start_selection_observer(app.handle().clone());
+
+            // 1. 将 AppHandle 存入全局静态变量
+            APP_HANDLE.set(app.handle().clone()).unwrap();
+
+            // 2. 转换函数指针并调用
+            unsafe {
+                let ptr: *const c_void = on_mouse_up_callback as *const c_void;
+                start_mouse_observer(ptr);
+            }
+
+            let floating = app.get_webview_window("floating").unwrap();
+            floating.show().unwrap();
+            floating.center().unwrap();
 
             Ok(())
         })
