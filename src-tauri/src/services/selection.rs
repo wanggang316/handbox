@@ -21,7 +21,7 @@ use objc2::rc::autoreleasepool;
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSEvent, NSScreen, NSWorkspace};
 #[cfg(target_os = "macos")]
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 #[cfg(target_os = "macos")]
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -302,22 +302,29 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
     // 定位并显示面板（必须在主线程执行）
     let panel_clone = panel.clone();
     let payload_rect = payload.rect.clone();
-    let app_clone = app.clone();
 
     app.run_on_main_thread(move || {
-        // 先定位面板
-        position_panel_at_selection(&app_clone, panel_clone.as_ref(), payload_rect.as_ref());
+        // 使用鼠标位置定位面板
+        let mouse = NSEvent::mouseLocation();
+        // macOS 坐标系统：原点在左下角，y 轴向上
+        // 面板显示在鼠标上方 24px
+        let panel_origin = NSPoint::new(
+            mouse.x - MENU_WIDTH / 2.0, // 水平居中
+            mouse.y + MENU_HEIGHT + OVERLAY_VERTICAL_GAP, // 垂直方向，面板 origin 在上方
+        );
+        let panel_size = NSSize::new(MENU_WIDTH, MENU_HEIGHT);
+        let frame = NSRect::new(panel_origin, panel_size);
 
-        // 显示面板
-        panel_clone.show();
-
-        // 使用 orderFront 而不是 order_front_regardless
-        // order_front_regardless 可能让面板失去交互能力
         let ns_panel = panel_clone.as_panel();
         unsafe {
+            ns_panel.setFrame_display(frame, true); // true = animate
             ns_panel.orderFront(None);
-            ns_panel.makeKeyWindow();
         }
+
+        tracing::info!(
+            "Panel positioned at ({}, {}), mouse at ({}, {})",
+            panel_origin.x, panel_origin.y, mouse.x, mouse.y
+        );
     })
     .ok();
 
@@ -337,137 +344,6 @@ fn hide_overlay_window(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 pub fn hide_overlay_window_and_restore(app: &AppHandle) {
     hide_overlay_window(app);
-}
-
-#[cfg(target_os = "macos")]
-fn position_panel_at_selection(
-    _app: &AppHandle,
-    panel: &dyn tauri_nspanel::Panel<tauri::Wry>,
-    rect: Option<&SelectionRect>,
-) {
-    use objc2_app_kit::NSPanel;
-    use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
-
-    let mtm = unsafe { MainThreadMarker::new_unchecked() };
-
-    // 获取屏幕信息
-    let screen = if let Some(rect) = rect {
-        let anchor = NSPoint::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
-        screen_frame_for_point(mtm, anchor)
-    } else {
-        let mouse = NSEvent::mouseLocation();
-        screen_frame_for_point(mtm, mouse)
-    }
-    .unwrap_or_else(|| {
-        objc2_app_kit::NSScreen::mainScreen(mtm)
-            .map(|s| s.frame())
-            .unwrap_or_else(|| NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1920.0, 1080.0)))
-    });
-
-    // 计算面板位置 (使用 SelectionRect 坐标系统,已经是 top-left 原点)
-    let (panel_x, panel_y) = if let Some(rect) = rect {
-        // 面板居中于选中文字,显示在上方
-        let x = rect.x + (rect.width - MENU_WIDTH) / 2.0;
-        let y = rect.y - MENU_HEIGHT - OVERLAY_VERTICAL_GAP;
-
-        tracing::info!(
-            "Position calculation: rect=({}, {}, {}x{}), panel_before_clamp=({}, {}), screen=({}, {}x{})",
-            rect.x, rect.y, rect.width, rect.height, x, y,
-            screen.origin.x, screen.size.width, screen.size.height
-        );
-
-        // 限制在屏幕范围内
-        let x = x.clamp(OVERLAY_PADDING, screen.size.width - MENU_WIDTH - OVERLAY_PADDING);
-        let y = y.clamp(OVERLAY_PADDING, screen.size.height - MENU_HEIGHT - OVERLAY_PADDING);
-
-        (x, y)
-    } else {
-        // 没有选区信息,使用鼠标位置
-        let mouse = current_mouse_location().unwrap_or(SelectionRect {
-            x: 100.0,
-            y: 100.0,
-            width: 0.0,
-            height: 0.0,
-        });
-        (mouse.x, mouse.y - MENU_HEIGHT - OVERLAY_VERTICAL_GAP)
-    };
-
-    tracing::info!("Final panel position: ({}, {})", panel_x, panel_y);
-
-    // 使用 NSPanel 的 setFrame 方法直接设置位置
-    // macOS 坐标系统：原点在屏幕左下角，y 轴向上
-    // SelectionRect 坐标系统：原点在屏幕左上角，y 轴向下
-    let screen_height = objc2_app_kit::NSScreen::mainScreen(mtm)
-        .map(|s| s.frame().size.height)
-        .unwrap_or(1080.0);
-
-    let ns_origin = NSPoint::new(
-        panel_x,
-        screen_height - panel_y - MENU_HEIGHT, // 转换为 macOS 坐标系统
-    );
-    let ns_size = NSSize::new(MENU_WIDTH, MENU_HEIGHT);
-    let frame = NSRect::new(ns_origin, ns_size);
-
-    let ns_panel = panel.as_panel();
-    unsafe {
-        ns_panel.setFrame_display(frame, true); // frame, animate
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn screen_frame_for_point(mtm: MainThreadMarker, point: NSPoint) -> Option<NSRect> {
-    let screens = NSScreen::screens(mtm);
-    let count = screens.count();
-    for i in 0..count {
-        let screen = screens.objectAtIndex(i);
-        let frame = screen.frame();
-        if point_in_nsrect(point, frame) {
-            return Some(frame);
-        }
-    }
-
-    NSScreen::mainScreen(mtm).map(|screen| screen.frame())
-}
-
-#[cfg(target_os = "macos")]
-fn point_in_nsrect(point: NSPoint, rect: NSRect) -> bool {
-    point.x >= rect.origin.x
-        && point.x <= rect.origin.x + rect.size.width
-        && point.y >= rect.origin.y
-        && point.y <= rect.origin.y + rect.size.height
-}
-
-#[cfg(target_os = "macos")]
-fn overlay_top_left_for_anchor(
-    anchor: NSPoint,
-    screen_frame: NSRect,
-    width: f64,
-    height: f64,
-) -> (f64, f64) {
-    // macOS 坐标系统: (0,0) 在屏幕左下角，y 轴向上增长
-    // 面板应该显示在选择文字的上方
-    let mut x = anchor.x - width / 2.0;
-    let mut y = anchor.y - height - OVERLAY_VERTICAL_GAP;
-
-    let min_x = screen_frame.origin.x + OVERLAY_PADDING;
-    let max_x = screen_frame.origin.x + screen_frame.size.width - width - OVERLAY_PADDING;
-    let min_y = screen_frame.origin.y + OVERLAY_PADDING;
-    let max_y = screen_frame.origin.y + screen_frame.size.height - height - OVERLAY_PADDING;
-
-    // 限制在屏幕范围内
-    if max_x >= min_x {
-        x = x.clamp(min_x, max_x);
-    } else {
-        x = min_x;
-    }
-
-    if max_y >= min_y {
-        y = y.clamp(min_y, max_y);
-    } else {
-        y = min_y;
-    }
-
-    (x, y)
 }
 
 #[cfg(target_os = "macos")]

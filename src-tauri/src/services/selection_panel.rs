@@ -53,11 +53,18 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 .transparent(true)
                 .visible(false)
                 .content_protected(true)
+                .skip_taskbar(true)
         })
-        .level(PanelLevel::PopUpMenu) // 使用 PopUpMenu 级别，确保在所有窗口之上且可交互
+        .level(PanelLevel::Floating) // 使用 Floating 级别，避免在所有窗口之上
         .transparent(true)
         .hides_on_deactivate(false)
         .build()?;
+
+    // 配置菜单面板交互性
+    if let Some(menu_panel) = get_menu_panel(app) {
+        menu_panel.set_ignores_mouse_events(false);
+        menu_panel.set_accepts_mouse_moved_events(true);
+    }
 
     tracing::info!("Menu panel created: {:?}", MENU_PANEL_LABEL);
 
@@ -73,11 +80,18 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 .transparent(true)
                 .visible(false)
                 .content_protected(true)
+                .skip_taskbar(true)
         })
-        .level(PanelLevel::PopUpMenu) // 使用 PopUpMenu 级别
+        .level(PanelLevel::Floating) // 使用 Floating 级别
         .transparent(true)
         .hides_on_deactivate(false)
         .build()?;
+
+    // 配置功能面板交互性
+    if let Some(action_panel) = get_action_panel(app) {
+        action_panel.set_ignores_mouse_events(false);
+        action_panel.set_accepts_mouse_moved_events(true);
+    }
 
     tracing::info!("Action panel created: {:?}", ACTION_PANEL_LABEL);
 

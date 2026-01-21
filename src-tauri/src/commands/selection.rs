@@ -72,7 +72,6 @@ pub async fn selection_show_action_panel(
         let ns_panel = panel.as_panel();
         unsafe {
             ns_panel.orderFront(None);
-            ns_panel.makeKeyWindow();
         }
     })
     .map_err(|e| AppError::internal_error(&e.to_string()))?;
