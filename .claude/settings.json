@@ -12,5 +12,8 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "additionalDirectories": ["/Users/wanggang/Downloads/1"]
   }
 }

@@ -21,8 +21,6 @@ use objc2::rc::autoreleasepool;
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSEvent, NSWorkspace};
 #[cfg(target_os = "macos")]
-use objc2_foundation::{NSPoint, NSRect, NSSize};
-#[cfg(target_os = "macos")]
 use once_cell::sync::Lazy;
 use serde::Serialize;
 #[cfg(target_os = "macos")]
@@ -39,10 +37,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 const MENU_WIDTH: f64 = 360.0;
-const MENU_HEIGHT: f64 = 44.0;
-const OVERLAY_MENU_HEIGHT: f64 = 32.0;
 const OVERLAY_VERTICAL_GAP: f64 = 24.0;
-const OVERLAY_PADDING: f64 = 12.0;
 const SELECTION_HOVER_PADDING: f64 = 6.0;
 const MOUSE_STILL_THRESHOLD: f64 = 2.0;
 const POLL_INTERVAL_MS: u64 = 100;
@@ -305,28 +300,47 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
     app.run_on_main_thread(move || {
         // 使用鼠标位置定位面板
         let mouse = NSEvent::mouseLocation();
+
         // macOS 坐标系统：原点在左下角，y 轴向上
-        // 面板显示在鼠标上方 24px
-        let panel_origin = NSPoint::new(
-            mouse.x - MENU_WIDTH / 2.0, // 水平居中
-            mouse.y + OVERLAY_VERTICAL_GAP, // 面板 origin 就在鼠标上方 24px
-        );
+        // Tauri window 坐标系统：原点在左上角，y 轴向下
+        // 需要转换坐标系统
 
-        // 设置面板位置（使用 NSPanel 的 setFrame 方法）
-        let panel_size = NSSize::new(MENU_WIDTH, MENU_HEIGHT);
-        let frame = NSRect::new(panel_origin, panel_size);
+        // 获取屏幕高度（用于坐标转换）
+        use objc2::rc::Retained;
+        use objc2_app_kit::NSScreen;
+        use objc2_foundation::MainThreadMarker;
 
-        let ns_panel = panel_clone.as_panel();
-        unsafe {
-            let _: () = objc2::msg_send![&*ns_panel, setFrame: frame];
+        let screen_height = unsafe {
+            let mtm = MainThreadMarker::new_unchecked();
+            NSScreen::mainScreen(mtm)
+                .map(|s: Retained<NSScreen>| s.frame().size.height)
+                .unwrap_or(1080.0)
+        };
+
+        // 转换到 Tauri 坐标系统（左上角为原点）
+        // macOS: y 从下往上（原点在左下角），Tauri: y 从上往下（原点在左上角）
+        // 鼠标位置在选中文字附近，面板应该显示在选中文字下方（鼠标下方）
+        // 计算：screen_height - mouse.y = 从屏幕顶部到鼠标的距离
+        // 加上 OVERLAY_VERTICAL_GAP 让面板出现在鼠标下方一点
+        let tauri_y = screen_height - mouse.y + OVERLAY_VERTICAL_GAP;
+        let tauri_x = mouse.x - MENU_WIDTH / 2.0; // 水平居中
+
+        // 使用 window 的 set_position 方法
+        if let Some(window) = panel_clone.to_window() {
+            use tauri::{LogicalPosition, Position};
+            let position = Position::Logical(LogicalPosition::new(tauri_x, tauri_y));
+
+            if let Err(e) = window.set_position(position) {
+                tracing::error!("Failed to set panel position: {}", e);
+            }
         }
 
         // 显示面板并使其可交互
         panel_clone.show_and_make_key();
 
         tracing::info!(
-            "Panel positioned at ({}, {}), mouse at ({}, {})",
-            panel_origin.x, panel_origin.y, mouse.x, mouse.y
+            "Panel positioned at Tauri({}, {}), macOS mouse at ({}, {})",
+            tauri_x, tauri_y, mouse.x, mouse.y
         );
     })
     .ok();

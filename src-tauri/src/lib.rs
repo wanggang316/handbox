@@ -189,10 +189,11 @@ pub fn run() {
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
 
-            // 创建选择面板 (NSPanel)
+            // 创建选择面板 (NSPanel) - 必须在setup中同步创建
             #[cfg(target_os = "macos")]
             {
                 if let Err(e) = setup_selection_panels(&app.handle()) {
+                    tracing::error!("Failed to setup selection panels: {e}");
                     eprintln!("Failed to setup selection panels: {e}");
                     // 不退出应用，因为选择面板是可选功能
                 }

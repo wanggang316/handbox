@@ -3,9 +3,12 @@
 #[cfg(target_os = "macos")]
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Manager, WebviewUrl};
+use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewUrl};
 #[cfg(target_os = "macos")]
-use tauri_nspanel::{tauri_panel, ManagerExt, Panel, PanelBuilder, PanelLevel};
+use tauri_nspanel::{
+    tauri_panel, CollectionBehavior, ManagerExt, Panel, PanelBuilder, PanelLevel, StyleMask,
+    TrackingAreaOptions,
+};
 
 // 定义两个面板类型
 // MenuPanel: 菜单面板 - 小型横向按钮条 (显示、复制、翻译、收藏、设置)
@@ -19,6 +22,17 @@ tauri_panel! {
             becomes_key_only_if_needed: true,  // 只在需要时成为 key window
             is_floating_panel: true,          // 浮动在其他窗口之上（重要！）
         }
+        with: {
+            // 启用鼠标追踪以支持按钮点击和自动隐藏
+            tracking_area: {
+                options: TrackingAreaOptions::new()
+                    .active_always()            // 始终追踪，即使应用未激活
+                    .mouse_entered_and_exited() // 获取鼠标进入/离开通知
+                    .mouse_moved()              // 追踪鼠标移动
+                    .cursor_update(),           // 追踪光标更新
+                auto_resize: true                // 自动调整追踪区域大小
+            }
+        }
     })
 
     panel!(ActionPanel {
@@ -28,6 +42,12 @@ tauri_panel! {
             becomes_key_only_if_needed: true,  // 只在需要时成为 key window
             is_floating_panel: true,          // 浮动在其他窗口之上（重要！）
         }
+    })
+
+    // 面板事件处理器
+    panel_event!(MenuPanelEventHandler {
+        window_did_become_key(notification: &NSNotification) -> (),
+        window_did_resign_key(notification: &NSNotification) -> (),
     })
 }
 
@@ -44,42 +64,95 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
     tracing::info!("Setting up selection panels");
 
     // 创建菜单面板
-    let _menu_panel = PanelBuilder::<tauri::Wry, MenuPanel>::new(app, MENU_PANEL_LABEL)
+    tracing::info!("Creating menu panel with label: {}", MENU_PANEL_LABEL);
+    let menu_panel = PanelBuilder::<tauri::Wry, MenuPanel>::new(app, MENU_PANEL_LABEL)
         .url(WebviewUrl::App("/selection/menu".into()))
         .title("Selection Menu")
+        .size(Size::Logical(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT)))
+        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别适合菜单
+        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
         .with_window(|window| {
             window
-                .inner_size(MENU_WIDTH, MENU_HEIGHT)
                 .resizable(false)
                 .decorations(false)
                 .transparent(true)
                 .visible(false)
                 .skip_taskbar(true)
         })
-        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别适合菜单
-        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
-        .build()?;
+        .build()
+        .map_err(|e| {
+            tracing::error!("Failed to build menu panel: {}", e);
+            e
+        })?;
 
-    tracing::info!("Menu panel created: {:?}", MENU_PANEL_LABEL);
+    // 配置菜单面板的行为
+    menu_panel.set_level(PanelLevel::PopUpMenu.value());
+
+    // 确保面板不会激活应用
+    menu_panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+
+    // 允许面板在全屏窗口同一空间显示，并加入所有空间
+    menu_panel.set_collection_behavior(
+        CollectionBehavior::new()
+            .full_screen_auxiliary()
+            .can_join_all_spaces()
+            .into(),
+    );
+
+    // 不在失去焦点时隐藏
+    menu_panel.set_hides_on_deactivate(false);
+
+    // 允许在模态对话框运行时接收事件
+    menu_panel.set_works_when_modal(true);
+
+    // 设置事件处理器
+    let handler = MenuPanelEventHandler::new();
+
+    // 监听鼠标进入事件 - 让面板成为 key window 以接收点击
+    handler.window_did_become_key(move |_notification| {
+        tracing::debug!("Menu panel became key window");
+    });
+
+    // 监听鼠标离开事件 - 使用独立的 app_handle
+    let app_for_resign = app.clone();
+    handler.window_did_resign_key(move |_notification| {
+        tracing::debug!("Menu panel resigned key window");
+        // 当失去焦点时隐藏面板
+        if let Some(panel) = get_menu_panel(&app_for_resign) {
+            panel.hide();
+        }
+    });
+
+    menu_panel.set_event_handler(Some(handler.as_ref()));
+
+    tracing::info!("Menu panel created successfully: {:?}", MENU_PANEL_LABEL);
 
     // 创建功能面板
+    tracing::info!("Creating action panel with label: {}", ACTION_PANEL_LABEL);
     let _action_panel = PanelBuilder::<tauri::Wry, ActionPanel>::new(app, ACTION_PANEL_LABEL)
         .url(WebviewUrl::App("/selection/action".into()))
         .title("Selection Action")
+        .size(Size::Logical(LogicalSize::new(
+            ACTION_WIDTH,
+            ACTION_MIN_HEIGHT,
+        )))
+        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别
+        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
         .with_window(|window| {
             window
-                .inner_size(ACTION_WIDTH, ACTION_MIN_HEIGHT)
                 .resizable(true)
                 .decorations(false)
                 .transparent(true)
                 .visible(false)
                 .skip_taskbar(true)
         })
-        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别
-        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
-        .build()?;
+        .build()
+        .map_err(|e| {
+            tracing::error!("Failed to build action panel: {}", e);
+            e
+        })?;
 
-    tracing::info!("Action panel created: {:?}", ACTION_PANEL_LABEL);
+    tracing::info!("Action panel created successfully: {:?}", ACTION_PANEL_LABEL);
 
     Ok(())
 }
@@ -105,10 +178,10 @@ pub fn get_action_panel(app: &AppHandle) -> Option<Arc<dyn Panel<tauri::Wry>>> {
 #[cfg(target_os = "macos")]
 pub fn hide_all_panels(app: &AppHandle) {
     if let Some(panel) = get_menu_panel(app) {
-        let _ = panel.hide();
+        panel.hide();
     }
     if let Some(panel) = get_action_panel(app) {
-        let _ = panel.hide();
+        panel.hide();
     }
 }
 
