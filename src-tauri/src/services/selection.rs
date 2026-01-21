@@ -301,28 +301,28 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
 
     // 定位并显示面板（必须在主线程执行）
     let panel_clone = panel.clone();
-    let payload_rect = payload.rect.clone();
 
     app.run_on_main_thread(move || {
         // 使用鼠标位置定位面板
         let mouse = NSEvent::mouseLocation();
         // macOS 坐标系统：原点在左下角，y 轴向上
         // 面板显示在鼠标上方 24px
-        // 面板顶部（y + MENU_HEIGHT）应该在鼠标位置上方
         let panel_origin = NSPoint::new(
             mouse.x - MENU_WIDTH / 2.0, // 水平居中
             mouse.y + OVERLAY_VERTICAL_GAP, // 面板 origin 就在鼠标上方 24px
         );
+
+        // 设置面板位置（使用 NSPanel 的 setFrame 方法）
         let panel_size = NSSize::new(MENU_WIDTH, MENU_HEIGHT);
         let frame = NSRect::new(panel_origin, panel_size);
 
         let ns_panel = panel_clone.as_panel();
         unsafe {
-            ns_panel.setFrame_display(frame, true); // true = animate
+            let _: () = objc2::msg_send![&*ns_panel, setFrame: frame];
         }
-        panel_clone.show();
-        panel_clone.make_key_window();
-        panel_clone.order_front_regardless();
+
+        // 显示面板并使其可交互
+        panel_clone.show_and_make_key();
 
         tracing::info!(
             "Panel positioned at ({}, {}), mouse at ({}, {})",

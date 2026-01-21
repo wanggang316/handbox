@@ -16,7 +16,8 @@ tauri_panel! {
         config: {
             can_become_key_window: true,       // 允许成为 key window
             can_become_main_window: false,     // 不需要成为主窗口
-            is_floating_panel: false,          // 不是浮动面板
+            becomes_key_only_if_needed: true,  // 只在需要时成为 key window
+            is_floating_panel: true,          // 浮动在其他窗口之上（重要！）
         }
     })
 
@@ -24,7 +25,8 @@ tauri_panel! {
         config: {
             can_become_key_window: true,       // 需要接收键盘事件(Escape关闭)
             can_become_main_window: false,     // 不需要成为主窗口
-            is_floating_panel: false,          // 不是浮动面板
+            becomes_key_only_if_needed: true,  // 只在需要时成为 key window
+            is_floating_panel: true,          // 浮动在其他窗口之上（重要！）
         }
     })
 }
@@ -52,13 +54,10 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 .decorations(false)
                 .transparent(true)
                 .visible(false)
-                .content_protected(true)
                 .skip_taskbar(true)
-                .always_on_top(true)
         })
-        .level(PanelLevel::Normal) // 使用 Normal 级别，允许正常的窗口行为
-        .transparent(true)
-        .hides_on_deactivate(true) // 点击外部时自动隐藏
+        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别适合菜单
+        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
         .build()?;
 
     tracing::info!("Menu panel created: {:?}", MENU_PANEL_LABEL);
@@ -74,13 +73,10 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 .decorations(false)
                 .transparent(true)
                 .visible(false)
-                .content_protected(true)
                 .skip_taskbar(true)
-                .always_on_top(true)
         })
-        .level(PanelLevel::Normal) // 使用 Normal 级别
-        .transparent(true)
-        .hides_on_deactivate(true)
+        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别
+        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
         .build()?;
 
     tracing::info!("Action panel created: {:?}", ACTION_PANEL_LABEL);
