@@ -163,24 +163,24 @@ pub fn run() {
         // 初始化 NSPanel 插件
         builder = builder.plugin(tauri_nspanel::init());
 
-        builder = builder.plugin(
-            tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
-                .on_event(|app, event| {
-                    if let tauri::RunEvent::Reopen {
-                        has_visible_windows,
-                        ..
-                    } = event
-                    {
-                        if !has_visible_windows {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    }
-                })
-                .build(),
-        );
+        // builder = builder.plugin(
+        //     tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
+        //         .on_event(|app, event| {
+        //             if let tauri::RunEvent::Reopen {
+        //                 has_visible_windows,
+        //                 ..
+        //             } = event
+        //             {
+        //                 if !has_visible_windows {
+        //                     if let Some(window) = app.get_webview_window("main") {
+        //                         let _ = window.show();
+        //                         let _ = window.set_focus();
+        //                     }
+        //                 }
+        //             }
+        //         })
+        //         .build(),
+        // );
     }
 
     builder
@@ -190,14 +190,14 @@ pub fn run() {
             app.set_menu(menu).expect("Failed to set menu");
 
             // 创建选择面板 (NSPanel) - 必须在setup中同步创建
-            #[cfg(target_os = "macos")]
-            {
-                if let Err(e) = setup_selection_panels(&app.handle()) {
-                    tracing::error!("Failed to setup selection panels: {e}");
-                    eprintln!("Failed to setup selection panels: {e}");
-                    // 不退出应用，因为选择面板是可选功能
-                }
-            }
+            // #[cfg(target_os = "macos")]
+            // {
+            //     if let Err(e) = setup_selection_panels(&app.handle()) {
+            //         tracing::error!("Failed to setup selection panels: {e}");
+            //         eprintln!("Failed to setup selection panels: {e}");
+            //         // 不退出应用，因为选择面板是可选功能
+            //     }
+            // }
 
             // 异步初始化服务
             let app_handle = app.handle().clone();
@@ -220,17 +220,17 @@ pub fn run() {
             greet,
             // 调试命令
             debug_check_file,
-            debug_show_selection_overlay,
-            // 选择相关命令
-            selection_get_last_payload,
-            selection_hide_menu_panel,
-            selection_hide_action_panel,
-            selection_show_action_panel,
-            selection_overlay_hide,
-            selection_overlay_resize,
-            selection_overlay_lock,
-            selection_overlay_dismiss,
-            selection_overlay_set_interactive,
+            // debug_show_selection_overlay,
+            // // 选择相关命令
+            // // selection_get_last_payload,
+            // selection_hide_menu_panel,
+            // selection_hide_action_panel,
+            // selection_show_action_panel,
+            // // selection_overlay_hide,
+            // selection_overlay_resize,
+            // selection_overlay_lock,
+            // selection_overlay_dismiss,
+            // selection_overlay_set_interactive,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,

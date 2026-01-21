@@ -64,12 +64,14 @@ handbox-llm = { path = "crates/handbox-llm" }
 handbox-mcp = { path = "crates/handbox-mcp" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.10"
+core-foundation = "0.10.1"
 core-graphics = "0.23"
 objc2 = "0.6.3"
 objc2-app-kit = { version = "0.3.2", features = ["NSEvent", "NSPanel", "NSResponder", "NSRunningApplication", "NSScreen", "NSWindow", "NSWorkspace", "libc"] }
 objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "NSURL"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+rdev = { git = "https://github.com/Narsil/rdev", branch = "main" }
+accessibility = { git = "https://github.com/eiz/accessibility" }
 
 [dev-dependencies]
 tempfile = "3.21.0"

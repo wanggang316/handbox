@@ -1,10 +1,10 @@
 use crate::models::error::AppError;
 
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub async fn selection_get_last_payload() -> Result<Option<serde_json::Value>, AppError> {
-    Ok(crate::services::selection::get_last_payload_json())
-}
+// #[cfg(target_os = "macos")]
+// #[tauri::command]
+// pub async fn selection_get_last_payload() -> Result<Option<serde_json::Value>, AppError> {
+//     Ok(crate::services::selection::get_last_payload_json())
+// }
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -62,7 +62,10 @@ pub async fn selection_show_action_panel(
     // 发送模式和文本数据
     if let Some(window) = panel.to_window() {
         window
-            .emit("mode_change", &serde_json::json!({ "mode": mode, "text": text }))
+            .emit(
+                "mode_change",
+                &serde_json::json!({ "mode": mode, "text": text }),
+            )
             .map_err(|e| AppError::internal_error(&e.to_string()))?;
     }
 
@@ -75,12 +78,12 @@ pub async fn selection_show_action_panel(
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub async fn selection_overlay_hide(app: tauri::AppHandle) -> Result<(), AppError> {
-    crate::services::selection::hide_overlay_window_and_restore(&app);
-    Ok(())
-}
+// #[cfg(target_os = "macos")]
+// #[tauri::command]
+// pub async fn selection_overlay_hide(app: tauri::AppHandle) -> Result<(), AppError> {
+//     crate::services::selection::hide_overlay_window_and_restore(&app);
+//     Ok(())
+// }
 
 #[cfg(target_os = "macos")]
 #[tauri::command]

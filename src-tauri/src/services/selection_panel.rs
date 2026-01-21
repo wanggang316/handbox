@@ -65,12 +65,13 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
 
     // 创建菜单面板
     tracing::info!("Creating menu panel with label: {}", MENU_PANEL_LABEL);
-    let menu_panel = PanelBuilder::<tauri::Wry, MenuPanel>::new(app, MENU_PANEL_LABEL)
+    // let menu_panel =
+    PanelBuilder::<tauri::Wry, MenuPanel>::new(app, MENU_PANEL_LABEL)
         .url(WebviewUrl::App("/selection/menu".into()))
         .title("Selection Menu")
         .size(Size::Logical(LogicalSize::new(MENU_WIDTH, MENU_HEIGHT)))
-        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别适合菜单
-        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
+        .level(PanelLevel::Floating) // PopUpMenu 级别适合菜单
+        // .hides_on_deactivate(false) // 不要在失去焦点时隐藏
         .with_window(|window| {
             window
                 .resizable(false)
@@ -86,73 +87,76 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
         })?;
 
     // 配置菜单面板的行为
-    menu_panel.set_level(PanelLevel::PopUpMenu.value());
+    // menu_panel.set_level(PanelLevel::PopUpMenu.value());
 
     // 确保面板不会激活应用
-    menu_panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+    // menu_panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
 
     // 允许面板在全屏窗口同一空间显示，并加入所有空间
-    menu_panel.set_collection_behavior(
-        CollectionBehavior::new()
-            .full_screen_auxiliary()
-            .can_join_all_spaces()
-            .into(),
-    );
+    // menu_panel.set_collection_behavior(
+    //     CollectionBehavior::new()
+    //         .full_screen_auxiliary()
+    //         .can_join_all_spaces()
+    //         .into(),
+    // );
 
     // 不在失去焦点时隐藏
-    menu_panel.set_hides_on_deactivate(false);
+    // menu_panel.set_hides_on_deactivate(false);
 
     // 允许在模态对话框运行时接收事件
-    menu_panel.set_works_when_modal(true);
+    // menu_panel.set_works_when_modal(true);
 
     // 设置事件处理器
-    let handler = MenuPanelEventHandler::new();
+    // let handler = MenuPanelEventHandler::new();
 
-    // 监听鼠标进入事件 - 让面板成为 key window 以接收点击
-    handler.window_did_become_key(move |_notification| {
-        tracing::debug!("Menu panel became key window");
-    });
+    // // 监听鼠标进入事件 - 让面板成为 key window 以接收点击
+    // handler.window_did_become_key(move |_notification| {
+    //     tracing::debug!("Menu panel became key window");
+    // });
 
-    // 监听鼠标离开事件 - 使用独立的 app_handle
-    let app_for_resign = app.clone();
-    handler.window_did_resign_key(move |_notification| {
-        tracing::debug!("Menu panel resigned key window");
-        // 当失去焦点时隐藏面板
-        if let Some(panel) = get_menu_panel(&app_for_resign) {
-            panel.hide();
-        }
-    });
+    // // 监听鼠标离开事件 - 使用独立的 app_handle
+    // let app_for_resign = app.clone();
+    // handler.window_did_resign_key(move |_notification| {
+    //     tracing::debug!("Menu panel resigned key window");
+    //     // 当失去焦点时隐藏面板
+    //     if let Some(panel) = get_menu_panel(&app_for_resign) {
+    //         panel.hide();
+    //     }
+    // });
 
-    menu_panel.set_event_handler(Some(handler.as_ref()));
+    // menu_panel.set_event_handler(Some(handler.as_ref()));
 
     tracing::info!("Menu panel created successfully: {:?}", MENU_PANEL_LABEL);
 
     // 创建功能面板
-    tracing::info!("Creating action panel with label: {}", ACTION_PANEL_LABEL);
-    let _action_panel = PanelBuilder::<tauri::Wry, ActionPanel>::new(app, ACTION_PANEL_LABEL)
-        .url(WebviewUrl::App("/selection/action".into()))
-        .title("Selection Action")
-        .size(Size::Logical(LogicalSize::new(
-            ACTION_WIDTH,
-            ACTION_MIN_HEIGHT,
-        )))
-        .level(PanelLevel::PopUpMenu) // PopUpMenu 级别
-        .hides_on_deactivate(false) // 不要在失去焦点时隐藏
-        .with_window(|window| {
-            window
-                .resizable(true)
-                .decorations(false)
-                .transparent(true)
-                .visible(false)
-                .skip_taskbar(true)
-        })
-        .build()
-        .map_err(|e| {
-            tracing::error!("Failed to build action panel: {}", e);
-            e
-        })?;
+    // tracing::info!("Creating action panel with label: {}", ACTION_PANEL_LABEL);
+    // let _action_panel = PanelBuilder::<tauri::Wry, ActionPanel>::new(app, ACTION_PANEL_LABEL)
+    //     .url(WebviewUrl::App("/selection/action".into()))
+    //     .title("Selection Action")
+    //     .size(Size::Logical(LogicalSize::new(
+    //         ACTION_WIDTH,
+    //         ACTION_MIN_HEIGHT,
+    //     )))
+    //     .level(PanelLevel::PopUpMenu) // PopUpMenu 级别
+    //     .hides_on_deactivate(false) // 不要在失去焦点时隐藏
+    //     .with_window(|window| {
+    //         window
+    //             .resizable(true)
+    //             .decorations(false)
+    //             .transparent(true)
+    //             .visible(false)
+    //             .skip_taskbar(true)
+    //     })
+    //     .build()
+    //     .map_err(|e| {
+    //         tracing::error!("Failed to build action panel: {}", e);
+    //         e
+    //     })?;
 
-    tracing::info!("Action panel created successfully: {:?}", ACTION_PANEL_LABEL);
+    // tracing::info!(
+    //     "Action panel created successfully: {:?}",
+    //     ACTION_PANEL_LABEL
+    // );
 
     Ok(())
 }
