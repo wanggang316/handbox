@@ -42,60 +42,42 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
     tracing::info!("Setting up selection panels");
 
     // 创建菜单面板
-    let menu_panel = PanelBuilder::<tauri::Wry, MenuPanel>::new(
-        app,
-        MENU_PANEL_LABEL,
-    )
-    .url(WebviewUrl::App("/selection/menu".into()))
-    .title("Selection Menu")
-    .with_window(|window| {
-        window
-            .inner_size(MENU_WIDTH, MENU_HEIGHT)
-            .position(0.0, 0.0)
-            .resizable(false)
-            .decorations(false)
-            .transparent(true)
-            .visible(false)
-            .content_protected(true)
-    })
-    .level(PanelLevel::Normal)  // 使用 Normal 而不是 Floating
-    .transparent(true)
-    .hides_on_deactivate(false)
-    .build()?;
-
-    // 配置面板交互属性
-    menu_panel.set_ignores_mouse_events(false); // 确保可以接收鼠标事件
-    menu_panel.set_accepts_mouse_moved_events(true);
-    menu_panel.set_floating_panel(false); // 确保不是浮动面板
+    let _menu_panel = PanelBuilder::<tauri::Wry, MenuPanel>::new(app, MENU_PANEL_LABEL)
+        .url(WebviewUrl::App("/selection/menu".into()))
+        .title("Selection Menu")
+        .with_window(|window| {
+            window
+                .inner_size(MENU_WIDTH, MENU_HEIGHT)
+                .resizable(false)
+                .decorations(false)
+                .transparent(true)
+                .visible(false)
+                .content_protected(true)
+        })
+        .level(PanelLevel::PopUpMenu) // 使用 PopUpMenu 级别，确保在所有窗口之上且可交互
+        .transparent(true)
+        .hides_on_deactivate(false)
+        .build()?;
 
     tracing::info!("Menu panel created: {:?}", MENU_PANEL_LABEL);
 
     // 创建功能面板
-    let action_panel = PanelBuilder::<tauri::Wry, ActionPanel>::new(
-        app,
-        ACTION_PANEL_LABEL,
-    )
-    .url(WebviewUrl::App("/selection/action".into()))
-    .title("Selection Action")
-    .with_window(|window| {
-        window
-            .inner_size(ACTION_WIDTH, ACTION_MIN_HEIGHT)
-            .position(0.0, 0.0)
-            .resizable(true)
-            .decorations(false)
-            .transparent(true)
-            .visible(false)
-            .content_protected(true)
-    })
-    .level(PanelLevel::Normal)  // 使用 Normal 而不是 Floating
-    .transparent(true)
-    .hides_on_deactivate(false)
-    .build()?;
-
-    // 配置面板交互属性
-    action_panel.set_ignores_mouse_events(false); // 确保可以接收鼠标事件
-    action_panel.set_accepts_mouse_moved_events(true);
-    action_panel.set_floating_panel(false); // 确保不是浮动面板
+    let _action_panel = PanelBuilder::<tauri::Wry, ActionPanel>::new(app, ACTION_PANEL_LABEL)
+        .url(WebviewUrl::App("/selection/action".into()))
+        .title("Selection Action")
+        .with_window(|window| {
+            window
+                .inner_size(ACTION_WIDTH, ACTION_MIN_HEIGHT)
+                .resizable(true)
+                .decorations(false)
+                .transparent(true)
+                .visible(false)
+                .content_protected(true)
+        })
+        .level(PanelLevel::PopUpMenu) // 使用 PopUpMenu 级别
+        .transparent(true)
+        .hides_on_deactivate(false)
+        .build()?;
 
     tracing::info!("Action panel created: {:?}", ACTION_PANEL_LABEL);
 

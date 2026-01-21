@@ -305,12 +305,19 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
     let app_clone = app.clone();
 
     app.run_on_main_thread(move || {
+        // 先定位面板
         position_panel_at_selection(&app_clone, panel_clone.as_ref(), payload_rect.as_ref());
 
-        // 显示面板并设置为可交互
+        // 显示面板
         panel_clone.show();
-        panel_clone.order_front_regardless(); // 确保面板在最前面
-        panel_clone.make_key_window(); // 让面板可以接收键盘和鼠标事件
+
+        // 使用 orderFront 而不是 order_front_regardless
+        // order_front_regardless 可能让面板失去交互能力
+        let ns_panel = panel_clone.as_panel();
+        unsafe {
+            ns_panel.orderFront(None);
+            ns_panel.makeKeyWindow();
+        }
     })
     .ok();
 
@@ -338,8 +345,8 @@ fn position_panel_at_selection(
     panel: &dyn tauri_nspanel::Panel<tauri::Wry>,
     rect: Option<&SelectionRect>,
 ) {
-    use objc2_foundation::MainThreadMarker;
-    use tauri_nspanel::NSPoint;
+    use objc2_app_kit::NSPanel;
+    use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 
     let mtm = unsafe { MainThreadMarker::new_unchecked() };
 
@@ -387,12 +394,23 @@ fn position_panel_at_selection(
 
     tracing::info!("Final panel position: ({}, {})", panel_x, panel_y);
 
-    // 设置面板位置
-    if let Some(window) = panel.to_window() {
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: panel_x as i32,
-            y: panel_y as i32,
-        }));
+    // 使用 NSPanel 的 setFrame 方法直接设置位置
+    // macOS 坐标系统：原点在屏幕左下角，y 轴向上
+    // SelectionRect 坐标系统：原点在屏幕左上角，y 轴向下
+    let screen_height = objc2_app_kit::NSScreen::mainScreen(mtm)
+        .map(|s| s.frame().size.height)
+        .unwrap_or(1080.0);
+
+    let ns_origin = NSPoint::new(
+        panel_x,
+        screen_height - panel_y - MENU_HEIGHT, // 转换为 macOS 坐标系统
+    );
+    let ns_size = NSSize::new(MENU_WIDTH, MENU_HEIGHT);
+    let frame = NSRect::new(ns_origin, ns_size);
+
+    let ns_panel = panel.as_panel();
+    unsafe {
+        ns_panel.setFrame_display(frame, true); // frame, animate
     }
 }
 
