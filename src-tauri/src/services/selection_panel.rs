@@ -16,7 +16,7 @@ tauri_panel! {
         config: {
             can_become_key_window: true,       // 允许成为 key window
             can_become_main_window: false,     // 不需要成为主窗口
-            is_floating_panel: false,          // 不是浮动面板(浮动面板会拦截事件)
+            is_floating_panel: false,          // 不是浮动面板
         }
     })
 
@@ -54,17 +54,12 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 .visible(false)
                 .content_protected(true)
                 .skip_taskbar(true)
+                .always_on_top(true)
         })
-        .level(PanelLevel::Floating) // 使用 Floating 级别，避免在所有窗口之上
+        .level(PanelLevel::Normal) // 使用 Normal 级别，允许正常的窗口行为
         .transparent(true)
-        .hides_on_deactivate(false)
+        .hides_on_deactivate(true) // 点击外部时自动隐藏
         .build()?;
-
-    // 配置菜单面板交互性
-    if let Some(menu_panel) = get_menu_panel(app) {
-        menu_panel.set_ignores_mouse_events(false);
-        menu_panel.set_accepts_mouse_moved_events(true);
-    }
 
     tracing::info!("Menu panel created: {:?}", MENU_PANEL_LABEL);
 
@@ -81,17 +76,12 @@ pub fn setup_selection_panels(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 .visible(false)
                 .content_protected(true)
                 .skip_taskbar(true)
+                .always_on_top(true)
         })
-        .level(PanelLevel::Floating) // 使用 Floating 级别
+        .level(PanelLevel::Normal) // 使用 Normal 级别
         .transparent(true)
-        .hides_on_deactivate(false)
+        .hides_on_deactivate(true)
         .build()?;
-
-    // 配置功能面板交互性
-    if let Some(action_panel) = get_action_panel(app) {
-        action_panel.set_ignores_mouse_events(false);
-        action_panel.set_accepts_mouse_moved_events(true);
-    }
 
     tracing::info!("Action panel created: {:?}", ACTION_PANEL_LABEL);
 

@@ -69,10 +69,6 @@ pub async fn selection_show_action_panel(
     // 显示面板并聚焦（必须在主线程执行）
     app.run_on_main_thread(move || {
         panel.show();
-        let ns_panel = panel.as_panel();
-        unsafe {
-            ns_panel.orderFront(None);
-        }
     })
     .map_err(|e| AppError::internal_error(&e.to_string()))?;
 

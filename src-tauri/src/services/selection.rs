@@ -19,7 +19,7 @@ use core_graphics::geometry::CGRect;
 #[cfg(target_os = "macos")]
 use objc2::rc::autoreleasepool;
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSEvent, NSScreen, NSWorkspace};
+use objc2_app_kit::{NSEvent, NSWorkspace};
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 #[cfg(target_os = "macos")]
@@ -308,9 +308,10 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
         let mouse = NSEvent::mouseLocation();
         // macOS 坐标系统：原点在左下角，y 轴向上
         // 面板显示在鼠标上方 24px
+        // 面板顶部（y + MENU_HEIGHT）应该在鼠标位置上方
         let panel_origin = NSPoint::new(
             mouse.x - MENU_WIDTH / 2.0, // 水平居中
-            mouse.y + MENU_HEIGHT + OVERLAY_VERTICAL_GAP, // 垂直方向，面板 origin 在上方
+            mouse.y + OVERLAY_VERTICAL_GAP, // 面板 origin 就在鼠标上方 24px
         );
         let panel_size = NSSize::new(MENU_WIDTH, MENU_HEIGHT);
         let frame = NSRect::new(panel_origin, panel_size);
@@ -318,8 +319,10 @@ fn show_overlay_window(app: &AppHandle, payload: &SelectionPayload) {
         let ns_panel = panel_clone.as_panel();
         unsafe {
             ns_panel.setFrame_display(frame, true); // true = animate
-            ns_panel.orderFront(None);
         }
+        panel_clone.show();
+        panel_clone.make_key_window();
+        panel_clone.order_front_regardless();
 
         tracing::info!(
             "Panel positioned at ({}, {}), mouse at ({}, {})",
