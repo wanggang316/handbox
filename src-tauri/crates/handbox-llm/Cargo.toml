@@ -21,6 +21,6 @@ google-genai-rust = { path = "../../../../../google-genai-rust/google-genai-rust
 rmcp = { version = "0.7", features = ["client"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.0", features = ["macros", "rt", "sync"] }
-aliyun-oss-rs = { path = "/Users/wanggang/dev/opensource/aliyun-oss-rs" }
+aliyun-oss-rs = { version = "0.3.0" }
 regex = "1.0"
 base64 = "0.22"

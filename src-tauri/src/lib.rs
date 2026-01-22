@@ -15,7 +15,10 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 use swift_rs::swift;
-use tauri::{AppHandle, Emitter, Manager, Runtime}; // 导入 c_void
+#[cfg(target_os = "macos")]
+use tauri::ActivationPolicy;
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri_nspanel::{ManagerExt, panel}; // 导入 c_void
 
 use crate::commands::*;
 use crate::services::{
@@ -170,8 +173,10 @@ extern "C" fn on_mouse_up_callback(
             // 给系统 UI 留出反应时间
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
+            tracing::info!(">>>>>>>> app_name: {}, bundle_id: {}, pid: {}", app_name, bundle_id, pid);
             // 这里你可以调用你之前的 accessibility 逻辑
             if let Some(text) = accessibility::get_ax_selected_text() {
+                tracing::info!("-----> text: {}, x: {}, y: {}, app_name: {}, bundle_id: {}, pid: {}", text, x, y, app_name, bundle_id, pid);
                 // 发送给前端
                 let _ = handle_clone.emit(
                     "global-selection",
@@ -183,6 +188,39 @@ extern "C" fn on_mouse_up_callback(
                     }),
                 );
 
+                // match handle_clone.get_webview_panel("floating") {
+                //     Ok(panel) => {
+                //     //     // 1. 设置位置
+                //         // let _ = panel.set_position(tauri::LogicalPosition::new(x, y - 50.0));
+    
+                //     //     // 2. 显示并强制获取焦点（成为 Key Window）
+                //     //     // show() 方法后面紧跟让它成为 Key 的指令
+                //         panel.show(); 
+                //         panel.make_key_and_order_front(); 
+    
+                //     //     // 关键：在不激活 App 的前提下，让面板成为当前能够接收事件的 Key Window
+                //     //     // 这样用户一旦点击屏幕任何其他位置，它就会触发 Resign Key 事件
+                //     //     panel.make_key_and_order_front(); 
+                //     }
+                //     Err(e) => {
+                //         tracing::error!("Failed to get floating panel: {:?}", e);
+                //     }
+                // }
+                
+                // if let Some(window) = handle_clone.get_webview_window("floating") {
+                //     // 1. 直接用 Tauri 原生窗口设置坐标（这绝对不会报错）
+                //     let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y: y - 50.0 }));
+                
+                //     // 2. 然后再获取 panel 句柄来显示
+                //     match handle_clone.get_webview_panel("floating") {
+                //         Ok(panel) => {
+                //             panel.show();
+                //         }
+                //         Err(e) => {
+                //             tracing::error!("Failed to get floating panel: {:?}", e);
+                //         }
+                //     }
+                // }
                 // 强制显示窗口 (使用你的 label: "floating")
                 if let Some(window) = handle_clone.get_webview_window("floating") {
                     let _ = window.set_position(tauri::LogicalPosition::new(x, y - 50.0));
@@ -220,24 +258,24 @@ pub fn run() {
         // 初始化 NSPanel 插件
         builder = builder.plugin(tauri_nspanel::init());
 
-        builder = builder.plugin(
-            tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
-                .on_event(|app, event| {
-                    if let tauri::RunEvent::Reopen {
-                        has_visible_windows,
-                        ..
-                    } = event
-                    {
-                        if !has_visible_windows {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    }
-                })
-                .build(),
-        );
+        // builder = builder.plugin(
+        //     tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
+        //         .on_event(|app, event| {
+        //             if let tauri::RunEvent::Reopen {
+        //                 has_visible_windows,
+        //                 ..
+        //             } = event
+        //             {
+        //                 if !has_visible_windows {
+        //                     if let Some(window) = app.get_webview_window("main") {
+        //                         let _ = window.show();
+        //                         let _ = window.set_focus();
+        //                     }
+        //                 }
+        //             }
+        //         })
+        //         .build(),
+        // );
     }
 
     builder
@@ -264,6 +302,10 @@ pub fn run() {
                     std::process::exit(1);
                 }
             });
+
+            // 1. 初始设为 Accessory 模式（解决陪跑的核心）
+            #[cfg(target_os = "macos")]
+            app.handle().clone().set_activation_policy(ActivationPolicy::Accessory);
 
             // start_selection_observer(app.handle().clone());
 

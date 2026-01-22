@@ -1,5 +1,4 @@
 use accessibility::{AXAttribute, AXUIElement};
-use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 
 pub fn get_ax_selected_text() -> Option<String> {
@@ -11,7 +10,7 @@ pub fn get_ax_selected_text() -> Option<String> {
     let focused_element = focused_cf.downcast_into::<AXUIElement>()?;
 
     // 2. 获取该元素中被选中的文本
-    let selected_attr = AXAttribute::new(&CFString::from_static_string("AXSelectedText"));
+    let selected_attr: AXAttribute<core_foundation::base::CFType> = AXAttribute::new(&CFString::from_static_string("AXSelectedText"));
     let text_cf_type = focused_element.attribute(&selected_attr).ok()?;
     let text_cf = text_cf_type.downcast_into::<CFString>()?;
 

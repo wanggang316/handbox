@@ -32,8 +32,8 @@
       await appWindow.setPosition(new LogicalPosition(x, y - 48));
 
       // 2. 显示窗口并置顶
-      await appWindow.show();
-      await appWindow.setFocus();
+      // await appWindow.show();
+      // await appWindow.setFocus();
     });
 
     // 组件销毁时取消监听

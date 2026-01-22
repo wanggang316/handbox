@@ -50,18 +50,6 @@
           "x": 15,
           "y": 27
         }
-      },
-      {
-        "label": "floating",
-        "url": "/floating",
-        "width": 360,
-        "height": 48,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "visible": false,
-        "resizable": false,
-        "skipTaskbar": true
       }
     ],
     "security": {

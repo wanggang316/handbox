@@ -6,6 +6,7 @@ const OSS_ACCESS_KEY_ID: &str = "OSSAccessKeyId";
 const OSS_ACCESS_KEY_SECRET: &str = "OSSAccessKeySecret";
 const OSS_BUCKET: &str = "OSSBucket";
 const OSS_ENDPOINT: &str = "OSSEndpoint";
+const OSS_REGION: &str = "OSSRegion";
 
 /// Minimal wrapper around aliyun OSS client to fetch supplemental model data.
 #[derive(Clone)]
@@ -21,11 +22,13 @@ impl OssClient {
         access_key_secret: impl Into<String>,
         bucket: impl Into<String>,
         endpoint: impl Into<String>,
+        region: impl Into<String>,
     ) -> Self {
         let access_key_id = access_key_id.into();
         let access_key_secret = access_key_secret.into();
+        let region = region.into();
 
-        let client = AliyunClient::new(&access_key_id, &access_key_secret);
+        let client = AliyunClient::new(&access_key_id, &access_key_secret, &region);
 
         Self {
             client,
@@ -45,12 +48,15 @@ impl OssClient {
             .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_BUCKET} env")))?;
         let endpoint = env::var(OSS_ENDPOINT)
             .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_ENDPOINT} env")))?;
+        let region = env::var(OSS_REGION)
+            .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_ENDPOINT} env")))?;
 
         Ok(Self::new(
             access_key_id,
             access_key_secret,
             bucket,
             endpoint,
+            region,
         ))
     }
 
@@ -62,7 +68,7 @@ impl OssClient {
     }
 
     pub async fn get_object_bytes(&self, key: &str) -> Result<Vec<u8>, LlmClientError> {
-        let bucket = self.client.bucket(&self.bucket, &self.endpoint);
+        let bucket = self.client.bucket(&self.bucket);
         let object = bucket.object(key);
         let bytes = object
             .get_object()
