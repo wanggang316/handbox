@@ -32,7 +32,7 @@
       await appWindow.setPosition(new LogicalPosition(x, y - 48));
 
       // 2. 显示窗口并置顶
-      // await appWindow.show();
+      await appWindow.show();
       // await appWindow.setFocus();
     });
 

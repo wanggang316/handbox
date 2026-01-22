@@ -9,7 +9,7 @@ tauri_panel! {
     // 定义面板类：允许成为 Key Window（这样按钮才能点击），但不允许成为 Main Window
     panel!(FloatingPanel {
         config: {
-            can_become_key_window: true,
+            can_become_key_window: false,
             can_become_main_window: false
         }
     })
@@ -101,12 +101,12 @@ pub fn init_menu_panel1(app_handle: &AppHandle) {
 
 
       
-    let handle_clone = app_handle.clone();
+    // let handle_clone = app_handle.clone();
     handler.window_did_resign_key(move |_| {
       println!("[info]: panel resigned from key window!");
-      if let Ok(p) = handle_clone.get_webview_panel("floating") {
-        p.hide();
-      }
+    //   if let Ok(p) = handle_clone.get_webview_panel("floating") {
+    //     p.hide();
+    //   }
     });
 
     menu_panel.set_event_handler(Some(handler.as_ref()));

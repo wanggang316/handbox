@@ -14,10 +14,13 @@ mod accessibility;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
+use core_graphics::event::{CGEventField, CGEventType, EventField};
+use mouce::common::MouseEvent;
+use mouce::{Mouse, MouseActions};
 use swift_rs::swift;
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 use tauri_nspanel::{ManagerExt, panel}; // 导入 c_void
 
 use crate::commands::*;
@@ -148,87 +151,127 @@ fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
 }
 
-// 使用 OnceLock 安全地在全局存储 AppHandle，方便 C 回调使用
-static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+pub fn setup_mouce_observer(app_handle: tauri::AppHandle) {
+    let mut mouse = Mouse::new();
+    let handle_clone = app_handle.clone();
 
-// 声明 Swift 函数签名
-swift!(fn start_mouse_observer(callback_ptr: *const c_void));
+    // 在独立线程中运行，因为 hook 是阻塞的
+    std::thread::spawn(move || {
+        // 使用 mouce 监听全局事件
+        let _ = mouse.hook(Box::new(move |event| {
+            match event {
+                // 1. 滚动事件：直接触发隐藏
+                mouce::common::MouseEvent::Scroll(_, _) => {
+                    let handle_clone2 = handle_clone.clone();
+                    let _ = handle_clone.run_on_main_thread(move || {
+                        if let Ok(panel) = handle_clone2.get_webview_panel("floating") {
+                            if panel.is_visible() {
+                                let _ = panel.hide();
+                            }
+                        }
+                    });
+                    
+                }
+                // 2. 左键点击：如果是按下（Press），通常也需要隐藏
+                mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
+                    let handle_clone2 = handle_clone.clone();
+                    let _ = handle_clone.run_on_main_thread(move || {
+                        if let Ok(panel) = handle_clone2.get_webview_panel("floating") {
+                            if panel.is_visible() {
+                                let _ = panel.hide();
+                            }
+                        }
+                    });
+                }
+                // 3. 左键松开：这是你划词逻辑的触发点
+                mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
+                    trigger_selection_logic(&handle_clone);
+                }
+                _ => {}
+            }
+        })).expect("无法启动 mouce hook");
+    });
+}
 
-extern "C" fn on_mouse_up_callback(
-    x: f64,
-    y: f64,
-    app_name_ptr: *const c_char,
-    bundle_id_ptr: *const c_char,
-    pid: i32,
-) {
-    // 1. 安全地将 C 指针转为 Rust String
-    let app_name = unsafe { CStr::from_ptr(app_name_ptr).to_string_lossy().into_owned() };
-    let bundle_id = unsafe { CStr::from_ptr(bundle_id_ptr).to_string_lossy().into_owned() };
-
-    if let Some(handle) = APP_HANDLE.get() {
+fn trigger_selection_logic(handle: &tauri::AppHandle) {
+    let mouse = Mouse::new();
+    // 使用 mouce 获取当前位置，替代之前的 Swift 传参
+    if let Ok((x, y)) = mouse.get_position() {
         let handle_clone = handle.clone();
-
-        // 使用 tauri 的 runtime 避免阻塞
         tauri::async_runtime::spawn(async move {
-            // 给系统 UI 留出反应时间
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-
-            tracing::info!(">>>>>>>> app_name: {}, bundle_id: {}, pid: {}", app_name, bundle_id, pid);
-            // 这里你可以调用你之前的 accessibility 逻辑
+            // 这里依然调用你之前的划词提取逻辑
             if let Some(text) = accessibility::get_ax_selected_text() {
-                tracing::info!("-----> text: {}, x: {}, y: {}, app_name: {}, bundle_id: {}, pid: {}", text, x, y, app_name, bundle_id, pid);
-                // 发送给前端
+                // 发送给前端并显示面板（逻辑同前）
+                // show_floating_panel(&handle_clone, x as f64, y as f64, text);
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                 let _ = handle_clone.emit(
                     "global-selection",
                     serde_json::json!({
                         "text": text,
                         "x": x,
                         "y": y,
-                        "app_info": { "name": app_name, "bundle_id": bundle_id, "pid": pid }
+                        "app_info": { "name": "1", "bundle_id": "2", "pid": 123 }
                     }),
                 );
-
-                // match handle_clone.get_webview_panel("floating") {
-                //     Ok(panel) => {
-                //     //     // 1. 设置位置
-                //         // let _ = panel.set_position(tauri::LogicalPosition::new(x, y - 50.0));
-    
-                //     //     // 2. 显示并强制获取焦点（成为 Key Window）
-                //     //     // show() 方法后面紧跟让它成为 Key 的指令
-                //         panel.show(); 
-                //         panel.make_key_and_order_front(); 
-    
-                //     //     // 关键：在不激活 App 的前提下，让面板成为当前能够接收事件的 Key Window
-                //     //     // 这样用户一旦点击屏幕任何其他位置，它就会触发 Resign Key 事件
-                //     //     panel.make_key_and_order_front(); 
+                                
+                // let h = handle.clone();
+                // let _ = h.run_on_main_thread(move || {
+                //     if let Some(window) = h.get_webview_window("floating") {
+                //         let x_f64 = x as f64;
+                //         let y_f64 = y as f64;
+                //         let _ = window.set_position(tauri::LogicalPosition::new(x_f64, y_f64 - 50.0));
+                //         let _ = window.show();
                 //     }
-                //     Err(e) => {
-                //         tracing::error!("Failed to get floating panel: {:?}", e);
-                //     }
-                // }
-                
-                // if let Some(window) = handle_clone.get_webview_window("floating") {
-                //     // 1. 直接用 Tauri 原生窗口设置坐标（这绝对不会报错）
-                //     let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y: y - 50.0 }));
-                
-                //     // 2. 然后再获取 panel 句柄来显示
-                //     match handle_clone.get_webview_panel("floating") {
-                //         Ok(panel) => {
-                //             panel.show();
-                //         }
-                //         Err(e) => {
-                //             tracing::error!("Failed to get floating panel: {:?}", e);
-                //         }
-                //     }
-                // }
-                // 强制显示窗口 (使用你的 label: "floating")
-                if let Some(window) = handle_clone.get_webview_window("floating") {
-                    let _ = window.set_position(tauri::LogicalPosition::new(x, y - 50.0));
-                    let _ = window.show();
-                }
+                // });
             }
         });
     }
+}
+
+pub fn setup_esc_monitor(handle: AppHandle<Wry>) {
+    std::thread::spawn(move || {
+        // 【关键修复 1】使用位移操作生成掩码
+        // let mask = 1 << core_graphics::event::CGEventType::KeyDown as u64; 
+
+        if let Ok(tap) = core_graphics::event::CGEventTap::new(
+            core_graphics::event::CGEventTapLocation::HID,
+            core_graphics::event::CGEventTapPlacement::HeadInsertEventTap,
+            core_graphics::event::CGEventTapOptions::Default,
+            vec![CGEventType::KeyDown],
+            move |_, _, event| {
+                // 【关键修复 2】使用正确的枚举字段名 KeyboardEventKeycode
+                let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                if key_code == 53 { // Esc 的键码
+                    let h = handle.clone();
+                    let h_for_closure = h.clone(); 
+                    
+                    let _ = h.run_on_main_thread(move || {
+                        // 闭包现在拥有 h_for_closure 的所有权
+                        if let Ok(panel) = h_for_closure.get_webview_panel("floating") {
+                            let _ = panel.hide();
+                        }
+                    });
+                }
+                None
+            },
+        ) {
+            unsafe {
+                let loop_source = tap.mach_port.create_runloop_source(0).expect("RunLoop Err");
+                let current_loop = core_foundation::runloop::CFRunLoopGetCurrent();
+                
+                let source_ptr: *mut std::ffi::c_void = std::mem::transmute(loop_source);
+
+                core_foundation::runloop::CFRunLoopAddSource(
+                    current_loop, 
+                    source_ptr as *mut _, 
+                    core_foundation::runloop::kCFRunLoopCommonModes
+                );
+                
+                tap.enable();
+                core_foundation::runloop::CFRunLoopRun();
+            }
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -303,20 +346,9 @@ pub fn run() {
                 }
             });
 
-            // 1. 初始设为 Accessory 模式（解决陪跑的核心）
-            #[cfg(target_os = "macos")]
-            app.handle().clone().set_activation_policy(ActivationPolicy::Accessory);
 
-            // start_selection_observer(app.handle().clone());
-
-            // 1. 将 AppHandle 存入全局静态变量
-            APP_HANDLE.set(app.handle().clone()).unwrap();
-
-            // 2. 转换函数指针并调用
-            unsafe {
-                let ptr: *const c_void = on_mouse_up_callback as *const c_void;
-                start_mouse_observer(ptr);
-            }
+            setup_mouce_observer(app.handle().clone());
+            setup_esc_monitor(app.handle().clone());
 
             // let floating = app.get_webview_window("floating").unwrap();
             // floating.show().unwrap();
