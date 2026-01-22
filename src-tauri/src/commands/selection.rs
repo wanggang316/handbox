@@ -6,77 +6,77 @@ use crate::models::error::AppError;
 //     Ok(crate::services::selection::get_last_payload_json())
 // }
 
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub async fn selection_hide_menu_panel(app: tauri::AppHandle) -> Result<(), AppError> {
-    use crate::services::selection_panel::get_menu_panel;
+// #[cfg(target_os = "macos")]
+// #[tauri::command]
+// pub async fn selection_hide_menu_panel(app: tauri::AppHandle) -> Result<(), AppError> {
+//     use crate::services::selection_panel::get_menu_panel;
 
-    if let Some(panel) = get_menu_panel(&app) {
-        app.run_on_main_thread(move || {
-            panel.hide();
-        })
-        .map_err(|e| AppError::internal_error(&e.to_string()))?;
-    }
-    Ok(())
-}
+//     if let Some(panel) = get_menu_panel(&app) {
+//         app.run_on_main_thread(move || {
+//             panel.hide();
+//         })
+//         .map_err(|e| AppError::internal_error(&e.to_string()))?;
+//     }
+//     Ok(())
+// }
 
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub async fn selection_hide_action_panel(app: tauri::AppHandle) -> Result<(), AppError> {
-    use crate::services::selection_panel::get_action_panel;
+// #[cfg(target_os = "macos")]
+// #[tauri::command]
+// pub async fn selection_hide_action_panel(app: tauri::AppHandle) -> Result<(), AppError> {
+//     use crate::services::selection_panel::get_action_panel;
 
-    if let Some(panel) = get_action_panel(&app) {
-        app.run_on_main_thread(move || {
-            panel.hide();
-        })
-        .map_err(|e| AppError::internal_error(&e.to_string()))?;
-    }
-    Ok(())
-}
+//     if let Some(panel) = get_action_panel(&app) {
+//         app.run_on_main_thread(move || {
+//             panel.hide();
+//         })
+//         .map_err(|e| AppError::internal_error(&e.to_string()))?;
+//     }
+//     Ok(())
+// }
 
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub async fn selection_show_action_panel(
-    app: tauri::AppHandle,
-    mode: String,
-    text: String,
-) -> Result<(), AppError> {
-    use crate::services::selection_panel::{get_action_panel, get_menu_panel};
-    use tauri::Emitter;
+// #[cfg(target_os = "macos")]
+// #[tauri::command]
+// pub async fn selection_show_action_panel(
+//     app: tauri::AppHandle,
+//     mode: String,
+//     text: String,
+// ) -> Result<(), AppError> {
+//     use crate::services::selection_panel::{get_action_panel, get_menu_panel};
+//     use tauri::Emitter;
 
-    // 隐藏菜单面板
-    if let Some(menu) = get_menu_panel(&app) {
-        let app_clone = app.clone();
-        app_clone
-            .run_on_main_thread(move || {
-                menu.hide();
-            })
-            .map_err(|e| AppError::internal_error(&e.to_string()))?;
-    }
+//     // 隐藏菜单面板
+//     if let Some(menu) = get_menu_panel(&app) {
+//         let app_clone = app.clone();
+//         app_clone
+//             .run_on_main_thread(move || {
+//                 menu.hide();
+//             })
+//             .map_err(|e| AppError::internal_error(&e.to_string()))?;
+//     }
 
-    // 显示功能面板
-    let Some(panel) = get_action_panel(&app) else {
-        return Err(AppError::internal_error("Action panel not found"));
-    };
+//     // 显示功能面板
+//     let Some(panel) = get_action_panel(&app) else {
+//         return Err(AppError::internal_error("Action panel not found"));
+//     };
 
-    // 发送模式和文本数据
-    if let Some(window) = panel.to_window() {
-        window
-            .emit(
-                "mode_change",
-                &serde_json::json!({ "mode": mode, "text": text }),
-            )
-            .map_err(|e| AppError::internal_error(&e.to_string()))?;
-    }
+//     // 发送模式和文本数据
+//     if let Some(window) = panel.to_window() {
+//         window
+//             .emit(
+//                 "mode_change",
+//                 &serde_json::json!({ "mode": mode, "text": text }),
+//             )
+//             .map_err(|e| AppError::internal_error(&e.to_string()))?;
+//     }
 
-    // 显示面板并聚焦（必须在主线程执行）
-    app.run_on_main_thread(move || {
-        panel.show_and_make_key();
-    })
-    .map_err(|e| AppError::internal_error(&e.to_string()))?;
+//     // 显示面板并聚焦（必须在主线程执行）
+//     app.run_on_main_thread(move || {
+//         panel.show_and_make_key();
+//     })
+//     .map_err(|e| AppError::internal_error(&e.to_string()))?;
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 // #[cfg(target_os = "macos")]
 // #[tauri::command]

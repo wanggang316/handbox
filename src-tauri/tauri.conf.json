@@ -54,7 +54,7 @@
       {
         "label": "floating",
         "url": "/floating",
-        "width": 240,
+        "width": 360,
         "height": 48,
         "decorations": false,
         "transparent": true,

@@ -6,25 +6,30 @@ class MouseObserverManager {
     static let shared = MouseObserverManager()
     var monitor: Any?
     
-    func start(callback: @escaping @convention(c) (Double, Double) -> Void) {
+    // 修改回调定义：使用 UnsafePointer<Int8> 代替 SRString
+    func start(callback: @escaping @convention(c) (Double, Double, UnsafePointer<Int8>, UnsafePointer<Int8>, Int32) -> Void) {
+        if self.monitor != nil { return }
+
         self.monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in
-            // 1. 获取全局鼠标位置（左下角原点）
             let mouseLocation = NSEvent.mouseLocation
+            let frontApp = NSWorkspace.shared.frontmostApplication
             
-            // 2. 永远获取“主显示器”（索引为 0 的屏幕）来作为 Y 轴翻转基准
-            // 在多屏系统中，screens[0] 始终是原点所在的屏幕
+            // 准备数据
+            let appName = frontApp?.localizedName ?? "Unknown"
+            let bundleId = frontApp?.bundleIdentifier ?? "unknown.app"
+            let pid = frontApp?.processIdentifier ?? 0
+            
             if let primaryScreen = NSScreen.screens.first {
-                let primaryScreenHeight = primaryScreen.frame.height
-                
-                // 3. 计算全局坐标
-                // X轴无需特殊处理，macOS 全局坐标即为虚拟桌面坐标
+                let screenHeight = primaryScreen.frame.height
                 let x = Double(mouseLocation.x)
+                let y = Double(screenHeight - mouseLocation.y)
                 
-                // Y轴翻转：主屏幕高度 - 全局Y
-                // 这样得到的坐标，(0,0) 就是主屏幕的左上角，完美匹配 Tauri
-                let y = Double(primaryScreenHeight - mouseLocation.y)
-                
-                callback(x, y)
+                // 将 Swift String 转换为临时 C 字符串指针
+                appName.withCString { namePtr in
+                    bundleId.withCString { bidPtr in
+                        callback(x, y, namePtr, bidPtr, Int32(pid))
+                    }
+                }
             }
         }
     }
@@ -32,7 +37,11 @@ class MouseObserverManager {
 
 @_cdecl("start_mouse_observer")
 public func start_mouse_observer(callbackPtr: UnsafeRawPointer) {
-    typealias CallbackType = @convention(c) (Double, Double) -> Void
+    // 这里的签名必须与上面完全一致
+    typealias CallbackType = @convention(c) (Double, Double, UnsafePointer<Int8>, UnsafePointer<Int8>, Int32) -> Void
     let callback = unsafeBitCast(callbackPtr, to: CallbackType.self)
-    MouseObserverManager.shared.start(callback: callback)
+    
+    DispatchQueue.main.async {
+        MouseObserverManager.shared.start(callback: callback)
+    }
 }

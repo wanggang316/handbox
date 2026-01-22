@@ -11,12 +11,11 @@ pub mod utils;
 
 mod accessibility;
 
-use std::ffi::c_void;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 use swift_rs::swift;
-use tauri::{AppHandle, Emitter, Manager}; // 导入 c_void
+use tauri::{AppHandle, Emitter, Manager, Runtime}; // 导入 c_void
 
 use crate::commands::*;
 use crate::services::{
@@ -27,6 +26,8 @@ use crate::services::{
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
+use std::ffi::{c_void, CStr};
+use std::os::raw::c_char;
 use std::sync::Arc;
 
 /// 初始化服务
@@ -150,28 +151,43 @@ static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 // 声明 Swift 函数签名
 swift!(fn start_mouse_observer(callback_ptr: *const c_void));
 
-// 被 Swift 调用的 C 回调函数
-extern "C" fn on_mouse_up_callback(x: f64, y: f64) {
+extern "C" fn on_mouse_up_callback(
+    x: f64,
+    y: f64,
+    app_name_ptr: *const c_char,
+    bundle_id_ptr: *const c_char,
+    pid: i32,
+) {
+    // 1. 安全地将 C 指针转为 Rust String
+    let app_name = unsafe { CStr::from_ptr(app_name_ptr).to_string_lossy().into_owned() };
+    let bundle_id = unsafe { CStr::from_ptr(bundle_id_ptr).to_string_lossy().into_owned() };
+
     if let Some(handle) = APP_HANDLE.get() {
         let handle_clone = handle.clone();
 
-        // 在新线程执行耗时的文本抓取逻辑，绝对不阻塞系统事件
-        thread::spawn(move || {
-            // 稍微延迟 250ms，等待系统完成选区渲染
-            thread::sleep(Duration::from_millis(250));
+        // 使用 tauri 的 runtime 避免阻塞
+        tauri::async_runtime::spawn(async move {
+            // 给系统 UI 留出反应时间
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
+            // 这里你可以调用你之前的 accessibility 逻辑
             if let Some(text) = accessibility::get_ax_selected_text() {
-                // 将文字和坐标打包发送给前端
-                // payload 包含: { text, x, y }
-                tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
+                // 发送给前端
                 let _ = handle_clone.emit(
                     "global-selection",
                     serde_json::json!({
                         "text": text,
                         "x": x,
-                        "y": y
+                        "y": y,
+                        "app_info": { "name": app_name, "bundle_id": bundle_id, "pid": pid }
                     }),
                 );
+
+                // 强制显示窗口 (使用你的 label: "floating")
+                if let Some(window) = handle_clone.get_webview_window("floating") {
+                    let _ = window.set_position(tauri::LogicalPosition::new(x, y - 50.0));
+                    let _ = window.show();
+                }
             }
         });
     }
@@ -204,24 +220,24 @@ pub fn run() {
         // 初始化 NSPanel 插件
         builder = builder.plugin(tauri_nspanel::init());
 
-        // builder = builder.plugin(
-        //     tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
-        //         .on_event(|app, event| {
-        //             if let tauri::RunEvent::Reopen {
-        //                 has_visible_windows,
-        //                 ..
-        //             } = event
-        //             {
-        //                 if !has_visible_windows {
-        //                     if let Some(window) = app.get_webview_window("main") {
-        //                         let _ = window.show();
-        //                         let _ = window.set_focus();
-        //                     }
-        //                 }
-        //             }
-        //         })
-        //         .build(),
-        // );
+        builder = builder.plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
+                .on_event(|app, event| {
+                    if let tauri::RunEvent::Reopen {
+                        has_visible_windows,
+                        ..
+                    } = event
+                    {
+                        if !has_visible_windows {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(),
+        );
     }
 
     builder
@@ -260,9 +276,9 @@ pub fn run() {
                 start_mouse_observer(ptr);
             }
 
-            let floating = app.get_webview_window("floating").unwrap();
-            floating.show().unwrap();
-            floating.center().unwrap();
+            // let floating = app.get_webview_window("floating").unwrap();
+            // floating.show().unwrap();
+            // floating.center().unwrap();
 
             Ok(())
         })
