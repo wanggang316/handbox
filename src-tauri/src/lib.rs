@@ -145,19 +145,14 @@ async fn initialize_services(
     Ok(())
 }
 
-// 保留原始的 greet 命令用于测试
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {name}! You've been greeted from Rust!")
-}
-
 
 fn show_floating_panel(handle: &tauri::AppHandle) {
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
         if let Ok(panel) = handle_clone.get_webview_panel("floating") {
             if !panel.is_visible() {
-                let _ = panel.show();
+                // 使用 show_and_make_key 让面板成为 key window，这样才能接收鼠标事件
+                panel.show();
             }
         }
     });
@@ -195,6 +190,12 @@ pub fn setup_mouce_observer(app_handle: tauri::AppHandle) {
                 // 3. 左键松开：这是你划词逻辑的触发点
                 mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
                     trigger_selection_logic(&handle_clone);
+                }
+                mouce::common::MouseEvent::RelativeMove(x, y) => {
+                    tracing::info!("======> x: {}, y: {}", x, y);
+                }
+                mouce::common::MouseEvent::AbsoluteMove(x, y) => {
+                    tracing::info!("-----> x: {}, y: {}", x, y);
                 }
                 _ => {}
             }
@@ -311,24 +312,6 @@ pub fn run() {
         // 初始化 NSPanel 插件
         builder = builder.plugin(tauri_nspanel::init());
 
-        // builder = builder.plugin(
-        //     tauri::plugin::Builder::<tauri::Wry>::new("dock-reopen")
-        //         .on_event(|app, event| {
-        //             if let tauri::RunEvent::Reopen {
-        //                 has_visible_windows,
-        //                 ..
-        //             } = event
-        //             {
-        //                 if !has_visible_windows {
-        //                     if let Some(window) = app.get_webview_window("main") {
-        //                         let _ = window.show();
-        //                         let _ = window.set_focus();
-        //                     }
-        //                 }
-        //             }
-        //         })
-        //         .build(),
-        // );
     }
 
     builder
@@ -370,8 +353,6 @@ pub fn run() {
             crate::menu::handle_menu_event(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
-            // 测试命令
-            greet,
             // 调试命令
             debug_check_file,
             // debug_show_selection_overlay,
