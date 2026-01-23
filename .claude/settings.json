@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "additionalDirectories": [
+      "/Users/wanggang/Downloads/1"
+    ],
+    "allow": [
+      "Bash(/dev/null -exec grep -l \"fn.*frame\\\\|fn.*position\" {} ;)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
@@ -12,8 +20,5 @@
         ]
       }
     ]
-  },
-  "permissions": {
-    "additionalDirectories": ["/Users/wanggang/Downloads/1"]
   }
 }

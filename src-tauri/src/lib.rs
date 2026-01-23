@@ -9,281 +9,19 @@ pub mod services;
 pub mod storage;
 pub mod utils;
 
-mod accessibility;
-
-use std::sync::OnceLock;
-use std::thread;
-use std::time::Duration;
-use core_graphics::event::{CGEventField, CGEventType, EventField};
-use mouce::common::MouseEvent;
-use mouce::{Mouse, MouseActions};
-use swift_rs::swift;
 #[cfg(target_os = "macos")]
-use tauri::ActivationPolicy;
-use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
-use tauri_nspanel::{ManagerExt, panel}; // 导入 c_void
+use tauri::{AppHandle, Manager};
 
 use crate::commands::*;
 use crate::services::{
-    selection_panel::setup_selection_panels, start_selection_observer, ArtifactService,
+    selection::setup_selection, ArtifactService,
     ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
     SettingsService, StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
-use std::ffi::{c_void, CStr};
-use std::os::raw::c_char;
 use std::sync::Arc;
-
-/// 初始化服务
-async fn initialize_services(
-    app: &tauri::AppHandle,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 获取应用数据目录
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .expect("Failed to get app data directory");
-
-    // 初始化存储服务
-    let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
-
-    // 允许前端通过 asset protocol 访问生成的媒体目录
-    let media_root = data_dir.join("generated_media");
-    std::fs::create_dir_all(&media_root)
-        .map_err(|e| format!("Failed to create generated media directory: {e}"))?;
-    app.asset_protocol_scope()
-        .allow_directory(&media_root, true)
-        .map_err(|e| format!("Failed to allow asset protocol for generated media: {e}"))?;
-
-    let attachments_root = data_dir.join("message_attachments");
-    std::fs::create_dir_all(&attachments_root)
-        .map_err(|e| format!("Failed to create attachment directory: {e}"))?;
-    app.asset_protocol_scope()
-        .allow_directory(&attachments_root, true)
-        .map_err(|e| format!("Failed to allow asset protocol for attachments: {e}"))?;
-
-    // 初始化数据库服务
-    let db_path = storage_service.get_database_path();
-    let database_service = Arc::new(
-        Database::new(&db_path)
-            .await
-            .map_err(|e| format!("Failed to initialize database: {e}"))?,
-    );
-
-    let llm_config = Arc::new(crate::config::llm_config::LlmConfig::load());
-    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-
-    // 初始化各个服务
-    let provider_service =
-        ProviderService::new(database_service.clone(), llm_config_provider.clone());
-    let provider_service_shared = Arc::new(provider_service.clone());
-
-    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
-
-    let mcp_service = McpService::new(database_service.clone());
-    let mcp_service_shared = Arc::new(mcp_service.clone());
-
-    let chat_service = ChatService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        llm_config_provider.clone(),
-    );
-    let chat_service_shared = Arc::new(chat_service.clone());
-
-    let message_service = MessageService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        chat_service_shared,
-        mcp_service_shared,
-        storage_service.clone(),
-        llm_config_provider.clone(),
-    );
-
-    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
-
-    let settings_service = SettingsService::new(storage_service.clone());
-
-    let word_repo = Arc::new(WordRepository::new(database_service.clone()));
-    let word_service = WordService::new(
-        word_repo,
-        provider_service_shared.clone(),
-        settings_service.clone(),
-        llm_config_provider.clone(),
-    );
-
-    // 初始化用户会话服务
-    let user_session_service = UserSessionService::new(database_service.clone());
-
-    // 从数据库恢复上次的用户会话
-    if let Err(e) = user_session_service.load_session_from_db().await {
-        tracing::warn!("恢复用户会话失败: {:?}", e);
-    }
-
-    // 初始化 Artifact 服务
-    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
-    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
-
-    // 初始化 Favorite 服务
-    let favorite_repo = FavoriteRepository::new(database_service.clone());
-
-    // 将服务注册到应用状态
-    app.manage(storage_service);
-    app.manage(chat_service);
-    app.manage(message_service);
-    app.manage(provider_service);
-    app.manage(model_service);
-    app.manage(mcp_service);
-    app.manage(search_service);
-    app.manage(settings_service);
-    app.manage(word_service);
-    app.manage(user_session_service);
-    app.manage(artifact_service);
-    app.manage(favorite_repo);
-
-    Ok(())
-}
-
-
-fn show_floating_panel(handle: &tauri::AppHandle) {
-    let handle_clone = handle.clone();
-    let _ = handle.run_on_main_thread(move || {
-        if let Ok(panel) = handle_clone.get_webview_panel("floating") {
-            if !panel.is_visible() {
-                // 使用 show_and_make_key 让面板成为 key window，这样才能接收鼠标事件
-                panel.show();
-            }
-        }
-    });
-}
-
-/// 隐藏浮动面板的辅助函数
-fn hide_floating_panel(handle: &tauri::AppHandle) {
-    let handle_clone = handle.clone();
-    let _ = handle.run_on_main_thread(move || {
-        if let Ok(panel) = handle_clone.get_webview_panel("floating") {
-            if panel.is_visible() {
-                let _ = panel.hide();
-            }
-        }
-    });
-}
-
-pub fn setup_mouce_observer(app_handle: tauri::AppHandle) {
-    let mut mouse = Mouse::new();
-    let handle_clone = app_handle.clone();
-
-    // 在独立线程中运行，因为 hook 是阻塞的
-    std::thread::spawn(move || {
-        // 使用 mouce 监听全局事件
-        let _ = mouse.hook(Box::new(move |event| {
-            match event {
-                // 1. 滚动事件：直接触发隐藏
-                mouce::common::MouseEvent::Scroll(_, _) => {
-                    hide_floating_panel(&handle_clone);
-                }
-                // 2. 左键点击：如果是按下（Press），通常也需要隐藏
-                mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
-                    hide_floating_panel(&handle_clone);
-                }
-                // 3. 左键松开：这是你划词逻辑的触发点
-                mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
-                    trigger_selection_logic(&handle_clone);
-                }
-                mouce::common::MouseEvent::RelativeMove(x, y) => {
-                    tracing::info!("======> x: {}, y: {}", x, y);
-                }
-                mouce::common::MouseEvent::AbsoluteMove(x, y) => {
-                    tracing::info!("-----> x: {}, y: {}", x, y);
-                }
-                _ => {}
-            }
-        })).expect("无法启动 mouce hook");
-    });
-}
-
-fn trigger_selection_logic(handle: &tauri::AppHandle) {
-    // 检查功能是否启用
-    if !is_selection_toolbar_enabled(handle) {
-        return;
-    }
-
-    let mouse = Mouse::new();
-    // 使用 mouce 获取当前位置，替代之前的 Swift 传参
-    if let Ok((x, y)) = mouse.get_position() {
-        let handle_clone = handle.clone();
-        tauri::async_runtime::spawn(async move {
-
-            if let Some(text) = accessibility::get_ax_selected_text() {
-                tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
-
-                let _ = handle_clone.emit(
-                    "global-selection",
-                    serde_json::json!({
-                        "text": text,
-                        "x": x,
-                        "y": y,
-                        "app_info": { "name": "1", "bundle_id": "2", "pid": 123 }
-                    }),
-                );
-
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-                show_floating_panel(&handle_clone);
-            }
-        });
-    }
-}
-
-/// 检查选中文本工具栏功能是否启用
-fn is_selection_toolbar_enabled(handle: &tauri::AppHandle) -> bool {
-    let settings_service: tauri::State<'_, SettingsService> = handle.state();
-    match settings_service.get_settings() {
-        Ok(settings) => settings.quick_tools.show_toolbar_on_selection,
-        Err(_) => false,
-    }
-}
-
-pub fn setup_esc_monitor(handle: AppHandle<Wry>) {
-    std::thread::spawn(move || {
-        // 【关键修复 1】使用位移操作生成掩码
-        // let mask = 1 << core_graphics::event::CGEventType::KeyDown as u64; 
-
-        if let Ok(tap) = core_graphics::event::CGEventTap::new(
-            core_graphics::event::CGEventTapLocation::HID,
-            core_graphics::event::CGEventTapPlacement::HeadInsertEventTap,
-            core_graphics::event::CGEventTapOptions::Default,
-            vec![CGEventType::KeyDown],
-            move |_, _, event| {
-                // 【关键修复 2】使用正确的枚举字段名  aaaaa
-                let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                tracing::info!("-----> key_code: {}", key_code);
-                // ESCAPE 键码是 53，COMMAND 键码是 55
-                // if key_code == 53 || key_code == 55 || key_code == 56 || key_code == 57 {
-                    hide_floating_panel(&handle);
-                // }
-                None
-            },
-        ) {
-            unsafe {
-                let loop_source = tap.mach_port.create_runloop_source(0).expect("RunLoop Err");
-                let current_loop = core_foundation::runloop::CFRunLoopGetCurrent();
-                
-                let source_ptr: *mut std::ffi::c_void = std::mem::transmute(loop_source);
-
-                core_foundation::runloop::CFRunLoopAddSource(
-                    current_loop, 
-                    source_ptr as *mut _, 
-                    core_foundation::runloop::kCFRunLoopCommonModes
-                );
-                
-                tap.enable();
-                core_foundation::runloop::CFRunLoopRun();
-            }
-        }
-    });
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -320,16 +58,6 @@ pub fn run() {
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
 
-            // 创建选择面板 (NSPanel) - 必须在setup中同步创建
-            #[cfg(target_os = "macos")]
-            {
-                if let Err(e) = setup_selection_panels(&app.handle()) {
-                    tracing::error!("Failed to setup selection panels: {e}");
-                    eprintln!("Failed to setup selection panels: {e}");
-                    // 不退出应用，因为选择面板是可选功能
-                }
-            }
-
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -339,13 +67,15 @@ pub fn run() {
                 }
             });
 
-
-            setup_mouce_observer(app.handle().clone());
-            setup_esc_monitor(app.handle().clone());
-
-            // let floating = app.get_webview_window("floating").unwrap();
-            // floating.show().unwrap();
-            // floating.center().unwrap();
+             // 创建选择面板 (NSPanel) - 必须在setup中同步创建
+             #[cfg(target_os = "macos")]
+             {
+                 if let Err(e) = setup_selection(&app.handle()) {
+                     tracing::error!("Failed to setup selection panels: {e}");
+                     eprintln!("Failed to setup selection panels: {e}");
+                     // 不退出应用，因为选择面板是可选功能
+                 }
+             }
 
             Ok(())
         })
@@ -487,4 +217,112 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-// 旧的窗口配置函数已移除，现在使用 tauri-nspanel
+
+/// 初始化服务
+async fn initialize_services(
+    app: &tauri::AppHandle,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 获取应用数据目录
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data directory");
+
+    // 初始化存储服务
+    let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
+
+    // 允许前端通过 asset protocol 访问生成的媒体目录
+    let media_root = data_dir.join("generated_media");
+    std::fs::create_dir_all(&media_root)
+        .map_err(|e| format!("Failed to create generated media directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&media_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for generated media: {e}"))?;
+
+    let attachments_root = data_dir.join("message_attachments");
+    std::fs::create_dir_all(&attachments_root)
+        .map_err(|e| format!("Failed to create attachment directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&attachments_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for attachments: {e}"))?;
+
+    // 初始化数据库服务
+    let db_path = storage_service.get_database_path();
+    let database_service = Arc::new(
+        Database::new(&db_path)
+            .await
+            .map_err(|e| format!("Failed to initialize database: {e}"))?,
+    );
+
+    let llm_config = Arc::new(crate::config::llm_config::LlmConfig::load());
+    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+
+    // 初始化各个服务
+    let provider_service =
+        ProviderService::new(database_service.clone(), llm_config_provider.clone());
+    let provider_service_shared = Arc::new(provider_service.clone());
+
+    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
+
+    let mcp_service = McpService::new(database_service.clone());
+    let mcp_service_shared = Arc::new(mcp_service.clone());
+
+    let chat_service = ChatService::new(
+        database_service.clone(),
+        provider_service_shared.clone(),
+        llm_config_provider.clone(),
+    );
+    let chat_service_shared = Arc::new(chat_service.clone());
+
+    let message_service = MessageService::new(
+        database_service.clone(),
+        provider_service_shared.clone(),
+        chat_service_shared,
+        mcp_service_shared,
+        storage_service.clone(),
+        llm_config_provider.clone(),
+    );
+
+    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
+
+    let settings_service = SettingsService::new(storage_service.clone());
+
+    let word_repo = Arc::new(WordRepository::new(database_service.clone()));
+    let word_service = WordService::new(
+        word_repo,
+        provider_service_shared.clone(),
+        settings_service.clone(),
+        llm_config_provider.clone(),
+    );
+
+    // 初始化用户会话服务
+    let user_session_service = UserSessionService::new(database_service.clone());
+
+    // 从数据库恢复上次的用户会话
+    if let Err(e) = user_session_service.load_session_from_db().await {
+        tracing::warn!("恢复用户会话失败: {:?}", e);
+    }
+
+    // 初始化 Artifact 服务
+    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
+    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
+
+    // 初始化 Favorite 服务
+    let favorite_repo = FavoriteRepository::new(database_service.clone());
+
+    // 将服务注册到应用状态
+    app.manage(storage_service);
+    app.manage(chat_service);
+    app.manage(message_service);
+    app.manage(provider_service);
+    app.manage(model_service);
+    app.manage(mcp_service);
+    app.manage(search_service);
+    app.manage(settings_service);
+    app.manage(word_service);
+    app.manage(user_session_service);
+    app.manage(artifact_service);
+    app.manage(favorite_repo);
+
+    Ok(())
+}

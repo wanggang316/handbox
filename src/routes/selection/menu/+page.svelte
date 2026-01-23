@@ -37,7 +37,7 @@
       await appWindow.setPosition(new LogicalPosition(x - 180, y - 72));
 
       // 2. 显示窗口并置顶
-      // await appWindow.show();
+      await appWindow.show();
       // await appWindow.setFocus();
     });
 
@@ -100,12 +100,10 @@
     <!-- 操作按钮组 -->
     <div
       class="flex items-center justify-center gap-1 px-2 w-full"
-      onmouseleave={() => (hoveredBtn = null)}
     >
       <button
         class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'show' ? 'bg-gray-100' : ''}"
         onclick={handleShow}
-        onmouseenter={() => (hoveredBtn = "show")}
       >
         <Eye class="size-3.5" />
         显示
@@ -114,7 +112,6 @@
       <button
         class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'copy' ? 'bg-gray-100' : ''}"
         onclick={handleCopy}
-        onmouseenter={() => (hoveredBtn = "copy")}
       >
         <Copy class="size-3.5" />
         复制
@@ -123,7 +120,6 @@
       <button
         class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-blue-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'translate' ? 'bg-blue-50' : ''}"
         onclick={handleTranslate}
-        onmouseenter={() => (hoveredBtn = "translate")}
       >
         <Languages class="size-3.5" />
         翻译
@@ -132,7 +128,6 @@
       <button
         class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-purple-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'ai' ? 'bg-purple-50' : ''}"
         onclick={handleAi}
-        onmouseenter={() => (hoveredBtn = "ai")}
       >
         <Sparkles class="size-3.5" />
         问 AI
@@ -141,25 +136,9 @@
       <button
         class="flex items-center justify-center size-6 text-gray-500 rounded-full transition-all duration-150 active:scale-95 {hoveredBtn === 'settings' ? 'bg-gray-100' : ''}"
         onclick={handleSettings}
-        onmouseenter={() => (hoveredBtn = "settings")}
       >
         <MoreVertical class="size-3.5" />
       </button>
     </div>
   </div>
 {/if}
-
-<!-- <style lang="postcss">
-  /* 必须强制背景透明，否则 rounded-full 会有白色背景底色 */
-  :global(html),
-  :global(body) {
-    background-color: transparent !important;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .btn-action {
-    @apply px-3 py-1.5 text-[11px] font-medium rounded-full transition-all active:scale-90 hover:bg-gray-100 text-gray-700;
-  }
-</style> -->

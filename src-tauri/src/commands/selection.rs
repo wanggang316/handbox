@@ -1,90 +1,5 @@
 use crate::models::error::AppError;
 
-// #[cfg(target_os = "macos")]
-// #[tauri::command]
-// pub async fn selection_get_last_payload() -> Result<Option<serde_json::Value>, AppError> {
-//     Ok(crate::services::selection::get_last_payload_json())
-// }
-
-// #[cfg(target_os = "macos")]
-// #[tauri::command]
-// pub async fn selection_hide_menu_panel(app: tauri::AppHandle) -> Result<(), AppError> {
-//     use crate::services::selection_panel::get_menu_panel;
-
-//     if let Some(panel) = get_menu_panel(&app) {
-//         app.run_on_main_thread(move || {
-//             panel.hide();
-//         })
-//         .map_err(|e| AppError::internal_error(&e.to_string()))?;
-//     }
-//     Ok(())
-// }
-
-// #[cfg(target_os = "macos")]
-// #[tauri::command]
-// pub async fn selection_hide_action_panel(app: tauri::AppHandle) -> Result<(), AppError> {
-//     use crate::services::selection_panel::get_action_panel;
-
-//     if let Some(panel) = get_action_panel(&app) {
-//         app.run_on_main_thread(move || {
-//             panel.hide();
-//         })
-//         .map_err(|e| AppError::internal_error(&e.to_string()))?;
-//     }
-//     Ok(())
-// }
-
-// #[cfg(target_os = "macos")]
-// #[tauri::command]
-// pub async fn selection_show_action_panel(
-//     app: tauri::AppHandle,
-//     mode: String,
-//     text: String,
-// ) -> Result<(), AppError> {
-//     use crate::services::selection_panel::{get_action_panel, get_menu_panel};
-//     use tauri::Emitter;
-
-//     // 隐藏菜单面板
-//     if let Some(menu) = get_menu_panel(&app) {
-//         let app_clone = app.clone();
-//         app_clone
-//             .run_on_main_thread(move || {
-//                 menu.hide();
-//             })
-//             .map_err(|e| AppError::internal_error(&e.to_string()))?;
-//     }
-
-//     // 显示功能面板
-//     let Some(panel) = get_action_panel(&app) else {
-//         return Err(AppError::internal_error("Action panel not found"));
-//     };
-
-//     // 发送模式和文本数据
-//     if let Some(window) = panel.to_window() {
-//         window
-//             .emit(
-//                 "mode_change",
-//                 &serde_json::json!({ "mode": mode, "text": text }),
-//             )
-//             .map_err(|e| AppError::internal_error(&e.to_string()))?;
-//     }
-
-//     // 显示面板并聚焦（必须在主线程执行）
-//     app.run_on_main_thread(move || {
-//         panel.show_and_make_key();
-//     })
-//     .map_err(|e| AppError::internal_error(&e.to_string()))?;
-
-//     Ok(())
-// }
-
-// #[cfg(target_os = "macos")]
-// #[tauri::command]
-// pub async fn selection_overlay_hide(app: tauri::AppHandle) -> Result<(), AppError> {
-//     crate::services::selection::hide_overlay_window_and_restore(&app);
-//     Ok(())
-// }
-
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_overlay_resize(
@@ -122,19 +37,6 @@ pub async fn selection_overlay_resize(
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub async fn selection_overlay_lock(locked: bool) -> Result<(), AppError> {
-    crate::services::selection::set_overlay_locked(locked);
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub async fn selection_overlay_dismiss() -> Result<(), AppError> {
-    crate::services::selection::dismiss_current_selection_signature();
-    Ok(())
-}
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
