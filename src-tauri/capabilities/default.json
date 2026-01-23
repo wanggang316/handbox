@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "settings", "floating"],
+  "windows": ["main", "settings", "selection_menu", "selection_content"],
   "permissions": [
     "core:default",
     "opener:default",

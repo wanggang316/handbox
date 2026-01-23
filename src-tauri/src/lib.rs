@@ -58,6 +58,16 @@ pub fn run() {
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
 
+            // 创建选择面板 (NSPanel) - 必须在setup中同步创建
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(e) = setup_selection(&app.handle()) {
+                    tracing::error!("Failed to setup selection panels: {e}");
+                    eprintln!("Failed to setup selection panels: {e}");
+                    // 不退出应用，因为选择面板是可选功能
+                }
+            }
+            
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -67,15 +77,7 @@ pub fn run() {
                 }
             });
 
-             // 创建选择面板 (NSPanel) - 必须在setup中同步创建
-             #[cfg(target_os = "macos")]
-             {
-                 if let Err(e) = setup_selection(&app.handle()) {
-                     tracing::error!("Failed to setup selection panels: {e}");
-                     eprintln!("Failed to setup selection panels: {e}");
-                     // 不退出应用，因为选择面板是可选功能
-                 }
-             }
+             
 
             Ok(())
         })

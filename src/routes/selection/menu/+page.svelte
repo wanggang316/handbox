@@ -23,6 +23,7 @@
   let hoveredBtn = $state<string | null>(null);
 
   onMount(() => {
+    console.log("=====> [selection/menu] onMount executed");
     // 监听后端发送的全局划词信号
     const unlisten = listen("global-selection", async (event: any) => {
       const { text, x, y, app_info } = event.payload;
@@ -34,10 +35,10 @@
 
       // 1. 计算位置：出现在鼠标上方 48 像素处
       // 使用 LogicalPosition 自动处理 Retina 屏和多屏缩放
-      await appWindow.setPosition(new LogicalPosition(x - 180, y - 72));
+      await appWindow.setPosition(new LogicalPosition(x - 180, y - 56));
 
       // 2. 显示窗口并置顶
-      await appWindow.show();
+      // await appWindow.show();
       // await appWindow.setFocus();
     });
 
@@ -92,12 +93,10 @@
     // TODO: 打开设置菜单
   }
 </script>
-
-{#if captured.text}
+<!-- {#if captured.text} -->
   <div
-    class="flex items-center w-full h-full bg-white overflow-hidden"
+    class="flex items-center w-full h-full bg-red-500"
   >
-    <!-- 操作按钮组 -->
     <div
       class="flex items-center justify-center gap-1 px-2 w-full"
     >
@@ -141,4 +140,4 @@
       </button>
     </div>
   </div>
-{/if}
+<!-- {/if} -->

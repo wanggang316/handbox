@@ -50,6 +50,18 @@
           "x": 15,
           "y": 27
         }
+      },
+      {
+        "label": "selection_menu",
+        "url": "/selection/menu",
+        "width": 360,
+        "height": 36,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

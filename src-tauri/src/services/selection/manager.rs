@@ -68,8 +68,10 @@ fn trigger_selection_logic(handle: &AppHandle) {
     let mouse = Mouse::new();
     // 使用 mouce 获取当前位置，替代之前的 Swift 传参
     if let Ok((x, y)) = mouse.get_position() {
-        let handle_clone = handle.clone();
+        let handle_clone: AppHandle = handle.clone();
         tauri::async_runtime::spawn(async move {
+
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
             match get_ax_selected_text() {
                 Some(text) => {
@@ -85,9 +87,7 @@ fn trigger_selection_logic(handle: &AppHandle) {
                         }),
                     );
 
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-                    show_menu_panel(&handle_clone);
+                    show_menu_panel(&handle_clone.clone());
                 }
                 _ => (),
             }
