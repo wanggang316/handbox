@@ -73,6 +73,7 @@ objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "N
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 rdev = { git = "https://github.com/Narsil/rdev", branch = "main" }
 accessibility = { git = "https://github.com/eiz/accessibility" }
+accessibility-sys = { git = "https://github.com/eiz/accessibility" }
 # Swift 桥接
 swift-rs = "1.0"
 mouce = "0.3.0"

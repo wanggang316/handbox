@@ -62,7 +62,7 @@
   }
 </script>
 
-{#if visible && captured.text}
+{#if captured.text}
   <div
     class="flex items-center h-10 px-1 bg-white/90 backdrop-blur-xl border border-gray-200/50 rounded-full shadow-2xl select-none overflow-hidden animate-in fade-in zoom-in duration-150"
   >

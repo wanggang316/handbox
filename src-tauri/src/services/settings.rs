@@ -1,8 +1,9 @@
 // 设置服务实现
 
 use crate::models::{
-    AccountSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings, ShortcutConfig,
-    Theme, ThemeColor, TranslationSettings, UpdateSettingsRequest,
+    AccountSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
+    QuickToolsSettings, ShortcutConfig, Theme, ThemeColor, TranslationSettings,
+    UpdateSettingsRequest,
 };
 use crate::services::StorageService;
 use serde_json::Value;
@@ -40,6 +41,10 @@ impl SettingsService {
                 settings.translation =
                     self.merge_section(settings.translation, request.data, "translation")?;
             }
+            "quickTools" => {
+                settings.quick_tools =
+                    self.merge_section(settings.quick_tools, request.data, "quickTools")?;
+            }
             _ => {
                 return Err(AppError::validation_error("未知设置分组"));
             }
@@ -61,6 +66,9 @@ impl SettingsService {
                         "mcp" => current.mcp = default_settings.mcp.clone(),
                         "account" => current.account = default_settings.account.clone(),
                         "translation" => current.translation = default_settings.translation.clone(),
+                        "quickTools" => {
+                            current.quick_tools = default_settings.quick_tools.clone()
+                        }
                         _ => return Err(AppError::validation_error("未知设置分组")),
                     }
                 }
@@ -147,6 +155,9 @@ fn default_settings() -> AppSettings {
             model_id: None,
             provider_id: None,
             target_language: "system".to_string(),
+        },
+        quick_tools: QuickToolsSettings {
+            show_toolbar_on_selection: false,
         },
     }
 }

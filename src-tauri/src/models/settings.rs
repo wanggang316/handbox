@@ -104,6 +104,15 @@ pub struct AccountSettings {
     pub is_logged_in: bool,
 }
 
+/// 快捷工具设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickToolsSettings {
+    /// 选中文本时显示工具栏
+    #[serde(default)]
+    pub show_toolbar_on_selection: bool,
+}
+
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,6 +121,8 @@ pub struct AppSettings {
     pub mcp: MCPSettings,
     pub account: AccountSettings,
     pub translation: TranslationSettings,
+    #[serde(default)]
+    pub quick_tools: QuickToolsSettings,
 }
 
 /// 设置更新请求

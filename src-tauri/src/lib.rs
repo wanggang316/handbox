@@ -203,6 +203,11 @@ pub fn setup_mouce_observer(app_handle: tauri::AppHandle) {
 }
 
 fn trigger_selection_logic(handle: &tauri::AppHandle) {
+    // 检查功能是否启用
+    if !is_selection_toolbar_enabled(handle) {
+        return;
+    }
+
     let mouse = Mouse::new();
     // 使用 mouce 获取当前位置，替代之前的 Swift 传参
     if let Ok((x, y)) = mouse.get_position() {
@@ -227,6 +232,15 @@ fn trigger_selection_logic(handle: &tauri::AppHandle) {
                 show_floating_panel(&handle_clone);
             }
         });
+    }
+}
+
+/// 检查选中文本工具栏功能是否启用
+fn is_selection_toolbar_enabled(handle: &tauri::AppHandle) -> bool {
+    let settings_service: tauri::State<'_, SettingsService> = handle.state();
+    match settings_service.get_settings() {
+        Ok(settings) => settings.quick_tools.show_toolbar_on_selection,
+        Err(_) => false,
     }
 }
 
@@ -483,6 +497,10 @@ pub fn run() {
             favorite_remove_tag,
             favorite_delete,
             favorite_create_external,
+            // 辅助功能权限命令
+            accessibility_check_permission,
+            accessibility_request_permission,
+            accessibility_open_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
