@@ -151,6 +151,30 @@ fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
 }
 
+
+fn show_floating_panel(handle: &tauri::AppHandle) {
+    let handle_clone = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Ok(panel) = handle_clone.get_webview_panel("floating") {
+            if !panel.is_visible() {
+                let _ = panel.show();
+            }
+        }
+    });
+}
+
+/// 隐藏浮动面板的辅助函数
+fn hide_floating_panel(handle: &tauri::AppHandle) {
+    let handle_clone = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Ok(panel) = handle_clone.get_webview_panel("floating") {
+            if panel.is_visible() {
+                let _ = panel.hide();
+            }
+        }
+    });
+}
+
 pub fn setup_mouce_observer(app_handle: tauri::AppHandle) {
     let mut mouse = Mouse::new();
     let handle_clone = app_handle.clone();
@@ -162,26 +186,11 @@ pub fn setup_mouce_observer(app_handle: tauri::AppHandle) {
             match event {
                 // 1. 滚动事件：直接触发隐藏
                 mouce::common::MouseEvent::Scroll(_, _) => {
-                    let handle_clone2 = handle_clone.clone();
-                    let _ = handle_clone.run_on_main_thread(move || {
-                        if let Ok(panel) = handle_clone2.get_webview_panel("floating") {
-                            if panel.is_visible() {
-                                let _ = panel.hide();
-                            }
-                        }
-                    });
-                    
+                    hide_floating_panel(&handle_clone);
                 }
                 // 2. 左键点击：如果是按下（Press），通常也需要隐藏
                 mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
-                    let handle_clone2 = handle_clone.clone();
-                    let _ = handle_clone.run_on_main_thread(move || {
-                        if let Ok(panel) = handle_clone2.get_webview_panel("floating") {
-                            if panel.is_visible() {
-                                let _ = panel.hide();
-                            }
-                        }
-                    });
+                    hide_floating_panel(&handle_clone);
                 }
                 // 3. 左键松开：这是你划词逻辑的触发点
                 mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
@@ -199,11 +208,10 @@ fn trigger_selection_logic(handle: &tauri::AppHandle) {
     if let Ok((x, y)) = mouse.get_position() {
         let handle_clone = handle.clone();
         tauri::async_runtime::spawn(async move {
-            // 这里依然调用你之前的划词提取逻辑
+
             if let Some(text) = accessibility::get_ax_selected_text() {
-                // 发送给前端并显示面板（逻辑同前）
-                // show_floating_panel(&handle_clone, x as f64, y as f64, text);
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
+
                 let _ = handle_clone.emit(
                     "global-selection",
                     serde_json::json!({
@@ -213,16 +221,10 @@ fn trigger_selection_logic(handle: &tauri::AppHandle) {
                         "app_info": { "name": "1", "bundle_id": "2", "pid": 123 }
                     }),
                 );
-                                
-                // let h = handle.clone();
-                // let _ = h.run_on_main_thread(move || {
-                //     if let Some(window) = h.get_webview_window("floating") {
-                //         let x_f64 = x as f64;
-                //         let y_f64 = y as f64;
-                //         let _ = window.set_position(tauri::LogicalPosition::new(x_f64, y_f64 - 50.0));
-                //         let _ = window.show();
-                //     }
-                // });
+
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                show_floating_panel(&handle_clone);
             }
         });
     }
@@ -239,19 +241,13 @@ pub fn setup_esc_monitor(handle: AppHandle<Wry>) {
             core_graphics::event::CGEventTapOptions::Default,
             vec![CGEventType::KeyDown],
             move |_, _, event| {
-                // 【关键修复 2】使用正确的枚举字段名 KeyboardEventKeycode
+                // 【关键修复 2】使用正确的枚举字段名  aaaaa
                 let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                if key_code == 53 { // Esc 的键码
-                    let h = handle.clone();
-                    let h_for_closure = h.clone(); 
-                    
-                    let _ = h.run_on_main_thread(move || {
-                        // 闭包现在拥有 h_for_closure 的所有权
-                        if let Ok(panel) = h_for_closure.get_webview_panel("floating") {
-                            let _ = panel.hide();
-                        }
-                    });
-                }
+                tracing::info!("-----> key_code: {}", key_code);
+                // ESCAPE 键码是 53，COMMAND 键码是 55
+                // if key_code == 53 || key_code == 55 || key_code == 56 || key_code == 57 {
+                    hide_floating_panel(&handle);
+                // }
                 None
             },
         ) {
@@ -356,7 +352,7 @@ pub fn run() {
 
             Ok(())
         })
-        .on_menu_event(|app, event| {
+        .on_menu_event(|app: &AppHandle, event| {
             crate::menu::handle_menu_event(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
