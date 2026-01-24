@@ -1,3 +1,4 @@
+use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
 use tauri_nspanel::{
@@ -37,7 +38,7 @@ pub fn init_panel(app_handle: &AppHandle) {
     let window = app_handle.get_webview_window(PANEL_LABEL.into()).unwrap();
     let panel = window.to_panel::<SelectionContentPanel>().unwrap();
     panel.set_level(PanelLevel::Floating.value());
-    panel.set_style_mask(StyleMask::empty().nonactivating_panel().borderless().into());
+    panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
     panel.set_corner_radius(18.0);
 
     // 设置事件处理器
@@ -67,13 +68,18 @@ pub fn init_panel(app_handle: &AppHandle) {
     panel.set_event_handler(Some(handler.as_ref()));
 }
 
-pub fn show_panel(handle: &AppHandle) {
+pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Ok(panel) = handle_clone.get_webview_panel(PANEL_LABEL) {
-            if !panel.is_visible() {
-                panel.show();
-            }
+        tracing::info!("Showing content panel: {}", PANEL_LABEL);
+
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+            if let Ok(is_visible) = window.is_visible() {
+                if !is_visible {
+                    let _ = window.set_position(LogicalPosition::new(x - 180.0, y + 8.0));
+                    let _ = window.show();
+                }
+            } 
         }
     });
 }
@@ -81,10 +87,10 @@ pub fn show_panel(handle: &AppHandle) {
 pub fn hide_panel(handle: &AppHandle) {
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Ok(panel) = handle_clone.get_webview_panel(PANEL_LABEL) {
-            if panel.is_visible() {
-                let _ = panel.hide();
-            }
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+            if window.is_visible().unwrap_or(false) {
+                let _ = window.hide();
+            } 
         }
     });
 }

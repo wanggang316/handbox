@@ -88,9 +88,8 @@ pub fn run() {
             // 调试命令
             debug_check_file,
             // debug_show_selection_overlay,
-            // // 选择相关命令
-            // // selection_get_last_payload,
-            // selection_hide_menu_panel,
+            // 选择相关命令
+            selection_hide_menu_panel,
             // selection_hide_action_panel,
             // selection_show_action_panel,
             // // selection_overlay_hide,
@@ -214,6 +213,9 @@ pub fn run() {
             accessibility_check_permission,
             accessibility_request_permission,
             accessibility_open_settings,
+            // 选择相关命令
+            selection_show_content_panel,
+            selection_hide_content_panel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

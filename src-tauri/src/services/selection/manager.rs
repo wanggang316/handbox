@@ -3,15 +3,22 @@ use mouce::{Mouse, MouseActions};
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use core_graphics::event::{CGEventType, EventField};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// 上次触发选中逻辑的时间戳（毫秒），用于防抖
+static LAST_TRIGGER_TIME: AtomicU64 = AtomicU64::new(0);
+/// 防抖间隔（毫秒）
+const DEBOUNCE_MS: u64 = 300;
 
 use crate::services::SettingsService;
 use crate::utils::accessibility::get_ax_selected_text;
 use crate::services::selection::menu_panel::init_panel as init_menu_panel;
 use crate::services::selection::content_panel::init_panel as init_content_panel;
 use crate::services::selection::menu_panel::hide_panel as hide_menu_panel;
-// use crate::services::selection::content_panel::hide_panel as hide_content_panel;
+use crate::services::selection::menu_panel::is_panel_visible as is_menu_panel_visible;
+use crate::services::selection::content_panel::hide_panel as hide_content_panel;
 use crate::services::selection::menu_panel::show_panel as show_menu_panel;
-// use crate::services::selection::content_panel::show_panel as show_content_panel;
 
 #[cfg(target_os = "macos")]
 pub fn setup_selection(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -40,11 +47,36 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                     hide_menu_panel(&handle_clone);
                 }
                 // 2. 左键点击：如果是按下（Press），通常也需要隐藏
+                //    但如果菜单面板正在显示，不隐藏（让按钮的 onclick 自己处理）
                 mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
-                    hide_menu_panel(&handle_clone);
+                    if !is_menu_panel_visible() {
+                        hide_content_panel(&handle_clone);
+                    }
                 }
                 // 3. 左键松开：这是你划词逻辑的触发点
                 mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
+                    // 如果菜单面板正在显示，延迟检查是否需要隐藏
+                    // （给按钮的 onclick 时间执行，onclick 会调用 hide_menu_panel）
+                    if is_menu_panel_visible() {
+                        let h = handle_clone.clone();
+                        std::thread::spawn(move || {
+                            // 等待 onclick 执行
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            // 如果面板仍可见（说明用户点击的是面板外部），则隐藏并触发新的选词逻辑
+                            if is_menu_panel_visible() {
+                                tracing::info!("-----> hiding menu panel (clicked outside)");
+                                hide_menu_panel(&h);
+                                // 隐藏后触发新的选词逻辑（用户可能在外部划词了新内容）
+                                tracing::info!("---------------------------------------------------------");
+                                tracing::info!("-----> trigger_selection_logic start (after hide)");
+                                trigger_selection_logic(&h);
+                            }
+                        });
+                        return;
+                    }
+
+                    tracing::info!("---------------------------------------------------------");
+                    tracing::info!("-----> trigger_selection_logic start");
                     trigger_selection_logic(&handle_clone);
                 }
                 mouce::common::MouseEvent::RelativeMove(x, y) => {
@@ -60,6 +92,24 @@ fn setup_mouce_observer(app_handle: AppHandle) {
 }
 
 fn trigger_selection_logic(handle: &AppHandle) {
+    // 如果菜单面板正在显示，跳过（避免点击按钮时重复触发）
+    if is_menu_panel_visible() {
+        tracing::debug!("-----> trigger_selection_logic skipped: menu panel is visible");
+        return;
+    }
+
+    // 防抖：检查距离上次触发是否过短
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let last = LAST_TRIGGER_TIME.load(Ordering::Relaxed);
+    if now - last < DEBOUNCE_MS {
+        tracing::debug!("-----> trigger_selection_logic debounced");
+        return;
+    }
+    LAST_TRIGGER_TIME.store(now, Ordering::Relaxed);
+
     // 检查功能是否启用
     if !is_selection_toolbar_enabled(handle) {
         return;
@@ -87,7 +137,7 @@ fn trigger_selection_logic(handle: &AppHandle) {
                         }),
                     );
 
-                    show_menu_panel(&handle_clone.clone());
+                    show_menu_panel(&handle_clone.clone(), x as f64, y as f64);
                 }
                 _ => (),
             }

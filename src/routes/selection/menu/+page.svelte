@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { listen, emit } from "@tauri-apps/api/event";
-  import { invoke } from "@tauri-apps/api/core";
+  import { emit, listen } from "@tauri-apps/api/event";
   import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
   import {
@@ -11,6 +10,11 @@
     EllipsisVertical,
   } from "@lucide/svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import {
+    hideMenuPanel,
+    showContentPanel,
+    type ContentPanelMode,
+  } from "$lib/api/selection";
 
   const appWindow = getCurrentWindow();
 
@@ -22,12 +26,6 @@
     app_info: { name: "", bundle_id: "", pid: 0 },
   });
 
-  // 记录显示状态，用于动画控制
-  let visible = $state(false);
-
-  // 手动追踪 hover 状态（解决 NSPanel hover 状态残留问题）
-  let hoveredBtn = $state<string | null>(null);
-
   onMount(() => {
     console.log("=====> [selection/menu] onMount executed");
     // 监听后端发送的全局划词信号
@@ -36,12 +34,10 @@
 
       captured = { text, x, y, app_info };
       console.log("-----> captured: ", captured);
-      visible = true;
-      hoveredBtn = null; // 重置 hover 状态
 
       // 1. 计算位置：出现在鼠标上方 48 像素处
       // 使用 LogicalPosition 自动处理 Retina 屏和多屏缩放
-      await appWindow.setPosition(new LogicalPosition(x - 180, y - 56));
+      // await appWindow.setPosition(new LogicalPosition(x - 180, y - 56));
 
       // 2. 显示窗口并置顶
       // await appWindow.show();
@@ -54,16 +50,26 @@
     };
   });
 
-  // 隐藏面板
+  // 隐藏面板（通过后端命令，确保状态同步）
   async function hidePanel() {
-    visible = false;
-    await appWindow.hide();
+    await hideMenuPanel();
+  }
+
+  // 显示内容面板的通用方法
+  async function openContentPanel(mode: ContentPanelMode) {
+    await showContentPanel(mode, {
+      text: captured.text,
+      x: captured.x,
+      y: captured.y,
+      app_info: captured.app_info,
+    });
+    await hidePanel();
   }
 
   // 显示完整内容
   async function handleShow() {
     console.log("-----> show: ", captured.text);
-    await hidePanel();
+    await openContentPanel("show");
   }
 
   // 复制文本
@@ -74,24 +80,12 @@
 
   // 翻译
   async function handleTranslate() {
-    await hidePanel();
-    await invoke("show_content_window");
-    await emit("init-content", {
-      mode: "translate",
-      text: captured.text,
-      app_info: captured.app_info,
-    });
+    await openContentPanel("translate");
   }
 
   // 问 AI
   async function handleAi() {
-    await hidePanel();
-    await invoke("show_content_window");
-    await emit("init-content", {
-      mode: "ai",
-      text: captured.text,
-      app_info: captured.app_info,
-    });
+    await openContentPanel("ai");
   }
 
   // 设置
@@ -100,13 +94,13 @@
   }
 </script>
 
-<!-- {#if captured.text} -->
+{#if captured.text}
 <div class="flex items-center w-full h-full p-1 bg-white">
   <div
     class="flex flex-row flex-1 items-center justify-between gap-1 px-2 text-[14px] text-gray-600"
   >
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-200"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-200 hover:bg-red-300"
       onclick={handleShow}
     >
       <Eye class="size-3.5" />
@@ -144,4 +138,4 @@
     <EllipsisVertical class="size-3.5" />
   </button>
 </div>
-<!-- {/if} -->
+{/if}

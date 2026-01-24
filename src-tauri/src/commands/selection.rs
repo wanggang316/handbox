@@ -1,4 +1,33 @@
+use serde::{Deserialize, Serialize};
+use tauri::Emitter;
+
 use crate::models::error::AppError;
+
+/// 内容面板模式
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContentPanelMode {
+    Show,
+    Translate,
+    Ai,
+}
+
+/// 选中文本的应用信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectionAppInfo {
+    pub name: String,
+    pub bundle_id: String,
+    pub pid: i32,
+}
+
+/// 显示内容面板的 payload
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectionPayload {
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub app_info: SelectionAppInfo,
+}
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -64,6 +93,68 @@ pub async fn selection_overlay_set_interactive(
     });
     let _ = rx.recv_timeout(Duration::from_millis(120));
 
+    Ok(())
+}
+
+/// 显示 content panel
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_show_content_panel(
+    app: tauri::AppHandle,
+    mode: ContentPanelMode,
+    payload: SelectionPayload,
+) -> Result<(), AppError> {
+    use crate::services::selection::show_content_panel;
+    tracing::info!(">>>>>>>>>>>> selection_show_content_panel start, mode: {:?}", mode);
+    let _ = app.emit(
+        "init-content",
+        serde_json::json!({
+            "mode": mode,
+            "text": payload.text,
+            "x": payload.x,
+            "y": payload.y,
+            "app_info": payload.app_info
+        }),
+    );
+    show_content_panel(&app, payload.x, payload.y);
+    Ok(())
+}
+
+/// 隐藏 content panel
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_hide_content_panel(app: tauri::AppHandle) -> Result<(), AppError> {
+    use crate::services::selection::hide_content_panel;
+
+    tracing::info!(">>>>>>>>>>>> selection_hide_content_panel start");
+    hide_content_panel(&app);
+    Ok(())
+}
+
+/// 隐藏 menu panel
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_hide_menu_panel(app: tauri::AppHandle) -> Result<(), AppError> {
+    use crate::services::selection::hide_menu_panel;
+
+    tracing::info!(">>>>>>>>>>>> selection_hide_menu_panel start");
+    hide_menu_panel(&app);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_show_content_panel(
+    _app: tauri::AppHandle,
+    _mode: ContentPanelMode,
+    _payload: SelectionPayload,
+) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_hide_content_panel(_app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
