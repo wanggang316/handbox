@@ -2,8 +2,8 @@
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
-  import { Eye, Languages, Sparkles, X } from "@lucide/svelte";
-  import { hideContentPanel } from "$lib/api/selection";
+  import { Eye, Languages, Sparkles, X, Pin, PinOff } from "@lucide/svelte";
+  import { hideContentPanel, setContentPanelPinned } from "$lib/api/selection";
 
   const appWindow = getCurrentWindow();
 
@@ -13,6 +13,9 @@
     text: "",
     app_info: { name: "", bundle_id: "", pid: 0 },
   });
+
+  // 置顶状态
+  let isPinned = $state(false);
 
   // 模式配置
   const modeConfig = {
@@ -28,6 +31,9 @@
     const unlisten = listen("init-content", async (event: any) => {
       const { mode, text, x, y, app_info } = event.payload;
       content = { mode, text, app_info };
+      // 新内容时重置置顶状态
+      isPinned = false;
+      await setContentPanelPinned(false);
       console.log("-----> content received: ", content);
 
       // // 设置位置：x 居中，y 在选中文字下方
@@ -43,7 +49,14 @@
   // 关闭面板
   async function handleClose() {
     content = { mode: "", text: "", app_info: { name: "", bundle_id: "", pid: 0 } };
+    isPinned = false;
     await hideContentPanel();
+  }
+
+  // 切换置顶状态
+  async function togglePin() {
+    isPinned = !isPinned;
+    await setContentPanelPinned(isPinned);
   }
 </script>
 
@@ -56,12 +69,25 @@
         <config.icon class="size-4" />
         <span class="text-sm font-medium">{config.label}</span>
       </div>
-      <button
-        class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-        onclick={handleClose}
-      >
-        <X class="size-4" />
-      </button>
+      <div class="flex items-center gap-1">
+        <button
+          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-gray-100 transition-colors {isPinned ? 'text-blue-500' : 'text-gray-400 hover:text-gray-600'}"
+          onclick={togglePin}
+          title={isPinned ? "取消置顶" : "置顶"}
+        >
+          {#if isPinned}
+            <Pin class="size-3.5" />
+          {:else}
+            <PinOff class="size-3.5" />
+          {/if}
+        </button>
+        <button
+          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+          onclick={handleClose}
+        >
+          <X class="size-4" />
+        </button>
+      </div>
     </div>
   {/if}
 

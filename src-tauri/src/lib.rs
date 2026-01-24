@@ -90,6 +90,10 @@ pub fn run() {
             // debug_show_selection_overlay,
             // 选择相关命令
             selection_hide_menu_panel,
+            selection_show_content_panel,
+            selection_hide_content_panel,
+            selection_set_content_pinned,
+            selection_get_content_pinned,
             // selection_hide_action_panel,
             // selection_show_action_panel,
             // // selection_overlay_hide,

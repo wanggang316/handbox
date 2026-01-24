@@ -50,3 +50,18 @@ export async function showContentPanel(
 export async function hideContentPanel(): Promise<void> {
   return apiCall<void>("selection_hide_content_panel");
 }
+
+/**
+ * 设置内容面板置顶状态
+ * @param pinned 是否置顶
+ */
+export async function setContentPanelPinned(pinned: boolean): Promise<void> {
+  return apiCall<void>("selection_set_content_pinned", { pinned });
+}
+
+/**
+ * 获取内容面板置顶状态
+ */
+export async function getContentPanelPinned(): Promise<boolean> {
+  return apiCall<boolean>("selection_get_content_pinned");
+}

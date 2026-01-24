@@ -18,6 +18,9 @@ use crate::services::selection::content_panel::init_panel as init_content_panel;
 use crate::services::selection::menu_panel::hide_panel as hide_menu_panel;
 use crate::services::selection::menu_panel::is_panel_visible as is_menu_panel_visible;
 use crate::services::selection::content_panel::hide_panel as hide_content_panel;
+use crate::services::selection::content_panel::is_panel_visible as is_content_panel_visible;
+use crate::services::selection::content_panel::is_panel_pinned as is_content_panel_pinned;
+use crate::services::selection::content_panel::is_mouse_inside as is_mouse_inside_content_panel;
 use crate::services::selection::menu_panel::show_panel as show_menu_panel;
 
 #[cfg(target_os = "macos")]
@@ -47,18 +50,41 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                     hide_menu_panel(&handle_clone);
                 }
                 // 2. 左键点击：如果是按下（Press），通常也需要隐藏
-                //    但如果菜单面板正在显示，不隐藏（让按钮的 onclick 自己处理）
+                //    但如果菜单面板或内容面板正在显示，不隐藏（让用户可以在面板上操作）
                 mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
-                    if !is_menu_panel_visible() {
+                    if !is_menu_panel_visible() && !is_content_panel_visible() {
                         hide_content_panel(&handle_clone);
                     }
                 }
                 // 3. 左键松开：这是你划词逻辑的触发点
                 mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
+                    // 如果内容面板正在显示
+                    if is_content_panel_visible() {
+                        // 如果置顶，完全不处理（用户只能通过关闭按钮关闭）
+                        if is_content_panel_pinned() {
+                            return;
+                        }
+                        // 如果鼠标在面板内，不隐藏（允许用户在面板上选择文字）
+                        if is_mouse_inside_content_panel() {
+                            return;
+                        }
+                        // 非置顶且鼠标在面板外：延迟检查后隐藏
+                        let h = handle_clone.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            // 如果面板仍可见、非置顶且鼠标不在面板内，则隐藏
+                            if is_content_panel_visible() && !is_content_panel_pinned() && !is_mouse_inside_content_panel() {
+                                tracing::info!("-----> hiding content panel (clicked outside)");
+                                hide_content_panel(&h);
+                            }
+                        });
+                        return;
+                    }
+
                     // 如果菜单面板正在显示，延迟检查是否需要隐藏
                     // （给按钮的 onclick 时间执行，onclick 会调用 hide_menu_panel）
                     if is_menu_panel_visible() {
-                        let h = handle_clone.clone();
+                        let h: AppHandle = handle_clone.clone();
                         std::thread::spawn(move || {
                             // 等待 onclick 执行
                             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -163,6 +189,10 @@ fn setup_keyboard_monitor(handle: AppHandle<Wry>) {
             core_graphics::event::CGEventTapOptions::Default,
             vec![CGEventType::KeyDown],
             move |_, _, event| {
+                // 如果 content panel 可见，不处理键盘事件（允许复制等操作）
+                if is_content_panel_visible() {
+                    return None;
+                }
                 let key_code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                 tracing::info!("-----> key_code: {}", key_code);
                 hide_menu_panel(&handle);

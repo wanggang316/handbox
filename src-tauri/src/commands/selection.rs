@@ -142,6 +142,25 @@ pub async fn selection_hide_menu_panel(app: tauri::AppHandle) -> Result<(), AppE
     Ok(())
 }
 
+/// 设置 content panel 置顶状态
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_set_content_pinned(pinned: bool) -> Result<(), AppError> {
+    use crate::services::selection::set_content_panel_pinned;
+
+    tracing::info!(">>>>>>>>>>>> selection_set_content_pinned: {}", pinned);
+    set_content_panel_pinned(pinned);
+    Ok(())
+}
+
+/// 获取 content panel 置顶状态
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_get_content_pinned() -> Result<bool, AppError> {
+    use crate::services::selection::is_content_panel_pinned;
+    Ok(is_content_panel_pinned())
+}
+
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 pub async fn selection_show_content_panel(
@@ -168,6 +187,18 @@ pub async fn selection_get_last_payload() -> Result<Option<serde_json::Value>, A
 #[tauri::command]
 pub async fn selection_hide_menu_panel(_app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_set_content_pinned(_pinned: bool) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_get_content_pinned() -> Result<bool, AppError> {
+    Ok(false)
 }
 
 #[cfg(not(target_os = "macos"))]
