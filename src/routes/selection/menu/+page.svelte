@@ -3,7 +3,13 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
-  import { Eye, Copy, Languages, Sparkles, MoreVertical } from "@lucide/svelte";
+  import {
+    Eye,
+    Copy,
+    Languages,
+    Sparkles,
+    EllipsisVertical,
+  } from "@lucide/svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
   const appWindow = getCurrentWindow();
@@ -93,51 +99,49 @@
     // TODO: 打开设置菜单
   }
 </script>
+
 <!-- {#if captured.text} -->
+<div class="flex items-center w-full h-full p-1 bg-white">
   <div
-    class="flex items-center w-full h-full bg-red-500"
+    class="flex flex-row flex-1 items-center justify-between gap-1 px-2 text-[14px] text-gray-600"
   >
-    <div
-      class="flex items-center justify-center gap-1 px-2 w-full"
+    <button
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-200"
+      onclick={handleShow}
     >
-      <button
-        class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'show' ? 'bg-gray-100' : ''}"
-        onclick={handleShow}
-      >
-        <Eye class="size-3.5" />
-        显示
-      </button>
+      <Eye class="size-3.5" />
+      显示
+    </button>
 
-      <button
-        class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'copy' ? 'bg-gray-100' : ''}"
-        onclick={handleCopy}
-      >
-        <Copy class="size-3.5" />
-        复制
-      </button>
+    <button
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-200"
+      onclick={handleCopy}
+    >
+      <Copy class="size-3.5" />
+      复制
+    </button>
 
-      <button
-        class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-blue-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'translate' ? 'bg-blue-50' : ''}"
-        onclick={handleTranslate}
-      >
-        <Languages class="size-3.5" />
-        翻译
-      </button>
+    <button
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-200"
+      onclick={handleTranslate}
+    >
+      <Languages class="size-3.5" />
+      翻译
+    </button>
 
-      <button
-        class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-purple-600 rounded-lg transition-all duration-150 active:scale-95 {hoveredBtn === 'ai' ? 'bg-purple-50' : ''}"
-        onclick={handleAi}
-      >
-        <Sparkles class="size-3.5" />
-        问 AI
-      </button>
-
-      <button
-        class="flex items-center justify-center size-6 text-gray-500 rounded-full transition-all duration-150 active:scale-95 {hoveredBtn === 'settings' ? 'bg-gray-100' : ''}"
-        onclick={handleSettings}
-      >
-        <MoreVertical class="size-3.5" />
-      </button>
-    </div>
+    <button
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-200"
+      onclick={handleAi}
+    >
+      <Sparkles class="size-3.5" />
+      问 AI
+    </button>
   </div>
+  <button
+    class="flex items-center justify-center flex-none w-8 h-8 rounded-full bg-gray-200"
+    onclick={handleSettings}
+  >
+    <EllipsisVertical class="size-3.5" />
+  </button>
+</div>
 <!-- {/if} -->

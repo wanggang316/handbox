@@ -17,7 +17,7 @@ use crate::services::selection::menu_panel::show_panel as show_menu_panel;
 pub fn setup_selection(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     init_menu_panel(app);
-    // init_content_panel(app);
+    init_content_panel(app);
     setup_mouce_observer(app.clone());
     setup_keyboard_monitor(app.clone());
 
