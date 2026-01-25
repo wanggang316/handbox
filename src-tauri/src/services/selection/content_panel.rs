@@ -2,7 +2,7 @@ use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
 use tauri_nspanel::{
-    ManagerExt, PanelLevel, StyleMask, TrackingAreaOptions, WebviewWindowExt, tauri_panel
+    PanelLevel, StyleMask, TrackingAreaOptions, WebviewWindowExt, tauri_panel
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -14,26 +14,6 @@ static CONTENT_PANEL_PINNED: AtomicBool = AtomicBool::new(false);
 
 /// 跟踪鼠标是否在面板内部
 static MOUSE_INSIDE_PANEL: AtomicBool = AtomicBool::new(false);
-
-/// 检查内容面板是否可见
-pub fn is_panel_visible() -> bool {
-    CONTENT_PANEL_VISIBLE.load(Ordering::Relaxed)
-}
-
-/// 检查内容面板是否置顶
-pub fn is_panel_pinned() -> bool {
-    CONTENT_PANEL_PINNED.load(Ordering::Relaxed)
-}
-
-/// 检查鼠标是否在面板内部
-pub fn is_mouse_inside() -> bool {
-    MOUSE_INSIDE_PANEL.load(Ordering::Relaxed)
-}
-
-/// 设置内容面板置顶状态
-pub fn set_panel_pinned(pinned: bool) {
-    CONTENT_PANEL_PINNED.store(pinned, Ordering::Relaxed);
-}
 
 const PANEL_LABEL: &str = "selection_content";
 
@@ -121,8 +101,6 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
         tracing::info!("Showing content panel: {}", PANEL_LABEL);
 
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
-            // 先隐藏，设置位置，再显示（避免闪烁）
-            let _ = window.hide();
             let _ = window.set_position(LogicalPosition::new(x - 180.0, y + 8.0));
             let _ = window.show();
         }
@@ -142,4 +120,25 @@ pub fn hide_panel(handle: &AppHandle) {
             let _ = window.hide();
         }
     });
+}
+
+
+/// 检查内容面板是否可见
+pub fn is_panel_visible() -> bool {
+    CONTENT_PANEL_VISIBLE.load(Ordering::Relaxed)
+}
+
+/// 检查内容面板是否置顶
+pub fn is_panel_pinned() -> bool {
+    CONTENT_PANEL_PINNED.load(Ordering::Relaxed)
+}
+
+/// 检查鼠标是否在面板内部
+pub fn is_mouse_inside() -> bool {
+    MOUSE_INSIDE_PANEL.load(Ordering::Relaxed)
+}
+
+/// 设置内容面板置顶状态
+pub fn set_panel_pinned(pinned: bool) {
+    CONTENT_PANEL_PINNED.store(pinned, Ordering::Relaxed);
 }

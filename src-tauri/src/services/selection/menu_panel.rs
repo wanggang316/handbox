@@ -1,18 +1,11 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
-use tauri::{LogicalPosition, LogicalSize, Size, WebviewUrl};
-use tauri_nspanel::{
-    ManagerExt, WebviewWindowExt, PanelLevel, StyleMask, TrackingAreaOptions, tauri_panel
-};
-use std::sync::atomic::{AtomicBool, Ordering};
+use tauri_nspanel::{tauri_panel, PanelLevel, StyleMask, WebviewWindowExt};
 
 /// 跟踪菜单面板是否可见（用于在 mouse hook 线程中快速检查）
 static MENU_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
-
-/// 检查菜单面板是否可见
-pub fn is_panel_visible() -> bool {
-    MENU_PANEL_VISIBLE.load(Ordering::Relaxed)
-}
 
 const PANEL_LABEL: &str = "selection_menu";
 
@@ -22,16 +15,6 @@ tauri_panel! {
             can_become_key_window: false,
             can_become_main_window: false,
         }
-        // with: {
-        //     tracking_area: {
-        //         options: TrackingAreaOptions::new()
-        //             .active_always()
-        //             .mouse_entered_and_exited()
-        //             .mouse_moved()
-        //             .cursor_update(),
-        //         auto_resize: true
-        //     }
-        // }
     })
 
     panel_event!(SelectionMenuEventHandler {
@@ -53,12 +36,12 @@ pub fn init_panel(app_handle: &AppHandle) {
 
     let handler = SelectionMenuEventHandler::new();
     handler.window_did_become_key(move |_notification| {
-        tracing::info!("======Menu panel became key window");
+        tracing::info!("Menu panel became key window");
     });
 
     // let handle_clone = app_handle.clone();
     handler.window_did_resign_key(move |_| {
-        tracing::info!("=======[info]: panel resigned from key window!");
+        tracing::info!("Menu panel resigned from key window!");
     });
 
     panel.set_works_when_modal(true);
@@ -75,12 +58,11 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
         tracing::info!("Showing menu panel: {}", PANEL_LABEL);
 
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
-            // 先隐藏窗口，避免在旧位置闪烁
-            let _ = window.hide();
-            // 设置新位置
             let _ = window.set_position(LogicalPosition::new(x - 180.0, y - 56.0));
-            // 显示窗口
-            let _ = window.show();
+            if !window.is_visible().unwrap_or(true) {
+                let _ = window.show();
+                tracing::info!("-----> show menu panel successfully");
+            }
         }
     });
 }
@@ -94,8 +76,15 @@ pub fn hide_panel(handle: &AppHandle) {
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
             // 先移到屏幕外，避免下次显示时在旧位置闪烁
             let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
-            let _ = window.hide();
-            tracing::info!("-----> hiding menu panel successfully");
+            if window.is_visible().unwrap_or(true) {
+                let _ = window.hide();
+                tracing::info!("-----> hide menu panel successfully");
+            }
         }
     });
+}
+
+/// 检查菜单面板是否可见
+pub fn is_panel_visible() -> bool {
+    MENU_PANEL_VISIBLE.load(Ordering::Relaxed)
 }
