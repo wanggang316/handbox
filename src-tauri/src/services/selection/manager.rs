@@ -82,6 +82,7 @@ fn setup_mouce_observer(app_handle: AppHandle) {
 
                     // 如果菜单面板正在显示，延迟检查是否需要隐藏
                     if is_menu_panel_visible() {
+                        // 延迟检查是否需要隐藏（给按钮的 onclick 时间执行，onclick 会调用 hide_menu_panel）
                         let h: AppHandle = handle_clone.clone();
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(100));
