@@ -1,11 +1,15 @@
 // 设置相关 IPC 命令
 
-use crate::models::{AppError, AppSettings, ExportSettingsOptions, ImportSettingsRequest, UpdateSettingsRequest};
+use crate::models::{
+    AppError, AppSettings, ExportSettingsOptions, ImportSettingsRequest, UpdateSettingsRequest,
+};
 use crate::services::SettingsService;
 use tauri::State;
 
 #[tauri::command]
-pub async fn settings_get(settings_service: State<'_, SettingsService>) -> Result<AppSettings, AppError> {
+pub async fn settings_get(
+    settings_service: State<'_, SettingsService>,
+) -> Result<AppSettings, AppError> {
     settings_service.get_settings()
 }
 
@@ -43,36 +47,30 @@ pub async fn settings_import(
     let settings: AppSettings = serde_json::from_str(&request.data)
         .map_err(|e| AppError::validation_error(&format!("导入设置失败: {e}")))?;
 
-    settings_service
-        .update_settings(UpdateSettingsRequest {
-            section: "general".to_string(),
-            data: serde_json::to_value(settings.general.clone())
-                .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
-        })?;
-    settings_service
-        .update_settings(UpdateSettingsRequest {
-            section: "mcp".to_string(),
-            data: serde_json::to_value(settings.mcp.clone())
-                .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
-        })?;
-    settings_service
-        .update_settings(UpdateSettingsRequest {
-            section: "account".to_string(),
-            data: serde_json::to_value(settings.account.clone())
-                .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
-        })?;
-    settings_service
-        .update_settings(UpdateSettingsRequest {
-            section: "translation".to_string(),
-            data: serde_json::to_value(settings.translation.clone())
-                .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
-        })
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "general".to_string(),
+        data: serde_json::to_value(settings.general.clone())
+            .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
+    })?;
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "mcp".to_string(),
+        data: serde_json::to_value(settings.mcp.clone())
+            .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
+    })?;
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "account".to_string(),
+        data: serde_json::to_value(settings.account.clone())
+            .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
+    })?;
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "translation".to_string(),
+        data: serde_json::to_value(settings.translation.clone())
+            .map_err(|e| AppError::internal_error(&format!("导入设置失败: {e}")))?,
+    })
 }
 
 #[tauri::command]
-pub async fn settings_validate_mcp(
-    _config: String,
-) -> Result<serde_json::Value, AppError> {
+pub async fn settings_validate_mcp(_config: String) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({ "valid": true }))
 }
 

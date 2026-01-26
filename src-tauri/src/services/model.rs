@@ -221,28 +221,27 @@ impl ModelService {
                         let provider_result =
                             self.provider_repo.get_provider_by_id(&provider_id).await;
                         match provider_result {
-                            Ok(Some(provider)) => match self
-                                .fetch_and_sync_models(&provider, true)
-                                .await
-                            {
-                                Ok(()) => {
-                                    let models = self
-                                        .model_repo
-                                        .get_models_by_provider(&provider_id)
-                                        .await
-                                        .ok();
-                                    let provider_type = provider.provider_type.clone();
-                                    (provider_id.clone(), models, Some(provider_type))
+                            Ok(Some(provider)) => {
+                                match self.fetch_and_sync_models(&provider, true).await {
+                                    Ok(()) => {
+                                        let models = self
+                                            .model_repo
+                                            .get_models_by_provider(&provider_id)
+                                            .await
+                                            .ok();
+                                        let provider_type = provider.provider_type.clone();
+                                        (provider_id.clone(), models, Some(provider_type))
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "Failed to fetch models for {}: {}",
+                                            provider_id,
+                                            e
+                                        );
+                                        (provider_id.clone(), None, None)
+                                    }
                                 }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failed to fetch models for {}: {}",
-                                        provider_id,
-                                        e
-                                    );
-                                    (provider_id.clone(), None, None)
-                                }
-                            },
+                            }
                             Ok(None) => (provider_id.clone(), None, None),
                             Err(e) => {
                                 tracing::error!("Failed to get provider {}: {}", provider_id, e);

@@ -16,9 +16,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+swift-rs = "1.0"
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "test"] }
+tauri = { version = "2", features = ["protocol-asset", "test", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
@@ -63,5 +64,21 @@ arboard = "3.4"
 handbox-llm = { path = "crates/handbox-llm" }
 handbox-mcp = { path = "crates/handbox-mcp" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
+core-graphics = "0.23"
+objc2 = "0.6.3"
+objc2-app-kit = { version = "0.3.2", features = ["NSEvent", "NSPanel", "NSResponder", "NSRunningApplication", "NSScreen", "NSWindow", "NSWorkspace", "libc"] }
+objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "NSURL"] }
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+rdev = { git = "https://github.com/Narsil/rdev", branch = "main" }
+accessibility = { git = "https://github.com/eiz/accessibility" }
+accessibility-sys = { git = "https://github.com/eiz/accessibility" }
+# Swift 桥接
+swift-rs = "1.0"
+mouce = "0.3.0"
+
 [dev-dependencies]
 tempfile = "3.21.0"
+
+

@@ -9,7 +9,9 @@ type HighlightRangeOptions =
   | TextRange
   | null
   | undefined
-  | {
+  | HighlightRangeConfig;
+
+type HighlightRangeConfig = {
       ranges?: TextRange[] | TextRange | null;
       onRangeHover?: (payload: { range: TextRange; rect: DOMRect }) => void;
       onRangeLeave?: () => void;
@@ -18,7 +20,20 @@ type HighlightRangeOptions =
     };
 
 function isTextRange(value: unknown): value is TextRange {
-  return Boolean(value) && typeof value === "object" && "start" in value && "end" in value;
+  return value !== null && typeof value === "object" && "start" in value && "end" in value;
+}
+
+function isRangeConfig(value: HighlightRangeOptions): value is HighlightRangeConfig {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    ("ranges" in value ||
+      "onRangeHover" in value ||
+      "onRangeLeave" in value ||
+      "hoverDelayMs" in value ||
+      "version" in value)
+  );
 }
 
 function normalizeRanges(input: HighlightRangeOptions): TextRange[] {
@@ -228,9 +243,10 @@ export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) 
   let lastVersion: number | undefined;
 
   const handleMouseOver = (event: MouseEvent) => {
-    if (!options || typeof options !== "object" || !("onRangeHover" in options)) {
+    if (!isRangeConfig(options) || !options.onRangeHover) {
       return;
     }
+    const config = options;
     const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(
       `[${HIGHLIGHT_ATTR}]`,
     );
@@ -238,7 +254,7 @@ export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) 
     if (target === lastTarget) return;
     lastTarget = target;
 
-    const ranges = normalizeRanges(options);
+    const ranges = normalizeRanges(config);
     const index = Number(target.getAttribute(HIGHLIGHT_INDEX_ATTR));
     if (!Number.isFinite(index) || !ranges[index]) return;
 
@@ -247,8 +263,8 @@ export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) 
     }
     hoverTimer = window.setTimeout(() => {
       const rect = target.getBoundingClientRect();
-      options.onRangeHover?.({ range: ranges[index], rect });
-    }, options.hoverDelayMs ?? 2000);
+      config.onRangeHover?.({ range: ranges[index], rect });
+    }, config.hoverDelayMs ?? 2000);
   };
 
   const handleMouseOut = (event: MouseEvent) => {
@@ -261,7 +277,7 @@ export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) 
       hoverTimer = null;
     }
     lastTarget = null;
-    if (options && typeof options === "object" && "onRangeLeave" in options) {
+    if (isRangeConfig(options)) {
       options.onRangeLeave?.();
     }
   };
@@ -274,10 +290,7 @@ export function highlightRange(node: HTMLElement, input: HighlightRangeOptions) 
     const normalized = mergeRanges(normalizeRanges(options));
     const signature = normalized.map((range) => `${range.start}-${range.end}`).join(",");
     const textLength = node.textContent?.length ?? 0;
-    const version =
-      typeof options === "object" && options && "version" in options
-        ? options.version
-        : undefined;
+    const version = isRangeConfig(options) ? options.version : undefined;
 
     if (
       signature === lastSignature &&

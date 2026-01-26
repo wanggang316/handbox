@@ -1,9 +1,7 @@
 // 单词数据访问层
 
 use crate::models::AppError;
-use crate::storage::types::{
-    Timestamp, UUID, Word, WordContext, WordLookupHistory, WordReview,
-};
+use crate::storage::types::{Timestamp, Word, WordContext, WordLookupHistory, WordReview, UUID};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
@@ -61,7 +59,9 @@ impl WordRepository {
             .bind(context.created_at)
             .execute(self.db.pool())
             .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to create word context: {e}")))?;
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to create word context: {e}"))
+            })?;
 
         Ok(())
     }
@@ -259,10 +259,7 @@ impl WordRepository {
         Ok(())
     }
 
-    pub async fn create_lookup_history(
-        &self,
-        history: &WordLookupHistory,
-    ) -> Result<(), AppError> {
+    pub async fn create_lookup_history(&self, history: &WordLookupHistory) -> Result<(), AppError> {
         let query = r#"
             INSERT INTO word_lookup_history (id, term, translation, phonetic, explanation, source_language, target_language, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

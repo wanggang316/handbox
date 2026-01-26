@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { User, Palette, Brain, BookOpen, Zap, Keyboard, Info } from '@lucide/svelte';
+  import { User, Palette, Brain, BookOpen, Zap, Keyboard, Info, MousePointerClick } from '@lucide/svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Menu from '$lib/components/ui/Menu.svelte';
 
   type Item = { id: string; title: string; icon: any, url: string, isActive?: boolean };
-  
+
   let baseItems: Item[] = [
     { id: 'account', title: '账户', icon: User, url: '/settings/account' },
     { id: 'general', title: '通用', icon: Palette, url: '/settings/general' },
+    { id: 'quicktools', title: '快捷工具', icon: MousePointerClick, url: '/settings/quicktools' },
     { id: 'models', title: '模型', icon: Brain, url: '/settings/models' },
     { id: 'words', title: '单词本', icon: BookOpen, url: '/settings/words' },
     { id: 'mcp', title: 'MCP', icon: Zap, url: '/settings/mcp' },

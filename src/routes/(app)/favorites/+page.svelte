@@ -24,6 +24,7 @@
   import { highlightRange, renderMarkdown } from "$lib/utils";
   import { escapeHtml } from "$lib/utils/string";
   import { resolveLocalAssetPath } from "$lib/utils/tauri";
+  import { openInBrowser } from "$lib/utils/browser";
 
   let searchQuery = $state("");
   let selectedType = $state<FavoriteMessageType | "all">("all");
@@ -49,6 +50,7 @@
       { value: "image", label: "图片" },
       { value: "message", label: "消息" },
       { value: "chat", label: "对话" },
+      { value: "external", label: "外部" },
     ];
 
   const tagColors: { value: TagColor; label: string; class: string }[] = [
@@ -84,7 +86,7 @@
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       result = result.filter((f) => {
-        const content = getDisplayContent(f);
+        const content = getSearchableText(f);
         return (
           content.toLowerCase().includes(query) ||
           f.tags.some((t) => t.name.toLowerCase().includes(query))
@@ -119,6 +121,8 @@
         return favorite.content;
       case "text":
         return favorite.context ?? favorite.content;
+      case "external":
+        return favorite.content;
       case "image":
         const match = favorite.content.match(/!\[.*?\]\((.*?)\)/);
         return match ? match[1] : favorite.content;
@@ -126,6 +130,21 @@
       default:
         return favorite.content;
     }
+  }
+
+  function getSearchableText(favorite: Favorite): string {
+    const base = getDisplayContent(favorite);
+    const metadata = [
+      favorite.sourceAppName,
+      favorite.sourceBundleId,
+      favorite.sourceWindowTitle,
+      favorite.sourceUrl,
+      favorite.sourceDomain,
+      favorite.sourceTabTitle,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return [base, metadata].filter(Boolean).join(" ");
   }
 
   function parseTextRanges(content: string): TextRange[] {
@@ -211,7 +230,8 @@
     return resolveLocalAssetPath(match[1]);
   }
 
-  function toggleExpand(favoriteId: string) {
+  function toggleExpand(favoriteId?: string) {
+    if (!favoriteId) return;
     expandedFavorites[favoriteId] = !expandedFavorites[favoriteId];
   }
 
@@ -302,6 +322,10 @@
           favorite.role,
           favorite.context
         );
+      } else if (favorite.messageType === "external") {
+        if (favorite.id) {
+          await favoriteStore.deleteFavoriteById(favorite.id);
+        }
       } else {
         await favoriteStore.toggleFavorite(
           favorite.messageId,
@@ -317,11 +341,21 @@
   }
 
   function handleNavigate(favorite: Favorite) {
+    if (favorite.messageType === "external") {
+      if (favorite.sourceUrl) {
+        openInBrowser(favorite.sourceUrl).catch((error) =>
+          console.error("Failed to open source URL:", error)
+        );
+      }
+      return;
+    }
+
     if (favorite.messageType === "chat") {
       goto(`/chat?id=${favorite.chatId}`);
-    } else {
-      goto(`/chat?id=${favorite.chatId}#message-${favorite.messageId}`);
+      return;
     }
+
+    goto(`/chat?id=${favorite.chatId}#message-${favorite.messageId}`);
   }
 
   function toggleTag(tag: string) {
@@ -360,6 +394,7 @@
       image: "图片",
       message: "消息",
       chat: "对话",
+      external: "外部",
     };
     return labels[type] || type;
   }
@@ -408,7 +443,10 @@
     };
   }
 
-  function getNavigateLabel(favorite: Favorite): string {
+  function getNavigateLabel(favorite: Favorite): string | null {
+    if (favorite.messageType === "external") {
+      return favorite.sourceUrl ? "打开来源" : null;
+    }
     return favorite.messageType === "chat" ? "查看对话" : "查看消息";
   }
 
@@ -524,6 +562,7 @@
     {:else}
       <div class="space-y-3">
         {#each filteredFavorites as favorite (favorite.id)}
+          {@const navLabel = getNavigateLabel(favorite)}
           <div
             class="bg-base-200 rounded-xl p-4 hover:bg-base-300 transition-colors relative {selectedFavorite?.id ===
               favorite.id && showContextMenu
@@ -554,13 +593,15 @@
 
               <div class="flex items-center gap-3 text-xs text-base-content/50 whitespace-nowrap">
                 <span>{formatTime(favorite.createdAt)}</span>
-                <button
-                  class="text-xs text-base-content/50 hover:text-primary flex items-center gap-1 cursor-pointer"
-                  onclick={() => handleNavigate(favorite)}
-                >
-                  <ExternalLink size={12} />
-                  {getNavigateLabel(favorite)}
-                </button>
+                {#if navLabel}
+                  <button
+                    class="text-xs text-base-content/50 hover:text-primary flex items-center gap-1 cursor-pointer"
+                    onclick={() => handleNavigate(favorite)}
+                  >
+                    <ExternalLink size={12} />
+                    {navLabel}
+                  </button>
+                {/if}
               </div>
             </div>
 
@@ -605,6 +646,35 @@
                       {/if}
                     </button>
                   {/if}
+                {:else if favorite.messageType === "external"}
+                  <div class="space-y-2">
+                    <div class="whitespace-pre-wrap text-[15px] leading-[1.6]">
+                      {favorite.content}
+                    </div>
+                    {#if favorite.selectionTextRaw &&
+                    favorite.selectionTextRaw !== favorite.content}
+                      <div class="text-xs text-base-content/60">
+                        原文: {favorite.selectionTextRaw}
+                      </div>
+                    {/if}
+                    <div class="flex flex-wrap gap-2 text-xs text-base-content/60">
+                      {#if favorite.sourceAppName}
+                        <span>应用: {favorite.sourceAppName}</span>
+                      {/if}
+                      {#if favorite.sourceWindowTitle}
+                        <span>窗口: {favorite.sourceWindowTitle}</span>
+                      {/if}
+                      {#if favorite.sourceUrl}
+                        <span>链接: {favorite.sourceUrl}</span>
+                      {/if}
+                      {#if favorite.sourceDomain}
+                        <span>域名: {favorite.sourceDomain}</span>
+                      {/if}
+                      {#if favorite.sourceTabTitle}
+                        <span>标签: {favorite.sourceTabTitle}</span>
+                      {/if}
+                    </div>
+                  </div>
                 {:else if favorite.messageType === "text"}
                   {@const ranges = mergeTextRanges(
                     parseTextRanges(favorite.content)

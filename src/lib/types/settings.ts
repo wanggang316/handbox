@@ -67,12 +67,18 @@ export interface AccountSettings {
   isLoggedIn: boolean;
 }
 
+// 快捷工具设置
+export interface QuickToolsSettings {
+  showToolbarOnSelection: boolean;
+}
+
 // 应用设置
 export interface AppSettings {
   general: GeneralSettings;
   mcp: MCPSettings;
   account: AccountSettings;
   translation: TranslationSettings;
+  quickTools: QuickToolsSettings;
 }
 
 // 设置更新请求

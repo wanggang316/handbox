@@ -10,6 +10,8 @@
     "frontendDist": "../build"
   },
   "app": {
+    "macOSPrivateApi": true,
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
@@ -48,6 +50,30 @@
           "x": 15,
           "y": 27
         }
+      },
+      {
+        "label": "selection_menu",
+        "url": "/selection/menu",
+        "width": 320,
+        "height": 36,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "skipTaskbar": true
+      },
+      {
+        "label": "selection_content",
+        "url": "/selection/content",
+        "width": 320,
+        "height": 240,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

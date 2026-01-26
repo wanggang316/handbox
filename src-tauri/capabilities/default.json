@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "settings"],
+  "windows": ["main", "settings", "selection_menu", "selection_content"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -25,6 +25,9 @@
     "core:window:allow-create",
     "core:window:allow-close",
     "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
     "core:menu:default",
     "clipboard-manager:default",
     "clipboard-manager:allow-write-text",

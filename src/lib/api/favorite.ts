@@ -1,5 +1,10 @@
 import { apiCall } from "./index";
-import type { Favorite, FavoriteMessageType, FavoriteTag } from "$lib/types/favorite";
+import type {
+  CreateExternalFavoriteDto,
+  Favorite,
+  FavoriteMessageType,
+  FavoriteTag,
+} from "$lib/types/favorite";
 import type { UUID } from "$lib/types";
 import type { TextRange } from "$lib/types/favorite";
 
@@ -74,5 +79,19 @@ export async function addTag(favoriteId: UUID, tag: FavoriteTag): Promise<void> 
 export async function removeTag(favoriteId: UUID, tagName: string): Promise<void> {
   return apiCall<void>("favorite_remove_tag", {
     request: { favoriteId, tagName },
+  });
+}
+
+export async function deleteFavorite(favoriteId: UUID): Promise<void> {
+  return apiCall<void>("favorite_delete", {
+    request: { favoriteId },
+  });
+}
+
+export async function createExternalFavorite(
+  payload: CreateExternalFavoriteDto,
+): Promise<UUID> {
+  return apiCall<UUID>("favorite_create_external", {
+    request: payload,
   });
 }

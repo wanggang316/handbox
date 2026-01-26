@@ -416,12 +416,9 @@ impl ModelRepository {
             query_builder = query_builder.bind(provider_id);
         }
 
-        let rows = query_builder
-            .fetch_all(self.db.pool())
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to get models by providers: {}", e))
-            })?;
+        let rows = query_builder.fetch_all(self.db.pool()).await.map_err(|e| {
+            AppError::internal_error(&format!("Failed to get models by providers: {}", e))
+        })?;
 
         let mut models = Vec::new();
         for row in rows {

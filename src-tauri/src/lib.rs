@@ -9,131 +9,19 @@ pub mod services;
 pub mod storage;
 pub mod utils;
 
+#[cfg(target_os = "macos")]
+use tauri::{AppHandle, Manager};
+
 use crate::commands::*;
 use crate::services::{
-    ArtifactService, ChatService, McpService, MessageService, ModelService, ProviderService,
-    SearchService, SettingsService, StorageService, UserSessionService, WordService,
+    selection::setup_selection, ArtifactService,
+    ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
+    SettingsService, StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
-use tauri::Manager;
-
-/// 初始化服务
-async fn initialize_services(
-    app: &tauri::AppHandle,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 获取应用数据目录
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .expect("Failed to get app data directory");
-
-    // 初始化存储服务
-    let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
-
-    // 允许前端通过 asset protocol 访问生成的媒体目录
-    let media_root = data_dir.join("generated_media");
-    std::fs::create_dir_all(&media_root)
-        .map_err(|e| format!("Failed to create generated media directory: {e}"))?;
-    app.asset_protocol_scope()
-        .allow_directory(&media_root, true)
-        .map_err(|e| format!("Failed to allow asset protocol for generated media: {e}"))?;
-
-    let attachments_root = data_dir.join("message_attachments");
-    std::fs::create_dir_all(&attachments_root)
-        .map_err(|e| format!("Failed to create attachment directory: {e}"))?;
-    app.asset_protocol_scope()
-        .allow_directory(&attachments_root, true)
-        .map_err(|e| format!("Failed to allow asset protocol for attachments: {e}"))?;
-
-    // 初始化数据库服务
-    let db_path = storage_service.get_database_path();
-    let database_service = Arc::new(
-        Database::new(&db_path)
-            .await
-            .map_err(|e| format!("Failed to initialize database: {e}"))?,
-    );
-
-    let llm_config = Arc::new(crate::config::llm_config::LlmConfig::load());
-    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-
-    // 初始化各个服务
-    let provider_service =
-        ProviderService::new(database_service.clone(), llm_config_provider.clone());
-    let provider_service_shared = Arc::new(provider_service.clone());
-
-    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
-
-    let mcp_service = McpService::new(database_service.clone());
-    let mcp_service_shared = Arc::new(mcp_service.clone());
-
-    let chat_service = ChatService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        llm_config_provider.clone(),
-    );
-    let chat_service_shared = Arc::new(chat_service.clone());
-
-    let message_service = MessageService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        chat_service_shared,
-        mcp_service_shared,
-        storage_service.clone(),
-        llm_config_provider.clone(),
-    );
-
-    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
-
-    let settings_service = SettingsService::new(storage_service.clone());
-
-    let word_repo = Arc::new(WordRepository::new(database_service.clone()));
-    let word_service = WordService::new(
-        word_repo,
-        provider_service_shared.clone(),
-        settings_service.clone(),
-        llm_config_provider.clone(),
-    );
-
-    // 初始化用户会话服务
-    let user_session_service = UserSessionService::new(database_service.clone());
-
-    // 从数据库恢复上次的用户会话
-    if let Err(e) = user_session_service.load_session_from_db().await {
-        tracing::warn!("恢复用户会话失败: {:?}", e);
-    }
-
-    // 初始化 Artifact 服务
-    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
-    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
-
-    // 初始化 Favorite 服务
-    let favorite_repo = FavoriteRepository::new(database_service.clone());
-
-    // 将服务注册到应用状态
-    app.manage(storage_service);
-    app.manage(chat_service);
-    app.manage(message_service);
-    app.manage(provider_service);
-    app.manage(model_service);
-    app.manage(mcp_service);
-    app.manage(search_service);
-    app.manage(settings_service);
-    app.manage(word_service);
-    app.manage(user_session_service);
-    app.manage(artifact_service);
-    app.manage(favorite_repo);
-
-    Ok(())
-}
-
-// 保留原始的 greet 命令用于测试
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {name}! You've been greeted from Rust!")
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -150,17 +38,36 @@ pub fn run() {
         tracing::info!("Logger initialized successfully");
     }
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_shell::init());
+
+    #[cfg(target_os = "macos")]
+    {
+        // 初始化 NSPanel 插件
+        builder = builder.plugin(tauri_nspanel::init());
+
+    }
+
+    builder
         .setup(|app| {
             // 创建菜单
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
 
+            // 创建选择面板 (NSPanel) - 必须在setup中同步创建
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(e) = setup_selection(&app.handle()) {
+                    tracing::error!("Failed to setup selection panels: {e}");
+                    eprintln!("Failed to setup selection panels: {e}");
+                    // 不退出应用，因为选择面板是可选功能
+                }
+            }
+            
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -170,16 +77,30 @@ pub fn run() {
                 }
             });
 
+             
+
             Ok(())
         })
-        .on_menu_event(|app, event| {
+        .on_menu_event(|app: &AppHandle, event| {
             crate::menu::handle_menu_event(app, event.id().as_ref());
         })
         .invoke_handler(tauri::generate_handler![
-            // 测试命令
-            greet,
             // 调试命令
             debug_check_file,
+            // debug_show_selection_overlay,
+            // 选择相关命令
+            selection_hide_menu_panel,
+            selection_show_content_panel,
+            selection_hide_content_panel,
+            selection_set_content_pinned,
+            selection_get_content_pinned,
+            // selection_hide_action_panel,
+            // selection_show_action_panel,
+            // // selection_overlay_hide,
+            // selection_overlay_resize,
+            // selection_overlay_lock,
+            // selection_overlay_dismiss,
+            // selection_overlay_set_interactive,
             // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,
@@ -290,7 +211,126 @@ pub fn run() {
             favorite_save_text_ranges,
             favorite_add_tag,
             favorite_remove_tag,
+            favorite_delete,
+            favorite_create_external,
+            // 辅助功能权限命令
+            accessibility_check_permission,
+            accessibility_request_permission,
+            accessibility_open_settings,
+            // 选择相关命令
+            selection_show_content_panel,
+            selection_hide_content_panel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+
+/// 初始化服务
+async fn initialize_services(
+    app: &tauri::AppHandle,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 获取应用数据目录
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data directory");
+
+    // 初始化存储服务
+    let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
+
+    // 允许前端通过 asset protocol 访问生成的媒体目录
+    let media_root = data_dir.join("generated_media");
+    std::fs::create_dir_all(&media_root)
+        .map_err(|e| format!("Failed to create generated media directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&media_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for generated media: {e}"))?;
+
+    let attachments_root = data_dir.join("message_attachments");
+    std::fs::create_dir_all(&attachments_root)
+        .map_err(|e| format!("Failed to create attachment directory: {e}"))?;
+    app.asset_protocol_scope()
+        .allow_directory(&attachments_root, true)
+        .map_err(|e| format!("Failed to allow asset protocol for attachments: {e}"))?;
+
+    // 初始化数据库服务
+    let db_path = storage_service.get_database_path();
+    let database_service = Arc::new(
+        Database::new(&db_path)
+            .await
+            .map_err(|e| format!("Failed to initialize database: {e}"))?,
+    );
+
+    let llm_config = Arc::new(crate::config::llm_config::LlmConfig::load());
+    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+
+    // 初始化各个服务
+    let provider_service =
+        ProviderService::new(database_service.clone(), llm_config_provider.clone());
+    let provider_service_shared = Arc::new(provider_service.clone());
+
+    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
+
+    let mcp_service = McpService::new(database_service.clone());
+    let mcp_service_shared = Arc::new(mcp_service.clone());
+
+    let chat_service = ChatService::new(
+        database_service.clone(),
+        provider_service_shared.clone(),
+        llm_config_provider.clone(),
+    );
+    let chat_service_shared = Arc::new(chat_service.clone());
+
+    let message_service = MessageService::new(
+        database_service.clone(),
+        provider_service_shared.clone(),
+        chat_service_shared,
+        mcp_service_shared,
+        storage_service.clone(),
+        llm_config_provider.clone(),
+    );
+
+    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
+
+    let settings_service = SettingsService::new(storage_service.clone());
+
+    let word_repo = Arc::new(WordRepository::new(database_service.clone()));
+    let word_service = WordService::new(
+        word_repo,
+        provider_service_shared.clone(),
+        settings_service.clone(),
+        llm_config_provider.clone(),
+    );
+
+    // 初始化用户会话服务
+    let user_session_service = UserSessionService::new(database_service.clone());
+
+    // 从数据库恢复上次的用户会话
+    if let Err(e) = user_session_service.load_session_from_db().await {
+        tracing::warn!("恢复用户会话失败: {:?}", e);
+    }
+
+    // 初始化 Artifact 服务
+    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
+    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
+
+    // 初始化 Favorite 服务
+    let favorite_repo = FavoriteRepository::new(database_service.clone());
+
+    // 将服务注册到应用状态
+    app.manage(storage_service);
+    app.manage(chat_service);
+    app.manage(message_service);
+    app.manage(provider_service);
+    app.manage(model_service);
+    app.manage(mcp_service);
+    app.manage(search_service);
+    app.manage(settings_service);
+    app.manage(word_service);
+    app.manage(user_session_service);
+    app.manage(artifact_service);
+    app.manage(favorite_repo);
+
+    Ok(())
 }
