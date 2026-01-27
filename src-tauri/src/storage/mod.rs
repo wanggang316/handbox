@@ -1,5 +1,6 @@
 // Storage 数据访问层模块
 
+pub mod agent_repository;
 pub mod artifact_repository;
 pub mod chat_repository;
 pub mod database;
@@ -11,6 +12,7 @@ pub mod provider_repository;
 pub mod types;
 pub mod word_repository;
 
+pub use agent_repository::AgentRepository;
 pub use artifact_repository::ArtifactRepository;
 pub use chat_repository::ChatRepository;
 pub use database::Database;

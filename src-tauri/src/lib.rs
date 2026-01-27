@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::*;
 use crate::services::{
-    selection::setup_selection, ArtifactService,
+    selection::setup_selection, AgentService, ArtifactService,
     ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
     SettingsService, StorageService, UserSessionService, WordService,
 };
@@ -119,6 +119,14 @@ pub fn run() {
             chat_update_name,
             chat_delete,
             chat_generate_title,
+            // Agent 相关命令
+            agent_create,
+            agent_list,
+            agent_get,
+            agent_update_field,
+            agent_update_model,
+            agent_update_name,
+            agent_delete,
             // 消息相关命令
             message_user_send,
             message_user_send_stream,
@@ -318,6 +326,9 @@ async fn initialize_services(
     // 初始化 Favorite 服务
     let favorite_repo = FavoriteRepository::new(database_service.clone());
 
+    // 初始化 Agent 服务
+    let agent_service = AgentService::new(database_service.clone());
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(chat_service);
@@ -331,6 +342,7 @@ async fn initialize_services(
     app.manage(user_session_service);
     app.manage(artifact_service);
     app.manage(favorite_repo);
+    app.manage(agent_service);
 
     Ok(())
 }

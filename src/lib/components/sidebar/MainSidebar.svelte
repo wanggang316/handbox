@@ -6,7 +6,7 @@
   import ChatList from "$lib/components/ui/ChatList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
-  import { BookOpen, Box, Search, Settings, User, LogOut, Star } from "@lucide/svelte";
+  import { BookOpen, Bot, Search, Settings, User, LogOut, Star, Box } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import SearchModal from "$lib/components/search/SearchModal.svelte";
@@ -50,6 +50,11 @@
   function handleWordsClick() {
     console.log("Clicked words menu");
     goto(`/words`);
+  }
+
+  function handleAgentClick() {
+    console.log("Clicked agent menu");
+    goto(`/agents`);
   }
 
   let showSearchModal = $state(false);
@@ -205,6 +210,13 @@
         iconSize={20}
         isActive={currentRoute === "/artifacts"}
         onClick={() => handleArtifactClick()}
+      />
+      <MenuButton
+        title="Agents"
+        icon={Bot}
+        iconSize={20}
+        isActive={currentRoute === "/agents"}
+        onClick={() => handleAgentClick()}
       />
       <MenuButton
         title="单词本"
