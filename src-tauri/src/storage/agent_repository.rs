@@ -30,26 +30,23 @@ impl AgentRepository {
         let skills_json = serde_json::to_string(&agent.skills)
             .map_err(|e| AppError::validation_error(&format!("Invalid skills: {}", e)))?;
 
-        // 将空字符串转换为 NULL 以避免外键约束错误
-        let model_id = agent.model_id.as_ref().filter(|s| !s.is_empty());
-        let provider_id = agent.provider_id.as_ref().filter(|s| !s.is_empty());
+        // 将空字符串转换为 NULL
+        let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            INSERT INTO agents (id, name, model_id, provider_id, temperature, top_p, top_k, reasoning, max_tokens, streaming, system_prompt, mcp_servers, skills, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         "#;
 
         sqlx::query(query)
             .bind(&agent.id)
             .bind(&agent.name)
-            .bind(model_id)
-            .bind(provider_id)
+            .bind(model)
             .bind(agent.temperature)
             .bind(agent.top_p)
             .bind(agent.top_k)
             .bind(reasoning_json)
             .bind(agent.max_tokens)
-            .bind(agent.streaming)
             .bind(&agent.system_prompt)
             .bind(&mcp_servers_json)
             .bind(&skills_json)
@@ -65,7 +62,7 @@ impl AgentRepository {
     /// 获取 Agent 列表
     pub async fn list_agents(&self, limit: i32, offset: i32) -> Result<Vec<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model_id, provider_id, temperature, top_p, top_k, reasoning, max_tokens, streaming, system_prompt, mcp_servers, skills, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, created_at, updated_at
             FROM agents ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -87,7 +84,7 @@ impl AgentRepository {
     /// 根据 ID 获取 Agent
     pub async fn get_agent_by_id(&self, agent_id: &UUID) -> Result<Option<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model_id, provider_id, temperature, top_p, top_k, reasoning, max_tokens, streaming, system_prompt, mcp_servers, skills, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, created_at, updated_at
             FROM agents WHERE id = $1
         "#;
 
@@ -117,25 +114,22 @@ impl AgentRepository {
         let skills_json = serde_json::to_string(&agent.skills)
             .map_err(|e| AppError::validation_error(&format!("Invalid skills: {}", e)))?;
 
-        // 将空字符串转换为 NULL 以避免外键约束错误
-        let model_id = agent.model_id.as_ref().filter(|s| !s.is_empty());
-        let provider_id = agent.provider_id.as_ref().filter(|s| !s.is_empty());
+        // 将空字符串转换为 NULL
+        let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            UPDATE agents SET name = $1, model_id = $2, provider_id = $3, temperature = $4, top_p = $5, top_k = $6, reasoning = $7, max_tokens = $8, streaming = $9, system_prompt = $10, mcp_servers = $11, skills = $12, updated_at = $13
-            WHERE id = $14
+            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, updated_at = $11
+            WHERE id = $12
         "#;
 
         let result = sqlx::query(query)
             .bind(&agent.name)
-            .bind(model_id)
-            .bind(provider_id)
+            .bind(model)
             .bind(agent.temperature)
             .bind(agent.top_p)
             .bind(agent.top_k)
             .bind(reasoning_json)
             .bind(agent.max_tokens)
-            .bind(agent.streaming)
             .bind(&agent.system_prompt)
             .bind(&mcp_servers_json)
             .bind(&skills_json)
@@ -167,34 +161,16 @@ impl AgentRepository {
         Ok(())
     }
 
-    /// 统计使用指定供应商的 Agent 数量
-    pub async fn count_agents_using_provider(&self, provider_id: &str) -> Result<i32, AppError> {
-        let query = r#"
-            SELECT COUNT(*) as count
-            FROM agents
-            WHERE provider_id = $1
-        "#;
-
-        let row = sqlx::query(query)
-            .bind(provider_id)
-            .fetch_one(self.db.pool())
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to count agents: {}", e)))?;
-
-        let count: i32 = row.try_get("count")?;
-        Ok(count)
-    }
-
     /// 统计使用指定模型的 Agent 数量
-    pub async fn count_agents_using_model(&self, model_id: &str) -> Result<i32, AppError> {
+    pub async fn count_agents_using_model(&self, model: &str) -> Result<i32, AppError> {
         let query = r#"
             SELECT COUNT(*) as count
             FROM agents
-            WHERE model_id = $1
+            WHERE model = $1
         "#;
 
         let row = sqlx::query(query)
-            .bind(model_id)
+            .bind(model)
             .fetch_one(self.db.pool())
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to count agents: {}", e)))?;
@@ -299,19 +275,16 @@ impl AgentRepository {
         let top_p: Option<f32> = row.try_get::<Option<f32>, _>("top_p")?;
         let top_k: Option<i32> = row.try_get::<Option<i32>, _>("top_k")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
-        let streaming: Option<bool> = row.try_get::<Option<bool>, _>("streaming")?;
 
         Ok(Agent {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            model_id: row.try_get("model_id").ok(),
-            provider_id: row.try_get("provider_id").ok(),
+            model: row.try_get("model").ok(),
             temperature,
             top_p,
             top_k,
             reasoning,
             max_tokens,
-            streaming,
             system_prompt: row.try_get("system_prompt").ok(),
             mcp_servers,
             skills,
@@ -347,14 +320,12 @@ mod tests {
         let agent = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Code Assistant".to_string(),
-            model_id: Some("gpt-4o".to_string()),
-            provider_id: Some("openai".to_string()),
+            model: Some("gpt-4o".to_string()),
             temperature: Some(0.7),
             top_p: Some(0.9),
             top_k: Some(40),
             reasoning: None,
             max_tokens: Some(2048),
-            streaming: Some(true),
             system_prompt: Some("You are a helpful coding assistant.".to_string()),
             mcp_servers: vec![
                 McpServerConfig {
@@ -381,6 +352,7 @@ mod tests {
         assert!(fetched.is_some());
         let fetched_agent = fetched.unwrap();
         assert_eq!(fetched_agent.name, agent.name);
+        assert_eq!(fetched_agent.system_prompt, agent.system_prompt);
         assert_eq!(fetched_agent.mcp_servers, agent.mcp_servers);
         assert_eq!(fetched_agent.skills, agent.skills);
 
@@ -405,84 +377,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_count_agents_using_provider() {
-        let (db, _temp_dir) = create_test_db().await;
-        let repo = AgentRepository::new(Arc::new(db));
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-
-        let agent1 = Agent {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "Agent 1".to_string(),
-            model_id: Some("model1".to_string()),
-            provider_id: Some("provider1".to_string()),
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            reasoning: None,
-            max_tokens: None,
-            streaming: None,
-            system_prompt: None,
-            mcp_servers: vec![],
-            skills: vec![],
-            created_at: now,
-            updated_at: now,
-        };
-
-        let agent2 = Agent {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "Agent 2".to_string(),
-            model_id: Some("model2".to_string()),
-            provider_id: Some("provider1".to_string()),
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            reasoning: None,
-            max_tokens: None,
-            streaming: None,
-            system_prompt: None,
-            mcp_servers: vec![],
-            skills: vec![],
-            created_at: now,
-            updated_at: now,
-        };
-
-        let agent3 = Agent {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "Agent 3".to_string(),
-            model_id: Some("model3".to_string()),
-            provider_id: Some("provider2".to_string()),
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            reasoning: None,
-            max_tokens: None,
-            streaming: None,
-            system_prompt: None,
-            mcp_servers: vec![],
-            skills: vec![],
-            created_at: now,
-            updated_at: now,
-        };
-
-        repo.create_agent(&agent1).await.unwrap();
-        repo.create_agent(&agent2).await.unwrap();
-        repo.create_agent(&agent3).await.unwrap();
-
-        let count1 = repo.count_agents_using_provider("provider1").await.unwrap();
-        assert_eq!(count1, 2);
-
-        let count2 = repo.count_agents_using_provider("provider2").await.unwrap();
-        assert_eq!(count2, 1);
-
-        let count3 = repo.count_agents_using_provider("provider3").await.unwrap();
-        assert_eq!(count3, 0);
-    }
-
-    #[tokio::test]
     async fn test_count_agents_using_model() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = AgentRepository::new(Arc::new(db));
@@ -495,14 +389,12 @@ mod tests {
         let agent1 = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Agent 1".to_string(),
-            model_id: Some("model1".to_string()),
-            provider_id: Some("provider1".to_string()),
+            model: Some("model1".to_string()),
             temperature: None,
             top_p: None,
             top_k: None,
             reasoning: None,
             max_tokens: None,
-            streaming: None,
             system_prompt: None,
             mcp_servers: vec![],
             skills: vec![],
@@ -513,14 +405,12 @@ mod tests {
         let agent2 = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Agent 2".to_string(),
-            model_id: Some("model1".to_string()),
-            provider_id: Some("provider1".to_string()),
+            model: Some("model1".to_string()),
             temperature: None,
             top_p: None,
             top_k: None,
             reasoning: None,
             max_tokens: None,
-            streaming: None,
             system_prompt: None,
             mcp_servers: vec![],
             skills: vec![],
@@ -531,14 +421,12 @@ mod tests {
         let agent3 = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Agent 3".to_string(),
-            model_id: Some("model2".to_string()),
-            provider_id: Some("provider1".to_string()),
+            model: Some("model2".to_string()),
             temperature: None,
             top_p: None,
             top_k: None,
             reasoning: None,
             max_tokens: None,
-            streaming: None,
             system_prompt: None,
             mcp_servers: vec![],
             skills: vec![],
@@ -573,14 +461,12 @@ mod tests {
         let agent1 = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Agent 1".to_string(),
-            model_id: None,
-            provider_id: None,
+            model: None,
             temperature: None,
             top_p: None,
             top_k: None,
             reasoning: None,
             max_tokens: None,
-            streaming: None,
             system_prompt: None,
             mcp_servers: vec![McpServerConfig {
                 server_id: "server1".to_string(),
@@ -595,14 +481,12 @@ mod tests {
         let agent2 = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Agent 2".to_string(),
-            model_id: None,
-            provider_id: None,
+            model: None,
             temperature: None,
             top_p: None,
             top_k: None,
             reasoning: None,
             max_tokens: None,
-            streaming: None,
             system_prompt: None,
             mcp_servers: vec![
                 McpServerConfig {

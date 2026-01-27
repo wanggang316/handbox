@@ -9,14 +9,12 @@ use tauri::State;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentCreateRequest {
     pub name: String,
-    pub model_id: Option<String>,
-    pub provider_id: Option<String>,
+    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
     pub reasoning: Option<AgentReasoningConfig>,
     pub max_tokens: Option<i32>,
-    pub streaming: Option<bool>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<crate::storage::types::McpServerConfig>>,
     pub skills: Option<Vec<String>>,
@@ -31,14 +29,12 @@ pub async fn agent_create(
     agent_service
         .create_agent(
             request.name,
-            request.model_id,
-            request.provider_id,
+            request.model,
             request.temperature,
             request.top_p,
             request.top_k,
             request.reasoning,
             request.max_tokens,
-            request.streaming,
             request.system_prompt,
             request.mcp_servers,
             request.skills,
@@ -80,6 +76,13 @@ pub async fn agent_update_field(
                 .ok_or_else(|| AppError::validation_error("Invalid name value"))?
                 .to_string();
             AgentParameter::Name(name)
+        }
+        "model" => {
+            let model = value
+                .as_str()
+                .ok_or_else(|| AppError::validation_error("Invalid model value"))?
+                .to_string();
+            AgentParameter::Model(model)
         }
         "temperature" => {
             let temp_value = if value.is_null() {
@@ -132,18 +135,6 @@ pub async fn agent_update_field(
             };
             AgentParameter::MaxTokens(max_tokens_value)
         }
-        "streaming" => {
-            let streaming_value = if value.is_null() {
-                None
-            } else {
-                Some(
-                    value
-                        .as_bool()
-                        .ok_or_else(|| AppError::validation_error("Invalid streaming value"))?,
-                )
-            };
-            AgentParameter::Streaming(streaming_value)
-        }
         "systemPrompt" => {
             let prompt_value = if value.is_null() {
                 None
@@ -193,25 +184,6 @@ pub async fn agent_update_field(
     };
 
     agent_service.update_agent_parameter(agent_id, parameter).await
-}
-
-/// 更新 Agent 模型
-#[tauri::command]
-pub async fn agent_update_model(
-    agent_id: UUID,
-    model_id: String,
-    provider_id: String,
-    agent_service: State<'_, AgentService>,
-) -> Result<Agent, AppError> {
-    agent_service
-        .update_agent_parameter(
-            agent_id,
-            AgentParameter::Model {
-                model_id,
-                provider_id,
-            },
-        )
-        .await
 }
 
 /// 更新 Agent 名称

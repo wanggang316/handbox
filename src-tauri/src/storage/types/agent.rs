@@ -11,14 +11,12 @@ pub type AgentReasoningConfig = ChatReasoningConfig;
 pub struct Agent {
     pub id: UUID,
     pub name: String,
-    pub model_id: Option<String>,
-    pub provider_id: Option<String>,
+    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
     pub reasoning: Option<AgentReasoningConfig>,
     pub max_tokens: Option<i32>,
-    pub streaming: Option<bool>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<McpServerConfig>,
     pub skills: Vec<String>,
@@ -31,14 +29,12 @@ pub struct Agent {
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentRequest {
     pub name: String,
-    pub model_id: Option<String>,
-    pub provider_id: Option<String>,
+    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
     pub reasoning: Option<AgentReasoningConfig>,
     pub max_tokens: Option<i32>,
-    pub streaming: Option<bool>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub skills: Option<Vec<String>>,
@@ -49,14 +45,12 @@ pub struct CreateAgentRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAgentRequest {
     pub name: Option<String>,
-    pub model_id: Option<String>,
-    pub provider_id: Option<String>,
+    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
     pub reasoning: Option<AgentReasoningConfig>,
     pub max_tokens: Option<i32>,
-    pub streaming: Option<bool>,
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub skills: Option<Vec<String>>,
@@ -71,14 +65,12 @@ mod tests {
         let agent = Agent {
             id: "agent_1".to_string(),
             name: "Code Assistant".to_string(),
-            model_id: Some("gpt-4".to_string()),
-            provider_id: Some("openai".to_string()),
+            model: Some("gpt-4".to_string()),
             temperature: Some(0.7),
             top_p: Some(0.9),
             top_k: Some(40),
             reasoning: None,
             max_tokens: Some(2048),
-            streaming: Some(true),
             system_prompt: Some("You are a helpful coding assistant.".to_string()),
             mcp_servers: vec![McpServerConfig {
                 server_id: "server1".to_string(),
@@ -103,7 +95,7 @@ mod tests {
         let req: CreateAgentRequest =
             serde_json::from_str(json).expect("deserialize");
         assert_eq!(req.name, "Test Agent");
-        assert!(req.model_id.is_none());
+        assert!(req.model.is_none());
         assert!(req.skills.is_none());
     }
 }

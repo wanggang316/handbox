@@ -9,12 +9,11 @@ use std::sync::Arc;
 /// Agent 参数类型
 pub enum AgentParameter {
     Name(String),
-    Model { model_id: String, provider_id: String },
+    Model(String),
     Temperature(Option<f32>),
     TopP(Option<f32>),
     TopK(Option<i32>),
     MaxTokens(Option<i32>),
-    Streaming(Option<bool>),
     Reasoning(Option<AgentReasoningConfig>),
     SystemPrompt(Option<String>),
     McpServers(Vec<McpServerConfig>),
@@ -38,14 +37,12 @@ impl AgentService {
     pub async fn create_agent(
         &self,
         name: String,
-        model_id: Option<String>,
-        provider_id: Option<String>,
+        model: Option<String>,
         temperature: Option<f32>,
         top_p: Option<f32>,
         top_k: Option<i32>,
         reasoning: Option<AgentReasoningConfig>,
         max_tokens: Option<i32>,
-        streaming: Option<bool>,
         system_prompt: Option<String>,
         mcp_servers: Option<Vec<McpServerConfig>>,
         skills: Option<Vec<String>>,
@@ -55,14 +52,12 @@ impl AgentService {
         let agent = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name,
-            model_id,
-            provider_id,
+            model,
             temperature,
             top_p,
             top_k,
             reasoning,
             max_tokens,
-            streaming,
             system_prompt,
             mcp_servers: mcp_servers.unwrap_or_default(),
             skills: skills.unwrap_or_default(),
@@ -104,18 +99,11 @@ impl AgentService {
 
         match parameter {
             AgentParameter::Name(name) => agent.name = name,
-            AgentParameter::Model {
-                model_id,
-                provider_id,
-            } => {
-                agent.model_id = Some(model_id);
-                agent.provider_id = Some(provider_id);
-            }
+            AgentParameter::Model(model) => agent.model = Some(model),
             AgentParameter::Temperature(temp) => agent.temperature = temp,
             AgentParameter::TopP(top_p) => agent.top_p = top_p,
             AgentParameter::TopK(top_k) => agent.top_k = top_k,
             AgentParameter::MaxTokens(max_tokens) => agent.max_tokens = max_tokens,
-            AgentParameter::Streaming(streaming) => agent.streaming = streaming,
             AgentParameter::Reasoning(reasoning) => agent.reasoning = reasoning,
             AgentParameter::SystemPrompt(prompt) => agent.system_prompt = prompt,
             AgentParameter::McpServers(servers) => agent.mcp_servers = servers,
@@ -132,14 +120,12 @@ impl AgentService {
         &self,
         agent_id: UUID,
         name: Option<String>,
-        model_id: Option<String>,
-        provider_id: Option<String>,
+        model: Option<String>,
         temperature: Option<Option<f32>>,
         top_p: Option<Option<f32>>,
         top_k: Option<Option<i32>>,
         reasoning: Option<Option<AgentReasoningConfig>>,
         max_tokens: Option<Option<i32>>,
-        streaming: Option<Option<bool>>,
         system_prompt: Option<Option<String>>,
         mcp_servers: Option<Vec<McpServerConfig>>,
         skills: Option<Vec<String>>,
@@ -149,11 +135,8 @@ impl AgentService {
         if let Some(n) = name {
             agent.name = n;
         }
-        if let Some(mid) = model_id {
-            agent.model_id = Some(mid);
-        }
-        if let Some(pid) = provider_id {
-            agent.provider_id = Some(pid);
+        if let Some(m) = model {
+            agent.model = Some(m);
         }
         if let Some(t) = temperature {
             agent.temperature = t;
@@ -169,9 +152,6 @@ impl AgentService {
         }
         if let Some(mt) = max_tokens {
             agent.max_tokens = mt;
-        }
-        if let Some(s) = streaming {
-            agent.streaming = s;
         }
         if let Some(sp) = system_prompt {
             agent.system_prompt = sp;
@@ -237,13 +217,11 @@ mod tests {
             .create_agent(
                 "Code Assistant".to_string(),
                 Some("gpt-4o".to_string()),
-                Some("openai".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
                 None,
                 Some(2048),
-                Some(true),
                 Some("You are a helpful coding assistant.".to_string()),
                 Some(vec![McpServerConfig {
                     server_id: "server1".to_string(),
@@ -256,13 +234,11 @@ mod tests {
             .expect("agent creation failed");
 
         assert_eq!(agent.name, "Code Assistant");
-        assert_eq!(agent.model_id, Some("gpt-4o".to_string()));
-        assert_eq!(agent.provider_id, Some("openai".to_string()));
+        assert_eq!(agent.model, Some("gpt-4o".to_string()));
         assert_eq!(agent.temperature, Some(0.7));
         assert_eq!(agent.top_p, Some(0.9));
         assert_eq!(agent.top_k, Some(40));
         assert_eq!(agent.max_tokens, Some(2048));
-        assert_eq!(agent.streaming, Some(true));
         assert_eq!(
             agent.system_prompt,
             Some("You are a helpful coding assistant.".to_string())
@@ -298,8 +274,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
-                None,
             )
             .await
             .unwrap();
@@ -309,8 +283,6 @@ mod tests {
         service
             .create_agent(
                 "Agent 2".to_string(),
-                None,
-                None,
                 None,
                 None,
                 None,
@@ -342,8 +314,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                None,
-                None,
                 None,
                 None,
                 None,
@@ -396,8 +366,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
-                None,
             )
             .await
             .unwrap();
@@ -407,13 +375,11 @@ mod tests {
                 created.id.clone(),
                 Some("Updated Name".to_string()),
                 Some("gpt-4o".to_string()),
-                Some("openai".to_string()),
                 Some(Some(0.8)),
                 Some(Some(0.95)),
                 Some(Some(40)),
                 None,
                 Some(Some(4096)),
-                Some(Some(false)),
                 Some(Some("Updated prompt".to_string())),
                 Some(vec![
                     McpServerConfig {
@@ -433,13 +399,11 @@ mod tests {
             .expect("update failed");
 
         assert_eq!(updated.name, "Updated Name");
-        assert_eq!(updated.model_id, Some("gpt-4o".to_string()));
-        assert_eq!(updated.provider_id, Some("openai".to_string()));
+        assert_eq!(updated.model, Some("gpt-4o".to_string()));
         assert_eq!(updated.temperature, Some(0.8));
         assert_eq!(updated.top_p, Some(0.95));
         assert_eq!(updated.top_k, Some(40));
         assert_eq!(updated.max_tokens, Some(4096));
-        assert_eq!(updated.streaming, Some(false));
         assert_eq!(updated.system_prompt, Some("Updated prompt".to_string()));
         assert_eq!(updated.skills, vec!["skill1".to_string(), "skill2".to_string()]);
     }
@@ -452,8 +416,6 @@ mod tests {
         let created = service
             .create_agent(
                 "To Delete".to_string(),
-                None,
-                None,
                 None,
                 None,
                 None,
@@ -488,8 +450,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                None,
-                None,
                 None,
                 None,
                 None,
@@ -540,13 +500,11 @@ mod tests {
             .create_agent(
                 "Test Agent".to_string(),
                 Some("gpt-4o".to_string()),
-                Some("openai".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
                 None,
                 Some(2048),
-                Some(true),
                 None,
                 None,
                 None,
@@ -558,12 +516,10 @@ mod tests {
         assert_eq!(created.top_p, Some(0.9));
         assert_eq!(created.top_k, Some(40));
         assert_eq!(created.max_tokens, Some(2048));
-        assert_eq!(created.streaming, Some(true));
 
         let updated = service
             .update_agent(
                 created.id.clone(),
-                None,
                 None,
                 None,
                 Some(None), // 清空 temperature
@@ -571,7 +527,6 @@ mod tests {
                 Some(None), // 清空 top_k
                 None,
                 Some(None), // 清空 max_tokens
-                Some(None), // 清空 streaming
                 None,
                 None,
                 None,
@@ -583,7 +538,6 @@ mod tests {
         assert_eq!(updated.top_p, None);
         assert_eq!(updated.top_k, None);
         assert_eq!(updated.max_tokens, None);
-        assert_eq!(updated.streaming, None);
     }
 
     #[tokio::test]
@@ -595,13 +549,11 @@ mod tests {
             .create_agent(
                 "Test Agent".to_string(),
                 Some("gpt-4o".to_string()),
-                Some("openai".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
                 None,
                 Some(2048),
-                Some(true),
                 None,
                 None,
                 None,
@@ -614,13 +566,11 @@ mod tests {
                 created.id.clone(),
                 Some("Updated Name".to_string()),
                 None,
-                None,
                 None, // 不修改 temperature，保持原值
                 None, // 不修改 top_p，保持原值
                 None, // 不修改 top_k，保持原值
                 None,
                 None, // 不修改 max_tokens，保持原值
-                None, // 不修改 streaming，保持原值
                 None,
                 None,
                 None,
@@ -633,6 +583,5 @@ mod tests {
         assert_eq!(updated.top_p, Some(0.9)); // 保持原值
         assert_eq!(updated.top_k, Some(40)); // 保持原值
         assert_eq!(updated.max_tokens, Some(2048)); // 保持原值
-        assert_eq!(updated.streaming, Some(true)); // 保持原值
     }
 }

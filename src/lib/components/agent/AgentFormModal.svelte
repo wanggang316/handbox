@@ -4,10 +4,8 @@
   import Button from "../ui/Button.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TableBaseRow from "../ui/table/TableBaseRow.svelte";
-  import { Bot, ChevronDown } from "@lucide/svelte";
-  import { getProviderIconById, providerState } from "$lib/states/provider.svelte";
-  import ChatModelSelectModal from "../chat/ChatModelSelectModal.svelte";
-  import type { Agent, ModelWithProvider } from "$lib/types";
+  import { Bot } from "@lucide/svelte";
+  import type { Agent } from "$lib/types";
 
   interface Props {
     open: boolean;
@@ -18,13 +16,11 @@
 
   export interface AgentFormData {
     name: string;
-    modelId: string;
-    providerId: string;
+    model: string;
     temperature?: number;
     topP?: number;
     topK?: number;
     maxTokens?: number;
-    streaming?: boolean;
     systemPrompt: string;
     skills: string;
   }
@@ -41,42 +37,12 @@
 
   let formData = $state<AgentFormData>({
     name: "",
-    modelId: "",
-    providerId: "",
+    model: "",
     systemPrompt: "",
     skills: "",
   });
 
-  let showModelModal = $state(false);
   let saving = $state(false);
-
-  // 当前选择的模型
-  const selectedModel = $derived<ModelWithProvider | undefined>(
-    providerState.providersWithModels
-      .flatMap((p) =>
-        p.models.map(
-          (m) =>
-            ({
-              ...m,
-              providerName: p.name,
-              providerType: p.provider_type,
-            }) as ModelWithProvider
-        )
-      )
-      .find((m) => m.id === formData.modelId && m.provider_id === formData.providerId)
-  );
-
-  const providerIcon = $derived(
-    selectedModel?.provider_id
-      ? getProviderIconById(selectedModel.provider_id)
-      : undefined
-  );
-
-  function handleModelSelect(model: ModelWithProvider) {
-    formData.modelId = model.id;
-    formData.providerId = model.provider_id;
-    showModelModal = false;
-  }
 
   async function handleSave() {
     if (!formData.name.trim()) {
@@ -102,21 +68,18 @@
     if (agent) {
       formData = {
         name: agent.name,
-        modelId: agent.modelId || "",
-        providerId: agent.providerId || "",
+        model: agent.model || "",
         temperature: agent.temperature,
         topP: agent.topP,
         topK: agent.topK,
         maxTokens: agent.maxTokens,
-        streaming: agent.streaming,
         systemPrompt: agent.systemPrompt || "",
         skills: agent.skills.join(", "),
       };
     } else {
       formData = {
         name: "",
-        modelId: "",
-        providerId: "",
+        model: "",
         systemPrompt: "",
         skills: "",
       };
@@ -138,50 +101,15 @@
 
     <!-- 模型选择 -->
     <TableGroup>
-      <button
-        class="w-full rounded-2xl bg-base-200 px-3 py-4 border border-base-200 hover:bg-base-300"
-        type="button"
-        onclick={() => (showModelModal = true)}
-      >
-        {#if selectedModel}
-          <div class="flex items-start justify-between gap-2">
-            <div class="space-y-1 pb-1 flex-1 flex flex-col text-left">
-              <div class="flex flex-row justify-start items-center gap-2">
-                {#if providerIcon}
-                  <img
-                    src={providerIcon}
-                    alt={selectedModel?.providerName ?? "模型供应商"}
-                    class="h-4 w-4 rounded-md object-contain"
-                  />
-                {/if}
-                <p class="text-xs text-base-content/50">
-                  {selectedModel?.providerName ?? "模型供应商"}
-                </p>
-              </div>
-
-              <div class="text-md text-base-content">
-                {selectedModel ? selectedModel.name : "未选择模型"}
-              </div>
-              <div
-                class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60"
-              >
-                {#if selectedModel?.id}
-                  <span class="font-mono text-[11px] text-base-content/50">
-                    {selectedModel.id}
-                  </span>
-                {/if}
-              </div>
-            </div>
-          </div>
-        {:else}
-          <div class="flex flex-row justify-between items-center px-2">
-            <p class="text-left text-sm leading-relaxed text-base-content">
-              {formData.modelId ? formData.modelId : "选择一个模型"}
-            </p>
-            <ChevronDown size={14} />
-          </div>
-        {/if}
-      </button>
+      <TableBaseRow label="模型" layout="vertical">
+        <Input
+          placeholder="输入模型标识符 (例如: gpt-4, claude-3-5-sonnet-20241022)"
+          bind:value={formData.model}
+        />
+        <p class="mt-1 text-xs text-base-content/50">
+          模型标识符可以是任何字符串，不限于已配置的模型
+        </p>
+      </TableBaseRow>
     </TableGroup>
 
     <!-- 系统提示词 -->
@@ -272,20 +200,6 @@
             bind:value={formData.maxTokens}
           />
         </TableBaseRow>
-
-        <TableBaseRow label="Streaming">
-          <div class="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="streaming"
-              class="w-4 h-4 rounded border-base-300 text-primary focus:ring-primary"
-              bind:checked={formData.streaming}
-            />
-            <label for="streaming" class="text-sm text-base-content">
-              启用流式输出
-            </label>
-          </div>
-        </TableBaseRow>
       </div>
     </TableGroup>
 
@@ -317,9 +231,3 @@
     </div>
   </div>
 </Modal>
-
-<ChatModelSelectModal
-  bind:open={showModelModal}
-  selectedModel={selectedModel ?? null}
-  onModelSelect={handleModelSelect}
-/>

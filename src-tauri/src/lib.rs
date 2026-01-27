@@ -124,7 +124,6 @@ pub fn run() {
             agent_list,
             agent_get,
             agent_update_field,
-            agent_update_model,
             agent_update_name,
             agent_delete,
             // 消息相关命令

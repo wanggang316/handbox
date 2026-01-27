@@ -109,14 +109,12 @@ export const agentActions = {
    */
   async createAgent(config: {
     name: string;
-    modelId?: string;
-    providerId?: string;
+    model?: string;
     temperature?: number;
     topP?: number;
     topK?: number;
     reasoning?: AgentReasoningConfig;
     maxTokens?: number;
-    streaming?: boolean;
     systemPrompt?: string;
     mcpServers?: McpServerConfig[];
     skills?: string[];
@@ -127,14 +125,12 @@ export const agentActions = {
 
       const agent = await agentApi.createAgent(
         config.name,
-        config.modelId,
-        config.providerId,
+        config.model,
         config.temperature,
         config.topP,
         config.topK,
         config.reasoning,
         config.maxTokens,
-        config.streaming,
         config.systemPrompt,
         config.mcpServers,
         config.skills,
@@ -185,55 +181,16 @@ export const agentActions = {
   },
 
   /**
-   * 更新 Agent 模型
-   */
-  async updateAgentModel(
-    agentId: UUID,
-    modelId: string,
-    providerId: string,
-  ): Promise<Agent> {
-    try {
-      agentState.isLoading = true;
-      agentState.error = null;
-
-      const updatedAgent = await agentApi.updateAgentModel(
-        agentId,
-        modelId,
-        providerId,
-      );
-
-      // 更新列表中的 Agent
-      const index = agentState.agents.findIndex((a) => a.id === agentId);
-      if (index !== -1) {
-        agentState.agents[index] = updatedAgent;
-      }
-
-      // 如果是当前选中的 Agent，也更新它
-      if (agentState.currentAgent?.id === agentId) {
-        agentState.currentAgent = updatedAgent;
-      }
-
-      return updatedAgent;
-    } catch (error) {
-      agentState.error =
-        error instanceof Error ? error.message : "更新 Agent 模型失败";
-      throw error;
-    } finally {
-      agentState.isLoading = false;
-    }
-  },
-
-  /**
    * 更新 Agent 字段
    */
   async updateAgentField(
     agentId: UUID,
     fieldName:
+      | "model"
       | "temperature"
       | "topP"
       | "topK"
       | "maxTokens"
-      | "streaming"
       | "systemPrompt"
       | "mcpServers"
       | "skills"

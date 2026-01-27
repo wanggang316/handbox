@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import { Plus, Bot, Pencil, Trash2, Settings } from "@lucide/svelte";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
-  import { providerActions, providerState } from "$lib/states/provider.svelte";
   import type { Agent } from "$lib/types";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
@@ -24,23 +23,6 @@
         a.name.toLowerCase().includes(query) ||
         a.skills.some((s) => s.toLowerCase().includes(query))
     );
-  });
-
-  // 获取可用模型列表
-  const availableModels = $derived.by(() => {
-    const models: { id: string; name: string; providerId: string }[] = [];
-    for (const provider of providerState.providersWithModels) {
-      for (const model of provider.models) {
-        if (model.id && model.name && provider.id) {
-          models.push({
-            id: model.id,
-            name: model.name,
-            providerId: provider.id,
-          });
-        }
-      }
-    }
-    return models;
   });
 
   function openCreateModal() {
@@ -68,17 +50,8 @@
       // 更新现有 Agent
       await agentActions.updateAgentName(editingAgent.id, data.name);
 
-      if (data.modelId && data.providerId) {
-        if (
-          data.modelId !== editingAgent.modelId ||
-          data.providerId !== editingAgent.providerId
-        ) {
-          await agentActions.updateAgentModel(
-            editingAgent.id,
-            data.modelId,
-            data.providerId
-          );
-        }
+      if (data.model !== editingAgent.model) {
+        await agentActions.updateAgentField(editingAgent.id, "model", data.model);
       }
 
       // Helper function to compare optional values
@@ -113,13 +86,6 @@
           data.maxTokens ?? null
         );
       }
-      if (hasChanged(data.streaming, editingAgent.streaming)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "streaming",
-          data.streaming ?? null
-        );
-      }
       if (data.systemPrompt !== editingAgent.systemPrompt) {
         await agentActions.updateAgentField(
           editingAgent.id,
@@ -138,13 +104,11 @@
       // 创建新 Agent
       await agentActions.createAgent({
         name: data.name,
-        modelId: data.modelId || undefined,
-        providerId: data.providerId || undefined,
+        model: data.model || undefined,
         temperature: data.temperature,
         topP: data.topP,
         topK: data.topK,
         maxTokens: data.maxTokens,
-        streaming: data.streaming,
         systemPrompt: data.systemPrompt || undefined,
         reasoning: undefined,
         mcpServers: [],
@@ -167,18 +131,11 @@
   }
 
   function getModelName(agent: Agent): string {
-    if (!agent.modelId) return "未设置";
-    const model = availableModels.find(
-      (m) => m.id === agent.modelId && m.providerId === agent.providerId
-    );
-    return model?.name || agent.modelId;
+    return agent.model || "未设置";
   }
 
   onMount(async () => {
     await agentActions.loadAgents();
-    if (providerState.providersWithModelsNeedRefresh) {
-      await providerActions.loadProvidersWithModels();
-    }
   });
 </script>
 

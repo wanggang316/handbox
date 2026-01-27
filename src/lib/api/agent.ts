@@ -16,30 +16,26 @@ import type {
  */
 export async function createAgent(
   name: string,
-  modelId?: string,
-  providerId?: string,
+  model?: string,
   temperature?: number,
   topP?: number,
   topK?: number,
   reasoning?: AgentReasoningConfig,
   maxTokens?: number,
-  streaming?: boolean,
   systemPrompt?: string,
   mcpServers?: McpServerConfig[],
   skills?: string[],
 ): Promise<Agent> {
   const request = {
     name,
-    modelId,
-    providerId,
+    model,
     temperature,
-    topP,
-    topK,
+    top_p: topP,
+    top_k: topK,
     reasoning,
-    maxTokens,
-    streaming,
-    systemPrompt,
-    mcpServers,
+    max_tokens: maxTokens,
+    system_prompt: systemPrompt,
+    mcp_servers: mcpServers,
     skills,
   };
   console.log("Creating agent:", request);
@@ -80,11 +76,11 @@ export async function updateAgentField(
   agentId: UUID,
   fieldName:
     | "name"
+    | "model"
     | "temperature"
     | "topP"
     | "topK"
     | "maxTokens"
-    | "streaming"
     | "systemPrompt"
     | "mcpServers"
     | "skills"
@@ -102,24 +98,6 @@ export async function updateAgentField(
     agentId,
     fieldName,
     value,
-  });
-}
-
-/**
- * 更新 Agent 模型
- * @param agentId Agent ID
- * @param modelId 模型 ID
- * @param providerId 供应商 ID
- */
-export async function updateAgentModel(
-  agentId: UUID,
-  modelId: string,
-  providerId: string,
-): Promise<Agent> {
-  return apiCall<Agent>("agent_update_model", {
-    agentId,
-    modelId,
-    providerId,
   });
 }
 
