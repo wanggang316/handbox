@@ -1,5 +1,6 @@
 // IPC 命令模块
 pub mod accessibility;
+pub mod agent;
 pub mod artifact;
 pub mod auth;
 pub mod chat;
@@ -20,6 +21,7 @@ pub mod word;
 
 // 重新导出所有命令
 pub use accessibility::*;
+pub use agent::*;
 pub use artifact::*;
 pub use auth::*;
 pub use chat::*;

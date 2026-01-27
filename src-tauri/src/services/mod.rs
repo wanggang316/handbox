@@ -1,4 +1,5 @@
 // 服务层模块
+pub mod agent;
 pub mod artifact;
 pub mod auth;
 pub mod chat;
@@ -15,6 +16,7 @@ pub mod word;
 
 // 重新导出服务
 pub use crate::storage::Database;
+pub use agent::{AgentParameter, AgentService};
 pub use artifact::ArtifactService;
 pub use auth::GoogleOAuthService;
 pub use chat::{ChatParameter, ChatService};

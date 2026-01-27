@@ -14,13 +14,15 @@ export interface AppError {
 }
 
 // API 响应包装类型
-export type ApiResponse<T> = {
-  success: true;
-  data: T;
-} | {
-  success: false;
-  error: AppError;
-};
+export type ApiResponse<T> =
+  | {
+      success: true;
+      data: T;
+    }
+  | {
+      success: false;
+      error: AppError;
+    };
 
 // 基础实体接口
 export interface BaseEntity {
@@ -30,10 +32,11 @@ export interface BaseEntity {
 }
 
 // 导出子模块类型
-export * from './chat';
-export * from './provider';
-export * from './artifact';
-export * from './settings';
-export * from './mcp';
-export * from './user';
-export * from './word';
+export * from "./agent";
+export * from "./chat";
+export * from "./provider";
+export * from "./artifact";
+export * from "./settings";
+export * from "./mcp";
+export * from "./user";
+export * from "./word";

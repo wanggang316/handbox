@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod artifact;
 pub mod chat;
 pub mod common;
@@ -8,6 +9,7 @@ pub mod model;
 pub mod provider;
 pub mod word;
 
+pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
 pub use artifact::{
     Artifact, ArtifactFilter, ArtifactType, CreateArtifactRequest, ExecuteArtifactRequest,
     ExecutionConfig, ExecutionResult, InstallArtifactRequest, ModelParameters,
