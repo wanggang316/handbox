@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
-use tauri_nspanel::{tauri_panel, PanelLevel, StyleMask, WebviewWindowExt};
+use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelLevel, StyleMask, WebviewWindowExt};
 
 /// 跟踪菜单面板是否可见（用于在 mouse hook 线程中快速检查）
 static MENU_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -29,6 +29,12 @@ pub fn init_panel(app_handle: &AppHandle) {
     let window = app_handle.get_webview_window(PANEL_LABEL.into()).unwrap();
     let panel = window.to_panel::<SelectionMenuPanel>().unwrap();
     panel.set_level(PanelLevel::Floating.value());
+    panel.set_collection_behavior(
+        CollectionBehavior::new()
+            .can_join_all_spaces()
+            .full_screen_auxiliary()
+            .value(),
+    );
     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
     panel.set_corner_radius(18.0);
 
