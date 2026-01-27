@@ -107,10 +107,23 @@ pub struct AccountSettings {
 /// 快捷工具设置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct SelectionBlacklist {
+    #[serde(default)]
+    pub pids: Vec<i32>,
+    #[serde(default)]
+    pub bundle_ids: Vec<String>,
+}
+
+/// 快捷工具设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct QuickToolsSettings {
     /// 选中文本时显示工具栏
     #[serde(default)]
     pub show_toolbar_on_selection: bool,
+    /// 选词工具黑名单
+    #[serde(default)]
+    pub selection_blacklist: SelectionBlacklist,
 }
 
 /// 应用设置

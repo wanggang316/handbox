@@ -158,6 +158,7 @@ fn default_settings() -> AppSettings {
         },
         quick_tools: QuickToolsSettings {
             show_toolbar_on_selection: false,
+            selection_blacklist: Default::default(),
         },
     }
 }

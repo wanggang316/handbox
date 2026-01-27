@@ -14,9 +14,17 @@ use crate::services::selection::menu_panel::hide_panel as hide_menu_panel;
 use crate::services::selection::menu_panel::init_panel as init_menu_panel;
 use crate::services::selection::menu_panel::is_panel_visible as is_menu_panel_visible;
 use crate::services::selection::menu_panel::show_panel as show_menu_panel;
+use crate::services::selection::settings_panel::init_panel as init_settings_panel;
+use crate::services::selection::settings_panel::is_panel_visible as is_settings_panel_visible;
+use crate::services::selection::settings_panel::hide_panel as hide_settings_panel;
+use crate::services::selection::settings_panel::is_mouse_inside as is_mouse_inside_settings_panel;
+use crate::services::selection::settings_disable_panel::init_panel as init_settings_disable_panel;
+use crate::services::selection::settings_disable_panel::hide_panel as hide_settings_disable_panel;
+use crate::services::selection::settings_disable_panel::is_panel_visible as is_settings_disable_panel_visible;
+use crate::services::selection::settings_disable_panel::is_mouse_inside as is_mouse_inside_settings_disable_panel;
 use crate::services::SettingsService;
 use crate::utils::accessibility::get_ax_selected_text;
-use crate::utils::get_frontmost_app_info;
+use crate::utils::{get_frontmost_app_info, FrontmostAppInfo};
 
 // ============================================================================
 // 入口和事件监听
@@ -26,6 +34,8 @@ use crate::utils::get_frontmost_app_info;
 pub fn setup_selection(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     init_menu_panel(app);
     init_content_panel(app);
+    init_settings_panel(app);
+    init_settings_disable_panel(app);
     setup_mouce_observer(app.clone());
     setup_keyboard_monitor(app.clone());
 
@@ -58,6 +68,22 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                 }
                 // 3. 左键松开：这是你划词逻辑的触发点
                 mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
+                    // 禁用面板可见且鼠标在面板内，不处理（允许点击菜单项）
+                    if is_settings_disable_panel_visible() && is_mouse_inside_settings_disable_panel() {
+                        return;
+                    }
+                    // 禁用面板可见但鼠标不在面板内：点击外部关闭禁用面板
+                    if is_settings_disable_panel_visible() && !is_mouse_inside_settings_disable_panel() {
+                        hide_settings_disable_panel(&handle_clone);
+                    }
+                    // 设置面板可见且鼠标在面板内，不处理（允许点击菜单项）
+                    if is_settings_panel_visible() && is_mouse_inside_settings_panel() {
+                        return;
+                    }
+                    // 设置面板可见但鼠标不在面板内：点击外部关闭设置面板
+                    if is_settings_panel_visible() && !is_mouse_inside_settings_panel() {
+                        hide_settings_panel(&handle_clone);
+                    }
                     // 如果内容面板正在显示
                     if is_content_panel_visible() {
                         // 如果置顶，完全不处理（用户只能通过关闭按钮关闭）
@@ -87,8 +113,11 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                         let h: AppHandle = handle_clone.clone();
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            // 如果面板仍可见（说明用户点击的是面板外部），则隐藏并触发新的选词逻辑
-                            if is_menu_panel_visible() {
+                            // 如果面板仍可见且设置面板未打开，则隐藏并触发新的选词逻辑
+                            if is_menu_panel_visible()
+                                && !is_settings_panel_visible()
+                                && !is_settings_disable_panel_visible()
+                            {
                                 tracing::info!("hiding menu panel (clicked outside)");
                                 hide_menu_panel(&h);
                                 // 只有拖动选择才触发新的选词逻辑
@@ -218,6 +247,19 @@ fn trigger_selection_logic(handle: &AppHandle) {
                     tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
                     let app_info = get_frontmost_app_info();
                     tracing::info!("-----> frontmost app info: {:?}", app_info);
+                    if let Some(ref info) = app_info {
+                        if is_selection_blacklisted(&handle_clone, info) {
+                            tracing::info!("-----> selection blocked by blacklist");
+                            return;
+                        }
+                    }
+                    let app_info_payload = app_info.map(|info| {
+                        serde_json::json!({
+                            "name": info.name,
+                            "bundle_id": info.bundle_id,
+                            "pid": info.pid,
+                        })
+                    });
 
                     let _ = handle_clone.emit(
                         "global-selection",
@@ -225,7 +267,9 @@ fn trigger_selection_logic(handle: &AppHandle) {
                             "text": text,
                             "x": x,
                             "y": y,
-                            "app_info": { "name": "1", "bundle_id": "2", "pid": 123 }
+                            "app_info": app_info_payload.unwrap_or_else(|| {
+                                serde_json::json!({ "name": "Unknown", "bundle_id": "unknown.app", "pid": 0 })
+                            })
                         }),
                     );
 
@@ -284,6 +328,23 @@ fn is_selection_toolbar_enabled(handle: &AppHandle) -> bool {
     let settings_service: tauri::State<'_, SettingsService> = handle.state();
     match settings_service.get_settings() {
         Ok(settings) => settings.quick_tools.show_toolbar_on_selection,
+        Err(_) => false,
+    }
+}
+
+fn is_selection_blacklisted(handle: &AppHandle, app_info: &FrontmostAppInfo) -> bool {
+    let settings_service: tauri::State<'_, SettingsService> = handle.state();
+    match settings_service.get_settings() {
+        Ok(settings) => {
+            let blacklist = settings.quick_tools.selection_blacklist;
+            if blacklist.pids.contains(&app_info.pid) {
+                return true;
+            }
+            blacklist
+                .bundle_ids
+                .iter()
+                .any(|bundle_id| bundle_id == &app_info.bundle_id)
+        }
         Err(_) => false,
     }
 }

@@ -2,34 +2,43 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
-use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelLevel, StyleMask, WebviewWindowExt};
-use crate::services::selection::settings_panel::hide_panel as hide_settings_panel;
-use crate::services::selection::settings_disable_panel::hide_panel as hide_settings_disable_panel;
+use tauri_nspanel::{
+    tauri_panel, CollectionBehavior, PanelLevel, StyleMask, TrackingAreaOptions, WebviewWindowExt
+};
 
-/// 跟踪菜单面板是否可见（用于在 mouse hook 线程中快速检查）
-static MENU_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+/// 跟踪设置面板是否可见
+static SETTINGS_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+/// 跟踪鼠标是否在面板内部
+static MOUSE_INSIDE_PANEL: AtomicBool = AtomicBool::new(false);
 
-const PANEL_LABEL: &str = "selection_menu";
+const PANEL_LABEL: &str = "selection_settings";
 
 tauri_panel! {
-    panel!(SelectionMenuPanel {
+    panel!(SelectionSettingsPanel {
         config: {
-            can_become_key_window: false,
+            can_become_key_window: true,
             can_become_main_window: false,
+        }
+        with: {
+            tracking_area: {
+                options: TrackingAreaOptions::new()
+                    .active_always()
+                    .mouse_entered_and_exited()
+                    .cursor_update(),
+                auto_resize: true
+            }
         }
     })
 
-    panel_event!(SelectionMenuEventHandler {
+    panel_event!(SelectionSettingsEventHandler {
         window_did_become_key(notification: &NSNotification) -> (),
         window_did_resign_key(notification: &NSNotification) -> (),
     })
 }
 
 pub fn init_panel(app_handle: &AppHandle) {
-    tracing::info!("Setting up selection panels");
-
     let window = app_handle.get_webview_window(PANEL_LABEL.into()).unwrap();
-    let panel = window.to_panel::<SelectionMenuPanel>().unwrap();
+    let panel = window.to_panel::<SelectionSettingsPanel>().unwrap();
     panel.set_level(PanelLevel::Floating.value());
     panel.set_collection_behavior(
         CollectionBehavior::new()
@@ -38,18 +47,23 @@ pub fn init_panel(app_handle: &AppHandle) {
             .value(),
     );
     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
-    panel.set_corner_radius(18.0);
+    panel.set_corner_radius(12.0);
 
-    // panel.set_becomes_key_only_if_needed(true);
-
-    let handler = SelectionMenuEventHandler::new();
-    handler.window_did_become_key(move |_notification| {
-        tracing::info!("Menu panel became key window");
+    let handler = SelectionSettingsEventHandler::new();
+    handler.on_mouse_entered(move |_event| {
+        MOUSE_INSIDE_PANEL.store(true, Ordering::Relaxed);
+        tracing::debug!("Mouse entered settings panel");
     });
 
-    // let handle_clone = app_handle.clone();
+    handler.on_mouse_exited(move |_event| {
+        MOUSE_INSIDE_PANEL.store(false, Ordering::Relaxed);
+        tracing::debug!("Mouse exited settings panel");
+    });
+    handler.window_did_become_key(move |_notification| {
+        tracing::debug!("Settings panel became key window");
+    });
     handler.window_did_resign_key(move |_| {
-        tracing::info!("Menu panel resigned from key window!");
+        tracing::debug!("Settings panel resigned from key window");
     });
 
     panel.set_works_when_modal(true);
@@ -58,43 +72,36 @@ pub fn init_panel(app_handle: &AppHandle) {
 }
 
 pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
-    // 立即更新标志，这样 mouse hook 线程可以快速感知
-    MENU_PANEL_VISIBLE.store(true, Ordering::Relaxed);
-
+    SETTINGS_PANEL_VISIBLE.store(true, Ordering::Relaxed);
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        tracing::info!("Showing menu panel: {}", PANEL_LABEL);
-
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
-            let _ = window.set_position(LogicalPosition::new(x - 180.0, y - 56.0));
+            let _ = window.set_position(LogicalPosition::new(x, y));
             if !window.is_visible().unwrap_or(true) {
+                tracing::info!("Settings panel is not visible, showing {} x: {}, y: {}", PANEL_LABEL, x, y);
                 let _ = window.show();
-                tracing::info!("-----> show menu panel successfully");
             }
         }
     });
 }
 
 pub fn hide_panel(handle: &AppHandle) {
-    // 立即更新标志，这样 mouse hook 线程可以快速感知
-    MENU_PANEL_VISIBLE.store(false, Ordering::Relaxed);
-    hide_settings_panel(handle);
-    hide_settings_disable_panel(handle);
-
+    SETTINGS_PANEL_VISIBLE.store(false, Ordering::Relaxed);
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
-            // 先移到屏幕外，避免下次显示时在旧位置闪烁
             let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
             if window.is_visible().unwrap_or(true) {
                 let _ = window.hide();
-                tracing::info!("-----> hide menu panel successfully");
             }
         }
     });
 }
 
-/// 检查菜单面板是否可见
 pub fn is_panel_visible() -> bool {
-    MENU_PANEL_VISIBLE.load(Ordering::Relaxed)
+    SETTINGS_PANEL_VISIBLE.load(Ordering::Relaxed)
+}
+
+pub fn is_mouse_inside() -> bool {
+    MOUSE_INSIDE_PANEL.load(Ordering::Relaxed)
 }

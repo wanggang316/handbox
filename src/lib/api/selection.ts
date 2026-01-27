@@ -65,3 +65,58 @@ export async function setContentPanelPinned(pinned: boolean): Promise<void> {
 export async function getContentPanelPinned(): Promise<boolean> {
   return apiCall<boolean>("selection_get_content_pinned");
 }
+
+/**
+ * 显示设置面板
+ */
+export async function showSettingsPanel(x: number, y: number): Promise<void> {
+  return apiCall<void>("selection_show_settings_panel", { x, y });
+}
+
+/**
+ * 隐藏设置面板
+ */
+export async function hideSettingsPanel(): Promise<void> {
+  return apiCall<void>("selection_hide_settings_panel");
+}
+
+/**
+ * 显示禁用二级面板
+ */
+export async function showSettingsDisablePanel(
+  x: number,
+  y: number,
+): Promise<void> {
+  return apiCall<void>("selection_show_settings_disable_panel", {
+    x,
+    y,
+  });
+}
+
+/**
+ * 当前应用（pid）禁用
+ */
+export async function disableCurrentAppByPid(): Promise<void> {
+  return apiCall<void>("selection_disable_current_app_by_pid");
+}
+
+/**
+ * 当前应用（bundleId）禁用
+ */
+export async function disableCurrentAppByBundleId(): Promise<void> {
+  return apiCall<void>("selection_disable_current_app_by_bundle_id");
+}
+
+/**
+ * 全局禁用
+ */
+export async function disableGlobalSelection(): Promise<void> {
+  return apiCall<void>("selection_disable_global");
+}
+
+/**
+ * 隐藏禁用二级面板
+ */
+export async function hideSettingsDisablePanel(): Promise<void> {
+  return apiCall<void>("selection_hide_settings_disable_panel");
+}

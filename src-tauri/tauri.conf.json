@@ -74,6 +74,30 @@
         "visible": false,
         "resizable": false,
         "skipTaskbar": true
+      },
+      {
+        "label": "selection_settings",
+        "url": "/selection/settings",
+        "width": 150,
+        "height": 116,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "skipTaskbar": true
+      },
+      {
+        "label": "selection_settings_disable",
+        "url": "/selection/settings/disable",
+        "width": 120,
+        "height": 76,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "skipTaskbar": true
       }
     ],
     "security": {
