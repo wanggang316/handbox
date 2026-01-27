@@ -16,6 +16,7 @@ use crate::services::selection::menu_panel::is_panel_visible as is_menu_panel_vi
 use crate::services::selection::menu_panel::show_panel as show_menu_panel;
 use crate::services::SettingsService;
 use crate::utils::accessibility::get_ax_selected_text;
+use crate::utils::get_frontmost_app_info;
 
 // ============================================================================
 // 入口和事件监听
@@ -215,6 +216,8 @@ fn trigger_selection_logic(handle: &AppHandle) {
             match get_ax_selected_text() {
                 Some(text) => {
                     tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
+                    let app_info = get_frontmost_app_info();
+                    tracing::info!("-----> frontmost app info: {:?}", app_info);
 
                     let _ = handle_clone.emit(
                         "global-selection",
