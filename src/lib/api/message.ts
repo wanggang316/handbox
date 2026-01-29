@@ -124,6 +124,7 @@ export interface StreamEventHandlers {
     content: string;
     reasoning?: string;
     toolCalls?: any[];
+    isGeneratingAssets?: boolean;
     chunk: string;
     index: number;
   }) => void;

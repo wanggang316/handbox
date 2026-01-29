@@ -1354,6 +1354,11 @@ impl MessageService {
                                 content: accumulated_content.clone(),
                                 reasoning: delta.reasoning.clone(),
                                 tool_calls: message_tool_calls,
+                                is_generating_assets: if accumulated_generated_images.is_empty() {
+                                    None
+                                } else {
+                                    Some(true)
+                                },
                             });
                             chunk_count += 1;
 

@@ -44,6 +44,9 @@ pub struct StreamChunk {
     pub content: String,
     pub reasoning: Option<String>,
     pub tool_calls: Option<Vec<MessageToolCall>>,
+    /// 是否正在生成资源（如图片）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_generating_assets: Option<bool>,
 }
 
 /// 消息响应

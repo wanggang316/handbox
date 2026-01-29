@@ -49,6 +49,7 @@ fn create_streaming_callback(window: Window, event_name: &'static str) -> impl F
                 "content": chunk.content,
                 "reasoning": chunk.reasoning,
                 "toolCalls": chunk.tool_calls,
+                "isGeneratingAssets": chunk.is_generating_assets,
                 "chunk": "",
                 "index": 0
             }),

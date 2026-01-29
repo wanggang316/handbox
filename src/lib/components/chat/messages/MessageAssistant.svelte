@@ -113,7 +113,11 @@
   $effect(() => {
     const newAssets = message?.generatedAssets ?? [];
     assets = newAssets;
-    isAssetsLoading = Boolean(isStreaming && newAssets.length === 0);
+    // 只有当明确知道正在生成资源时才显示加载状态
+    isAssetsLoading = Boolean(
+      isStreaming &&
+        messageStore.streamingIsGeneratingAssets
+    );
   });
 
   // 右键菜单状态
