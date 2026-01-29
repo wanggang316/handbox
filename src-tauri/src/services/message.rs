@@ -2742,9 +2742,10 @@ mod tests {
             mcp_servers: vec![],
             turn_count: Some(5),
             artifact_id: None,
+            agent_id: None,
             reasoning: None,
             created_at: 0,
-            updated_at: 0,
+            updated_at: 0
         };
 
         let config = MessageService::message_config_from_chat(&chat);
@@ -2785,6 +2786,7 @@ mod tests {
             mcp_servers: vec![],
             turn_count: Some(10),
             artifact_id: None,
+            agent_id: None,
             reasoning: None,
             created_at: 0,
             updated_at: 0,

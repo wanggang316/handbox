@@ -57,7 +57,7 @@
   });
 
   const textRanges = $derived.by(() => {
-    if (!message?.id || !message.chatId) return [];
+    if (!message?.id || !message.sessionId) return [];
     const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
     return ranges.map((range) => ({ start: range.start, end: range.end }));
   });
@@ -82,11 +82,11 @@
   }
 
   async function handleRemoveRange() {
-    if (!hoveredRange || !message?.id || !message.chatId) return;
+    if (!hoveredRange || !message?.id || !message.sessionId) return;
     try {
       await favoriteStore.removeTextRange(
         message.id,
-        message.chatId,
+        message.sessionId,
         hoveredRange,
         message.role,
         message.content,
@@ -401,7 +401,7 @@
       const imageMarkdown = `![${contextMenu.asset.name}](${contextMenu.asset.path})`;
       await favoriteStore.toggleFavorite(
         message.id ?? "",
-        message.chatId,
+        message.sessionId,
         imageMarkdown,
         message.role ?? "assistant",
         "image",
@@ -486,10 +486,10 @@
           {/if}
 
   <!-- 消息内容 -->
-          {#if message && message.id && message.chatId}
+          {#if message && message.id && message.sessionId}
             <TextSelectionMenu
               messageId={message.id}
-              chatId={message.chatId}
+              chatId={message.sessionId}
               content={message.content}
               role={message.role}
             >
@@ -602,7 +602,7 @@
               {#if message && message.id}
                 <FavoriteButton
                   messageId={message.id}
-                  chatId={message.chatId}
+                  chatId={message.sessionId}
                   content={message.content}
                   role={message.role}
                 />
