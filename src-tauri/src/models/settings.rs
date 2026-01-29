@@ -104,6 +104,26 @@ pub struct AccountSettings {
     pub is_logged_in: bool,
 }
 
+/// 禁用的应用信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisabledAppInfo {
+    pub bundle_id: String,
+    pub name: String,
+    /// 图标数据的 base64 编码（data URL 格式，如 "data:image/png;base64,..."）
+    pub icon: Option<String>,
+}
+
+/// 快捷工具设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionBlacklist {
+    #[serde(default)]
+    pub pids: Vec<i32>,
+    #[serde(default)]
+    pub apps: Vec<DisabledAppInfo>,
+}
+
 /// 快捷工具设置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +131,9 @@ pub struct QuickToolsSettings {
     /// 选中文本时显示工具栏
     #[serde(default)]
     pub show_toolbar_on_selection: bool,
+    /// 选词工具黑名单
+    #[serde(default)]
+    pub selection_blacklist: SelectionBlacklist,
 }
 
 /// 应用设置

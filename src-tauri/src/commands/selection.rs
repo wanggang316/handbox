@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::models::error::AppError;
+use crate::models::UpdateSettingsRequest;
+use crate::SettingsService;
 
 /// 内容面板模式
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +163,135 @@ pub async fn selection_get_content_pinned() -> Result<bool, AppError> {
     Ok(is_content_panel_pinned())
 }
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_show_settings_panel(
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+) -> Result<(), AppError> {
+    use crate::services::selection::show_settings_panel;
+    show_settings_panel(&app, x, y);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_hide_settings_panel(app: tauri::AppHandle) -> Result<(), AppError> {
+    use crate::services::selection::hide_settings_panel;
+    hide_settings_panel(&app);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_show_settings_panel(
+    _app: tauri::AppHandle,
+    _x: f64,
+    _y: f64,
+) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_disable_current_app_by_pid(
+    settings_service: tauri::State<'_, SettingsService>,
+) -> Result<(), AppError> {
+    use crate::utils::get_frontmost_app_info;
+    let Some(info) = get_frontmost_app_info() else {
+        return Ok(());
+    };
+    let mut settings = settings_service.get_settings()?;
+    let blacklist = &mut settings.quick_tools.selection_blacklist;
+    if !blacklist.pids.contains(&info.pid) {
+        blacklist.pids.push(info.pid);
+    }
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "quickTools".to_string(),
+        data: serde_json::to_value(settings.quick_tools)
+            .map_err(|e| AppError::internal_error(&format!("序列化设置失败: {e}")))?,
+    })?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_disable_current_app_by_bundle_id(
+    settings_service: tauri::State<'_, SettingsService>,
+) -> Result<(), AppError> {
+    use crate::models::settings::DisabledAppInfo;
+    use crate::utils::get_frontmost_app_info;
+
+    let Some(info) = get_frontmost_app_info() else {
+        return Ok(());
+    };
+
+    // 直接使用 FrontmostAppInfo 中已有的 name
+    let disabled_app = DisabledAppInfo {
+        bundle_id: info.bundle_id.clone(),
+        name: info.name.clone(),
+        icon: None,
+    };
+
+    let mut settings = settings_service.get_settings()?;
+    let blacklist = &mut settings.quick_tools.selection_blacklist;
+    if !blacklist.apps.iter().any(|app| app.bundle_id == info.bundle_id) {
+        blacklist.apps.push(disabled_app);
+    }
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "quickTools".to_string(),
+        data: serde_json::to_value(settings.quick_tools)
+            .map_err(|e| AppError::internal_error(&format!("序列化设置失败: {e}")))?,
+    })?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_disable_global(
+    settings_service: tauri::State<'_, SettingsService>,
+) -> Result<(), AppError> {
+    let mut settings = settings_service.get_settings()?;
+    settings.quick_tools.show_toolbar_on_selection = false;
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "quickTools".to_string(),
+        data: serde_json::to_value(settings.quick_tools)
+            .map_err(|e| AppError::internal_error(&format!("序列化设置失败: {e}")))?,
+    })?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_disable_current_app_by_pid(
+    _settings_service: tauri::State<'_, SettingsService>,
+) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_disable_current_app_by_bundle_id(
+    _settings_service: tauri::State<'_, SettingsService>,
+) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_disable_global(
+    _settings_service: tauri::State<'_, SettingsService>,
+) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_hide_settings_panel(_app: tauri::AppHandle) -> Result<(), AppError> {
+    Ok(())
+}
+
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 pub async fn selection_show_content_panel(
@@ -254,3 +385,72 @@ pub async fn selection_overlay_set_interactive(
 ) -> Result<(), AppError> {
     Ok(())
 }
+
+/// 禁用的应用信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisabledApp {
+    pub bundle_id: String,
+    pub name: String,
+}
+
+/// 获取禁用的应用列表
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_get_disabled_apps(
+    settings_service: tauri::State<'_, SettingsService>,
+) -> Result<Vec<DisabledApp>, AppError> {
+    let settings = settings_service.get_settings()?;
+    let blacklist = &settings.quick_tools.selection_blacklist;
+
+    // 直接返回存储的应用信息
+    let disabled_apps = blacklist
+        .apps
+        .iter()
+        .map(|app| DisabledApp {
+            bundle_id: app.bundle_id.clone(),
+            name: app.name.clone(),
+        })
+        .collect();
+
+    Ok(disabled_apps)
+}
+
+/// 从禁用列表中移除应用（通过 bundle_id）
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn selection_remove_disabled_app(
+    settings_service: tauri::State<'_, SettingsService>,
+    bundle_id: String,
+) -> Result<(), AppError> {
+    let mut settings = settings_service.get_settings()?;
+    let blacklist = &mut settings.quick_tools.selection_blacklist;
+
+    // 移除该 bundle_id 对应的应用
+    blacklist.apps.retain(|app| app.bundle_id != bundle_id);
+
+    settings_service.update_settings(UpdateSettingsRequest {
+        section: "quickTools".to_string(),
+        data: serde_json::to_value(settings.quick_tools)
+            .map_err(|e| AppError::internal_error(&format!("序列化设置失败: {e}")))?,
+    })?;
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_get_disabled_apps(
+    _settings_service: tauri::State<'_, SettingsService>,
+) -> Result<Vec<DisabledApp>, AppError> {
+    Ok(vec![])
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn selection_remove_disabled_app(
+    _settings_service: tauri::State<'_, SettingsService>,
+    _bundle_id: String,
+) -> Result<(), AppError> {
+    Ok(())
+}
+

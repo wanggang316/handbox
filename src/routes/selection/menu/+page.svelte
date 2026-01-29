@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { emit, listen } from "@tauri-apps/api/event";
-  import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
+  import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
   import {
     Eye,
@@ -13,6 +13,7 @@
   import {
     hideMenuPanel,
     showContentPanel,
+    showSettingsPanel,
     type ContentPanelMode,
   } from "$lib/api/selection";
 
@@ -34,14 +35,6 @@
 
       captured = { text, x, y, app_info };
       console.log("-----> captured: ", captured);
-
-      // 1. 计算位置：出现在鼠标上方 48 像素处
-      // 使用 LogicalPosition 自动处理 Retina 屏和多屏缩放
-      // await appWindow.setPosition(new LogicalPosition(x - 180, y - 56));
-
-      // 2. 显示窗口并置顶
-      // await appWindow.show();
-      // await appWindow.setFocus();
     });
 
     // 组件销毁时取消监听
@@ -88,9 +81,19 @@
     await openContentPanel("ai");
   }
 
-  // 设置
-  function handleSettings() {
-    // TODO: 打开设置菜单
+  async function handleSettings() {
+    const [position, size, scale] = await Promise.all([
+      appWindow.outerPosition(),
+      appWindow.outerSize(),
+      appWindow.scaleFactor(),
+    ]);
+    const logicalX = position.x / scale;
+    const logicalY = position.y / scale;
+    const logicalWidth = size.width / scale;
+    const logicalHeight = size.height / scale;
+    const x = logicalX + logicalWidth - 40;
+    const y = logicalY + logicalHeight + 8;
+    await showSettingsPanel(x, y);
   }
 </script>
 

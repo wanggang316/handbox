@@ -3,16 +3,25 @@
  */
 
 // 主题类型
-export type Theme = 'light' | 'dark' | 'system';
+export type Theme = "light" | "dark" | "system";
 
 // 主题色
-export type ThemeColor = 'blue' | 'green' | 'red' | 'yellow' | 'purple' | 'orange' | 'pink' | 'brown' | 'system';
+export type ThemeColor =
+  | "blue"
+  | "green"
+  | "red"
+  | "yellow"
+  | "purple"
+  | "orange"
+  | "pink"
+  | "brown"
+  | "system";
 
 // 语言
-export type Language = 'zh-CN' | 'en-US';
+export type Language = "zh-CN" | "en-US";
 
 // 翻译目标语言（支持 system 或任意语言标签）
-export type TranslationTargetLanguage = 'system' | string;
+export type TranslationTargetLanguage = "system" | string;
 
 // 快捷键配置
 export interface ShortcutConfig {
@@ -68,8 +77,14 @@ export interface AccountSettings {
 }
 
 // 快捷工具设置
+export interface SelectionBlacklist {
+  pids: number[];
+  bundleIds: string[];
+}
+
 export interface QuickToolsSettings {
   showToolbarOnSelection: boolean;
+  selectionBlacklist: SelectionBlacklist;
 }
 
 // 应用设置
