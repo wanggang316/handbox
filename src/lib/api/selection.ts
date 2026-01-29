@@ -81,19 +81,6 @@ export async function hideSettingsPanel(): Promise<void> {
 }
 
 /**
- * 显示禁用二级面板
- */
-export async function showSettingsDisablePanel(
-  x: number,
-  y: number,
-): Promise<void> {
-  return apiCall<void>("selection_show_settings_disable_panel", {
-    x,
-    y,
-  });
-}
-
-/**
  * 当前应用（pid）禁用
  */
 export async function disableCurrentAppByPid(): Promise<void> {
@@ -114,9 +101,22 @@ export async function disableGlobalSelection(): Promise<void> {
   return apiCall<void>("selection_disable_global");
 }
 
+/** 禁用的应用信息 */
+export interface DisabledApp {
+  bundle_id: string;
+  name: string;
+}
+
 /**
- * 隐藏禁用二级面板
+ * 获取禁用的应用列表
  */
-export async function hideSettingsDisablePanel(): Promise<void> {
-  return apiCall<void>("selection_hide_settings_disable_panel");
+export async function getDisabledApps(): Promise<DisabledApp[]> {
+  return apiCall<DisabledApp[]>("selection_get_disabled_apps");
+}
+
+/**
+ * 从禁用列表中移除应用
+ */
+export async function removeDisabledApp(bundleId: string): Promise<void> {
+  return apiCall<void>("selection_remove_disabled_app", { bundleId });
 }

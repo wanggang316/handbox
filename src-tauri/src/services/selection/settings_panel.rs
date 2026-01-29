@@ -52,18 +52,18 @@ pub fn init_panel(app_handle: &AppHandle) {
     let handler = SelectionSettingsEventHandler::new();
     handler.on_mouse_entered(move |_event| {
         MOUSE_INSIDE_PANEL.store(true, Ordering::Relaxed);
-        tracing::debug!("Mouse entered settings panel");
+        tracing::info!("Mouse entered settings panel");
     });
 
     handler.on_mouse_exited(move |_event| {
         MOUSE_INSIDE_PANEL.store(false, Ordering::Relaxed);
-        tracing::debug!("Mouse exited settings panel");
+        tracing::info!("Mouse exited settings panel");
     });
     handler.window_did_become_key(move |_notification| {
-        tracing::debug!("Settings panel became key window");
+        tracing::info!("Settings panel became key window");
     });
     handler.window_did_resign_key(move |_| {
-        tracing::debug!("Settings panel resigned from key window");
+        tracing::info!("Settings panel resigned from key window");
     });
 
     panel.set_works_when_modal(true);
@@ -93,6 +93,20 @@ pub fn hide_panel(handle: &AppHandle) {
             let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
             if window.is_visible().unwrap_or(true) {
                 let _ = window.hide();
+            }
+        }
+    });
+}
+
+pub fn become_key_window(handle: &AppHandle) {
+    let handle_clone = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+            if let Ok(panel) = window.to_panel::<SelectionSettingsPanel>() {
+                panel.make_key_and_order_front();
+                // panel.show_and_make_key();
+            } else {
+                let _ = window.set_focus();
             }
         }
     });

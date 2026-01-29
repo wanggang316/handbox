@@ -2,7 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "settings", "selection_menu", "selection_content", "selection_settings", "selection_settings_disable"],
+  "windows": [
+    "main",
+    "settings",
+    "selection_menu",
+    "selection_content",
+    "selection_settings"
+  ],
   "permissions": [
     "core:default",
     "opener:default",

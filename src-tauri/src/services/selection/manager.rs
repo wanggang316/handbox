@@ -18,10 +18,6 @@ use crate::services::selection::settings_panel::init_panel as init_settings_pane
 use crate::services::selection::settings_panel::is_panel_visible as is_settings_panel_visible;
 use crate::services::selection::settings_panel::hide_panel as hide_settings_panel;
 use crate::services::selection::settings_panel::is_mouse_inside as is_mouse_inside_settings_panel;
-use crate::services::selection::settings_disable_panel::init_panel as init_settings_disable_panel;
-use crate::services::selection::settings_disable_panel::hide_panel as hide_settings_disable_panel;
-use crate::services::selection::settings_disable_panel::is_panel_visible as is_settings_disable_panel_visible;
-use crate::services::selection::settings_disable_panel::is_mouse_inside as is_mouse_inside_settings_disable_panel;
 use crate::services::SettingsService;
 use crate::utils::accessibility::get_ax_selected_text;
 use crate::utils::{get_frontmost_app_info, FrontmostAppInfo};
@@ -35,7 +31,6 @@ pub fn setup_selection(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     init_menu_panel(app);
     init_content_panel(app);
     init_settings_panel(app);
-    init_settings_disable_panel(app);
     setup_mouce_observer(app.clone());
     setup_keyboard_monitor(app.clone());
 
@@ -68,20 +63,11 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                 }
                 // 3. 左键松开：这是你划词逻辑的触发点
                 mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
-                    // 禁用面板可见且鼠标在面板内，不处理（允许点击菜单项）
-                    if is_settings_disable_panel_visible() && is_mouse_inside_settings_disable_panel() {
-                        return;
-                    }
-                    // 禁用面板可见但鼠标不在面板内：点击外部关闭禁用面板
-                    if is_settings_disable_panel_visible() && !is_mouse_inside_settings_disable_panel() {
-                        hide_settings_disable_panel(&handle_clone);
-                    }
-                    // 设置面板可见且鼠标在面板内，不处理（允许点击菜单项）
-                    if is_settings_panel_visible() && is_mouse_inside_settings_panel() {
-                        return;
-                    }
-                    // 设置面板可见但鼠标不在面板内：点击外部关闭设置面板
-                    if is_settings_panel_visible() && !is_mouse_inside_settings_panel() {
+                    // 先处理设置面板：允许在设置面板内操作
+                    if is_settings_panel_visible() {
+                        if is_mouse_inside_settings_panel() {
+                            return;
+                        }
                         hide_settings_panel(&handle_clone);
                     }
                     // 如果内容面板正在显示
@@ -114,10 +100,7 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(100));
                             // 如果面板仍可见且设置面板未打开，则隐藏并触发新的选词逻辑
-                            if is_menu_panel_visible()
-                                && !is_settings_panel_visible()
-                                && !is_settings_disable_panel_visible()
-                            {
+                            if is_menu_panel_visible() && !is_settings_panel_visible() {
                                 tracing::info!("hiding menu panel (clicked outside)");
                                 hide_menu_panel(&h);
                                 // 只有拖动选择才触发新的选词逻辑
@@ -341,9 +324,9 @@ fn is_selection_blacklisted(handle: &AppHandle, app_info: &FrontmostAppInfo) -> 
                 return true;
             }
             blacklist
-                .bundle_ids
+                .apps
                 .iter()
-                .any(|bundle_id| bundle_id == &app_info.bundle_id)
+                .any(|app| app.bundle_id == app_info.bundle_id)
         }
         Err(_) => false,
     }

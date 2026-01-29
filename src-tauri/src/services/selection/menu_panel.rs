@@ -4,7 +4,6 @@ use tauri::LogicalPosition;
 use tauri::{AppHandle, Manager};
 use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelLevel, StyleMask, WebviewWindowExt};
 use crate::services::selection::settings_panel::hide_panel as hide_settings_panel;
-use crate::services::selection::settings_disable_panel::hide_panel as hide_settings_disable_panel;
 
 /// 跟踪菜单面板是否可见（用于在 mouse hook 线程中快速检查）
 static MENU_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -79,7 +78,6 @@ pub fn hide_panel(handle: &AppHandle) {
     // 立即更新标志，这样 mouse hook 线程可以快速感知
     MENU_PANEL_VISIBLE.store(false, Ordering::Relaxed);
     hide_settings_panel(handle);
-    hide_settings_disable_panel(handle);
 
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
