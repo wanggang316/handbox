@@ -44,7 +44,7 @@
 <div class="w-full h-full bg-red-500">
   <div class="flex flex-col bg-white gap-1">
     <button
-      class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-red-200"
+      class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
       onclick={handleHideUntilRestart}
     >
       隐藏至重启此应用

@@ -313,9 +313,7 @@ async fn initialize_services(
     let word_repo = Arc::new(WordRepository::new(database_service.clone()));
     let word_service = WordService::new(
         word_repo,
-        provider_service_shared.clone(),
         settings_service.clone(),
-        llm_config_provider.clone(),
     );
 
     // 初始化用户会话服务

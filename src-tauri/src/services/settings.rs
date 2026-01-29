@@ -152,9 +152,7 @@ fn default_settings() -> AppSettings {
             is_logged_in: false,
         },
         translation: TranslationSettings {
-            model_id: None,
-            provider_id: None,
-            target_language: "system".to_string(),
+            session_id: None,
         },
         quick_tools: QuickToolsSettings {
             show_toolbar_on_selection: false,

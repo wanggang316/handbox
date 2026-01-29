@@ -4,35 +4,26 @@ use crate::models::{
     AppError, CreateWordLookupRequest, CreateWordRequest, ListWordLookupHistoryRequest,
     ReviewWordRequest, TranslateWordRequest, TranslateWordResponse, UpdateWordRequest, WordDetail,
 };
-use crate::services::{ProviderService, SettingsService};
+use crate::services::SettingsService;
 use crate::storage::types::{Timestamp, Word, WordContext, WordLookupHistory, WordReview, UUID};
 use crate::storage::word_repository::next_review_timestamp;
 use crate::storage::WordRepository;
-use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::types::{LlmMessage, LlmMessageRole, LlmRequest};
-use handbox_llm::{create_llm_client, LlmProvider};
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct WordService {
     repo: Arc<WordRepository>,
-    provider_service: Arc<ProviderService>,
     settings_service: SettingsService,
-    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl WordService {
     pub fn new(
         repo: Arc<WordRepository>,
-        provider_service: Arc<ProviderService>,
         settings_service: SettingsService,
-        llm_config: Arc<dyn LlmConfigProvider>,
     ) -> Self {
         Self {
             repo,
-            provider_service,
             settings_service,
-            llm_config,
         }
     }
 
@@ -176,179 +167,10 @@ impl WordService {
         &self,
         request: TranslateWordRequest,
     ) -> Result<TranslateWordResponse, AppError> {
-        if request.term.trim().is_empty() {
-            return Err(AppError::validation_error("请输入需要翻译的单词"));
-        }
-
-        let settings = self.settings_service.get_settings()?;
-        let provider_id = settings
-            .translation
-            .provider_id
-            .ok_or_else(|| AppError::validation_error("请先设置翻译供应商"))?;
-        let model_id = settings
-            .translation
-            .model_id
-            .ok_or_else(|| AppError::validation_error("请先设置翻译模型"))?;
-
-        let target_language = if settings.translation.target_language == "system" {
-            match settings.general.language {
-                crate::models::Language::ZhCN => "zh-CN".to_string(),
-                crate::models::Language::EnUS => "en-US".to_string(),
-            }
-        } else {
-            settings.translation.target_language.clone()
-        };
-
-        let provider = self.provider_service.get_provider(&provider_id).await?;
-        if provider.api_key.is_empty() {
-            return Err(AppError::validation_error("翻译供应商未配置 API Key"));
-        }
-
-        let llm_client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
-            .map_err(|e| {
-            let error: AppError = e.into();
-            tracing::error!(
-                "[WordService::translate_word] Failed to create LLM client: {}",
-                error.message
-            );
-            error
-        })?;
-
-        let prompt = format!(
-            "请将下面的词、短语或句子翻译为目标语言（{}）。只返回一行 JSON，不要使用 Markdown 代码块，不要输出额外文本。格式：{{\"translation\":\"...\",\"phonetic\":\"...\",\"explanation\":\"...\"}}。其中 phonetic 为源词/短语的音标（如果适用，句子可为空），explanation 为简短解释（单行，不换行）。",
-            target_language
-        );
-
-        let api_request = LlmRequest {
-            model: model_id.clone(),
-            messages: vec![
-                LlmMessage {
-                    role: LlmMessageRole::System,
-                    content: prompt,
-                    reasoning: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                    attachments: None,
-                },
-                LlmMessage {
-                    role: LlmMessageRole::User,
-                    content: request.term.clone(),
-                    reasoning: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                    attachments: None,
-                },
-            ],
-            temperature: Some(0.2),
-            top_p: None,
-            top_k: None,
-            max_tokens: Some(512),
-            stream: Some(false),
-            reasoning: None,
-            reasoning_effort: None,
-            thinking: None,
-            tools: None,
-            tool_choice: None,
-            parallel_tool_calls: None,
-        };
-
-        let provider_context = LlmProvider {
-            base_url: provider.base_url.clone(),
-            api_key: provider.api_key.clone(),
-        };
-
-        let response = llm_client
-            .chat(&provider_context, api_request)
-            .await
-            .map_err(|e| {
-                let error: AppError = e.into();
-                tracing::error!(
-                    "[WordService::translate_word] LLM API call failed: {}",
-                    error.message
-                );
-                error
-            })?;
-
-        let raw_content = extract_first_choice_content(response)?;
-
-        let parsed = parse_translation_json(&raw_content);
-        let (mut translation, mut phonetic, mut explanation) = match parsed.as_ref() {
-            Some(parsed) => (
-                parsed.translation.clone(),
-                normalize_optional(parsed.phonetic.clone()),
-                normalize_optional(parsed.explanation.clone()),
-            ),
-            None => {
-                tracing::warn!(
-                    "[WordService::translate_word] Failed to parse translation JSON: {}",
-                    raw_content
-                );
-                (raw_content.clone(), None, None)
-            }
-        };
-
-        if parsed.is_none() && looks_truncated_json(&raw_content) {
-            tracing::warn!(
-                "[WordService::translate_word] Detected truncated JSON, retrying with plain translation"
-            );
-            let fallback_prompt = format!(
-                "请将下面的词、短语或句子翻译为目标语言（{}）。只返回译文，不要包含 Markdown、JSON 或解释。",
-                target_language
-            );
-            let fallback_request = LlmRequest {
-                model: model_id.clone(),
-                messages: vec![
-                    LlmMessage {
-                        role: LlmMessageRole::System,
-                        content: fallback_prompt,
-                        reasoning: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                        attachments: None,
-                    },
-                    LlmMessage {
-                        role: LlmMessageRole::User,
-                        content: request.term.clone(),
-                        reasoning: None,
-                        tool_calls: None,
-                        tool_call_id: None,
-                        attachments: None,
-                    },
-                ],
-                temperature: Some(0.2),
-                top_p: None,
-                top_k: None,
-                max_tokens: Some(128),
-                stream: Some(false),
-                reasoning: None,
-                reasoning_effort: None,
-                thinking: None,
-                tools: None,
-                tool_choice: None,
-                parallel_tool_calls: None,
-            };
-
-            if let Ok(fallback_response) =
-                llm_client.chat(&provider_context, fallback_request).await
-            {
-                if let Ok(fallback_content) = extract_first_choice_content(fallback_response) {
-                    let fallback_text = fallback_content.trim();
-                    if !fallback_text.is_empty() {
-                        translation = fallback_text.to_string();
-                        phonetic = None;
-                        explanation = None;
-                    }
-                }
-            }
-        }
-
-        Ok(TranslateWordResponse {
-            term: request.term,
-            translation,
-            target_language,
-            phonetic,
-            explanation,
-        })
+        // 此方法已废弃，请使用 Session 的 sendUserMessageStream 接口进行翻译
+        Err(AppError::validation_error(
+            "翻译功能已迁移到 Session 模式，请在单词本页面选择翻译 Agent 和模型",
+        ))
     }
 
     pub async fn record_lookup_history(
@@ -394,72 +216,4 @@ fn now_millis() -> Timestamp {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64
-}
-
-#[derive(serde::Deserialize)]
-struct TranslationPayload {
-    translation: String,
-    phonetic: Option<String>,
-    explanation: Option<String>,
-}
-
-fn parse_translation_json(input: &str) -> Option<TranslationPayload> {
-    let trimmed = input.trim();
-    let json_text = if trimmed.starts_with("```") {
-        trimmed
-            .trim_start_matches("```json")
-            .trim_start_matches("```")
-            .trim_end_matches("```")
-            .trim()
-            .to_string()
-    } else {
-        trimmed.to_string()
-    };
-
-    if let Ok(parsed) = serde_json::from_str::<TranslationPayload>(&json_text) {
-        return Some(parsed);
-    }
-
-    // Fallback: extract the first JSON object if extra text exists.
-    let start = json_text.find('{')?;
-    let end = json_text.rfind('}')?;
-    if start >= end {
-        return None;
-    }
-    let slice = json_text[start..=end].trim();
-    serde_json::from_str::<TranslationPayload>(slice).ok()
-}
-
-fn extract_first_choice_content(
-    response: handbox_llm::types::LlmResponse,
-) -> Result<String, AppError> {
-    response
-        .choices
-        .first()
-        .and_then(|choice| choice.delta.as_ref())
-        .map(|message| message.content.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::internal_error("翻译结果为空"))
-}
-
-fn looks_truncated_json(input: &str) -> bool {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let looks_like_json = trimmed.starts_with("```") || trimmed.starts_with('{');
-    let has_open = trimmed.contains('{');
-    let has_close = trimmed.contains('}');
-    looks_like_json && has_open && !has_close
-}
-
-fn normalize_optional(value: Option<String>) -> Option<String> {
-    value.and_then(|item| {
-        let trimmed = item.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
 }

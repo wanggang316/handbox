@@ -9,11 +9,13 @@
     recordLookup,
     reviewWord,
     deleteWord,
-    translateWord,
+    translateWordStream,
   } from "$lib/api/word";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import * as agentApi from "$lib/api/agent";
+  import * as chatApi from "$lib/api/chat";
   import LookupResultRow from "$lib/components/words/LookupResultRow.svelte";
   import Select from "$lib/components/ui/Select.svelte";
+  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import { settingsState } from "$lib/states";
   import { providerActions, providerState } from "$lib/states/provider.svelte";
   import type { Word } from "$lib/types";
@@ -39,14 +41,18 @@
 
   let activeTab = $state<TabId>("lookup");
   let isLoading = $state(false);
+  let isUpdatingSession = $state(false);
   let errorMessage = $state<string | null>(null);
   let words = $state<Word[]>([]);
   let listQuery = $state("");
   let lookupQuery = $state("");
-  let translationProviderId = $state("");
-  let translationModelId = $state("");
-  let targetLanguage = $state("system");
-  let customTargetLanguage = $state("");
+
+  // 翻译配置
+  let agentOptions = $state<{ value: string; label: string }[]>([]);
+  let agentId = $state("");
+  let selectedAgent = $state<any>(null);
+  let providerId = $state("");
+  let modelId = $state("");
 
   let lookupResult = $state<LookupResult | null>(null);
   let lookupHistory = $state<
@@ -63,39 +69,67 @@
     }>
   >([]);
 
-  const targetLanguageOptions = [
-    { value: "system", label: "跟随系统" },
-    { value: "zh-CN", label: "简体中文" },
-    { value: "en-US", label: "English" },
-    { value: "ja-JP", label: "日本語" },
-    { value: "ko-KR", label: "한국어" },
-    { value: "fr-FR", label: "Français" },
-    { value: "de-DE", label: "Deutsch" },
-    { value: "es-ES", label: "Español" },
-    { value: "it-IT", label: "Italiano" },
-    { value: "ru-RU", label: "Русский" },
-    { value: "pt-BR", label: "Português (BR)" },
-    { value: "ar-SA", label: "العربية" },
-    { value: "custom", label: "自定义" },
-  ];
-
   const selectedModel = $derived(
     (() => {
-      if (!translationProviderId || !translationModelId) return null;
+      if (!providerId || !modelId) return null;
       const provider = providerState.providersWithModels.find(
-        (item) => item.id === translationProviderId
+        (item) => item.id === providerId
       );
-      const model = provider?.models.find(
-        (item) => item.id === translationModelId
-      );
-      if (!model || !provider) return null;
+      const model = provider?.models.find((item) => item.id === modelId);
+      if (!model || !provider || !provider.id) return null;
       return {
         ...model,
         providerName: provider.name,
         providerType: provider.provider_type,
+        provider_id: provider.id,
       };
     })()
   );
+
+  /**
+   * 创建或更新翻译 Session
+   * 从 Agent 实例化 Session，拷贝所有配置（system_prompt 等）
+   * 然后更新 model_id 和 provider_id
+   */
+  async function createOrUpdateTranslationSession(): Promise<string | null> {
+    if (!agentId || !modelId || !providerId) {
+      return null;
+    }
+
+    try {
+      isUpdatingSession = true;
+      const translation = settingsState.settings?.translation;
+      const currentSessionId = translation?.sessionId;
+
+      if (currentSessionId) {
+        // Session 已存在，只需更新模型
+        await chatApi.updateChatModel(currentSessionId, modelId, providerId);
+        return currentSessionId;
+      } else {
+        // 从 Agent 创建 Session，自动拷贝 Agent 的所有配置
+        const session = await chatApi.createSessionFromAgent(agentId);
+        if (!session.id) {
+          throw new Error("Failed to create session: no id returned");
+        }
+        // 更新用户选择的模型
+        await chatApi.updateChatModel(session.id, modelId, providerId);
+
+        // 保存 sessionId 到设置
+        await settingsState.updateSettings({
+          section: "translation",
+          data: { sessionId: session.id },
+        });
+
+        return session.id;
+      }
+    } catch (error) {
+      console.error("Failed to create/update translation session:", error);
+      errorMessage = "创建翻译会话失败";
+      return null;
+    } finally {
+      isUpdatingSession = false;
+    }
+  }
 
   async function loadWords() {
     try {
@@ -133,6 +167,7 @@
       const trimmed = lookupQuery.trim();
       if (!trimmed) {
         lookupResult = null;
+        isLoading = false;
         return;
       }
 
@@ -150,51 +185,74 @@
           term: exact.term,
           translation: exact.translation,
           sourceLanguage: exact.language,
-          targetLanguage: targetLanguage,
+          targetLanguage: exact.translation,
           phonetic: exact.phonetic,
           explanation: exact.explanation,
           exists: true,
         };
+        isLoading = false;
       } else {
-        if (!translationProviderId || !translationModelId) {
-          errorMessage = "请先选择翻译模型";
+        const sessionId = await createOrUpdateTranslationSession();
+        if (!sessionId) {
+          errorMessage = "请先配置翻译 Agent 和模型";
+          isLoading = false;
           return;
         }
-        const translation = await translateWord({ term: trimmed });
-        lookupResult = {
-          term: trimmed,
-          translation: translation.translation,
-          sourceLanguage: "auto",
-          targetLanguage: translation.targetLanguage,
-          phonetic: translation.phonetic,
-          explanation: translation.explanation,
-          exists: false,
-        };
-      }
 
-      const recorded = await recordLookup({
-        term: lookupResult.term,
-        translation: lookupResult.translation,
-        phonetic: lookupResult.phonetic,
-        explanation: lookupResult.explanation,
-        sourceLanguage: lookupResult.sourceLanguage,
-        targetLanguage: lookupResult.targetLanguage,
-      });
-      lookupHistory = [
-        {
-          ...recorded,
-          exists: words.some(
-            (word) =>
-              word.term.trim().toLowerCase() ===
-              recorded.term.trim().toLowerCase()
-          ),
-        },
-        ...lookupHistory,
-      ];
+        await translateWordStream(sessionId, trimmed, {
+          onChunk: (content) => {
+            lookupResult = {
+              term: trimmed,
+              translation: content,
+              sourceLanguage: "auto",
+              targetLanguage: "unknown",
+              phonetic: null,
+              explanation: null,
+              exists: false,
+            };
+          },
+          onComplete: async (result) => {
+            lookupResult = {
+              term: trimmed,
+              translation: result.translation,
+              sourceLanguage: "auto",
+              targetLanguage: result.targetLanguage,
+              phonetic: result.phonetic,
+              explanation: result.explanation,
+              exists: false,
+            };
+
+            const recorded = await recordLookup({
+              term: lookupResult.term,
+              translation: lookupResult.translation,
+              phonetic: lookupResult.phonetic,
+              explanation: lookupResult.explanation,
+              sourceLanguage: lookupResult.sourceLanguage,
+              targetLanguage: lookupResult.targetLanguage,
+            });
+            lookupHistory = [
+              {
+                ...recorded,
+                exists: words.some(
+                  (word) =>
+                    word.term.trim().toLowerCase() ===
+                    recorded.term.trim().toLowerCase()
+                ),
+              },
+              ...lookupHistory,
+            ];
+            isLoading = false;
+          },
+          onError: (error) => {
+            console.error("Translation failed:", error);
+            errorMessage = "翻译失败";
+            isLoading = false;
+          },
+        });
+      }
     } catch (error) {
       console.error("Failed to lookup word:", error);
       errorMessage = "查词失败";
-    } finally {
       isLoading = false;
     }
   }
@@ -297,66 +355,97 @@
     event.stopPropagation();
   }
 
+  async function loadAgents() {
+    try {
+      const agents = await agentApi.getAgents(100, 0);
+      agentOptions = agents
+        .filter((agent) => agent.id)
+        .map((agent) => ({
+          value: agent.id!,
+          label: agent.name,
+        }));
+    } catch (error) {
+      console.error("Failed to load agents:", error);
+    }
+  }
+
+  async function loadProviders() {
+    try {
+      await providerActions.loadProvidersWithModels(false);
+    } catch (error) {
+      console.error("Failed to load providers:", error);
+    }
+  }
+
+  async function saveConfig() {
+    try {
+      await createOrUpdateTranslationSession();
+      // sessionId 在 createOrUpdateTranslationSession 中已保存
+      errorMessage = null;
+    } catch (error) {
+      console.error("Failed to save config:", error);
+      errorMessage = "保存配置失败";
+    }
+  }
+
+  async function handleAgentChange(value: string) {
+    agentId = value;
+    const agent = await agentApi.getAgent(value);
+    selectedAgent = agent;
+
+    // 如果 Agent 有配置的模型，使用 Agent 的模型
+    if (agent.model) {
+      for (const provider of providerState.providersWithModels) {
+        const model = provider.models.find((m) => m.id === agent.model);
+        if (model) {
+          providerId = provider.id ?? "";
+          modelId = agent.model;
+          break;
+        }
+      }
+    }
+    await saveConfig();
+  }
+
+  async function handleModelSelect(model: any) {
+    providerId = model.provider_id;
+    modelId = model.id;
+    await saveConfig();
+  }
+
   async function loadTranslationSettings() {
     try {
       await settingsState.loadSettings();
-      await providerActions.loadProvidersWithModels(false);
       const translation = settingsState.settings?.translation;
-      translationProviderId = translation?.providerId || "";
-      translationModelId = translation?.modelId || "";
-      const savedTarget = translation?.targetLanguage || "system";
-      const hasPreset = targetLanguageOptions.some(
-        (option) => option.value === savedTarget
-      );
-      if (hasPreset) {
-        targetLanguage = savedTarget;
-      } else {
-        targetLanguage = "custom";
-        customTargetLanguage = savedTarget;
+
+      // 如果已有 sessionId，从 session 加载配置
+      if (translation?.sessionId) {
+        try {
+          const session = await chatApi.getChat(translation.sessionId);
+          // 恢复 modelId 和 providerId
+          if (session.modelId) {
+            modelId = session.modelId;
+          }
+          if (session.providerId) {
+            providerId = session.providerId;
+          }
+        } catch (error) {
+          console.error("Failed to load session:", error);
+        }
+      }
+
+      // 设置默认 agent
+      if (agentOptions.length > 0 && !agentId) {
+        agentId = agentOptions[0].value;
       }
     } catch (error) {
       console.error("Failed to load translation settings:", error);
     }
   }
 
-  async function updateTranslationSettings(data: Record<string, unknown>) {
-    try {
-      await settingsState.updateSettings({
-        section: "translation",
-        data,
-      });
-    } catch (error) {
-      console.error("Failed to update translation settings:", error);
-      errorMessage = "保存设置失败";
-    }
-  }
-
-  async function handleTargetLanguageChange(value: string) {
-    targetLanguage = value;
-    if (value !== "custom") {
-      await updateTranslationSettings({ targetLanguage: value });
-    }
-  }
-
-  async function handleCustomTargetChange(value: string) {
-    customTargetLanguage = value;
-    if (targetLanguage === "custom") {
-      await updateTranslationSettings({
-        targetLanguage: customTargetLanguage || "system",
-      });
-    }
-  }
-
-  async function handleModelSelect(model: any) {
-    translationProviderId = model.provider_id;
-    translationModelId = model.id;
-    await updateTranslationSettings({
-      providerId: translationProviderId,
-      modelId: translationModelId,
-    });
-  }
-
   onMount(async () => {
+    await loadAgents();
+    await loadProviders();
     await loadWords();
     await loadTranslationSettings();
     try {
@@ -428,43 +517,54 @@
           onkeydown={(event) =>
             event.key === "Enter" && !event.shiftKey && handleLookup()}
         ></textarea>
+
+        <!-- 配置区域 -->
         <div class="flex flex-wrap items-center gap-3">
+          <!-- Agent 选择 -->
           <div class="flex items-center gap-2">
-            <span class="text-xs text-base-content/60">目标语言</span>
+            <span class="text-xs text-base-content/60">翻译 Agent</span>
             <Select
-              options={targetLanguageOptions}
-              bind:selectedValue={targetLanguage}
-              onChange={(value) => handleTargetLanguageChange(value)}
+              options={agentOptions}
+              bind:selectedValue={agentId}
+              onChange={(value) => handleAgentChange(value)}
               size="sm"
+              disabled={isUpdatingSession}
             />
           </div>
-          {#if targetLanguage === "custom"}
-            <input
-              class="h-8 rounded-lg bg-base-200 px-2 text-xs outline-none"
-              placeholder="语言标签，如 en-US"
-              bind:value={customTargetLanguage}
-              oninput={(event) =>
-                handleCustomTargetChange(
-                  (event.target as HTMLInputElement).value
-                )}
+
+          <!-- 模型选择（Agent 选择后显示） -->
+          {#if agentId}
+            <ChatModelSelectButton
+              {selectedModel}
+              variant="gray"
+              size="sm"
+              onModelSelect={(model) => handleModelSelect(model)}
             />
           {/if}
-          <ChatModelSelectButton
-            {selectedModel}
-            variant="gray"
-            size="sm"
-            onModelSelect={(model) => handleModelSelect(model)}
-          />
+
           <button
             class="h-8 px-4 rounded-lg bg-primary text-base-100 text-sm"
             onclick={handleLookup}
-            disabled={isLoading ||
-              !translationProviderId ||
-              !translationModelId}
+            disabled={isLoading || !agentId || !modelId}
           >
             {isLoading ? "查询中..." : "查询"}
           </button>
         </div>
+
+        <!-- 提示信息 -->
+        {#if agentOptions.length === 0}
+          <div class="text-xs text-base-content/60">
+            暂无可用 Agent，请先在 Agent 管理页面创建翻译 Agent。
+          </div>
+        {:else if !agentId}
+          <div class="text-xs text-base-content/60">
+            请选择翻译 Agent
+          </div>
+        {:else if !modelId}
+          <div class="text-xs text-base-content/60">
+            请选择翻译模型
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -515,15 +615,15 @@
                       </span>
                     {/if}
                   </div>
-                <div class="text-sm text-base-content/60">
-                  {word.translation}
-                </div>
-                {#if word.explanation}
-                  <div class="text-xs text-base-content/50 mt-1">
-                    {word.explanation}
+                  <div class="text-sm text-base-content/60">
+                    {word.translation}
                   </div>
-                {/if}
-              </div>
+                  {#if word.explanation}
+                    <div class="text-xs text-base-content/50 mt-1">
+                      {word.explanation}
+                    </div>
+                  {/if}
+                </div>
                 <div
                   class="flex items-center gap-2"
                   onclick={handleActionClick}
