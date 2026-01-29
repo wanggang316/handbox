@@ -4,7 +4,7 @@ use crate::models::model::ModelResponse;
 use crate::models::AppError;
 use crate::services::Database;
 use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
-use crate::storage::{ChatRepository, ModelRepository, ProviderRepository};
+use crate::storage::{SessionRepository, ModelRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct ModelService {
     model_repo: ModelRepository,
     provider_repo: ProviderRepository,
-    chat_repo: ChatRepository,
+    chat_repo: SessionRepository,
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
@@ -26,7 +26,7 @@ impl ModelService {
         Self {
             model_repo: ModelRepository::new(Arc::clone(&db)),
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
-            chat_repo: ChatRepository::new(db),
+            chat_repo: SessionRepository::new(db),
             llm_config,
         }
     }

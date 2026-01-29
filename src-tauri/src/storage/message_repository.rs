@@ -86,7 +86,7 @@ impl MessageRepository {
         let role_str = message.role.as_str();
 
         let sql = r#"
-            INSERT INTO messages (id, chat_id, role, content, reasoning, config, tools, attachments,
+            INSERT INTO messages (id, session_id, role, content, reasoning, config, tools, attachments,
                                 generated_assets, input_tokens, output_tokens, total_tokens, start_time,
                                 end_time, duration, turn_id, tool_call_id, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
@@ -94,7 +94,7 @@ impl MessageRepository {
 
         sqlx::query(sql)
             .bind(&message.id)
-            .bind(&message.chat_id)
+            .bind(&message.session_id)
             .bind(role_str)
             .bind(&message.content)
             .bind(&message.reasoning)
@@ -181,7 +181,7 @@ impl MessageRepository {
     /// 获取聊天的消息列表（主方法）
     pub async fn get_messages(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         limit: i32,
         offset: i32,
         roles: Option<Vec<LlmMessageRole>>, // 指定要包含的角色，None表示包含所有角色
@@ -190,8 +190,8 @@ impl MessageRepository {
         let order_direction = if order_by_desc { "DESC" } else { "ASC" };
 
         // 构建WHERE条件
-        let mut where_conditions = vec!["chat_id = $1".to_string()];
-        let mut bind_values = vec![chat_id.as_str()];
+        let mut where_conditions = vec!["session_id = $1".to_string()];
+        let mut bind_values = vec![session_id.as_str()];
 
         // 如果指定了角色过滤
         if let Some(role_list) = roles {
@@ -216,7 +216,7 @@ impl MessageRepository {
 
         let query = format!(
             r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+            SELECT id, session_id, role, content, reasoning, config, tools, attachments, generated_assets,
                    input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
                    turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE {} ORDER BY created_at {} LIMIT {} OFFSET {}
@@ -246,12 +246,12 @@ impl MessageRepository {
     /// 获取聊天的消息列表（不包含工具角色消息）- 用于前端显示
     pub async fn get_messages_by_chat(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         limit: i32,
         offset: i32,
     ) -> Result<Vec<Message>, AppError> {
         self.get_messages(
-            chat_id,
+            session_id,
             limit,
             offset,
             Some(vec![
@@ -267,12 +267,12 @@ impl MessageRepository {
     /// 获取聊天的消息列表（包含所有角色）- 用于内部处理
     pub async fn get_all_messages_by_chat(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         limit: i32,
         offset: i32,
     ) -> Result<Vec<Message>, AppError> {
         self.get_messages(
-            chat_id, limit, offset, None,  // 包含所有角色
+            session_id, limit, offset, None,  // 包含所有角色
             false, // 升序排列
         )
         .await
@@ -281,25 +281,25 @@ impl MessageRepository {
     /// 获取聊天的消息列表（带角色筛选和排序）
     pub async fn get_messages_by_chat_with_filters(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         limit: i32,
         offset: i32,
         role_filter: Option<&LlmMessageRole>,
         order_by_desc: bool,
     ) -> Result<Vec<Message>, AppError> {
         let roles = role_filter.map(|role| vec![role.clone()]);
-        self.get_messages(chat_id, limit, offset, roles, order_by_desc)
+        self.get_messages(session_id, limit, offset, roles, order_by_desc)
             .await
     }
 
     /// 获取最新的指定角色消息
     pub async fn get_latest_message_by_role(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         role: &LlmMessageRole,
     ) -> Result<Option<Message>, AppError> {
         let messages = self
-            .get_messages(chat_id, 1, 0, Some(vec![role.clone()]), true)
+            .get_messages(session_id, 1, 0, Some(vec![role.clone()]), true)
             .await?;
 
         Ok(messages.into_iter().next())
@@ -313,7 +313,7 @@ impl MessageRepository {
         );
 
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+            SELECT id, session_id, role, content, reasoning, config, tools, attachments, generated_assets,
                    input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
                    turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE id = $1
@@ -529,9 +529,9 @@ impl MessageRepository {
     }
 
     /// 删除聊天的所有消息
-    pub async fn delete_messages_by_chat(&self, chat_id: &UUID) -> Result<(), AppError> {
-        sqlx::query("DELETE FROM messages WHERE chat_id = $1")
-            .bind(chat_id)
+    pub async fn delete_messages_by_chat(&self, session_id: &UUID) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM messages WHERE session_id = $1")
+            .bind(session_id)
             .execute(self.db.pool())
             .await
             .map_err(|e| {
@@ -572,7 +572,7 @@ impl MessageRepository {
     /// 删除某个消息之后的所有消息（基于 created_at 时间戳）
     pub async fn delete_messages_after(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         message_id: &UUID,
     ) -> Result<Vec<String>, AppError> {
         // 首先获取目标消息的创建时间
@@ -582,8 +582,8 @@ impl MessageRepository {
             .ok_or_else(|| AppError::not_found(&format!("Message not found: {}", message_id)))?;
 
         // 查询要删除的消息ID列表
-        let rows = sqlx::query("SELECT id FROM messages WHERE chat_id = $1 AND created_at > $2")
-            .bind(chat_id)
+        let rows = sqlx::query("SELECT id FROM messages WHERE session_id = $1 AND created_at > $2")
+            .bind(session_id)
             .bind(target_message.created_at)
             .fetch_all(self.db.pool())
             .await
@@ -602,7 +602,7 @@ impl MessageRepository {
     /// 删除指定消息及之后的所有消息（包含当前消息）
     pub async fn delete_message_and_after(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         message_id: &UUID,
     ) -> Result<Vec<String>, AppError> {
         // 首先获取目标消息的创建时间
@@ -612,8 +612,8 @@ impl MessageRepository {
             .ok_or_else(|| AppError::not_found(&format!("Message not found: {}", message_id)))?;
 
         // 查询要删除的消息ID列表（包含当前消息，使用 >= 而不是 >）
-        let rows = sqlx::query("SELECT id FROM messages WHERE chat_id = $1 AND created_at >= $2")
-            .bind(chat_id)
+        let rows = sqlx::query("SELECT id FROM messages WHERE session_id = $1 AND created_at >= $2")
+            .bind(session_id)
             .bind(target_message.created_at)
             .fetch_all(self.db.pool())
             .await
@@ -630,9 +630,9 @@ impl MessageRepository {
     }
 
     /// 获取聊天的消息数量
-    pub async fn get_message_count_by_chat(&self, chat_id: &UUID) -> Result<i32, AppError> {
-        let row = sqlx::query("SELECT COUNT(*) as count FROM messages WHERE chat_id = $1")
-            .bind(chat_id)
+    pub async fn get_message_count_by_chat(&self, session_id: &UUID) -> Result<i32, AppError> {
+        let row = sqlx::query("SELECT COUNT(*) as count FROM messages WHERE session_id = $1")
+            .bind(session_id)
             .fetch_one(self.db.pool())
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to count messages: {}", e)))?;
@@ -642,10 +642,10 @@ impl MessageRepository {
     }
 
     /// 获取聊天的最后一条消息时间
-    pub async fn get_last_message_time(&self, chat_id: &UUID) -> Result<Option<i64>, AppError> {
+    pub async fn get_last_message_time(&self, session_id: &UUID) -> Result<Option<i64>, AppError> {
         let row =
-            sqlx::query("SELECT MAX(created_at) as last_time FROM messages WHERE chat_id = $1")
-                .bind(chat_id)
+            sqlx::query("SELECT MAX(created_at) as last_time FROM messages WHERE session_id = $1")
+                .bind(session_id)
                 .fetch_one(self.db.pool())
                 .await
                 .map_err(|e| {
@@ -659,7 +659,7 @@ impl MessageRepository {
     /// 根据 turn_id 获取所有相关消息
     pub async fn get_messages_by_turn_id(&self, turn_id: i32) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+            SELECT id, session_id, role, content, reasoning, config, tools, attachments, generated_assets,
                    input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
                    turn_id, tool_call_id, created_at, updated_at
             FROM messages WHERE turn_id = $1 ORDER BY created_at ASC
@@ -684,18 +684,18 @@ impl MessageRepository {
     /// 根据聊天 ID 和 turn_id 获取消息
     pub async fn get_messages_by_chat_and_turn(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         turn_id: i32,
     ) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+            SELECT id, session_id, role, content, reasoning, config, tools, attachments, generated_assets,
                    input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
                    turn_id, tool_call_id, created_at, updated_at
-            FROM messages WHERE chat_id = $1 AND turn_id = $2 ORDER BY created_at ASC
+            FROM messages WHERE session_id = $1 AND turn_id = $2 ORDER BY created_at ASC
         "#;
 
         let rows = sqlx::query(query)
-            .bind(chat_id)
+            .bind(session_id)
             .bind(turn_id)
             .fetch_all(self.db.pool())
             .await
@@ -714,17 +714,17 @@ impl MessageRepository {
     /// 获取聊天中存在的所有 turn_id（去重并排序）
     ///
     /// # 参数
-    /// - `chat_id`: 聊天 ID
-    pub async fn get_turn_ids_by_chat(&self, chat_id: &UUID) -> Result<Vec<i32>, AppError> {
+    /// - `session_id`: 聊天 ID
+    pub async fn get_turn_ids_by_chat(&self, session_id: &UUID) -> Result<Vec<i32>, AppError> {
         let query = r#"
             SELECT DISTINCT turn_id
             FROM messages
-            WHERE chat_id = $1 AND turn_id IS NOT NULL
+            WHERE session_id = $1 AND turn_id IS NOT NULL
             ORDER BY turn_id ASC
         "#;
 
         let rows = sqlx::query(query)
-            .bind(chat_id)
+            .bind(session_id)
             .fetch_all(self.db.pool())
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to get turn ids: {}", e)))?;
@@ -741,26 +741,26 @@ impl MessageRepository {
     /// 根据 turn_id 范围获取消息（使用最小和最大 turn_id）
     ///
     /// # 参数
-    /// - `chat_id`: 聊天 ID
+    /// - `session_id`: 聊天 ID
     /// - `min_turn_id`: 最小轮次 ID（包含）
     /// - `max_turn_id`: 最大轮次 ID（包含）
     pub async fn get_messages_by_turn_id_range(
         &self,
-        chat_id: &UUID,
+        session_id: &UUID,
         min_turn_id: i32,
         max_turn_id: i32,
     ) -> Result<Vec<Message>, AppError> {
         let query = r#"
-            SELECT id, chat_id, role, content, reasoning, config, tools, attachments, generated_assets,
+            SELECT id, session_id, role, content, reasoning, config, tools, attachments, generated_assets,
                    input_tokens, output_tokens, total_tokens, start_time, end_time, duration,
                    turn_id, tool_call_id, created_at, updated_at
             FROM messages
-            WHERE chat_id = $1 AND turn_id >= $2 AND turn_id <= $3
+            WHERE session_id = $1 AND turn_id >= $2 AND turn_id <= $3
             ORDER BY created_at ASC
         "#;
 
         let rows = sqlx::query(query)
-            .bind(chat_id)
+            .bind(session_id)
             .bind(min_turn_id)
             .bind(max_turn_id)
             .fetch_all(self.db.pool())
@@ -778,12 +778,12 @@ impl MessageRepository {
     }
 
     /// 获取聊天的下一个 turn_id
-    pub async fn get_next_turn_id(&self, chat_id: &UUID) -> Result<i32, AppError> {
+    pub async fn get_next_turn_id(&self, session_id: &UUID) -> Result<i32, AppError> {
         let query =
-            "SELECT COALESCE(MAX(turn_id), 0) + 1 as next_turn_id FROM messages WHERE chat_id = $1";
+            "SELECT COALESCE(MAX(turn_id), 0) + 1 as next_turn_id FROM messages WHERE session_id = $1";
 
         let row = sqlx::query(query)
-            .bind(chat_id)
+            .bind(session_id)
             .fetch_one(self.db.pool())
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to get next turn_id: {}", e)))?;
@@ -832,7 +832,7 @@ impl MessageRepository {
 
         Ok(Message {
             id: row.try_get("id").unwrap_or_default(),
-            chat_id: row.try_get("chat_id").unwrap_or_default(),
+            session_id: row.try_get("session_id").unwrap_or_default(),
             role,
             content: row.try_get("content").unwrap_or_default(),
             reasoning: row.try_get("reasoning").ok(),
@@ -878,7 +878,7 @@ mod tests {
             .unwrap()
             .as_millis() as i64;
 
-        let chat_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
@@ -886,7 +886,7 @@ mod tests {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#;
         sqlx::query(chat_query)
-            .bind(&chat_id)
+            .bind(&session_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
@@ -899,7 +899,7 @@ mod tests {
 
         let message = Message {
             id: uuid::Uuid::new_v4().to_string(),
-            chat_id: chat_id.clone(),
+            session_id: session_id.clone(),
             role: LlmMessageRole::User,
             content: "Hello, world!".to_string(),
             reasoning: None, // 用户消息没有推理过程
@@ -942,7 +942,7 @@ mod tests {
         assert_eq!(fetched_message.role, LlmMessageRole::User);
 
         // Get by chat
-        let messages = repo.get_messages_by_chat(&chat_id, 10, 0).await.unwrap();
+        let messages = repo.get_messages_by_chat(&session_id, 10, 0).await.unwrap();
         assert_eq!(messages.len(), 1);
 
         // Update content
@@ -954,7 +954,7 @@ mod tests {
         assert_eq!(updated.unwrap().content, "Updated content");
 
         // Count messages
-        let count = repo.get_message_count_by_chat(&chat_id).await.unwrap();
+        let count = repo.get_message_count_by_chat(&session_id).await.unwrap();
         assert_eq!(count, 1);
 
         // Delete
@@ -974,7 +974,7 @@ mod tests {
             .unwrap()
             .as_millis() as i64;
 
-        let chat_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
@@ -982,7 +982,7 @@ mod tests {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#;
         sqlx::query(chat_query)
-            .bind(&chat_id)
+            .bind(&session_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
@@ -994,13 +994,13 @@ mod tests {
             .unwrap();
 
         // 第一次调用应该返回 1
-        let next_turn_id = repo.get_next_turn_id(&chat_id).await.unwrap();
+        let next_turn_id = repo.get_next_turn_id(&session_id).await.unwrap();
         assert_eq!(next_turn_id, 1);
 
         // 创建一条消息
         let message = Message {
             id: uuid::Uuid::new_v4().to_string(),
-            chat_id: chat_id.clone(),
+            session_id: session_id.clone(),
             role: LlmMessageRole::User,
             content: "Hello".to_string(),
             reasoning: None,
@@ -1023,7 +1023,7 @@ mod tests {
         repo.create_message(&message).await.unwrap();
 
         // 第二次调用应该返回 2
-        let next_turn_id = repo.get_next_turn_id(&chat_id).await.unwrap();
+        let next_turn_id = repo.get_next_turn_id(&session_id).await.unwrap();
         assert_eq!(next_turn_id, 2);
     }
 
@@ -1038,7 +1038,7 @@ mod tests {
             .unwrap()
             .as_millis() as i64;
 
-        let chat_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
 
         // 先创建一个 chat 以满足外键约束
         let chat_query = r#"
@@ -1046,7 +1046,7 @@ mod tests {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#;
         sqlx::query(chat_query)
-            .bind(&chat_id)
+            .bind(&session_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
@@ -1061,7 +1061,7 @@ mod tests {
         let messages = vec![
             Message {
                 id: uuid::Uuid::new_v4().to_string(),
-                chat_id: chat_id.clone(),
+                session_id: session_id.clone(),
                 role: LlmMessageRole::Tool,
                 content: "Tool result 1".to_string(),
                 reasoning: None,
@@ -1082,7 +1082,7 @@ mod tests {
             },
             Message {
                 id: uuid::Uuid::new_v4().to_string(),
-                chat_id: chat_id.clone(),
+                session_id: session_id.clone(),
                 role: LlmMessageRole::Tool,
                 content: "Tool result 2".to_string(),
                 reasoning: None,
@@ -1103,7 +1103,7 @@ mod tests {
             },
             Message {
                 id: uuid::Uuid::new_v4().to_string(),
-                chat_id: chat_id.clone(),
+                session_id: session_id.clone(),
                 role: LlmMessageRole::Tool,
                 content: "Tool result 3".to_string(),
                 reasoning: None,
@@ -1129,7 +1129,7 @@ mod tests {
 
         // 验证所有消息都已创建
         let all_messages = repo
-            .get_all_messages_by_chat(&chat_id, 100, 0)
+            .get_all_messages_by_chat(&session_id, 100, 0)
             .await
             .unwrap();
         assert_eq!(all_messages.len(), 3);
@@ -1167,7 +1167,7 @@ mod tests {
             .unwrap()
             .as_millis() as i64;
 
-        let chat_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
 
         // 创建 chat
         let chat_query = r#"
@@ -1175,7 +1175,7 @@ mod tests {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#;
         sqlx::query(chat_query)
-            .bind(&chat_id)
+            .bind(&session_id)
             .bind("Test Chat")
             .bind(Option::<String>::None)
             .bind("[]")
@@ -1194,7 +1194,7 @@ mod tests {
         for &turn in &turns {
             messages.push(Message {
                 id: uuid::Uuid::new_v4().to_string(),
-                chat_id: chat_id.clone(),
+                session_id: session_id.clone(),
                 role: LlmMessageRole::User,
                 content: format!("User message turn {}", turn),
                 reasoning: None,
@@ -1216,7 +1216,7 @@ mod tests {
 
             messages.push(Message {
                 id: uuid::Uuid::new_v4().to_string(),
-                chat_id: chat_id.clone(),
+                session_id: session_id.clone(),
                 role: LlmMessageRole::Assistant,
                 content: format!("Assistant message turn {}", turn),
                 reasoning: None,
@@ -1240,12 +1240,12 @@ mod tests {
         repo.create_messages_batch(&messages).await.unwrap();
 
         // 测试 1: 获取所有 turn_id
-        let turn_ids = repo.get_turn_ids_by_chat(&chat_id).await.unwrap();
+        let turn_ids = repo.get_turn_ids_by_chat(&session_id).await.unwrap();
         assert_eq!(turn_ids, vec![1, 2, 4, 6, 7]);
 
         // 测试 2: 根据 turn_id 范围获取消息（turn 2-6，应该包含 2, 4, 6）
         let result = repo
-            .get_messages_by_turn_id_range(&chat_id, 2, 6)
+            .get_messages_by_turn_id_range(&session_id, 2, 6)
             .await
             .unwrap();
 
@@ -1260,7 +1260,7 @@ mod tests {
 
         // 测试 3: 范围只包含一个 turn
         let result = repo
-            .get_messages_by_turn_id_range(&chat_id, 4, 4)
+            .get_messages_by_turn_id_range(&session_id, 4, 4)
             .await
             .unwrap();
 
@@ -1270,7 +1270,7 @@ mod tests {
 
         // 测试 4: 范围包含不存在的 turn（3, 5 不存在，但在范围内）
         let result = repo
-            .get_messages_by_turn_id_range(&chat_id, 1, 7)
+            .get_messages_by_turn_id_range(&session_id, 1, 7)
             .await
             .unwrap();
 

@@ -1,4 +1,4 @@
-use super::chat::ChatReasoningConfig;
+use super::session::SessionReasoningConfig;
 use super::common::{Timestamp, UUID};
 use crate::storage::types::McpServerConfig;
 use handbox_llm::types::{LlmMessageRole, LlmToolFunction};
@@ -111,7 +111,7 @@ pub struct MessageConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_count: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<ChatReasoningConfig>,
+    pub reasoning: Option<SessionReasoningConfig>,
 }
 
 /// 消息实体
@@ -119,7 +119,7 @@ pub struct MessageConfig {
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub id: UUID,
-    pub chat_id: UUID,
+    pub session_id: UUID,
     pub role: LlmMessageRole,
     pub content: String,
     pub reasoning: Option<String>,
@@ -149,7 +149,7 @@ mod tests {
     fn message_roundtrip_preserves_fields() {
         let message = Message {
             id: "msg_123".to_string(),
-            chat_id: "chat_456".to_string(),
+            session_id: "chat_456".to_string(),
             role: LlmMessageRole::User,
             content: "Hello".to_string(),
             reasoning: None,
@@ -173,7 +173,7 @@ mod tests {
         let deserialized: Message = serde_json::from_str(&json).expect("deserialize message");
 
         assert_eq!(message.id, deserialized.id);
-        assert_eq!(message.chat_id, deserialized.chat_id);
+        assert_eq!(message.session_id, deserialized.session_id);
         assert_eq!(message.content, deserialized.content);
     }
 

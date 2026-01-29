@@ -187,7 +187,7 @@ class MessageStore {
     } else {
       const newMessage: Message = {
         id: response.messageId,
-        chatId,
+        sessionId: chatId,
         role: "assistant",
         content: response.content,
         reasoning: response.reasoning,
@@ -579,7 +579,7 @@ class MessageStore {
       // 添加用户消息到本地状态
       const userMessage: Message = {
         id: crypto.randomUUID(),
-        chatId: currentChat.id,
+        sessionId: currentChat.id,
         role: "user",
         content: content,
         config: {

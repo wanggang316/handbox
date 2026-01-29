@@ -1,9 +1,9 @@
 use super::common::{Timestamp, UUID};
-use super::chat::{ChatReasoningConfig, McpServerConfig};
+use super::session::{SessionReasoningConfig, McpServerConfig};
 use serde::{Deserialize, Serialize};
 
-// Agent 推理配置 - 复用 Chat 的推理配置
-pub type AgentReasoningConfig = ChatReasoningConfig;
+// Agent 推理配置 - 复用 Session 的推理配置
+pub type AgentReasoningConfig = SessionReasoningConfig;
 
 /// Agent 实体 - 可复用的 AI 助手配置
 #[derive(Debug, Clone, Serialize, Deserialize)]

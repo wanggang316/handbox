@@ -1,12 +1,12 @@
 pub mod agent;
 pub mod artifact;
-pub mod chat;
 pub mod common;
 pub mod favorite;
 pub mod mcp;
 pub mod message;
 pub mod model;
 pub mod provider;
+pub mod session;
 pub mod word;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
@@ -15,7 +15,7 @@ pub use artifact::{
     ExecutionConfig, ExecutionResult, InstallArtifactRequest, ModelParameters,
     UpdateArtifactRequest,
 };
-pub use chat::{Chat, ChatReasoningConfig, McpServerConfig};
+pub use session::{McpServerConfig, Session, SessionReasoningConfig};
 pub use common::{Timestamp, UUID};
 pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag};
 pub use mcp::{

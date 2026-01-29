@@ -2,19 +2,19 @@
 
 pub mod agent_repository;
 pub mod artifact_repository;
-pub mod chat_repository;
 pub mod database;
 pub mod favorite_repository;
 pub mod mcp_repository;
 pub mod message_repository;
 pub mod model_repository;
 pub mod provider_repository;
+pub mod session_repository;
 pub mod types;
 pub mod word_repository;
 
 pub use agent_repository::AgentRepository;
 pub use artifact_repository::ArtifactRepository;
-pub use chat_repository::ChatRepository;
+pub use session_repository::SessionRepository;
 pub use database::Database;
 pub use favorite_repository::FavoriteRepository;
 pub use mcp_repository::McpRepository;

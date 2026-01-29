@@ -4,9 +4,9 @@ use crate::models::{
     AppError, MessageRequest, MessageRequestAttachment, MessageResponse, StreamChunk,
     UserMessageSendRequest,
 };
-use crate::services::{ChatService, Database, McpService, ProviderService, StorageService};
+use crate::services::{SessionService, Database, McpService, ProviderService, StorageService};
 use crate::storage::types::{
-    Chat, McpServer, McpServerStatus, Message, MessageAttachment, MessageConfig, MessageToolCall,
+    Session, McpServer, McpServerStatus, Message, MessageAttachment, MessageConfig, MessageToolCall,
     MessageToolExecutionMode, MessageToolExecutionStatus, Provider, UUID,
 };
 use crate::storage::MessageRepository;
@@ -96,7 +96,7 @@ impl<T> UserMessageSavedCallback for T where T: FnMut(String, String) + Send + '
 pub struct MessageService {
     repository: MessageRepository,
     provider_service: Arc<ProviderService>,
-    chat_service: Arc<ChatService>,
+    chat_service: Arc<SessionService>,
     mcp_service: Arc<McpService>,
     storage_service: Arc<StorageService>,
     llm_config: Arc<dyn LlmConfigProvider>,
@@ -106,7 +106,7 @@ impl MessageService {
     pub fn new(
         db: Arc<Database>,
         provider_service: Arc<ProviderService>,
-        chat_service: Arc<ChatService>,
+        chat_service: Arc<SessionService>,
         mcp_service: Arc<McpService>,
         storage_service: Arc<StorageService>,
         llm_config: Arc<dyn LlmConfigProvider>,
@@ -452,7 +452,7 @@ impl MessageService {
         // 4. 删除该消息之后的所有消息
         let deleted_message_ids = match self
             .repository
-            .delete_messages_after(&message.chat_id, &message_id)
+            .delete_messages_after(&message.session_id, &message_id)
             .await
         {
             Ok(ids) => ids,
@@ -475,11 +475,11 @@ impl MessageService {
 
         // 通知前端消息已被删除
         if !deleted_message_ids.is_empty() {
-            messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
+            messages_delete_callback(message.session_id.clone(), deleted_message_ids);
         }
 
         // 5. 获取聊天配置
-        let chat = match self.chat_service.get_chat(message.chat_id.clone()).await {
+        let chat = match self.chat_service.get_chat(message.session_id.clone()).await {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(
@@ -539,7 +539,7 @@ impl MessageService {
         };
 
         // 8. 使用 build_request_from_turn 重新构建请求
-        let resend_request = match self.build_message_request(&message.chat_id, turn_id).await {
+        let resend_request = match self.build_message_request(&message.session_id, turn_id).await {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -553,13 +553,13 @@ impl MessageService {
 
         tracing::info!(
             "[MessageService::resend_message_stream] Sending stream request for chat {}",
-            message.chat_id
+            message.session_id
         );
 
         // 9. 包装 end_callback 以保存助手消息
         let end_callback_wrapper = Self::wrap_end_callback_with_save(
             self.repository.clone(),
-            message.chat_id.clone(),
+            message.session_id.clone(),
             message.config.clone(),
             Some(turn_id),
             end_callback,
@@ -622,7 +622,7 @@ impl MessageService {
         // 3. 删除当前消息及之后的所有消息
         let deleted_message_ids = match self
             .repository
-            .delete_message_and_after(&message.chat_id, &message_id)
+            .delete_message_and_after(&message.session_id, &message_id)
             .await
         {
             Ok(ids) => {
@@ -645,7 +645,7 @@ impl MessageService {
 
         // 通知前端消息已被删除
         if !deleted_message_ids.is_empty() {
-            messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
+            messages_delete_callback(message.session_id.clone(), deleted_message_ids);
         }
 
         // 4. 验证消息必须有 turn_id
@@ -665,7 +665,7 @@ impl MessageService {
         };
 
         // 5. 获取聊天配置并构建请求
-        let regenerate_request = match self.build_message_request(&message.chat_id, turn_id).await {
+        let regenerate_request = match self.build_message_request(&message.session_id, turn_id).await {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -679,13 +679,13 @@ impl MessageService {
 
         tracing::info!(
             "[MessageService::regenerate_message_stream] Sending stream request for chat {}",
-            message.chat_id
+            message.session_id
         );
 
         // 8. 包装 end_callback 以保存助手消息
         let end_callback_wrapper = Self::wrap_end_callback_with_save(
             self.repository.clone(),
-            message.chat_id.clone(),
+            message.session_id.clone(),
             message.config.clone(),
             Some(turn_id),
             end_callback,
@@ -750,7 +750,7 @@ impl MessageService {
         // 删除之前执行产生的后续消息（Tool 消息和 Assistant 响应），避免重复追加
         let deleted_message_ids = match self
             .repository
-            .delete_messages_after(&message.chat_id, &message_id)
+            .delete_messages_after(&message.session_id, &message_id)
             .await
         {
             Ok(ids) => ids,
@@ -767,7 +767,7 @@ impl MessageService {
 
         // 通知前端消息已被删除
         if !deleted_message_ids.is_empty() {
-            messages_delete_callback(message.chat_id.clone(), deleted_message_ids);
+            messages_delete_callback(message.session_id.clone(), deleted_message_ids);
         }
 
         // 2. 验证消息是否为 assistant消息且包含工具调用
@@ -935,7 +935,7 @@ impl MessageService {
                     if let Some(result) = &tool_call.result {
                         let tool_result_message = Message {
                             id: uuid::Uuid::new_v4().to_string(),
-                            chat_id: message.chat_id.clone(),
+                            session_id: message.session_id.clone(),
                             role: LlmMessageRole::Tool,
                             content: result.clone(),
                             reasoning: None,
@@ -994,7 +994,7 @@ impl MessageService {
         };
 
         // 11. 构建包含工具调用结果的新请求
-        let request = match self.build_message_request(&message.chat_id, turn_id).await {
+        let request = match self.build_message_request(&message.session_id, turn_id).await {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -1014,7 +1014,7 @@ impl MessageService {
         // 创建包装的 end_callback，在保存消息后调用原始回调
         let end_callback_wrapper = Self::wrap_end_callback_with_save(
             self.repository.clone(),
-            message.chat_id.clone(),
+            message.session_id.clone(),
             message.config.clone(),
             message.turn_id.clone(),
             end_callback,
@@ -1474,7 +1474,7 @@ impl MessageService {
     async fn convert_to_api_request(
         &self,
         request: &MessageRequest,
-        chat: &Chat,
+        chat: &Session,
     ) -> Result<LlmRequest, AppError> {
         /// 过滤掉无效的数值参数（0 或负数）
         fn normalize_numeric<T>(value: Option<T>) -> Option<T>
@@ -1607,7 +1607,7 @@ impl MessageService {
         })
     }
 
-    async fn prepare_tools(&self, chat: &Chat) -> Result<Vec<LlmRequestTool>, AppError> {
+    async fn prepare_tools(&self, chat: &Session) -> Result<Vec<LlmRequestTool>, AppError> {
         if chat.mcp_servers.is_empty() {
             return Ok(Vec::new());
         }
@@ -1686,7 +1686,7 @@ impl MessageService {
 
     async fn lookup_supported_parameters(
         &self,
-        chat: &Chat,
+        chat: &Session,
     ) -> Result<Option<Vec<String>>, AppError> {
         if let (Some(model_id), Some(provider_id)) = (&chat.model_id, &chat.provider_id) {
             if let Some(model) = self
@@ -1724,7 +1724,7 @@ impl MessageService {
 
         let message = Message {
             id: message_id.clone(),
-            chat_id: chat_id.to_string(),
+            session_id: chat_id.to_string(),
             role: LlmMessageRole::User,
             content: content.to_string(),
             reasoning: None, // 用户消息没有推理过程
@@ -1881,7 +1881,7 @@ impl MessageService {
 
         let message = Message {
             id: message_id.clone(),
-            chat_id: chat_id.to_string(),
+            session_id: chat_id.to_string(),
             role: LlmMessageRole::Assistant,
             content: content.clone(),
             reasoning,
@@ -1907,7 +1907,7 @@ impl MessageService {
     }
 
     /// 获取聊天配置
-    async fn get_chat_config(&self, chat_id: &str) -> Result<Chat, AppError> {
+    async fn get_chat_config(&self, chat_id: &str) -> Result<Session, AppError> {
         self.chat_service.get_chat(chat_id.to_string()).await
     }
 
@@ -2417,7 +2417,7 @@ impl MessageService {
     }
 
     /// 根据聊天信息构建消息配置
-    fn message_config_from_chat(chat: &Chat) -> MessageConfig {
+    fn message_config_from_chat(chat: &Session) -> MessageConfig {
         fn normalize_str(value: &Option<String>) -> Option<String> {
             value.as_ref().and_then(|text| {
                 let trimmed = text.trim();
@@ -2504,7 +2504,7 @@ impl MessageService {
                 match repository
                     .create_message(&Message {
                         id: response_clone.message_id.clone(),
-                        chat_id: chat_id.to_string(),
+                        session_id: chat_id.to_string(),
                         role: LlmMessageRole::Assistant,
                         content: response_clone.content.clone(),
                         reasoning: response_clone.reasoning.clone(),
@@ -2549,7 +2549,7 @@ mod tests {
     use super::*;
     use crate::config::llm_config::LlmConfig;
     use crate::models::{ModelParameters, UserMessageSendRequest};
-    use crate::services::{ChatService, McpService, ProviderService, StorageService};
+    use crate::services::{SessionService, McpService, ProviderService, StorageService};
     use crate::storage::types::MessageConfig;
     use crate::storage::Database;
     use std::sync::Arc;
@@ -2565,7 +2565,7 @@ mod tests {
         )
     }
 
-    async fn setup_services() -> (Arc<ChatService>, MessageService, String) {
+    async fn setup_services() -> (Arc<SessionService>, MessageService, String) {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
         let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
@@ -2574,7 +2574,7 @@ mod tests {
             llm_config_provider.clone(),
         ));
         let mcp_service = Arc::new(McpService::new(db.clone()));
-        let chat_service = Arc::new(ChatService::new(
+        let chat_service = Arc::new(SessionService::new(
             db.clone(),
             provider_service.clone(),
             llm_config_provider.clone(),
@@ -2622,7 +2622,7 @@ mod tests {
             llm_config_provider.clone(),
         ));
         let mcp_service = Arc::new(McpService::new(db.clone()));
-        let chat_service = Arc::new(ChatService::new(
+        let chat_service = Arc::new(SessionService::new(
             db.clone(),
             provider_service.clone(),
             llm_config_provider.clone(),
@@ -2721,7 +2721,7 @@ mod tests {
 
     #[test]
     fn message_config_from_chat_filters_zero_values() {
-        let chat = Chat {
+        let chat = Session {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Test Chat".to_string(),
             last_message_at: None,
@@ -2764,7 +2764,7 @@ mod tests {
 
     #[test]
     fn message_config_from_chat_preserves_valid_values() {
-        let chat = Chat {
+        let chat = Session {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Test Chat".to_string(),
             last_message_at: None,

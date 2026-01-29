@@ -3,7 +3,7 @@
 use crate::models::{AddProviderRequest, AppError};
 use crate::services::{Database, ModelService};
 use crate::storage::types::{Model, Provider, Timestamp, UUID};
-use crate::storage::{ChatRepository, ProviderRepository};
+use crate::storage::{SessionRepository, ProviderRepository};
 use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,7 +13,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ProviderService {
     provider_repo: ProviderRepository,
-    chat_repo: ChatRepository,
+    chat_repo: SessionRepository,
     model_service: ModelService,
 }
 
@@ -22,7 +22,7 @@ impl ProviderService {
     pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
-            chat_repo: ChatRepository::new(Arc::clone(&db)),
+            chat_repo: SessionRepository::new(Arc::clone(&db)),
             model_service: ModelService::new(Arc::clone(&db), llm_config),
         }
     }
