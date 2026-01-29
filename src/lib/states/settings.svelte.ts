@@ -45,13 +45,18 @@ class SettingsState {
   }
 
   /**
-   * 加载设置
+   * 加载设置（如果已加载则跳过）
    */
-  async loadSettings(): Promise<void> {
+  async loadSettings(forceReload = false): Promise<void> {
+    // 如果已经加载过且不强制重新加载，直接返回
+    if (!forceReload && this.state.settings) {
+      return;
+    }
+
     try {
       this.setLoading(true);
       this.setError(null);
-      
+
       const settings = await settingsApi.getSettings();
       this.setSettings(settings);
     } catch (error) {

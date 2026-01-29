@@ -370,11 +370,9 @@
   }
 
   async function loadProviders() {
-    try {
-      await providerActions.loadProvidersWithModels(false);
-    } catch (error) {
-      console.error("Failed to load providers:", error);
-    }
+    // providers 已在根布局预加载，直接使用 providerState.providersWithModels
+    // 无需再次调用 API
+    console.log('[Words] loadProviders: using cached providers');
   }
 
   async function saveConfig() {
@@ -413,15 +411,24 @@
     await saveConfig();
   }
 
-  async function loadTranslationSettings() {
+  async function loadSessionFromSettings() {
+    const t = performance.now();
     try {
-      await settingsState.loadSettings();
       const translation = settingsState.settings?.translation;
+      console.log(`[Words] translation:`, translation);
+
+      // 设置默认 agent
+      if (agentOptions.length > 0 && !agentId) {
+        agentId = agentOptions[0].value;
+      }
 
       // 如果已有 sessionId，从 session 加载配置
-      if (translation?.sessionId) {
+      // 但如果 modelId 和 providerId 已经存在，跳过 getChat 调用
+      if (translation?.sessionId && (!modelId || !providerId)) {
         try {
+          const t1 = performance.now();
           const session = await chatApi.getChat(translation.sessionId);
+          console.log(`[Words] getChat: ${(performance.now() - t1).toFixed(2)}ms`);
           // 恢复 modelId 和 providerId
           if (session.modelId) {
             modelId = session.modelId;
@@ -433,27 +440,56 @@
           console.error("Failed to load session:", error);
         }
       }
-
-      // 设置默认 agent
-      if (agentOptions.length > 0 && !agentId) {
-        agentId = agentOptions[0].value;
-      }
     } catch (error) {
-      console.error("Failed to load translation settings:", error);
+      console.error("Failed to load session from settings:", error);
     }
+    console.log(`[Words] loadSessionFromSettings: ${(performance.now() - t).toFixed(2)}ms`);
   }
 
   onMount(async () => {
-    await loadAgents();
-    await loadProviders();
-    await loadWords();
-    await loadTranslationSettings();
-    try {
-      lookupHistory = await listLookupHistory({ limit: 20, offset: 0 });
-      syncLookupHistoryWithWords();
-    } catch (error) {
-      console.error("Failed to load lookup history:", error);
-    }
+    const t0 = performance.now();
+    console.log('[Words] onMount started');
+
+    // 并行加载独立的数据，提高加载速度
+    await Promise.all([
+      (async () => {
+        const t = performance.now();
+        await loadAgents();
+        console.log(`[Words] loadAgents: ${(performance.now() - t).toFixed(2)}ms`);
+      })(),
+      (async () => {
+        const t = performance.now();
+        await loadProviders();
+        console.log(`[Words] loadProviders: ${(performance.now() - t).toFixed(2)}ms`);
+      })(),
+      (async () => {
+        const t = performance.now();
+        await loadWords();
+        console.log(`[Words] loadWords: ${(performance.now() - t).toFixed(2)}ms`);
+      })(),
+      (async () => {
+        const t = performance.now();
+        await settingsState.loadSettings(); // 现在有缓存，不会重复请求
+        console.log(`[Words] loadSettings: ${(performance.now() - t).toFixed(2)}ms`);
+      })(),
+      (async () => {
+        try {
+          const t = performance.now();
+          lookupHistory = await listLookupHistory({ limit: 20, offset: 0 });
+          console.log(`[Words] listLookupHistory: ${(performance.now() - t).toFixed(2)}ms`);
+          syncLookupHistoryWithWords();
+        } catch (error) {
+          console.error("Failed to load lookup history:", error);
+        }
+      })(),
+    ]);
+
+    console.log(`[Words] Promise.all done: ${(performance.now() - t0).toFixed(2)}ms`);
+
+    // 加载完基础设置后，再从 session 恢复配置（如果需要）
+    // 这个 getChat 调用可能还是有点慢，但它是必须的
+    await loadSessionFromSettings();
+    console.log(`[Words] onMount total: ${(performance.now() - t0).toFixed(2)}ms`);
   });
 </script>
 

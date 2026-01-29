@@ -4,6 +4,7 @@
   import { browser } from "$app/environment";
   import { uiState } from "$lib/states/ui.svelte";
   import { providerActions } from "$lib/states/provider.svelte";
+  import { settingsState } from "$lib/states/settings.svelte";
   import { initAuth, cleanupAuth } from "$lib/states/auth.svelte";
   import Toast from "$lib/components/ui/Toast.svelte";
   import type { Theme, ThemeColor } from "$lib/types/settings";
@@ -56,6 +57,16 @@
 
     providerActions.loadProviderConfigs().catch((error) => {
       console.error("Failed to load provider configs:", error);
+    });
+
+    // 预加载 providers with models，这样子页面就不需要重复加载
+    providerActions.loadProvidersWithModels(false).catch((error) => {
+      console.error("Failed to load providers:", error);
+    });
+
+    // 预加载 settings，这样子页面就不需要重复加载
+    settingsState.loadSettings().catch((error) => {
+      console.error("Failed to load settings:", error);
     });
 
     initAuth().catch((error) => {
