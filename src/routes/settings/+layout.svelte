@@ -12,7 +12,7 @@
 </script>
 
 <div class="flex h-screen bg-[color:var(--base-100)]">
-  <TitleBar sidebarOpen={false} showToggleButton={false} on:toggle={handleToggle} />
+  <TitleBar sidebarOpen={false} showToggleButton={false} onToggle={handleToggle} />
   
   <div class="m-2 w-35">
     <SettingsSidebar/>

@@ -7,6 +7,7 @@
   import { uiState } from "$lib/states/ui.svelte";
   import { chatActions } from "$lib/states/chat.svelte";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
+    import { goto } from "$app/navigation";
 
   // 侧边栏配置常量
   const SIDEBAR_AUTO_HIDE_WIDTH = 600; // 自动隐藏侧边栏的最小窗口宽度阈值
@@ -109,6 +110,14 @@
     }
   });
 
+  async function handleNewChat() {
+    await goto("/chat");
+  }
+
+  async function handleImplicitCreate() {
+    await goto("/chat?implicit=true");
+  }
+
   let { children } = $props();
 </script>
 
@@ -116,7 +125,9 @@
   <TitleBar
     sidebarOpen={uiState.sidebarOpen}
     showToggleButton={true}
-    on:toggle={toggleSidebar}
+    onNewChat={handleNewChat}
+    onImplicitCreate={handleImplicitCreate}
+    onToggle={toggleSidebar}
   />
 
   <div
