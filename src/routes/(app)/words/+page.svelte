@@ -650,10 +650,6 @@
                         <IconButton
                           icon={BookMinus}
                           iconSize={16}
-                          size="w-7 h-7"
-                          bgColor="bg-success/10"
-                          hoverColor="hover:bg-success/20"
-                          textColor="text-success"
                           title="从单词本移除"
                           disabled={isLoading}
                           onclick={() => handleRemoveFromHistory(message.content)}
@@ -662,10 +658,6 @@
                         <IconButton
                           icon={BookPlus}
                           iconSize={16}
-                          size="w-7 h-7"
-                          bgColor="bg-primary/10"
-                          hoverColor="hover:bg-primary/20"
-                          textColor="text-primary"
                           title="加入单词本"
                           disabled={isLoading}
                           onclick={() => handleAddFromHistory(message, translationHistory[index + 1])}
@@ -674,10 +666,6 @@
                       <IconButton
                         icon={Trash2}
                         iconSize={16}
-                        size="w-7 h-7"
-                        bgColor="bg-error/10"
-                        hoverColor="hover:bg-error/20"
-                        textColor="text-error"
                         title="删除"
                         onclick={() => handleDeleteHistory(message.id)}
                       />
