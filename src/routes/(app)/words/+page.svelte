@@ -3,25 +3,20 @@
   import { goto } from "$app/navigation";
   import {
     createWord,
-    deleteLookupHistory,
-    listLookupHistory,
     listWords,
-    recordLookup,
-    reviewWord,
     deleteWord,
-    translateWordStream,
+    getTranslationHistory,
   } from "$lib/api/word";
   import * as agentApi from "$lib/api/agent";
   import * as chatApi from "$lib/api/chat";
-  import LookupResultRow from "$lib/components/words/LookupResultRow.svelte";
+  import * as messageApi from "$lib/api/message";
   import Select from "$lib/components/ui/Select.svelte";
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import { settingsState } from "$lib/states";
   import { providerActions, providerState } from "$lib/states/provider.svelte";
-  import type { Word } from "$lib/types";
-  import { Trash2 } from "@lucide/svelte";
+  import type { Word, Message } from "$lib/types";
 
-  type TabId = "lookup" | "learn" | "review";
+  type TabId = "lookup" | "learn";
 
   type LookupResult = {
     term: string;
@@ -36,7 +31,6 @@
   const tabs: Array<{ id: TabId; label: string }> = [
     { id: "lookup", label: "查词" },
     { id: "learn", label: "学习" },
-    { id: "review", label: "复习" },
   ];
 
   let activeTab = $state<TabId>("lookup");
@@ -55,19 +49,7 @@
   let modelId = $state("");
 
   let lookupResult = $state<LookupResult | null>(null);
-  let lookupHistory = $state<
-    Array<{
-      id: string;
-      term: string;
-      translation?: string | null;
-      phonetic?: string | null;
-      explanation?: string | null;
-      sourceLanguage?: string | null;
-      targetLanguage?: string | null;
-      exists?: boolean;
-      createdAt: number;
-    }>
-  >([]);
+  let translationHistory = $state<Message[]>([]);
 
   const selectedModel = $derived(
     (() => {
@@ -140,24 +122,12 @@
         limit: 100,
         offset: 0,
       });
-      syncLookupHistoryWithWords();
     } catch (error) {
       console.error("Failed to load words:", error);
       errorMessage = "加载单词失败";
     } finally {
       isLoading = false;
     }
-  }
-
-  function syncLookupHistoryWithWords() {
-    if (!lookupHistory.length) return;
-    const existing = new Set(
-      words.map((word) => word.term.trim().toLowerCase())
-    );
-    lookupHistory = lookupHistory.map((item) => ({
-      ...item,
-      exists: existing.has(item.term.trim().toLowerCase()),
-    }));
   }
 
   async function handleLookup() {
@@ -199,11 +169,21 @@
           return;
         }
 
-        await translateWordStream(sessionId, trimmed, {
-          onChunk: (content) => {
+        // 使用流式消息发送翻译请求
+        let streamContent = "";
+        await messageApi.sendUserMessageStream({
+          chatId: sessionId,
+          content: trimmed,
+          tempUserMessageId: `trans-${Date.now()}`,
+        });
+
+        // 监听流式事件
+        const unlisten = await messageApi.listenToStreamEvents({
+          onChunk: (data) => {
+            streamContent = data.content;
             lookupResult = {
               term: trimmed,
-              translation: content,
+              translation: streamContent,
               sourceLanguage: "auto",
               targetLanguage: "unknown",
               phonetic: null,
@@ -211,7 +191,9 @@
               exists: false,
             };
           },
-          onComplete: async (result) => {
+          onEnd: (data) => {
+            // 解析翻译结果
+            const result = parseTranslationResponse(data.finalContent, trimmed);
             lookupResult = {
               term: trimmed,
               translation: result.translation,
@@ -221,26 +203,6 @@
               explanation: result.explanation,
               exists: false,
             };
-
-            const recorded = await recordLookup({
-              term: lookupResult.term,
-              translation: lookupResult.translation,
-              phonetic: lookupResult.phonetic,
-              explanation: lookupResult.explanation,
-              sourceLanguage: lookupResult.sourceLanguage,
-              targetLanguage: lookupResult.targetLanguage,
-            });
-            lookupHistory = [
-              {
-                ...recorded,
-                exists: words.some(
-                  (word) =>
-                    word.term.trim().toLowerCase() ===
-                    recorded.term.trim().toLowerCase()
-                ),
-              },
-              ...lookupHistory,
-            ];
             isLoading = false;
           },
           onError: (error) => {
@@ -254,6 +216,52 @@
       console.error("Failed to lookup word:", error);
       errorMessage = "查词失败";
       isLoading = false;
+    }
+  }
+
+  /**
+   * 解析翻译响应
+   * 从 LLM 的 JSON 响应中提取翻译结果
+   */
+  function parseTranslationResponse(content: string, term: string): {
+    term: string;
+    translation: string;
+    targetLanguage: string;
+    phonetic: string | null;
+    explanation: string | null;
+  } {
+    try {
+      // 尝试解析 JSON 响应
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          term,
+          translation: parsed.translation || content,
+          targetLanguage: parsed.targetLanguage || 'unknown',
+          phonetic: parsed.phonetic || null,
+          explanation: parsed.explanation || null,
+        };
+      }
+
+      // 如果没有 JSON，直接返回内容作为翻译
+      return {
+        term,
+        translation: content,
+        targetLanguage: 'unknown',
+        phonetic: null,
+        explanation: null,
+      };
+    } catch (error) {
+      console.error('Failed to parse translation response:', error);
+      // 解析失败，返回原始内容
+      return {
+        term,
+        translation: content,
+        targetLanguage: 'unknown',
+        phonetic: null,
+        explanation: null,
+      };
     }
   }
 
@@ -276,26 +284,11 @@
       });
       lookupResult = { ...currentLookup, exists: true };
       await loadWords();
-      lookupHistory = lookupHistory.map((item) =>
-        item.term.trim().toLowerCase() === currentLookup.term.trim().toLowerCase()
-          ? { ...item, exists: true }
-          : item
-      );
     } catch (error) {
       console.error("Failed to add lookup word:", error);
       errorMessage = "添加单词失败";
     } finally {
       isLoading = false;
-    }
-  }
-
-  async function handleReview(wordId: string, remembered: boolean) {
-    try {
-      await reviewWord({ wordId, remembered });
-      await loadWords();
-    } catch (error) {
-      console.error("Failed to review word:", error);
-      errorMessage = "更新复习失败";
     }
   }
 
@@ -309,50 +302,24 @@
     }
   }
 
-  async function handleDeleteLookup(historyId: string) {
+  async function loadTranslationHistory() {
     try {
-      await deleteLookupHistory(historyId);
-      lookupHistory = lookupHistory.filter((item) => item.id !== historyId);
-    } catch (error) {
-      console.error("Failed to delete lookup history:", error);
-      errorMessage = "删除查询记录失败";
-    }
-  }
+      const translation = settingsState.settings?.translation;
+      const sessionId = translation?.sessionId;
+      if (!sessionId) {
+        translationHistory = [];
+        return;
+      }
 
-  async function handleAddHistory(item: {
-    id?: string;
-    term: string;
-    translation?: string | null;
-    phonetic?: string | null;
-    explanation?: string | null;
-    sourceLanguage?: string | null;
-    exists?: boolean;
-  }) {
-    if (!item.translation || item.exists) {
-      errorMessage = "查询结果不完整，无法添加";
-      return;
-    }
-    try {
-      await createWord({
-        term: item.term,
-        translation: item.translation,
-        language: item.sourceLanguage || "auto",
-        phonetic: item.phonetic,
-        explanation: item.explanation,
-        source: "lookup",
-      });
-      await loadWords();
-      lookupHistory = lookupHistory.map((history) =>
-        history.id === item.id ? { ...history, exists: true } : history
+      const messages = await getTranslationHistory(sessionId, 50, 0);
+      // 只保留用户和助手的消息对
+      translationHistory = messages.filter(
+        (msg) => msg.role === "user" || msg.role === "assistant"
       );
     } catch (error) {
-      console.error("Failed to add history word:", error);
-      errorMessage = "添加单词失败";
+      console.error("Failed to load translation history:", error);
+      translationHistory = [];
     }
-  }
-
-  function handleActionClick(event: MouseEvent) {
-    event.stopPropagation();
   }
 
   async function loadAgents() {
@@ -473,14 +440,9 @@
         console.log(`[Words] loadSettings: ${(performance.now() - t).toFixed(2)}ms`);
       })(),
       (async () => {
-        try {
-          const t = performance.now();
-          lookupHistory = await listLookupHistory({ limit: 20, offset: 0 });
-          console.log(`[Words] listLookupHistory: ${(performance.now() - t).toFixed(2)}ms`);
-          syncLookupHistoryWithWords();
-        } catch (error) {
-          console.error("Failed to load lookup history:", error);
-        }
+        const t = performance.now();
+        await loadTranslationHistory();
+        console.log(`[Words] loadTranslationHistory: ${(performance.now() - t).toFixed(2)}ms`);
       })(),
     ]);
 
@@ -604,20 +566,26 @@
       </div>
     </div>
 
-    {#if lookupHistory.length > 0}
+    {#if translationHistory.length > 0}
       <div class="rounded-2xl bg-base-100 p-4 shadow-sm border border-base-200">
         <div class="text-xs text-base-content/60 mb-3">历史查询</div>
-        <div class="divide-y divide-base-200">
-          {#each lookupHistory as item}
-            <div class="py-3">
-              <LookupResultRow
-                {item}
-                busy={isLoading}
-                showDelete={true}
-                onAdd={() => handleAddHistory(item)}
-                onDelete={() => handleDeleteLookup(item.id)}
-              />
-            </div>
+        <div class="divide-y divide-base-200 max-h-96 overflow-y-auto">
+          {#each translationHistory as message, index}
+            {#if message.role === "user" && translationHistory[index + 1]?.role === "assistant"}
+              <div class="py-3">
+                <div class="flex flex-col gap-2">
+                  <div class="text-sm font-medium text-base-content">
+                    {message.content}
+                  </div>
+                  <div class="text-sm text-base-content/70">
+                    {translationHistory[index + 1].content}
+                  </div>
+                  <div class="text-xs text-base-content/40">
+                    {new Date(message.createdAt).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            {/if}
           {/each}
         </div>
       </div>
@@ -660,29 +628,15 @@
                     </div>
                   {/if}
                 </div>
-                <div
-                  class="flex items-center gap-2"
-                  onclick={handleActionClick}
+                <button
+                  class="px-3 py-1 rounded-full text-xs bg-error/10 text-error"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteWord(word.id);
+                  }}
                 >
-                  <button
-                    class="px-3 py-1 rounded-full text-xs bg-success/10 text-success"
-                    onclick={() => handleReview(word.id, true)}
-                  >
-                    记住
-                  </button>
-                  <button
-                    class="px-3 py-1 rounded-full text-xs bg-warning/10 text-warning"
-                    onclick={() => handleReview(word.id, false)}
-                  >
-                    忘记
-                  </button>
-                  <button
-                    class="px-3 py-1 rounded-full text-xs bg-error/10 text-error"
-                    onclick={() => handleDeleteWord(word.id)}
-                  >
-                    删除
-                  </button>
-                </div>
+                  删除
+                </button>
               </div>
               <div class="flex items-center gap-2 text-xs text-base-content/50">
                 <span>{word.language}</span>

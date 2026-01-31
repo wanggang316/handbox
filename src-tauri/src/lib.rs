@@ -190,11 +190,7 @@ pub fn run() {
             word_get,
             word_update,
             word_delete,
-            word_review,
-            word_translate,
-            word_lookup_record,
-            word_lookup_history,
-            word_lookup_delete,
+            word_translation_history,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,

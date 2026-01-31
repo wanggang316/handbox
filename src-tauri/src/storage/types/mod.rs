@@ -28,4 +28,4 @@ pub use message::{
 };
 pub use model::{Model, ModelModality};
 pub use provider::Provider;
-pub use word::{Word, WordContext, WordLookupHistory, WordReview};
+pub use word::Word;

@@ -1,12 +1,10 @@
 // 单词相关 IPC 命令
 
 use crate::models::{
-    AppError, CreateWordLookupRequest, CreateWordRequest, ListWordLookupHistoryRequest,
-    ListWordsRequest, ReviewWordRequest, TranslateWordRequest, TranslateWordResponse,
-    UpdateWordRequest, WordDetail,
+    AppError, CreateWordRequest, ListWordsRequest, UpdateWordRequest,
 };
-use crate::services::WordService;
-use crate::storage::types::Word;
+use crate::services::{MessageService, WordService};
+use crate::storage::types::{Message, Word};
 use tauri::State;
 
 #[tauri::command]
@@ -41,8 +39,8 @@ pub async fn word_list(
 pub async fn word_get(
     word_id: String,
     word_service: State<'_, WordService>,
-) -> Result<WordDetail, AppError> {
-    word_service.get_word_detail(&word_id).await
+) -> Result<Word, AppError> {
+    word_service.get_word(&word_id).await
 }
 
 #[tauri::command]
@@ -62,45 +60,16 @@ pub async fn word_delete(
 }
 
 #[tauri::command]
-pub async fn word_review(
-    request: ReviewWordRequest,
-    word_service: State<'_, WordService>,
-) -> Result<crate::storage::types::WordReview, AppError> {
-    word_service.review_word(request).await
-}
+pub async fn word_translation_history(
+    session_id: String,
+    limit: Option<i32>,
+    offset: Option<i32>,
+    message_service: State<'_, MessageService>,
+) -> Result<Vec<Message>, AppError> {
+    let limit = limit.unwrap_or(20);
+    let offset = offset.unwrap_or(0);
 
-#[tauri::command]
-pub async fn word_translate(
-    request: TranslateWordRequest,
-    word_service: State<'_, WordService>,
-) -> Result<TranslateWordResponse, AppError> {
-    word_service.translate_word(request).await
-}
-
-#[tauri::command]
-pub async fn word_lookup_record(
-    request: CreateWordLookupRequest,
-    word_service: State<'_, WordService>,
-) -> Result<crate::storage::types::WordLookupHistory, AppError> {
-    word_service.record_lookup_history(request).await
-}
-
-#[tauri::command]
-pub async fn word_lookup_history(
-    request: Option<ListWordLookupHistoryRequest>,
-    word_service: State<'_, WordService>,
-) -> Result<Vec<crate::storage::types::WordLookupHistory>, AppError> {
-    let request = request.unwrap_or(ListWordLookupHistoryRequest {
-        limit: Some(20),
-        offset: Some(0),
-    });
-    word_service.list_lookup_history(request).await
-}
-
-#[tauri::command]
-pub async fn word_lookup_delete(
-    history_id: String,
-    word_service: State<'_, WordService>,
-) -> Result<(), AppError> {
-    word_service.delete_lookup_history(&history_id).await
+    message_service
+        .get_messages(session_id, Some(limit), Some(offset))
+        .await
 }

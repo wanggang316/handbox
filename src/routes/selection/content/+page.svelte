@@ -8,10 +8,17 @@
   import { settingsState } from "$lib/states/settings.svelte";
   import * as agentApi from "$lib/api/agent";
   import * as chatApi from "$lib/api/chat";
-  import { translateWordStream, recordLookup, listWords } from "$lib/api/word";
-  import type { TranslateWordResponse } from "$lib/types";
+  import * as messageApi from "$lib/api/message";
 
   const appWindow = getCurrentWindow();
+
+  type TranslationResult = {
+    term: string;
+    translation: string;
+    targetLanguage: string;
+    phonetic: string | null;
+    explanation: string | null;
+  };
 
   // 内容状态
   let content = $state({
@@ -23,7 +30,7 @@
   // 翻译状态
   let translation = $state({
     isLoading: false,
-    result: null as TranslateWordResponse | null,
+    result: null as TranslationResult | null,
     error: null as string | null,
   });
 
@@ -148,6 +155,42 @@
   }
 
   /**
+   * 解析翻译响应
+   */
+  function parseTranslationResponse(content: string, term: string): TranslationResult {
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          term,
+          translation: parsed.translation || content,
+          targetLanguage: parsed.targetLanguage || 'unknown',
+          phonetic: parsed.phonetic || null,
+          explanation: parsed.explanation || null,
+        };
+      }
+
+      return {
+        term,
+        translation: content,
+        targetLanguage: 'unknown',
+        phonetic: null,
+        explanation: null,
+      };
+    } catch (error) {
+      console.error('Failed to parse translation response:', error);
+      return {
+        term,
+        translation: content,
+        targetLanguage: 'unknown',
+        phonetic: null,
+        explanation: null,
+      };
+    }
+  }
+
+  /**
    * 执行翻译
    */
   async function handleTranslate() {
@@ -164,42 +207,38 @@
     translation.result = null;
 
     try {
-      await translateWordStream(sessionId, content.text, {
-        onChunk: (text) => {
+      let streamContent = "";
+      await messageApi.sendUserMessageStream({
+        chatId: sessionId,
+        content: content.text,
+        tempUserMessageId: `trans-${Date.now()}`,
+      });
+
+      const unlisten = await messageApi.listenToStreamEvents({
+        onChunk: (data) => {
+          streamContent = data.content;
           translation.result = {
             term: content.text,
-            translation: text,
+            translation: streamContent,
             targetLanguage: "unknown",
             phonetic: null,
             explanation: null,
           };
         },
-        onComplete: async (result) => {
+        onEnd: (data) => {
+          const result = parseTranslationResponse(data.finalContent, content.text);
           translation.result = result;
-
-          // 保存到单词本查询历史
-          try {
-            await recordLookup({
-              term: content.text,
-              translation: result.translation,
-              phonetic: result.phonetic,
-              explanation: result.explanation,
-              sourceLanguage: "auto",
-              targetLanguage: result.targetLanguage,
-            });
-          } catch (error) {
-            console.error("Failed to record lookup:", error);
-          }
+          translation.isLoading = false;
         },
         onError: (error) => {
           console.error("Translation failed:", error);
           translation.error = "翻译失败";
+          translation.isLoading = false;
         },
       });
     } catch (error) {
       console.error("Translation error:", error);
       translation.error = "翻译失败";
-    } finally {
       translation.isLoading = false;
     }
   }
