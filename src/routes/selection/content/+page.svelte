@@ -2,7 +2,19 @@
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
-  import { Eye, Languages, Sparkles, X, Pin, PinOff, Copy, RotateCcw, MessageCirclePlus, ChevronDown, Loader2 } from "@lucide/svelte";
+  import {
+    Eye,
+    Languages,
+    Sparkles,
+    X,
+    Pin,
+    PinOff,
+    Copy,
+    RotateCcw,
+    MessageCirclePlus,
+    ChevronDown,
+    Loader2,
+  } from "@lucide/svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { hideContentPanel, setContentPanelPinned } from "$lib/api/selection";
   import { settingsState } from "$lib/states/settings.svelte";
@@ -79,7 +91,11 @@
 
   // 关闭面板
   async function handleClose() {
-    content = { mode: "", text: "", app_info: { name: "", bundle_id: "", pid: 0 } };
+    content = {
+      mode: "",
+      text: "",
+      app_info: { name: "", bundle_id: "", pid: 0 },
+    };
     isPinned = false;
     await hideContentPanel();
   }
@@ -157,7 +173,10 @@
   /**
    * 解析翻译响应
    */
-  function parseTranslationResponse(content: string, term: string): TranslationResult {
+  function parseTranslationResponse(
+    content: string,
+    term: string,
+  ): TranslationResult {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -165,7 +184,7 @@
         return {
           term,
           translation: parsed.translation || content,
-          targetLanguage: parsed.targetLanguage || 'unknown',
+          targetLanguage: parsed.targetLanguage || "unknown",
           phonetic: parsed.phonetic || null,
           explanation: parsed.explanation || null,
         };
@@ -174,16 +193,16 @@
       return {
         term,
         translation: content,
-        targetLanguage: 'unknown',
+        targetLanguage: "unknown",
         phonetic: null,
         explanation: null,
       };
     } catch (error) {
-      console.error('Failed to parse translation response:', error);
+      console.error("Failed to parse translation response:", error);
       return {
         term,
         translation: content,
-        targetLanguage: 'unknown',
+        targetLanguage: "unknown",
         phonetic: null,
         explanation: null,
       };
@@ -226,7 +245,10 @@
           };
         },
         onEnd: (data) => {
-          const result = parseTranslationResponse(data.finalContent, content.text);
+          const result = parseTranslationResponse(
+            data.finalContent,
+            content.text,
+          );
           translation.result = result;
           translation.isLoading = false;
         },
@@ -246,11 +268,16 @@
 
 <svelte:window onclick={handleClickOutside} />
 
-<div class="flex flex-col w-full h-full bg-base-100 rounded-2xl shadow-lg overflow-hidden">
+<div
+  class="flex flex-col w-full h-full bg-base-100 rounded-2xl shadow-lg overflow-hidden"
+>
   <!-- 标题栏 -->
   {#if content.mode && modeConfig[content.mode]}
     {@const config = modeConfig[content.mode]}
-    <div class="flex items-center justify-between px-3 py-2 border-b border-base-300 cursor-move" data-tauri-drag-region>
+    <div
+      class="flex items-center justify-between px-3 py-2 border-b border-base-300 cursor-move"
+      data-tauri-drag-region
+    >
       <!-- 模式下拉框 -->
       <div class="mode-dropdown relative">
         <button
@@ -264,14 +291,19 @@
 
         <!-- 下拉菜单 -->
         {#if showModeDropdown}
-          <div class="absolute top-full left-0 mt-1 bg-base-100 rounded-lg shadow-lg border border-base-300 py-1 min-w-[120px] z-50">
+          <div
+            class="absolute top-full left-0 mt-1 bg-base-100 rounded-lg shadow-lg border border-base-300 py-1 min-w-[120px] z-50"
+          >
             {#each Object.entries(modeConfig) as [key, value]}
               {@const isActive = key === content.mode}
               <button
-                class="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-base-200 transition-colors {isActive ? 'bg-base-300' : ''}"
+                class="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-base-200 transition-colors {isActive
+                  ? 'bg-base-300'
+                  : ''}"
                 class:text-primary={isActive}
                 class:text-base-content={!isActive}
-                onclick={() => handleModeChange(key as "show" | "translate" | "ai")}
+                onclick={() =>
+                  handleModeChange(key as "show" | "translate" | "ai")}
               >
                 <value.icon class="size-4" />
                 <span>{value.label}</span>
@@ -283,7 +315,9 @@
 
       <div class="flex items-center gap-1">
         <button
-          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-base-200 transition-colors {isPinned ? 'text-primary' : 'text-base-content/50 hover:text-base-content'}"
+          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-base-200 transition-colors {isPinned
+            ? 'text-primary'
+            : 'text-base-content/50 hover:text-base-content'}"
           onclick={togglePin}
           title={isPinned ? "取消置顶" : "置顶"}
         >
@@ -318,24 +352,21 @@
         </div>
       {:else if translation.result}
         <div class="space-y-3">
-          <!-- 原文 -->
-          <div class="p-2 rounded-lg bg-base-200">
-            <p class="text-xs text-base-content/50 mb-1">原文</p>
-            <p class="text-sm text-base-content whitespace-pre-wrap break-words">
-              {content.text}
-            </p>
-          </div>
           <!-- 译文 -->
           <div class="p-2 rounded-lg bg-base-100">
-            <p class="text-xs text-base-content/50 mb-1">译文</p>
-            <p class="text-sm text-base-content whitespace-pre-wrap break-words font-medium">
-              {translation.result.translation}
-            </p>
-            {#if translation.result.phonetic}
-              <p class="text-xs text-base-content/50 mt-1">
-                [{translation.result.phonetic}]
-              </p>
-            {/if}
+            <div class="flex items-center gap-2">
+              <span
+                class="text-sm text-base-content whitespace-pre-wrap break-words font-medium"
+              >
+                {translation.result.translation}
+              </span>
+              {#if translation.result.phonetic}
+                <span class="text-xs text-base-content/50">
+                  [{translation.result.phonetic}]
+                </span>
+              {/if}
+            </div>
+
             {#if translation.result.explanation}
               <p class="text-xs text-base-content/70 mt-1">
                 {translation.result.explanation}
@@ -344,12 +375,12 @@
           </div>
         </div>
       {:else}
-        <p class="text-sm text-base-content/40 text-center py-4">
-          等待翻译...
-        </p>
+        <p class="text-sm text-base-content/40 text-center py-4">等待翻译...</p>
       {/if}
     {:else if content.text}
-      <p class="text-sm text-base-content whitespace-pre-wrap break-words leading-relaxed">
+      <p
+        class="text-sm text-base-content whitespace-pre-wrap break-words leading-relaxed"
+      >
         {content.text}
       </p>
     {:else}
@@ -358,7 +389,9 @@
   </div>
 
   <!-- 底部按钮区域 -->
-  <div class="flex items-center justify-between px-3 py-1.5 border-t border-base-300 bg-base-200/50">
+  <div
+    class="flex items-center justify-between px-3 py-1.5 border-t border-base-300 bg-base-200/50"
+  >
     <!-- 左下角：复制、重新生成 -->
     <div class="flex items-center gap-1">
       <button
