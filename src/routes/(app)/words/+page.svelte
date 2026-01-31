@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
+  import { BookPlus, BookCheck, Trash2, BookMinus } from "lucide-svelte";
   import {
     createWord,
     listWords,
@@ -12,6 +13,7 @@
   import * as messageApi from "$lib/api/message";
   import Select from "$lib/components/ui/Select.svelte";
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
   import { settingsState } from "$lib/states";
   import { providerActions, providerState } from "$lib/states/provider.svelte";
   import type { Word, Message } from "$lib/types";
@@ -312,13 +314,72 @@
       }
 
       const messages = await getTranslationHistory(sessionId, 50, 0);
-      // 只保留用户和助手的消息对
-      translationHistory = messages.filter(
-        (msg) => msg.role === "user" || msg.role === "assistant"
-      );
+      // 只保留用户和助手的消息对，并倒序显示（最新的在前）
+      translationHistory = messages
+        .filter((msg) => msg.role === "user" || msg.role === "assistant")
+        .reverse();
     } catch (error) {
       console.error("Failed to load translation history:", error);
       translationHistory = [];
+    }
+  }
+
+  async function handleAddFromHistory(userMessage: Message, assistantMessage: Message) {
+    try {
+      isLoading = true;
+      errorMessage = null;
+
+      // 尝试解析助手消息的 JSON 响应
+      const parsed = parseTranslationResponse(assistantMessage.content, userMessage.content);
+
+      await createWord({
+        term: userMessage.content,
+        translation: parsed.translation,
+        language: parsed.targetLanguage || "auto",
+        phonetic: parsed.phonetic,
+        explanation: parsed.explanation,
+        source: "history",
+      });
+
+      await loadWords();
+    } catch (error) {
+      console.error("Failed to add word from history:", error);
+      errorMessage = "添加单词失败";
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  async function handleDeleteHistory(messageId: string) {
+    try {
+      await messageApi.deleteMessage(messageId);
+      await loadTranslationHistory();
+    } catch (error) {
+      console.error("Failed to delete history:", error);
+      errorMessage = "删除历史失败";
+    }
+  }
+
+  /**
+   * 检查某个词是否已在单词本中
+   */
+  function isWordInWordbook(term: string): boolean {
+    return words.some((word) => word.term.toLowerCase() === term.toLowerCase());
+  }
+
+  /**
+   * 从单词本中移除某个词
+   */
+  async function handleRemoveFromHistory(term: string) {
+    try {
+      const word = words.find((w) => w.term.toLowerCase() === term.toLowerCase());
+      if (word) {
+        await deleteWord(word.id);
+        await loadWords();
+      }
+    } catch (error) {
+      console.error("Failed to remove word from wordbook:", error);
+      errorMessage = "移除单词失败";
     }
   }
 
@@ -580,8 +641,47 @@
                   <div class="text-sm text-base-content/70">
                     {translationHistory[index + 1].content}
                   </div>
-                  <div class="text-xs text-base-content/40">
-                    {new Date(message.createdAt).toLocaleString()}
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="text-xs text-base-content/40">
+                      {new Date(message.createdAt).toLocaleString()}
+                    </div>
+                    <div class="flex items-center gap-2">
+                      {#if isWordInWordbook(message.content)}
+                        <IconButton
+                          icon={BookMinus}
+                          iconSize={16}
+                          size="w-7 h-7"
+                          bgColor="bg-success/10"
+                          hoverColor="hover:bg-success/20"
+                          textColor="text-success"
+                          title="从单词本移除"
+                          disabled={isLoading}
+                          onclick={() => handleRemoveFromHistory(message.content)}
+                        />
+                      {:else}
+                        <IconButton
+                          icon={BookPlus}
+                          iconSize={16}
+                          size="w-7 h-7"
+                          bgColor="bg-primary/10"
+                          hoverColor="hover:bg-primary/20"
+                          textColor="text-primary"
+                          title="加入单词本"
+                          disabled={isLoading}
+                          onclick={() => handleAddFromHistory(message, translationHistory[index + 1])}
+                        />
+                      {/if}
+                      <IconButton
+                        icon={Trash2}
+                        iconSize={16}
+                        size="w-7 h-7"
+                        bgColor="bg-error/10"
+                        hoverColor="hover:bg-error/20"
+                        textColor="text-error"
+                        title="删除"
+                        onclick={() => handleDeleteHistory(message.id)}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
