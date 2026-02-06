@@ -60,10 +60,8 @@ pub struct GeneralSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslationSettings {
-    pub model_id: Option<String>,
-    pub provider_id: Option<String>,
-    /// 目标语言，支持 "system" 或 IETF 语言标签（如 "en-US"）
-    pub target_language: String,
+    /// 翻译使用的 Session ID
+    pub session_id: Option<String>,
 }
 
 /// MCP 服务器配置

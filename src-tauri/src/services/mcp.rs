@@ -8,7 +8,7 @@ use crate::models::{
 };
 use crate::services::Database;
 use crate::storage::types::{McpServer, McpServerStatus};
-use crate::storage::{ChatRepository, McpRepository};
+use crate::storage::{SessionRepository, McpRepository};
 use handbox_mcp::{
     validate_server_config, ConnectionConfig, McpClient, McpClientError, McpPrompt,
     McpPromptArgument, McpResource, McpTool, ProcessConfig, SseConfig, StreamableHttpConfig,
@@ -18,14 +18,14 @@ use handbox_mcp::{
 #[derive(Clone)]
 pub struct McpService {
     repository: McpRepository,
-    chat_repository: ChatRepository,
+    chat_repository: SessionRepository,
 }
 
 impl McpService {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: McpRepository::new(db.clone()),
-            chat_repository: ChatRepository::new(db),
+            chat_repository: SessionRepository::new(db),
         }
     }
 

@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Plus, Bot, Pencil, Trash2, Settings } from "@lucide/svelte";
+  import { Plus, Bot, Pencil, Trash2, Settings, Play } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import type { Agent } from "$lib/types";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import AgentFormModal from "$lib/components/agent/AgentFormModal.svelte";
   import type { AgentFormData } from "$lib/components/agent/AgentFormModal.svelte";
+  import { createSessionFromAgent } from "$lib/api/chat";
 
   let searchQuery = $state("");
 
@@ -130,6 +132,18 @@
     }
   }
 
+  async function handleUseAgent(agent: Agent) {
+    if (!agent.id) return;
+    try {
+      // 通过 Agent 创建 Session
+      const session = await createSessionFromAgent(agent.id);
+      // 跳转到聊天页面
+      goto(`/chat/${session.id}`);
+    } catch (error) {
+      console.error("Failed to create session from agent:", error);
+    }
+  }
+
   function getModelName(agent: Agent): string {
     return agent.model || "未设置";
   }
@@ -222,6 +236,13 @@
                 </div>
               </div>
               <div class="flex items-center gap-1">
+                <button
+                  class="p-1.5 rounded-lg hover:bg-success/10 text-base-content/60 hover:text-success transition-colors"
+                  on:click={() => handleUseAgent(agent)}
+                  title="使用"
+                >
+                  <Play size={14} />
+                </button>
                 <button
                   class="p-1.5 rounded-lg hover:bg-base-100 text-base-content/60 hover:text-base-content transition-colors"
                   on:click={() => openEditModal(agent)}

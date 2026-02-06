@@ -35,6 +35,7 @@ interface MessageState {
   streamingContent: string;
   streamingReasoning: string;
   streamingToolCalls: ToolCall[] | null;
+  streamingIsGeneratingAssets: boolean;
 }
 
 interface ToolExecuteEventPayload {
@@ -53,6 +54,7 @@ class MessageStore {
     streamingContent: "",
     streamingReasoning: "",
     streamingToolCalls: null,
+    streamingIsGeneratingAssets: false,
   });
 
   // 当前流式事件监听器的清理函数
@@ -85,6 +87,10 @@ class MessageStore {
 
   get streamingToolCalls() {
     return this.state.streamingToolCalls;
+  }
+
+  get streamingIsGeneratingAssets() {
+    return this.state.streamingIsGeneratingAssets;
   }
 
   // 判断是否正在推理中（有推理内容但还没有最终内容）
@@ -187,7 +193,7 @@ class MessageStore {
     } else {
       const newMessage: Message = {
         id: response.messageId,
-        chatId,
+        sessionId: chatId,
         role: "assistant",
         content: response.content,
         reasoning: response.reasoning,
@@ -313,6 +319,7 @@ class MessageStore {
     this.state.streamingContent = "";
     this.state.streamingReasoning = "";
     this.state.streamingToolCalls = null;
+    this.state.streamingIsGeneratingAssets = false;
   }
 
   // 更新流式内容
@@ -335,6 +342,11 @@ class MessageStore {
     this.state.streamingToolCalls = toolCalls;
   }
 
+  // 设置是否正在生成资源
+  setStreamingIsGeneratingAssets(value: boolean) {
+    this.state.streamingIsGeneratingAssets = value;
+  }
+
   // 添加流式生成的图片
   // 完成流式响应
   finishStreaming(chatId: string, response: MessageResponse) {
@@ -345,6 +357,7 @@ class MessageStore {
     this.state.streamingContent = "";
     this.state.streamingReasoning = "";
     this.state.streamingToolCalls = null;
+    this.state.streamingIsGeneratingAssets = false;
   }
 
   /**
@@ -369,6 +382,9 @@ class MessageStore {
         }
         if (data.toolCalls) {
           this.setStreamingToolCalls(data.toolCalls);
+        }
+        if (data.isGeneratingAssets !== undefined) {
+          this.setStreamingIsGeneratingAssets(data.isGeneratingAssets);
         }
       },
 
@@ -579,7 +595,7 @@ class MessageStore {
       // 添加用户消息到本地状态
       const userMessage: Message = {
         id: crypto.randomUUID(),
-        chatId: currentChat.id,
+        sessionId: currentChat.id,
         role: "user",
         content: content,
         config: {

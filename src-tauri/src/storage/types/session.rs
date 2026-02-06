@@ -17,10 +17,10 @@ pub struct McpServerConfig {
     pub enabled_tools: Vec<String>,
 }
 
-/// 聊天实体
+/// Session 实体（Agent 的实例）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Chat {
+pub struct Session {
     pub id: UUID,
     pub name: String,
     pub last_message_at: Option<Timestamp>,
@@ -36,7 +36,8 @@ pub struct Chat {
     pub mcp_servers: Vec<McpServerConfig>,
     pub turn_count: Option<i32>,
     pub artifact_id: Option<UUID>,
-    pub reasoning: Option<ChatReasoningConfig>,
+    pub agent_id: Option<UUID>, // 关联的 Agent ID
+    pub reasoning: Option<SessionReasoningConfig>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -53,10 +54,10 @@ pub struct LlmOpenrouterReasoning {
     pub exclude: Option<bool>,
 }
 
-/// 聊天级推理配置
+/// Session 级推理配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatReasoningConfig {
+pub struct SessionReasoningConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub responses: Option<LlmResponsesReasoning>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,9 +81,9 @@ mod tests {
     }
 
     #[test]
-    fn chat_serialization_roundtrip() {
-        let chat = Chat {
-            id: "chat_1".to_string(),
+    fn session_serialization_roundtrip() {
+        let session = Session {
+            id: "session_1".to_string(),
             name: "Test".to_string(),
             last_message_at: Some(1000),
             message_count: 5,
@@ -101,14 +102,15 @@ mod tests {
             }],
             turn_count: Some(5),
             artifact_id: None,
+            agent_id: None,
             reasoning: None,
             created_at: 1000,
             updated_at: 2000,
         };
 
-        let json = serde_json::to_string(&chat).expect("serialize");
-        let deserialized: Chat = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(chat.id, deserialized.id);
-        assert_eq!(chat.name, deserialized.name);
+        let json = serde_json::to_string(&session).expect("serialize");
+        let deserialized: Session = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(session.id, deserialized.id);
+        assert_eq!(session.name, deserialized.name);
     }
 }

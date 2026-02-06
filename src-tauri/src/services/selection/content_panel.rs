@@ -107,7 +107,7 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
         tracing::info!("Showing content panel: {}", PANEL_LABEL);
 
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
-            let _ = window.set_position(LogicalPosition::new(x - 180.0, y + 8.0));
+            let _ = window.set_position(LogicalPosition::new(x - 20.0, y - 250.0));
             let _ = window.show();
         }
     });

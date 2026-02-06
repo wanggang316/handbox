@@ -41,9 +41,7 @@ export interface GeneralSettings {
 
 // 翻译设置
 export interface TranslationSettings {
-  modelId?: string | null;
-  providerId?: string | null;
-  targetLanguage: TranslationTargetLanguage;
+  sessionId?: string | null; // 翻译使用的 Session ID
 }
 
 // MCP 服务器配置

@@ -111,17 +111,7 @@ export async function resendUserMessageStream(
 export async function sendUserMessageStream(
   request: UserMessageSendRequest,
 ): Promise<void> {
-  // Tauri 命令期望参数名与函数参数名匹配
-  const payload = {
-    request: {
-      chat_id: request.chatId,
-      content: request.content,
-      temp_user_message_id: request.tempUserMessageId,
-      attachments: request.attachments,
-    },
-  };
-
-  await apiCall<void>("message_user_send_stream", payload);
+  await apiCall<void>("message_user_send_stream", { request: request });
 }
 
 /**
@@ -134,6 +124,7 @@ export interface StreamEventHandlers {
     content: string;
     reasoning?: string;
     toolCalls?: any[];
+    isGeneratingAssets?: boolean;
     chunk: string;
     index: number;
   }) => void;

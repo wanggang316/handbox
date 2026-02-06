@@ -5,7 +5,6 @@
     MessageSquarePlus,
     MessageSquareDashed,
   } from "@lucide/svelte";
-  import { createEventDispatcher } from "svelte";
 
   interface Props {
     sidebarOpen?: boolean;
@@ -25,24 +24,15 @@
     onImplicitCreate,
   }: Props = $props();
 
-  const dispatch = createEventDispatcher<{
-    toggle: void;
-    newChat: void;
-    implicitCreate: void;
-  }>();
-
   function handleToggle() {
-    dispatch("toggle");
     onToggle?.();
   }
 
-  function handleNewChat() {
-    dispatch("newChat");
+  async function handleNewChat() {
     onNewChat?.();
   }
 
   function handleImplicitCreate() {
-    dispatch("implicitCreate");
     onImplicitCreate?.();
   }
 </script>

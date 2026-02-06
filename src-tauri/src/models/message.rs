@@ -8,6 +8,7 @@ use handbox_llm::types::LlmMessage;
 
 /// 消息请求附件
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageRequestAttachment {
     pub name: String,
     pub mime_type: String,
@@ -18,6 +19,7 @@ pub struct MessageRequestAttachment {
 
 /// 消息请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageRequest {
     pub chat_id: Option<UUID>,
     pub model_id: String,
@@ -27,6 +29,7 @@ pub struct MessageRequest {
 
 /// 用户消息流式发送请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserMessageSendRequest {
     pub chat_id: UUID,
     pub content: String,
@@ -41,6 +44,9 @@ pub struct StreamChunk {
     pub content: String,
     pub reasoning: Option<String>,
     pub tool_calls: Option<Vec<MessageToolCall>>,
+    /// 是否正在生成资源（如图片）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_generating_assets: Option<bool>,
 }
 
 /// 消息响应

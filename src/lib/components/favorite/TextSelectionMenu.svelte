@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Copy, Languages, Star, X as CloseIcon } from "@lucide/svelte";
   import type { Snippet } from "svelte";
-  import { translateWord } from "$lib/api/word";
   import { favoriteStore } from "$lib/states";
   import type { UUID } from "$lib/types";
   import { showAppError } from "$lib/utils/error";
@@ -197,12 +196,8 @@
     showMenu = false;
 
     try {
-      const response = await translateWord({ term: selectedText });
-      translateResult = response;
-    } catch (error) {
-      console.error("Failed to translate selection:", error);
-      const normalized = showAppError(error, { fallbackMessage: "翻译失败" });
-      translateError = normalized.message;
+      // 翻译功能已迁移到单词本页面，这里暂时禁用
+      translateError = "翻译功能已迁移，请使用单词本页面的查词功能";
     } finally {
       isTranslating = false;
     }

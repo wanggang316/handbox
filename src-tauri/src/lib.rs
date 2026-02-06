@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentService, ArtifactService,
-    ChatService, McpService, MessageService, ModelService, ProviderService, SearchService,
+    SessionService, McpService, MessageService, ModelService, ProviderService, SearchService,
     SettingsService, StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
@@ -116,16 +116,17 @@ pub fn run() {
             auth_get_user,
             auth_update_profile,
             auth_validate_token,
-            // 聊天相关命令
-            chat_create,
-            chat_list,
-            chat_get,
-            chat_update_field,
-            chat_update_model,
-            chat_clear_model_parameters,
-            chat_update_name,
-            chat_delete,
-            chat_generate_title,
+            // Session 相关命令 (原 chat 相关命令)
+            session_create,
+            session_list,
+            session_get,
+            session_update_field,
+            session_update_model,
+            session_clear_model_parameters,
+            session_update_name,
+            session_delete,
+            session_generate_title,
+            session_create_from_agent,
             // Agent 相关命令
             agent_create,
             agent_list,
@@ -189,11 +190,7 @@ pub fn run() {
             word_get,
             word_update,
             word_delete,
-            word_review,
-            word_translate,
-            word_lookup_record,
-            word_lookup_history,
-            word_lookup_delete,
+            word_translation_history,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
@@ -289,17 +286,17 @@ async fn initialize_services(
     let mcp_service = McpService::new(database_service.clone());
     let mcp_service_shared = Arc::new(mcp_service.clone());
 
-    let chat_service = ChatService::new(
+    let session_service = SessionService::new(
         database_service.clone(),
         provider_service_shared.clone(),
         llm_config_provider.clone(),
     );
-    let chat_service_shared = Arc::new(chat_service.clone());
+    let session_service_shared = Arc::new(session_service.clone());
 
     let message_service = MessageService::new(
         database_service.clone(),
         provider_service_shared.clone(),
-        chat_service_shared,
+        session_service_shared,
         mcp_service_shared,
         storage_service.clone(),
         llm_config_provider.clone(),
@@ -312,9 +309,7 @@ async fn initialize_services(
     let word_repo = Arc::new(WordRepository::new(database_service.clone()));
     let word_service = WordService::new(
         word_repo,
-        provider_service_shared.clone(),
         settings_service.clone(),
-        llm_config_provider.clone(),
     );
 
     // 初始化用户会话服务
@@ -337,7 +332,7 @@ async fn initialize_services(
 
     // 将服务注册到应用状态
     app.manage(storage_service);
-    app.manage(chat_service);
+    app.manage(session_service);
     app.manage(message_service);
     app.manage(provider_service);
     app.manage(model_service);

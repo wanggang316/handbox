@@ -1,16 +1,16 @@
-// 聊天服务实现
+// Session 服务实现
 
 use crate::models::AppError;
 use crate::services::{Database, ProviderService};
-use crate::storage::types::{Chat, ChatReasoningConfig, McpServerConfig, Provider, UUID};
-use crate::storage::{ChatRepository, MessageRepository};
+use crate::storage::types::{Session, SessionReasoningConfig, McpServerConfig, Provider, UUID};
+use crate::storage::{AgentRepository, SessionRepository, MessageRepository};
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::types::{LlmMessage, LlmMessageRole, LlmRequest};
 use handbox_llm::{create_llm_client, LlmProvider};
 use std::sync::Arc;
 
-/// 聊天参数类型
-pub enum ChatParameter {
+/// Session 参数类型
+pub enum SessionParameter {
     Name(String),
     Temperature(Option<f32>),
     TopP(Option<f32>),
@@ -24,26 +24,28 @@ pub enum ChatParameter {
     SystemPrompt(Option<String>),
     McpServers(Vec<McpServerConfig>),
     TurnCount(Option<i32>),
-    Reasoning(Option<ChatReasoningConfig>),
+    Reasoning(Option<SessionReasoningConfig>),
 }
 
-/// 聊天服务
+/// Session 服务
 #[derive(Clone)]
-pub struct ChatService {
-    repository: ChatRepository,
+pub struct SessionService {
+    repository: SessionRepository,
+    agent_repository: AgentRepository,
     message_repository: MessageRepository,
     provider_service: Arc<ProviderService>,
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
-impl ChatService {
+impl SessionService {
     pub fn new(
         db: Arc<Database>,
         provider_service: Arc<ProviderService>,
         llm_config: Arc<dyn LlmConfigProvider>,
     ) -> Self {
         Self {
-            repository: ChatRepository::new(db.clone()),
+            repository: SessionRepository::new(db.clone()),
+            agent_repository: AgentRepository::new(db.clone()),
             message_repository: MessageRepository::new(db),
             provider_service,
             llm_config,
@@ -57,7 +59,7 @@ impl ChatService {
         }
     }
 
-    /// 创建聊天
+    /// 创建 Session
     pub async fn create_chat(
         &self,
         name: String,
@@ -70,13 +72,13 @@ impl ChatService {
         provider_id: Option<String>,
         system_prompt: Option<String>,
         mcp_servers: Option<Vec<McpServerConfig>>,
-    ) -> Result<Chat, AppError> {
+    ) -> Result<Session, AppError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
 
-        let chat = Chat {
+        let chat = Session {
             id: uuid::Uuid::new_v4().to_string(),
             name,
             last_message_at: None,
@@ -92,6 +94,7 @@ impl ChatService {
             mcp_servers: mcp_servers.unwrap_or_default(),
             turn_count: Some(5), // 默认值为 5
             artifact_id: None,
+            agent_id: None,
             reasoning: None,
             created_at: now,
             updated_at: now,
@@ -101,20 +104,60 @@ impl ChatService {
         Ok(chat)
     }
 
-    /// 获取聊天列表
+    /// 通过 Agent 创建 Session（复制 Agent 的配置到 Session）
+    pub async fn create_session_from_agent(&self, agent_id: UUID) -> Result<Session, AppError> {
+        // 获取 Agent 配置
+        let agent = match self.agent_repository.get_agent_by_id(&agent_id).await? {
+            Some(agent) => agent,
+            None => return Err(AppError::not_found(&format!("Agent not found: {}", agent_id))),
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // 从 Agent 创建 Session，复制所有配置
+        let session = Session {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: format!("{} - Session", agent.name),
+            last_message_at: None,
+            message_count: 0,
+            temperature: agent.temperature,
+            top_p: agent.top_p,
+            top_k: agent.top_k,
+            max_tokens: agent.max_tokens,
+            stream: None,
+            model_id: agent.model,
+            provider_id: None,
+            system_prompt: agent.system_prompt,
+            mcp_servers: agent.mcp_servers,
+            turn_count: Some(5),
+            artifact_id: None,
+            agent_id: Some(agent_id),
+            reasoning: agent.reasoning,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.repository.create_session(&session).await?;
+        Ok(session)
+    }
+
+    /// 获取 Session 列表
     pub async fn list_chats(
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> Result<Vec<Chat>, AppError> {
+    ) -> Result<Vec<Session>, AppError> {
         let limit = limit.unwrap_or(50);
         let offset = offset.unwrap_or(0);
 
         self.repository.list_chats(limit, offset).await
     }
 
-    /// 获取聊天详情
-    pub async fn get_chat(&self, chat_id: UUID) -> Result<Chat, AppError> {
+    /// 获取 Session 详情
+    pub async fn get_chat(&self, chat_id: UUID) -> Result<Session, AppError> {
         match self.repository.get_chat_by_id(&chat_id).await? {
             Some(chat) => Ok(chat),
             None => Err(AppError::not_found(&format!("Chat not found: {}", chat_id))),
@@ -125,28 +168,28 @@ impl ChatService {
     pub async fn update_chat_parameter(
         &self,
         chat_id: UUID,
-        parameter: ChatParameter,
-    ) -> Result<Chat, AppError> {
+        parameter: SessionParameter,
+    ) -> Result<Session, AppError> {
         let mut chat = self.get_chat(chat_id).await?;
 
         match parameter {
-            ChatParameter::Name(name) => chat.name = name,
-            ChatParameter::Temperature(temp) => chat.temperature = temp,
-            ChatParameter::TopP(top_p) => chat.top_p = top_p,
-            ChatParameter::TopK(top_k) => chat.top_k = top_k,
-            ChatParameter::MaxTokens(max_tokens) => chat.max_tokens = max_tokens,
-            ChatParameter::Stream(stream) => chat.stream = stream,
-            ChatParameter::Model {
+            SessionParameter::Name(name) => chat.name = name,
+            SessionParameter::Temperature(temp) => chat.temperature = temp,
+            SessionParameter::TopP(top_p) => chat.top_p = top_p,
+            SessionParameter::TopK(top_k) => chat.top_k = top_k,
+            SessionParameter::MaxTokens(max_tokens) => chat.max_tokens = max_tokens,
+            SessionParameter::Stream(stream) => chat.stream = stream,
+            SessionParameter::Model {
                 model_id,
                 provider_id,
             } => {
                 chat.model_id = Some(model_id);
                 chat.provider_id = Some(provider_id);
             }
-            ChatParameter::SystemPrompt(prompt) => chat.system_prompt = prompt,
-            ChatParameter::McpServers(servers) => chat.mcp_servers = servers,
-            ChatParameter::TurnCount(turn_count) => chat.turn_count = turn_count,
-            ChatParameter::Reasoning(reasoning) => chat.reasoning = reasoning,
+            SessionParameter::SystemPrompt(prompt) => chat.system_prompt = prompt,
+            SessionParameter::McpServers(servers) => chat.mcp_servers = servers,
+            SessionParameter::TurnCount(turn_count) => chat.turn_count = turn_count,
+            SessionParameter::Reasoning(reasoning) => chat.reasoning = reasoning,
         }
 
         chat.updated_at = Self::current_timestamp();
@@ -169,7 +212,7 @@ impl ChatService {
         system_prompt: Option<String>,
         mcp_servers: Option<Vec<McpServerConfig>>,
         turn_count: Option<i32>,
-    ) -> Result<Chat, AppError> {
+    ) -> Result<Session, AppError> {
         let mut chat = self.get_chat(chat_id).await?;
 
         if let Some(n) = name {
@@ -212,7 +255,7 @@ impl ChatService {
     }
 
     /// 清空模型相关参数
-    pub async fn clear_model_parameters(&self, chat_id: UUID) -> Result<Chat, AppError> {
+    pub async fn clear_model_parameters(&self, chat_id: UUID) -> Result<Session, AppError> {
         let mut chat = self.get_chat(chat_id).await?;
         chat.temperature = None;
         chat.top_p = None;
@@ -244,7 +287,7 @@ impl ChatService {
     /// 生成聊天标题
     pub async fn generate_title(&self, chat_id: UUID) -> Result<String, AppError> {
         tracing::info!(
-            "[ChatService::generate_title] Generating title for chat: {}",
+            "[SessionService::generate_title] Generating title for chat: {}",
             chat_id
         );
 
@@ -305,7 +348,7 @@ impl ChatService {
         .map_err(|e| {
             let error: AppError = e.into();
             tracing::error!(
-                "[ChatService::generate_title] Failed to create LLM client for provider type {}: {}",
+                "[SessionService::generate_title] Failed to create LLM client for provider type {}: {}",
                 provider.provider_type,
                 error.message
             );
@@ -337,14 +380,14 @@ impl ChatService {
         };
 
         // 10. 调用LLM API
-        let provider_context = ChatService::provider_context(&provider);
+        let provider_context = SessionService::provider_context(&provider);
         let response = llm_client
             .chat(&provider_context, api_request)
             .await
             .map_err(|e| {
                 let error: AppError = e.into();
                 tracing::error!(
-                    "[ChatService::generate_title] Failed to call LLM API for provider {}: {}",
+                    "[SessionService::generate_title] Failed to call LLM API for provider {}: {}",
                     provider.provider_type,
                     error.message
                 );
@@ -375,7 +418,7 @@ impl ChatService {
         };
 
         tracing::info!(
-            "[ChatService::generate_title] Generated title: {}",
+            "[SessionService::generate_title] Generated title: {}",
             final_title
         );
         Ok(final_title)
@@ -411,7 +454,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let _service = ChatService::new(db, provider_service, llm_config_provider);
+        let _service = SessionService::new(db, provider_service, llm_config_provider);
     }
 
     #[tokio::test]
@@ -423,7 +466,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         let chat = service
             .create_chat(
@@ -475,7 +518,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         service
             .create_chat(
@@ -530,7 +573,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -566,7 +609,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         let err = service
             .get_chat("nonexistent_chat".to_string())
@@ -585,7 +628,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -668,7 +711,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -708,7 +751,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         let chat = service
             .create_chat(
@@ -760,7 +803,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         // 创建带有参数的聊天
         let created = service
@@ -820,7 +863,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         let created = service
             .create_chat(
@@ -860,7 +903,7 @@ mod tests {
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = ChatService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service, llm_config_provider);
 
         // 创建带有参数的聊天
         let created = service

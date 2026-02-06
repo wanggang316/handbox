@@ -30,7 +30,7 @@ export interface MessageConfig {
 
 // 消息类型
 export interface Message extends BaseEntity {
-  chatId: UUID;
+  sessionId: UUID;
   role: MessageRole;
   content: string;
   reasoning?: string; // 推理过程内容
