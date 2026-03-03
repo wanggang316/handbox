@@ -14,7 +14,7 @@
   import type { Message, MessageAttachment } from "$lib/types";
   import type { TextRange } from "$lib/types/favorite";
   import { messageStore, favoriteStore } from "$lib/states";
-  import { highlightRange, openInBrowser, renderMarkdown } from "$lib/utils";
+  import { highlightRange, openInBrowser, renderMarkdown, markdownInteractions, copyToClipboard } from "$lib/utils";
   import {
     resolveLocalAssetPath,
     isTauriEnvironment,
@@ -156,9 +156,13 @@
   }
 
   // 处理操作
-  function handleCopy() {
+  async function handleCopy() {
     if (message?.content) {
-      onCopy?.(message.content);
+      if (onCopy) {
+        onCopy(message.content);
+      } else {
+        await copyToClipboard(message.content);
+      }
     }
   }
 
@@ -172,110 +176,6 @@
     if (message?.id) {
       onDelete?.(message.id);
     }
-  }
-
-  function closestButton(target: EventTarget | null): HTMLButtonElement | null {
-    if (!(target instanceof Element)) return null;
-    return target.closest<HTMLButtonElement>(".markdown-code-block__copy");
-  }
-
-  function closestLink(target: EventTarget | null): HTMLAnchorElement | null {
-    if (!(target instanceof Element)) return null;
-    return target.closest<HTMLAnchorElement>("a[href]");
-  }
-
-  function isExternalLink(link: HTMLAnchorElement): boolean {
-    const href = link.getAttribute("href")?.trim();
-    if (!href) return false;
-
-    const lowerHref = href.toLowerCase();
-    if (lowerHref.startsWith("http://") || lowerHref.startsWith("https://")) {
-      return true;
-    }
-
-    return lowerHref.startsWith("mailto:") || lowerHref.startsWith("tel:");
-  }
-
-  async function openMarkdownLink(link: HTMLAnchorElement) {
-    try {
-      await openInBrowser(link.href);
-    } catch (error) {
-      console.error("Failed to open markdown link", error);
-    }
-  }
-
-  async function copyText(content: string) {
-    try {
-      await navigator.clipboard.writeText(content);
-    } catch (error) {
-      const textarea = document.createElement("textarea");
-      textarea.value = content;
-      textarea.setAttribute("readonly", "");
-      textarea.style.position = "absolute";
-      textarea.style.left = "-9999px";
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        document.execCommand("copy");
-      } catch (fallbackError) {
-        console.error("Failed to copy code block", fallbackError);
-      }
-      document.body.removeChild(textarea);
-    }
-  }
-
-  function markdownInteractions(node: HTMLElement) {
-    const handleClick = async (event: MouseEvent) => {
-      const button = closestButton(event.target);
-      if (button) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const block = button.closest<HTMLElement>(".markdown-code-block");
-        const codeElement = block?.querySelector("code");
-        const codeContent = codeElement?.textContent ?? "";
-
-        if (!codeContent) return;
-
-        if (onCopy) {
-          onCopy(codeContent);
-        } else {
-          await copyText(codeContent);
-        }
-
-        button.classList.add("copied");
-
-        const timerId = button.dataset.copyTimeout
-          ? Number(button.dataset.copyTimeout)
-          : undefined;
-        if (timerId) {
-          window.clearTimeout(timerId);
-        }
-
-        const timeoutHandle = window.setTimeout(() => {
-          button.classList.remove("copied");
-          delete button.dataset.copyTimeout;
-        }, 1500);
-
-        button.dataset.copyTimeout = String(timeoutHandle);
-        return;
-      }
-
-      const link = closestLink(event.target);
-      if (link && isExternalLink(link)) {
-        event.preventDefault();
-        event.stopPropagation();
-        await openMarkdownLink(link);
-      }
-    };
-
-    node.addEventListener("click", handleClick);
-
-    return {
-      destroy() {
-        node.removeEventListener("click", handleClick);
-      },
-    };
   }
 
   // 切换推理过程显示状态

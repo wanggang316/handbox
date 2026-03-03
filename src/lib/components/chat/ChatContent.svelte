@@ -2,6 +2,7 @@
   import { chatState } from '$lib/states/chat.svelte';
   import { favoriteStore } from '$lib/states';
   import { messageStore } from '$lib/states/message.svelte';
+  import { copyToClipboard } from '$lib/utils';
   import { Bot } from 'lucide-svelte';
   import type { Message } from '$lib/types';
   import { tick } from 'svelte';
@@ -18,29 +19,6 @@
   }
 
   let { onEditMessage, targetMessageId = null, focusKey = null }: Props = $props();
-
-  // 复制消息内容
-  async function copyMessage(content: string) {
-    try {
-      await navigator.clipboard.writeText(content);
-      console.log('Message copied successfully');
-      // TODO: 集成 toast 提示系统显示成功提示
-    } catch (error) {
-      console.error('Failed to copy message:', error);
-      // Fallback: 使用传统方法复制
-      const textArea = document.createElement('textarea');
-      textArea.value = content;
-      document.body.appendChild(textArea);
-      textArea.select();
-      try {
-        document.execCommand('copy');
-        console.log('Message copied using fallback method');
-      } catch (fallbackError) {
-        console.error('Fallback copy also failed:', fallbackError);
-      }
-      document.body.removeChild(textArea);
-    }
-  }
 
   // 操作状态
   let operatingMessageId = $state<string | null>(null);
@@ -316,14 +294,14 @@
               {message}
               isOperating={operatingMessageId === message.id}
               onResend={resendMessage}
-              onCopy={copyMessage}
+              onCopy={copyToClipboard}
               onEdit={onEditMessage}
             />
           {:else if message.role === 'assistant'}
             <AssistantMessageView
               {message}
               isOperating={operatingMessageId === message.id}
-              onCopy={copyMessage}
+              onCopy={copyToClipboard}
               onRegenerate={regenerateMessage}
               onDelete={deleteMessage}
             />

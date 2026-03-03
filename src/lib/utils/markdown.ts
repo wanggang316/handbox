@@ -1,4 +1,5 @@
 import { Marked } from "marked";
+import { copyToClipboard, openInBrowser } from "./browser";
 import { markedHighlight } from "marked-highlight";
 import type { Tokens } from "marked";
 import hljs from "highlight.js/lib/common";
@@ -308,4 +309,94 @@ function resolveImageSource(rawSrc: unknown): string {
   }
 
   return trimmed;
+}
+
+// ── Svelte Action: markdown 区域交互 ──────────────────────────────────────────
+
+function closestButton(target: EventTarget | null): HTMLButtonElement | null {
+  if (!(target instanceof Element)) return null;
+  return target.closest<HTMLButtonElement>(".markdown-code-block__copy");
+}
+
+function closestLink(target: EventTarget | null): HTMLAnchorElement | null {
+  if (!(target instanceof Element)) return null;
+  return target.closest<HTMLAnchorElement>("a[href]");
+}
+
+function isExternalLink(link: HTMLAnchorElement): boolean {
+  const href = link.getAttribute("href")?.trim();
+  if (!href) return false;
+  const lowerHref = href.toLowerCase();
+  return (
+    lowerHref.startsWith("http://") ||
+    lowerHref.startsWith("https://") ||
+    lowerHref.startsWith("mailto:") ||
+    lowerHref.startsWith("tel:")
+  );
+}
+
+async function openMarkdownLink(link: HTMLAnchorElement) {
+  try {
+    await openInBrowser(link.href);
+  } catch (error) {
+    console.error("Failed to open markdown link", error);
+  }
+}
+
+/**
+ * Svelte action：为 markdown 渲染区域添加交互行为。
+ * - 点击代码块复制按钮：复制代码内容
+ * - 点击外链：在系统浏览器中打开
+ *
+ * @example
+ * ```svelte
+ * <div use:markdownInteractions>
+ *   {@html renderMarkdown(content)}
+ * </div>
+ * ```
+ */
+export function markdownInteractions(node: HTMLElement) {
+  const handleClick = async (event: MouseEvent) => {
+    const button = closestButton(event.target);
+    if (button) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const block = button.closest<HTMLElement>(".markdown-code-block");
+      const codeContent = block?.querySelector("code")?.textContent ?? "";
+      if (!codeContent) return;
+
+      await copyToClipboard(codeContent);
+
+      button.classList.add("copied");
+
+      const timerId = button.dataset.copyTimeout
+        ? Number(button.dataset.copyTimeout)
+        : undefined;
+      if (timerId) window.clearTimeout(timerId);
+
+      const timeoutHandle = window.setTimeout(() => {
+        button.classList.remove("copied");
+        delete button.dataset.copyTimeout;
+      }, 1500);
+
+      button.dataset.copyTimeout = String(timeoutHandle);
+      return;
+    }
+
+    const link = closestLink(event.target);
+    if (link && isExternalLink(link)) {
+      event.preventDefault();
+      event.stopPropagation();
+      await openMarkdownLink(link);
+    }
+  };
+
+  node.addEventListener("click", handleClick);
+
+  return {
+    destroy() {
+      node.removeEventListener("click", handleClick);
+    },
+  };
 }
