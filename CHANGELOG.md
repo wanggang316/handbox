@@ -9,20 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+
+## [0.1.1] - 2026-05-06
+
+### Added
 - System tray (menu bar) icon with Open / Do Something / Quit menu.
 - In-app updater wired through `tauri-plugin-updater` with a Settings page check/install flow.
 - Release script `scripts/release.sh` and GitHub Actions release workflow.
 
 ### Changed
-
 - Replaced local path crate dependencies (`openai-rust`, `google-genai-rust`) with remote git references.
 - Hide main window on close instead of destroying it, so the tray Open command can always restore it.
 
 ### Fixed
-
 - Corrected misleading error message reporting `OSSEndpoint` when `OSSRegion` was missing from environment.
-
-### Removed
 
 ## [0.1.0] - 2026-05-06
 
