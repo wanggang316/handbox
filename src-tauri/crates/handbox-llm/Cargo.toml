@@ -16,8 +16,8 @@ serde_json = "1"
 thiserror = "1.0"
 tracing = "0.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
-openai-rust = { path = "../../../../../openai-rust/openai-rust" }
-google-genai-rust = { path = "../../../../../google-genai-rust/google-genai-rust" }
+openai-rust = { git = "https://github.com/wanggang316/openai-rust.git", branch = "master" }
+google-genai-rust = { git = "https://github.com/wanggang316/google-genai-rust.git", branch = "main" }
 rmcp = { version = "0.7", features = ["client"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.0", features = ["macros", "rt", "sync"] }
