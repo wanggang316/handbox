@@ -7,7 +7,10 @@ pub mod menu;
 pub mod models;
 pub mod services;
 pub mod storage;
+pub mod tray;
 pub mod utils;
+
+use crate::tray::setup_tray;
 
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
@@ -57,6 +60,11 @@ pub fn run() {
             // 创建菜单
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
+
+            // Setup tray icon and menu
+            if let Err(e) = setup_tray(app.handle()) {
+                eprintln!("Failed to setup tray: {}", e);
+            }
 
             // 创建选择面板 (NSPanel) - 必须在setup中同步创建
             #[cfg(target_os = "macos")]
