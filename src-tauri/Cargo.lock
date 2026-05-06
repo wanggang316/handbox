@@ -156,7 +156,7 @@ dependencies = [
  "objc2-foundation",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -1179,7 +1179,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1391,7 +1391,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2009,6 +2009,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "google-genai-rust"
+version = "0.1.0"
+source = "git+https://github.com/wanggang316/google-genai-rust.git?branch=main#176effd6a92d3d94beded46f88dbf2564343e436"
+dependencies = [
+ "async-stream",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "gtk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2107,7 +2121,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "futures-util",
- "google-genai-rust",
+ "google-genai-rust 0.1.0 (git+https://github.com/wanggang316/google-genai-rust.git?branch=main)",
  "handbox-llm",
  "handbox-mcp",
  "image",
@@ -2117,7 +2131,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "once_cell",
- "openai-rust",
+ "openai-rust 0.1.0 (git+https://github.com/wanggang316/openai-rust.git?branch=master)",
  "rand 0.8.5",
  "rdev",
  "regex",
@@ -2159,8 +2173,8 @@ dependencies = [
  "chrono",
  "futures",
  "futures-util",
- "google-genai-rust",
- "openai-rust",
+ "google-genai-rust 0.1.0",
+ "openai-rust 0.1.0",
  "regex",
  "reqwest",
  "rmcp",
@@ -3257,7 +3271,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3635,6 +3649,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "openai-rust"
+version = "0.1.0"
+source = "git+https://github.com/wanggang316/openai-rust.git?branch=master#c600a1a636d8880fadf60785bee57b38b81fd355"
+dependencies = [
+ "async-stream",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "openssl"
 version = "0.10.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3701,7 +3729,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -4265,7 +4293,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4739,7 +4767,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6149,7 +6177,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7180,7 +7208,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
