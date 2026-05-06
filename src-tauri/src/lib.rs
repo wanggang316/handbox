@@ -92,6 +92,14 @@ pub fn run() {
         .on_menu_event(|app: &AppHandle, event| {
             crate::menu::handle_menu_event(app, event.id().as_ref());
         })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // 调试命令
             debug_check_file,
