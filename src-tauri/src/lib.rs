@@ -46,7 +46,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init());
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
 
     #[cfg(target_os = "macos")]
     {
@@ -199,7 +201,6 @@ pub fn run() {
             settings_validate_mcp,
             settings_test_mcp_server,
             settings_system_info,
-            settings_check_updates,
             // 单词相关命令
             word_create,
             word_list,

@@ -54,6 +54,11 @@
       ]
     },
     "shell:default",
-    "shell:allow-execute"
+    "shell:allow-execute",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:default",
+    "process:allow-restart"
   ]
 }

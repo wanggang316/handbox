@@ -78,18 +78,19 @@ export async function getSystemInfo(): Promise<{
 }
 
 /**
- * 检查更新
+ * 检查更新（基于 tauri-plugin-updater）
  */
 export async function checkForUpdates(): Promise<{
   hasUpdate: boolean;
   latestVersion?: string;
   releaseNotes?: string;
-  downloadUrl?: string;
 }> {
-  return apiCall<{
-    hasUpdate: boolean;
-    latestVersion?: string;
-    releaseNotes?: string;
-    downloadUrl?: string;
-  }>('settings_check_updates');
+  const { check } = await import('@tauri-apps/plugin-updater');
+  const update = await check();
+  if (!update) return { hasUpdate: false };
+  return {
+    hasUpdate: true,
+    latestVersion: update.version,
+    releaseNotes: update.body
+  };
 }

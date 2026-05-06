@@ -91,7 +91,3 @@ pub async fn settings_system_info() -> Result<serde_json::Value, AppError> {
     }))
 }
 
-#[tauri::command]
-pub async fn settings_check_updates() -> Result<serde_json::Value, AppError> {
-    Ok(serde_json::json!({ "hasUpdate": false }))
-}
