@@ -49,7 +49,7 @@ impl OssClient {
         let endpoint = env::var(OSS_ENDPOINT)
             .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_ENDPOINT} env")))?;
         let region = env::var(OSS_REGION)
-            .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_ENDPOINT} env")))?;
+            .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_REGION} env")))?;
 
         Ok(Self::new(
             access_key_id,
