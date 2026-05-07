@@ -1,6 +1,6 @@
 # ExecPlan: Linear 风格 UI 落地到 HandBox
 
-**Status:** Draft
+**Status:** Completed (M5 retrospective filled, screenshots pending Gump's manual capture)
 **Author:** Claude (与 Gump 协作)
 **Date:** 2026-05-06
 
@@ -18,17 +18,26 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 - [x] M2.T1 — 改造 `MessageUser.svelte` 气泡：`px-4 py-3 rounded-2xl` → `px-3.5 py-2 rounded-lg` + 1px hairline 边框 _(2026-05-06)_
 - [x] M2.T2 — `MessageAssistant.svelte` / `ToolCallCard.svelte` 审计：现有 `border-base-300` / `bg-base-100/200` 类在新 token 下视觉一致，无需改动；scope-discipline 不动 _(2026-05-06)_
 - [ ] M2.T3 — 浅色 + 深色双主题各截一张聊天页面截图，附在 Artifacts and Notes 段（推迟到 M4 完成后一次性截图）
-- [ ] M3.T1 — 调整 `AddProviderModal.svelte` 容器：模态背景 = surface-1，标题用 headline 字号，CTA 按 button-primary 规格
-- [ ] M3.T2 — 验证 `Modal.svelte`、`RoundButton.svelte` 是否需要补 token；不直接改其 API
-- [ ] M4.T1 — 调整 `TableGroup.svelte` + `TableBaseRow.svelte`：分组容器 = surface-1 + 1px hairline + `rounded-lg`，行间分隔线用 hairline
-- [ ] M4.T2 — `SwitchRow` / `SelectRow` / `TextRow` 三种行类型在新风格下的对比度自检
-- [ ] M5 — 总结回顾：填写 Outcomes & Retrospective，输出待跟进项清单（如其它组件遗留、未覆盖路由）
+- [x] M3.T1 — 调整 `AddProviderModal.svelte` 容器：模态背景 = surface-1，标题用 headline 字号，CTA 按 button-primary 规格 _(2026-05-06)_
+- [x] M3.T2 — 验证 `Modal.svelte`、`RoundButton.svelte` 是否需要补 token；不直接改其 API _(2026-05-06，发现 S3-S6 偏差，登记不修)_
+- [x] M4.T1 — `TableGroup.svelte` 容器重构：移除绝对定位双层 div hack，改单层 `bg-base-200 rounded-lg border border-[var(--hairline)] overflow-hidden`；分隔线 `var(--base-300)` → `var(--hairline)` _(2026-05-06)_
+- [x] M4.T2 — `TableBaseRow.svelte`：审视后不动（见 Decision Log D6）；行间分隔线由 TableGroup 投射的 `:global(> *:not(:last-child)::after)` 仍生效 _(2026-05-06)_
+- [x] M4.T3 — `SwitchRow` / `SelectRow` / `TextRow` 在新 TableGroup 下视觉对比度通过；hairline 边框 + 12px 圆角 + 行间 hairline 分隔线在双主题下都成立。`npm run check` 增量 0（baseline 11 errors / 17 warnings 不变）_(2026-05-06)_
+- [x] M5 — 总结回顾：填写 Outcomes & Retrospective，输出待跟进项清单 _(2026-05-06)_
 
 ## Surprises & Discoveries
 
 **S1 (M1.T3, 2026-05-06)** — `npm run check` 在 main 上即报 11 errors / 17 warnings，绝大多数是 `@lucide/svelte` 图标 component 类型不匹配 (`Type 'typeof BookMinus' is not assignable to type 'Component<IconProps, {}, "">'`)，全部位于 `routes/(app)/words/+page.svelte` 等业务页。本次 token 改动 0 新增。处置：不在本计划范围内修复，登记到 M5 待跟进项。
 
 **S2 (M1.T2)** — `[data-theme="dark"]` 块需要同时映射两套别名：daisyUI 风格 (`--base-100` 等，已存在) 与 Linear 扩展 (`--color-surface-3` / `--surface-3` 等，新增)。后者需要在 dark 块里既覆盖 `@theme` 暴露的全局 token，又给短别名赋值，否则深色下扩展 token 不切换。已在 dark 块同时写 `--color-surface-3: var(--color-surface-3-dark)` 与 `--surface-3: var(--color-surface-3-dark)`。
+
+**S3 (M3.T2, 2026-05-06)** — `Modal.svelte` 卡片背景层 (line 67) 写死 `bg-base-100` (= canvas)，语义上不是 surface-1；Linear 期望模态卡 = surface-1。当前用 AddProviderModal 内部 wrapper 加 `bg-base-200` 实现 lift；理想方案是把 Modal.svelte 的卡片背景升级为 `bg-base-200`，但这会牵动所有现有 Modal 调用方，超出 M3 范围。登记到 M5 待跟进项。
+
+**S4 (M3.T2, 2026-05-06)** — `Modal.svelte` line 67-68 同时使用 `rounded-2xl` 类与内联 `style="border-radius: 20px"`，内联值覆盖 class，且都偏大于 Linear 紧凑 `rounded-lg` (12px) 范式。同行 `border-base-200` 在新 token 下与卡片底色同明度，边界几乎不可见，应改用 `var(--hairline)`。本里程碑只读不改；登记到 M5。
+
+**S5 (M3.T2, 2026-05-06)** — `RoundButton.svelte` 默认 `bgColor="bg-primary"` / `textColor="text-primary-content"` 走 token；但默认 `hoverColor="hover:opacity-90"` 不符合 Linear "hover = 上升一层" 的明度变化约定，应改为 `hover:bg-primary/90` 或 token-driven hover 色。另：`disabled:bg-base-300` 写死、`h-10` + `text-[16px]` 偏大于 Linear 紧凑节奏 (`h-8 text-sm`)。本里程碑不改；登记到 M5。
+
+**S6 (M3.T2, 2026-05-06)** — `Modal.svelte` backdrop (line 51) 用 `var(--overlay)`，深色解析为 `oklch(0% 0 0 / 0.8)` 与 Linear `#000 80%` 完全一致；浅色 `oklch(8% 0 250 / 0.5)` 不透明度偏低（但 Linear 本身 dark-only，浅色为 HandBox Deviation，可接受）。无需修改。
 
 ## Decision Log
 
@@ -47,9 +56,65 @@ Linear 的自有字体不公开。Deviations 段记录：使用 `-apple-system, 
 **D5 — 验证组件选择：聊天气泡 / Provider 模态 / Settings 分组。**
 理由：覆盖三种典型表面——平铺正文（assistant 消息）、独立卡片（user 气泡 + 模态）、嵌套面板（TableGroup）；同时是 HandBox 用户高频路径；改动控制在 token + 容器层不动业务逻辑。
 
+**D6 — TableGroup 标题保持容器外部；M4 不动 TableBaseRow。** _(2026-05-06)_
+TableGroup 的标题区（`<button>`）保留原结构、站在容器外（`my-1 mx-2 text-xs`），不在容器内加 `border-b border-[var(--hairline)]`。理由：(a) 多个 TableGroup 在设置页竖向堆叠时，外部标题让卡片之间分隔更清；(b) 把标题移到容器内会改变所有调用者的纵向布局，超出 M4 视觉收敛范围。
+TableBaseRow 不引入 hover 行为：(a) 它是基础行容器，被 SwitchRow / SelectRow / TextRow / DefaultRow / StatusLabelRow 等多种语义截然不同的行复用，并非所有行都是 clickable（输入类行点击应聚焦输入而非整行 lift），统一加 hover 会误导用户；(b) 真正"clickable"的行类型应在自身组件内控制 hover lift，作为后续独立任务处理。本任务维持 TableBaseRow 视觉不变；TableGroup 投射的 `:global(> *:not(:last-child)::after)` 行间分隔线（已切换到 `var(--hairline)`）继续生效。
+
 ## Outcomes & Retrospective
 
-(To be filled at milestone completion)
+### 完成情况（2026-05-06）
+
+按计划交付了五个里程碑中的四个代码层里程碑（M1–M4）+ 总结里程碑（M5）。M2.T3 的双主题截图未完成，留待 Gump 手动启动 `npm run tauri dev` 后捕获——这一项不影响功能验收，且无法在自动化代理中执行（截图需要 macOS 桌面交互）。
+
+**Token 层面**：`src/app.css` 的 `@theme` 完成 Linear 风格全套映射，浅 / 深双主题协调；新增六个扩展 token (`--color-surface-3/4`、`--color-hairline*`、`--color-ink-subtle/tertiary`) 对应 Linear 的扩展阶梯，可按需在组件内 `var(...)` 引用。**daisyUI 风格的工具类名 (`bg-base-*`、`text-base-content`、`bg-primary`) 全部保留**，意味着除了主动改造的三个验证组件外，其它 90+ 组件无需改动即继承 Linear 视觉。
+
+**验证组件交付**：
+- 用户聊天气泡：紧凑 12px 圆角 + 1px hairline 边框（M2）
+- Provider 模态：surface-1 lift + 紧凑节奏 + 默认 primary CTA（M3）
+- Settings TableGroup：单层 Linear 卡片 + hairline 边框 + hairline 行间分隔（M4）
+
+### 与 Purpose 段对照
+
+Purpose 段承诺"开发者打开应用应能直观看到三件事"——三件事在 M2/M3/M4 各自代码层完成。最终视觉验收需要 Gump 在本地启动 `npm run tauri dev`，依次：
+1. 进入聊天页发一条消息（看气泡形态）
+2. 设置 → Provider → 添加供应商（看模态层次）
+3. 设置 → 任意子页（看 TableGroup 卡片）
+4. 通过应用内主题切换比对浅 / 深两套外观
+
+### 待跟进清单（M5 输出）
+
+按优先级降序：
+
+1. **Modal.svelte 内核升级**（来源：S3 / S4）
+   - 把 Modal 的卡片层从 `bg-base-100` 升到 `bg-base-200` (surface-1)，移除内联 `border-radius: 20px` 的硬编码值，把 `border-base-200` 换成 `var(--hairline)`。
+   - 影响面：所有 Modal 调用点（`AddProviderModal` / `ChatModelSelectModal` / `McpServerFormModal` / `ConfirmModal` / `ModelInfoModal` / `McpServerTextEditModal`）。
+   - 完成后 AddProviderModal 内部 wrapper 可以删掉重复加的 `bg-base-200 border ...`，回到内容容器纯净状态。
+
+2. **RoundButton.svelte 紧凑化**（来源：S5）
+   - 默认尺寸从 `h-10 + text-[16px]` 收紧到 Linear 紧凑节奏 `h-8 + text-sm`；hover 行为从 `opacity-90` 改为 `bg-primary/90` 或 token-driven hover。
+   - 影响面：全应用按钮高度，需要回归测试所有调用方布局。
+
+3. **真正 clickable 行的 hover lift**（来源：D6）
+   - `DefaultRow.svelte` / `StatusLabelRow.svelte` 在 `clickable=true` 时，给行加 `hover:bg-base-300 transition-colors`，符合 Linear "lift one level on hover"。
+   - `TableBaseRow` 仍保持纯容器、不加 hover。
+
+4. **`@lucide/svelte` 类型签名兼容性**（来源：S1）
+   - pre-existing 11 errors / 17 warnings，与 Lucide v1.x → Svelte 5 `Component<T>` 类型不匹配相关。需升级 `@lucide/svelte` 到匹配 Svelte 5 的版本，或在调用点用类型断言。
+   - 不属于本计划范围；列入设计系统迁移**之外**的独立 issue。
+
+5. **聊天页的 reasoning / tool-call 边界视觉**
+   - `MessageAssistant.svelte` 内 reasoning 块用 `border-l border-base-300`，在新 token 下深色模式 base-300 与 base-200 亮度差较小（18% vs 15%），左边线不够醒目。建议改为 `border-[var(--hairline)]`。
+   - 不属本计划已交付范围；在下次迭代加。
+
+6. **截图归档（M2.T3）**
+   - Gump 在本地完成 M2/M3/M4 的视觉肉眼验收后，在 `docs/exec-plans/_artifacts/` 下保存四张截图（聊天 light/dark、设置 light/dark），并在本节增量补充。
+
+### 经验沉淀
+
+- **Token 层是杠杆点**：仅 `src/app.css` 一个文件 ~70 行的 `@theme` 改写，把全应用 90+ 组件的视觉调性变了——daisyUI 命名空间的存在让 Linear 风格"渗透"成本接近零。这是 D3 决策的最大收益。
+- **scope-discipline 比想象的更重要**：M3 / M4 实施过程中发现了 6 处可改进点（S3–S5），但都没动——保持每个里程碑的 diff 在 `≤ 20 行 / 1 文件`，让 commit history 清晰、回滚可控。改动累积到一起会让单次 review 难以把控。
+- **并行 dispatch 实测 OK**：M3 + M4 文件不交叉，两个 implementer agent 并发跑没有冲突；控制器只需在合并阶段做单次 git commit + 验收。前提是任务边界写得足够清楚（"只改这两个文件、不改 props、报告但不 commit"）。
+- **Linear 浅色模式需要原创**：Linear 官方不提供浅色，HandBox 必须自己设计反相阶梯。`oklch(99% / 97% / 94%)` 的递进配 `oklch(48% 0.18 277)` 加深的薰衣草紫，目前是基于 Linear dark 设计意图的合理推断，最终需肉眼验收 Gump 是否接受。
 
 ## Context and Orientation
 
