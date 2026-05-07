@@ -195,8 +195,10 @@
     display: flex;
     flex-direction: column;
     transition: width 0.25s ease-in-out;
-    /* Linear 主布局：内容卡四边贴窗口；与 sidebar 仅靠 page/card 颜色差区分 */
+    /* Linear 主布局：内容卡四边贴窗口，仅左侧两角圆角与 sidebar 区分 */
     background-color: var(--bg-card);
+    border-top-left-radius: 0.75rem;
+    border-bottom-left-radius: 0.75rem;
   }
 
   @media (max-width: 768px) {
