@@ -327,7 +327,7 @@
     <!-- 模型供应商图标（模型） -->
     <div class="flex flex-row gap-2">
       <div
-        class="w-8 h-8 rounded-full bg-base-200 flex items-center justify-center"
+        class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center"
       >
         <img
           src={providerConfig()?.icon}
@@ -376,7 +376,7 @@
               <!-- 推理过程内容，根据展开状态显示 -->
               {#if reasoningExpanded}
                 <div
-                  class="mt-2 mb-6 px-4 text-sm border-l border-base-300 text-base-content/80 break-words leading-relaxed reasoning-content markdown-content"
+                  class="mt-2 mb-6 px-4 text-sm border-l border-[var(--hairline)] text-base-content/80 break-words leading-relaxed reasoning-content markdown-content"
                   use:markdownInteractions
                 >
                   {@html renderMarkdown(message.reasoning)}
@@ -420,7 +420,7 @@
 
           {#if isAssetsLoading}
             <div
-              class="mt-4 flex items-center gap-3 rounded-lg border border-dashed border-base-300 px-4 py-3 text-sm text-base-content/70"
+              class="mt-4 flex items-center gap-3 rounded-lg border border-dashed border-[var(--hairline)] px-4 py-3 text-sm text-base-content/70"
             >
               <div
                 class="w-4 h-4 border-2 border-base-content/30 border-t-transparent rounded-full animate-spin"

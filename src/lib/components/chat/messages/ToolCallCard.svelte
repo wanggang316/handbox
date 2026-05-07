@@ -141,11 +141,11 @@
 </script>
 
 {#if calls().length > 0}
-  <div class="mb-4 border-base-300 bg-base-100 p-0 text-sm text-base-content">
+  <div class="mb-4 p-0 text-sm text-base-content">
     <div class="space-y-2">
       {#each calls() as tool (tool.id || tool.index)}
         {@const statusDisplay = getToolExecutionStatusDisplay(tool.executionStatus)}
-        <div class="rounded-md border border-base-300 bg-base-200 text-xs bg-base-100 hover:bg-base-300">
+        <div class="rounded-lg border border-[var(--hairline)] bg-base-300 text-xs hover:bg-base-300/80 transition-colors">
           <!-- header -->
           <div class="flex items-center justify-between gap-2">
             <button
@@ -197,7 +197,7 @@
           </div>
 
           {#if isExpanded(tool)}
-            <div class="p-3 space-y-2 rounded-b-md text-[11px] leading-relaxed max-h-80 overflow-auto bg-base-100">
+            <div class="p-3 space-y-2 rounded-b-lg text-[11px] leading-relaxed max-h-80 overflow-auto border-t border-[var(--hairline)]">
               {#if tool.function?.arguments}
                 <div class="">
                   <div class="mb-1 text-[10px] text-base-content/70">Request</div>
