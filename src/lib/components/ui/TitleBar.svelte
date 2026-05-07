@@ -43,6 +43,8 @@
     <div class="sidebar-toggle-button">
       <IconButton
         icon={PanelLeft}
+        iconSize={15}
+        strokeWidth={1.5}
         ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
         onclick={handleToggle}
       />
@@ -51,7 +53,8 @@
     <div class="header-actions">
       <IconButton
         icon={MessageSquarePlus}
-        iconSize={18}
+        iconSize={15}
+        strokeWidth={1.5}
         ariaLabel="新建会话"
         onclick={handleNewChat}
         customClass="new-chat-button"
@@ -59,7 +62,8 @@
       />
       <IconButton
         icon={MessageSquareDashed}
-        iconSize={18}
+        iconSize={15}
+        strokeWidth={1.5}
         ariaLabel="临时会话"
         onclick={handleImplicitCreate}
         customClass="implicit-create-button"

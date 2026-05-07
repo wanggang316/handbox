@@ -4,6 +4,7 @@
   interface Props {
     icon: typeof IconType;
     iconSize?: number;
+    strokeWidth?: number;
     ariaLabel?: string;
     size?: string;
     rounded?: string;
@@ -20,6 +21,7 @@
   let {
     icon,
     iconSize = 20,
+    strokeWidth = 2,
     ariaLabel = '',
     size = 'w-7 h-7',
     rounded = 'rounded-md',
@@ -56,6 +58,6 @@
 >
   {#if icon}
     {@const Icon = icon}
-    <Icon size={iconSize} />
+    <Icon size={iconSize} strokeWidth={strokeWidth} />
   {/if}
 </button>
