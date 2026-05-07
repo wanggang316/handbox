@@ -131,8 +131,9 @@
   />
 
   <div
-    class="sidebar-wrapper m-2"
+    class="sidebar-wrapper"
     class:dragging={isDragging}
+    class:open={uiState.sidebarOpen}
     style={`width:${uiState.sidebarOpen ? sidebarWidth : 0}px`}
     aria-hidden={!uiState.sidebarOpen}
   >
@@ -181,12 +182,17 @@
   .sidebar-wrapper {
     flex-shrink: 0;
     min-width: 0;
-    transition: width 0s linear;
+    transition: width 0s linear, margin 0.25s ease-in-out;
     overflow: hidden;
   }
 
+  /* 仅在 sidebar 打开时给 top / left / bottom 8px 间距；右侧贴主体 border，无 mr */
+  .sidebar-wrapper.open {
+    margin: 0.5rem 0 0.5rem 0.5rem;
+  }
+
   .sidebar-wrapper:not(.dragging) {
-    transition: width 0.25s ease-in-out;
+    transition: width 0.25s ease-in-out, margin 0.25s ease-in-out;
   }
 
   .main-content {
@@ -200,6 +206,13 @@
     border-left: 1px solid var(--hairline);
     border-top-left-radius: 0.75rem;
     border-bottom-left-radius: 0.75rem;
+  }
+
+  /* sidebar 关闭：主体撑满整个窗口，去掉左侧 border 和圆角 */
+  .main-content.sidebar-hidden {
+    border-left: 0;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
   }
 
   @media (max-width: 768px) {
