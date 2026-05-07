@@ -12,7 +12,7 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Progress
 
-- [ ] M1.T1 — 在 `docs/ui-design.md` 末尾追加"HandBox Deviations"段，记录浅色模式策略、oklch 表示、保留的语义色与 Web/Tauri 字体替换
+- [x] M1.T1 — 在 `docs/ui-design.md` 末尾追加"HandBox Deviations"段，记录浅色模式策略、oklch 表示、保留的语义色与 Web/Tauri 字体替换 _(2026-05-06)_
 - [ ] M1.T2 — 在 `src/app.css` 的 `@theme` 中改写 `--color-base-100/200/300`、`--color-primary*`、新增 `--color-surface-3/4`、`--color-hairline*`、`--color-ink-subtle`，浅色 / 深色双轨完成
 - [ ] M1.T3 — 启动 `npm run tauri dev` + `npm run check`，肉眼验证应用未崩、类型检查通过；记录任何视觉回归
 - [ ] M2.T1 — 改造 `MessageUser.svelte` 气泡：surface-2 lift + hairline border + 圆角降至 `rounded-lg`(12px)

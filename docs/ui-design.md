@@ -546,3 +546,49 @@ Linear's depth is carried by surface ladder + hairline borders. The brand resist
 - Light mode is not documented because the marketing site does not ship a light theme.
 - Linear's actual product UI uses a richer color-tag palette (red, orange, yellow, green, blue, purple) for issue priorities and project labels — those colors live in the in-product surfaces shown in mockups.
 - The custom display, text, and mono families are proprietary; an open-source substitute is acceptable.
+
+## HandBox Deviations
+
+This section records where HandBox intentionally diverges from the Linear reference above. Reasons are pragmatic — HandBox is a desktop application, not a marketing site, and ships behaviors Linear's marketing surface does not need.
+
+### 1. Light Mode
+
+Linear's marketing site is dark-only. HandBox ships both light and dark themes via `[data-theme="dark"]` on the document root. We construct an "inverted Linear" for light mode by mirroring the surface ladder while keeping the same brand intent: near-white canvas, light-gray surface tiers, hairline borders, and a slightly darkened lavender (still recognizably Linear) for AA contrast on white.
+
+| Role | Light (HandBox) | Dark (Linear) |
+|---|---|---|
+| canvas | `oklch(99% 0 0)` | `oklch(8% 0 250)` ≈ #010102 |
+| surface-1 | `oklch(97% 0 0)` | `oklch(15% 0 250)` ≈ #0f1011 |
+| surface-2 | `oklch(94% 0 0)` | `oklch(18% 0 250)` ≈ #141516 |
+| hairline | `oklch(90% 0 0)` | `oklch(28% 0 250)` ≈ #23252a |
+| ink | `oklch(18% 0 0)` | `oklch(97% 0 0)` ≈ #f7f8f8 |
+| ink-subtle | `oklch(45% 0.01 250)` | `oklch(63% 0.01 250)` ≈ #8a8f98 |
+| primary | `oklch(48% 0.18 277)` | `oklch(54% 0.16 277)` ≈ #5e6ad2 |
+
+### 2. Color Representation: oklch, not hex
+
+HandBox's `@theme` in `src/app.css` exclusively uses `oklch()` to enable `color-mix(in oklch, ...)` interpolation across the codebase. All Linear hex anchors are translated to oklch and stored as `--color-*` tokens. The hex values in the Linear sections above remain authoritative as visual targets; the oklch values are how HandBox writes them.
+
+### 3. Semantic Color Palette Retained
+
+Linear marketing uses only `success` as a semantic color. HandBox keeps the full `info / success / warning / error` set because the application surfaces these states (model probe results, API errors, rate-limit warnings, tool-call outcomes). These tokens are unaffected by the Linear migration.
+
+### 4. Typography: System Stack
+
+Linear's proprietary typeface is not available. HandBox uses a system stack: `-apple-system, system-ui, "SF Pro Display", "Helvetica Neue", Inter, sans-serif` for display and body, and the existing `"Fira Code", Monaco, Consolas` chain for mono. No web fonts are loaded — desktop apps cannot tolerate font-flash on cold start.
+
+### 5. Tailwind Utility Class Naming Preserved
+
+HandBox already uses daisyUI-style class names (`bg-base-100/200/300`, `text-base-content`, `bg-primary`, etc.). These names are NOT renamed to Linear's `surface-1` / `ink` vocabulary. Instead, the underlying `--color-*` variables behind these utility classes are remapped so existing components inherit the new design without class-name churn. Mapping:
+
+- `bg-base-100` ≡ Linear `canvas`
+- `bg-base-200` ≡ Linear `surface-1`
+- `bg-base-300` ≡ Linear `surface-2`
+- `text-base-content` ≡ Linear `ink`
+- `bg-primary` / `text-primary-content` ≡ Linear `primary` / `on-primary`
+
+Linear's deeper-ladder tokens (`surface-3`, `surface-4`, `hairline`, `hairline-strong`, `ink-subtle`, `ink-tertiary`) are NOT mapped onto the daisyUI vocabulary. They are exposed as additional CSS variables (`--color-surface-3`, `--color-hairline`, etc.) and consumed in components via inline `var(...)` references where explicitly needed.
+
+### 6. Component Coverage Beyond Linear's Surface
+
+Linear marketing has no concept of: chat bubbles (user vs assistant), settings table rows (`TableGroup`/`*Row`), model selectors, MCP server cards. HandBox extends the Linear language to these surfaces by composition — chat bubbles use `surface-1` lift + hairline border + `rounded-lg`; assistant messages tile flat on canvas; settings groups become `surface-1` cards with hairline-divided rows. Hover behavior follows Linear's "lift one level on interaction" convention (e.g., row `bg-base-200` → `bg-base-300` on hover).
