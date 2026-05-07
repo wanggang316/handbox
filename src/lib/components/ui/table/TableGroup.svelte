@@ -51,13 +51,12 @@
   {/if}
 
   {#if !collapsible || !isCollapsed}
-    <div class="relative flex-1">
-      <div
-        class="absolute inset-0 bg-base-200 rounded-[20px] pointer-events-none"
-      ></div>
-      <div class="relative table-group rounded-[20px] {showDivider ? 'show-divider' : ''}">
-        {@render children?.()}
-      </div>
+    <div
+      class="table-group bg-base-200 rounded-lg border border-[var(--hairline)] overflow-hidden {showDivider
+        ? 'show-divider'
+        : ''}"
+    >
+      {@render children?.()}
     </div>
   {/if}
 </div>
@@ -74,6 +73,6 @@
     left: 1.5rem;
     right: 1.5rem;
     height: 1px;
-    background-color: var(--base-300);
+    background-color: var(--hairline);
   }
 </style>
