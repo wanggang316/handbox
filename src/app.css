@@ -12,7 +12,8 @@
   --color-base-200: oklch(97% 0 0);
   --color-base-300: oklch(94% 0 0);
   --color-base-content: oklch(18% 0 0);
-  --color-primary: oklch(48% 0.18 277);
+  /* primary 加深至 45% L 以确保 white-on-primary ≥ 4.5:1 (WCAG AA) */
+  --color-primary: oklch(45% 0.19 277);
   --color-primary-content: oklch(100% 0 0);
   --color-secondary: oklch(65% 0.241 354.308);
   --color-secondary-content: oklch(94% 0.028 342.258);
@@ -34,6 +35,7 @@
   --color-surface-4: oklch(88% 0 0);
   --color-hairline: oklch(90% 0 0);
   --color-hairline-strong: oklch(85% 0 0);
+  /* 命名约定：subtle 比 tertiary 对比度更高（更醒目）；tertiary 是最弱的辅助文字 */
   --color-ink-subtle: oklch(45% 0.01 250);
   --color-ink-tertiary: oklch(55% 0.01 250);
 
@@ -41,9 +43,10 @@
   --color-overlay: oklch(8% 0 250 / 0.5);
 
   /* 深色：Linear 锚定（canvas #010102 / surface-1..4 / 薰衣草紫） */
-  --color-base-100-dark: oklch(8% 0 250);
-  --color-base-200-dark: oklch(15% 0 250);
-  --color-base-300-dark: oklch(18% 0 250);
+  /* chroma 0.005 + hue 250 真正赋予 Linear 描述的"近黑带蓝调"（chroma 0 时 hue 无效）*/
+  --color-base-100-dark: oklch(8% 0.005 250);
+  --color-base-200-dark: oklch(15% 0.005 250);
+  --color-base-300-dark: oklch(18% 0.005 250);
   --color-base-content-dark: oklch(97% 0 0);
   --color-primary-dark: oklch(54% 0.16 277);
   --color-primary-content-dark: oklch(100% 0 0);
@@ -62,11 +65,11 @@
   --color-error-dark: oklch(71% 0.194 13.428);
   --color-error-content-dark: oklch(27% 0.105 12.094);
 
-  /* Linear extended ladder — dark variants */
-  --color-surface-3-dark: oklch(22% 0 250);
-  --color-surface-4-dark: oklch(25% 0 250);
-  --color-hairline-dark: oklch(28% 0 250);
-  --color-hairline-strong-dark: oklch(35% 0 250);
+  /* Linear extended ladder — dark variants (chroma 0.005 同前以保持蓝调一致) */
+  --color-surface-3-dark: oklch(22% 0.005 250);
+  --color-surface-4-dark: oklch(25% 0.005 250);
+  --color-hairline-dark: oklch(28% 0.005 250);
+  --color-hairline-strong-dark: oklch(35% 0.005 250);
   --color-ink-subtle-dark: oklch(63% 0.01 250);
   --color-ink-tertiary-dark: oklch(48% 0.01 250);
 
@@ -163,14 +166,8 @@ body {
   --error-content: var(--color-error-content-dark);
   --overlay: var(--color-overlay-dark);
 
-  /* Linear 扩展阶梯（短别名）— 深色 */
-  --color-surface-3: var(--color-surface-3-dark);
-  --color-surface-4: var(--color-surface-4-dark);
-  --color-hairline: var(--color-hairline-dark);
-  --color-hairline-strong: var(--color-hairline-strong-dark);
-  --color-ink-subtle: var(--color-ink-subtle-dark);
-  --color-ink-tertiary: var(--color-ink-tertiary-dark);
-
+  /* Linear 扩展阶梯（短别名）— 深色。注：consumers 全部走 var(--hairline) 等短别名，无需 */
+  /* 在此重绑 --color-* —— Tailwind utility 在 build 时已 baked，runtime override 对其无效 */
   --surface-3: var(--color-surface-3-dark);
   --surface-4: var(--color-surface-4-dark);
   --hairline: var(--color-hairline-dark);
