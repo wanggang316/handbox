@@ -4,13 +4,16 @@
 @import "katex/dist/katex.min.css";
 
 /* 使用 Tailwind @theme 指令定义主题变量 */
+/* Linear-inspired palette — see docs/ui-design.md for the design language and HandBox Deviations. */
+/* base-100 = Linear "canvas", base-200 = "surface-1", base-300 = "surface-2". */
 @theme {
-  --color-base-100: oklch(100% 0 0);
-  --color-base-200: oklch(98% 0 0);
-  --color-base-300: oklch(95% 0 0);
-  --color-base-content: oklch(21% 0.006 285.885);
-  --color-primary: oklch(51% 0.262 276.966);
-  --color-primary-content: oklch(93% 0.034 272.788);
+  /* 浅色：反相 Linear（白画布 + 浅灰阶梯 + 加深的薰衣草紫） */
+  --color-base-100: oklch(99% 0 0);
+  --color-base-200: oklch(97% 0 0);
+  --color-base-300: oklch(94% 0 0);
+  --color-base-content: oklch(18% 0 0);
+  --color-primary: oklch(48% 0.18 277);
+  --color-primary-content: oklch(100% 0 0);
   --color-secondary: oklch(65% 0.241 354.308);
   --color-secondary-content: oklch(94% 0.028 342.258);
   --color-accent: oklch(77% 0.152 181.912);
@@ -19,22 +22,31 @@
   --color-neutral-content: oklch(92% 0.004 286.32);
   --color-info: oklch(74% 0.16 232.661);
   --color-info-content: oklch(29% 0.066 243.157);
-  --color-success: oklch(76% 0.177 163.223);
-  --color-success-content: oklch(37% 0.077 168.94);
+  --color-success: oklch(60% 0.16 145);
+  --color-success-content: oklch(98% 0 0);
   --color-warning: oklch(82% 0.189 84.429);
   --color-warning-content: oklch(41% 0.112 45.904);
   --color-error: oklch(71% 0.194 13.428);
   --color-error-content: oklch(27% 0.105 12.094);
 
-  /* 遮罩层颜色 (Modal/Drawer backdrop) */
-  --color-overlay: oklch(21% 0.006 285.885 / 0.3);
+  /* Linear extended ladder — not mapped to daisyUI vocab; consumed via var(...) */
+  --color-surface-3: oklch(91% 0 0);
+  --color-surface-4: oklch(88% 0 0);
+  --color-hairline: oklch(90% 0 0);
+  --color-hairline-strong: oklch(85% 0 0);
+  --color-ink-subtle: oklch(45% 0.01 250);
+  --color-ink-tertiary: oklch(55% 0.01 250);
 
-  --color-base-100-dark: oklch(0.2308 0 0);
-  --color-base-200-dark: oklch(0.2838 0.0047 247.99);
-  --color-base-300-dark: oklch(0.3268 0.0055 236.68);
-  --color-base-content-dark: oklch(0.934 0 0);
-  --color-primary-dark: oklch(58% 0.233 277.117);
-  --color-primary-content-dark: oklch(96% 0.018 272.314);
+  /* 遮罩层颜色 (Modal/Drawer backdrop) */
+  --color-overlay: oklch(8% 0 250 / 0.5);
+
+  /* 深色：Linear 锚定（canvas #010102 / surface-1..4 / 薰衣草紫） */
+  --color-base-100-dark: oklch(8% 0 250);
+  --color-base-200-dark: oklch(15% 0 250);
+  --color-base-300-dark: oklch(18% 0 250);
+  --color-base-content-dark: oklch(97% 0 0);
+  --color-primary-dark: oklch(54% 0.16 277);
+  --color-primary-content-dark: oklch(100% 0 0);
   --color-secondary-dark: oklch(65% 0.241 354.308);
   --color-secondary-content-dark: oklch(94% 0.028 342.258);
   --color-accent-dark: oklch(77% 0.152 181.912);
@@ -43,15 +55,23 @@
   --color-neutral-content-dark: oklch(92% 0.004 286.32);
   --color-info-dark: oklch(74% 0.16 232.661);
   --color-info-content-dark: oklch(29% 0.066 243.157);
-  --color-success-dark: oklch(76% 0.177 163.223);
-  --color-success-content-dark: oklch(37% 0.077 168.94);
+  --color-success-dark: oklch(64% 0.18 145);
+  --color-success-content-dark: oklch(98% 0 0);
   --color-warning-dark: oklch(82% 0.189 84.429);
   --color-warning-content-dark: oklch(41% 0.112 45.904);
   --color-error-dark: oklch(71% 0.194 13.428);
   --color-error-content-dark: oklch(27% 0.105 12.094);
 
+  /* Linear extended ladder — dark variants */
+  --color-surface-3-dark: oklch(22% 0 250);
+  --color-surface-4-dark: oklch(25% 0 250);
+  --color-hairline-dark: oklch(28% 0 250);
+  --color-hairline-strong-dark: oklch(35% 0 250);
+  --color-ink-subtle-dark: oklch(63% 0.01 250);
+  --color-ink-tertiary-dark: oklch(48% 0.01 250);
+
   /* 遮罩层颜色 (Modal/Drawer backdrop) - 深色模式 */
-  --color-overlay-dark: oklch(21% 0.006 285.885 / 0.6);
+  --color-overlay-dark: oklch(0% 0 0 / 0.8);
 }
 
 /* 禁用桌面应用的全局滚动，但保留内部组件滚动 */
@@ -86,6 +106,14 @@ body {
   --error: var(--color-error);
   --error-content: var(--color-error-content);
   --overlay: var(--color-overlay);
+
+  /* Linear 扩展阶梯（短别名，便于组件内联引用） */
+  --surface-3: var(--color-surface-3);
+  --surface-4: var(--color-surface-4);
+  --hairline: var(--color-hairline);
+  --hairline-strong: var(--color-hairline-strong);
+  --ink-subtle: var(--color-ink-subtle);
+  --ink-tertiary: var(--color-ink-tertiary);
 }
 
 /* 深色主题 */
@@ -134,6 +162,21 @@ body {
   --error: var(--color-error-dark);
   --error-content: var(--color-error-content-dark);
   --overlay: var(--color-overlay-dark);
+
+  /* Linear 扩展阶梯（短别名）— 深色 */
+  --color-surface-3: var(--color-surface-3-dark);
+  --color-surface-4: var(--color-surface-4-dark);
+  --color-hairline: var(--color-hairline-dark);
+  --color-hairline-strong: var(--color-hairline-strong-dark);
+  --color-ink-subtle: var(--color-ink-subtle-dark);
+  --color-ink-tertiary: var(--color-ink-tertiary-dark);
+
+  --surface-3: var(--color-surface-3-dark);
+  --surface-4: var(--color-surface-4-dark);
+  --hairline: var(--color-hairline-dark);
+  --hairline-strong: var(--color-hairline-strong-dark);
+  --ink-subtle: var(--color-ink-subtle-dark);
+  --ink-tertiary: var(--color-ink-tertiary-dark);
 }
 
 [data-theme="dark"] .shadow-2xl {

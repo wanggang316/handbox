@@ -13,8 +13,8 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 ## Progress
 
 - [x] M1.T1 — 在 `docs/ui-design.md` 末尾追加"HandBox Deviations"段，记录浅色模式策略、oklch 表示、保留的语义色与 Web/Tauri 字体替换 _(2026-05-06)_
-- [ ] M1.T2 — 在 `src/app.css` 的 `@theme` 中改写 `--color-base-100/200/300`、`--color-primary*`、新增 `--color-surface-3/4`、`--color-hairline*`、`--color-ink-subtle`，浅色 / 深色双轨完成
-- [ ] M1.T3 — 启动 `npm run tauri dev` + `npm run check`，肉眼验证应用未崩、类型检查通过；记录任何视觉回归
+- [x] M1.T2 — 在 `src/app.css` 的 `@theme` 中改写 `--color-base-100/200/300`、`--color-primary*`、新增 `--color-surface-3/4`、`--color-hairline*`、`--color-ink-subtle`，浅色 / 深色双轨完成 _(2026-05-06)_
+- [x] M1.T3 — `npm run check` baseline 比对：本次改动 0 新增类型错误（pre-existing 11 errors 全部位于 `routes/(app)/words/+page.svelte` 等文件，与 CSS token 无关）。`tauri dev` 视觉验证在 M2 完成后一次性进行 _(2026-05-06)_
 - [ ] M2.T1 — 改造 `MessageUser.svelte` 气泡：surface-2 lift + hairline border + 圆角降至 `rounded-lg`(12px)
 - [ ] M2.T2 — 检查 `MessageAssistant.svelte` 在新 token 下的可读性，必要时调整 reasoning / tool-call 卡片背景到 surface-1
 - [ ] M2.T3 — 浅色 + 深色双主题各截一张聊天页面截图，附在 Artifacts and Notes 段
@@ -26,7 +26,9 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 
 ## Surprises & Discoveries
 
-(None yet)
+**S1 (M1.T3, 2026-05-06)** — `npm run check` 在 main 上即报 11 errors / 17 warnings，绝大多数是 `@lucide/svelte` 图标 component 类型不匹配 (`Type 'typeof BookMinus' is not assignable to type 'Component<IconProps, {}, "">'`)，全部位于 `routes/(app)/words/+page.svelte` 等业务页。本次 token 改动 0 新增。处置：不在本计划范围内修复，登记到 M5 待跟进项。
+
+**S2 (M1.T2)** — `[data-theme="dark"]` 块需要同时映射两套别名：daisyUI 风格 (`--base-100` 等，已存在) 与 Linear 扩展 (`--color-surface-3` / `--surface-3` 等，新增)。后者需要在 dark 块里既覆盖 `@theme` 暴露的全局 token，又给短别名赋值，否则深色下扩展 token 不切换。已在 dark 块同时写 `--color-surface-3: var(--color-surface-3-dark)` 与 `--surface-3: var(--color-surface-3-dark)`。
 
 ## Decision Log
 
