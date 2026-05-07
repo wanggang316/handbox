@@ -108,7 +108,7 @@
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">按钮类</h2>
     <div class="grid gap-4 lg:grid-cols-2">
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Button</div>
         <div class="flex flex-wrap items-center gap-2">
           <Button>Primary</Button>
@@ -120,7 +120,7 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">RoundButton / CircleButton / IconButton</div>
         <div class="flex flex-wrap items-center gap-3">
           <RoundButton label="确认" />
@@ -131,7 +131,7 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">ArrowButton</div>
         <ArrowButton label="高级选项" />
       </div>
@@ -141,7 +141,7 @@
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">表单类</h2>
     <div class="grid gap-4 lg:grid-cols-2">
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Input / Select</div>
         <Input
           label="名称"
@@ -158,7 +158,7 @@
         />
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Textarea</div>
         <Textarea
           bind:value={textareaValue}
@@ -168,7 +168,7 @@
         />
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Toggle / NumberStepper</div>
         <div class="flex items-center gap-4">
           <Toggle label="启用" bind:checked={toggleValue} />
@@ -176,7 +176,7 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Slider / LabeledSlider</div>
         <Slider
           label="紧凑度"
@@ -207,12 +207,12 @@
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">导航与布局</h2>
     <div class="grid gap-4 lg:grid-cols-2">
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Tabs</div>
         <Tabs value={tabValue} items={tabItems} onChange={(val) => (tabValue = val)} />
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Menu</div>
         <Menu
           items={menuItems}
@@ -221,7 +221,7 @@
         />
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">ResizableSidebar</div>
         <div class="flex h-40 rounded-lg border border-base-300 overflow-hidden">
           <ResizableSidebar
@@ -245,7 +245,7 @@
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">反馈与弹层</h2>
     <div class="grid gap-4 lg:grid-cols-2">
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Toast</div>
         <div class="flex flex-wrap gap-2">
           <Button size="sm" on:click={() => triggerToast("success")}>Success</Button>
@@ -255,7 +255,7 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Modal / ConfirmModal / Drawer</div>
         <div class="flex flex-wrap gap-2">
           <Button size="sm" on:click={() => (modalOpen = true)}>打开 Modal</Button>
@@ -268,7 +268,7 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">InfoTooltip</div>
         <div class="flex items-center gap-2 text-sm text-base-content">
           帮助信息
@@ -281,7 +281,7 @@
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">数据展示</h2>
     <div class="grid gap-4 lg:grid-cols-2">
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Avatar / StatusLabel</div>
         <div class="flex items-center gap-4">
           <Avatar src="/logo-openai.png" size="md" />
@@ -293,7 +293,7 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">ChatList</div>
         <div class="h-44 rounded-lg border border-base-300 overflow-hidden">
           <ChatList
@@ -308,7 +308,7 @@
 
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">表格行组件</h2>
-    <div class="rounded-xl border border-[var(--hairline)] bg-base-300 p-4">
+    <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4">
       <TableGroup title="基础组件" collapsible showDivider>
         <SwitchRow
           label="自动同步"
@@ -378,7 +378,7 @@
   onClose={() => (modalOpen = false)}
   closeOnBackdropClick
 >
-  <div class="max-w-lg bg-base-300 rounded-xl px-6 py-5">
+  <div class="max-w-lg bg-base-300 rounded-lg px-6 py-5">
     <div class="space-y-2">
       <h3 class="text-base font-medium text-base-content">Modal 内容</h3>
       <p class="text-sm text-base-content/70">

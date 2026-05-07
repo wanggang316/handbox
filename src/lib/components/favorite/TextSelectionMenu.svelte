@@ -270,7 +270,7 @@
 
   {#if showTranslatePanel}
     <div
-      class="text-selection-translation fixed z-[10031] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-xl shadow-xl p-3 w-[400px] max-w-[90vw] h-[200px] flex flex-col"
+      class="text-selection-translation fixed z-[10031] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl p-3 w-[400px] max-w-[90vw] h-[200px] flex flex-col"
       style="left: {translatePanelX}px; top: {translatePanelY}px;"
       role="dialog"
       aria-label="翻译结果"

@@ -347,7 +347,7 @@
     {#if currentProvider}
       {@const providerModels = providerState.currentModels}
       {#if providerModels.length > 0}
-        <div class="bg-base-200 rounded-xl overflow-hidden">
+        <div class="bg-base-200 rounded-lg overflow-hidden">
           <!-- Table Headers -->
           <div
             class="flex flex-row items-center gap-4 px-4 py-2 bg-base-300 border-b border-base-300 text-xs font-medium text-base-content"

@@ -226,7 +226,6 @@
   }
   :global(body) {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-      Ubuntu, Cantarell, sans-serif;
+    /* font-family inherits from html (Geist Variable) — see app.css */
   }
 </style>

@@ -33,7 +33,7 @@
         <div class="text-md text-base-content/80">{displayName}</div>
         {#if planText}
           <div
-            class="text-xs text-primary rounded-xl bg-primary/10 border border-primary px-2 py-0"
+            class="text-xs text-primary rounded-md bg-primary/10 border border-primary px-2 py-0"
           >
             {planText}
           </div>

@@ -178,7 +178,7 @@
 />
 
 <div
-  class="flex flex-col bg-base-300 rounded-xl border border-[var(--hairline)] max-h-[300px] mx-auto w-full max-w-[800px]"
+  class="flex flex-col bg-base-300 rounded-lg border border-[var(--hairline)] max-h-[300px] mx-auto w-full max-w-[800px]"
 >
   <!-- 编辑模式提示 -->
   {#if isEditing}

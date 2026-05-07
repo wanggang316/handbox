@@ -219,7 +219,7 @@
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {#each filteredAgents as agent (agent.id)}
           <div
-            class="bg-base-200 rounded-xl p-4 hover:bg-base-300 transition-colors"
+            class="bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors"
           >
             <div class="flex items-start justify-between mb-3">
               <div class="flex items-center gap-2">

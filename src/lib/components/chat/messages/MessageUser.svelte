@@ -120,7 +120,7 @@
     <div class="flex flex-col items-end">
          <!-- 消息气泡 -->
         <div
-          class="inline-block max-w-full px-3.5 py-2 rounded-xl bg-base-200 text-base-content border border-[var(--hairline)]"
+          class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
         >
           {#if message.id && message.chatId}
             <TextSelectionMenu

@@ -192,7 +192,7 @@
           type="text"
           bind:value={searchQuery}
           placeholder="搜索模型..."
-          class="w-full pl-10 pr-4 py-2 border border-[var(--hairline)] bg-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+          class="w-full pl-10 pr-4 py-2 border border-[var(--hairline)] bg-base-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
         />
         {#if searchQuery}
           <button
@@ -319,7 +319,7 @@
   {#if hoveredModel}
     {@const providerIcon = getProviderIconById(hoveredModel.provider_id)}
     <div
-      class="fixed z-[9999] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-xl shadow-xl px-4 pt-4 pb-0 min-w-[280px] max-w-[380px]"
+      class="fixed z-[9999] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-4 pt-4 pb-0 min-w-[280px] max-w-[380px]"
       style="left: {tooltipPosition.x}px; top: {tooltipPosition.y}px;"
     >
       <div class="space-y-1">

@@ -176,7 +176,7 @@
   </TableGroup>
 
   {#if !permissionGranted}
-    <div class="bg-base-300 rounded-xl p-4 flex flex-col gap-3">
+    <div class="bg-base-300 rounded-lg p-4 flex flex-col gap-3">
       <p class="text-sm text-base-content/70">
         启用此功能需要授予辅助功能权限。请前往"系统设置 &gt; 隐私与安全性 &gt;
         辅助功能"，并启用 HandBox 的权限。

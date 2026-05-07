@@ -546,7 +546,7 @@
   {/if}
 
   {#if activeTab !== "lookup"}
-    <div class="rounded-xl bg-base-300 p-4 border border-[var(--hairline)]">
+    <div class="rounded-lg bg-base-300 p-4 border border-[var(--hairline)]">
       <div class="flex flex-col md:flex-row gap-3">
         <input
           class="flex-1 h-10 rounded-lg bg-base-200 border border-[var(--hairline)] px-3 text-sm outline-none"
@@ -566,7 +566,7 @@
   {/if}
 
   {#if activeTab === "lookup"}
-    <div class="rounded-xl bg-base-300 p-4 border border-[var(--hairline)]">
+    <div class="rounded-lg bg-base-300 p-4 border border-[var(--hairline)]">
       <div class="flex flex-col gap-3">
         <textarea
           class="w-full h-20 rounded-lg bg-base-200 border border-[var(--hairline)] px-3 py-2 text-sm outline-none resize-none"
@@ -628,7 +628,7 @@
     </div>
 
     {#if translationHistory.length > 0}
-      <div class="rounded-xl bg-base-300 p-4 border border-[var(--hairline)]">
+      <div class="rounded-lg bg-base-300 p-4 border border-[var(--hairline)]">
         <div class="text-xs text-base-content/60 mb-3">历史查询</div>
         <div class="divide-y divide-base-200 max-h-96 overflow-y-auto">
           {#each translationHistory as message, index}
@@ -682,7 +682,7 @@
 
   {#if activeTab !== "lookup"}
     <div
-      class="flex-1 overflow-auto rounded-xl bg-base-300 border border-[var(--hairline)]"
+      class="flex-1 overflow-auto rounded-lg bg-base-300 border border-[var(--hairline)]"
     >
       {#if isLoading}
         <div class="p-6 text-sm text-base-content/60">加载中...</div>

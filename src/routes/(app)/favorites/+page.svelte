@@ -564,7 +564,7 @@
         {#each filteredFavorites as favorite (favorite.id)}
           {@const navLabel = getNavigateLabel(favorite)}
           <div
-            class="bg-base-200 rounded-xl p-4 hover:bg-base-300 transition-colors relative {selectedFavorite?.id ===
+            class="bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors relative {selectedFavorite?.id ===
               favorite.id && showContextMenu
               ? 'bg-base-300'
               : ''}"
@@ -742,7 +742,7 @@
 <!-- 右键菜单 -->
 {#if showContextMenu && selectedFavorite}
   <div
-    class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
+    class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenuX}px; top: {contextMenuY}px;"
     onclick={(event) => event.stopPropagation()}
   >
@@ -767,7 +767,7 @@
 <!-- 标签编辑弹窗 -->
 {#if showTagEditor && editingFavoriteId}
   <div
-    class="tag-editor fixed z-[10030] bg-base-100 border border-base-300 rounded-xl shadow-xl p-4 min-w-[280px]"
+    class="tag-editor fixed z-[10030] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl p-4 min-w-[280px]"
     style="left: {editorX}px; top: {editorY}px;"
     onclick={(event) => event.stopPropagation()}
   >

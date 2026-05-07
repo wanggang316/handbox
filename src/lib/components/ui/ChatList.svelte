@@ -276,7 +276,7 @@
 <!-- 右键菜单 -->
 {#if showContextMenu}
   <div
-    class="context-menu fixed z-[10020] bg-base-100 border border-base-300 rounded-xl shadow-xl px-1 py-1 min-w-36"
+    class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenuX}px; top: {contextMenuY}px;"
   >
     {#if onGenerateTitle}
