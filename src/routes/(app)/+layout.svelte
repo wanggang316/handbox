@@ -159,7 +159,7 @@
   </div>
 
   <main
-    class="main-content my-2"
+    class="main-content"
     class:sidebar-hidden={!uiState.sidebarOpen}
   >
     {@render children()}
@@ -195,13 +195,8 @@
     display: flex;
     flex-direction: column;
     transition: width 0.25s ease-in-out;
-    /* Linear 主布局：内容卡上浮一档，hairline 包边但右侧贴边（只有 top/left/bottom 描边） */
+    /* Linear 主布局：内容卡四边贴窗口；与 sidebar 仅靠 page/card 颜色差区分 */
     background-color: var(--bg-card);
-    border-top: 1px solid var(--hairline);
-    border-left: 1px solid var(--hairline);
-    border-bottom: 1px solid var(--hairline);
-    border-top-left-radius: 0.75rem;
-    border-bottom-left-radius: 0.75rem;
   }
 
   @media (max-width: 768px) {
