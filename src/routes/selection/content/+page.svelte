@@ -269,7 +269,7 @@
 <svelte:window onclick={handleClickOutside} />
 
 <div
-  class="flex flex-col w-full h-full bg-base-100 rounded-xl shadow-lg overflow-hidden"
+  class="flex flex-col w-full h-full bg-[var(--bg-card)] rounded-xl shadow-lg border border-[var(--hairline)] overflow-hidden"
 >
   <!-- 标题栏 -->
   {#if content.mode && modeConfig[content.mode]}
@@ -281,7 +281,7 @@
       <!-- 模式下拉框 -->
       <div class="mode-dropdown relative">
         <button
-          class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-base-200 transition-colors {config.color}"
+          class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-base-300 transition-colors {config.color}"
           onclick={toggleDropdown}
         >
           <config.icon class="size-4" />
@@ -292,12 +292,12 @@
         <!-- 下拉菜单 -->
         {#if showModeDropdown}
           <div
-            class="absolute top-full left-0 mt-1 bg-base-100 rounded-lg shadow-lg border border-base-300 py-1 min-w-[120px] z-50"
+            class="absolute top-full left-0 mt-1 bg-[var(--bg-card)] rounded-lg shadow-lg border border-[var(--hairline)] py-1 min-w-[120px] z-50"
           >
             {#each Object.entries(modeConfig) as [key, value]}
               {@const isActive = key === content.mode}
               <button
-                class="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-base-200 transition-colors {isActive
+                class="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-base-300 transition-colors {isActive
                   ? 'bg-base-300'
                   : ''}"
                 class:text-primary={isActive}
@@ -315,7 +315,7 @@
 
       <div class="flex items-center gap-1">
         <button
-          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-base-200 transition-colors {isPinned
+          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-base-300 transition-colors {isPinned
             ? 'text-primary'
             : 'text-base-content/50 hover:text-base-content'}"
           onclick={togglePin}
@@ -328,7 +328,7 @@
           {/if}
         </button>
         <button
-          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-base-200 text-base-content/50 hover:text-base-content transition-colors"
+          class="flex items-center justify-center w-6 h-6 rounded-full hover:bg-base-300 text-base-content/50 hover:text-base-content transition-colors"
           onclick={handleClose}
         >
           <X class="size-4" />
@@ -353,7 +353,7 @@
       {:else if translation.result}
         <div class="space-y-3">
           <!-- 译文 -->
-          <div class="p-2 rounded-lg bg-base-100">
+          <div class="p-2 rounded-lg bg-base-300">
             <div class="flex items-center gap-2">
               <span
                 class="text-sm text-base-content whitespace-pre-wrap break-words font-medium"
@@ -390,7 +390,7 @@
 
   <!-- 底部按钮区域 -->
   <div
-    class="flex items-center justify-between px-3 py-1.5 border-t border-base-300 bg-base-200/50"
+    class="flex items-center justify-between px-3 py-1.5 border-t border-[var(--hairline)] bg-base-300/60"
   >
     <!-- 左下角：复制、重新生成 -->
     <div class="flex items-center gap-1">

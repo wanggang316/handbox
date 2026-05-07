@@ -121,7 +121,7 @@
           rows="4"
           class="w-full px-3 py-2 border border-base-300 rounded-md resize-none
                  focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-                 font-mono text-sm text-base-content bg-base-200"
+                 font-mono text-sm text-base-content bg-base-300"
         ></textarea>
         <div class="mt-1 text-xs text-base-content/50 text-right">
           {formData.systemPrompt.length} 字符
@@ -138,7 +138,7 @@
           placeholder="例如: coding, writing, translation"
           class="w-full px-3 py-2 border border-base-300 rounded-md
                  focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-                 text-sm text-base-content bg-base-200"
+                 text-sm text-base-content bg-base-300"
         />
         <p class="mt-1 text-xs text-base-content/50">
           用逗号分隔多个技能标签
@@ -158,7 +158,7 @@
             placeholder="0.7"
             class="w-full px-3 py-2 border border-base-300 rounded-md
                    focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-                   text-sm text-base-content bg-base-200"
+                   text-sm text-base-content bg-base-300"
             bind:value={formData.temperature}
           />
         </TableBaseRow>
@@ -172,7 +172,7 @@
             placeholder="0.9"
             class="w-full px-3 py-2 border border-base-300 rounded-md
                    focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-                   text-sm text-base-content bg-base-200"
+                   text-sm text-base-content bg-base-300"
             bind:value={formData.topP}
           />
         </TableBaseRow>
@@ -184,7 +184,7 @@
             placeholder="40"
             class="w-full px-3 py-2 border border-base-300 rounded-md
                    focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-                   text-sm text-base-content bg-base-200"
+                   text-sm text-base-content bg-base-300"
             bind:value={formData.topK}
           />
         </TableBaseRow>
@@ -196,7 +196,7 @@
             placeholder="2048"
             class="w-full px-3 py-2 border border-base-300 rounded-md
                    focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-                   text-sm text-base-content bg-base-200"
+                   text-sm text-base-content bg-base-300"
             bind:value={formData.maxTokens}
           />
         </TableBaseRow>

@@ -519,7 +519,7 @@
 <div class="h-full flex flex-col gap-4 p-6">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-semibold text-base-content">单词本</h1>
+      <h1 class="text-xl font-medium text-base-content">单词本</h1>
     </div>
   </div>
 
@@ -546,10 +546,10 @@
   {/if}
 
   {#if activeTab !== "lookup"}
-    <div class="rounded-xl bg-base-100 p-4 shadow-sm border border-base-200">
+    <div class="rounded-xl bg-base-300 p-4 border border-[var(--hairline)]">
       <div class="flex flex-col md:flex-row gap-3">
         <input
-          class="flex-1 h-10 rounded-lg bg-base-200 px-3 text-sm outline-none"
+          class="flex-1 h-10 rounded-lg bg-base-200 border border-[var(--hairline)] px-3 text-sm outline-none"
           placeholder="搜索单词或释义"
           bind:value={listQuery}
           onkeydown={(event) => event.key === "Enter" && loadWords()}
@@ -566,10 +566,10 @@
   {/if}
 
   {#if activeTab === "lookup"}
-    <div class="rounded-xl bg-base-100 p-4 shadow-sm border border-base-200">
+    <div class="rounded-xl bg-base-300 p-4 border border-[var(--hairline)]">
       <div class="flex flex-col gap-3">
         <textarea
-          class="w-full h-20 rounded-lg bg-base-200 px-3 py-2 text-sm outline-none resize-none"
+          class="w-full h-20 rounded-lg bg-base-200 border border-[var(--hairline)] px-3 py-2 text-sm outline-none resize-none"
           rows={2}
           placeholder="输入单词、短语或句子"
           bind:value={lookupQuery}
@@ -628,7 +628,7 @@
     </div>
 
     {#if translationHistory.length > 0}
-      <div class="rounded-xl bg-base-100 p-4 shadow-sm border border-base-200">
+      <div class="rounded-xl bg-base-300 p-4 border border-[var(--hairline)]">
         <div class="text-xs text-base-content/60 mb-3">历史查询</div>
         <div class="divide-y divide-base-200 max-h-96 overflow-y-auto">
           {#each translationHistory as message, index}
@@ -682,7 +682,7 @@
 
   {#if activeTab !== "lookup"}
     <div
-      class="flex-1 overflow-auto rounded-xl bg-base-100 border border-base-200"
+      class="flex-1 overflow-auto rounded-xl bg-base-300 border border-[var(--hairline)]"
     >
       {#if isLoading}
         <div class="p-6 text-sm text-base-content/60">加载中...</div>
@@ -692,7 +692,7 @@
         <div class="divide-y divide-base-200">
           {#each words as word}
             <div
-              class="p-4 flex flex-col gap-3 hover:bg-base-200/40 cursor-pointer"
+              class="p-4 flex flex-col gap-3 hover:bg-base-300/60 cursor-pointer"
               onclick={() => goto(`/words/${word.id}`)}
             >
               <div

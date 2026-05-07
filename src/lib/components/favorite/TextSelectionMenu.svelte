@@ -225,7 +225,7 @@
 
   {#if showMenu}
     <div
-      class="fixed z-[10030] bg-base-100 border border-base-300 rounded-lg shadow-xl px-3 py-2 flex flex-col gap-2"
+      class="fixed z-[10030] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-3 py-2 flex flex-col gap-2"
       style="left: {menuX}px; top: {menuY}px; transform: translateX(-50%);"
       onclick={(event) => event.stopPropagation()}
     >
@@ -234,7 +234,7 @@
       </span>
       <div class="flex items-center gap-2">
         <button
-          class="flex items-center gap-1 px-2 py-1 text-xs rounded bg-base-200 text-base-content hover:bg-base-300"
+          class="flex items-center gap-1 px-2 py-1 text-xs rounded bg-base-300 text-base-content hover:bg-base-300/80"
           onclick={handleCopyText}
         >
           <Copy size={12} />
@@ -270,7 +270,7 @@
 
   {#if showTranslatePanel}
     <div
-      class="text-selection-translation fixed z-[10031] bg-base-100 border border-base-300 rounded-xl shadow-xl p-3 w-[400px] max-w-[90vw] h-[200px] flex flex-col"
+      class="text-selection-translation fixed z-[10031] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-xl shadow-xl p-3 w-[400px] max-w-[90vw] h-[200px] flex flex-col"
       style="left: {translatePanelX}px; top: {translatePanelY}px;"
       role="dialog"
       aria-label="翻译结果"
@@ -279,7 +279,7 @@
       <div class="flex items-center justify-between">
         <div class="text-xs text-base-content/60">翻译结果</div>
         <button
-          class="p-1 rounded hover:bg-base-200 text-base-content/60 hover:text-base-content"
+          class="p-1 rounded hover:bg-base-300 text-base-content/60 hover:text-base-content"
           onclick={closeTranslatePanel}
           aria-label="关闭翻译结果"
         >
@@ -289,7 +289,7 @@
       <div class="mt-1 text-xs text-base-content/70 truncate">
         {selectedText}
       </div>
-      <div class="mt-2 flex-1 min-h-0 rounded-lg bg-base-200 px-3 py-2 text-sm overflow-auto">
+      <div class="mt-2 flex-1 min-h-0 rounded-lg bg-base-300 px-3 py-2 text-sm overflow-auto">
         {#if isTranslating}
           <div class="flex items-center gap-2 text-base-content/60">
             <div class="w-3 h-3 border border-t-transparent rounded-full animate-spin"></div>
