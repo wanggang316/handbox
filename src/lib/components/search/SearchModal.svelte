@@ -155,7 +155,7 @@
         <input
           bind:this={searchInput}
           type="text"
-          class="w-full pl-10 pr-9 py-2.5 rounded-xl border border-base-300 bg-base-100 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary"
+          class="w-full pl-10 pr-9 py-2.5 rounded-xl border border-[var(--hairline)] bg-base-300 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary"
           placeholder="搜索聊天记录..."
           bind:value={query}
         />
@@ -188,7 +188,7 @@
             {#each history as item}
               <button
                 type="button"
-                class="px-3 py-1.5 rounded-full bg-base-200 text-sm text-base-content/80 hover:bg-base-300"
+                class="px-3 py-1.5 rounded-full bg-base-300 text-sm text-base-content/80 hover:bg-base-300/80"
                 onclick={() => handleHistorySelect(item)}
               >
                 {item}
@@ -213,7 +213,7 @@
           {#each results as result}
             <button
               type="button"
-              class="w-full text-left rounded-xl border border-base-200 hover:border-primary/40 hover:bg-primary/5 transition-colors px-4 py-3"
+              class="w-full text-left rounded-xl border border-[var(--hairline)] hover:border-primary/40 hover:bg-primary/5 transition-colors px-4 py-3"
               onclick={() => handleResultSelect(result)}
             >
               <div class="flex items-start justify-between gap-4">

@@ -192,7 +192,7 @@
           type="text"
           bind:value={searchQuery}
           placeholder="搜索模型..."
-          class="w-full pl-10 pr-4 py-2 border border-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+          class="w-full pl-10 pr-4 py-2 border border-[var(--hairline)] bg-base-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
         />
         {#if searchQuery}
           <button
@@ -231,7 +231,7 @@
             onclick={() => (showFavoritesOnly = !showFavoritesOnly)}
             class="flex items-center gap-1 px-2 py-1 rounded-md text-xs {showFavoritesOnly
               ? 'bg-warning/10 text-warning border border-warning/30'
-              : 'bg-base-200 text-base-content border border-base-200 hover:bg-base-300'}"
+              : 'bg-base-300 text-base-content border border-[var(--hairline)] hover:bg-base-300/80'}"
           >
             <Star
               size={14}
@@ -269,9 +269,7 @@
                 <div
                   role="button"
                   tabindex="-1"
-                  class="flex flex-row px-4 py-1 {index % 2 === 0
-                    ? 'bg-base-100'
-                    : 'bg-base-200'} hover:bg-base-300"
+                  class="flex flex-row px-4 py-1 hover:bg-base-300 transition-colors"
                   onmouseenter={(e) => handleMouseEnter(model, e)}
                   onmouseleave={handleMouseLeave}
                 >
@@ -299,7 +297,7 @@
                       e.stopPropagation();
                       handleToggleFavorite(model);
                     }}
-                    class="p-1 hover:bg-base-200 rounded transition-colors"
+                    class="p-1 hover:bg-base-300 rounded transition-colors"
                   >
                     <Star
                       size={16}
@@ -321,7 +319,7 @@
   {#if hoveredModel}
     {@const providerIcon = getProviderIconById(hoveredModel.provider_id)}
     <div
-      class="fixed z-[9999] bg-base-100 border border-base-300 rounded-lg shadow-xl px-4 pt-4 pb-0 min-w-[280px] max-w-[380px]"
+      class="fixed z-[9999] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-xl shadow-xl px-4 pt-4 pb-0 min-w-[280px] max-w-[380px]"
       style="left: {tooltipPosition.x}px; top: {tooltipPosition.y}px;"
     >
       <div class="space-y-1">
@@ -345,7 +343,7 @@
         <!-- 模型 ID - tag 样式 -->
         <div class="flex mb-2">
           <span
-            class="inline-block px-2 py-1 text-xs bg-base-200 text-base-content/70 rounded-lg break-all"
+            class="inline-block px-2 py-1 text-xs bg-base-300 text-base-content/70 rounded-md break-all"
           >
             {hoveredModel.id}
           </span>
@@ -356,7 +354,7 @@
           {#if hoveredModel.display_context_length}
             <div class="flex justify-between items-center">
               <span class="text-base-content/70">上下文长度</span>
-              <span class="font-semibold text-base-content">
+              <span class="font-medium text-base-content">
                 {hoveredModel.display_context_length}
               </span>
             </div>
@@ -364,7 +362,7 @@
           {#if hoveredModel.display_output_max_tokens}
             <div class="flex justify-between items-center">
               <span class="text-base-content/70">最大输出长度</span>
-              <span class="font-semibold text-base-content">
+              <span class="font-medium text-base-content">
                 {hoveredModel.display_output_max_tokens}
               </span>
             </div>
@@ -372,7 +370,7 @@
           {#if hoveredModel.pricing?.input_text}
             <div class="flex justify-between items-center">
               <span class="text-base-content/70">输入价格</span>
-              <span class="font-semibold text-base-content">
+              <span class="font-medium text-base-content">
                 {hoveredModel.pricing.input_text}
               </span>
             </div>
@@ -380,7 +378,7 @@
           {#if hoveredModel.pricing?.output_text}
             <div class="flex justify-between items-center">
               <span class="text-base-content/70">输出价格</span>
-              <span class="font-semibold text-base-content">
+              <span class="font-medium text-base-content">
                 {hoveredModel.pricing.output_text}
               </span>
             </div>

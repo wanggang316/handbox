@@ -84,9 +84,9 @@
         };
       case "secondary":
         return {
-          bgColor: "bg-base-200",
+          bgColor: "bg-base-300",
           textColor: "text-base-content/80",
-          hoverColor: "hover:bg-base-300",
+          hoverColor: "hover:bg-base-300/80",
         };
       default:
         return {
@@ -152,9 +152,9 @@
           label={cancelText}
           size="h-8"
           fontSize="text-sm"
-          bgColor="bg-base-200"
+          bgColor="bg-base-300"
           textColor="text-base-content/80"
-          hoverColor="hover:bg-base-300"
+          hoverColor="hover:bg-base-300/80"
           onclick={handleCancel}
         />
         <RoundButton

@@ -48,13 +48,13 @@
     {required}
     {value}
     oninput={handleInput}
-    class="w-full px-3 py-2 border border-base-300 rounded-md resize-none
+    class="w-full px-3 py-2 border border-[var(--hairline)] rounded-md resize-none
            focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
-           font-mono text-sm text-base-content bg-base-200
+           font-mono text-sm text-base-content bg-base-300
            scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200
            hover:scrollbar-thumb-base-300/80
-           disabled:bg-base-300 disabled:cursor-not-allowed disabled:opacity-50
-           readonly:bg-base-300"
+           disabled:opacity-50 disabled:cursor-not-allowed
+           readonly:opacity-80"
   ></textarea>
 
   {#if showCharCount}

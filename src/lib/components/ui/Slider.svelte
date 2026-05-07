@@ -29,7 +29,7 @@
   {#if label}
     <div class="flex items-center justify-between">
       <label for="slider-{label}" class="text-sm font-medium text-base-content">{label}</label>
-      <span class="text-sm font-mono text-base-content/80 bg-base-200 px-2 py-1 rounded">
+      <span class="text-sm font-mono text-base-content/80 bg-base-300 px-2 py-0.5 rounded-md">
         {formatValue(value)}
       </span>
     </div>
