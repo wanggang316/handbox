@@ -166,7 +166,7 @@
     </div>
   {/if}
 
-  <div class="rounded-[20px] overflow-hidden">
+  <div class="rounded-xl overflow-hidden">
     <!-- MCP 服务器列表 -->
     <TableGroup>
       {#each mcpState.servers as server (server.id)}

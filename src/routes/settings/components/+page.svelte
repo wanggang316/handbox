@@ -378,7 +378,7 @@
   onClose={() => (modalOpen = false)}
   closeOnBackdropClick
 >
-  <div class="max-w-lg bg-base-100 rounded-2xl px-6 py-5">
+  <div class="max-w-lg bg-base-100 rounded-xl px-6 py-5">
     <div class="space-y-2">
       <h3 class="text-base font-medium text-base-content">Modal 内容</h3>
       <p class="text-sm text-base-content/70">

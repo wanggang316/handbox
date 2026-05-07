@@ -269,7 +269,7 @@
 <svelte:window onclick={handleClickOutside} />
 
 <div
-  class="flex flex-col w-full h-full bg-base-100 rounded-2xl shadow-lg overflow-hidden"
+  class="flex flex-col w-full h-full bg-base-100 rounded-xl shadow-lg overflow-hidden"
 >
   <!-- 标题栏 -->
   {#if content.mode && modeConfig[content.mode]}

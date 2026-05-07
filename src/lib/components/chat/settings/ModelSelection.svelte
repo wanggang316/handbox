@@ -24,7 +24,7 @@
 </script>
 
 <button
-  class="w-full rounded-2xl bg-base-200 px-3 py-4 border border-base-200 hover:bg-base-300"
+  class="w-full rounded-xl bg-base-200 px-3 py-4 border border-base-200 hover:bg-base-300"
   type="button"
   onclick={() => (showModelModal = true)}
 >

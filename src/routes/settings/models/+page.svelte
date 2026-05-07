@@ -67,7 +67,7 @@
     </div>
   {/if}
 
-  <div class="rounded-[20px] overflow-hidden">
+  <div class="rounded-xl overflow-hidden">
     <!-- 供应商列表 -->
     <TableGroup>
       <!-- 实际供应商 -->

@@ -48,7 +48,7 @@
 </script>
 
 <button
-  class="w-full space-y-4 rounded-2xl bg-base-200 px-5 py-4 hover:bg-base-300"
+  class="w-full space-y-4 rounded-xl bg-base-200 px-5 py-4 hover:bg-base-300"
   type="button"
   onclick={handleOpenModal}
   disabled={!hasActiveChat}

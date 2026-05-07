@@ -27,7 +27,7 @@
 </script>
 
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
-  <div class="rounded-[20px] overflow-hidden">
+  <div class="rounded-xl overflow-hidden">
     <TableGroup>
       <DefaultRow
         label="检查更新"

@@ -66,7 +66,7 @@
 </script>
 
 <Modal bind:this={modalRef} {open} {onClose} showCloseButton={false}>
-  <div class="bg-base-100 rounded-2xl relative flex flex-col p-8">
+  <div class="bg-base-100 rounded-xl relative flex flex-col p-8">
     <!-- 用户头像 -->
     <div class="flex justify-center py-4">
       <Avatar 
