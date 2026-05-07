@@ -385,14 +385,14 @@
               {#each envEntries as entry, index (index)}
                 <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
                   <input
-                    class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
+                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary focus:outline-none"
                     placeholder="键"
                     value={entry.key}
                     oninput={(e) =>
                       updateEnvEntry(index, "key", e.currentTarget.value)}
                   />
                   <input
-                    class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
+                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary focus:outline-none"
                     placeholder="值"
                     value={entry.value}
                     oninput={(e) =>
@@ -431,14 +431,14 @@
               {#each headerEntries as entry, index (index)}
                 <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
                   <input
-                    class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
+                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary focus:outline-none"
                     placeholder="头部名称"
                     value={entry.key}
                     oninput={(e) =>
                       updateHeaderEntry(index, "key", e.currentTarget.value)}
                   />
                   <input
-                    class="w-full px-3 py-2 text-sm bg-base-100 border border-base-300 rounded-lg focus:border-primary focus:outline-none"
+                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary focus:outline-none"
                     placeholder="头部值"
                     value={entry.value}
                     oninput={(e) =>
@@ -473,7 +473,7 @@
       <RoundButton
         customClass="w-18"
         label="取消"
-        bgColor="bg-base-200"
+        bgColor="bg-base-300"
         textColor="text-base-content/80"
         onclick={closeModal}
       />

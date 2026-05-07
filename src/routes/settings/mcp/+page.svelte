@@ -208,7 +208,7 @@
             {:else if server.tools.length > 0}
               <div class="flex items-center gap-2">
                 <button
-                  class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded px-1 -ml-1 py-0.5 transition-colors"
+                  class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-300 rounded px-1 -ml-1 py-0.5 transition-colors"
                   onclick={() => toggleTools(server.id)}
                 >
                   <span

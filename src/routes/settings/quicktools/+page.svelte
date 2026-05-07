@@ -157,7 +157,7 @@
     {:else}
       <div class="grid grid-cols-2 p-4 gap-x-4 gap-y-2">
         {#each disabledApps as app}
-          <div class="flex items-center justify-between px-3 py-2 bg-base-100 rounded-lg group">
+          <div class="flex items-center justify-between px-3 py-2 bg-base-300 rounded-lg group">
             <div class="flex flex-col">
               <span class="text-sm font-medium">{app.name}</span>
               <span class="text-xs text-base-content/50">{app.bundle_id}</span>
@@ -176,7 +176,7 @@
   </TableGroup>
 
   {#if !permissionGranted}
-    <div class="bg-base-200 rounded-xl p-4 flex flex-col gap-3">
+    <div class="bg-base-300 rounded-xl p-4 flex flex-col gap-3">
       <p class="text-sm text-base-content/70">
         启用此功能需要授予辅助功能权限。请前往"系统设置 &gt; 隐私与安全性 &gt;
         辅助功能"，并启用 HandBox 的权限。

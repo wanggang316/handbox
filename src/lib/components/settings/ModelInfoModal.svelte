@@ -205,7 +205,7 @@
       <table
         class="w-full text-sm text-base-content/80 border-collapse table-fixed"
       >
-        <tbody class="divide-y divide-base-200">
+        <tbody class="divide-y divide-[var(--hairline)]">
           {#each tableRows as row (row.label)}
             <tr>
               <td
@@ -229,7 +229,7 @@
                     </span>
                     <button
                       onclick={handleCopyModelId}
-                      class="p-1 hover:bg-base-200 rounded transition-colors"
+                      class="p-1 hover:bg-base-300 rounded transition-colors"
                       title="复制模型 ID"
                     >
                       {#if copied}

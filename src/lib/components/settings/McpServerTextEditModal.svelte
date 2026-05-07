@@ -66,7 +66,7 @@
 
 		<div class="flex-1 px-6">
 			<textarea
-				class="w-full h-full min-h-40 border-1 border-base-300 rounded-md p-2 resize-none bg-base-100 text-base-content"
+				class="w-full h-full min-h-40 border border-[var(--hairline)] rounded-md p-2 resize-none bg-base-300 text-base-content"
 				placeholder="请输入MCP服务器配置..."
 				bind:value={mcpJson}
 			></textarea>
@@ -77,7 +77,7 @@
 			<RoundButton
 				customClass="w-18"
 				label="取消"
-				bgColor="bg-base-200"
+				bgColor="bg-base-300"
 				textColor="text-base-content/80"
 				hoverColor="hover:text-base-content"
 				onclick={handleClose}

@@ -66,7 +66,7 @@
 </script>
 
 <Modal bind:this={modalRef} {open} {onClose} showCloseButton={false}>
-  <div class="bg-base-100 rounded-xl relative flex flex-col p-8">
+  <div class="relative flex flex-col p-8">
     <!-- 用户头像 -->
     <div class="flex justify-center py-4">
       <Avatar 
@@ -100,7 +100,7 @@
       <RoundButton
         customClass="w-18"
         label="取消"
-        bgColor="bg-base-200"
+        bgColor="bg-base-300"
         textColor="text-base-content/80"
         hoverColor="hover:text-base-content"
         onclick={handleCancel}

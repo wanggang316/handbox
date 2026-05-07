@@ -11,14 +11,16 @@
   }
 </script>
 
-<div class="flex h-screen bg-[color:var(--base-100)]">
+<div class="flex h-screen bg-[color:var(--bg-page)]">
   <TitleBar sidebarOpen={false} showToggleButton={false} onToggle={handleToggle} />
-  
-  <div class="m-2 w-35">
+
+  <div class="my-2 ml-2 w-35">
     <SettingsSidebar/>
   </div>
-  
-  <main class="flex-1 overflow-auto">
+
+  <main
+    class="flex-1 overflow-auto bg-[color:var(--bg-card)] border-l border-[var(--hairline)] rounded-tl-xl rounded-bl-xl"
+  >
     {@render children()}
   </main>
 </div>

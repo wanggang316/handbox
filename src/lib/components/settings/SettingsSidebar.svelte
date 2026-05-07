@@ -27,7 +27,7 @@
   }
 </script>
 
-<div class="h-full flex flex-col bg-base-200 p-0 pt-10 rounded-xl overflow-hidden">
+<div class="h-full flex flex-col p-0 pt-10 overflow-hidden">
   <div class="flex-1 overflow-y-auto p-0">
     <Menu 
       title=""
