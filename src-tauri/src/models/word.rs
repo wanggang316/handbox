@@ -1,6 +1,5 @@
 // 单词相关请求类型
 
-use crate::storage::types::Word;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

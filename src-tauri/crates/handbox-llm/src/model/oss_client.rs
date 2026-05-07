@@ -5,7 +5,6 @@ use std::env;
 const OSS_ACCESS_KEY_ID: &str = "OSSAccessKeyId";
 const OSS_ACCESS_KEY_SECRET: &str = "OSSAccessKeySecret";
 const OSS_BUCKET: &str = "OSSBucket";
-const OSS_ENDPOINT: &str = "OSSEndpoint";
 const OSS_REGION: &str = "OSSRegion";
 
 /// Minimal wrapper around aliyun OSS client to fetch supplemental model data.
@@ -13,7 +12,6 @@ const OSS_REGION: &str = "OSSRegion";
 pub struct OssClient {
     client: AliyunClient,
     bucket: String,
-    endpoint: String,
 }
 
 impl OssClient {
@@ -21,7 +19,6 @@ impl OssClient {
         access_key_id: impl Into<String>,
         access_key_secret: impl Into<String>,
         bucket: impl Into<String>,
-        endpoint: impl Into<String>,
         region: impl Into<String>,
     ) -> Self {
         let access_key_id = access_key_id.into();
@@ -33,7 +30,6 @@ impl OssClient {
         Self {
             client,
             bucket: bucket.into(),
-            endpoint: endpoint.into(),
         }
     }
 
@@ -46,18 +42,10 @@ impl OssClient {
         })?;
         let bucket = env::var(OSS_BUCKET)
             .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_BUCKET} env")))?;
-        let endpoint = env::var(OSS_ENDPOINT)
-            .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_ENDPOINT} env")))?;
         let region = env::var(OSS_REGION)
             .map_err(|_| LlmClientError::configuration(format!("Missing {OSS_REGION} env")))?;
 
-        Ok(Self::new(
-            access_key_id,
-            access_key_secret,
-            bucket,
-            endpoint,
-            region,
-        ))
+        Ok(Self::new(access_key_id, access_key_secret, bucket, region))
     }
 
     pub async fn get_object_text(&self, key: &str) -> Result<String, LlmClientError> {

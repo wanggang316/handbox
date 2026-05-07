@@ -227,7 +227,11 @@
     <div
       class="fixed z-[10030] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-3 py-2 flex flex-col gap-2"
       style="left: {menuX}px; top: {menuY}px; transform: translateX(-50%);"
+      role="menu"
+      tabindex="-1"
+      aria-label="文本选择操作"
       onclick={(event) => event.stopPropagation()}
+      onkeydown={(event) => event.stopPropagation()}
     >
       <span class="text-xs text-base-content/70 truncate max-w-[240px]">
         {selectedText}
@@ -273,8 +277,10 @@
       class="text-selection-translation fixed z-[10031] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl p-3 w-[400px] max-w-[90vw] h-[200px] flex flex-col"
       style="left: {translatePanelX}px; top: {translatePanelY}px;"
       role="dialog"
+      tabindex="-1"
       aria-label="翻译结果"
       onclick={(event) => event.stopPropagation()}
+      onkeydown={(event) => event.stopPropagation()}
     >
       <div class="flex items-center justify-between">
         <div class="text-xs text-base-content/60">翻译结果</div>

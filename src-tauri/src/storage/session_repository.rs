@@ -404,11 +404,6 @@ impl SessionRepository {
             updated_at: row.try_get("updated_at")?,
         })
     }
-
-    /// 向后兼容：辅助方法将数据库行转换为 Chat
-    fn row_to_chat(&self, row: sqlx::sqlite::SqliteRow) -> Result<Session, AppError> {
-        self.row_to_session(row)
-    }
 }
 
 #[cfg(test)]

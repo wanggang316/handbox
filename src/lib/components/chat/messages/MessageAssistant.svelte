@@ -611,6 +611,7 @@
     class="favorite-range-menu fixed z-[10040] bg-base-100 border border-base-300 rounded-lg shadow-lg px-2 py-1 text-xs"
     style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
     role="menu"
+    tabindex="-1"
     aria-label="收藏范围操作"
     onmouseenter={() => (isRangeMenuHovering = true)}
     onmouseleave={() => {
