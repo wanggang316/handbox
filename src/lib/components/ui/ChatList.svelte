@@ -234,14 +234,14 @@
   <div class="text-sm text-base-content/70 pb-2 pl-4 flex-shrink-0">聊天</div>
 
   <!-- 聊天列表 -->
-  <div class="flex-1 overflow-y-auto space-y-1 px-2">
+  <div class="flex-1 overflow-y-auto space-y-0.5 px-2">
     {#each chats as chat (chat.id)}
       {#if isRenaming && renamingChatId === chat.id}
         <!-- 重命名输入框 -->
         <div class="relative">
           <input
             data-chat-id={chat.id}
-            class="w-full py-1 px-2 text-[14px] bg-base-100 border border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+            class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={renameValue}
             onkeydown={handleKeydown}
             onblur={confirmRename}
@@ -251,9 +251,9 @@
       {:else}
         <!-- 聊天项 -->
         <button
-          class="w-full py-1 px-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 {chat.id ===
+          class="w-full py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {chat.id ===
           activeId
-            ? 'bg-base-300'
+            ? 'bg-base-300 text-base-content'
             : ''}"
           onclick={() => handleChatClick(chat)}
           oncontextmenu={(e) => handleContextMenu(e, chat)}

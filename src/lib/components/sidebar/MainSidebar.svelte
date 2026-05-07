@@ -178,51 +178,55 @@
   class="h-full flex flex-col p-0 pt-12 overflow-hidden"
 >
   <!-- 顶部固定区域 -->
-  <div class="flex-shrink-0 space-y-6 mb-6">
+  <div class="flex-shrink-0 space-y-3 mb-3">
     <!-- 搜索框 -->
     <div class="px-2">
       <div class="relative">
         <Search
           class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
-          size={16}
+          size={14}
         />
         <input
           type="text"
           placeholder="搜索..."
-          class="w-full h-8 pl-10 pr-4 bg-base-300 rounded-lg text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+          class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-[12px]"
           onfocus={() => (showSearchModal = true)}
           readonly
         />
       </div>
     </div>
 
-    <div class="flex flex-col px-2 space-y-1">
+    <div class="flex flex-col px-2 space-y-0.5">
       <MenuButton
         title="收藏"
         icon={Star}
-        iconSize={20}
+        iconSize={16}
         isActive={currentRoute === "/favorites"}
+        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
         onClick={() => handleFavoriteClick()}
       />
       <MenuButton
         title="Artifacts"
         icon={Box}
-        iconSize={20}
+        iconSize={16}
         isActive={currentRoute === "/artifacts"}
+        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
         onClick={() => handleArtifactClick()}
       />
       <MenuButton
         title="Agents"
         icon={Bot}
-        iconSize={20}
+        iconSize={16}
         isActive={currentRoute === "/agents"}
+        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
         onClick={() => handleAgentClick()}
       />
       <MenuButton
         title="单词本"
         icon={BookOpen}
-        iconSize={20}
+        iconSize={16}
         isActive={currentRoute === "/words"}
+        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
         onClick={() => handleWordsClick()}
       />
     </div>
