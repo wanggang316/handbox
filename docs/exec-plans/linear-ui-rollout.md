@@ -15,9 +15,9 @@ This is a living document. The Progress, Surprises & Discoveries, Decision Log, 
 - [x] M1.T1 — 在 `docs/ui-design.md` 末尾追加"HandBox Deviations"段，记录浅色模式策略、oklch 表示、保留的语义色与 Web/Tauri 字体替换 _(2026-05-06)_
 - [x] M1.T2 — 在 `src/app.css` 的 `@theme` 中改写 `--color-base-100/200/300`、`--color-primary*`、新增 `--color-surface-3/4`、`--color-hairline*`、`--color-ink-subtle`，浅色 / 深色双轨完成 _(2026-05-06)_
 - [x] M1.T3 — `npm run check` baseline 比对：本次改动 0 新增类型错误（pre-existing 11 errors 全部位于 `routes/(app)/words/+page.svelte` 等文件，与 CSS token 无关）。`tauri dev` 视觉验证在 M2 完成后一次性进行 _(2026-05-06)_
-- [ ] M2.T1 — 改造 `MessageUser.svelte` 气泡：surface-2 lift + hairline border + 圆角降至 `rounded-lg`(12px)
-- [ ] M2.T2 — 检查 `MessageAssistant.svelte` 在新 token 下的可读性，必要时调整 reasoning / tool-call 卡片背景到 surface-1
-- [ ] M2.T3 — 浅色 + 深色双主题各截一张聊天页面截图，附在 Artifacts and Notes 段
+- [x] M2.T1 — 改造 `MessageUser.svelte` 气泡：`px-4 py-3 rounded-2xl` → `px-3.5 py-2 rounded-lg` + 1px hairline 边框 _(2026-05-06)_
+- [x] M2.T2 — `MessageAssistant.svelte` / `ToolCallCard.svelte` 审计：现有 `border-base-300` / `bg-base-100/200` 类在新 token 下视觉一致，无需改动；scope-discipline 不动 _(2026-05-06)_
+- [ ] M2.T3 — 浅色 + 深色双主题各截一张聊天页面截图，附在 Artifacts and Notes 段（推迟到 M4 完成后一次性截图）
 - [ ] M3.T1 — 调整 `AddProviderModal.svelte` 容器：模态背景 = surface-1，标题用 headline 字号，CTA 按 button-primary 规格
 - [ ] M3.T2 — 验证 `Modal.svelte`、`RoundButton.svelte` 是否需要补 token；不直接改其 API
 - [ ] M4.T1 — 调整 `TableGroup.svelte` + `TableBaseRow.svelte`：分组容器 = surface-1 + 1px hairline + `rounded-lg`，行间分隔线用 hairline
