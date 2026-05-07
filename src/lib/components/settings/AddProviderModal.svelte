@@ -221,16 +221,16 @@
 </script>
 
 <Modal bind:this={modalRef} {open} onClose={onModalClose} showCloseButton={false}>
-  <!-- 弹窗容器 -->
+  <!-- 弹窗容器：surface-1 lift + hairline 包边，构造模态卡层 -->
   <div
-    class="w-md max-w-md max-h-[80vh] flex flex-col"
+    class="w-md max-w-md max-h-[80vh] flex flex-col bg-base-200 rounded-lg border border-[var(--hairline)]"
   >
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-6 py-4">
-      <h2 class="font-normal text-base-content">{isEditMode ? '编辑供应商' : '添加供应商'}</h2>
+    <div class="flex items-center justify-between px-5 py-3.5">
+      <h2 class="text-base font-medium tracking-tight text-base-content">{isEditMode ? '编辑供应商' : '添加供应商'}</h2>
     </div>
 
-    <div class="flex-1 min-h-0 px-6 py-2 space-y-4">
+    <div class="flex-1 min-h-0 px-5 py-2 space-y-3">
       <TableGroup>
         <SelectRow
           label="供应商类型"
@@ -246,12 +246,12 @@
       </TableGroup>
     </div>
 
-    <!-- 底部按钮 -->
-    <div class="flex items-center justify-end gap-3 px-6 py-3">
+    <!-- 底部按钮：CTA 走默认 primary（薰衣草紫），取消用 surface-2 lift -->
+    <div class="flex items-center justify-end gap-3 px-5 py-3">
       <RoundButton
         customClass="w-18"
         label="取消"
-        bgColor="bg-base-200"
+        bgColor="bg-base-300"
         textColor="text-base-content/80"
         onclick={handleClose}
       ></RoundButton>
