@@ -175,7 +175,7 @@
 </script>
 
 <div
-  class="h-full flex flex-col bg-base-200 p-0 pt-12 rounded-2xl overflow-hidden"
+  class="h-full flex flex-col p-0 pt-12 overflow-hidden"
 >
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-6 mb-6">

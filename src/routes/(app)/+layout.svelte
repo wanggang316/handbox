@@ -158,7 +158,10 @@
     </ResizableSidebar>
   </div>
 
-  <main class="main-content" class:sidebar-hidden={!uiState.sidebarOpen}>
+  <main
+    class="main-content my-2 mr-2"
+    class:sidebar-hidden={!uiState.sidebarOpen}
+  >
     {@render children()}
   </main>
 </div>
@@ -168,7 +171,7 @@
     display: flex;
     height: 100vh;
     width: 100vw;
-    background-color: var(--base-100);
+    background-color: var(--bg-page);
     color: var(--base-content);
     position: relative;
     overflow: hidden;
@@ -192,6 +195,10 @@
     display: flex;
     flex-direction: column;
     transition: width 0.25s ease-in-out;
+    /* Linear 主布局：内容卡上浮一档，hairline 包边，12px 圆角 */
+    background-color: var(--bg-card);
+    border: 1px solid var(--hairline);
+    border-radius: 0.75rem;
   }
 
   @media (max-width: 768px) {

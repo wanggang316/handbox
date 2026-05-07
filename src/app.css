@@ -117,6 +117,11 @@ body {
   --hairline-strong: var(--color-hairline-strong);
   --ink-subtle: var(--color-ink-subtle);
   --ink-tertiary: var(--color-ink-tertiary);
+
+  /* Layout 角色 token：page = sidebar 所在底色；card = 浮起的内容卡 (Linear 主布局) */
+  /* 浅色：page 略灰 (97%) → card 最亮 (99%)；深色：page 最深 (8%) → card 上浮 (15%) */
+  --bg-page: var(--color-base-200);
+  --bg-card: var(--color-base-100);
 }
 
 /* 深色主题 */
@@ -174,6 +179,10 @@ body {
   --hairline-strong: var(--color-hairline-strong-dark);
   --ink-subtle: var(--color-ink-subtle-dark);
   --ink-tertiary: var(--color-ink-tertiary-dark);
+
+  /* 深色：page 取 canvas (最深) ，card 上浮一档 */
+  --bg-page: var(--color-base-100-dark);
+  --bg-card: var(--color-base-200-dark);
 }
 
 [data-theme="dark"] .shadow-2xl {

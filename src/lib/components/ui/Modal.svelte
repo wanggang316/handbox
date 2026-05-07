@@ -64,7 +64,7 @@
     <div class="relative animate-modal" class:animate-modal-close={closing}>
       <!-- 背景层：surface-1 lift + hairline 边框 (Linear modal spec) -->
       <div
-        class="bg-base-200 max-w-[90vw] max-h-[90vh] rounded-xl shadow-2xl overflow-hidden relative pointer-events-none border border-[var(--hairline)]"
+        class="bg-[var(--bg-card)] max-w-[90vw] max-h-[90vh] rounded-xl shadow-2xl overflow-hidden relative pointer-events-none border border-[var(--hairline)]"
         style="z-index: 1;"
       >
         <!-- 预留内容空间 -->
