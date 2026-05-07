@@ -221,10 +221,8 @@
 </script>
 
 <Modal bind:this={modalRef} {open} onClose={onModalClose} showCloseButton={false}>
-  <!-- 弹窗容器：surface-1 lift + hairline 包边，构造模态卡层 -->
-  <div
-    class="w-md max-w-md max-h-[80vh] flex flex-col bg-base-200 rounded-lg border border-[var(--hairline)]"
-  >
+  <!-- 弹窗内容容器：surface 与边框由 Modal.svelte 统一提供 -->
+  <div class="w-md max-w-md max-h-[80vh] flex flex-col">
     <!-- 头部 -->
     <div class="flex items-center justify-between px-5 py-3.5">
       <h2 class="text-base font-medium tracking-tight text-base-content">{isEditMode ? '编辑供应商' : '添加供应商'}</h2>

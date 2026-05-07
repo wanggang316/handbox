@@ -62,10 +62,10 @@
     <TitleBar showToggleButton={false} />
     <!-- 外层容器：不裁切，允许下拉菜单溢出，负责动画 -->
     <div class="relative animate-modal" class:animate-modal-close={closing}>
-      <!-- 背景层：负责视觉效果和边界裁切，但不影响内容层 -->
+      <!-- 背景层：surface-1 lift + hairline 边框 (Linear modal spec) -->
       <div
-        class="bg-base-100 max-w-[90vw] max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden relative pointer-events-none border-[1px] border-base-200"
-        style="border-radius: 20px; z-index: 1;"
+        class="bg-base-200 max-w-[90vw] max-h-[90vh] rounded-xl shadow-2xl overflow-hidden relative pointer-events-none border border-[var(--hairline)]"
+        style="z-index: 1;"
       >
         <!-- 预留内容空间 -->
         <div class="px-0 py-0 invisible">
