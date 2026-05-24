@@ -8,12 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Linear-inspired design system: dual-mode surface ladder, hairline borders, and a 3-tier radius hierarchy (button 6 / card 8 / panel 12).
+- Geist Variable + Geist Mono Variable as the default UI fonts.
+- `docs/ui-design.md` capturing the Linear design system and HandBox deviations.
 
 ### Changed
+- Refactored chat, settings, edge routes (words/selection/agent/favorite), and modals to the new Linear surface ladder.
+- Inverted sidebar/main surface roles to match the Linear pattern; main card bleeds to all four window edges and fills the viewport when the sidebar is closed.
+- Tightened typography and spacing across sidebar, title bar, message bubbles, and modals; aligned all card radii to `rounded-xl` (12px).
+- Switched base inputs and modals to `bg-base-300` inset with hairline borders and removed semibold weight.
+- Remapped `@theme` tokens to a Linear-inspired palette with tighter primary contrast and a real blue tint on dark surfaces.
 
 ### Fixed
+- Layout gap between sidebar and main content card when the sidebar is closed.
+- Modal surface lift moved into `Modal.svelte` to remove the redundant wrapper in `AddProviderModal`.
+- A11y warnings and dead code surfaced at dev startup.
 
 ### Removed
+- Dropped the unused `TextSelectionMenu` wrapper from message bubbles.
+- Removed Windows from the release matrix.
 
 
 ## [0.1.1] - 2026-05-06
