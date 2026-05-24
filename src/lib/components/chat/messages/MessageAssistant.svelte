@@ -21,7 +21,6 @@
     openPathInSystem,
   } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
-  import TextSelectionMenu from "$lib/components/favorite/TextSelectionMenu.svelte";
 
   interface Props {
     message?: Message;
@@ -387,28 +386,21 @@
 
   <!-- 消息内容 -->
           {#if message && message.id && message.sessionId}
-            <TextSelectionMenu
-              messageId={message.id}
-              chatId={message.sessionId}
-              content={message.content}
-              role={message.role}
+            <div
+              class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+              data-message-id={message.id}
+              use:highlightRange={{
+                ranges: textRanges,
+                onRangeHover: handleRangeHover,
+                onRangeLeave: handleRangeLeave,
+                hoverDelayMs: 2000,
+                version: favoriteStore.textRangesVersion,
+              }}
+              data-favorite-highlight-version={favoriteStore.textRangesVersion}
+              use:markdownInteractions
             >
-              <div
-                class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-                data-message-id={message.id}
-                use:highlightRange={{
-                  ranges: textRanges,
-                  onRangeHover: handleRangeHover,
-                  onRangeLeave: handleRangeLeave,
-                  hoverDelayMs: 2000,
-                  version: favoriteStore.textRangesVersion,
-                }}
-                data-favorite-highlight-version={favoriteStore.textRangesVersion}
-                use:markdownInteractions
-              >
-                {@html renderMarkdown(message.content || "")}
-              </div>
-            </TextSelectionMenu>
+              {@html renderMarkdown(message.content || "")}
+            </div>
           {:else if message}
             <div
               class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"

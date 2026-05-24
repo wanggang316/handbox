@@ -6,7 +6,6 @@
   import { highlightRange } from "$lib/utils";
   import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
-  import TextSelectionMenu from "$lib/components/favorite/TextSelectionMenu.svelte";
 
   interface Props {
     message: Message;
@@ -123,27 +122,19 @@
           class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
         >
           {#if message.id && message.chatId}
-            <TextSelectionMenu
-              messageId={message.id}
-              chatId={message.chatId}
-              content={message.content}
-              role={message.role}
+            <div
+              class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+              use:highlightRange={{
+                ranges: textRanges,
+                onRangeHover: handleRangeHover,
+                onRangeLeave: handleRangeLeave,
+                hoverDelayMs: 2000,
+                version: favoriteStore.textRangesVersion,
+              }}
+              data-favorite-highlight-version={favoriteStore.textRangesVersion}
             >
-              <!-- 消息内容 -->
-              <div
-                class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
-                use:highlightRange={{
-                  ranges: textRanges,
-                  onRangeHover: handleRangeHover,
-                  onRangeLeave: handleRangeLeave,
-                  hoverDelayMs: 2000,
-                  version: favoriteStore.textRangesVersion,
-                }}
-                data-favorite-highlight-version={favoriteStore.textRangesVersion}
-              >
-                {message.content}
-              </div>
-            </TextSelectionMenu>
+              {message.content}
+            </div>
           {:else}
             <div class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left">
               {message.content}
