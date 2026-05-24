@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+- Load `llm_config.json` from the Tauri resource directory instead of the current working directory, so packaged builds no longer fall back to an empty config and fail chat requests with `Unknown provider type` (and lose provider icons).
 
 ### Removed
 
