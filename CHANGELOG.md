@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+
+## [0.1.2] - 2026-05-24
+
+### Added
 - Linear-inspired design system: dual-mode surface ladder, hairline borders, and a 3-tier radius hierarchy (button 6 / card 8 / panel 12).
 - Geist Variable + Geist Mono Variable as the default UI fonts.
 - `docs/ui-design.md` capturing the Linear design system and HandBox deviations.
@@ -27,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Dropped the unused `TextSelectionMenu` wrapper from message bubbles.
 - Removed Windows from the release matrix.
-
 
 ## [0.1.1] - 2026-05-06
 
