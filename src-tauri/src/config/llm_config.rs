@@ -155,10 +155,10 @@ impl LlmConfig {
         }
     }
 
-    /// 从配置文件加载
+    /// 从配置文件加载（开发/测试用，按 cwd 相对路径读取）
     pub fn load() -> Self {
         let mut config = Self::new();
-        match config.load_file() {
+        match config.load_file_at(std::path::Path::new("llm_config.json")) {
             Ok(()) => {
                 tracing::info!("Successfully loaded LLM config from llm_config.json");
             }
@@ -169,10 +169,33 @@ impl LlmConfig {
         config
     }
 
-    /// 加载配置文件
-    fn load_file(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let config_content = fs::read_to_string("llm_config.json")
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
+    /// 通过 Tauri AppHandle 从打包资源目录加载配置
+    pub fn load_from_app(app: &tauri::AppHandle) -> Self {
+        use tauri::Manager;
+        let mut config = Self::new();
+        let resource_dir = match app.path().resource_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                tracing::warn!("Failed to get resource dir: {}. Using empty config", e);
+                return config;
+            }
+        };
+        let path = resource_dir.join("llm_config.json");
+        match config.load_file_at(&path) {
+            Ok(()) => {
+                tracing::info!("Successfully loaded LLM config from {}", path.display());
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load {}: {}. Using empty config", path.display(), e);
+            }
+        }
+        config
+    }
+
+    /// 加载配置文件（按指定路径）
+    fn load_file_at(&mut self, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+        let config_content = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read config file {}: {}", path.display(), e))?;
 
         let loaded_config: LlmConfig = serde_json::from_str(&config_content)
             .map_err(|e| format!("Failed to parse config file: {}", e))?;
@@ -267,6 +290,13 @@ static GLOBAL_LLM_CONFIG: OnceLock<LlmConfig> = OnceLock::new();
 /// 获取全局 LLM 配置实例
 pub fn get_global_llm_config() -> &'static LlmConfig {
     GLOBAL_LLM_CONFIG.get_or_init(|| LlmConfig::load())
+}
+
+/// 安装全局 LLM 配置实例（应在使用前由启动流程调用）
+pub fn install_global_llm_config(config: LlmConfig) {
+    if GLOBAL_LLM_CONFIG.set(config).is_err() {
+        tracing::warn!("Global LLM config already initialized; install_global_llm_config ignored");
+    }
 }
 
 #[cfg(test)]

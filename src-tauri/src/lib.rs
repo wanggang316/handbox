@@ -290,7 +290,9 @@ async fn initialize_services(
             .map_err(|e| format!("Failed to initialize database: {e}"))?,
     );
 
-    let llm_config = Arc::new(crate::config::llm_config::LlmConfig::load());
+    let llm_config_value = crate::config::llm_config::LlmConfig::load_from_app(app);
+    crate::config::llm_config::install_global_llm_config(llm_config_value.clone());
+    let llm_config = Arc::new(llm_config_value);
     let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
 
     // 初始化各个服务
