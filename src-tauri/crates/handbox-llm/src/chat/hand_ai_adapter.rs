@@ -1,24 +1,25 @@
 // hand-ai adapter — routes ChatClient calls through hand-ai/crates/model.
 //
-// Behind the `hand-ai` feature flag. Dark by default. See
-// docs/exec-plans/hand-ai-integration.md for the full translation table
-// and milestones; this file implements M1 (compile-clean skeleton).
+// Behind the `hand-ai` feature flag. See docs/exec-plans/hand-ai-integration.md
+// for the full translation table and milestones.
 //
-// What this adapter delivers in M1:
+// What this adapter delivers today:
 //   • Compiles when `--features hand-ai` is set.
 //   • `ChatClient::api_type()` returns "hand-ai".
-//   • `chat()` and `chat_stream()` translate `LlmRequest` → `model::Context`
-//     and back, but `unimplemented!()` on paths that depend on translation
-//     details not yet finalized (image attachments, tool-result encoding,
-//     reasoning/thinking config, generated images).
+//   • `chat_stream()` invokes hand_ai_model::stream_simple end-to-end:
+//     LlmRequest → Context (with prior assistant turns reconstructed
+//     from the current request's model template, tool_name pulled from
+//     preceding tool_calls), per-request api_key + base_url override
+//     via StreamOptions / Model.base_url, and an event aggregator that
+//     maps TextDelta/ThinkingDelta/Done/Error back to LlmChunkResponse.
+//   • Image attachments translate to UserContentBlock::Image.
 //
-// What lands in later milestones:
-//   M2 — wire one provider (openai) end-to-end through `complete_simple`
-//        / `stream_simple` with real network calls; pass live HandBox chat.
-//   M3 — parity for anthropic / google / openrouter and delete the
-//        per-provider adapters.
-//   M4 — drive provider catalog from hand-ai's `get_providers()` /
-//        `ProviderCapabilities` (hand-ai issue #31).
+// What still validation-errors out:
+//   • Non-image attachments (PDF, etc.) — needs hand-ai content variants.
+//   • Models not in hand-ai's static catalog — adapter requires a Model
+//     template lookup; synthetic Model construction lands in M3.
+//   • Non-stream `chat()` path — wired in M3 alongside legacy adapter
+//     deletion.
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -74,10 +75,10 @@ impl ChatClient for HandAiChatClient {
     ) -> Result<LlmResponse, LlmClientError> {
         // M1 stub: translation compiles, but we don't actually invoke the
         // network yet. Live call lands in M2.
-        let _context = llm_request_to_context(&request)?;
+        let _context = llm_request_to_context(&request, self.provider_id)?;
         let _tools = request.tools.as_ref().map(translate_tools).transpose()?;
         Err(LlmClientError::validation(
-            "hand-ai adapter chat() not yet wired; lands in M2",
+            "hand-ai adapter chat() not yet wired; lands in M3",
         ))
     }
 
@@ -89,7 +90,7 @@ impl ChatClient for HandAiChatClient {
         Box<dyn Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
         LlmClientError,
     > {
-        let context = llm_request_to_context(&request)?;
+        let context = llm_request_to_context(&request, self.provider_id)?;
         let model = resolve_model(self.provider_id, &request.model, &provider.base_url)?;
         let options = build_stream_options(&request, &provider.api_key);
 
@@ -126,9 +127,46 @@ impl ChatClient for HandAiChatClient {
 /// first system message out into `system_prompt` and concatenate any later
 /// system messages into it with a blank line between them (rare in practice
 /// but happens with multi-stage prompts).
-pub(crate) fn llm_request_to_context(request: &LlmRequest) -> Result<Context, LlmClientError> {
+pub(crate) fn llm_request_to_context(
+    request: &LlmRequest,
+    provider_id: &str,
+) -> Result<Context, LlmClientError> {
     let mut system_chunks: Vec<String> = Vec::new();
     let mut messages: Vec<Message> = Vec::with_capacity(request.messages.len());
+    // Threaded so role=Tool entries can recover the tool name from the
+    // preceding role=Assistant turn that declared the call. HandBox's
+    // LlmMessage(role=Tool) only carries `tool_call_id`; hand-ai requires
+    // `tool_name` on ToolResultMessage.
+    let mut tool_name_by_call_id: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    // For prior assistant turns, hand-ai's AssistantMessage requires
+    // api/provider/model metadata HandBox doesn't store per-message. We
+    // best-effort reconstruct from the *current* request's model: even if
+    // the past turn ran on a different model, the historical record is
+    // about *content*, not provenance — and hand-ai's transcript handling
+    // doesn't validate that prior turns match the current model. If the
+    // current model id isn't in hand-ai's catalog we surface a clear
+    // error rather than fabricating Api::OpenAICompletions / Provider::OpenAI.
+    let assistant_meta = if request
+        .messages
+        .iter()
+        .any(|m| m.role == LlmMessageRole::Assistant)
+    {
+        let template = hand_ai_model::get_model(provider_id, &request.model).ok_or_else(|| {
+            LlmClientError::validation(format!(
+                "hand-ai: cannot reconstruct prior assistant turn — model '{}' under provider '{}' not in catalog",
+                request.model, provider_id
+            ))
+        })?;
+        Some(AssistantMeta {
+            api: template.api,
+            provider: template.provider,
+            model: template.id,
+        })
+    } else {
+        None
+    };
 
     for msg in &request.messages {
         match msg.role {
@@ -141,22 +179,21 @@ pub(crate) fn llm_request_to_context(request: &LlmRequest) -> Result<Context, Ll
                 messages.push(Message::User(llm_user_message(msg)?));
             }
             LlmMessageRole::Assistant => {
-                // M1: reconstructing a prior assistant turn requires api/
-                // provider/model/usage/stop_reason metadata that HandBox does
-                // not carry on LlmMessage. Multi-turn replay lands in M2 once
-                // we decide whether to (a) store this metadata in HandBox or
-                // (b) ask hand-ai for a lightweight history-only constructor.
-                return Err(LlmClientError::validation(
-                    "hand-ai adapter: prior assistant messages in history not yet supported (M2)",
-                ));
+                if let Some(calls) = msg.tool_calls.as_ref() {
+                    for c in calls {
+                        tool_name_by_call_id.insert(c.id.clone(), c.function.name.clone());
+                    }
+                }
+                let meta = assistant_meta
+                    .as_ref()
+                    .expect("computed when any assistant entry exists");
+                messages.push(Message::Assistant(llm_assistant_message(msg, meta)?));
             }
             LlmMessageRole::Tool => {
-                // M1: ToolResultMessage requires tool_name, which HandBox's
-                // LlmMessage(role=Tool) doesn't carry. Need to thread it
-                // through from the upstream tool-call record. Lands in M2.
-                return Err(LlmClientError::validation(
-                    "hand-ai adapter: tool result messages not yet supported (M2)",
-                ));
+                messages.push(Message::ToolResult(llm_tool_result_message(
+                    msg,
+                    &tool_name_by_call_id,
+                )?));
             }
         }
     }
@@ -176,6 +213,16 @@ pub(crate) fn llm_request_to_context(request: &LlmRequest) -> Result<Context, Ll
         messages,
         tools,
     })
+}
+
+/// api / provider / model triple recovered from the current request's
+/// model, used to fill required fields on reconstructed prior assistant
+/// turns. Cached once per request so multi-turn histories don't pay
+/// the catalog lookup per message.
+struct AssistantMeta {
+    api: model::Api,
+    provider: hand_ai_model::types::Provider,
+    model: String,
 }
 
 fn llm_user_message(msg: &LlmMessage) -> Result<UserMessage, LlmClientError> {
@@ -207,6 +254,91 @@ fn llm_user_message(msg: &LlmMessage) -> Result<UserMessage, LlmClientError> {
         blocks.push(UserContentBlock::Text(TextContent::new(msg.content.clone())));
     }
     Ok(UserMessage::new_blocks(blocks))
+}
+
+fn llm_assistant_message(
+    msg: &LlmMessage,
+    meta: &AssistantMeta,
+) -> Result<model::AssistantMessage, LlmClientError> {
+    let mut content: Vec<model::AssistantContentBlock> = Vec::new();
+
+    // Reasoning → ThinkingContent. Some providers carry reasoning as a
+    // separate sidecar field on assistant turns; preserve it so the next
+    // turn sees the same context the user did.
+    if let Some(reasoning) = msg.reasoning.as_ref().filter(|s| !s.is_empty()) {
+        content.push(model::AssistantContentBlock::Thinking(
+            model::ThinkingContent::new(reasoning.clone()),
+        ));
+    }
+
+    if !msg.content.is_empty() {
+        content.push(model::AssistantContentBlock::Text(
+            model::TextContent::new(msg.content.clone()),
+        ));
+    }
+
+    if let Some(calls) = msg.tool_calls.as_ref() {
+        for call in calls {
+            // HandBox stores arguments as a JSON-encoded string;
+            // hand-ai's ToolCall.arguments is a Value.
+            let args: serde_json::Value = if call.function.arguments.is_empty() {
+                serde_json::Value::Object(Default::default())
+            } else {
+                serde_json::from_str(&call.function.arguments).map_err(|e| {
+                    LlmClientError::validation(format!(
+                        "hand-ai adapter: tool_call arguments not valid JSON for call '{}': {}",
+                        call.id, e
+                    ))
+                })?
+            };
+            content.push(model::AssistantContentBlock::ToolCall(model::ToolCall::new(
+                call.id.clone(),
+                call.function.name.clone(),
+                args,
+            )));
+        }
+    }
+
+    Ok(model::AssistantMessage {
+        role: "assistant".to_string(),
+        content,
+        api: meta.api,
+        provider: meta.provider,
+        model: meta.model.clone(),
+        usage: model::Usage::default(),
+        stop_reason: StopReason::Stop,
+        error_message: None,
+        timestamp: 0,
+        response_model: None,
+        response_id: None,
+        diagnostics: None,
+    })
+}
+
+fn llm_tool_result_message(
+    msg: &LlmMessage,
+    tool_name_by_call_id: &std::collections::HashMap<String, String>,
+) -> Result<model::ToolResultMessage, LlmClientError> {
+    let tool_call_id = msg.tool_call_id.as_ref().ok_or_else(|| {
+        LlmClientError::validation("hand-ai adapter: LlmMessage role=Tool requires tool_call_id")
+    })?;
+    let tool_name = tool_name_by_call_id.get(tool_call_id).ok_or_else(|| {
+        LlmClientError::validation(format!(
+            "hand-ai adapter: tool result for unknown tool_call_id '{}' (no preceding assistant tool_call with this id)",
+            tool_call_id
+        ))
+    })?;
+    Ok(model::ToolResultMessage {
+        role: "toolResult".to_string(),
+        tool_call_id: tool_call_id.clone(),
+        tool_name: tool_name.clone(),
+        content: vec![model::ToolResultContent::Text(model::TextContent::new(
+            msg.content.clone(),
+        ))],
+        details: None,
+        is_error: false,
+        timestamp: 0,
+    })
 }
 
 fn translate_tools(tools: &Vec<LlmRequestTool>) -> Result<Vec<Tool>, LlmClientError> {
@@ -405,7 +537,7 @@ mod tests {
     #[test]
     fn text_only_user_messages_translate_to_user_blocks() {
         let req = bare_request(vec![user_msg("hello"), user_msg("world")]);
-        let ctx = llm_request_to_context(&req).expect("translation");
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
         assert!(ctx.system_prompt.is_none());
         assert_eq!(ctx.messages.len(), 2);
         match &ctx.messages[0] {
@@ -420,7 +552,7 @@ mod tests {
     #[test]
     fn system_message_extracted_into_system_prompt() {
         let req = bare_request(vec![system_msg("you are helpful"), user_msg("hi")]);
-        let ctx = llm_request_to_context(&req).expect("translation");
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
         assert_eq!(ctx.system_prompt.as_deref(), Some("you are helpful"));
         assert_eq!(ctx.messages.len(), 1);
     }
@@ -432,7 +564,7 @@ mod tests {
             user_msg("hi"),
             system_msg("second"),
         ]);
-        let ctx = llm_request_to_context(&req).expect("translation");
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
         assert_eq!(ctx.system_prompt.as_deref(), Some("first\n\nsecond"));
         assert_eq!(ctx.messages.len(), 1);
     }
@@ -440,13 +572,43 @@ mod tests {
     #[test]
     fn empty_system_message_dropped() {
         let req = bare_request(vec![system_msg(""), user_msg("hi")]);
-        let ctx = llm_request_to_context(&req).expect("translation");
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
         assert!(ctx.system_prompt.is_none());
     }
 
     #[test]
-    fn assistant_history_returns_validation_error_until_m2() {
-        let req = bare_request(vec![LlmMessage {
+    fn assistant_history_translates_when_model_in_catalog() {
+        let req = bare_request(vec![
+            user_msg("hi"),
+            LlmMessage {
+                role: LlmMessageRole::Assistant,
+                content: "prior reply".into(),
+                reasoning: None,
+                tool_calls: None,
+                tool_call_id: None,
+                attachments: None,
+            },
+            user_msg("follow-up"),
+        ]);
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
+        assert_eq!(ctx.messages.len(), 3);
+        match &ctx.messages[1] {
+            Message::Assistant(am) => {
+                assert_eq!(am.model, "gpt-4o");
+                match &am.content[..] {
+                    [model::AssistantContentBlock::Text(t)] => {
+                        assert_eq!(t.text, "prior reply");
+                    }
+                    other => panic!("expected single text block, got {:?}", other),
+                }
+            }
+            other => panic!("expected assistant, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn assistant_history_errors_when_model_not_in_catalog() {
+        let mut req = bare_request(vec![LlmMessage {
             role: LlmMessageRole::Assistant,
             content: "prior reply".into(),
             reasoning: None,
@@ -454,8 +616,104 @@ mod tests {
             tool_call_id: None,
             attachments: None,
         }]);
-        let err = llm_request_to_context(&req).expect_err("M1 should reject assistant history");
-        assert!(format!("{}", err).contains("M2"));
+        req.model = "no-such-model-9999".into();
+        let err =
+            llm_request_to_context(&req, "openai").expect_err("unknown model must surface clearly");
+        let m = format!("{}", err);
+        assert!(m.contains("not in catalog"), "msg: {m}");
+        assert!(m.contains("no-such-model-9999"), "msg: {m}");
+    }
+
+    #[test]
+    fn assistant_history_preserves_reasoning_and_tool_calls() {
+        let req = bare_request(vec![LlmMessage {
+            role: LlmMessageRole::Assistant,
+            content: "calling tool".into(),
+            reasoning: Some("considering options".into()),
+            tool_calls: Some(vec![crate::types::LlmToolCall {
+                id: "call_1".into(),
+                tool_type: "function".into(),
+                function: crate::types::LlmToolFunction {
+                    name: "get_weather".into(),
+                    arguments: r#"{"city":"sf"}"#.into(),
+                },
+            }]),
+            tool_call_id: None,
+            attachments: None,
+        }]);
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
+        match &ctx.messages[0] {
+            Message::Assistant(am) => {
+                assert_eq!(am.content.len(), 3, "thinking + text + tool_call");
+                assert!(matches!(am.content[0], model::AssistantContentBlock::Thinking(_)));
+                assert!(matches!(am.content[1], model::AssistantContentBlock::Text(_)));
+                match &am.content[2] {
+                    model::AssistantContentBlock::ToolCall(tc) => {
+                        assert_eq!(tc.id, "call_1");
+                        assert_eq!(tc.name, "get_weather");
+                        assert_eq!(tc.arguments["city"], "sf");
+                    }
+                    other => panic!("expected ToolCall, got {:?}", other),
+                }
+            }
+            other => panic!("expected assistant, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tool_result_pulls_tool_name_from_prior_assistant_call() {
+        let req = bare_request(vec![
+            LlmMessage {
+                role: LlmMessageRole::Assistant,
+                content: "".into(),
+                reasoning: None,
+                tool_calls: Some(vec![crate::types::LlmToolCall {
+                    id: "call_99".into(),
+                    tool_type: "function".into(),
+                    function: crate::types::LlmToolFunction {
+                        name: "search_web".into(),
+                        arguments: r#"{}"#.into(),
+                    },
+                }]),
+                tool_call_id: None,
+                attachments: None,
+            },
+            LlmMessage {
+                role: LlmMessageRole::Tool,
+                content: "result text".into(),
+                reasoning: None,
+                tool_calls: None,
+                tool_call_id: Some("call_99".into()),
+                attachments: None,
+            },
+        ]);
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
+        match &ctx.messages[1] {
+            Message::ToolResult(tr) => {
+                assert_eq!(tr.tool_call_id, "call_99");
+                assert_eq!(tr.tool_name, "search_web");
+                match &tr.content[..] {
+                    [model::ToolResultContent::Text(t)] => assert_eq!(t.text, "result text"),
+                    other => panic!("expected text result, got {:?}", other),
+                }
+            }
+            other => panic!("expected tool result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tool_result_with_unknown_call_id_errors() {
+        let req = bare_request(vec![LlmMessage {
+            role: LlmMessageRole::Tool,
+            content: "orphan".into(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: Some("ghost".into()),
+            attachments: None,
+        }]);
+        let err = llm_request_to_context(&req, "openai")
+            .expect_err("orphan tool result should error");
+        assert!(format!("{}", err).contains("unknown tool_call_id"));
     }
 
     // ---- event_to_chunk_result -----------------------------------------
@@ -575,7 +833,7 @@ mod tests {
             attachments: Some(vec![png_attachment()]),
         };
         let req = bare_request(vec![msg]);
-        let ctx = llm_request_to_context(&req).expect("translation");
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
         match &ctx.messages[0] {
             Message::User(um) => match &um.content {
                 hand_ai_model::UserContent::Blocks(blocks) => {
@@ -610,7 +868,7 @@ mod tests {
             attachments: Some(vec![png_attachment()]),
         };
         let req = bare_request(vec![msg]);
-        let ctx = llm_request_to_context(&req).expect("translation");
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
         match &ctx.messages[0] {
             Message::User(um) => match &um.content {
                 hand_ai_model::UserContent::Blocks(blocks) => {
@@ -634,7 +892,7 @@ mod tests {
             attachments: Some(vec![pdf_attachment()]),
         };
         let req = bare_request(vec![msg]);
-        let err = llm_request_to_context(&req).expect_err("PDF should bounce until M3");
+        let err = llm_request_to_context(&req, "openai").expect_err("PDF should bounce until M3");
         let msg = format!("{}", err);
         assert!(msg.contains("M3"), "error must signal M3: {}", msg);
         assert!(msg.contains("application/pdf"), "error must mention mime: {}", msg);
@@ -651,7 +909,7 @@ mod tests {
             attachments: Some(vec![]),
         };
         let req = bare_request(vec![msg]);
-        let ctx = llm_request_to_context(&req).expect("translation");
+        let ctx = llm_request_to_context(&req, "openai").expect("translation");
         match &ctx.messages[0] {
             Message::User(um) => match &um.content {
                 hand_ai_model::UserContent::Text(t) => assert_eq!(t, "hi"),
