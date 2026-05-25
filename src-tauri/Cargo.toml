@@ -69,10 +69,13 @@ handbox-llm = { path = "crates/handbox-llm" }
 handbox-mcp = { path = "crates/handbox-mcp" }
 
 [features]
-default = []
-# Surface hand-ai's provider/model catalog through IPC. Dark by default;
-# enable with `cargo tauri dev --features hand-ai` while integration is
-# in flight. See docs/exec-plans/hand-ai-integration.md.
+default = ["hand-ai"]
+# Surface hand-ai's provider/model catalog through IPC and route chat
+# traffic through hand-ai/crates/model when the provider id matches the
+# catalog. Default-on as of 2026-05-25: HandBox depends on hand-ai
+# 0.2.0 for provider coverage (30+ vendors), capability metadata, and
+# wrapper-level cancellation. To force a legacy-only build:
+#   cargo tauri dev --no-default-features
 hand-ai = ["handbox-llm/hand-ai"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
