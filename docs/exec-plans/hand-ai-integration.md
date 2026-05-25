@@ -174,25 +174,98 @@ publicly. Adapter clones the template `Model` returned by
 
 No env-var dance required. No #33b builder dependency.
 
-## Provider catalog
+## Provider catalog (M4)
 
-HandBox today drives the provider-selection UI from `llm_config.json`. To
-avoid divergence with hand-ai's internal registry, the adapter calls:
+HandBox today drives the provider-selection UI from `llm_config.json`. The
+M4 design replaces that static list with a live read of hand-ai's catalog,
+so adding a new provider on the hand-ai side (e.g. a future "Together" or
+"Replicate" entry) appears in HandBox without a config edit.
+
+### Hand-ai API surface — confirmed 2026-05-25 (issue #31 done locally)
+
+`crates/model/src/capabilities.rs` exposes (all `#[non_exhaustive]`,
+all `const fn`):
 
 ```rust
-hand_ai_model::get_providers()           -> Vec<model::Provider>
-hand_ai_model::get_models("openai")      -> Vec<model::Model>
+pub struct ProviderCapabilities {
+    pub api_key_auth: bool,
+    pub oauth_auth: bool,
+    pub custom_base_url: bool,
+}
+
+pub struct ApiCapabilities {
+    pub tools: bool,
+}
+
+impl Provider { pub const fn capabilities(self) -> ProviderCapabilities; }
+impl Api { pub const fn capabilities(self) -> ApiCapabilities; }
 ```
 
-and surfaces this through a new IPC command `hand_ai_list_providers`. This
-**replaces** the static "providers" array in `llm_config.json`; the JSON
-shrinks to just per-provider UI metadata (icon, color, parameter form layout)
-keyed by provider id.
+Per-model facts (multimodal input, reasoning, context window, cost) stay on
+`model::Model`. Adapter must not duplicate them on the capability structs.
 
-Blocks on hand-ai issue **#31** for the full capabilities surface
-(streaming/tools/oauth/multimodal). Until #31 lands, the adapter ships with a
-hard-coded capabilities table mirroring what we know about each built-in
-provider.
+### HandBox IPC layer
+
+One Tauri command:
+
+```rust
+#[tauri::command]
+fn hand_ai_list_providers() -> Vec<HandAiProviderInfo>;
+
+#[derive(Serialize)]
+struct HandAiProviderInfo {
+    id: String,              // e.g. "openai", "anthropic", "bedrock"
+    display_name: String,    // hand-ai gives this via Provider::display_name()
+                             //   (TBD if exposed; if not, mapper hard-codes)
+    capabilities: HandAiProviderCaps,
+    models: Vec<HandAiModelInfo>,
+}
+
+#[derive(Serialize)]
+struct HandAiProviderCaps {
+    api_key_auth: bool,
+    oauth_auth: bool,
+    custom_base_url: bool,
+    // Flattened from per-model facts — TRUE if ANY model under this
+    // provider has the capability. UI uses this for the provider chip
+    // (e.g. "supports vision"); per-model granularity comes from
+    // HandAiModelInfo below.
+    any_model_multimodal: bool,
+    any_model_reasoning: bool,
+}
+
+#[derive(Serialize)]
+struct HandAiModelInfo {
+    id: String,
+    name: String,
+    api: String,                // string form of model::Api
+    api_supports_tools: bool,   // from Api::capabilities()
+    context_window: u64,
+    max_output_tokens: u32,
+    cost_per_million_input_usd: f64,
+    cost_per_million_output_usd: f64,
+    reasoning: bool,
+    input_modalities: Vec<String>,
+}
+```
+
+Implementation lives in `src-tauri/src/commands/hand_ai.rs` (new file).
+The mapper is pure — no I/O, no state — and depends only on hand-ai's
+catalog functions and capability impls.
+
+### llm_config.json fate
+
+The static `providers` array in `llm_config.json` is **superseded** by the
+above IPC. The remaining content of `llm_config.json` shrinks to per-provider
+UI presentation metadata only (icon path, brand color, parameter form
+layout). Field name keyed by provider id; missing entries fall back to a
+default icon. Schema change recorded once M4 lands.
+
+### Blocker
+
+Hand-ai #31 implementation exists locally (commit `66222a3`) but is not yet
+pushed to GitHub. Adapter cannot compile against `ProviderCapabilities`
+until push lands and HandBox bumps `hand-ai-model` rev.
 
 ## Milestones
 
