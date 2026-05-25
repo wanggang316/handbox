@@ -143,6 +143,37 @@ already (verified: `crates/model/src/stream.rs:80`). Hand-ai issue **#32**
 formalizes the contract; the adapter wires HandBox's existing per-request
 cancellation channel into this `signal`.
 
+### API key + base URL injection — RESOLVED 2026-05-25
+
+HandBox stores provider API keys encrypted in SQLite and must NOT leak them
+to environment variables. Initial concern was that `hand_ai_model::Client`
+reads keys from env (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …).
+
+Investigation of `crates/model/src/types.rs:552` shows `StreamOptions`
+already has `api_key: Option<String>` — the per-request key, redacted in
+Debug output. Adapter just sets it from `LlmProvider.api_key`:
+
+```rust
+let opts = SimpleStreamOptions {
+    base: StreamOptions {
+        api_key: Some(provider.api_key.clone()),
+        signal: Some(cancel_token),
+        timeout_ms: ...,
+        ..Default::default()
+    },
+    reasoning: ...,
+    ..Default::default()
+};
+hand_ai_model::stream_simple(&registry, &model, context, Some(opts))
+```
+
+For custom `base_url` (BYO endpoint), `Model` exposes `base_url: String`
+publicly. Adapter clones the template `Model` returned by
+`get_model(provider, model_id)` and overrides `base_url` from
+`LlmProvider.base_url` before passing to `stream_simple`.
+
+No env-var dance required. No #33b builder dependency.
+
 ## Provider catalog
 
 HandBox today drives the provider-selection UI from `llm_config.json`. To
@@ -165,13 +196,13 @@ provider.
 
 ## Milestones
 
-| M  | Scope                                                                  | Blockers              |
+| M  | Scope                                                                  | Status / Blockers     |
 |----|------------------------------------------------------------------------|-----------------------|
-| M0 | This document committed; hand-ai issues #31–#36 filed                  | — (done)              |
-| M1 | `hand_ai_adapter.rs` skeleton compiles behind `--features hand-ai`     | #34 tag               |
-| M2 | One provider (openai) end-to-end through adapter, gated by feature flag in `llm_config.json` per-provider override | M1                    |
-| M3 | All four existing providers (openai/anthropic/google/openrouter) routed through adapter; old adapters deleted | #32 cancellation contract |
-| M4 | Expose new providers (Bedrock, Groq, xAI, …) through provider-catalog IPC; UI provider picker driven by hand-ai introspection | #31, #33             |
+| M0 | Exec plan committed; hand-ai issues #31–#36 filed; openai-rust / google-genai-rust dedup verified | **DONE** (commits 76592cb, afcfb8d) |
+| M1 | `hand_ai_adapter.rs` skeleton compiles behind `--features hand-ai`; translation tests lock the contract | **DONE** (commit 9aad119) |
+| M2 | One provider (openai) end-to-end through adapter for single-turn text-only chat | API key + base URL injection unblocked via `StreamOptions.api_key` / `Model.base_url` (see below). Still need three real type mismatches: assistant history metadata, tool result `tool_name`, user attachments. |
+| M3 | All four existing providers (openai/anthropic/google/openrouter) routed through adapter; old adapters deleted | #32 cancellation contract finalized |
+| M4 | Expose new providers (Bedrock, Groq, xAI, …) through provider-catalog IPC; UI provider picker driven by hand-ai introspection | #31 (in progress), #33a Cargo features |
 | M5 | `hand-coding-agent` mounted as a separate IPC surface (deferred)       | #36 base_dir           |
 
 ## Risk register
