@@ -63,22 +63,25 @@ hand-ai-model = { git = "https://github.com/wanggang316/hand-ai.git", tag = "mod
 
 Pinning to a tag (NOT branch) is mandatory: blocks on hand-ai issue **#34**.
 
-### Open dependency question
+### Open dependency question — RESOLVED 2026-05-25
 
 hand-ai uses `openai-rust` / `google-genai-rust` at tagged versions
-(`openai-rust@v0.2.1`, `google-genai-rust@v0.1.0`). HandBox today uses the same
-forks but at `branch = master` / `branch = main`.
+(`openai-rust@v0.2.1`, `google-genai-rust@v0.1.0`). HandBox previously used
+the same forks but at `branch = master` / `branch = main`. Although the
+commits behind tag and branch HEAD were identical (both `1beaefe2` and
+`176effd6` respectively), Cargo treated the two URL/ref pairs as distinct
+crates and double-linked.
 
-The other Claude verified that **transitive** crates (reqwest, tokio, serde)
-dedup cleanly, but did **not** verify that `openai-rust` / `google-genai-rust`
-themselves dedup. If they don't, the final binary doubles in size for those
-two SDKs.
+**Fix**: HandBox switched both its top-level `src-tauri/Cargo.toml` and
+`crates/handbox-llm/Cargo.toml` to the exact same git URL + tag form hand-ai
+uses (no `.git` suffix, `tag = "v0.2.1"` / `tag = "v0.1.0"`). Verified with
+`cargo tree -d --features hand-ai` from `crates/handbox-llm/` — `openai-rust`
+and `google-genai-rust` no longer appear in the duplicates list. Remaining
+duplicates (`block-buffer`, `core-foundation`, etc.) are unrelated transitive
+ones that existed before `hand-ai-model` was added.
 
-**Resolution**: before enabling the `hand-ai` feature in HandBox's
-`src-tauri/Cargo.toml`, run `cargo tree -d -p handbox-llm --features hand-ai`
-and confirm `openai-rust` / `google-genai-rust` appear exactly once. If not,
-HandBox switches its own Cargo.toml to the same tag refs hand-ai uses. This
-is a one-line change.
+Full `cargo check --manifest-path src-tauri/Cargo.toml` passes; nothing in
+HandBox's existing code regressed from the branch→tag switch.
 
 ## Translation layer
 

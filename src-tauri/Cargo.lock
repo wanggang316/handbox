@@ -2103,7 +2103,7 @@ dependencies = [
 [[package]]
 name = "google-genai-rust"
 version = "0.1.0"
-source = "git+https://github.com/wanggang316/google-genai-rust.git?branch=main#176effd6a92d3d94beded46f88dbf2564343e436"
+source = "git+https://github.com/wanggang316/google-genai-rust?tag=v0.1.0#176effd6a92d3d94beded46f88dbf2564343e436"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -3777,7 +3777,7 @@ dependencies = [
 [[package]]
 name = "openai-rust"
 version = "0.1.0"
-source = "git+https://github.com/wanggang316/openai-rust.git?branch=master#c600a1a636d8880fadf60785bee57b38b81fd355"
+source = "git+https://github.com/wanggang316/openai-rust?tag=v0.2.1#1beaefe294f1028a343cf8ddd4779216035f324c"
 dependencies = [
  "async-stream",
  "futures-util",

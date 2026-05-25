@@ -51,8 +51,10 @@ jsonwebtoken = "9.3"
 dotenvy = "0.15"
 urlencoding = "2.1"
 once_cell = "1.19"
-openai-rust = { git = "https://github.com/wanggang316/openai-rust.git", branch = "master" }
-google-genai-rust = { git = "https://github.com/wanggang316/google-genai-rust.git", branch = "main" }
+# Align with handbox-llm/Cargo.toml and hand-ai/crates/model so all three
+# pull the same crate copy (avoids double-link). See exec-plans/hand-ai-integration.md.
+openai-rust = { git = "https://github.com/wanggang316/openai-rust", tag = "v0.2.1" }
+google-genai-rust = { git = "https://github.com/wanggang316/google-genai-rust", tag = "v0.1.0" }
 async-stream = "0.3"
 rmcp = { version = "0.7", features = [
     "client",
