@@ -45,25 +45,36 @@ use hand_ai_model::{
 /// "anthropic"). HandBox's `create_chat_client(LlmApiType)` will produce one
 /// of these per supported provider once parity is verified.
 pub struct HandAiChatClient {
-    /// Hand-ai provider id this adapter targets. Matches `model::Provider`
-    /// values exposed by `hand_ai_model::get_providers()`.
-    provider_id: &'static str,
+    /// Hand-ai provider id this adapter targets. Matches `Provider::as_str()`
+    /// values exposed by `hand_ai_model::get_providers()`. Owned (not &'static)
+    /// so factories that get the id from a config string can construct
+    /// adapters at runtime.
+    provider_id: String,
     /// hand-ai `Client` (holds the `Arc<ApiProviderRegistry>`). Cheap to clone.
     client: Client,
 }
 
 impl HandAiChatClient {
-    pub fn new(provider_id: &'static str) -> Self {
+    pub fn new(provider_id: impl Into<String>) -> Self {
         Self {
-            provider_id,
+            provider_id: provider_id.into(),
             client: Client::new(),
         }
     }
 
     /// hand-ai provider id this adapter targets.
-    pub fn provider_id(&self) -> &'static str {
-        self.provider_id
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
     }
+}
+
+/// Whether the given HandBox provider_type string corresponds to a hand-ai
+/// `Provider` variant. Used by the LlmClient factory to route chat traffic
+/// through `HandAiChatClient` when the new backend can handle the provider.
+pub fn is_hand_ai_provider(provider_type: &str) -> bool {
+    hand_ai_model::get_providers()
+        .iter()
+        .any(|p| p.as_str() == provider_type)
 }
 
 #[async_trait]
@@ -75,7 +86,7 @@ impl ChatClient for HandAiChatClient {
     ) -> Result<LlmResponse, LlmClientError> {
         // M1 stub: translation compiles, but we don't actually invoke the
         // network yet. Live call lands in M2.
-        let _context = llm_request_to_context(&request, self.provider_id)?;
+        let _context = llm_request_to_context(&request, &self.provider_id)?;
         let _tools = request.tools.as_ref().map(translate_tools).transpose()?;
         Err(LlmClientError::validation(
             "hand-ai adapter chat() not yet wired; lands in M3",
@@ -90,8 +101,8 @@ impl ChatClient for HandAiChatClient {
         Box<dyn Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
         LlmClientError,
     > {
-        let context = llm_request_to_context(&request, self.provider_id)?;
-        let model = resolve_model(self.provider_id, &request.model, &provider.base_url)?;
+        let context = llm_request_to_context(&request, &self.provider_id)?;
+        let model = resolve_model(&self.provider_id, &request.model, &provider.base_url)?;
         let options = build_stream_options(&request, &provider.api_key);
 
         let event_stream = hand_ai_model::stream_simple(
