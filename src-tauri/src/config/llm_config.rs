@@ -223,7 +223,10 @@ impl LlmConfig {
                     type_name: display_name.clone(),
                     default_name: display_name,
                     default_base_url: hp.default_base_url.clone(),
-                    icon: format!("/logo-{}.png", hp.id),
+                    // Generic placeholder — `static/logo-150.png` exists; per-
+                    // provider art lands when a designer touches each one.
+                    // Tracked as a deferred decision in the overnight summary.
+                    icon: "/logo-150.png".to_string(),
                     chat_api_type: "openai-completions".to_string(),
                     model_api_type: "openai".to_string(),
                     parameters: std::collections::HashMap::new(),
@@ -366,6 +369,65 @@ fn humanize_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn humanize_id_handles_kebab_and_single_word() {
+        assert_eq!(humanize_id("openai"), "Openai");
+        assert_eq!(humanize_id("github-copilot"), "Github Copilot");
+        assert_eq!(humanize_id("amazon-bedrock"), "Amazon Bedrock");
+        assert_eq!(humanize_id("xiaomi-token-plan-cn"), "Xiaomi Token Plan Cn");
+        assert_eq!(humanize_id(""), "");
+    }
+
+    #[cfg(feature = "hand-ai")]
+    #[test]
+    fn augment_appends_hand_ai_providers_without_clobbering_existing() {
+        let mut cfg = LlmConfig::new();
+        // Pretend llm_config.json had a single hand-tuned openai entry with
+        // a custom icon. Augmentation must NOT replace it with a synthesized
+        // version (the legacy hand-tuned metadata wins).
+        cfg.providers.push(ProviderConfig {
+            provider_type: "openai".into(),
+            type_name: "OpenAI".into(),
+            default_name: "OpenAI".into(),
+            default_base_url: "https://api.openai.com/v1".into(),
+            icon: "/logo-openai.png".into(),
+            chat_api_type: "openai-completions".into(),
+            model_api_type: "openai".into(),
+            parameters: std::collections::HashMap::new(),
+        });
+        let before = cfg.providers.len();
+        cfg.augment_with_hand_ai_providers();
+        let after = cfg.providers.len();
+        assert!(
+            after > before,
+            "augmentation should add hand-ai-only providers"
+        );
+
+        let openai = cfg
+            .providers
+            .iter()
+            .find(|p| p.provider_type == "openai")
+            .unwrap();
+        assert_eq!(
+            openai.type_name, "OpenAI",
+            "hand-tuned name must survive augmentation"
+        );
+
+        // Spot-check that a hand-ai-only provider got synthesized in.
+        assert!(
+            cfg.providers.iter().any(|p| p.provider_type == "groq"),
+            "groq (hand-ai-only) should now appear"
+        );
+        let groq = cfg
+            .providers
+            .iter()
+            .find(|p| p.provider_type == "groq")
+            .unwrap();
+        assert_eq!(groq.type_name, "Groq");
+        // Generic placeholder until per-provider art is added.
+        assert_eq!(groq.icon, "/logo-150.png");
+    }
 
     #[test]
     fn test_reasoning_parameter_config() {
