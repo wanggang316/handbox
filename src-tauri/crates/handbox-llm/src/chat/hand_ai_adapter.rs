@@ -21,6 +21,7 @@
 //        `ProviderCapabilities` (hand-ai issue #31).
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use futures::{Stream, StreamExt};
 
 use crate::chat::ChatClient;
@@ -31,8 +32,9 @@ use crate::types::{
 };
 
 use hand_ai_model::{
-    self as model, AssistantMessageEvent, Client, Context, Message, SimpleStreamOptions,
-    StopReason, StreamOptions, Tool, Usage, UserMessage,
+    self as model, AssistantMessageEvent, Client, Context, ImageContent, Message,
+    SimpleStreamOptions, StopReason, StreamOptions, TextContent, Tool, Usage, UserContentBlock,
+    UserMessage,
 };
 
 /// `ChatClient` that delegates to `hand_ai_model::stream_simple` /
@@ -177,13 +179,34 @@ pub(crate) fn llm_request_to_context(request: &LlmRequest) -> Result<Context, Ll
 }
 
 fn llm_user_message(msg: &LlmMessage) -> Result<UserMessage, LlmClientError> {
-    // M1: text-only path. Image / file attachments lands in M2.
-    if msg.attachments.is_some() {
-        return Err(LlmClientError::validation(
-            "hand-ai adapter: user message attachments not yet supported (M2)",
-        ));
+    let Some(attachments) = msg.attachments.as_ref().filter(|a| !a.is_empty()) else {
+        return Ok(UserMessage::new_text(msg.content.clone()));
+    };
+
+    // At least one attachment — build a block sequence: image(s) first, then
+    // the text body if non-empty. Mirrors what HandBox does for openai
+    // completions (image_url precedes text in the request content array).
+    let mut blocks: Vec<UserContentBlock> = Vec::with_capacity(attachments.len() + 1);
+    for att in attachments {
+        if !att.mime_type.starts_with("image/") {
+            // M3 will add file / pdf passthrough once hand-ai has a matching
+            // UserContentBlock variant. For now, refuse explicitly so we
+            // never silently drop a user's attached file.
+            return Err(LlmClientError::validation(format!(
+                "hand-ai adapter: non-image attachment '{}' (mime: {}) not yet supported (M3)",
+                att.name, att.mime_type
+            )));
+        }
+        let data_b64 = BASE64_STANDARD.encode(&att.data);
+        blocks.push(UserContentBlock::Image(ImageContent::new(
+            data_b64,
+            att.mime_type.clone(),
+        )));
     }
-    Ok(UserMessage::new_text(msg.content.clone()))
+    if !msg.content.is_empty() {
+        blocks.push(UserContentBlock::Text(TextContent::new(msg.content.clone())));
+    }
+    Ok(UserMessage::new_blocks(blocks))
 }
 
 fn translate_tools(tools: &Vec<LlmRequestTool>) -> Result<Vec<Tool>, LlmClientError> {
@@ -520,6 +543,121 @@ mod tests {
         let result = event_to_chunk_result(&event, "gpt-4o").expect("event maps");
         let err = result.expect_err("error event must surface as Err");
         assert!(format!("{}", err).contains("upstream blew up"));
+    }
+
+    // ---- attachments ---------------------------------------------------
+
+    fn png_attachment() -> crate::types::LlmMessageAttachment {
+        crate::types::LlmMessageAttachment {
+            name: "screenshot.png".into(),
+            mime_type: "image/png".into(),
+            data: vec![0x89, 0x50, 0x4e, 0x47], // PNG magic bytes — bytewise not a full image
+        }
+    }
+
+    fn pdf_attachment() -> crate::types::LlmMessageAttachment {
+        crate::types::LlmMessageAttachment {
+            name: "doc.pdf".into(),
+            mime_type: "application/pdf".into(),
+            data: vec![0x25, 0x50, 0x44, 0x46],
+        }
+    }
+
+    #[test]
+    fn image_attachment_translates_to_image_block_before_text() {
+        let msg = LlmMessage {
+            role: LlmMessageRole::User,
+            content: "what is this?".into(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachments: Some(vec![png_attachment()]),
+        };
+        let req = bare_request(vec![msg]);
+        let ctx = llm_request_to_context(&req).expect("translation");
+        match &ctx.messages[0] {
+            Message::User(um) => match &um.content {
+                hand_ai_model::UserContent::Blocks(blocks) => {
+                    assert_eq!(blocks.len(), 2);
+                    match &blocks[0] {
+                        UserContentBlock::Image(img) => {
+                            assert_eq!(img.mime_type, "image/png");
+                            // Verify base64-encoded PNG magic bytes round-trip.
+                            assert_eq!(img.data, "iVBORw==");
+                        }
+                        other => panic!("expected image first, got {:?}", other),
+                    }
+                    match &blocks[1] {
+                        UserContentBlock::Text(t) => assert_eq!(t.text, "what is this?"),
+                        other => panic!("expected text second, got {:?}", other),
+                    }
+                }
+                _ => panic!("expected blocks content for attachment message"),
+            },
+            other => panic!("expected user message, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn image_attachment_with_empty_text_omits_text_block() {
+        let msg = LlmMessage {
+            role: LlmMessageRole::User,
+            content: "".into(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachments: Some(vec![png_attachment()]),
+        };
+        let req = bare_request(vec![msg]);
+        let ctx = llm_request_to_context(&req).expect("translation");
+        match &ctx.messages[0] {
+            Message::User(um) => match &um.content {
+                hand_ai_model::UserContent::Blocks(blocks) => {
+                    assert_eq!(blocks.len(), 1);
+                    assert!(matches!(blocks[0], UserContentBlock::Image(_)));
+                }
+                _ => panic!("expected blocks content"),
+            },
+            _ => panic!("expected user message"),
+        }
+    }
+
+    #[test]
+    fn non_image_attachment_returns_validation_error_until_m3() {
+        let msg = LlmMessage {
+            role: LlmMessageRole::User,
+            content: "summarize".into(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachments: Some(vec![pdf_attachment()]),
+        };
+        let req = bare_request(vec![msg]);
+        let err = llm_request_to_context(&req).expect_err("PDF should bounce until M3");
+        let msg = format!("{}", err);
+        assert!(msg.contains("M3"), "error must signal M3: {}", msg);
+        assert!(msg.contains("application/pdf"), "error must mention mime: {}", msg);
+    }
+
+    #[test]
+    fn empty_attachments_vec_falls_through_to_text_path() {
+        let msg = LlmMessage {
+            role: LlmMessageRole::User,
+            content: "hi".into(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachments: Some(vec![]),
+        };
+        let req = bare_request(vec![msg]);
+        let ctx = llm_request_to_context(&req).expect("translation");
+        match &ctx.messages[0] {
+            Message::User(um) => match &um.content {
+                hand_ai_model::UserContent::Text(t) => assert_eq!(t, "hi"),
+                _ => panic!("empty attachments must not force Blocks variant"),
+            },
+            _ => panic!("expected user message"),
+        }
     }
 
     #[test]
