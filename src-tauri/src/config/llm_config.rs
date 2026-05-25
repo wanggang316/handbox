@@ -187,7 +187,57 @@ impl LlmConfig {
                 tracing::warn!("Failed to load {}: {}. Using empty config", path.display(), e);
             }
         }
+        config.augment_with_hand_ai_providers();
         config
+    }
+
+    /// Append synthesized `ProviderConfig` entries for every hand-ai catalog
+    /// provider that isn't already in `self.providers`. Lets the existing
+    /// `get_provider_configs` IPC + `LlmConfigProvider::get_provider_config`
+    /// lookups surface the 30+ vendors hand-ai knows about (Bedrock, Groq,
+    /// xAI, Cerebras, etc.) without HandBox having to maintain its own copy
+    /// of the catalog.
+    ///
+    /// The synthesized entries carry placeholder chat_api_type / model_api_type
+    /// ("openai-completions" / "openai") — these fields exist only to keep the
+    /// legacy LlmApiType / LlmModelApiType plumbing happy. The actual chat path
+    /// short-circuits to HandAiChatClient via `build_chat_client` long before
+    /// those strings get read.
+    fn augment_with_hand_ai_providers(&mut self) {
+        #[cfg(feature = "hand-ai")]
+        {
+            let existing: std::collections::HashSet<String> = self
+                .providers
+                .iter()
+                .chain(self.custom_providers.iter())
+                .map(|p| p.provider_type.clone())
+                .collect();
+            let mut appended = 0usize;
+            for hp in handbox_llm::hand_ai_catalog::list_providers() {
+                if existing.contains(&hp.id) {
+                    continue;
+                }
+                let display_name = humanize_id(&hp.id);
+                self.providers.push(ProviderConfig {
+                    provider_type: hp.id.clone(),
+                    type_name: display_name.clone(),
+                    default_name: display_name,
+                    default_base_url: hp.default_base_url.clone(),
+                    icon: format!("/logo-{}.png", hp.id),
+                    chat_api_type: "openai-completions".to_string(),
+                    model_api_type: "openai".to_string(),
+                    parameters: std::collections::HashMap::new(),
+                });
+                appended += 1;
+            }
+            if appended > 0 {
+                tracing::info!(
+                    "Augmented LLM config with {} hand-ai providers ({} total now)",
+                    appended,
+                    self.providers.len(),
+                );
+            }
+        }
     }
 
     /// 加载配置文件（按指定路径）
@@ -293,6 +343,24 @@ pub fn install_global_llm_config(config: LlmConfig) {
     if GLOBAL_LLM_CONFIG.set(config).is_err() {
         tracing::warn!("Global LLM config already initialized; install_global_llm_config ignored");
     }
+}
+
+/// Format a kebab-case provider id (e.g. `"github-copilot"`) into a
+/// space-separated, title-cased display name (`"Github Copilot"`). Used
+/// when synthesizing `ProviderConfig` entries for hand-ai-only providers
+/// that don't have hand-tuned metadata in `llm_config.json`.
+#[cfg_attr(not(feature = "hand-ai"), allow(dead_code))]
+fn humanize_id(id: &str) -> String {
+    id.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]

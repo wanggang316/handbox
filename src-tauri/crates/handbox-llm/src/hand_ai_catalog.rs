@@ -18,6 +18,10 @@ pub struct HandAiProviderInfo {
     /// Stable string id (e.g. "openai", "anthropic", "bedrock"). Matches
     /// `Provider::as_str`.
     pub id: String,
+    /// API base URL the AddProvider UI uses as the default. Taken from the
+    /// first model in the catalog; empty when the provider has no models
+    /// registered yet.
+    pub default_base_url: String,
     /// Vendor-level intrinsic facts.
     pub capabilities: HandAiProviderCaps,
     /// Models hand-ai knows about for this provider.
@@ -68,10 +72,12 @@ pub fn list_providers() -> Vec<HandAiProviderInfo> {
 fn provider_info(p: Provider) -> HandAiProviderInfo {
     let id = p.as_str().to_string();
     let raw_caps = p.capabilities();
-    let models: Vec<HandAiModelInfo> = model::get_models(&id)
-        .into_iter()
-        .map(model_info)
-        .collect();
+    let raw_models = model::get_models(&id);
+    let default_base_url = raw_models
+        .first()
+        .map(|m| m.base_url.clone())
+        .unwrap_or_default();
+    let models: Vec<HandAiModelInfo> = raw_models.into_iter().map(model_info).collect();
 
     let any_mm = models
         .iter()
@@ -80,6 +86,7 @@ fn provider_info(p: Provider) -> HandAiProviderInfo {
 
     HandAiProviderInfo {
         id,
+        default_base_url,
         capabilities: HandAiProviderCaps {
             api_key_auth: raw_caps.api_key_auth,
             oauth_auth: raw_caps.oauth_auth,
@@ -190,6 +197,7 @@ mod tests {
         // shape, which evolves).
         let mut info = HandAiProviderInfo {
             id: "x".into(),
+            default_base_url: String::new(),
             capabilities: HandAiProviderCaps {
                 api_key_auth: true,
                 oauth_auth: false,
