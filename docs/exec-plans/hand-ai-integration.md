@@ -200,7 +200,7 @@ provider.
 |----|------------------------------------------------------------------------|-----------------------|
 | M0 | Exec plan committed; hand-ai issues #31–#36 filed; openai-rust / google-genai-rust dedup verified | **DONE** (commits 76592cb, afcfb8d) |
 | M1 | `hand_ai_adapter.rs` skeleton compiles behind `--features hand-ai`; translation tests lock the contract | **DONE** (commit 9aad119) |
-| M2 | One provider (openai) end-to-end through adapter for single-turn text-only chat | API key + base URL injection unblocked via `StreamOptions.api_key` / `Model.base_url` (see below). Still need three real type mismatches: assistant history metadata, tool result `tool_name`, user attachments. |
+| M2 | One provider (openai) end-to-end through adapter for single-turn text-only chat | **DONE — translation layer only** (commit 06ecb70). `chat_stream()` wires `hand_ai_model::stream_simple` with per-request `StreamOptions.api_key` and `Model.base_url` override; event aggregator handles TextDelta / ThinkingDelta / Done / Error. Live-network integration test deferred to M3 (no API keys in CI yet). |
 | M3 | All four existing providers (openai/anthropic/google/openrouter) routed through adapter; old adapters deleted | #32 cancellation contract finalized |
 | M4 | Expose new providers (Bedrock, Groq, xAI, …) through provider-catalog IPC; UI provider picker driven by hand-ai introspection | #31 (in progress), #33a Cargo features |
 | M5 | `hand-coding-agent` mounted as a separate IPC surface (deferred)       | #36 base_dir           |
