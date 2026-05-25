@@ -36,14 +36,11 @@ aliyun-oss-rs = { version = "0.3.0" }
 regex = "1.0"
 base64 = "0.22"
 
-# Pinned to hand-ai main 2026-05-25 at 7994163. Adds #32 to the
-# cumulative set since 5dec8aa9:
-#   f07a608 thiserror 2.x bump
-#   66222a3 Provider/Api capability introspection (#31)
-#   0f7bfc4 hand-coding-agent base_dir injection (#36) — not consumed here
-#   58c6d00 model_cli gated behind `cli` feature (#35) — internal-zero-impact
-#   7994163 Stream/SimpleStreamOptions #[non_exhaustive] + wrapper-level
-#           cancellation gate (#32) — BREAKING for external struct-literal
-#           users; HandBox adapter already on mutate-default
-# TODO: switch to tag `model-v0.2.0` once hand-ai issue #34 lands (after #33a).
-hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", rev = "7994163", package = "model", optional = true }
+# Pinned to hand-ai's annotated tag `model-v0.2.0` (commit cfc813c,
+# 2026-05-25). 0.2.0 contains thiserror 2.x bump, Provider/Api
+# capability introspection (#31), Stream/SimpleStreamOptions
+# #[non_exhaustive] with wrapper-level cancellation gate (#32),
+# model_cli gated behind `cli` feature (#35), hand-coding-agent
+# base_dir injection (#36). Does NOT contain #33a/#33b — deferred
+# to 0.3.0 once binary-size measurements demand it.
+hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "model-v0.2.0", package = "model", optional = true }

@@ -3282,8 +3282,8 @@ dependencies = [
 
 [[package]]
 name = "model"
-version = "0.1.0"
-source = "git+ssh://git@github.com/wanggang316/hand-ai.git?rev=7994163#7994163a4625b3db6c39b0e97a50aa7fca76353b"
+version = "0.2.0"
+source = "git+ssh://git@github.com/wanggang316/hand-ai.git?tag=model-v0.2.0#cfc813c11368230b79e19044ff3109ac34f7b9a3"
 dependencies = [
  "async-stream",
  "async-trait",
