@@ -68,6 +68,13 @@ arboard = "3.4"
 handbox-llm = { path = "crates/handbox-llm" }
 handbox-mcp = { path = "crates/handbox-mcp" }
 
+[features]
+default = []
+# Surface hand-ai's provider/model catalog through IPC. Dark by default;
+# enable with `cargo tauri dev --features hand-ai` while integration is
+# in flight. See docs/exec-plans/hand-ai-integration.md.
+hand-ai = ["handbox-llm/hand-ai"]
+
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"
 core-graphics = "0.23"

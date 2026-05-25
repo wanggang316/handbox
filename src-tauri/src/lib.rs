@@ -211,6 +211,8 @@ pub fn run() {
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
+            #[cfg(feature = "hand-ai")]
+            hand_ai_list_providers,
             // 搜索相关命令
             search_query,
             search_history,
