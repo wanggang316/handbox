@@ -1,6 +1,8 @@
 pub mod chat;
 pub mod config;
 pub mod error;
+#[cfg(feature = "hand-ai")]
+pub mod hand_ai_catalog;
 pub mod model;
 pub mod types;
 

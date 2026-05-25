@@ -36,7 +36,10 @@ aliyun-oss-rs = { version = "0.3.0" }
 regex = "1.0"
 base64 = "0.22"
 
-# Pinned to hand-ai main HEAD on 2026-05-25 (commit 5dec8aa9). Confirmed
-# with hand-ai maintainer not to be force-pushed this week.
-# TODO: switch to tag `model-v0.1.0` once hand-ai issue #34 lands.
-hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", rev = "5dec8aa91a7fa80c696e30072ce361e51f7d3bca", package = "model", optional = true }
+# Pinned to hand-ai main 2026-05-25 at 58c6d00. Cumulative since 5dec8aa9:
+#   f07a608 thiserror 2.x bump
+#   66222a3 Provider/Api capability introspection (#31)
+#   0f7bfc4 hand-coding-agent base_dir injection (#36) — not consumed here
+#   58c6d00 model_cli gated behind `cli` feature (#35) — internal-zero-impact
+# TODO: switch to tag `model-v0.2.0` once hand-ai issue #34 lands (after #32/#33a).
+hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", rev = "58c6d00", package = "model", optional = true }
