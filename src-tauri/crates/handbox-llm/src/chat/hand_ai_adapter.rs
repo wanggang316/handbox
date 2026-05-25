@@ -250,13 +250,14 @@ fn build_stream_options(request: &LlmRequest, api_key: &str) -> SimpleStreamOpti
     base.api_key = Some(api_key.to_string());
     base.temperature = request.temperature;
     base.max_tokens = request.max_tokens.and_then(|v| u32::try_from(v).ok());
-    SimpleStreamOptions {
-        base,
-        // reasoning/thinking_budgets: HandBox passes these through
-        // `request.reasoning_effort` / `request.thinking` today; mapping
-        // lands in M3 alongside the other provider parity work.
-        ..Default::default()
-    }
+    // Both Stream/SimpleStreamOptions are #[non_exhaustive] in hand-ai
+    // since #32 (commit 7994163) — must use mutate-default, not FRU.
+    // reasoning/thinking_budgets: HandBox passes these through
+    // `request.reasoning_effort` / `request.thinking` today; mapping
+    // lands in M3 alongside the other provider parity work.
+    let mut opts = SimpleStreamOptions::default();
+    opts.base = base;
+    opts
 }
 
 // ---------------------------------------------------------------------------
