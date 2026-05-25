@@ -21,18 +21,18 @@
 //        `ProviderCapabilities` (hand-ai issue #31).
 
 use async_trait::async_trait;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 
 use crate::chat::ChatClient;
 use crate::error::LlmClientError;
 use crate::types::{
-    LlmChunkResponse, LlmMessage, LlmMessageRole, LlmProvider, LlmRequest, LlmRequestTool,
-    LlmResponse,
+    LlmChunkChoice, LlmChunkResponse, LlmDeltaMessage, LlmMessage, LlmMessageRole, LlmProvider,
+    LlmRequest, LlmRequestTool, LlmResponse, LlmUsage,
 };
 
-#[allow(unused_imports)] // `model` alias kept for M2 (text/tool-call content blocks)
 use hand_ai_model::{
-    self as model, AssistantMessageEvent, Context, Message, StopReason, Tool, UserMessage,
+    self as model, AssistantMessageEvent, Client, Context, Message, SimpleStreamOptions,
+    StopReason, StreamOptions, Tool, Usage, UserMessage,
 };
 
 /// `ChatClient` that delegates to `hand_ai_model::stream_simple` /
@@ -45,11 +45,16 @@ pub struct HandAiChatClient {
     /// Hand-ai provider id this adapter targets. Matches `model::Provider`
     /// values exposed by `hand_ai_model::get_providers()`.
     provider_id: &'static str,
+    /// hand-ai `Client` (holds the `Arc<ApiProviderRegistry>`). Cheap to clone.
+    client: Client,
 }
 
 impl HandAiChatClient {
     pub fn new(provider_id: &'static str) -> Self {
-        Self { provider_id }
+        Self {
+            provider_id,
+            client: Client::new(),
+        }
     }
 
     /// hand-ai provider id this adapter targets.
@@ -76,18 +81,31 @@ impl ChatClient for HandAiChatClient {
 
     async fn chat_stream(
         &self,
-        _provider: &LlmProvider,
+        provider: &LlmProvider,
         request: LlmRequest,
     ) -> Result<
         Box<dyn Stream<Item = Result<LlmChunkResponse, LlmClientError>> + Send + Unpin>,
         LlmClientError,
     > {
-        // M1 stub: as above. The aggregator helper is below; it will be
-        // wired up once `stream_simple` is invoked for real.
-        let _context = llm_request_to_context(&request)?;
-        Err(LlmClientError::validation(
-            "hand-ai adapter chat_stream() not yet wired; lands in M2",
-        ))
+        let context = llm_request_to_context(&request)?;
+        let model = resolve_model(self.provider_id, &request.model, &provider.base_url)?;
+        let options = build_stream_options(&request, &provider.api_key);
+
+        let event_stream = hand_ai_model::stream_simple(
+            &self.client.registry,
+            &model,
+            context,
+            Some(options),
+        )
+        .map_err(client_err_to_handbox)?;
+
+        let model_id = request.model.clone();
+        let chunk_stream = event_stream.filter_map(move |event| {
+            let model_id = model_id.clone();
+            async move { event_to_chunk_result(&event, &model_id) }
+        });
+
+        Ok(Box::new(Box::pin(chunk_stream)))
     }
 
     fn api_type(&self) -> &'static str {
@@ -182,26 +200,133 @@ fn translate_tools(tools: &Vec<LlmRequestTool>) -> Result<Vec<Tool>, LlmClientEr
 }
 
 // ---------------------------------------------------------------------------
+// Model lookup + options building
+// ---------------------------------------------------------------------------
+
+/// Look up the hand-ai `Model` template and override `base_url` from the
+/// caller's `LlmProvider`.
+fn resolve_model(
+    provider_id: &str,
+    model_id: &str,
+    base_url: &str,
+) -> Result<model::Model, LlmClientError> {
+    let mut m = hand_ai_model::get_model(provider_id, model_id).ok_or_else(|| {
+        LlmClientError::validation(format!(
+            "hand-ai: model '{}' not registered under provider '{}'",
+            model_id, provider_id
+        ))
+    })?;
+    if !base_url.is_empty() {
+        m.base_url = base_url.to_string();
+    }
+    Ok(m)
+}
+
+fn build_stream_options(request: &LlmRequest, api_key: &str) -> SimpleStreamOptions {
+    let mut base = StreamOptions::default();
+    base.api_key = Some(api_key.to_string());
+    base.temperature = request.temperature;
+    base.max_tokens = request.max_tokens.and_then(|v| u32::try_from(v).ok());
+    SimpleStreamOptions {
+        base,
+        // reasoning/thinking_budgets: HandBox passes these through
+        // `request.reasoning_effort` / `request.thinking` today; mapping
+        // lands in M3 alongside the other provider parity work.
+        ..Default::default()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Translation: AssistantMessageEvent stream → LlmChunkResponse stream
 // ---------------------------------------------------------------------------
 
-/// Aggregates a stream of hand-ai `AssistantMessageEvent`s into HandBox's
-/// completion-style chunk model.
+fn client_err_to_handbox(err: hand_ai_model::ClientError) -> LlmClientError {
+    LlmClientError::validation(format!("hand-ai client error: {}", err))
+}
+
+fn chunk_envelope(
+    model_id: &str,
+    delta: Option<LlmDeltaMessage>,
+    finish_reason: Option<String>,
+    usage: Option<LlmUsage>,
+) -> LlmChunkResponse {
+    LlmChunkResponse {
+        id: String::new(),
+        object: "chat.completion.chunk".to_string(),
+        model: model_id.to_string(),
+        choices: vec![LlmChunkChoice {
+            index: 0,
+            delta,
+            finish_reason,
+            generated_images: None,
+        }],
+        usage,
+    }
+}
+
+fn usage_to_llm(usage: &Usage) -> Option<LlmUsage> {
+    if usage.input == 0 && usage.output == 0 && usage.total_tokens == 0 {
+        return None;
+    }
+    Some(LlmUsage {
+        prompt_tokens: i32::try_from(usage.input).unwrap_or(i32::MAX),
+        completion_tokens: i32::try_from(usage.output).unwrap_or(i32::MAX),
+        total_tokens: i32::try_from(usage.total_tokens).unwrap_or(i32::MAX),
+    })
+}
+
+/// Map one hand-ai event to one HandBox chunk, if applicable.
 ///
-/// Not yet wired into `chat_stream()` — sits here for M2 to consume. Lives
-/// in this file so the translation contract is co-located with the request
-/// translation above.
-#[allow(dead_code)] // M2
-pub(crate) fn event_to_chunk(
-    _event: &AssistantMessageEvent,
-    _model_id: &str,
-) -> Option<LlmChunkResponse> {
-    // M2 will implement the per-variant aggregation defined in
-    // exec-plans/hand-ai-integration.md (TextDelta → delta.content,
-    // ThinkingDelta → delta.reasoning, ToolCallStart/Delta/End →
-    // delta.tool_calls[]). Returns None for variants that do not produce
-    // a downstream chunk (e.g. ToolCallStart on its own).
-    None
+/// `*_Start` / `*_End` variants emit nothing (the matching `_Delta` events
+/// carry the payload, and HandBox doesn't need explicit boundary markers).
+/// `Error` is translated to `Err` so the consumer's stream terminates with
+/// the failure rather than receiving a synthetic content chunk.
+fn event_to_chunk_result(
+    event: &AssistantMessageEvent,
+    model_id: &str,
+) -> Option<Result<LlmChunkResponse, LlmClientError>> {
+    match event {
+        AssistantMessageEvent::TextDelta { delta, .. } => Some(Ok(chunk_envelope(
+            model_id,
+            Some(LlmDeltaMessage {
+                role: None,
+                content: Some(delta.clone()),
+                reasoning: None,
+                tool_calls: None,
+            }),
+            None,
+            None,
+        ))),
+        AssistantMessageEvent::ThinkingDelta { delta, .. } => Some(Ok(chunk_envelope(
+            model_id,
+            Some(LlmDeltaMessage {
+                role: None,
+                content: None,
+                reasoning: Some(delta.clone()),
+                tool_calls: None,
+            }),
+            None,
+            None,
+        ))),
+        AssistantMessageEvent::Done { reason, message } => Some(Ok(chunk_envelope(
+            model_id,
+            None,
+            Some(stop_reason_to_finish_reason(reason).to_string()),
+            usage_to_llm(&message.usage),
+        ))),
+        AssistantMessageEvent::Error { error, .. } => {
+            let msg = error
+                .error_message
+                .clone()
+                .unwrap_or_else(|| "hand-ai stream returned Error event".to_string());
+            Some(Err(LlmClientError::validation(msg)))
+        }
+        // Start / TextStart / TextEnd / ThinkingStart / ThinkingEnd produce
+        // no downstream chunk. ToolCall* variants land in M3 alongside tool
+        // call parity (HandBox's LlmDeltaToolCall has its own aggregation
+        // semantics that need a dedicated translation block).
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +432,103 @@ mod tests {
         }]);
         let err = llm_request_to_context(&req).expect_err("M1 should reject assistant history");
         assert!(format!("{}", err).contains("M2"));
+    }
+
+    // ---- event_to_chunk_result -----------------------------------------
+
+    fn partial_assistant() -> model::AssistantMessage {
+        model::AssistantMessage {
+            role: "assistant".into(),
+            content: vec![],
+            api: model::Api::OpenAICompletions,
+            provider: hand_ai_model::types::Provider::OpenAI,
+            model: "gpt-4o".into(),
+            usage: Usage::default(),
+            stop_reason: StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+        }
+    }
+
+    #[test]
+    fn text_delta_becomes_content_chunk() {
+        let event = AssistantMessageEvent::TextDelta {
+            content_index: 0,
+            delta: "hi".into(),
+            partial: partial_assistant(),
+        };
+        let chunk = event_to_chunk_result(&event, "gpt-4o")
+            .expect("event maps")
+            .expect("ok variant");
+        assert_eq!(chunk.choices[0].delta.as_ref().unwrap().content.as_deref(), Some("hi"));
+        assert!(chunk.choices[0].finish_reason.is_none());
+    }
+
+    #[test]
+    fn thinking_delta_becomes_reasoning_chunk() {
+        let event = AssistantMessageEvent::ThinkingDelta {
+            content_index: 0,
+            delta: "let me think".into(),
+            partial: partial_assistant(),
+        };
+        let chunk = event_to_chunk_result(&event, "gpt-4o")
+            .expect("event maps")
+            .expect("ok variant");
+        assert_eq!(
+            chunk.choices[0].delta.as_ref().unwrap().reasoning.as_deref(),
+            Some("let me think")
+        );
+        assert!(chunk.choices[0].delta.as_ref().unwrap().content.is_none());
+    }
+
+    #[test]
+    fn done_event_produces_terminal_chunk_with_finish_reason() {
+        let mut msg = partial_assistant();
+        msg.usage = Usage {
+            input: 5,
+            output: 10,
+            cache_read: 0,
+            cache_write: 0,
+            total_tokens: 15,
+            cost: Default::default(),
+        };
+        let event = AssistantMessageEvent::Done {
+            reason: StopReason::Stop,
+            message: msg,
+        };
+        let chunk = event_to_chunk_result(&event, "gpt-4o")
+            .expect("event maps")
+            .expect("ok variant");
+        assert_eq!(chunk.choices[0].finish_reason.as_deref(), Some("stop"));
+        let usage = chunk.usage.expect("usage forwarded");
+        assert_eq!(usage.prompt_tokens, 5);
+        assert_eq!(usage.completion_tokens, 10);
+        assert_eq!(usage.total_tokens, 15);
+    }
+
+    #[test]
+    fn error_event_translates_to_err() {
+        let mut msg = partial_assistant();
+        msg.error_message = Some("upstream blew up".into());
+        let event = AssistantMessageEvent::Error {
+            reason: StopReason::Error,
+            error: msg,
+        };
+        let result = event_to_chunk_result(&event, "gpt-4o").expect("event maps");
+        let err = result.expect_err("error event must surface as Err");
+        assert!(format!("{}", err).contains("upstream blew up"));
+    }
+
+    #[test]
+    fn boundary_events_emit_nothing() {
+        let event = AssistantMessageEvent::TextStart {
+            content_index: 0,
+            partial: partial_assistant(),
+        };
+        assert!(event_to_chunk_result(&event, "gpt-4o").is_none());
     }
 }
 
