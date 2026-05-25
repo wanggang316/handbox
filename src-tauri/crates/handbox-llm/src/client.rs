@@ -132,8 +132,6 @@ mod tests {
                 provider_type: provider_type.to_string(),
                 chat_api_type: LlmApiType::OpenAICompletions,
                 model_api_type: LlmModelApiType::OpenAI,
-                supplement_file: None,
-                supplement_fields: None,
             })
         }
     }

@@ -2,7 +2,7 @@
 // 从 llm_config.json 读取供应商配置信息
 
 use handbox_llm::config::{LlmConfigProvider, LlmProviderConfig};
-use handbox_llm::types::{LlmApiType, LlmModelApiType, SupplementField};
+use handbox_llm::types::{LlmApiType, LlmModelApiType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -130,8 +130,6 @@ pub struct ProviderConfig {
     pub icon: String,
     pub chat_api_type: String,  // "openai" | "google" | "anthropic"
     pub model_api_type: String, // "openai" | "google" | "anthropic" | "openrouter"
-    pub supplement_file: Option<String>,
-    pub supplement_fields: Option<Vec<SupplementField>>,
     #[serde(default)]
     pub parameters: HashMap<String, ParameterConfig>, // 供应商级别的参数配置
 }
@@ -277,8 +275,6 @@ impl LlmConfigProvider for LlmConfig {
                 provider_type: config.provider_type.clone(),
                 chat_api_type,
                 model_api_type,
-                supplement_file: config.supplement_file.clone(),
-                supplement_fields: config.supplement_fields.clone(),
             })
         })
     }
