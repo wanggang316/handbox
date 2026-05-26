@@ -60,6 +60,10 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-26T05:05Z  M2-T2d spec-reviewer      compliant
 2026-05-26T05:15Z  M2-T2d code-reviewer      approve-with-fixes (1 Important: pub fn without test; 2 Suggestions: Drop runtime probe + IPC input bound)
 2026-05-26T05:25Z  M2-T2d.1 implementer      DONE             2a6d741  (3 fixes; 91/9 unchanged; UT-DISSOLVE-003 structural assertion pinned)
+2026-05-26T06:00Z  M2-T3  implementer        DONE             1d572d0  (+55/-69 in services/session.rs; generate_title via chat_engine)
+2026-05-26T06:05Z  M2-T3  spec-reviewer      compliant
+2026-05-26T06:15Z  M2-T3  code-reviewer      approve  (2 Suggestions: error-log granularity + silent unwrap_or_default — debuggability only)
+2026-05-26T06:16Z  M2-T3  user-test-validator structural-pass UT-DISSOLVE-004 (baseline 91/9 preserved)
 
 ### Task checklist
 
