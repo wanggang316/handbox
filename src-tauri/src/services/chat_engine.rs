@@ -401,14 +401,16 @@ fn resolve_model(
     Ok(m)
 }
 
+#[allow(clippy::field_reassign_with_default)]
+// StreamOptions and SimpleStreamOptions are #[non_exhaustive] in hand_ai_model
+// (since #32 / commit 7994163). FRU (`..Default::default()`) is illegal from
+// outside the defining crate, so we mutate-default.
 fn build_stream_options(options: &ChatOptions, api_key: &str) -> SimpleStreamOptions {
     let mut base = StreamOptions::default();
     base.api_key = Some(api_key.to_string());
     base.temperature = options.temperature;
     base.max_tokens = options.max_tokens;
     base.signal = options.signal.clone();
-    // Stream/SimpleStreamOptions are #[non_exhaustive] in hand-ai (#32) — must
-    // mutate-default rather than FRU.
     let mut opts = SimpleStreamOptions::default();
     opts.base = base;
     opts.reasoning = options
@@ -433,12 +435,28 @@ fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
 // Translation: AssistantMessageEvent → ChatChunk
 // ---------------------------------------------------------------------------
 
-/// Map hand-ai's `ClientError` onto HandBox's `AppError`. `ClientError` is a
-/// small enum (ProviderNotFound / StreamEndedWithoutResult / OAuthRequired);
-/// all three are configuration / validation issues rather than transport
-/// failures, so they translate to `validation_error` with the original Display.
+/// Map hand-ai's `ClientError` onto HandBox's `AppError`. Routed per variant
+/// so OAuth re-init / config-validation / unexpected-internal paths land on
+/// the right HandBox error code:
+///
+/// - `OAuthRequired` → `AppError::auth_error` (triggers provider OAuth re-init
+///   in the UI; collapsing this to `validation_error` would surface
+///   "请检查输入参数" instead of an auth prompt).
+/// - `ProviderNotFound` → `AppError::validation_error` (model/provider pair
+///   isn't in hand-ai's static catalog — caller-side config issue).
+/// - `StreamEndedWithoutResult` → `AppError::internal_error` (no terminal
+///   event from the provider stream; not a user-correctable failure).
 fn client_err_to_app_err(err: hand_ai_model::ClientError) -> AppError {
-    AppError::validation_error(&format!("hand-ai client error: {}", err))
+    use hand_ai_model::ClientError;
+    match &err {
+        ClientError::OAuthRequired { .. } => AppError::auth_error(&format!("{}", err)),
+        ClientError::ProviderNotFound { .. } => {
+            AppError::validation_error(&format!("hand-ai client error: {}", err))
+        }
+        ClientError::StreamEndedWithoutResult => {
+            AppError::internal_error(&format!("hand-ai client error: {}", err))
+        }
+    }
 }
 
 fn usage_to_chat(u: &Usage) -> Option<ChatUsage> {
@@ -563,7 +581,10 @@ fn hand_ai_to_handbox_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::types::Message as DbMessage;
+    use crate::models::llm_types::LlmToolFunction;
+    use crate::storage::types::{
+        Message as DbMessage, MessageToolCall, MessageToolExecutionMode, MessageToolExecutionStatus,
+    };
 
     fn bare_db_message(role: LlmMessageRole, content: &str) -> DbMessage {
         DbMessage {
@@ -586,6 +607,20 @@ mod tests {
             duration: None,
             created_at: 0,
             updated_at: 0,
+        }
+    }
+
+    fn tool_call(id: &str, name: &str, arguments: &str) -> MessageToolCall {
+        MessageToolCall {
+            id: id.to_string(),
+            tool_type: "function".to_string(),
+            function: LlmToolFunction {
+                name: name.to_string(),
+                arguments: arguments.to_string(),
+            },
+            execution_mode: MessageToolExecutionMode::default(),
+            execution_status: MessageToolExecutionStatus::default(),
+            result: None,
         }
     }
 
@@ -664,5 +699,104 @@ mod tests {
         assert_eq!(usage.prompt_tokens, 5);
         assert_eq!(usage.completion_tokens, 10);
         assert_eq!(usage.total_tokens, 15);
+    }
+
+    #[test]
+    fn assistant_history_errors_when_model_not_in_catalog() {
+        let messages = vec![bare_db_message(LlmMessageRole::Assistant, "prior reply")];
+        let err = messages_to_context(&messages, "openai", "no-such-model-9999", &[])
+            .expect_err("unknown model must surface clearly");
+        let m = format!("{}", err);
+        assert!(m.contains("not in catalog"), "msg: {m}");
+        assert!(m.contains("no-such-model-9999"), "msg: {m}");
+    }
+
+    #[test]
+    fn tool_result_pulls_tool_name_from_prior_assistant_call() {
+        let mut assistant = bare_db_message(LlmMessageRole::Assistant, "");
+        assistant.tool_calls = Some(vec![tool_call("call_99", "search_web", "{}")]);
+        let mut tool_result = bare_db_message(LlmMessageRole::Tool, "result text");
+        tool_result.tool_call_id = Some("call_99".to_string());
+
+        let messages = vec![assistant, tool_result];
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        match &ctx.messages[1] {
+            Message::ToolResult(tr) => {
+                assert_eq!(tr.tool_call_id, "call_99");
+                assert_eq!(tr.tool_name, "search_web");
+                match &tr.content[..] {
+                    [model::ToolResultContent::Text(t)] => assert_eq!(t.text, "result text"),
+                    other => panic!("expected text result, got {:?}", other),
+                }
+            }
+            other => panic!("expected tool result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tool_result_with_unknown_call_id_errors() {
+        let mut orphan = bare_db_message(LlmMessageRole::Tool, "orphan");
+        orphan.tool_call_id = Some("ghost".to_string());
+        let messages = vec![orphan];
+        let err = messages_to_context(&messages, "openai", "gpt-4o", &[])
+            .expect_err("orphan tool result should error");
+        assert!(format!("{}", err).contains("unknown tool_call_id"));
+    }
+
+    #[test]
+    fn assistant_history_preserves_reasoning_and_tool_calls() {
+        let mut assistant = bare_db_message(LlmMessageRole::Assistant, "calling tool");
+        assistant.reasoning = Some("considering options".to_string());
+        assistant.tool_calls = Some(vec![tool_call("call_1", "get_weather", r#"{"city":"sf"}"#)]);
+
+        let messages = vec![assistant];
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        match &ctx.messages[0] {
+            Message::Assistant(am) => {
+                assert_eq!(am.content.len(), 3, "thinking + text + tool_call");
+                assert!(matches!(
+                    am.content[0],
+                    model::AssistantContentBlock::Thinking(_)
+                ));
+                assert!(matches!(
+                    am.content[1],
+                    model::AssistantContentBlock::Text(_)
+                ));
+                match &am.content[2] {
+                    model::AssistantContentBlock::ToolCall(tc) => {
+                        assert_eq!(tc.id, "call_1");
+                        assert_eq!(tc.name, "get_weather");
+                        assert_eq!(tc.arguments["city"], "sf");
+                    }
+                    other => panic!("expected ToolCall, got {:?}", other),
+                }
+            }
+            other => panic!("expected assistant, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn multiple_system_messages_concatenated_with_blank_line() {
+        let messages = vec![
+            bare_db_message(LlmMessageRole::System, "first"),
+            bare_db_message(LlmMessageRole::User, "hi"),
+            bare_db_message(LlmMessageRole::System, "second"),
+        ];
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        assert_eq!(ctx.system_prompt.as_deref(), Some("first\n\nsecond"));
+        assert_eq!(ctx.messages.len(), 1);
+    }
+
+    #[test]
+    fn error_event_translates_to_err() {
+        let mut msg = partial_assistant();
+        msg.error_message = Some("upstream blew up".to_string());
+        let event = AssistantMessageEvent::Error {
+            reason: StopReason::Error,
+            error: msg,
+        };
+        let result = event_to_chunk_result(&event).expect("event maps");
+        let err = result.expect_err("error event must surface as Err");
+        assert!(format!("{}", err).contains("upstream blew up"));
     }
 }
