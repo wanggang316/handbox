@@ -4,6 +4,7 @@ pub mod artifact;
 pub mod chat;
 pub mod error;
 pub mod llm_config;
+pub mod llm_types;
 pub mod mcp;
 pub mod message;
 pub mod model;
