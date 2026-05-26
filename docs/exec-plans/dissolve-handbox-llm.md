@@ -43,6 +43,11 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-25T21:48Z  M2-T1  code-reviewer      approve-with-fixes  (2 Important: auth-error mapping; test density gap; +1 clippy CI hint)
 2026-05-25T22:05Z  M2-T1.1 implementer       DONE             a512c4f  (3 fixes landed; 10/10 chat_engine tests; 87 lib pass)
 2026-05-25T22:06Z  M2-T1  user-test-validator structural-pass UT-DISSOLVE-002 + UT-003 (no caller wired yet; chat_engine module ready for M2-T2 to dispatch)
+2026-05-26T01:00Z  M2-T2  controller         BLOCKED-then-mid-flight-then-revert  (decision-log entry 2026-05-26 captures the split rationale)
+2026-05-26T01:30Z  M2-T2a implementer        DONE_W_CONCERNS  ba887a8 (4 observation-class concerns; #1 escalated by code-reviewer)
+2026-05-26T01:40Z  M2-T2a spec-reviewer      compliant
+2026-05-26T01:50Z  M2-T2a code-reviewer      approve-with-fixes  (2 Important: model_id revert + expect-to-internal_error)
+2026-05-26T02:00Z  M2-T2a.1 implementer      DONE             77ab4ef  (-25 LOC; 12/12 chat_engine; 89 lib pass)
 
 ### Task checklist
 
@@ -52,7 +57,7 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 - [x] M1-T4: Verify M1 with `cargo test` + DB JSON roundtrip — commit `21e038b` (test pins LlmMessageRole serde wire shape; M1 Exit Gate ✅)
 - [x] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch — commit `f068875` + `a512c4f` (M2-T1.1 fix-pass)
 - ~~M2-T2: Rewire `services/message.rs` chat flows through `chat_engine`~~ — split into M2-T2a/b/c/d per Decision Log (2026-05-26).
-- [ ] M2-T2a: Extend chat_engine API (ChatMessage / ChatToolCall / hydrated_attachments / terminal tool_calls)
+- [x] M2-T2a: Extend chat_engine API — commits `ba887a8` + `77ab4ef` (M2-T2a.1 fix-pass)
 - [ ] M2-T2b: Rewire streaming path in services/message.rs
 - [ ] M2-T2c: Rewire non-stream path + delete dead helpers
 - [ ] M2-T2d: Cancellation source survey + wiring
