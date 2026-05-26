@@ -23,7 +23,6 @@ use crate::services::{
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
-use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -296,23 +295,20 @@ async fn initialize_services(
     let llm_config_value = crate::config::llm_config::LlmConfig::load_from_app(app);
     crate::config::llm_config::install_global_llm_config(llm_config_value.clone());
     let llm_config = Arc::new(llm_config_value);
-    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+    let llm_config_provider = llm_config.clone();
 
     // 初始化各个服务
     let provider_service =
         ProviderService::new(database_service.clone(), llm_config_provider.clone());
     let provider_service_shared = Arc::new(provider_service.clone());
 
-    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
+    let model_service = ModelService::new(database_service.clone());
 
     let mcp_service = McpService::new(database_service.clone());
     let mcp_service_shared = Arc::new(mcp_service.clone());
 
-    let session_service = SessionService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        llm_config_provider.clone(),
-    );
+    let session_service =
+        SessionService::new(database_service.clone(), provider_service_shared.clone());
     let session_service_shared = Arc::new(session_service.clone());
 
     let message_service = MessageService::new(
@@ -321,7 +317,6 @@ async fn initialize_services(
         session_service_shared,
         mcp_service_shared,
         storage_service.clone(),
-        llm_config_provider.clone(),
     );
 
     let search_service = SearchService::new(database_service.clone(), storage_service.clone());

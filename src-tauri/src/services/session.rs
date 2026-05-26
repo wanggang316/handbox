@@ -6,10 +6,6 @@ use crate::services::chat_engine::{self, ChatMessage, ChatOptions, ChatProvider}
 use crate::services::{Database, ProviderService};
 use crate::storage::types::{McpServerConfig, Session, SessionReasoningConfig, UUID};
 use crate::storage::{AgentRepository, MessageRepository, SessionRepository};
-// `LlmConfigProvider` is retained only as the type of the (now-dead)
-// `SessionService::llm_config` field. M2-T5 deletes the field together with
-// the rest of the legacy stack.
-use handbox_llm::config::LlmConfigProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -38,24 +34,15 @@ pub struct SessionService {
     agent_repository: AgentRepository,
     message_repository: MessageRepository,
     provider_service: Arc<ProviderService>,
-    /// Carried for constructor-signature compatibility; the legacy chat path
-    /// that consumed this is gone (M2-T3). M2-T5 removes the field outright.
-    #[allow(dead_code)]
-    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl SessionService {
-    pub fn new(
-        db: Arc<Database>,
-        provider_service: Arc<ProviderService>,
-        llm_config: Arc<dyn LlmConfigProvider>,
-    ) -> Self {
+    pub fn new(db: Arc<Database>, provider_service: Arc<ProviderService>) -> Self {
         Self {
             repository: SessionRepository::new(db.clone()),
             agent_repository: AgentRepository::new(db.clone()),
             message_repository: MessageRepository::new(db),
             provider_service,
-            llm_config,
         }
     }
 
@@ -436,24 +423,24 @@ mod tests {
     async fn creates_service_successfully() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let _service = SessionService::new(db, provider_service, llm_config_provider);
+        let _service = SessionService::new(db, provider_service);
     }
 
     #[tokio::test]
     async fn creates_chat_with_all_fields() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         let chat = service
             .create_chat(
@@ -500,12 +487,12 @@ mod tests {
     async fn lists_chats_sorted_by_updated_at() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         service
             .create_chat(
@@ -555,12 +542,12 @@ mod tests {
     async fn fetches_chat_by_id() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -591,12 +578,12 @@ mod tests {
     async fn get_chat_returns_not_found_error() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         let err = service
             .get_chat("nonexistent_chat".to_string())
@@ -610,12 +597,12 @@ mod tests {
     async fn updates_existing_chat() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -693,12 +680,12 @@ mod tests {
     async fn delete_chat_removes_record() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -733,12 +720,12 @@ mod tests {
     async fn generate_title_requires_messages() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         let chat = service
             .create_chat(
@@ -785,12 +772,12 @@ mod tests {
     async fn clears_parameters_when_passed_some_none() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         // 创建带有参数的聊天
         let created = service
@@ -845,12 +832,12 @@ mod tests {
     async fn clears_parameters_via_service_method() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -885,12 +872,12 @@ mod tests {
     async fn preserves_parameters_when_passed_none() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
         ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let service = SessionService::new(db, provider_service);
 
         // 创建带有参数的聊天
         let created = service

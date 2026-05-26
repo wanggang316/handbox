@@ -15,12 +15,6 @@ use crate::storage::types::{
 use crate::storage::MessageRepository;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::Utc;
-// Retained for backward-compat with MessageService::new callers (lib.rs and the
-// two test-setup sites in this file). The trait is no longer consumed by any
-// chat dispatch path after M2-T2c. Removed in M2-T5 once all handbox_llm types
-// leave services/ and MessageService::new's signature can safely change.
-#[allow(unused_imports)]
-use handbox_llm::config::LlmConfigProvider;
 use crate::models::llm_types::{
     LlmMessageRole, LlmReasoningEffort, LlmToolFunction,
 };
@@ -111,13 +105,6 @@ pub struct MessageService {
     chat_service: Arc<SessionService>,
     mcp_service: Arc<McpService>,
     storage_service: Arc<StorageService>,
-    /// Retained for backward-compat with `MessageService::new` callers
-    /// (lib.rs:317 and the two test-setup sites in this file). The field is
-    /// no longer consumed by any chat dispatch path after M2-T2c. Removed in
-    /// M2-T5 once all handbox_llm types leave services/ and
-    /// MessageService::new's signature can safely change.
-    #[allow(dead_code)]
-    llm_config: Arc<dyn LlmConfigProvider>,
     /// Per-stream cancellation tokens keyed by `stream_id`. Inserted at the
     /// top of `call_llm_api_stream` once the stream id is generated; removed
     /// when the stream terminates (success, error, or external cancel) via
@@ -166,7 +153,6 @@ impl MessageService {
         chat_service: Arc<SessionService>,
         mcp_service: Arc<McpService>,
         storage_service: Arc<StorageService>,
-        llm_config: Arc<dyn LlmConfigProvider>,
     ) -> Self {
         Self {
             repository: MessageRepository::new(db),
@@ -174,7 +160,6 @@ impl MessageService {
             chat_service,
             mcp_service,
             storage_service,
-            llm_config,
             stream_cancellations: Arc::new(TokioMutex::new(HashMap::new())),
         }
     }
@@ -2683,7 +2668,7 @@ mod tests {
     async fn setup_services() -> (Arc<SessionService>, MessageService, String) {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
@@ -2692,7 +2677,6 @@ mod tests {
         let chat_service = Arc::new(SessionService::new(
             db.clone(),
             provider_service.clone(),
-            llm_config_provider.clone(),
         ));
         let storage_dir = TempDir::new().expect("Failed to create temp storage dir");
         let storage_path = storage_dir.path().to_path_buf();
@@ -2705,7 +2689,6 @@ mod tests {
             chat_service.clone(),
             mcp_service,
             storage_service,
-            llm_config_provider,
         );
 
         let chat = chat_service
@@ -2731,7 +2714,7 @@ mod tests {
     async fn creates_service_successfully() {
         let db = create_test_database().await;
         let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
+        let llm_config_provider = llm_config.clone();
         let provider_service = Arc::new(ProviderService::new(
             db.clone(),
             llm_config_provider.clone(),
@@ -2740,7 +2723,6 @@ mod tests {
         let chat_service = Arc::new(SessionService::new(
             db.clone(),
             provider_service.clone(),
-            llm_config_provider.clone(),
         ));
         let storage_dir = TempDir::new().expect("Failed to create temp storage dir");
         let storage_path = storage_dir.path().to_path_buf();
@@ -2753,7 +2735,6 @@ mod tests {
             chat_service,
             mcp_service,
             storage_service,
-            llm_config_provider,
         );
     }
 

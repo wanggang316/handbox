@@ -6,10 +6,6 @@ use crate::services::chat_engine;
 use crate::services::Database;
 use crate::storage::types::{Model, Provider, UUID};
 use crate::storage::{SessionRepository, ModelRepository, ProviderRepository};
-// `LlmConfigProvider` is retained only as the type of the (now-dead)
-// `ModelService::llm_config` field. M2-T5 deletes the field together with
-// the rest of the legacy stack.
-use handbox_llm::config::LlmConfigProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,20 +15,15 @@ pub struct ModelService {
     model_repo: ModelRepository,
     provider_repo: ProviderRepository,
     chat_repo: SessionRepository,
-    /// Carried for constructor-signature compatibility; the legacy model-list
-    /// path that consumed this is gone (M2-T4). M2-T5 removes the field outright.
-    #[allow(dead_code)]
-    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl ModelService {
     /// 创建新的模型服务实例
-    pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             model_repo: ModelRepository::new(Arc::clone(&db)),
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
             chat_repo: SessionRepository::new(db),
-            llm_config,
         }
     }
 

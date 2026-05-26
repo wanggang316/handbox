@@ -18,12 +18,19 @@ pub struct ProviderService {
 }
 
 impl ProviderService {
-    /// 创建新的供应商服务实例
-    pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
+    /// 创建新的供应商服务实例.
+    ///
+    /// `_llm_config` is retained in the signature so callers (lib.rs,
+    /// downstream tests) need not change; the parameter is unused after
+    /// M2-T5 because `ModelService::new` no longer takes a config provider
+    /// (the legacy on-demand model-list path that consumed it was retired
+    /// in M2-T4). The parameter — and `LlmConfigProvider` import — survives
+    /// until M3-T1, which deletes the handbox-llm crate wholesale.
+    pub fn new(db: Arc<Database>, _llm_config: Arc<dyn LlmConfigProvider>) -> Self {
         Self {
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
             chat_repo: SessionRepository::new(Arc::clone(&db)),
-            model_service: ModelService::new(Arc::clone(&db), llm_config),
+            model_service: ModelService::new(Arc::clone(&db)),
         }
     }
 
