@@ -5,7 +5,7 @@
 // `cargo tauri dev --features hand-ai`. The library bridge lives in
 // `handbox-llm::hand_ai_catalog`; this file is only the IPC adaptor.
 
-use handbox_llm::hand_ai_catalog::{self, HandAiProviderInfo};
+use crate::services::hand_ai_catalog::{self, HandAiProviderInfo};
 
 use crate::models::AppError;
 

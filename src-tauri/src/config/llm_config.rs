@@ -213,7 +213,7 @@ impl LlmConfig {
                 .map(|p| p.provider_type.clone())
                 .collect();
             let mut appended = 0usize;
-            for hp in handbox_llm::hand_ai_catalog::list_providers() {
+            for hp in crate::services::hand_ai_catalog::list_providers() {
                 if existing.contains(&hp.id) {
                     continue;
                 }
