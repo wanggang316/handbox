@@ -1,14 +1,10 @@
 // chat_engine — HandBox-owned dispatch over hand_ai_model::Client.
 //
-// This module replaces the legacy handbox-llm chat path. After M2 every
-// service in HandBox that wants to stream from an upstream LLM goes through
-// `stream_chat` / `complete_chat` here; the per-provider adapters in
-// `crates/handbox-llm/src/chat/*` are kept around only until M3 deletes the
-// crate.
-//
-// The translation logic (ChatMessage slice → hand-ai Context, AssistantMessageEvent
-// → ChatChunk) is lifted from `crates/handbox-llm/src/chat/hand_ai_adapter.rs`
-// with type renames — see the M2 row of docs/exec-plans/dissolve-handbox-llm.md.
+// Every HandBox service that streams from an upstream LLM goes through
+// `stream_chat` / `complete_chat` here. The translation logic (ChatMessage
+// slice → hand-ai Context, AssistantMessageEvent → ChatChunk) was lifted
+// from the now-deleted handbox-llm chat adapter — see the M2 row of
+// docs/exec-plans/dissolve-handbox-llm.md for the migration history.
 //
 // M2-T2a expanded the surface area: `ChatMessage` / `ChatToolCall` /
 // `HydratedAttachment` are HandBox-app-internal carrier types that keep

@@ -17,9 +17,9 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 
 ## Progress
 
-**State:** Running
-**Active worker:** none (M1-T2 complete; M1-T4 about to dispatch)
-**Last handoff:** 2026-05-25T20:35Z — M1-T2 — completed
+**State:** Running — awaiting user manual UI smoke for M3-T3
+**Active worker:** none (M3-T1+T2 landed at `e7ea789`; static gates of M3-T3 pass; live UI smoke deferred to Gump)
+**Last handoff:** 2026-05-26T10:30Z — M3-T1+T2 — completed
 
 ### Handoff log
 
@@ -77,6 +77,10 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-26T08:32Z  M2     milestone-exit-gate PASS  M2 complete: chat_engine owns dispatch; services/{message,session,model} clean of handbox_llm function-body refs; cancellation registry wired; baseline 91/9 preserved
 2026-05-26T09:00Z  M3-T0  implementer        DONE             fd38b09  (+276/-15; 13 leaf types now verbatim; serde-repr regression test still green; baseline 91/9 preserved)
 2026-05-26T09:15Z  M3-T0  controller         replan           M3-T1 needs pre-steps: 5 handbox_llm refs remain in app code (hand_ai_catalog module + LlmConfigProvider + LlmApiType/LlmModelApiType). Split into M3-T1a (relocate hand_ai_catalog) + M3-T1b (inline enums + drop trait) + M3-T1 (delete crate)
+2026-05-26T09:45Z  M3-T1a implementer        DONE             1c24bf6  (services/hand_ai_catalog.rs verbatim copy; 2 import sites retargeted; 6 catalog tests pass at new location; 97/9 baseline)
+2026-05-26T10:00Z  M3-T1b implementer        BLOCKED-then-WIDENED 13 test call sites in session.rs/message.rs outside declared scope; widened scope per option 1
+2026-05-26T10:10Z  M3-T1b implementer        DONE             b930414  (drop LlmConfigProvider trait + 3 handbox_llm imports; ProviderService::new 2-arg → 1-arg + 13-site test sweep; 97/9 unchanged)
+2026-05-26T10:30Z  M3-T1+T2 implementer      DONE             e7ea789  (delete handbox-llm crate dir: 22 .rs + Cargo.toml + tests = -5617 LOC; Cargo.toml cleaned; hand-ai feature reduced to no-op; release build succeeds in 4m35s; 97/9 baseline preserved)
 
 ### Task checklist
 
@@ -90,13 +94,14 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 - [x] M2-T2b: Rewire streaming path in services/message.rs — commits `8441f0a` + `89e8450` (M2-T2b.1 fix-pass)
 - [x] M2-T2c: Rewire non-stream path + delete dead helpers — commit `5589965` (net -62 LOC; both dispatch paths now through chat_engine)
 - [x] M2-T2d: Cancellation source survey + wiring — commits `1b0004c` + `2a6d741` (M2-T2d.1 fix-pass)
-- [ ] M2-T3: Rewire `services/session.rs` model lookups through hand-ai
-- [ ] M2-T4: Rewire `services/model.rs` list_models through hand-ai catalog
-- [ ] M2-T5: Replace `LlmClientError` import in `models/error.rs` with `hand_ai_model::ClientError`
-- [ ] M3-T0 **(new)**: Flip `src-tauri/src/models/llm_types.rs` from re-exports to the verbatim copies M1-T1 originally wrote. Single atomic commit, build still clean (the local definitions replace `pub use handbox_llm::types::*` with `pub struct/enum {...}` bodies identical to handbox-llm's leaf types).
-- [ ] M3-T1: Delete `src-tauri/crates/handbox-llm/` directory
-- [ ] M3-T2: Drop `handbox-llm = …` from `src-tauri/Cargo.toml` and `src-tauri/crates/handbox-llm` from workspace dep graph
-- [ ] M3-T3: Final compile + manual UI smoke test
+- [x] M2-T3: Rewire `services/session.rs` model lookups through hand-ai — commit `1d572d0`
+- [x] M2-T4: Rewire `services/model.rs` list_models through hand-ai catalog — commits `fad2885` + `8b5215a`
+- [x] M2-T5: Replace `LlmClientError` import in `models/error.rs` with `hand_ai_model::ClientError` — commits `3f61a4b` + `30562f7`
+- [x] M3-T0 **(new)**: Flip `src-tauri/src/models/llm_types.rs` from re-exports to verbatim copies — commit `fd38b09`
+- [x] M3-T1a **(new)**: Relocate `hand_ai_catalog` module from handbox-llm into HandBox-app — commit `1c24bf6`
+- [x] M3-T1b **(new)**: Drop `LlmConfigProvider` trait + remaining `handbox_llm::*` imports — commit `b930414`
+- [x] M3-T1 + M3-T2 **(fused)**: Delete crate dir + clean `src-tauri/Cargo.toml` — commit `e7ea789`
+- [~] M3-T3: Final compile (static gates) **PASS** at `e7ea789`. Manual UI smoke (UT-DISSOLVE-001..004) **awaiting user run**.
 
 ## Surprises & Discoveries
 
@@ -138,7 +143,23 @@ This makes M1-T2 trivial again: pure path-rewrite, single atomic commit, no sema
 
 ## Outcomes & Retrospective
 
-(To be filled at plan completion)
+**State as of `e7ea789` (2026-05-26):** All static gates pass. The `handbox-llm` crate no longer exists in tree; `grep -rn 'handbox_llm\|handbox-llm' src-tauri/src/ src-tauri/Cargo.toml` returns only historical-breadcrumb comments and one doc cross-reference. The default + `--no-default-features` + `--features hand-ai` cargo-check matrix is clean. The `cargo test --lib` baseline (97 pass / 9 fail / 1 ignored) is identical to pre-M3-T0 — the 9 failures pre-date this work (sqlite-schema setup in repository tests) and are out of scope. `cargo build --release` succeeds in 4m35s.
+
+**Net code impact:**
+
+- Deleted: `src-tauri/crates/handbox-llm/` — 22 .rs files, ~5500 LOC, plus Cargo.toml and tests directory.
+- Added in HandBox-app: `services/chat_engine.rs` (~500 LOC), `services/hand_ai_catalog.rs` (~240 LOC), `models/llm_types.rs` (~290 LOC verbatim definitions), `+~120 LOC` of test code spread across `services/{message,session,model,provider}.rs`.
+- Net: roughly **−4300 LOC** of Rust deleted, with the LLM-integration surface reduced to a single vendor (`hand_ai_model`) and a single set of leaf types (`crate::models::llm_types`).
+
+**Runtime validation pending:** UT-DISSOLVE-001..004 are static-pass at the code-review level. The live UI smoke (provider picker shows ≥30 entries; OpenAI streaming + usage; Stop button cancels ≤500ms; non-chat surfaces don't regress) requires Gump to run `npm run tauri dev` against the `feat/hand-ai-integration` branch. Treat this as the gate before merging to `main`.
+
+**Lessons learned:**
+
+1. **Rust nominal typing made M1-T2 strictly bigger than planned.** Discovered mid-task that swapping leaf-type imports forces every heavy-aggregate seam to change with them. Resolved by introducing a transitional `pub use handbox_llm::types::{…}` re-export in `llm_types.rs` (M1-T2) and deferring the verbatim-copy flip to M3-T0. The pattern — *re-export now, copy at deletion time* — is reusable for similar crate-extraction work.
+2. **Session boundaries forced M2-T2 into a 4-way split.** A single 500-line task can't span a session boundary safely; once the implementer's context is lost, the next agent can't reliably resume mid-flight. Splitting M2-T2 into 4 sub-tasks (≤150 LOC each) was the right call; each commit leaves a clean compile + tests. Future plans with large rewires should pre-emptively budget for sub-task granularity.
+3. **Plan briefs systematically underestimated test-callsite scope.** M3-T1b's brief listed 3 import sites but missed the 13 test call sites in `services/{session,message}.rs` that compile under `cargo test --lib`. The implementer surfaced this as BLOCKED with options; widening scope (option 1) was the right call. Future briefs should run `grep -rn "TargetSymbol::new(" src-tauri/src/` pre-dispatch to capture test-only call sites.
+4. **Comment provenance ("Verbatim copy from handbox-llm/src/...") leaves broken pointers after deletion.** Kept in place per the implementer's note about historical archaeology — the original code is findable via `git log` on the dissolve-handbox-llm series. If future readers find these annoying, a sweep replacing them with git-SHA references is a low-risk follow-up.
+5. **The `hand-ai` feature became vestigial.** With handbox-llm gone, the feature is a no-op (`hand-ai = []`). The `#[cfg(feature = "hand-ai")]` annotations in `lib.rs` and `services/mod.rs` could be removed in a follow-up, but the cost/value of that sweep doesn't justify scope expansion mid-dissolution.
 
 ## Context and Orientation
 

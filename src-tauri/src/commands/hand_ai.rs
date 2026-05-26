@@ -1,9 +1,8 @@
 // Tauri IPC bridge over hand-ai's provider/model catalog.
 //
-// Behind the top-level `hand-ai` feature flag — disabled in shipped
-// HandBox builds today, enabled during integration via
-// `cargo tauri dev --features hand-ai`. The library bridge lives in
-// `handbox-llm::hand_ai_catalog`; this file is only the IPC adaptor.
+// Gated by the `hand-ai` feature flag (default-on as of the
+// dissolve-handbox-llm migration). The catalog itself lives in
+// `crate::services::hand_ai_catalog`; this file is only the IPC adaptor.
 
 use crate::services::hand_ai_catalog::{self, HandAiProviderInfo};
 
