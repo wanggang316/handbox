@@ -48,6 +48,10 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-26T01:40Z  M2-T2a spec-reviewer      compliant
 2026-05-26T01:50Z  M2-T2a code-reviewer      approve-with-fixes  (2 Important: model_id revert + expect-to-internal_error)
 2026-05-26T02:00Z  M2-T2a.1 implementer      DONE             77ab4ef  (-25 LOC; 12/12 chat_engine; 89 lib pass)
+2026-05-26T03:00Z  M2-T2b implementer        DONE_W_CONCERNS  8441f0a  (3 pre-accepted concerns; streaming-only rewire +208/-152)
+2026-05-26T03:05Z  M2-T2b spec-reviewer      compliant
+2026-05-26T03:15Z  M2-T2b code-reviewer      approve-with-fixes (2 Important: reasoning gate regression + ChatChunk.usage discarded)
+2026-05-26T03:25Z  M2-T2b.1 implementer      DONE             89e8450  (+44/-25; reasoning gate + usage harvest; 89/9 unchanged)
 
 ### Task checklist
 
@@ -58,7 +62,7 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 - [x] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch — commit `f068875` + `a512c4f` (M2-T1.1 fix-pass)
 - ~~M2-T2: Rewire `services/message.rs` chat flows through `chat_engine`~~ — split into M2-T2a/b/c/d per Decision Log (2026-05-26).
 - [x] M2-T2a: Extend chat_engine API — commits `ba887a8` + `77ab4ef` (M2-T2a.1 fix-pass)
-- [ ] M2-T2b: Rewire streaming path in services/message.rs
+- [x] M2-T2b: Rewire streaming path in services/message.rs — commits `8441f0a` + `89e8450` (M2-T2b.1 fix-pass)
 - [ ] M2-T2c: Rewire non-stream path + delete dead helpers
 - [ ] M2-T2d: Cancellation source survey + wiring
 - [ ] M2-T3: Rewire `services/session.rs` model lookups through hand-ai
