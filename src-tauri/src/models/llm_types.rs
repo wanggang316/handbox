@@ -9,7 +9,7 @@
 // home.
 
 pub use handbox_llm::types::{
-    LlmMessageAttachment, LlmMessageRole, LlmModelParameter, LlmReasoningEffort,
-    LlmReasoningEffortConfig, LlmReasoningSummary, LlmResponsesReasoning, LlmThinkingConfig,
-    LlmToolCall, LlmToolFunction, ModelPricing,
+    LlmGeneratedImage, LlmMessage, LlmMessageAttachment, LlmMessageRole, LlmModelParameter,
+    LlmReasoningEffort, LlmReasoningEffortConfig, LlmReasoningSummary, LlmResponsesReasoning,
+    LlmThinkingConfig, LlmToolCall, LlmToolFunction, ModelPricing,
 };

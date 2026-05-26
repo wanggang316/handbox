@@ -16,13 +16,8 @@ use crate::storage::MessageRepository;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::Utc;
 use crate::models::llm_types::{
-    LlmMessageRole, LlmReasoningEffort, LlmToolFunction,
+    LlmGeneratedImage, LlmMessage, LlmMessageRole, LlmReasoningEffort, LlmToolFunction,
 };
-// LlmMessage / LlmGeneratedImage stay imported because `build_message_request`,
-// `save_assistant_message`, and `persist_generated_assets` still reference them.
-// These are outside M2-T2c's scope (the dispatch rewire) and will be migrated
-// alongside the storage- and history-building paths in later M2/M3 work.
-use handbox_llm::types::{LlmGeneratedImage, LlmMessage};
 use std::{collections::HashMap, fs, sync::Arc};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
