@@ -17,25 +17,29 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 
 ## Progress
 
-**State:** Draft
-**Active worker:** none
-**Last handoff:** —
+**State:** Running
+**Active worker:** none (M1-T1 complete; M1-T2 about to dispatch)
+**Last handoff:** 2026-05-25T19:30Z — M1-T1 — completed
 
 ### Handoff log
 
-(empty — will be appended as `<ISO timestamp>  <task-id>  <role>  <outcome>  [<commit-sha>]` lines)
+2026-05-25T19:20Z  M1-T1  implementer        DONE             83d28a0
+2026-05-25T19:24Z  M1-T1  spec-reviewer      compliant
+2026-05-25T19:28Z  M1-T1  code-reviewer      approve
+2026-05-25T19:30Z  M1-T1  user-test-validator vacuous-pass (no cases bound)
 
 ### Task checklist
 
-- [ ] M1-T1: Create `src-tauri/src/models/llm_types.rs` with copied leaf types
-- [ ] M1-T2: Switch `src-tauri/src/storage/types/{message,session,model}.rs` to local types
-- [ ] M1-T3: Switch `src-tauri/src/storage/message_repository.rs` to local `MessageRole`
+- [x] M1-T1: Create `src-tauri/src/models/llm_types.rs` with copied leaf types — commit `83d28a0`
+- [ ] M1-T2: Switch ALL `handbox_llm::types::*` import sites — storage/types/* + storage/message_repository + services/{message,model,session}.rs + models/model.rs. Single atomic commit; build stays clean.
+- ~~M1-T3: Switch `src-tauri/src/storage/message_repository.rs` to local `MessageRole`~~ — absorbed into M1-T2 (see Decision Log).
 - [ ] M1-T4: Verify M1 with `cargo test` + DB JSON roundtrip
 - [ ] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch
 - [ ] M2-T2: Rewire `services/message.rs` chat flows through `chat_engine`
 - [ ] M2-T3: Rewire `services/session.rs` model lookups through hand-ai
 - [ ] M2-T4: Rewire `services/model.rs` list_models through hand-ai catalog
 - [ ] M2-T5: Replace `LlmClientError` import in `models/error.rs` with `hand_ai_model::ClientError`
+- [ ] M3-T0 **(new)**: Flip `src-tauri/src/models/llm_types.rs` from re-exports to the verbatim copies M1-T1 originally wrote. Single atomic commit, build still clean (the local definitions replace `pub use handbox_llm::types::*` with `pub struct/enum {...}` bodies identical to handbox-llm's leaf types).
 - [ ] M3-T1: Delete `src-tauri/crates/handbox-llm/` directory
 - [ ] M3-T2: Drop `handbox-llm = …` from `src-tauri/Cargo.toml` and `src-tauri/crates/handbox-llm` from workspace dep graph
 - [ ] M3-T3: Final compile + manual UI smoke test
@@ -47,6 +51,21 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 ## Decision Log
 
 **2026-05-25 — Local copies instead of re-export.** Two ways to dissolve a crate: (a) re-export hand-ai types from a thin shim, (b) copy the types HandBox needs into HandBox-local modules. (a) leaves HandBox coupled to whatever hand-ai chooses to ship next; the leaf types we use (e.g. `LlmMessageRole`) are tiny enums whose meaning is stable and HandBox-domain (we want our own `Tool` variant naming regardless of what hand-ai calls it). Copy.
+
+**2026-05-25 — M1-T2 absorbs M1-T3 + service call sites (Rust nominal typing).** The original plan scoped M1-T2 to `storage/types/*` only, with `storage/message_repository.rs` deferred to M1-T3 and `services/*` deferred to M2. M1-T2's implementer dispatched and surfaced a hard contradiction: Rust types are nominal, not structural, so the moment `storage/types/message.rs::Message::role` is retyped from `handbox_llm::types::LlmMessageRole` to `crate::models::llm_types::LlmMessageRole`, every `services/*` consumer that reads `message.role` as the old type fails to compile (20 sites across 5 files). The plan as originally written would have committed a half-broken tree — that violates the skill's "atomic commit / clean tree" rule.
+
+First resolution attempt: collapse M1-T2 + M1-T3 + the affected service/model call sites into one big mechanical sweep under M1-T2.
+
+**2026-05-25 — M1-T1 strategy revised: verbatim copy → transitional re-exports.** The "collapsed sweep" attempt above ran into a deeper structural issue: heavy aggregate types (`LlmMessage`, `LlmRequest`, `LlmModel`, `LlmResponse`) hold leaf types as struct fields. Once we have two distinct nominal copies of each leaf type (one in handbox-llm, one in `crate::models::llm_types`), every heavy-aggregate construction or destructure site becomes a type error at the field boundary. M2 owns the aggregate migration; M1 cannot finish without it.
+
+Two paths out:
+
+- **(2) inter-copy `From` impls** — write 22 trait impls bridging local↔heavy leaf types. Orphan rule forces half of them to live inside `handbox-llm/src/...` which means editing handbox-llm; they're literally identity-shape copies, so the bridge code is pure noise that disappears in M3.
+- **(7) `models/llm_types.rs` becomes a transitional re-export** — `pub use handbox_llm::types::{...}` instead of verbatim copies. `crate::models::llm_types::LlmMessageRole` IS `handbox_llm::types::LlmMessageRole` (same nominal type via re-export). The import sweep is zero-cost. M3 acquires one new pre-task: flip `models/llm_types.rs` from re-exports back to verbatim copies just before deleting the crate.
+
+Pick (7). It keeps the build clean throughout, costs no conversion code, and only adds a single ~5-minute "flip" task at the M3 boundary that mechanically replays what M1-T1 originally did. The verbatim definitions M1-T1 wrote will be re-introduced into the same file at M3 time — they're not lost work, just deferred to the moment they're actually needed.
+
+This makes M1-T2 trivial again: pure path-rewrite, single atomic commit, no semantic shift, no type-conversion plumbing.
 
 **2026-05-25 — Preserve serde representations byte-for-byte.** HandBox's SQLite stores serialized `LlmMessageRole` and `LlmToolCall` JSON in TEXT columns. If the new local types have different `#[serde(rename_all = …)]` or field names, existing rows become unreadable. Every leaf type's serde shape is reproduced exactly, and an explicit deserialization roundtrip test pins the contract.
 
