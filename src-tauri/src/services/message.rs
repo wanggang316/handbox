@@ -2642,7 +2642,6 @@ impl MessageService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::llm_config::LlmConfig;
     use crate::models::{ModelParameters, UserMessageSendRequest};
     use crate::services::{SessionService, McpService, ProviderService, StorageService};
     use crate::storage::types::MessageConfig;
@@ -2662,12 +2661,7 @@ mod tests {
 
     async fn setup_services() -> (Arc<SessionService>, MessageService, String) {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
         let mcp_service = Arc::new(McpService::new(db.clone()));
         let chat_service = Arc::new(SessionService::new(
             db.clone(),
@@ -2708,12 +2702,7 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
         let mcp_service = Arc::new(McpService::new(db.clone()));
         let chat_service = Arc::new(SessionService::new(
             db.clone(),

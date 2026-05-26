@@ -294,12 +294,9 @@ async fn initialize_services(
 
     let llm_config_value = crate::config::llm_config::LlmConfig::load_from_app(app);
     crate::config::llm_config::install_global_llm_config(llm_config_value.clone());
-    let llm_config = Arc::new(llm_config_value);
-    let llm_config_provider = llm_config.clone();
 
     // 初始化各个服务
-    let provider_service =
-        ProviderService::new(database_service.clone(), llm_config_provider.clone());
+    let provider_service = ProviderService::new(database_service.clone());
     let provider_service_shared = Arc::new(provider_service.clone());
 
     let model_service = ModelService::new(database_service.clone());

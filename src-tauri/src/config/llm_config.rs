@@ -1,8 +1,6 @@
 // LLM 配置管理器
 // 从 llm_config.json 读取供应商配置信息
 
-use handbox_llm::config::{LlmConfigProvider, LlmProviderConfig};
-use handbox_llm::types::{LlmApiType, LlmModelApiType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -193,16 +191,15 @@ impl LlmConfig {
 
     /// Append synthesized `ProviderConfig` entries for every hand-ai catalog
     /// provider that isn't already in `self.providers`. Lets the existing
-    /// `get_provider_configs` IPC + `LlmConfigProvider::get_provider_config`
-    /// lookups surface the 30+ vendors hand-ai knows about (Bedrock, Groq,
-    /// xAI, Cerebras, etc.) without HandBox having to maintain its own copy
-    /// of the catalog.
+    /// `get_provider_configs` IPC and `LlmConfig::get_provider_config` lookups
+    /// surface the 30+ vendors hand-ai knows about (Bedrock, Groq, xAI,
+    /// Cerebras, etc.) without HandBox having to maintain its own copy of the
+    /// catalog.
     ///
     /// The synthesized entries carry placeholder chat_api_type / model_api_type
-    /// ("openai-completions" / "openai") — these fields exist only to keep the
-    /// legacy LlmApiType / LlmModelApiType plumbing happy. The actual chat path
-    /// short-circuits to HandAiChatClient via `build_chat_client` long before
-    /// those strings get read.
+    /// ("openai-completions" / "openai"). The actual chat path short-circuits
+    /// to HandAiChatClient via `build_chat_client` long before those strings
+    /// get read.
     fn augment_with_hand_ai_providers(&mut self) {
         #[cfg(feature = "hand-ai")]
         {
@@ -315,21 +312,6 @@ impl LlmConfig {
         }
 
         merged
-    }
-}
-
-impl LlmConfigProvider for LlmConfig {
-    fn get_provider_config(&self, provider_type: &str) -> Option<LlmProviderConfig> {
-        self.get_provider_config(provider_type).and_then(|config| {
-            let chat_api_type = LlmApiType::try_from(config.chat_api_type.as_str()).ok()?;
-            let model_api_type = LlmModelApiType::try_from(config.model_api_type.as_str()).ok()?;
-
-            Some(LlmProviderConfig {
-                provider_type: config.provider_type.clone(),
-                chat_api_type,
-                model_api_type,
-            })
-        })
     }
 }
 

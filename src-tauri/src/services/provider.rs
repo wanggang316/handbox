@@ -4,7 +4,6 @@ use crate::models::{AddProviderRequest, AppError};
 use crate::services::{Database, ModelService};
 use crate::storage::types::{Model, Provider, Timestamp, UUID};
 use crate::storage::{SessionRepository, ProviderRepository};
-use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -19,14 +18,7 @@ pub struct ProviderService {
 
 impl ProviderService {
     /// 创建新的供应商服务实例.
-    ///
-    /// `_llm_config` is retained in the signature so callers (lib.rs,
-    /// downstream tests) need not change; the parameter is unused after
-    /// M2-T5 because `ModelService::new` no longer takes a config provider
-    /// (the legacy on-demand model-list path that consumed it was retired
-    /// in M2-T4). The parameter — and `LlmConfigProvider` import — survives
-    /// until M3-T1, which deletes the handbox-llm crate wholesale.
-    pub fn new(db: Arc<Database>, _llm_config: Arc<dyn LlmConfigProvider>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
             chat_repo: SessionRepository::new(Arc::clone(&db)),
@@ -212,7 +204,6 @@ impl ProviderService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::llm_config::LlmConfig;
     use crate::models::AddProviderRequest;
     use crate::storage::Database;
     use tempfile::tempdir;
@@ -221,12 +212,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let database = Database::new(&db_path).await.unwrap();
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        (
-            ProviderService::new(Arc::new(database), llm_config_provider),
-            temp_dir,
-        )
+        (ProviderService::new(Arc::new(database)), temp_dir)
     }
 
     #[tokio::test]
