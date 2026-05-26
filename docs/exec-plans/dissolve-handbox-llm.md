@@ -33,13 +33,18 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-25T20:28Z  M1-T2  spec-reviewer      compliant
 2026-05-25T20:34Z  M1-T2  code-reviewer      approve          (2 suggestions deferred to M2-T2 same-file touches)
 2026-05-25T20:35Z  M1-T2  user-test-validator structural-pass UT-DISSOLVE-004 (pub-use preserves nominal identity & serde shape)
+2026-05-25T20:48Z  M1-T4  implementer        DONE             21e038b
+2026-05-25T20:52Z  M1-T4  spec-reviewer      compliant
+2026-05-25T20:55Z  M1-T4  code-reviewer      approve          (1 suggestion / 1 nit / 1 FYI — cosmetic)
+2026-05-25T20:56Z  M1-T4  user-test-validator vacuous-pass (static gate, no cases)
+2026-05-25T20:57Z  M1     exit-gate          PASS             cargo check clean both default + --no-default-features; storage::types 6/6 green; new serde-repr test green; pre-existing 9 unrelated failures unchanged
 
 ### Task checklist
 
 - [x] M1-T1: Create `src-tauri/src/models/llm_types.rs` with copied leaf types — commit `83d28a0`
 - [x] M1-T2: Switch ALL `handbox_llm::types::*` import sites — commit `b758f56` (via pub-use re-exports per Decision Log)
 - ~~M1-T3: Switch `src-tauri/src/storage/message_repository.rs` to local `MessageRole`~~ — absorbed into M1-T2 (see Decision Log).
-- [ ] M1-T4: Verify M1 with `cargo test` + DB JSON roundtrip
+- [x] M1-T4: Verify M1 with `cargo test` + DB JSON roundtrip — commit `21e038b` (test pins LlmMessageRole serde wire shape; M1 Exit Gate ✅)
 - [ ] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch
 - [ ] M2-T2: Rewire `services/message.rs` chat flows through `chat_engine`
 - [ ] M2-T3: Rewire `services/session.rs` model lookups through hand-ai
