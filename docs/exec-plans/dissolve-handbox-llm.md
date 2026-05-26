@@ -64,6 +64,11 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-26T06:05Z  M2-T3  spec-reviewer      compliant
 2026-05-26T06:15Z  M2-T3  code-reviewer      approve  (2 Suggestions: error-log granularity + silent unwrap_or_default — debuggability only)
 2026-05-26T06:16Z  M2-T3  user-test-validator structural-pass UT-DISSOLVE-004 (baseline 91/9 preserved)
+2026-05-26T07:00Z  M2-T4  implementer        DONE             fad2885  (+30/-131; chat_engine::list_catalog_models; provider_id rebind)
+2026-05-26T07:05Z  M2-T4  spec-reviewer      compliant
+2026-05-26T07:15Z  M2-T4  code-reviewer      approve-with-fixes (2 Important: empty-catalog log + provider.rs comments lie)
+2026-05-26T07:30Z  M2-T4.1 implementer       DONE             8b5215a  (warn log + 3 docstring fixes; 91/9 unchanged)
+2026-05-26T07:31Z  M2-T4  user-test-validator structural-pass UT-DISSOLVE-001 + UT-004 (catalog wired; baseline preserved)
 
 ### Task checklist
 
