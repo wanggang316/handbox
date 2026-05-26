@@ -18,8 +18,8 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 ## Progress
 
 **State:** Running
-**Active worker:** none (M1-T1 complete; M1-T2 about to dispatch)
-**Last handoff:** 2026-05-25T19:30Z — M1-T1 — completed
+**Active worker:** none (M1-T2 complete; M1-T4 about to dispatch)
+**Last handoff:** 2026-05-25T20:35Z — M1-T2 — completed
 
 ### Handoff log
 
@@ -27,11 +27,17 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-25T19:24Z  M1-T1  spec-reviewer      compliant
 2026-05-25T19:28Z  M1-T1  code-reviewer      approve
 2026-05-25T19:30Z  M1-T1  user-test-validator vacuous-pass (no cases bound)
+2026-05-25T20:08Z  M1-T2  implementer        BLOCKED          (nominal-type heavy-aggregate seams)
+2026-05-25T20:11Z  M1-T2  controller         replan           Decision Log: switch to pub-use re-export strategy + add M3-T0
+2026-05-25T20:25Z  M1-T2  implementer        DONE             b758f56
+2026-05-25T20:28Z  M1-T2  spec-reviewer      compliant
+2026-05-25T20:34Z  M1-T2  code-reviewer      approve          (2 suggestions deferred to M2-T2 same-file touches)
+2026-05-25T20:35Z  M1-T2  user-test-validator structural-pass UT-DISSOLVE-004 (pub-use preserves nominal identity & serde shape)
 
 ### Task checklist
 
 - [x] M1-T1: Create `src-tauri/src/models/llm_types.rs` with copied leaf types — commit `83d28a0`
-- [ ] M1-T2: Switch ALL `handbox_llm::types::*` import sites — storage/types/* + storage/message_repository + services/{message,model,session}.rs + models/model.rs. Single atomic commit; build stays clean.
+- [x] M1-T2: Switch ALL `handbox_llm::types::*` import sites — commit `b758f56` (via pub-use re-exports per Decision Log)
 - ~~M1-T3: Switch `src-tauri/src/storage/message_repository.rs` to local `MessageRole`~~ — absorbed into M1-T2 (see Decision Log).
 - [ ] M1-T4: Verify M1 with `cargo test` + DB JSON roundtrip
 - [ ] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch
