@@ -2,6 +2,7 @@
 pub mod agent;
 pub mod artifact;
 pub mod auth;
+pub mod chat_engine;
 pub mod mcp;
 pub mod message;
 pub mod model;

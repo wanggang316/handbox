@@ -67,6 +67,11 @@ image = "0.25"
 arboard = "3.4"
 handbox-llm = { path = "crates/handbox-llm" }
 handbox-mcp = { path = "crates/handbox-mcp" }
+# Direct dep on hand-ai's model crate for services/chat_engine.rs (M2-T1).
+# Pinned to the same tag as handbox-llm so cargo deduplicates into a single
+# copy. M3-T1 keeps this dep alive after deleting handbox-llm.
+hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "model-v0.2.0", package = "model" }
+tokio-util = "0.7"
 
 [features]
 default = ["hand-ai"]
