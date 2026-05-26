@@ -51,7 +51,11 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 - ~~M1-T3: Switch `src-tauri/src/storage/message_repository.rs` to local `MessageRole`~~ — absorbed into M1-T2 (see Decision Log).
 - [x] M1-T4: Verify M1 with `cargo test` + DB JSON roundtrip — commit `21e038b` (test pins LlmMessageRole serde wire shape; M1 Exit Gate ✅)
 - [x] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch — commit `f068875` + `a512c4f` (M2-T1.1 fix-pass)
-- [ ] M2-T2: Rewire `services/message.rs` chat flows through `chat_engine`
+- ~~M2-T2: Rewire `services/message.rs` chat flows through `chat_engine`~~ — split into M2-T2a/b/c/d per Decision Log (2026-05-26).
+- [ ] M2-T2a: Extend chat_engine API (ChatMessage / ChatToolCall / hydrated_attachments / terminal tool_calls)
+- [ ] M2-T2b: Rewire streaming path in services/message.rs
+- [ ] M2-T2c: Rewire non-stream path + delete dead helpers
+- [ ] M2-T2d: Cancellation source survey + wiring
 - [ ] M2-T3: Rewire `services/session.rs` model lookups through hand-ai
 - [ ] M2-T4: Rewire `services/model.rs` list_models through hand-ai catalog
 - [ ] M2-T5: Replace `LlmClientError` import in `models/error.rs` with `hand_ai_model::ClientError`
@@ -71,6 +75,15 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 **2026-05-25 — M1-T2 absorbs M1-T3 + service call sites (Rust nominal typing).** The original plan scoped M1-T2 to `storage/types/*` only, with `storage/message_repository.rs` deferred to M1-T3 and `services/*` deferred to M2. M1-T2's implementer dispatched and surfaced a hard contradiction: Rust types are nominal, not structural, so the moment `storage/types/message.rs::Message::role` is retyped from `handbox_llm::types::LlmMessageRole` to `crate::models::llm_types::LlmMessageRole`, every `services/*` consumer that reads `message.role` as the old type fails to compile (20 sites across 5 files). The plan as originally written would have committed a half-broken tree — that violates the skill's "atomic commit / clean tree" rule.
 
 First resolution attempt: collapse M1-T2 + M1-T3 + the affected service/model call sites into one big mechanical sweep under M1-T2.
+
+**2026-05-26 — M2-T2 split into 4 sub-tasks (session boundary resilience).** The original M2-T2 ("rewire services/message.rs through chat_engine") was a single ~500-line task that combined chat_engine API expansion (Phase A) with services/message.rs rewire (Phase B). On its first dispatch the implementer correctly BLOCKED on tool-call consumption in the non-stream path. On its second dispatch (revised v2 brief with terminal-tool-call aggregation + ChatMessage + hydrated_attachments), the implementer got mid-flight into Phase B when a session boundary hit, leaving the tree dirty with 18 compile errors and the next agent unable to recover the prior agent's context.
+
+Resolution: split into four atomic sub-tasks. Each commit lands a clean compile + tests, so a session boundary in the middle cannot leave the next agent guessing.
+
+- **M2-T2a** — chat_engine API expansion only (chat_engine.rs). ChatMessage / ChatToolCall / HydratedAttachment structs + ChatChunk.tool_calls + ChatOptions.hydrated_attachments + messages_to_context signature change + 10 existing tests retargeted to ChatMessage + 2 new tests. Build stays clean (no service callers exercise the new types yet).
+- **M2-T2b** — services/message.rs streaming path rewire. Replace call_llm_api_stream's create_llm_client+chat_stream with chat_engine::stream_chat. Leave non-stream path untouched.
+- **M2-T2c** — services/message.rs non-stream path rewire + delete helpers (convert_to_api_request / prepare_tools / llm_provider_from_provider) now that both paths are off the legacy adapter. Annotate the still-living MessageService.llm_config field with #[allow(dead_code)] — actual field removal is M2-T5 territory.
+- **M2-T2d** — cancellation source. Survey existing Stop-button cancel mechanism (if any); if found, wire to ChatOptions.signal; if not, materialize a stream_id → CancellationToken registry. UT-DISSOLVE-003 acceptance hangs off this.
 
 **2026-05-25 — M1-T1 strategy revised: verbatim copy → transitional re-exports.** The "collapsed sweep" attempt above ran into a deeper structural issue: heavy aggregate types (`LlmMessage`, `LlmRequest`, `LlmModel`, `LlmResponse`) hold leaf types as struct fields. Once we have two distinct nominal copies of each leaf type (one in handbox-llm, one in `crate::models::llm_types`), every heavy-aggregate construction or destructure site becomes a type error at the field boundary. M2 owns the aggregate migration; M1 cannot finish without it.
 
