@@ -69,6 +69,12 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-26T07:15Z  M2-T4  code-reviewer      approve-with-fixes (2 Important: empty-catalog log + provider.rs comments lie)
 2026-05-26T07:30Z  M2-T4.1 implementer       DONE             8b5215a  (warn log + 3 docstring fixes; 91/9 unchanged)
 2026-05-26T07:31Z  M2-T4  user-test-validator structural-pass UT-DISSOLVE-001 + UT-004 (catalog wired; baseline preserved)
+2026-05-26T08:00Z  M2-T5  implementer        DONE_W_CONCERNS  3f61a4b  (4 pre-accepted concerns; -83 LOC; LlmClientError From + 3 dead llm_config fields gone)
+2026-05-26T08:05Z  M2-T5  spec-reviewer      compliant
+2026-05-26T08:15Z  M2-T5  code-reviewer      approve  (2 Suggestions + 2 FYIs all in "collapse before M3-T1" territory)
+2026-05-26T08:30Z  M2-T5.1 implementer       DONE             30562f7  (-5 LOC; llm_types re-export expanded to 13 names; LlmMessage+LlmGeneratedImage retargeted; M2-T5 concerns #2/#3 closed)
+2026-05-26T08:31Z  M2-T5  user-test-validator structural-pass UT-DISSOLVE-004 (no behavior change; baseline 91/9 preserved)
+2026-05-26T08:32Z  M2     milestone-exit-gate PASS  M2 complete: chat_engine owns dispatch; services/{message,session,model} clean of handbox_llm function-body refs; cancellation registry wired; baseline 91/9 preserved
 
 ### Task checklist
 
