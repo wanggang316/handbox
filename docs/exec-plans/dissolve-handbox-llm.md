@@ -75,6 +75,8 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-26T08:30Z  M2-T5.1 implementer       DONE             30562f7  (-5 LOC; llm_types re-export expanded to 13 names; LlmMessage+LlmGeneratedImage retargeted; M2-T5 concerns #2/#3 closed)
 2026-05-26T08:31Z  M2-T5  user-test-validator structural-pass UT-DISSOLVE-004 (no behavior change; baseline 91/9 preserved)
 2026-05-26T08:32Z  M2     milestone-exit-gate PASS  M2 complete: chat_engine owns dispatch; services/{message,session,model} clean of handbox_llm function-body refs; cancellation registry wired; baseline 91/9 preserved
+2026-05-26T09:00Z  M3-T0  implementer        DONE             fd38b09  (+276/-15; 13 leaf types now verbatim; serde-repr regression test still green; baseline 91/9 preserved)
+2026-05-26T09:15Z  M3-T0  controller         replan           M3-T1 needs pre-steps: 5 handbox_llm refs remain in app code (hand_ai_catalog module + LlmConfigProvider + LlmApiType/LlmModelApiType). Split into M3-T1a (relocate hand_ai_catalog) + M3-T1b (inline enums + drop trait) + M3-T1 (delete crate)
 
 ### Task checklist
 
