@@ -56,6 +56,10 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-26T04:05Z  M2-T2c spec-reviewer      compliant
 2026-05-26T04:15Z  M2-T2c code-reviewer      approve  (3 Suggestions deferred: inspect_err style, ~95 LOC dup → M2-T5 helper task, top_p/top_k drop → exec-plan owner)
 2026-05-26T04:16Z  M2-T2c user-test-validator structural-pass UT-DISSOLVE-002 + UT-004 (no regression; full lib test 89/9/1 unchanged)
+2026-05-26T05:00Z  M2-T2d implementer        DONE             1b0004c  (Arc<TokioMutex<HashMap>> registry + RAII guard + cancel_stream + message_stop_stream IPC)
+2026-05-26T05:05Z  M2-T2d spec-reviewer      compliant
+2026-05-26T05:15Z  M2-T2d code-reviewer      approve-with-fixes (1 Important: pub fn without test; 2 Suggestions: Drop runtime probe + IPC input bound)
+2026-05-26T05:25Z  M2-T2d.1 implementer      DONE             2a6d741  (3 fixes; 91/9 unchanged; UT-DISSOLVE-003 structural assertion pinned)
 
 ### Task checklist
 
@@ -68,7 +72,7 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 - [x] M2-T2a: Extend chat_engine API — commits `ba887a8` + `77ab4ef` (M2-T2a.1 fix-pass)
 - [x] M2-T2b: Rewire streaming path in services/message.rs — commits `8441f0a` + `89e8450` (M2-T2b.1 fix-pass)
 - [x] M2-T2c: Rewire non-stream path + delete dead helpers — commit `5589965` (net -62 LOC; both dispatch paths now through chat_engine)
-- [ ] M2-T2d: Cancellation source survey + wiring
+- [x] M2-T2d: Cancellation source survey + wiring — commits `1b0004c` + `2a6d741` (M2-T2d.1 fix-pass)
 - [ ] M2-T3: Rewire `services/session.rs` model lookups through hand-ai
 - [ ] M2-T4: Rewire `services/model.rs` list_models through hand-ai catalog
 - [ ] M2-T5: Replace `LlmClientError` import in `models/error.rs` with `hand_ai_model::ClientError`
