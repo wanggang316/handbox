@@ -10,20 +10,25 @@ use crate::services::chat_engine::{
 use crate::services::{SessionService, Database, McpService, ProviderService, StorageService};
 use crate::storage::types::{
     Session, McpServer, McpServerStatus, Message, MessageAttachment, MessageConfig, MessageToolCall,
-    MessageToolExecutionMode, MessageToolExecutionStatus, Provider, UUID,
+    MessageToolExecutionMode, MessageToolExecutionStatus, UUID,
 };
 use crate::storage::MessageRepository;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::Utc;
+// Retained for backward-compat with MessageService::new callers (lib.rs and the
+// two test-setup sites in this file). The trait is no longer consumed by any
+// chat dispatch path after M2-T2c. Removed in M2-T5 once all handbox_llm types
+// leave services/ and MessageService::new's signature can safely change.
+#[allow(unused_imports)]
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::create_llm_client;
 use crate::models::llm_types::{
-    LlmMessageRole, LlmReasoningEffort, LlmReasoningEffortConfig, LlmToolFunction,
+    LlmMessageRole, LlmReasoningEffort, LlmToolFunction,
 };
-use handbox_llm::types::{
-    LlmGeneratedImage, LlmMessage, LlmProvider, LlmRequest, LlmRequestTool, LlmRequestToolFunction,
-    LlmResponse, LlmToolChoice,
-};
+// LlmMessage / LlmGeneratedImage stay imported because `build_message_request`,
+// `save_assistant_message`, and `persist_generated_assets` still reference them.
+// These are outside M2-T2c's scope (the dispatch rewire) and will be migrated
+// alongside the storage- and history-building paths in later M2/M3 work.
+use handbox_llm::types::{LlmGeneratedImage, LlmMessage};
 use std::{collections::HashMap, fs, sync::Arc};
 
 /// 流式回调 trait 定义
@@ -104,6 +109,12 @@ pub struct MessageService {
     chat_service: Arc<SessionService>,
     mcp_service: Arc<McpService>,
     storage_service: Arc<StorageService>,
+    /// Retained for backward-compat with `MessageService::new` callers
+    /// (lib.rs:317 and the two test-setup sites in this file). The field is
+    /// no longer consumed by any chat dispatch path after M2-T2c. Removed in
+    /// M2-T5 once all handbox_llm types leave services/ and
+    /// MessageService::new's signature can safely change.
+    #[allow(dead_code)]
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
@@ -1080,50 +1091,171 @@ impl MessageService {
             ));
         }
 
-        // 3. 创建 LLM 客户端
-        let llm_client = create_llm_client(
-            &provider.provider_type,
-            Arc::clone(&self.llm_config),
+        // 3. 构造 chat_engine ChatProvider（不再创建 handbox-llm 客户端）
+        let chat_provider = ChatProvider {
+            provider_type: provider.provider_type.clone(),
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
+        };
+
+        // 4. 翻译 MessageRequest → chat_engine 输入：ChatMessage 列表 + hydrated_attachments
+        //    使用合成 id `req-msg-{idx}` 作为 ChatOptions::hydrated_attachments 的 key，
+        //    并以同一 id 标记 ChatMessage::attachment_ids 的存在性。
+        let mut chat_messages: Vec<ChatMessage> = Vec::with_capacity(request.messages.len());
+        let mut hydrated_attachments: HashMap<String, Vec<HydratedAttachment>> = HashMap::new();
+        for (idx, msg) in request.messages.iter().enumerate() {
+            let msg_id = format!("req-msg-{}", idx);
+            let attachment_ids: Vec<String> = match msg.attachments.as_ref() {
+                Some(atts) if !atts.is_empty() => {
+                    let payload: Vec<HydratedAttachment> = atts
+                        .iter()
+                        .map(|a| HydratedAttachment {
+                            name: a.name.clone(),
+                            mime_type: a.mime_type.clone(),
+                            data: a.data.clone(),
+                        })
+                        .collect();
+                    let ids: Vec<String> = (0..payload.len())
+                        .map(|i| format!("{}-att-{}", msg_id, i))
+                        .collect();
+                    hydrated_attachments.insert(msg_id.clone(), payload);
+                    ids
+                }
+                _ => Vec::new(),
+            };
+            chat_messages.push(ChatMessage {
+                id: msg_id,
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+                reasoning: msg.reasoning.clone(),
+                tool_calls: msg.tool_calls.as_ref().map(|v| {
+                    v.iter()
+                        .map(|tc| ChatToolCall {
+                            id: tc.id.clone(),
+                            name: tc.function.name.clone(),
+                            arguments: tc.function.arguments.clone(),
+                        })
+                        .collect()
+                }),
+                tool_call_id: msg.tool_call_id.clone(),
+                attachment_ids,
+            });
+        }
+
+        // 5. 构造 ChatOptions：复用 prepare_chat_tools / reasoning_effort 抽取逻辑。
+        let chat_tools = self.prepare_chat_tools(&chat).await?;
+
+        // reasoning_effort: 优先 chat.reasoning.reasoning_effort.effort；
+        // 否则尝试 chat.reasoning.openrouter.effort（exclude=true 时跳过）。
+        // 通过 supports_reasoning 门控，未声明 reasoning/thinking 参数的模型不发送。
+        let supported_parameters = self.lookup_supported_parameters(&chat).await?;
+        let supports_reasoning = Self::parameters_include(&supported_parameters, "reasoning")
+            || Self::parameters_include(&supported_parameters, "thinking");
+        let reasoning_effort: Option<String> = if supports_reasoning {
+            chat.reasoning.as_ref().and_then(|cfg| {
+                let from_effort = cfg
+                    .reasoning_effort
+                    .as_ref()
+                    .and_then(|re| re.effort.as_ref())
+                    .map(|e| match e {
+                        LlmReasoningEffort::Minimal => "minimal".to_string(),
+                        LlmReasoningEffort::Low => "low".to_string(),
+                        LlmReasoningEffort::Medium => "medium".to_string(),
+                        LlmReasoningEffort::High => "high".to_string(),
+                    });
+                if from_effort.is_some() {
+                    return from_effort;
+                }
+                cfg.openrouter.as_ref().and_then(|or_cfg| {
+                    if or_cfg.exclude == Some(true) {
+                        return None;
+                    }
+                    or_cfg.effort.as_ref().and_then(|s| {
+                        match s.to_ascii_lowercase().as_str() {
+                            "minimal" | "low" | "medium" | "high" => Some(s.to_ascii_lowercase()),
+                            _ => None,
+                        }
+                    })
+                })
+            })
+        } else {
+            None
+        };
+
+        // signal: 当前 services/message.rs 没有 CancellationToken 来源；M2-T2d 落地。
+        let chat_options = ChatOptions {
+            temperature: Self::normalize_numeric(chat.temperature),
+            max_tokens: Self::normalize_numeric(chat.max_tokens)
+                .and_then(|n| u32::try_from(n).ok()),
+            tools: chat_tools,
+            reasoning_effort,
+            signal: None,
+            hydrated_attachments,
+        };
+
+        // 6. 调用 chat_engine 非流式 API
+        let start_time = std::time::Instant::now();
+        let chunk = chat_engine::complete_chat(
+            &chat_provider,
+            &request.model_id,
+            &chat_messages,
+            chat_options,
         )
-        .map_err(|e| {
-            let error: AppError = e.into();
+        .await
+        .map_err(|err| {
             tracing::error!(
-                "[MessageService::call_llm_api] Failed to create LLM client for provider type {}: {}",
-                provider.provider_type,
-                error.message
+                "[MessageService::call_llm_api] chat_engine::complete_chat returned error: {}",
+                err.message
             );
-            error
+            err
         })?;
 
-        // 4. 转换请求格式
-        let api_request = self.convert_to_api_request(request, &chat).await?;
+        let duration = start_time.elapsed().as_millis() as i64;
 
-        // 5. 调用 API
-        let start_time = std::time::Instant::now();
-        let provider_context = Self::llm_provider_from_provider(&provider);
-        let api_response = llm_client
-            .chat(&provider_context, api_request)
-            .await
-            .map_err(|e| {
-                let error: AppError = e.into();
-                tracing::error!(
-                    "[MessageService::call_llm_api] LLM API call failed for provider {}: {}",
-                    provider.provider_type,
-                    error.message
-                );
-                error
-            })?;
+        // 7. 由 ChatChunk 直接构建 MessageResponse（取代旧 convert_from_api_response）。
+        let tool_calls: Option<Vec<MessageToolCall>> = chunk.tool_calls.as_ref().map(|calls| {
+            calls
+                .iter()
+                .map(|tc| MessageToolCall {
+                    id: tc.id.clone(),
+                    tool_type: "function".to_string(),
+                    function: LlmToolFunction {
+                        name: tc.name.clone(),
+                        arguments: tc.arguments.clone(),
+                    },
+                    execution_mode: MessageToolExecutionMode::default(),
+                    execution_status: MessageToolExecutionStatus::default(),
+                    result: None,
+                })
+                .collect()
+        });
 
-        let duration = start_time.elapsed().as_millis() as f64;
-        let (llm_response, generated_images) =
-            self.convert_from_api_response(api_response, duration, request)?;
+        let response = MessageResponse {
+            chat_id: request.chat_id.clone().unwrap_or_default(),
+            message_id: uuid::Uuid::new_v4().to_string(), // 临时ID，调用方覆盖
+            content: chunk.content.unwrap_or_default(),
+            reasoning: chunk.reasoning,
+            tool_calls,
+            model_id: request.model_id.clone(),
+            provider_id: request.provider_id.clone(),
+            input_tokens: chunk.usage.as_ref().map(|u| u.prompt_tokens),
+            output_tokens: chunk.usage.as_ref().map(|u| u.completion_tokens),
+            total_tokens: chunk.usage.as_ref().map(|u| u.total_tokens),
+            duration: Some(duration),
+            generated_assets: None,
+        };
+
+        // TODO(post-M3): hand-ai 0.2.0's AssistantContentBlock has no Image variant.
+        // Image-generating models (DALL-E, gpt-image-1) stop returning generated
+        // images via this path. Re-enable when hand-ai surfaces them.
+        let generated_images: Vec<LlmGeneratedImage> = Vec::new();
 
         tracing::info!(
-            "[MessageService::call_llm_api] API call successful, duration: {}ms",
+            "[MessageService::call_llm_api] chat_engine call successful, duration: {}ms",
             duration
         );
 
-        Ok((llm_response, generated_images))
+        Ok((response, generated_images))
     }
 
     /// 流式调用 LLM API
@@ -1253,34 +1385,18 @@ impl MessageService {
             });
         }
 
-        // 5. 构造 ChatOptions：复用 prepare_tools / reasoning_effort 抽取逻辑。
-        //    convert_to_api_request 暂时保留供非流式路径使用（M2-T2c 处理）。
-        fn normalize_numeric<T>(value: Option<T>) -> Option<T>
-        where
-            T: PartialOrd + Default,
-        {
-            value.filter(|v| *v > T::default())
-        }
-
-        let chat_tools_raw = match self.prepare_tools(&chat).await {
+        // 5. 构造 ChatOptions：复用 prepare_chat_tools / reasoning_effort 抽取逻辑。
+        let chat_tools: Vec<ChatTool> = match self.prepare_chat_tools(&chat).await {
             Ok(tools) => tools,
             Err(e) => {
                 error_callback(stream_id.clone(), e);
                 return;
             }
         };
-        let chat_tools: Vec<ChatTool> = chat_tools_raw
-            .into_iter()
-            .map(|t| ChatTool {
-                name: t.function.name,
-                description: t.function.description,
-                parameters: t.function.parameters,
-            })
-            .collect();
 
         // reasoning_effort: 优先 chat.reasoning.reasoning_effort.effort；
         // 否则尝试 chat.reasoning.openrouter.effort（exclude=true 时跳过）。
-        // 镜像 convert_to_api_request 中的分支逻辑（含 supports_reasoning 门控）。
+        // 通过 supports_reasoning 门控，未声明 reasoning/thinking 参数的模型不发送。
         let supported_parameters = match self.lookup_supported_parameters(&chat).await {
             Ok(params) => params,
             Err(e) => {
@@ -1324,8 +1440,9 @@ impl MessageService {
         // signal: 当前 services/message.rs 没有 CancellationToken 来源。
         // UT-DISSOLVE-003 的端到端验收依赖 M2-T2d 落地取消机制；本任务仅完成信号管脚。
         let chat_options = ChatOptions {
-            temperature: normalize_numeric(chat.temperature),
-            max_tokens: normalize_numeric(chat.max_tokens).and_then(|n| u32::try_from(n).ok()),
+            temperature: Self::normalize_numeric(chat.temperature),
+            max_tokens: Self::normalize_numeric(chat.max_tokens)
+                .and_then(|n| u32::try_from(n).ok()),
             tools: chat_tools,
             reasoning_effort,
             signal: None,
@@ -1552,144 +1669,12 @@ impl MessageService {
         end_callback(stream_id, response);
     }
 
-    /// 转换为 API 请求格式
-    async fn convert_to_api_request(
-        &self,
-        request: &MessageRequest,
-        chat: &Session,
-    ) -> Result<LlmRequest, AppError> {
-        /// 过滤掉无效的数值参数（0 或负数）
-        fn normalize_numeric<T>(value: Option<T>) -> Option<T>
-        where
-            T: PartialOrd + Default,
-        {
-            value.filter(|v| *v > T::default())
-        }
-
-        let messages: Vec<LlmMessage> = request
-            .messages
-            .iter()
-            .map(|msg| {
-                // tracing::info!(
-                //     "[convert_to_api_request] Message: role={:?}, has_attachments={}, content_preview={}",
-                //     msg.role,
-                //     msg.attachments.as_ref().map(|a| a.len()).unwrap_or(0),
-                //     if msg.content.len() > 100 { &msg.content[..100] } else { &msg.content }
-                // );
-                LlmMessage {
-                    role: msg.role.clone(),
-                    content: msg.content.clone(),
-                    reasoning: msg.reasoning.clone(),
-                    tool_calls: msg.tool_calls.clone(),
-                    tool_call_id: msg.tool_call_id.clone(),
-                    attachments: msg.attachments.clone(),
-                }
-            })
-            .collect();
-
-        tracing::info!(
-            "[convert_to_api_request] Total messages to send: {}",
-            messages.len()
-        );
-
-        let tools = self.prepare_tools(&chat).await?;
-        let reasoning_config = chat.reasoning.clone();
-        let supported_parameters = self.lookup_supported_parameters(chat).await?;
-        let supports_reasoning = Self::parameters_include(&supported_parameters, "reasoning")
-            || Self::parameters_include(&supported_parameters, "thinking");
-
-        tracing::info!(
-            "[MessageService::convert_to_api_request] reasoning_config: {:?}, supports_reasoning: {}",
-            reasoning_config,
-            supports_reasoning
-        );
-
-        Ok(LlmRequest {
-            model: request.model_id.clone(),
-            messages,
-            temperature: normalize_numeric(chat.temperature),
-            top_p: normalize_numeric(chat.top_p),
-            top_k: chat.top_k,
-            max_tokens: normalize_numeric(chat.max_tokens),
-            stream: chat.stream.or(Some(true)), // 默认为 true
-            tools: if tools.is_empty() {
-                None
-            } else {
-                Some(tools.clone())
-            },
-            tool_choice: if tools.is_empty() {
-                None
-            } else {
-                Some(LlmToolChoice::Auto)
-            },
-            parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
-            reasoning: {
-                let reasoning = reasoning_config
-                    .as_ref()
-                    .and_then(|cfg| cfg.responses.clone())
-                    .filter(|_| supports_reasoning);
-                tracing::info!(
-                    "[MessageService::convert_to_api_request] Final reasoning param: {:?}",
-                    reasoning
-                );
-                reasoning
-            },
-            reasoning_effort: {
-                // 优先使用 reasoning_effort，如果不存在则尝试从 openrouter 转换
-                let effort_config = reasoning_config
-                    .as_ref()
-                    .and_then(|cfg| {
-                        cfg.reasoning_effort.clone().or_else(|| {
-                            // 如果有 openrouter 配置，转换为 reasoning_effort
-                            cfg.openrouter.as_ref().and_then(|or_cfg| {
-                                // 如果 exclude 为 true，不发送推理参数
-                                if or_cfg.exclude == Some(true) {
-                                    return None;
-                                }
-
-                                // 将 String 转换为 LlmReasoningEffort 枚举
-                                let effort = or_cfg.effort.as_ref().and_then(|s| {
-                                    match s.to_lowercase().as_str() {
-                                        "minimal" => Some(LlmReasoningEffort::Minimal),
-                                        "low" => Some(LlmReasoningEffort::Low),
-                                        "medium" => Some(LlmReasoningEffort::Medium),
-                                        "high" => Some(LlmReasoningEffort::High),
-                                        _ => None,
-                                    }
-                                });
-
-                                // 构建 reasoning_effort 配置
-                                if effort.is_some() || or_cfg.exclude.is_some() {
-                                    Some(LlmReasoningEffortConfig {
-                                        effort,
-                                        include_reasoning: match or_cfg.exclude {
-                                            Some(false) => Some(true),
-                                            Some(true) => Some(false),
-                                            None => None,
-                                        },
-                                    })
-                                } else {
-                                    None
-                                }
-                            })
-                        })
-                    })
-                    .filter(|_| supports_reasoning);
-
-                tracing::info!(
-                    "[MessageService::convert_to_api_request] Final reasoning_effort param: {:?}",
-                    effort_config
-                );
-                effort_config
-            },
-            thinking: reasoning_config
-                .as_ref()
-                .and_then(|cfg| cfg.thinking.clone())
-                .filter(|_| supports_reasoning),
-        })
-    }
-
-    async fn prepare_tools(&self, chat: &Session) -> Result<Vec<LlmRequestTool>, AppError> {
+    /// 收集激活的 MCP 工具并翻译为 `ChatTool`（chat_engine 输入类型）。
+    ///
+    /// 同一个 helper 供流式与非流式两条 dispatch 路径共用——M2-T2c 之前流式
+    /// 路径会再做一次 `LlmRequestTool` → `ChatTool` 的中转，现在直接生成
+    /// `Vec<ChatTool>` 减少一次翻译。
+    async fn prepare_chat_tools(&self, chat: &Session) -> Result<Vec<ChatTool>, AppError> {
         if chat.mcp_servers.is_empty() {
             return Ok(Vec::new());
         }
@@ -1712,7 +1697,7 @@ impl MessageService {
             return Ok(Vec::new());
         }
 
-        let mut tools = Vec::new();
+        let mut tools: Vec<ChatTool> = Vec::new();
 
         for server in active_servers {
             // Find the server config to get enabled tools
@@ -1752,18 +1737,26 @@ impl MessageService {
                         format!("MCP 服务器 {} 的工具 {}", display_name, tool.name)
                     });
 
-                tools.push(LlmRequestTool {
-                    tool_type: "function".to_string(),
-                    function: LlmRequestToolFunction {
-                        name: tool.name.clone(),
-                        description,
-                        parameters: tool.input_schema.clone(),
-                    },
+                tools.push(ChatTool {
+                    name: tool.name.clone(),
+                    description,
+                    parameters: tool.input_schema.clone(),
                 });
             }
         }
 
         Ok(tools)
+    }
+
+    /// 过滤掉无效的数值参数（0 或负数）。
+    ///
+    /// 两条 dispatch 路径都会用它构造 `ChatOptions::{temperature, max_tokens}`，
+    /// 因此放在 impl 层以单一定义服务两端（M2-T2c 之前两端各有一份本地定义）。
+    fn normalize_numeric<T>(value: Option<T>) -> Option<T>
+    where
+        T: PartialOrd + Default,
+    {
+        value.filter(|v| *v > T::default())
     }
 
     async fn lookup_supported_parameters(
@@ -2202,54 +2195,6 @@ impl MessageService {
         })
     }
 
-    /// 从 API 响应格式转换
-    fn convert_from_api_response(
-        &self,
-        api_response: LlmResponse,
-        duration: f64,
-        request: &MessageRequest,
-    ) -> Result<(MessageResponse, Vec<LlmGeneratedImage>), AppError> {
-        let choice = api_response
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| AppError::internal_error("No choices in API response"))?;
-
-        let message = choice
-            .delta
-            .ok_or_else(|| AppError::internal_error("No message in API choice"))?;
-
-        let generated_images = choice.generated_images.unwrap_or_default();
-        tracing::info!(
-            "[MessageService::convert_from_api_response] Response includes {} generated images",
-            generated_images.len()
-        );
-
-        Ok((
-            MessageResponse {
-                chat_id: request.chat_id.clone().unwrap_or_default(),
-                message_id: uuid::Uuid::new_v4().to_string(), // 临时ID，实际使用时会被覆盖
-                content: message.content,
-                reasoning: message.reasoning,
-                // 临时转换为 MessageToolCall（默认状态）
-                tool_calls: message.tool_calls.map(|calls| {
-                    calls
-                        .into_iter()
-                        .map(|tc| MessageToolCall::from(tc))
-                        .collect()
-                }),
-                model_id: request.model_id.clone(),
-                provider_id: request.provider_id.clone(),
-                input_tokens: api_response.usage.as_ref().map(|u| u.prompt_tokens),
-                output_tokens: api_response.usage.as_ref().map(|u| u.completion_tokens),
-                total_tokens: api_response.usage.as_ref().map(|u| u.total_tokens),
-                duration: Some(duration as i64),
-                generated_assets: None,
-            },
-            generated_images,
-        ))
-    }
-
     /// 获取消息
     pub async fn get_messages(
         &self,
@@ -2543,13 +2488,6 @@ impl MessageService {
             mcp_servers,
             turn_count: chat.turn_count,
             reasoning: chat.reasoning.clone(),
-        }
-    }
-
-    fn llm_provider_from_provider(provider: &Provider) -> LlmProvider {
-        LlmProvider {
-            base_url: provider.base_url.clone(),
-            api_key: provider.api_key.clone(),
         }
     }
 
