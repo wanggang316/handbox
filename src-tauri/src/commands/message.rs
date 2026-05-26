@@ -451,6 +451,13 @@ pub async fn message_stop_stream(
         "[message_stop_stream] IPC command called for stream_id: {}",
         stream_id
     );
+    // Stream IDs are UUID-like; cap at 64 chars to leave headroom. Empty /
+    // oversized inputs are treated as unknown-stream (silent Ok) to match
+    // the documented contract and prevent renderer-side bugs (or a
+    // compromised renderer) from passing arbitrary-size strings.
+    if stream_id.is_empty() || stream_id.len() > 64 {
+        return Ok(());
+    }
     message_service.cancel_stream(&stream_id).await;
     Ok(())
 }

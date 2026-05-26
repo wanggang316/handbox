@@ -143,6 +143,13 @@ struct StreamCancellationGuard {
 
 impl Drop for StreamCancellationGuard {
     fn drop(&mut self) {
+        // No active Tokio runtime — best-effort cleanup degrades to a leak
+        // rather than a secondary panic. Production paths always run under
+        // Tauri's Tokio runtime; this branch only triggers in test/teardown
+        // edge cases (e.g. a sync setup helper dropping the service).
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
         let cancellations = self.cancellations.clone();
         let stream_id = std::mem::take(&mut self.stream_id);
         tokio::spawn(async move {
@@ -197,6 +204,18 @@ impl MessageService {
                 stream_id
             );
         }
+    }
+
+    /// Test-only: insert a `CancellationToken` into the per-stream registry
+    /// so unit tests can exercise `cancel_stream` without spinning up an
+    /// actual streaming chat. Exposed via `pub(crate)` under `#[cfg(test)]`
+    /// to avoid widening production visibility of `stream_cancellations`.
+    #[cfg(test)]
+    pub(crate) async fn register_test_token(&self, stream_id: String, token: CancellationToken) {
+        self.stream_cancellations
+            .lock()
+            .await
+            .insert(stream_id, token);
     }
 
     /// 发送消息
@@ -2896,5 +2915,36 @@ mod tests {
         assert!(json.contains("\"temperature\""));
         assert!(json.contains("\"topP\""));
         assert!(json.contains("\"maxTokens\""));
+    }
+
+    /// Verifies the cancellation pin actually fires when a registered token
+    /// is looked up by `stream_id`. This is the structural assertion behind
+    /// UT-DISSOLVE-003: `MessageService::cancel_stream` must propagate to
+    /// the very same `CancellationToken` instance that `call_llm_api_stream`
+    /// installed on `ChatOptions.signal`.
+    #[tokio::test]
+    async fn cancel_stream_cancels_registered_token() {
+        let (_chat_service, message_service, _chat_id) = setup_services().await;
+        let token = CancellationToken::new();
+        message_service
+            .register_test_token("sid-1".to_string(), token.clone())
+            .await;
+
+        message_service.cancel_stream("sid-1").await;
+
+        assert!(
+            token.is_cancelled(),
+            "cancel_stream must fire .cancel() on the registered token"
+        );
+    }
+
+    /// Unknown / already-finished `stream_id`s must not panic — the documented
+    /// contract is silent Ok, since racing a natural Done event against a Stop
+    /// click is normal and the user-visible behavior is the same either way.
+    #[tokio::test]
+    async fn cancel_stream_unknown_id_is_silent_ok() {
+        let (_chat_service, message_service, _chat_id) = setup_services().await;
+        // Must not panic; no assertion needed beyond returning normally.
+        message_service.cancel_stream("does-not-exist").await;
     }
 }
