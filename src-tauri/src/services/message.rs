@@ -4,6 +4,9 @@ use crate::models::{
     AppError, MessageRequest, MessageRequestAttachment, MessageResponse, StreamChunk,
     UserMessageSendRequest,
 };
+use crate::services::chat_engine::{
+    self, ChatMessage, ChatOptions, ChatProvider, ChatTool, ChatToolCall, HydratedAttachment,
+};
 use crate::services::{SessionService, Database, McpService, ProviderService, StorageService};
 use crate::storage::types::{
     Session, McpServer, McpServerStatus, Message, MessageAttachment, MessageConfig, MessageToolCall,
@@ -1199,17 +1202,146 @@ impl MessageService {
             api_key_preview
         );
 
-        // 3. 创建 LLM 客户端
-        let llm_client = match create_llm_client(
-            &provider.provider_type,
-            Arc::clone(&self.llm_config),
-        ) {
-            Ok(client) => client,
+        // 3. 构造 chat_engine ChatProvider（不再创建 handbox-llm 客户端）
+        let chat_provider = ChatProvider {
+            provider_type: provider.provider_type.clone(),
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
+        };
+
+        // 4. 翻译 MessageRequest → chat_engine 输入：ChatMessage 列表 + hydrated_attachments
+        //    使用合成 id `req-msg-{idx}` 作为 ChatOptions::hydrated_attachments 的 key，
+        //    并以同一 id 标记 ChatMessage::attachment_ids 的存在性。
+        let mut chat_messages: Vec<ChatMessage> = Vec::with_capacity(request.messages.len());
+        let mut hydrated_attachments: HashMap<String, Vec<HydratedAttachment>> = HashMap::new();
+        for (idx, msg) in request.messages.iter().enumerate() {
+            let msg_id = format!("req-msg-{}", idx);
+            let attachment_ids: Vec<String> = match msg.attachments.as_ref() {
+                Some(atts) if !atts.is_empty() => {
+                    let payload: Vec<HydratedAttachment> = atts
+                        .iter()
+                        .map(|a| HydratedAttachment {
+                            name: a.name.clone(),
+                            mime_type: a.mime_type.clone(),
+                            data: a.data.clone(),
+                        })
+                        .collect();
+                    let ids: Vec<String> = (0..payload.len())
+                        .map(|i| format!("{}-att-{}", msg_id, i))
+                        .collect();
+                    hydrated_attachments.insert(msg_id.clone(), payload);
+                    ids
+                }
+                _ => Vec::new(),
+            };
+            chat_messages.push(ChatMessage {
+                id: msg_id,
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+                reasoning: msg.reasoning.clone(),
+                tool_calls: msg.tool_calls.as_ref().map(|v| {
+                    v.iter()
+                        .map(|tc| ChatToolCall {
+                            id: tc.id.clone(),
+                            name: tc.function.name.clone(),
+                            arguments: tc.function.arguments.clone(),
+                        })
+                        .collect()
+                }),
+                tool_call_id: msg.tool_call_id.clone(),
+                attachment_ids,
+            });
+        }
+
+        // 5. 构造 ChatOptions：复用 prepare_tools / reasoning_effort 抽取逻辑。
+        //    convert_to_api_request 暂时保留供非流式路径使用（M2-T2c 处理）。
+        fn normalize_numeric<T>(value: Option<T>) -> Option<T>
+        where
+            T: PartialOrd + Default,
+        {
+            value.filter(|v| *v > T::default())
+        }
+
+        let chat_tools_raw = match self.prepare_tools(&chat).await {
+            Ok(tools) => tools,
             Err(e) => {
-                let err: AppError = e.into();
+                error_callback(stream_id.clone(), e);
+                return;
+            }
+        };
+        let chat_tools: Vec<ChatTool> = chat_tools_raw
+            .into_iter()
+            .map(|t| ChatTool {
+                name: t.function.name,
+                description: t.function.description,
+                parameters: t.function.parameters,
+            })
+            .collect();
+
+        // reasoning_effort: 优先 chat.reasoning.reasoning_effort.effort；
+        // 否则尝试 chat.reasoning.openrouter.effort（exclude=true 时跳过）。
+        // 镜像 convert_to_api_request 中的分支逻辑，仅抽取字符串形式。
+        let reasoning_effort: Option<String> = chat.reasoning.as_ref().and_then(|cfg| {
+            let from_effort = cfg
+                .reasoning_effort
+                .as_ref()
+                .and_then(|re| re.effort.as_ref())
+                .map(|e| match e {
+                    LlmReasoningEffort::Minimal => "minimal".to_string(),
+                    LlmReasoningEffort::Low => "low".to_string(),
+                    LlmReasoningEffort::Medium => "medium".to_string(),
+                    LlmReasoningEffort::High => "high".to_string(),
+                });
+            if from_effort.is_some() {
+                return from_effort;
+            }
+            cfg.openrouter.as_ref().and_then(|or_cfg| {
+                if or_cfg.exclude == Some(true) {
+                    return None;
+                }
+                or_cfg.effort.as_ref().and_then(|s| {
+                    match s.to_ascii_lowercase().as_str() {
+                        "minimal" | "low" | "medium" | "high" => Some(s.to_ascii_lowercase()),
+                        _ => None,
+                    }
+                })
+            })
+        });
+
+        // signal: 当前 services/message.rs 没有 CancellationToken 来源。
+        // UT-DISSOLVE-003 的端到端验收依赖 M2-T2d 落地取消机制；本任务仅完成信号管脚。
+        let chat_options = ChatOptions {
+            temperature: normalize_numeric(chat.temperature),
+            max_tokens: normalize_numeric(chat.max_tokens).and_then(|n| u32::try_from(n).ok()),
+            tools: chat_tools,
+            reasoning_effort,
+            signal: None,
+            hydrated_attachments,
+        };
+
+        // 6. 调用开始回调
+        start_callback(stream_id.clone(), message_id.clone());
+
+        // 7. 调用 chat_engine 流式 API
+        let start_time = std::time::Instant::now();
+
+        tracing::info!(
+            "[MessageService::call_llm_api_stream] Calling chat_engine::stream_chat (provider={}, model={})",
+            provider.provider_type,
+            request.model_id
+        );
+        let mut stream = match chat_engine::stream_chat(
+            &chat_provider,
+            &request.model_id,
+            &chat_messages,
+            chat_options,
+        )
+        .await
+        {
+            Ok(s) => s,
+            Err(err) => {
                 tracing::error!(
-                    "[MessageService::call_llm_api_stream] Failed to create LLM client for provider type {}: {}",
-                    provider.provider_type,
+                    "[MessageService::call_llm_api_stream] chat_engine::stream_chat returned error: {}",
                     err.message
                 );
                 error_callback(stream_id.clone(), err);
@@ -1217,177 +1349,101 @@ impl MessageService {
             }
         };
 
-        // 4. 转换请求格式
-        let mut api_request = match self.convert_to_api_request(request, &chat).await {
-            Ok(req) => req,
-            Err(e) => {
-                error_callback(stream_id.clone(), e);
-                return;
-            }
-        };
-        api_request.stream = Some(true); // 强制启用流式
-
-        // 5. 调用开始回调
-        start_callback(stream_id.clone(), message_id.clone());
-
-        // 6. 调用 LLM 流式 API
-        let start_time = std::time::Instant::now();
-
-        tracing::info!("[MessageService::call_llm_api_stream] Calling real LLM streaming API...");
-        let provider_context = Self::llm_provider_from_provider(&provider);
-        let mut stream = match llm_client.chat_stream(&provider_context, api_request).await {
-            Ok(s) => s,
-            Err(e) => {
-                let err: AppError = e.into();
-                error_callback(stream_id.clone(), err);
-                return;
-            }
-        };
-
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
-        let mut accumulated_generated_images: Vec<LlmGeneratedImage> = Vec::new();
-        let mut all_tool_calls: Vec<crate::models::llm_types::LlmToolCall> = Vec::new();
+        // TODO(post-M3): hand-ai 0.2.0's AssistantContentBlock has no Image variant.
+        // Image-generating models (DALL-E, gpt-image-1) stop returning generated
+        // images via this path. Re-enable when hand-ai surfaces them.
+        let accumulated_generated_images: Vec<LlmGeneratedImage> = Vec::new();
+        let mut terminal_tool_calls: Vec<crate::models::llm_types::LlmToolCall> = Vec::new();
         let mut chunk_count = 0;
 
-        // 7. 处理真实的流式响应
+        // 8. 处理 chat_engine 流式响应
         use futures::StreamExt;
         while let Some(result) = stream.next().await {
             match result {
-                Ok(chunk_response) => {
-                    // 提取流式内容
-                    if let Some(choice) = chunk_response.choices.first() {
-                        if let Some(delta) = &choice.delta {
-                            // 处理内容
-                            if let Some(chunk) = &delta.content {
-                                accumulated_content.push_str(chunk);
-                            }
-
-                            // 处理推理过程
-                            if let Some(reasoning_chunk) = &delta.reasoning {
-                                accumulated_reasoning.push_str(reasoning_chunk);
-                                tracing::info!(
-                                    "[MessageService::call_llm_api_stream] Received reasoning chunk: '{}', total accumulated: {} chars",
-                                    reasoning_chunk,
-                                    accumulated_reasoning.len()
-                                );
-                            }
+                Ok(chunk) => {
+                    if let Some(text) = chunk.content.as_deref() {
+                        if !text.is_empty() {
+                            accumulated_content.push_str(text);
                         }
+                    }
 
-                        // 处理生成的图片（在 choice 级别，不在 delta 中）
-                        if let Some(generated_images) = &choice.generated_images {
+                    if let Some(reasoning_chunk) = chunk.reasoning.as_deref() {
+                        if !reasoning_chunk.is_empty() {
+                            accumulated_reasoning.push_str(reasoning_chunk);
                             tracing::info!(
-                                "[MessageService::call_llm_api_stream] Found {} generated images in chunk",
-                                generated_images.len()
-                            );
-                            for img in generated_images {
-                                tracing::info!(
-                                    "[MessageService::call_llm_api_stream] Adding image: mime_type={}, data_len={}",
-                                    img.mime_type,
-                                    img.data.len()
-                                );
-                                accumulated_generated_images.push(img.clone());
-                            }
-                            tracing::info!(
-                                "[MessageService::call_llm_api_stream] Total accumulated images: {}",
-                                accumulated_generated_images.len()
+                                "[MessageService::call_llm_api_stream] Received reasoning chunk: '{}', total accumulated: {} chars",
+                                reasoning_chunk,
+                                accumulated_reasoning.len()
                             );
                         }
+                    }
 
-                        if let Some(delta) = &choice.delta {
-                            // 积累工具调用信息
-                            if let Some(tool_calls) = &delta.tool_calls {
-                                for tool_call_delta in tool_calls {
-                                    let index = tool_call_delta.index as usize;
-
-                                    // 确保有足够的空间
-                                    while all_tool_calls.len() <= index {
-                                        all_tool_calls.push(crate::models::llm_types::LlmToolCall {
-                                            id: String::new(),
-                                            tool_type: String::new(),
-                                            function: LlmToolFunction {
-                                                name: String::new(),
-                                                arguments: String::new(),
-                                            },
-                                        });
-                                    }
-
-                                    let tool_call = &mut all_tool_calls[index];
-
-                                    // 更新工具调用信息
-                                    if let Some(id) = &tool_call_delta.id {
-                                        tool_call.id = id.clone();
-                                    }
-                                    if let Some(tool_type) = &tool_call_delta.tool_type {
-                                        tool_call.tool_type = tool_type.clone();
-                                    }
-                                    if let Some(function) = &tool_call_delta.function {
-                                        if let Some(name) = &function.name {
-                                            tool_call.function.name = name.clone();
-                                        }
-                                        if let Some(arguments) = &function.arguments {
-                                            tool_call.function.arguments.push_str(arguments);
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 将 LLM tool calls 转换为 Message tool calls 用于回调
-                            // 过滤掉空的工具调用（id 和 name 都为空的）
-                            let valid_tool_calls: Vec<_> = all_tool_calls
-                                .iter()
-                                .filter(|tc| !tc.id.is_empty() && !tc.function.name.is_empty())
-                                .cloned()
-                                .collect();
-
-                            let message_tool_calls = if valid_tool_calls.is_empty() {
-                                None
-                            } else {
-                                Some(
-                                    valid_tool_calls
-                                        .iter()
-                                        .map(|tc| MessageToolCall::from(tc.clone()))
-                                        .collect(),
-                                )
-                            };
-
-                            streaming_callback(StreamChunk {
-                                stream_id: stream_id.clone(),
-                                content: accumulated_content.clone(),
-                                reasoning: delta.reasoning.clone(),
-                                tool_calls: message_tool_calls,
-                                is_generating_assets: if accumulated_generated_images.is_empty() {
-                                    None
-                                } else {
-                                    Some(true)
+                    // tool_calls 只在终止 chunk 上出现（chat_engine 保证）。
+                    if let Some(tcs) = chunk.tool_calls.as_ref() {
+                        terminal_tool_calls = tcs
+                            .iter()
+                            .map(|tc| crate::models::llm_types::LlmToolCall {
+                                id: tc.id.clone(),
+                                tool_type: "function".to_string(),
+                                function: LlmToolFunction {
+                                    name: tc.name.clone(),
+                                    arguments: tc.arguments.clone(),
                                 },
-                            });
-                            chunk_count += 1;
+                            })
+                            .collect();
+                    }
 
-                            tracing::debug!(
-                                "[MessageService::call_llm_api_stream] Real streaming chunk {}: content='{}', reasoning='{}'",
-                                chunk_count,
-                                delta.content.as_deref().unwrap_or(""),
-                                delta.reasoning.as_deref().unwrap_or("")
-                            );
+                    // 推送增量给前端（与原行为一致：每个 chunk 触发一次回调）。
+                    let message_tool_calls = if terminal_tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            terminal_tool_calls
+                                .iter()
+                                .map(|tc| MessageToolCall::from(tc.clone()))
+                                .collect(),
+                        )
+                    };
 
-                            // 添加小延迟以控制流速
-                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                        }
+                    streaming_callback(StreamChunk {
+                        stream_id: stream_id.clone(),
+                        content: accumulated_content.clone(),
+                        reasoning: chunk.reasoning.clone(),
+                        tool_calls: message_tool_calls,
+                        is_generating_assets: if accumulated_generated_images.is_empty() {
+                            None
+                        } else {
+                            Some(true)
+                        },
+                    });
+                    chunk_count += 1;
 
-                        // 检查是否完成
-                        if choice.finish_reason.is_some() {
-                            tracing::info!(
-                                "[MessageService::call_llm_api_stream] Stream finished with reason: {:?}",
-                                choice.finish_reason
-                            );
-                            break;
-                        }
+                    tracing::debug!(
+                        "[MessageService::call_llm_api_stream] chat_engine chunk {}: content='{}', reasoning='{}'",
+                        chunk_count,
+                        chunk.content.as_deref().unwrap_or(""),
+                        chunk.reasoning.as_deref().unwrap_or("")
+                    );
+
+                    // 添加小延迟以控制流速（保持与原行为一致，避免前端 UI 抖动）。
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+                    if let Some(reason) = chunk.finish_reason.as_deref() {
+                        tracing::info!(
+                            "[MessageService::call_llm_api_stream] Stream finished with reason: {}",
+                            reason
+                        );
+                        break;
                     }
                 }
                 Err(e) => {
-                    tracing::error!("[MessageService::call_llm_api_stream] Stream error: {}", e);
-                    error_callback(stream_id.clone(), e.into());
+                    tracing::error!(
+                        "[MessageService::call_llm_api_stream] Stream error: {}",
+                        e.message
+                    );
+                    error_callback(stream_id.clone(), e);
                     return;
                 }
             }
@@ -1422,10 +1478,10 @@ impl MessageService {
             chunk_count, accumulated_content.len(), duration
         );
 
-        // 7. 构造消息配置并处理工具调用的执行模式
+        // 9. 构造消息配置并处理工具调用的执行模式
         let config = Self::message_config_from_chat(&chat);
         // 过滤掉空的工具调用（id 和 name 都为空的）
-        let valid_tool_calls: Vec<_> = all_tool_calls
+        let valid_tool_calls: Vec<_> = terminal_tool_calls
             .into_iter()
             .filter(|tc| !tc.id.is_empty() && !tc.function.name.is_empty())
             .collect();
