@@ -7,7 +7,6 @@ pub mod clipboard;
 pub mod debug;
 pub mod selection;
 pub mod favorite;
-#[cfg(feature = "hand-ai")]
 pub mod hand_ai;
 pub mod image;
 pub mod llm_config;
@@ -32,7 +31,6 @@ pub use clipboard::*;
 pub use debug::*;
 pub use selection::*;
 pub use favorite::*;
-#[cfg(feature = "hand-ai")]
 pub use hand_ai::*;
 pub use image::*;
 pub use llm_config::*;

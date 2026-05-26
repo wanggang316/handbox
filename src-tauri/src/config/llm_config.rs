@@ -201,42 +201,39 @@ impl LlmConfig {
     /// to HandAiChatClient via `build_chat_client` long before those strings
     /// get read.
     fn augment_with_hand_ai_providers(&mut self) {
-        #[cfg(feature = "hand-ai")]
-        {
-            let existing: std::collections::HashSet<String> = self
-                .providers
-                .iter()
-                .chain(self.custom_providers.iter())
-                .map(|p| p.provider_type.clone())
-                .collect();
-            let mut appended = 0usize;
-            for hp in crate::services::hand_ai_catalog::list_providers() {
-                if existing.contains(&hp.id) {
-                    continue;
-                }
-                let display_name = humanize_id(&hp.id);
-                self.providers.push(ProviderConfig {
-                    provider_type: hp.id.clone(),
-                    type_name: display_name.clone(),
-                    default_name: display_name,
-                    default_base_url: hp.default_base_url.clone(),
-                    // Generic placeholder — `static/logo-150.png` exists; per-
-                    // provider art lands when a designer touches each one.
-                    // Tracked as a deferred decision in the overnight summary.
-                    icon: "/logo-150.png".to_string(),
-                    chat_api_type: "openai-completions".to_string(),
-                    model_api_type: "openai".to_string(),
-                    parameters: std::collections::HashMap::new(),
-                });
-                appended += 1;
+        let existing: std::collections::HashSet<String> = self
+            .providers
+            .iter()
+            .chain(self.custom_providers.iter())
+            .map(|p| p.provider_type.clone())
+            .collect();
+        let mut appended = 0usize;
+        for hp in crate::services::hand_ai_catalog::list_providers() {
+            if existing.contains(&hp.id) {
+                continue;
             }
-            if appended > 0 {
-                tracing::info!(
-                    "Augmented LLM config with {} hand-ai providers ({} total now)",
-                    appended,
-                    self.providers.len(),
-                );
-            }
+            let display_name = humanize_id(&hp.id);
+            self.providers.push(ProviderConfig {
+                provider_type: hp.id.clone(),
+                type_name: display_name.clone(),
+                default_name: display_name,
+                default_base_url: hp.default_base_url.clone(),
+                // Generic placeholder — `static/logo-150.png` exists; per-
+                // provider art lands when a designer touches each one.
+                // Tracked as a deferred decision in the overnight summary.
+                icon: "/logo-150.png".to_string(),
+                chat_api_type: "openai-completions".to_string(),
+                model_api_type: "openai".to_string(),
+                parameters: std::collections::HashMap::new(),
+            });
+            appended += 1;
+        }
+        if appended > 0 {
+            tracing::info!(
+                "Augmented LLM config with {} hand-ai providers ({} total now)",
+                appended,
+                self.providers.len(),
+            );
         }
     }
 
@@ -334,7 +331,6 @@ pub fn install_global_llm_config(config: LlmConfig) {
 /// space-separated, title-cased display name (`"Github Copilot"`). Used
 /// when synthesizing `ProviderConfig` entries for hand-ai-only providers
 /// that don't have hand-tuned metadata in `llm_config.json`.
-#[cfg_attr(not(feature = "hand-ai"), allow(dead_code))]
 fn humanize_id(id: &str) -> String {
     id.split('-')
         .map(|part| {
@@ -361,7 +357,6 @@ mod tests {
         assert_eq!(humanize_id(""), "");
     }
 
-    #[cfg(feature = "hand-ai")]
     #[test]
     fn augment_appends_hand_ai_providers_without_clobbering_existing() {
         let mut cfg = LlmConfig::new();

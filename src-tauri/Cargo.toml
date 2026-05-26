@@ -72,16 +72,6 @@ handbox-mcp = { path = "crates/handbox-mcp" }
 hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "model-v0.2.0", package = "model" }
 tokio-util = "0.7"
 
-[features]
-default = ["hand-ai"]
-# Surface hand-ai's provider/model catalog through IPC and route chat
-# traffic through hand-ai/crates/model when the provider id matches the
-# catalog. Default-on as of 2026-05-25: HandBox depends on hand-ai
-# 0.2.0 for provider coverage (30+ vendors), capability metadata, and
-# wrapper-level cancellation. To force a legacy-only build:
-#   cargo tauri dev --no-default-features
-hand-ai = []
-
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"
 core-graphics = "0.23"

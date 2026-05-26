@@ -3,7 +3,6 @@ pub mod agent;
 pub mod artifact;
 pub mod auth;
 pub mod chat_engine;
-#[cfg(feature = "hand-ai")]
 pub mod hand_ai_catalog;
 pub mod mcp;
 pub mod message;
