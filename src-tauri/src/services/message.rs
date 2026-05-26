@@ -30,6 +30,8 @@ use crate::models::llm_types::{
 // alongside the storage- and history-building paths in later M2/M3 work.
 use handbox_llm::types::{LlmGeneratedImage, LlmMessage};
 use std::{collections::HashMap, fs, sync::Arc};
+use tokio::sync::Mutex as TokioMutex;
+use tokio_util::sync::CancellationToken;
 
 /// 流式回调 trait 定义
 ///
@@ -116,6 +118,38 @@ pub struct MessageService {
     /// MessageService::new's signature can safely change.
     #[allow(dead_code)]
     llm_config: Arc<dyn LlmConfigProvider>,
+    /// Per-stream cancellation tokens keyed by `stream_id`. Inserted at the
+    /// top of `call_llm_api_stream` once the stream id is generated; removed
+    /// when the stream terminates (success, error, or external cancel) via
+    /// the RAII `StreamCancellationGuard` below. The Arc<Mutex<...>> wrapper
+    /// is necessary because `MessageService` is cloned across IPC handlers
+    /// (`State::inner().clone()`), and every clone must observe the same
+    /// registry so `cancel_stream` can find tokens registered by streaming
+    /// tasks running on other clones.
+    stream_cancellations: Arc<TokioMutex<HashMap<String, CancellationToken>>>,
+}
+
+/// RAII guard that removes a stream's cancellation token from
+/// `MessageService::stream_cancellations` on drop. Spawns a detached cleanup
+/// task because the registry uses a Tokio `Mutex` (async-only acquire). The
+/// best-effort cleanup is acceptable: stream ids are UUIDs (never reused),
+/// the token itself is dropped with the function frame regardless, and the
+/// only downside of a stranded entry is a tiny amount of memory until the
+/// process exits.
+struct StreamCancellationGuard {
+    cancellations: Arc<TokioMutex<HashMap<String, CancellationToken>>>,
+    stream_id: String,
+}
+
+impl Drop for StreamCancellationGuard {
+    fn drop(&mut self) {
+        let cancellations = self.cancellations.clone();
+        let stream_id = std::mem::take(&mut self.stream_id);
+        tokio::spawn(async move {
+            let mut guard = cancellations.lock().await;
+            guard.remove(&stream_id);
+        });
+    }
 }
 
 impl MessageService {
@@ -134,6 +168,34 @@ impl MessageService {
             mcp_service,
             storage_service,
             llm_config,
+            stream_cancellations: Arc::new(TokioMutex::new(HashMap::new())),
+        }
+    }
+
+    /// Cancel an in-flight streaming chat by its `stream_id`.
+    ///
+    /// Looks up the registered `CancellationToken` and fires `.cancel()`,
+    /// which propagates through `ChatOptions::signal` →
+    /// `SimpleStreamOptions::base.signal` → hand-ai's wrapper-level
+    /// `select!` gate, aborting the provider stream within ~100ms (see
+    /// hand-ai 0.2.0 `model-v0.2.0` tag).
+    ///
+    /// Returns silently if `stream_id` is unknown — racing a natural Done
+    /// event against a Stop click is normal, and the user-visible behavior
+    /// (stream ends within 500ms) is the same either way.
+    pub async fn cancel_stream(&self, stream_id: &str) {
+        let guard = self.stream_cancellations.lock().await;
+        if let Some(token) = guard.get(stream_id) {
+            token.cancel();
+            tracing::info!(
+                "[MessageService::cancel_stream] cancelled stream {}",
+                stream_id
+            );
+        } else {
+            tracing::debug!(
+                "[MessageService::cancel_stream] stream {} not found (already finished?)",
+                stream_id
+            );
         }
     }
 
@@ -1274,6 +1336,19 @@ impl MessageService {
         let stream_id = uuid::Uuid::new_v4().to_string();
         let message_id = uuid::Uuid::new_v4().to_string();
 
+        // 注册 per-stream CancellationToken。`_cancel_guard` 在函数返回时（无论
+        // 走哪条 early-return 路径，包括 panic 展开）触发 Drop，将本 stream_id
+        // 从 registry 中移除，避免每条 termination 分支都重复写 remove() 调用。
+        let cancel_token = CancellationToken::new();
+        {
+            let mut guard = self.stream_cancellations.lock().await;
+            guard.insert(stream_id.clone(), cancel_token.clone());
+        }
+        let _cancel_guard = StreamCancellationGuard {
+            cancellations: self.stream_cancellations.clone(),
+            stream_id: stream_id.clone(),
+        };
+
         // 1. 获取聊天配置
         let chat = if let Some(chat_id) = &request.chat_id {
             match self.get_chat_config(chat_id).await {
@@ -1437,15 +1512,16 @@ impl MessageService {
             None
         };
 
-        // signal: 当前 services/message.rs 没有 CancellationToken 来源。
-        // UT-DISSOLVE-003 的端到端验收依赖 M2-T2d 落地取消机制；本任务仅完成信号管脚。
+        // signal: 注入函数顶部注册的 CancellationToken；通过 chat_engine 透传到
+        // hand-ai 的 SimpleStreamOptions::base.signal，由 hand-ai 0.2.0 的
+        // wrapper-level select! gate 保证 ~100ms 内中止 provider 流。
         let chat_options = ChatOptions {
             temperature: Self::normalize_numeric(chat.temperature),
             max_tokens: Self::normalize_numeric(chat.max_tokens)
                 .and_then(|n| u32::try_from(n).ok()),
             tools: chat_tools,
             reasoning_effort,
-            signal: None,
+            signal: Some(cancel_token.clone()),
             hydrated_attachments,
         };
 

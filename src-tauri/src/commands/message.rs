@@ -434,6 +434,27 @@ pub async fn message_user_send_stream(
     Ok(())
 }
 
+/// 停止正在进行的流式聊天
+///
+/// 通过 `stream_id` 在 `MessageService` 的取消注册表中查找已注册的
+/// `CancellationToken` 并触发取消，由 hand-ai 0.2.0 的 wrapper-level
+/// `select!` gate 在 ~100ms 内中止 provider 流（UT-DISSOLVE-003 验收路径）。
+///
+/// 即使 `stream_id` 未知（自然 Done 事件先于 Stop 点击到达）也返回 Ok：
+/// 对用户而言两种情况都是“流停止”，无需区分。
+#[tauri::command]
+pub async fn message_stop_stream(
+    stream_id: String,
+    message_service: State<'_, MessageService>,
+) -> Result<(), AppError> {
+    tracing::info!(
+        "[message_stop_stream] IPC command called for stream_id: {}",
+        stream_id
+    );
+    message_service.cancel_stream(&stream_id).await;
+    Ok(())
+}
+
 /// 执行工具调用
 #[tauri::command]
 pub async fn message_execute_tool_calls(

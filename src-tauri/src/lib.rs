@@ -161,6 +161,7 @@ pub fn run() {
             message_delete,
             message_assistant_regenerate_stream,
             message_user_resend_stream,
+            message_stop_stream,
             // message_execute_mcp_call, // Temporarily removed
             message_execute_tool_calls,
             message_execute_tool_calls_stream,
