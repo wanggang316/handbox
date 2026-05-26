@@ -38,6 +38,11 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 2026-05-25T20:55Z  M1-T4  code-reviewer      approve          (1 suggestion / 1 nit / 1 FYI — cosmetic)
 2026-05-25T20:56Z  M1-T4  user-test-validator vacuous-pass (static gate, no cases)
 2026-05-25T20:57Z  M1     exit-gate          PASS             cargo check clean both default + --no-default-features; storage::types 6/6 green; new serde-repr test green; pre-existing 9 unrelated failures unchanged
+2026-05-25T21:35Z  M2-T1  implementer        DONE_W_CONCERNS  f068875 (4 observation-class concerns accepted)
+2026-05-25T21:40Z  M2-T1  spec-reviewer      compliant
+2026-05-25T21:48Z  M2-T1  code-reviewer      approve-with-fixes  (2 Important: auth-error mapping; test density gap; +1 clippy CI hint)
+2026-05-25T22:05Z  M2-T1.1 implementer       DONE             a512c4f  (3 fixes landed; 10/10 chat_engine tests; 87 lib pass)
+2026-05-25T22:06Z  M2-T1  user-test-validator structural-pass UT-DISSOLVE-002 + UT-003 (no caller wired yet; chat_engine module ready for M2-T2 to dispatch)
 
 ### Task checklist
 
@@ -45,7 +50,7 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 - [x] M1-T2: Switch ALL `handbox_llm::types::*` import sites — commit `b758f56` (via pub-use re-exports per Decision Log)
 - ~~M1-T3: Switch `src-tauri/src/storage/message_repository.rs` to local `MessageRole`~~ — absorbed into M1-T2 (see Decision Log).
 - [x] M1-T4: Verify M1 with `cargo test` + DB JSON roundtrip — commit `21e038b` (test pins LlmMessageRole serde wire shape; M1 Exit Gate ✅)
-- [ ] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch
+- [x] M2-T1: Add `src-tauri/src/services/chat_engine.rs` with direct hand-ai dispatch — commit `f068875` + `a512c4f` (M2-T1.1 fix-pass)
 - [ ] M2-T2: Rewire `services/message.rs` chat flows through `chat_engine`
 - [ ] M2-T3: Rewire `services/session.rs` model lookups through hand-ai
 - [ ] M2-T4: Rewire `services/model.rs` list_models through hand-ai catalog
