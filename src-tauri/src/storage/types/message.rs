@@ -205,4 +205,68 @@ mod tests {
         assert_eq!(config.turn_count, deserialized.turn_count);
         assert_eq!(config.top_k, deserialized.top_k);
     }
+
+    #[test]
+    fn serde_repr_matches_legacy_wire_for_role_field() {
+        // Pin the serde wire shape for LlmMessageRole and the immediately
+        // surrounding Message struct. After M1-T2's pub-use re-export, the
+        // role field still serializes to a bare lowercase string ("user"
+        // / "assistant" / "system" / "tool") — same as it did before any
+        // dissolve-handbox-llm work. M3-T0 will later replace the re-export
+        // with a verbatim copy; this test pins the wire so that swap can't
+        // drift the format under HandBox's existing SQLite rows.
+
+        let message = Message {
+            id: "msg_repr".to_string(),
+            session_id: "chat_repr".to_string(),
+            role: LlmMessageRole::Assistant,
+            content: "hello".to_string(),
+            reasoning: None,
+            tool_calls: None,
+            turn_id: None,
+            tool_call_id: None,
+            config: None,
+            attachments: None,
+            generated_assets: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            start_time: None,
+            end_time: None,
+            duration: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let json = serde_json::to_string(&message).expect("serialize Message");
+        assert!(
+            json.contains(r#""role":"assistant""#),
+            "role must serialize to lowercase string token; got JSON: {json}",
+        );
+
+        // Roundtrip: deserialize back and confirm role survives.
+        let parsed: Message = serde_json::from_str(&json).expect("deserialize Message");
+        assert_eq!(parsed.role, LlmMessageRole::Assistant);
+
+        // Direct enum-level pin (independent of Message wrapper). The four
+        // string tokens MUST be exactly "system" / "user" / "assistant" /
+        // "tool" — anything else breaks every chat row HandBox has ever
+        // written.
+        assert_eq!(
+            serde_json::to_string(&LlmMessageRole::System).unwrap(),
+            "\"system\"",
+        );
+        assert_eq!(
+            serde_json::to_string(&LlmMessageRole::User).unwrap(),
+            "\"user\"",
+        );
+        assert_eq!(
+            serde_json::to_string(&LlmMessageRole::Assistant).unwrap(),
+            "\"assistant\"",
+        );
+        assert_eq!(
+            serde_json::to_string(&LlmMessageRole::Tool).unwrap(),
+            "\"tool\"",
+        );
+    }
 }
