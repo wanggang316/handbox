@@ -6,25 +6,33 @@
 // `crates/handbox-llm/src/chat/*` are kept around only until M3 deletes the
 // crate.
 //
-// The translation logic (DbMessage slice → hand-ai Context, AssistantMessageEvent
+// The translation logic (ChatMessage slice → hand-ai Context, AssistantMessageEvent
 // → ChatChunk) is lifted from `crates/handbox-llm/src/chat/hand_ai_adapter.rs`
 // with type renames — see the M2 row of docs/exec-plans/dissolve-handbox-llm.md.
+//
+// M2-T2a expanded the surface area: `ChatMessage` / `ChatToolCall` /
+// `HydratedAttachment` are HandBox-app-internal carrier types that keep
+// chat_engine storage-layer agnostic. Service callers translate from their
+// richer `MessageRequest` / `Message` representations at the chat_engine
+// boundary (wired up in M2-T2b/c).
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::OnceLock;
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
 use hand_ai_model::{
-    self as model, AssistantMessageEvent, Client, Context, Message, SimpleStreamOptions,
-    StopReason, StreamOptions, ThinkingLevel, Tool, Usage, UserMessage,
+    self as model, AssistantMessageEvent, Client, Context, ImageContent, Message,
+    SimpleStreamOptions, StopReason, StreamOptions, TextContent, ThinkingLevel, Tool, Usage,
+    UserContentBlock, UserMessage,
 };
 
 use crate::models::llm_types::{LlmMessageRole, ModelPricing};
 use crate::models::AppError;
 use crate::storage::types::model::ModelModality;
-use crate::storage::types::Message as DbMessage;
 
 // ---------------------------------------------------------------------------
 // Public surface
@@ -42,6 +50,19 @@ pub struct ChatProvider {
     pub api_key: String,
 }
 
+/// A tool call surfaced from the terminal assistant message. Mirrors
+/// HandBox's storage-layer MessageToolCall shape for downstream consumers,
+/// but kept here as a HandBox-app-internal type so chat_engine stays
+/// storage-layer agnostic.
+#[derive(Debug, Clone)]
+pub struct ChatToolCall {
+    pub id: String,
+    pub name: String,
+    /// JSON-encoded arguments (mirrors handbox-llm's `LlmToolFunction.arguments`
+    /// shape; downstream consumers do not need to re-parse).
+    pub arguments: String,
+}
+
 /// One unit of streamed assistant output, mapped from hand-ai's
 /// `AssistantMessageEvent`.
 #[derive(Debug, Clone, Default)]
@@ -55,6 +76,9 @@ pub struct ChatChunk {
     pub finish_reason: Option<String>,
     /// Token usage stats; set only on the terminal chunk.
     pub usage: Option<ChatUsage>,
+    /// Tool calls harvested from the terminal `Done` event's assistant
+    /// message content. Populated only on the terminal chunk.
+    pub tool_calls: Option<Vec<ChatToolCall>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -62,6 +86,39 @@ pub struct ChatUsage {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
     pub total_tokens: i32,
+}
+
+/// One message in a chat context as `chat_engine` sees it. Lighter than
+/// `storage::types::Message` — only the fields actually used in translation.
+/// Service-layer callers translate from their richer `MessageRequest` /
+/// `Message` representations at the chat_engine boundary.
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    /// Stable per-message id used to key into `ChatOptions::hydrated_attachments`.
+    /// Service callers may use the DB message id, the in-request synthetic id,
+    /// or any other stable string — uniqueness is the only requirement.
+    pub id: String,
+    pub role: LlmMessageRole,
+    pub content: String,
+    pub reasoning: Option<String>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub tool_call_id: Option<String>,
+    /// Presence indicator for hydrated attachments. Non-empty means
+    /// `ChatOptions::hydrated_attachments` must carry an entry under this
+    /// message's `id`. The individual ids carried here are informational
+    /// only — the keying is by **message id**, see the docstring on
+    /// `ChatOptions::hydrated_attachments`. Empty Vec means "no attachments".
+    pub attachment_ids: Vec<String>,
+}
+
+/// Pre-loaded attachment payload. Hand-ai's `UserContentBlock::Image` needs
+/// raw bytes + mime; HandBox's storage stores file paths, so the service
+/// layer hydrates before calling `stream_chat` / `complete_chat`.
+#[derive(Debug, Clone)]
+pub struct HydratedAttachment {
+    pub name: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
 }
 
 /// Per-call options. Mirrors a subset of HandBox's chat parameter UI.
@@ -76,6 +133,21 @@ pub struct ChatOptions {
     /// External cancellation channel. None = uncancellable; Some flows into
     /// `SimpleStreamOptions.base.signal`.
     pub signal: Option<CancellationToken>,
+    /// Current request's model id, used by `messages_to_context` to
+    /// reconstruct `AssistantMessage::{api, provider, model}` for any prior
+    /// assistant turns in `messages` (hand-ai requires that metadata; HandBox
+    /// doesn't store it per-message). Must match the `model_id` passed to
+    /// `stream_chat` / `complete_chat`. Empty / None means "no assistant-turn
+    /// reconstruction available" — only safe when no Assistant messages
+    /// appear in history.
+    pub model_id: Option<String>,
+    /// Service callers pre-load attachment bytes **keyed by message id**.
+    /// When a `ChatMessage` has non-empty `attachment_ids`, chat_engine looks
+    /// up the hydrated payloads here under the message's own `id` (the
+    /// `attachment_ids` vec is a presence indicator only — its individual
+    /// values are not used as keys). Missing entries cause the attachment
+    /// to be silently dropped with a `tracing::warn!` log line (no failure).
+    pub hydrated_attachments: HashMap<String, Vec<HydratedAttachment>>,
 }
 
 #[derive(Debug, Clone)]
@@ -92,10 +164,18 @@ pub struct ChatTool {
 pub async fn stream_chat(
     provider: &ChatProvider,
     model_id: &str,
-    messages: &[DbMessage],
+    messages: &[ChatMessage],
     options: ChatOptions,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatChunk, AppError>> + Send>>, AppError> {
-    let context = messages_to_context(messages, &provider.provider_type, model_id, &options.tools)?;
+    // Make sure `options.model_id` is populated for downstream catalog lookup
+    // even if the caller forgot — `stream_chat`'s own `model_id` parameter is
+    // the source of truth.
+    let mut options = options;
+    if options.model_id.is_none() {
+        options.model_id = Some(model_id.to_string());
+    }
+
+    let context = messages_to_context(messages, &provider.provider_type, &options)?;
     let model = resolve_model(&provider.provider_type, model_id, &provider.base_url)?;
     let stream_options = build_stream_options(&options, &provider.api_key);
 
@@ -116,7 +196,7 @@ pub async fn stream_chat(
 pub async fn complete_chat(
     provider: &ChatProvider,
     model_id: &str,
-    messages: &[DbMessage],
+    messages: &[ChatMessage],
     options: ChatOptions,
 ) -> Result<ChatChunk, AppError> {
     let mut stream = stream_chat(provider, model_id, messages, options).await?;
@@ -138,6 +218,11 @@ pub async fn complete_chat(
         }
         if chunk.usage.is_some() {
             acc.usage = chunk.usage;
+        }
+        // Tool calls only land on the terminal chunk; just take the last
+        // non-None set, which is necessarily the terminal one.
+        if chunk.tool_calls.is_some() {
+            acc.tool_calls = chunk.tool_calls;
         }
     }
 
@@ -173,29 +258,33 @@ fn shared_client() -> &'static Client {
 }
 
 // ---------------------------------------------------------------------------
-// Translation: &[DbMessage] → hand_ai_model::Context
+// Translation: &[ChatMessage] → hand_ai_model::Context
 // ---------------------------------------------------------------------------
 
-/// Convert a HandBox `DbMessage` slice into a hand-ai `Context`.
+/// Convert a slice of `ChatMessage` into a hand-ai `Context`.
 ///
 /// HandBox encodes the system prompt as `LlmMessageRole::System` rows in
 /// `messages`; hand-ai expects it on `Context::system_prompt`. Multiple
 /// system messages are concatenated with a blank line between them — same
 /// behaviour the legacy `hand_ai_adapter` uses for the request path.
+///
+/// `options.model_id` is consulted when any prior assistant turn is present
+/// (hand-ai requires api/provider/model metadata on `AssistantMessage`); a
+/// missing or unknown model id surfaces as a validation error in that case.
+/// `options.hydrated_attachments` is consulted while translating user
+/// messages that carry non-empty `attachment_ids`.
 pub(crate) fn messages_to_context(
-    messages: &[DbMessage],
+    messages: &[ChatMessage],
     provider_id: &str,
-    model_id: &str,
-    tools: &[ChatTool],
+    options: &ChatOptions,
 ) -> Result<Context, AppError> {
     let mut system_chunks: Vec<String> = Vec::new();
     let mut out: Vec<Message> = Vec::with_capacity(messages.len());
     // Threaded so role=Tool entries can recover the tool name from the
     // preceding role=Assistant turn that declared the call. HandBox's
-    // DbMessage(role=Tool) only carries `tool_call_id`; hand-ai requires
+    // ChatMessage(role=Tool) only carries `tool_call_id`; hand-ai requires
     // `tool_name` on ToolResultMessage.
-    let mut tool_name_by_call_id: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut tool_name_by_call_id: HashMap<String, String> = HashMap::new();
 
     // For prior assistant turns, hand-ai's AssistantMessage requires
     // api/provider/model metadata HandBox doesn't store per-message. Best-effort
@@ -205,6 +294,11 @@ pub(crate) fn messages_to_context(
     // turns against the current model. If the current model id isn't in
     // hand-ai's catalog we surface a clear error rather than fabricate metadata.
     let assistant_meta = if messages.iter().any(|m| m.role == LlmMessageRole::Assistant) {
+        let model_id = options.model_id.as_deref().ok_or_else(|| {
+            AppError::validation_error(
+                "chat_engine: cannot reconstruct prior assistant turn — ChatOptions.model_id is unset",
+            )
+        })?;
         let template = hand_ai_model::get_model(provider_id, model_id).ok_or_else(|| {
             AppError::validation_error(&format!(
                 "chat_engine: cannot reconstruct prior assistant turn — model '{}' under provider '{}' not in catalog",
@@ -228,21 +322,24 @@ pub(crate) fn messages_to_context(
                 }
             }
             LlmMessageRole::User => {
-                out.push(Message::User(db_user_message(msg)));
+                out.push(Message::User(chat_user_message(
+                    msg,
+                    &options.hydrated_attachments,
+                )));
             }
             LlmMessageRole::Assistant => {
                 if let Some(calls) = msg.tool_calls.as_ref() {
                     for c in calls {
-                        tool_name_by_call_id.insert(c.id.clone(), c.function.name.clone());
+                        tool_name_by_call_id.insert(c.id.clone(), c.name.clone());
                     }
                 }
                 let meta = assistant_meta
                     .as_ref()
                     .expect("computed when any assistant entry exists");
-                out.push(Message::Assistant(db_assistant_message(msg, meta)?));
+                out.push(Message::Assistant(chat_assistant_message(msg, meta)?));
             }
             LlmMessageRole::Tool => {
-                out.push(Message::ToolResult(db_tool_result_message(
+                out.push(Message::ToolResult(chat_tool_result_message(
                     msg,
                     &tool_name_by_call_id,
                 )?));
@@ -256,10 +353,10 @@ pub(crate) fn messages_to_context(
         Some(system_chunks.join("\n\n"))
     };
 
-    let tools = if tools.is_empty() {
+    let tools = if options.tools.is_empty() {
         None
     } else {
-        Some(translate_tools(tools))
+        Some(translate_tools(&options.tools))
     };
 
     Ok(Context {
@@ -269,28 +366,79 @@ pub(crate) fn messages_to_context(
     })
 }
 
-/// api / provider / model triple recovered from the current request's
-/// model, used to fill required fields on reconstructed prior assistant
-/// turns. Cached once per request so multi-turn histories don't pay the
-/// catalog lookup per message.
+/// api / provider / model triple recovered from the current request's model,
+/// used to fill required fields on reconstructed prior assistant turns.
+/// Cached once per request so multi-turn histories don't pay the catalog
+/// lookup per message.
 struct AssistantMeta {
     api: model::Api,
     provider: hand_ai_model::types::Provider,
     model: String,
 }
 
-fn db_user_message(msg: &DbMessage) -> UserMessage {
-    // Attachments on DbMessage carry a filesystem `path`, not raw bytes; the
-    // legacy adapter loads bytes upstream and packs an `UserContentBlock::Image`.
-    // M2-T1 only owns the dispatch shell — attachment hydration stays at the
-    // caller (or moves into chat_engine later). For now, treat the message as
-    // plain text; the caller that wants image attachments must pass them in a
-    // pre-translated representation in a follow-up task.
-    UserMessage::new_text(msg.content.clone())
+/// Build a hand-ai `UserMessage` from a `ChatMessage`, hydrating any
+/// attachments referenced by the message's id.
+///
+/// When `attachment_ids` is empty the message becomes a plain
+/// `UserMessage::new_text`. When non-empty, `hydrated_attachments` is looked
+/// up under `msg.id`:
+///
+/// - **Missing entry**: log a `tracing::warn!` and fall back to text-only.
+/// - **Non-image attachment**: log a `tracing::warn!` and drop it (does not
+///   error — by design, callers handle non-image surfaces upstream).
+/// - **Image attachment**: emit one `UserContentBlock::Image` (base64-encoded
+///   per hand-ai's expectation).
+///
+/// Order matches the legacy adapter: image blocks first, the text body last
+/// (if non-empty).
+fn chat_user_message(
+    msg: &ChatMessage,
+    hydrated_attachments: &HashMap<String, Vec<HydratedAttachment>>,
+) -> UserMessage {
+    if msg.attachment_ids.is_empty() {
+        return UserMessage::new_text(msg.content.clone());
+    }
+
+    let Some(attachments) = hydrated_attachments.get(&msg.id).filter(|a| !a.is_empty()) else {
+        tracing::warn!(
+            message_id = %msg.id,
+            attachment_count = msg.attachment_ids.len(),
+            "chat_engine: message declares attachments but no hydrated payload found; sending text only"
+        );
+        return UserMessage::new_text(msg.content.clone());
+    };
+
+    let mut blocks: Vec<UserContentBlock> = Vec::with_capacity(attachments.len() + 1);
+    for att in attachments {
+        if !att.mime_type.starts_with("image/") {
+            tracing::warn!(
+                message_id = %msg.id,
+                attachment_name = %att.name,
+                mime_type = %att.mime_type,
+                "chat_engine: non-image attachment dropped (only image/* supported in this path)"
+            );
+            continue;
+        }
+        let data_b64 = BASE64_STANDARD.encode(&att.data);
+        blocks.push(UserContentBlock::Image(ImageContent::new(
+            data_b64,
+            att.mime_type.clone(),
+        )));
+    }
+
+    if blocks.is_empty() {
+        // All attachments were dropped above — fall back to text-only.
+        return UserMessage::new_text(msg.content.clone());
+    }
+
+    if !msg.content.is_empty() {
+        blocks.push(UserContentBlock::Text(TextContent::new(msg.content.clone())));
+    }
+    UserMessage::new_blocks(blocks)
 }
 
-fn db_assistant_message(
-    msg: &DbMessage,
+fn chat_assistant_message(
+    msg: &ChatMessage,
     meta: &AssistantMeta,
 ) -> Result<model::AssistantMessage, AppError> {
     let mut content: Vec<model::AssistantContentBlock> = Vec::new();
@@ -311,12 +459,13 @@ fn db_assistant_message(
 
     if let Some(calls) = msg.tool_calls.as_ref() {
         for call in calls {
-            // HandBox stores arguments as a JSON-encoded string; hand-ai's
-            // ToolCall.arguments is a Value.
-            let args: serde_json::Value = if call.function.arguments.is_empty() {
+            // `ChatToolCall::arguments` is JSON-encoded text mirroring
+            // handbox-llm's LlmToolFunction shape; hand-ai's ToolCall.arguments
+            // is a Value.
+            let args: serde_json::Value = if call.arguments.is_empty() {
                 serde_json::Value::Object(Default::default())
             } else {
-                serde_json::from_str(&call.function.arguments).map_err(|e| {
+                serde_json::from_str(&call.arguments).map_err(|e| {
                     AppError::validation_error(&format!(
                         "chat_engine: tool_call arguments not valid JSON for call '{}': {}",
                         call.id, e
@@ -324,7 +473,7 @@ fn db_assistant_message(
                 })?
             };
             content.push(model::AssistantContentBlock::ToolCall(
-                model::ToolCall::new(call.id.clone(), call.function.name.clone(), args),
+                model::ToolCall::new(call.id.clone(), call.name.clone(), args),
             ));
         }
     }
@@ -345,12 +494,12 @@ fn db_assistant_message(
     })
 }
 
-fn db_tool_result_message(
-    msg: &DbMessage,
-    tool_name_by_call_id: &std::collections::HashMap<String, String>,
+fn chat_tool_result_message(
+    msg: &ChatMessage,
+    tool_name_by_call_id: &HashMap<String, String>,
 ) -> Result<model::ToolResultMessage, AppError> {
     let tool_call_id = msg.tool_call_id.as_ref().ok_or_else(|| {
-        AppError::validation_error("chat_engine: DbMessage role=Tool requires tool_call_id")
+        AppError::validation_error("chat_engine: ChatMessage role=Tool requires tool_call_id")
     })?;
     let tool_name = tool_name_by_call_id.get(tool_call_id).ok_or_else(|| {
         AppError::validation_error(&format!(
@@ -483,14 +632,36 @@ fn stop_reason_to_finish_reason(reason: &StopReason) -> &'static str {
     }
 }
 
+/// Harvest tool calls from a terminal assistant message's content blocks.
+/// Returns `None` if no `ToolCall` blocks were present.
+fn tool_calls_from_assistant_message(message: &model::AssistantMessage) -> Option<Vec<ChatToolCall>> {
+    let calls: Vec<ChatToolCall> = message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            model::AssistantContentBlock::ToolCall(tc) => Some(ChatToolCall {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                arguments: serde_json::to_string(&tc.arguments)
+                    .unwrap_or_else(|_| "{}".to_string()),
+            }),
+            _ => None,
+        })
+        .collect();
+    if calls.is_empty() {
+        None
+    } else {
+        Some(calls)
+    }
+}
+
 /// Translate one hand-ai event to one HandBox chunk, if applicable.
 ///
 /// `*_Start` / `*_End` boundary variants emit nothing (the matching `_Delta`
 /// events carry the payload). `Error` is translated to `Err` so the consumer's
 /// stream terminates with the failure rather than receiving a synthetic chunk.
-/// `ToolCall*` variants are intentionally dropped for M2 — tool-call streaming
-/// has its own aggregation semantics that need a dedicated translation block
-/// (acknowledged gap in the dissolve-handbox-llm plan).
+/// On the terminal `Done` event we also harvest any `ToolCall` blocks from the
+/// assistant message's content into `ChatChunk::tool_calls`.
 pub(crate) fn event_to_chunk_result(
     event: &AssistantMessageEvent,
 ) -> Option<Result<ChatChunk, AppError>> {
@@ -506,6 +677,7 @@ pub(crate) fn event_to_chunk_result(
         AssistantMessageEvent::Done { reason, message } => Some(Ok(ChatChunk {
             finish_reason: Some(stop_reason_to_finish_reason(reason).to_string()),
             usage: usage_to_chat(&message.usage),
+            tool_calls: tool_calls_from_assistant_message(message),
             ..Default::default()
         })),
         AssistantMessageEvent::Error { error, .. } => {
@@ -581,46 +753,70 @@ fn hand_ai_to_handbox_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::llm_types::LlmToolFunction;
-    use crate::storage::types::{
-        Message as DbMessage, MessageToolCall, MessageToolExecutionMode, MessageToolExecutionStatus,
-    };
+    use hand_ai_model::UserContent;
 
-    fn bare_db_message(role: LlmMessageRole, content: &str) -> DbMessage {
-        DbMessage {
+    // ---- ChatMessage fixture helpers -----------------------------------
+
+    fn user_msg(text: &str) -> ChatMessage {
+        ChatMessage {
             id: "msg".to_string(),
-            session_id: "sess".to_string(),
-            role,
-            content: content.to_string(),
+            role: LlmMessageRole::User,
+            content: text.to_string(),
             reasoning: None,
             tool_calls: None,
-            turn_id: None,
             tool_call_id: None,
-            config: None,
-            attachments: None,
-            generated_assets: None,
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            start_time: None,
-            end_time: None,
-            duration: None,
-            created_at: 0,
-            updated_at: 0,
+            attachment_ids: vec![],
         }
     }
 
-    fn tool_call(id: &str, name: &str, arguments: &str) -> MessageToolCall {
-        MessageToolCall {
+    fn system_msg(text: &str) -> ChatMessage {
+        ChatMessage {
+            id: "msg".to_string(),
+            role: LlmMessageRole::System,
+            content: text.to_string(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachment_ids: vec![],
+        }
+    }
+
+    fn assistant_msg(text: &str) -> ChatMessage {
+        ChatMessage {
+            id: "msg".to_string(),
+            role: LlmMessageRole::Assistant,
+            content: text.to_string(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachment_ids: vec![],
+        }
+    }
+
+    fn tool_msg(text: &str, tool_call_id: &str) -> ChatMessage {
+        ChatMessage {
+            id: "msg".to_string(),
+            role: LlmMessageRole::Tool,
+            content: text.to_string(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.to_string()),
+            attachment_ids: vec![],
+        }
+    }
+
+    fn tool_call(id: &str, name: &str, arguments: &str) -> ChatToolCall {
+        ChatToolCall {
             id: id.to_string(),
-            tool_type: "function".to_string(),
-            function: LlmToolFunction {
-                name: name.to_string(),
-                arguments: arguments.to_string(),
-            },
-            execution_mode: MessageToolExecutionMode::default(),
-            execution_status: MessageToolExecutionStatus::default(),
-            result: None,
+            name: name.to_string(),
+            arguments: arguments.to_string(),
+        }
+    }
+
+    fn options_with_model(model_id: &str) -> ChatOptions {
+        ChatOptions {
+            model_id: Some(model_id.to_string()),
+            ..Default::default()
         }
     }
 
@@ -641,21 +837,22 @@ mod tests {
         }
     }
 
+    // ---- messages_to_context ------------------------------------------
+
     #[test]
     fn builds_context_from_user_message() {
-        let messages = vec![bare_db_message(LlmMessageRole::User, "hello")];
-        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        let messages = vec![user_msg("hello")];
+        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+            .expect("translation");
         assert!(ctx.system_prompt.is_none());
         assert_eq!(ctx.messages.len(), 1);
     }
 
     #[test]
     fn extracts_system_prompt_from_leading_system_message() {
-        let messages = vec![
-            bare_db_message(LlmMessageRole::System, "be helpful"),
-            bare_db_message(LlmMessageRole::User, "hi"),
-        ];
-        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        let messages = vec![system_msg("be helpful"), user_msg("hi")];
+        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+            .expect("translation");
         assert_eq!(ctx.system_prompt.as_deref(), Some("be helpful"));
         assert_eq!(ctx.messages.len(), 1);
     }
@@ -674,6 +871,7 @@ mod tests {
         assert!(chunk.reasoning.is_none());
         assert!(chunk.finish_reason.is_none());
         assert!(chunk.usage.is_none());
+        assert!(chunk.tool_calls.is_none());
     }
 
     #[test]
@@ -699,12 +897,14 @@ mod tests {
         assert_eq!(usage.prompt_tokens, 5);
         assert_eq!(usage.completion_tokens, 10);
         assert_eq!(usage.total_tokens, 15);
+        // No ToolCall blocks in the message → tool_calls stays None.
+        assert!(chunk.tool_calls.is_none());
     }
 
     #[test]
     fn assistant_history_errors_when_model_not_in_catalog() {
-        let messages = vec![bare_db_message(LlmMessageRole::Assistant, "prior reply")];
-        let err = messages_to_context(&messages, "openai", "no-such-model-9999", &[])
+        let messages = vec![assistant_msg("prior reply")];
+        let err = messages_to_context(&messages, "openai", &options_with_model("no-such-model-9999"))
             .expect_err("unknown model must surface clearly");
         let m = format!("{}", err);
         assert!(m.contains("not in catalog"), "msg: {m}");
@@ -713,13 +913,13 @@ mod tests {
 
     #[test]
     fn tool_result_pulls_tool_name_from_prior_assistant_call() {
-        let mut assistant = bare_db_message(LlmMessageRole::Assistant, "");
+        let mut assistant = assistant_msg("");
         assistant.tool_calls = Some(vec![tool_call("call_99", "search_web", "{}")]);
-        let mut tool_result = bare_db_message(LlmMessageRole::Tool, "result text");
-        tool_result.tool_call_id = Some("call_99".to_string());
+        let tool_result = tool_msg("result text", "call_99");
 
         let messages = vec![assistant, tool_result];
-        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+            .expect("translation");
         match &ctx.messages[1] {
             Message::ToolResult(tr) => {
                 assert_eq!(tr.tool_call_id, "call_99");
@@ -735,22 +935,22 @@ mod tests {
 
     #[test]
     fn tool_result_with_unknown_call_id_errors() {
-        let mut orphan = bare_db_message(LlmMessageRole::Tool, "orphan");
-        orphan.tool_call_id = Some("ghost".to_string());
+        let orphan = tool_msg("orphan", "ghost");
         let messages = vec![orphan];
-        let err = messages_to_context(&messages, "openai", "gpt-4o", &[])
+        let err = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
             .expect_err("orphan tool result should error");
         assert!(format!("{}", err).contains("unknown tool_call_id"));
     }
 
     #[test]
     fn assistant_history_preserves_reasoning_and_tool_calls() {
-        let mut assistant = bare_db_message(LlmMessageRole::Assistant, "calling tool");
+        let mut assistant = assistant_msg("calling tool");
         assistant.reasoning = Some("considering options".to_string());
         assistant.tool_calls = Some(vec![tool_call("call_1", "get_weather", r#"{"city":"sf"}"#)]);
 
         let messages = vec![assistant];
-        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+            .expect("translation");
         match &ctx.messages[0] {
             Message::Assistant(am) => {
                 assert_eq!(am.content.len(), 3, "thinking + text + tool_call");
@@ -778,11 +978,12 @@ mod tests {
     #[test]
     fn multiple_system_messages_concatenated_with_blank_line() {
         let messages = vec![
-            bare_db_message(LlmMessageRole::System, "first"),
-            bare_db_message(LlmMessageRole::User, "hi"),
-            bare_db_message(LlmMessageRole::System, "second"),
+            system_msg("first"),
+            user_msg("hi"),
+            system_msg("second"),
         ];
-        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &[]).expect("translation");
+        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+            .expect("translation");
         assert_eq!(ctx.system_prompt.as_deref(), Some("first\n\nsecond"));
         assert_eq!(ctx.messages.len(), 1);
     }
@@ -798,5 +999,96 @@ mod tests {
         let result = event_to_chunk_result(&event).expect("event maps");
         let err = result.expect_err("error event must surface as Err");
         assert!(format!("{}", err).contains("upstream blew up"));
+    }
+
+    // ---- New in M2-T2a ------------------------------------------------
+
+    #[test]
+    fn terminal_chunk_aggregates_tool_calls_from_done_event() {
+        let mut msg = partial_assistant();
+        msg.content = vec![
+            model::AssistantContentBlock::ToolCall(model::ToolCall::new(
+                "call_a".to_string(),
+                "search_web".to_string(),
+                serde_json::json!({"q": "x"}),
+            )),
+            model::AssistantContentBlock::ToolCall(model::ToolCall::new(
+                "call_b".to_string(),
+                "fetch_url".to_string(),
+                serde_json::json!({"u": "y"}),
+            )),
+        ];
+        let event = AssistantMessageEvent::Done {
+            reason: StopReason::ToolUse,
+            message: msg,
+        };
+        let chunk = event_to_chunk_result(&event)
+            .expect("event maps")
+            .expect("ok variant");
+        let calls = chunk.tool_calls.expect("tool_calls populated");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id, "call_a");
+        assert_eq!(calls[0].name, "search_web");
+        assert_eq!(calls[1].id, "call_b");
+        assert_eq!(calls[1].name, "fetch_url");
+
+        let args_a: serde_json::Value = serde_json::from_str(&calls[0].arguments)
+            .expect("call_a arguments round-trip");
+        assert_eq!(args_a, serde_json::json!({"q": "x"}));
+        let args_b: serde_json::Value = serde_json::from_str(&calls[1].arguments)
+            .expect("call_b arguments round-trip");
+        assert_eq!(args_b, serde_json::json!({"u": "y"}));
+
+        assert_eq!(chunk.finish_reason.as_deref(), Some("tool_calls"));
+    }
+
+    #[test]
+    fn user_attachment_translates_to_image_block() {
+        let msg = ChatMessage {
+            id: "m1".to_string(),
+            role: LlmMessageRole::User,
+            content: "what's this?".to_string(),
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachment_ids: vec!["m1-att-0".to_string()],
+        };
+        let mut hydrated: HashMap<String, Vec<HydratedAttachment>> = HashMap::new();
+        hydrated.insert(
+            "m1".to_string(),
+            vec![HydratedAttachment {
+                name: "shot.png".to_string(),
+                mime_type: "image/png".to_string(),
+                data: vec![0x89, 0x50, 0x4e, 0x47],
+            }],
+        );
+        let options = ChatOptions {
+            hydrated_attachments: hydrated,
+            ..Default::default()
+        };
+
+        let ctx = messages_to_context(&[msg], "openai", &options).expect("translation");
+        assert_eq!(ctx.messages.len(), 1);
+        match &ctx.messages[0] {
+            Message::User(um) => match &um.content {
+                UserContent::Blocks(blocks) => {
+                    assert_eq!(blocks.len(), 2);
+                    match &blocks[0] {
+                        UserContentBlock::Image(img) => {
+                            assert_eq!(img.mime_type, "image/png");
+                            // base64 of PNG magic bytes (0x89 0x50 0x4e 0x47).
+                            assert_eq!(img.data, "iVBORw==");
+                        }
+                        other => panic!("expected image first, got {:?}", other),
+                    }
+                    match &blocks[1] {
+                        UserContentBlock::Text(t) => assert_eq!(t.text, "what's this?"),
+                        other => panic!("expected text second, got {:?}", other),
+                    }
+                }
+                _ => panic!("expected blocks variant for attachment message"),
+            },
+            other => panic!("expected user message, got {:?}", other),
+        }
     }
 }
