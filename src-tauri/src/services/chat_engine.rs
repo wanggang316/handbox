@@ -133,14 +133,6 @@ pub struct ChatOptions {
     /// External cancellation channel. None = uncancellable; Some flows into
     /// `SimpleStreamOptions.base.signal`.
     pub signal: Option<CancellationToken>,
-    /// Current request's model id, used by `messages_to_context` to
-    /// reconstruct `AssistantMessage::{api, provider, model}` for any prior
-    /// assistant turns in `messages` (hand-ai requires that metadata; HandBox
-    /// doesn't store it per-message). Must match the `model_id` passed to
-    /// `stream_chat` / `complete_chat`. Empty / None means "no assistant-turn
-    /// reconstruction available" — only safe when no Assistant messages
-    /// appear in history.
-    pub model_id: Option<String>,
     /// Service callers pre-load attachment bytes **keyed by message id**.
     /// When a `ChatMessage` has non-empty `attachment_ids`, chat_engine looks
     /// up the hydrated payloads here under the message's own `id` (the
@@ -167,15 +159,7 @@ pub async fn stream_chat(
     messages: &[ChatMessage],
     options: ChatOptions,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatChunk, AppError>> + Send>>, AppError> {
-    // Make sure `options.model_id` is populated for downstream catalog lookup
-    // even if the caller forgot — `stream_chat`'s own `model_id` parameter is
-    // the source of truth.
-    let mut options = options;
-    if options.model_id.is_none() {
-        options.model_id = Some(model_id.to_string());
-    }
-
-    let context = messages_to_context(messages, &provider.provider_type, &options)?;
+    let context = messages_to_context(messages, &provider.provider_type, model_id, &options)?;
     let model = resolve_model(&provider.provider_type, model_id, &provider.base_url)?;
     let stream_options = build_stream_options(&options, &provider.api_key);
 
@@ -268,14 +252,15 @@ fn shared_client() -> &'static Client {
 /// system messages are concatenated with a blank line between them — same
 /// behaviour the legacy `hand_ai_adapter` uses for the request path.
 ///
-/// `options.model_id` is consulted when any prior assistant turn is present
-/// (hand-ai requires api/provider/model metadata on `AssistantMessage`); a
-/// missing or unknown model id surfaces as a validation error in that case.
-/// `options.hydrated_attachments` is consulted while translating user
-/// messages that carry non-empty `attachment_ids`.
+/// `model_id` is consulted when any prior assistant turn is present (hand-ai
+/// requires api/provider/model metadata on `AssistantMessage`); an unknown
+/// model id surfaces as a validation error in that case. `options.hydrated_attachments`
+/// is consulted while translating user messages that carry non-empty
+/// `attachment_ids`.
 pub(crate) fn messages_to_context(
     messages: &[ChatMessage],
     provider_id: &str,
+    model_id: &str,
     options: &ChatOptions,
 ) -> Result<Context, AppError> {
     let mut system_chunks: Vec<String> = Vec::new();
@@ -294,11 +279,6 @@ pub(crate) fn messages_to_context(
     // turns against the current model. If the current model id isn't in
     // hand-ai's catalog we surface a clear error rather than fabricate metadata.
     let assistant_meta = if messages.iter().any(|m| m.role == LlmMessageRole::Assistant) {
-        let model_id = options.model_id.as_deref().ok_or_else(|| {
-            AppError::validation_error(
-                "chat_engine: cannot reconstruct prior assistant turn — ChatOptions.model_id is unset",
-            )
-        })?;
         let template = hand_ai_model::get_model(provider_id, model_id).ok_or_else(|| {
             AppError::validation_error(&format!(
                 "chat_engine: cannot reconstruct prior assistant turn — model '{}' under provider '{}' not in catalog",
@@ -333,9 +313,11 @@ pub(crate) fn messages_to_context(
                         tool_name_by_call_id.insert(c.id.clone(), c.name.clone());
                     }
                 }
-                let meta = assistant_meta
-                    .as_ref()
-                    .expect("computed when any assistant entry exists");
+                let meta = assistant_meta.as_ref().ok_or_else(|| {
+                    AppError::internal_error(
+                        "chat_engine: assistant_meta missing despite assistant entry present — invariant broken",
+                    )
+                })?;
                 out.push(Message::Assistant(chat_assistant_message(msg, meta)?));
             }
             LlmMessageRole::Tool => {
@@ -813,13 +795,6 @@ mod tests {
         }
     }
 
-    fn options_with_model(model_id: &str) -> ChatOptions {
-        ChatOptions {
-            model_id: Some(model_id.to_string()),
-            ..Default::default()
-        }
-    }
-
     fn partial_assistant() -> model::AssistantMessage {
         model::AssistantMessage {
             role: "assistant".into(),
@@ -842,7 +817,7 @@ mod tests {
     #[test]
     fn builds_context_from_user_message() {
         let messages = vec![user_msg("hello")];
-        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &ChatOptions::default())
             .expect("translation");
         assert!(ctx.system_prompt.is_none());
         assert_eq!(ctx.messages.len(), 1);
@@ -851,7 +826,7 @@ mod tests {
     #[test]
     fn extracts_system_prompt_from_leading_system_message() {
         let messages = vec![system_msg("be helpful"), user_msg("hi")];
-        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &ChatOptions::default())
             .expect("translation");
         assert_eq!(ctx.system_prompt.as_deref(), Some("be helpful"));
         assert_eq!(ctx.messages.len(), 1);
@@ -904,7 +879,7 @@ mod tests {
     #[test]
     fn assistant_history_errors_when_model_not_in_catalog() {
         let messages = vec![assistant_msg("prior reply")];
-        let err = messages_to_context(&messages, "openai", &options_with_model("no-such-model-9999"))
+        let err = messages_to_context(&messages, "openai", "no-such-model-9999", &ChatOptions::default())
             .expect_err("unknown model must surface clearly");
         let m = format!("{}", err);
         assert!(m.contains("not in catalog"), "msg: {m}");
@@ -918,7 +893,7 @@ mod tests {
         let tool_result = tool_msg("result text", "call_99");
 
         let messages = vec![assistant, tool_result];
-        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &ChatOptions::default())
             .expect("translation");
         match &ctx.messages[1] {
             Message::ToolResult(tr) => {
@@ -937,7 +912,7 @@ mod tests {
     fn tool_result_with_unknown_call_id_errors() {
         let orphan = tool_msg("orphan", "ghost");
         let messages = vec![orphan];
-        let err = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+        let err = messages_to_context(&messages, "openai", "gpt-4o", &ChatOptions::default())
             .expect_err("orphan tool result should error");
         assert!(format!("{}", err).contains("unknown tool_call_id"));
     }
@@ -949,7 +924,7 @@ mod tests {
         assistant.tool_calls = Some(vec![tool_call("call_1", "get_weather", r#"{"city":"sf"}"#)]);
 
         let messages = vec![assistant];
-        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &ChatOptions::default())
             .expect("translation");
         match &ctx.messages[0] {
             Message::Assistant(am) => {
@@ -982,7 +957,7 @@ mod tests {
             user_msg("hi"),
             system_msg("second"),
         ];
-        let ctx = messages_to_context(&messages, "openai", &options_with_model("gpt-4o"))
+        let ctx = messages_to_context(&messages, "openai", "gpt-4o", &ChatOptions::default())
             .expect("translation");
         assert_eq!(ctx.system_prompt.as_deref(), Some("first\n\nsecond"));
         assert_eq!(ctx.messages.len(), 1);
@@ -1067,7 +1042,7 @@ mod tests {
             ..Default::default()
         };
 
-        let ctx = messages_to_context(&[msg], "openai", &options).expect("translation");
+        let ctx = messages_to_context(&[msg], "openai", "gpt-4o", &options).expect("translation");
         assert_eq!(ctx.messages.len(), 1);
         match &ctx.messages[0] {
             Message::User(um) => match &um.content {
