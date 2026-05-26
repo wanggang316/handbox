@@ -33,7 +33,12 @@ impl ProviderService {
         tracing::info!("Dynamic LLM client system ready");
     }
 
-    /// 创建供应商（验证 API Key 并获取模型）
+    /// 创建供应商并预填 hand-ai 目录中的模型。
+    ///
+    /// 注意（M2-T4 起）: 此函数不再做 API Key 验证 ——
+    /// `fetch_and_sync_models` 已切换为静态目录读取（无网络）。
+    /// 错误的 API Key 会在首次实际对话时才被发现。
+    /// TODO(post-M3): 添加一次性轻量探测来恢复 API Key 校验。
     pub async fn create_provider(&self, config: AddProviderRequest) -> Result<Provider, AppError> {
         let provider = Provider {
             id: Uuid::new_v4().to_string(),
@@ -49,7 +54,7 @@ impl ProviderService {
         // 模型获取成功，创建供应商
         self.provider_repo.create_provider(&provider).await?;
 
-        // 先获取并保存模型（同时验证 API Key），成功后再创建供应商
+        // 拉取 hand-ai 目录中的模型并写入 DB（不再含 API Key 校验; M2-T4）。
         self.model_service
             .fetch_and_sync_models(&provider, false)
             .await?;
@@ -62,7 +67,10 @@ impl ProviderService {
         Ok(provider)
     }
 
-    /// 直接创建供应商（不验证 API Key，仅供测试使用）
+    /// 创建供应商，不预填模型。
+    ///
+    /// 注意（M2-T4 起）: `create_provider` 本身也不再做 API Key 验证，
+    /// 因此这两个函数的差别仅在「是否预填模型目录」。仅供测试使用。
     #[cfg(test)]
     async fn create_provider_without_validation(
         &self,
@@ -107,7 +115,7 @@ impl ProviderService {
             updated_at: self.current_timestamp(),
         };
 
-        // 如果关键配置有变更，先获取并同步模型（同时验证 API Key）
+        // 关键配置变更时刷新 hand-ai 目录映射的模型行（不再含 API Key 校验; M2-T4）。
         if should_refresh_models {
             self.model_service
                 .fetch_and_sync_models(&updated_provider, true)

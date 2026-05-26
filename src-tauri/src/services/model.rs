@@ -59,6 +59,17 @@ impl ModelService {
         // hand-ai 目录读取：纯内存、同步、返回已映射好的 storage::types::Model
         let catalog_models = chat_engine::list_catalog_models(&provider.provider_type);
 
+        // 目录未命中（DB 中 provider_type 拼写错误、新供应商尚未进入 hand-ai 发布等）
+        // 单独走 WARN 路径，便于运维 grep；已落库的模型行保持不动。
+        if catalog_models.is_empty() {
+            tracing::warn!(
+                provider_name = %provider.name,
+                provider_type = %provider.provider_type,
+                "hand-ai catalog returned 0 models; existing DB rows preserved"
+            );
+            return Ok(());
+        }
+
         // 用应用层的 provider_id 覆盖 catalog 返回的占位 provider_id
         let models: Vec<Model> = catalog_models
             .into_iter()
@@ -68,33 +79,25 @@ impl ModelService {
             })
             .collect();
 
-        tracing::info!(
-            "Successfully loaded {} catalog models for provider: {}",
-            models.len(),
-            provider.name
-        );
-
         // 保存或同步模型
-        if !models.is_empty() {
-            if sync {
-                // 同步模型，保留用户状态
-                self.model_repo
-                    .sync_provider_models(&provider.id, &models)
-                    .await?;
-                tracing::info!(
-                    "Successfully synced {} models for provider: {}",
-                    models.len(),
-                    provider.name
-                );
-            } else {
-                // 创建新模型
-                self.model_repo.create_models(&models).await?;
-                tracing::info!(
-                    "Successfully created {} models for provider: {}",
-                    models.len(),
-                    provider.name
-                );
-            }
+        if sync {
+            // 同步模型，保留用户状态
+            self.model_repo
+                .sync_provider_models(&provider.id, &models)
+                .await?;
+            tracing::info!(
+                "Successfully synced {} models for provider: {}",
+                models.len(),
+                provider.name
+            );
+        } else {
+            // 创建新模型
+            self.model_repo.create_models(&models).await?;
+            tracing::info!(
+                "Successfully created {} models for provider: {}",
+                models.len(),
+                provider.name
+            );
         }
 
         Ok(())
