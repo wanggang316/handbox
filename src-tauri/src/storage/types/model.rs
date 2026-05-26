@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::common::Timestamp;
-use handbox_llm::types::ModelPricing;
+use crate::models::llm_types::ModelPricing;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

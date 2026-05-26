@@ -14,10 +14,12 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::Utc;
 use handbox_llm::config::LlmConfigProvider;
 use handbox_llm::create_llm_client;
+use crate::models::llm_types::{
+    LlmMessageRole, LlmReasoningEffort, LlmReasoningEffortConfig, LlmToolFunction,
+};
 use handbox_llm::types::{
-    LlmGeneratedImage, LlmMessage, LlmMessageRole, LlmProvider, LlmReasoningEffort,
-    LlmReasoningEffortConfig, LlmRequest, LlmRequestTool, LlmRequestToolFunction, LlmResponse,
-    LlmToolChoice, LlmToolFunction,
+    LlmGeneratedImage, LlmMessage, LlmProvider, LlmRequest, LlmRequestTool, LlmRequestToolFunction,
+    LlmResponse, LlmToolChoice,
 };
 use std::{collections::HashMap, fs, sync::Arc};
 
@@ -1245,7 +1247,7 @@ impl MessageService {
         let mut accumulated_content = String::new();
         let mut accumulated_reasoning = String::new();
         let mut accumulated_generated_images: Vec<LlmGeneratedImage> = Vec::new();
-        let mut all_tool_calls: Vec<handbox_llm::types::LlmToolCall> = Vec::new();
+        let mut all_tool_calls: Vec<crate::models::llm_types::LlmToolCall> = Vec::new();
         let mut chunk_count = 0;
 
         // 7. 处理真实的流式响应
@@ -1300,7 +1302,7 @@ impl MessageService {
 
                                     // 确保有足够的空间
                                     while all_tool_calls.len() <= index {
-                                        all_tool_calls.push(handbox_llm::types::LlmToolCall {
+                                        all_tool_calls.push(crate::models::llm_types::LlmToolCall {
                                             id: String::new(),
                                             tool_type: String::new(),
                                             function: LlmToolFunction {
@@ -1961,7 +1963,7 @@ impl MessageService {
 
     fn load_llm_attachments(
         attachments: &[MessageAttachment],
-    ) -> Result<Vec<handbox_llm::types::LlmMessageAttachment>, AppError> {
+    ) -> Result<Vec<crate::models::llm_types::LlmMessageAttachment>, AppError> {
         let mut resources = Vec::new();
         for attachment in attachments {
             let data = fs::read(&attachment.path).map_err(|e| {
@@ -1970,7 +1972,7 @@ impl MessageService {
                     attachment.name, attachment.path, e
                 ))
             })?;
-            resources.push(handbox_llm::types::LlmMessageAttachment {
+            resources.push(crate::models::llm_types::LlmMessageAttachment {
                 name: attachment.name.clone(),
                 mime_type: attachment.mime_type.clone(),
                 data,

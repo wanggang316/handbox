@@ -5,7 +5,8 @@ use crate::services::{Database, ProviderService};
 use crate::storage::types::{Session, SessionReasoningConfig, McpServerConfig, Provider, UUID};
 use crate::storage::{AgentRepository, SessionRepository, MessageRepository};
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::types::{LlmMessage, LlmMessageRole, LlmRequest};
+use crate::models::llm_types::LlmMessageRole;
+use handbox_llm::types::{LlmMessage, LlmRequest};
 use handbox_llm::{create_llm_client, LlmProvider};
 use std::sync::Arc;
 

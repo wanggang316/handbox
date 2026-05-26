@@ -1,5 +1,5 @@
 use super::common::{Timestamp, UUID};
-use handbox_llm::types::{LlmReasoningEffortConfig, LlmResponsesReasoning, LlmThinkingConfig};
+use crate::models::llm_types::{LlmReasoningEffortConfig, LlmResponsesReasoning, LlmThinkingConfig};
 use serde::{Deserialize, Serialize};
 
 fn default_execution_mode() -> String {

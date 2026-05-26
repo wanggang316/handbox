@@ -3,7 +3,7 @@
 use crate::models::AppError;
 use crate::storage::types::{Message, MessageConfig, MessageToolCall, Timestamp, UUID};
 use crate::storage::Database;
-use handbox_llm::types::LlmMessageRole;
+use crate::models::llm_types::LlmMessageRole;
 use serde_json;
 use sqlx::query::Query;
 use sqlx::sqlite::SqliteArguments;

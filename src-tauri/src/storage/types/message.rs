@@ -1,7 +1,7 @@
 use super::session::SessionReasoningConfig;
 use super::common::{Timestamp, UUID};
 use crate::storage::types::McpServerConfig;
-use handbox_llm::types::{LlmMessageRole, LlmToolFunction};
+use crate::models::llm_types::{LlmMessageRole, LlmToolFunction};
 
 use serde::{Deserialize, Serialize};
 
@@ -51,8 +51,8 @@ pub struct MessageToolCall {
     pub result: Option<String>,
 }
 
-impl From<handbox_llm::types::LlmToolCall> for MessageToolCall {
-    fn from(llm_call: handbox_llm::types::LlmToolCall) -> Self {
+impl From<crate::models::llm_types::LlmToolCall> for MessageToolCall {
+    fn from(llm_call: crate::models::llm_types::LlmToolCall) -> Self {
         MessageToolCall {
             id: llm_call.id,
             tool_type: llm_call.tool_type,
@@ -66,8 +66,8 @@ impl From<handbox_llm::types::LlmToolCall> for MessageToolCall {
 
 impl MessageToolCall {
     /// 转换为 LLM 层的 ToolCall（移除业务字段）
-    pub fn to_llm_tool_call(&self) -> handbox_llm::types::LlmToolCall {
-        handbox_llm::types::LlmToolCall {
+    pub fn to_llm_tool_call(&self) -> crate::models::llm_types::LlmToolCall {
+        crate::models::llm_types::LlmToolCall {
             id: self.id.clone(),
             tool_type: self.tool_type.clone(),
             function: self.function.clone(),
@@ -143,7 +143,7 @@ pub struct Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use handbox_llm::types::LlmMessageRole;
+    use crate::models::llm_types::LlmMessageRole;
 
     #[test]
     fn message_roundtrip_preserves_fields() {
