@@ -1280,33 +1280,46 @@ impl MessageService {
 
         // reasoning_effort: 优先 chat.reasoning.reasoning_effort.effort；
         // 否则尝试 chat.reasoning.openrouter.effort（exclude=true 时跳过）。
-        // 镜像 convert_to_api_request 中的分支逻辑，仅抽取字符串形式。
-        let reasoning_effort: Option<String> = chat.reasoning.as_ref().and_then(|cfg| {
-            let from_effort = cfg
-                .reasoning_effort
-                .as_ref()
-                .and_then(|re| re.effort.as_ref())
-                .map(|e| match e {
-                    LlmReasoningEffort::Minimal => "minimal".to_string(),
-                    LlmReasoningEffort::Low => "low".to_string(),
-                    LlmReasoningEffort::Medium => "medium".to_string(),
-                    LlmReasoningEffort::High => "high".to_string(),
-                });
-            if from_effort.is_some() {
-                return from_effort;
+        // 镜像 convert_to_api_request 中的分支逻辑（含 supports_reasoning 门控）。
+        let supported_parameters = match self.lookup_supported_parameters(&chat).await {
+            Ok(params) => params,
+            Err(e) => {
+                error_callback(stream_id.clone(), e);
+                return;
             }
-            cfg.openrouter.as_ref().and_then(|or_cfg| {
-                if or_cfg.exclude == Some(true) {
-                    return None;
+        };
+        let supports_reasoning = Self::parameters_include(&supported_parameters, "reasoning")
+            || Self::parameters_include(&supported_parameters, "thinking");
+        let reasoning_effort: Option<String> = if supports_reasoning {
+            chat.reasoning.as_ref().and_then(|cfg| {
+                let from_effort = cfg
+                    .reasoning_effort
+                    .as_ref()
+                    .and_then(|re| re.effort.as_ref())
+                    .map(|e| match e {
+                        LlmReasoningEffort::Minimal => "minimal".to_string(),
+                        LlmReasoningEffort::Low => "low".to_string(),
+                        LlmReasoningEffort::Medium => "medium".to_string(),
+                        LlmReasoningEffort::High => "high".to_string(),
+                    });
+                if from_effort.is_some() {
+                    return from_effort;
                 }
-                or_cfg.effort.as_ref().and_then(|s| {
-                    match s.to_ascii_lowercase().as_str() {
-                        "minimal" | "low" | "medium" | "high" => Some(s.to_ascii_lowercase()),
-                        _ => None,
+                cfg.openrouter.as_ref().and_then(|or_cfg| {
+                    if or_cfg.exclude == Some(true) {
+                        return None;
                     }
+                    or_cfg.effort.as_ref().and_then(|s| {
+                        match s.to_ascii_lowercase().as_str() {
+                            "minimal" | "low" | "medium" | "high" => Some(s.to_ascii_lowercase()),
+                            _ => None,
+                        }
+                    })
                 })
             })
-        });
+        } else {
+            None
+        };
 
         // signal: 当前 services/message.rs 没有 CancellationToken 来源。
         // UT-DISSOLVE-003 的端到端验收依赖 M2-T2d 落地取消机制；本任务仅完成信号管脚。
@@ -1356,6 +1369,7 @@ impl MessageService {
         // images via this path. Re-enable when hand-ai surfaces them.
         let accumulated_generated_images: Vec<LlmGeneratedImage> = Vec::new();
         let mut terminal_tool_calls: Vec<crate::models::llm_types::LlmToolCall> = Vec::new();
+        let mut terminal_usage: Option<chat_engine::ChatUsage> = None;
         let mut chunk_count = 0;
 
         // 8. 处理 chat_engine 流式响应
@@ -1363,6 +1377,11 @@ impl MessageService {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(chunk) => {
+                    // 终止 chunk 上 chat_engine 会附带 usage；非终止 chunk 通常为 None。
+                    if let Some(usage) = chunk.usage.clone() {
+                        terminal_usage = Some(usage);
+                    }
+
                     if let Some(text) = chunk.content.as_deref() {
                         if !text.is_empty() {
                             accumulated_content.push_str(text);
@@ -1516,9 +1535,9 @@ impl MessageService {
             tool_calls: processed_tool_calls,
             model_id: request.model_id.clone(),
             provider_id: request.provider_id.clone(),
-            input_tokens: None, // 流式API通常不返回token统计
-            output_tokens: None,
-            total_tokens: None,
+            input_tokens: terminal_usage.as_ref().map(|u| u.prompt_tokens),
+            output_tokens: terminal_usage.as_ref().map(|u| u.completion_tokens),
+            total_tokens: terminal_usage.as_ref().map(|u| u.total_tokens),
             duration: Some(duration),
             generated_assets: persisted_assets,
         };
