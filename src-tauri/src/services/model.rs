@@ -2,14 +2,16 @@
 
 use crate::models::model::ModelResponse;
 use crate::models::AppError;
+use crate::services::chat_engine;
 use crate::services::Database;
-use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
+use crate::storage::types::{Model, Provider, UUID};
 use crate::storage::{SessionRepository, ModelRepository, ProviderRepository};
+// `LlmConfigProvider` is retained only as the type of the (now-dead)
+// `ModelService::llm_config` field. M2-T5 deletes the field together with
+// the rest of the legacy stack.
 use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 模型服务
 #[derive(Clone)]
@@ -17,6 +19,9 @@ pub struct ModelService {
     model_repo: ModelRepository,
     provider_repo: ProviderRepository,
     chat_repo: SessionRepository,
+    /// Carried for constructor-signature compatibility; the legacy model-list
+    /// path that consumed this is gone (M2-T4). M2-T5 removes the field outright.
+    #[allow(dead_code)]
     llm_config: Arc<dyn LlmConfigProvider>,
 }
 
@@ -31,7 +36,12 @@ impl ModelService {
         }
     }
 
-    /// 从远程 API 获取模型并保存到数据库
+    /// 从 hand-ai 静态目录获取模型并保存到数据库
+    ///
+    /// M2-T4 起，模型列表的真理源来自 hand-ai 的静态目录（`hand_ai_model::get_models`），
+    /// 经 `chat_engine::list_catalog_models` 适配为 `storage::types::Model`。
+    /// 不再向 `/v1/models` 发起在线请求；网络/认证错误路径随之消失。
+    /// 显式权衡：用户自定义的、不在 hand-ai 目录里的模型 id 将不再出现。
     ///
     /// # 参数
     /// - `provider`: 供应商信息
@@ -41,30 +51,28 @@ impl ModelService {
         provider: &Provider,
         sync: bool,
     ) -> Result<(), AppError> {
-        tracing::info!("Fetching models from API for provider: {}", provider.name);
-
-        let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
-            .map_err(AppError::from)?;
-        let context = Self::provider_context(provider);
-
-        // 获取模型列表，使用友好的错误转换
-        let llm_models = client
-            .list_models(&context)
-            .await
-            .map_err(AppError::from_llm_fetch_error)?;
-
         tracing::info!(
-            "Successfully fetched {} models for provider: {}",
-            llm_models.len(),
+            "Loading catalog models from hand-ai for provider: {}",
             provider.name
         );
 
-        // 适配为我们的 Model 结构
-        let now = self.current_timestamp();
-        let models: Vec<Model> = llm_models
+        // hand-ai 目录读取：纯内存、同步、返回已映射好的 storage::types::Model
+        let catalog_models = chat_engine::list_catalog_models(&provider.provider_type);
+
+        // 用应用层的 provider_id 覆盖 catalog 返回的占位 provider_id
+        let models: Vec<Model> = catalog_models
             .into_iter()
-            .map(|llm_model| adapt_model(llm_model, provider.id.clone(), now))
+            .map(|mut model| {
+                model.provider_id = provider.id.clone();
+                model
+            })
             .collect();
+
+        tracing::info!(
+            "Successfully loaded {} catalog models for provider: {}",
+            models.len(),
+            provider.name
+        );
 
         // 保存或同步模型
         if !models.is_empty() {
@@ -270,118 +278,9 @@ impl ModelService {
         }
     }
 
-    // === 私有辅助方法 ===
-
-    /// 构建 LLM Provider 上下文
-    fn provider_context(provider: &Provider) -> LlmProvider {
-        LlmProvider {
-            base_url: provider.base_url.clone(),
-            api_key: provider.api_key.clone(),
-        }
-    }
-
-    /// 获取当前时间戳
-    fn current_timestamp(&self) -> Timestamp {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64
-    }
-
     /// 统计使用指定模型的聊天数量
     pub async fn count_chats_using_model(&self, model_id: &str) -> Result<i32, AppError> {
         self.chat_repo.count_chats_using_model(model_id).await
-    }
-}
-
-/// 将标准模型适配为应用内部的 `Model`
-pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) -> Model {
-    let LlmModel {
-        id,
-        name,
-        context_length,
-        output_max_tokens,
-        supported_features,
-        description,
-        input_modalities,
-        output_modalities,
-        metadata,
-        pricing,
-        url,
-        supported_parameters,
-        default_parameters,
-        max_parameters,
-        supported_methods,
-        created_at,
-    } = llm_model;
-
-    let supported_features = supported_features.and_then(|features| {
-        let mapped: Vec<String> = features
-            .into_iter()
-            .filter(|f| !f.trim().is_empty())
-            .collect();
-        if mapped.is_empty() {
-            None
-        } else {
-            Some(mapped)
-        }
-    });
-
-    let input_modalities = input_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let output_modalities = output_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let supported_methods = supported_methods.and_then(|methods| {
-        if methods.is_empty() {
-            None
-        } else {
-            Some(methods)
-        }
-    });
-
-    Model {
-        id,
-        provider_id,
-        name,
-        context_length,
-        output_max_tokens,
-        supported_features,
-        description,
-        input_modalities,
-        output_modalities,
-        metadata,
-        pricing,
-        url,
-        supported_parameters,
-        default_parameters,
-        max_parameters,
-        supported_methods,
-        model_created_at: created_at,
-        enabled: true,
-        favorite: false,
-        created_at: now,
-        updated_at: now,
-    }
-}
-
-fn map_llm_modality(modality: LlmModelModality) -> Option<ModelModality> {
-    match modality {
-        LlmModelModality::Text => Some(ModelModality::Text),
-        LlmModelModality::Image => Some(ModelModality::Image),
-        LlmModelModality::Pdf => Some(ModelModality::Pdf),
-        LlmModelModality::File => Some(ModelModality::File),
-        LlmModelModality::Audio => Some(ModelModality::Audio),
-        LlmModelModality::Video => Some(ModelModality::Video),
     }
 }
 
