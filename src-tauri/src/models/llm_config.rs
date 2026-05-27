@@ -10,8 +10,6 @@ pub struct ProviderConfig {
     pub default_name: String,
     pub default_base_url: String,
     pub icon: String,
-    pub chat_api_type: String,
-    pub model_api_type: String,
     pub description: Option<String>,
 }
 

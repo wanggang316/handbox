@@ -188,36 +188,28 @@
       "type_name": "OpenAI",
       "default_name": "OpenAI",
       "default_base_url": "https://api.openai.com/v1",
-      "icon": "/logo-openai.png",
-      "chat_api_type": "openai-responses",
-      "model_api_type": "openai"
+      "icon": "/logo-openai.png"
     },
     {
       "type": "google",
       "type_name": "Google AI",
       "default_name": "Google AI",
       "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
-      "icon": "/logo-google.png",
-      "chat_api_type": "google",
-      "model_api_type": "google"
+      "icon": "/logo-google.png"
     },
     {
       "type": "deepseek",
       "type_name": "DeepSeek",
       "default_name": "DeepSeek",
       "default_base_url": "https://api.deepseek.com",
-      "icon": "/logo-deepseek.png",
-      "chat_api_type": "openai-completions",
-      "model_api_type": "openai"
+      "icon": "/logo-deepseek.png"
     },
     {
       "type": "anthropic",
       "type_name": "Anthropic",
       "default_name": "Anthropic",
       "default_base_url": "https://api.anthropic.com",
-      "icon": "/logo-anthropic.png",
-      "chat_api_type": "anthropic",
-      "model_api_type": "anthropic"
+      "icon": "/logo-anthropic.png"
     },
     {
       "type": "openrouter",
@@ -225,8 +217,6 @@
       "default_name": "OpenRouter",
       "default_base_url": "https://openrouter.ai/api/v1",
       "icon": "/logo-openrouter.png",
-      "chat_api_type": "openai-completions",
-      "model_api_type": "openrouter",
       "parameters": {
         "reasoning": {
           "component": "openrouter_reasoning",
@@ -265,18 +255,14 @@
       "type_name": "OpenAI Compatible",
       "default_name": "Custom Provider",
       "default_base_url": "",
-      "icon": "/logo-openai-compatible.png",
-      "chat_api_type": "openai-completions",
-      "model_api_type": "openai"
+      "icon": "/logo-openai-compatible.png"
     },
     {
       "type": "anthropic-compatible",
       "type_name": "Anthropic Compatible",
       "default_name": "Custom Provider",
       "default_base_url": "",
-      "icon": "/logo-anthropic-compatible.png",
-      "chat_api_type": "anthropic",
-      "model_api_type": "anthropic"
+      "icon": "/logo-anthropic-compatible.png"
     }
   ]
 }

@@ -126,8 +126,6 @@ pub struct ProviderConfig {
     pub default_name: String,
     pub default_base_url: String,
     pub icon: String,
-    pub chat_api_type: String,  // "openai" | "google" | "anthropic"
-    pub model_api_type: String, // "openai" | "google" | "anthropic" | "openrouter"
     #[serde(default)]
     pub parameters: HashMap<String, ParameterConfig>, // 供应商级别的参数配置
 }
@@ -195,11 +193,6 @@ impl LlmConfig {
     /// surface the 30+ vendors hand-ai knows about (Bedrock, Groq, xAI,
     /// Cerebras, etc.) without HandBox having to maintain its own copy of the
     /// catalog.
-    ///
-    /// The synthesized entries carry placeholder chat_api_type / model_api_type
-    /// ("openai-completions" / "openai"). The actual chat path short-circuits
-    /// to HandAiChatClient via `build_chat_client` long before those strings
-    /// get read.
     fn augment_with_hand_ai_providers(&mut self) {
         let existing: std::collections::HashSet<String> = self
             .providers
@@ -222,8 +215,6 @@ impl LlmConfig {
                 // provider art lands when a designer touches each one.
                 // Tracked as a deferred decision in the overnight summary.
                 icon: "/logo-150.png".to_string(),
-                chat_api_type: "openai-completions".to_string(),
-                model_api_type: "openai".to_string(),
                 parameters: std::collections::HashMap::new(),
             });
             appended += 1;
@@ -369,8 +360,6 @@ mod tests {
             default_name: "OpenAI".into(),
             default_base_url: "https://api.openai.com/v1".into(),
             icon: "/logo-openai.png".into(),
-            chat_api_type: "openai-completions".into(),
-            model_api_type: "openai".into(),
             parameters: std::collections::HashMap::new(),
         });
         let before = cfg.providers.len();
