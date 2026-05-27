@@ -715,12 +715,47 @@ fn hand_ai_to_handbox_model(
         supported_parameters: None,
         default_parameters: None,
         max_parameters: None,
-        supported_methods: None,
+        supported_methods: Some(supported_methods_for_api(m.api)),
         model_created_at: None,
         enabled: true,
         favorite: false,
         created_at: now,
         updated_at: now,
+    }
+}
+
+/// Map a hand-ai `Api` enum value to the short chat-method tags that
+/// HandBox's UI uses to pick a parameter set. Pre-dissolve, only the
+/// OpenRouter adapter populated this field (with `"completions"`); the
+/// other legacy fetchers left it `None`, so existing DB rows for OpenAI
+/// / Anthropic providers may also be empty in the same way. After M2-T4
+/// rewired through hand-ai's catalog every freshly-synced provider
+/// must populate it explicitly or `is_method_supported` short-circuits
+/// to false and `get_provider_models` silently filters every model out
+/// at the IPC boundary (the bug that hid all 3 Cerebras models from
+/// the picker until this fix).
+fn supported_methods_for_api(api: model::Api) -> Vec<String> {
+    use model::Api;
+    match api {
+        // OpenAI-Completions wire family.
+        Api::OpenAICompletions | Api::MistralConversations => vec!["completions".to_string()],
+        // OpenAI-Responses wire family.
+        Api::OpenAIResponses
+        | Api::AzureOpenAiResponses
+        | Api::OpenAICodexResponses => vec!["responses".to_string()],
+        // Native Anthropic / Bedrock-Converse. The UI parameter set is
+        // identical to OpenAI Completions (temperature / top_p / max_tokens /
+        // streaming), and the actual chat wire dispatch is owned by hand-ai's
+        // Client based on `Model.api`, not by this string. Tagging as
+        // `"completions"` lets `ChatMethod::Completions` pick up its base
+        // parameter rendering for these providers.
+        Api::AnthropicMessages | Api::BedrockConverseStream => vec!["completions".to_string()],
+        // Google native Generate-Content family.
+        Api::GoogleGenerativeAi | Api::GoogleGeminiCli | Api::GoogleVertex => {
+            vec!["google_generate_content".to_string()]
+        }
+        // In-memory test harness — no UI surface.
+        Api::Faux => Vec::new(),
     }
 }
 
@@ -732,6 +767,62 @@ fn hand_ai_to_handbox_model(
 mod tests {
     use super::*;
     use hand_ai_model::UserContent;
+
+    #[test]
+    fn supported_methods_for_api_covers_every_variant() {
+        // Pin the per-Api mapping so a new hand-ai Api variant forces an
+        // explicit decision here (the exhaustive match in
+        // `supported_methods_for_api` already guarantees compile-time
+        // failure; this test pins runtime semantics for the existing set).
+        use hand_ai_model::Api;
+
+        assert_eq!(
+            supported_methods_for_api(Api::OpenAICompletions),
+            vec!["completions".to_string()],
+            "OpenAI-Completions wire → ChatMethod::Completions parameter set"
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::OpenAIResponses),
+            vec!["responses".to_string()],
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::AzureOpenAiResponses),
+            vec!["responses".to_string()],
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::OpenAICodexResponses),
+            vec!["responses".to_string()],
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::AnthropicMessages),
+            vec!["completions".to_string()],
+            "Anthropic wire uses Completions parameter set for UI"
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::BedrockConverseStream),
+            vec!["completions".to_string()],
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::GoogleGenerativeAi),
+            vec!["google_generate_content".to_string()],
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::GoogleGeminiCli),
+            vec!["google_generate_content".to_string()],
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::GoogleVertex),
+            vec!["google_generate_content".to_string()],
+        );
+        assert_eq!(
+            supported_methods_for_api(Api::MistralConversations),
+            vec!["completions".to_string()],
+        );
+        assert!(
+            supported_methods_for_api(Api::Faux).is_empty(),
+            "Faux is the in-memory test harness — no UI surface"
+        );
+    }
 
     // ---- ChatMessage fixture helpers -----------------------------------
 
