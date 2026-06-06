@@ -124,6 +124,14 @@ pub struct ProviderConfig {
     pub provider_type: String,
     pub type_name: String,
     pub default_name: String,
+    // The provider's API endpoint is a fact owned by hand-ai's catalog, not
+    // HandBox: `augment_with_hand_ai_providers` fills this from
+    // `hand_ai_catalog::list_providers()` for every catalog provider, so the
+    // hand-tuned entries in llm_config.json no longer carry it. Custom
+    // providers (openai-compatible / anthropic-compatible) are NOT in the
+    // catalog, so theirs stays empty — the user supplies a base_url when
+    // adding the provider.
+    #[serde(default)]
     pub default_base_url: String,
     pub icon: String,
     #[serde(default)]
@@ -187,13 +195,42 @@ impl LlmConfig {
         config
     }
 
-    /// Append synthesized `ProviderConfig` entries for every hand-ai catalog
-    /// provider that isn't already in `self.providers`. Lets the existing
-    /// `get_provider_configs` IPC and `LlmConfig::get_provider_config` lookups
-    /// surface the 30+ vendors hand-ai knows about (Bedrock, Groq, xAI,
-    /// Cerebras, etc.) without HandBox having to maintain its own copy of the
-    /// catalog.
+    /// Merge hand-ai's catalog into the loaded config:
+    ///
+    /// 1. **Fill endpoints.** For every provider already present (the
+    ///    hand-tuned entries in llm_config.json) whose `default_base_url` is
+    ///    empty, fill it from the catalog. The endpoint is hand-ai's fact, so
+    ///    HandBox no longer hard-codes it. Custom providers
+    ///    (openai-compatible / anthropic-compatible) aren't in the catalog and
+    ///    keep their empty base_url — the user supplies one when adding them.
+    /// 2. **Append catalog-only providers.** Synthesize a `ProviderConfig`
+    ///    for every catalog provider not already present, so the
+    ///    `get_provider_configs` IPC and `LlmConfig::get_provider_config`
+    ///    lookups surface the 30+ vendors hand-ai knows about (Bedrock, Groq,
+    ///    xAI, Cerebras, etc.) without HandBox maintaining its own catalog.
     fn augment_with_hand_ai_providers(&mut self) {
+        let catalog = crate::services::hand_ai_catalog::list_providers();
+
+        // Single source of truth for provider endpoints: provider_type -> base_url.
+        let base_url_by_type: HashMap<String, String> = catalog
+            .iter()
+            .map(|hp| (hp.id.clone(), hp.default_base_url.clone()))
+            .collect();
+
+        // 1. Fill empty endpoints on existing (hand-tuned) entries from the catalog.
+        for p in self
+            .providers
+            .iter_mut()
+            .chain(self.custom_providers.iter_mut())
+        {
+            if p.default_base_url.is_empty() {
+                if let Some(url) = base_url_by_type.get(&p.provider_type) {
+                    p.default_base_url = url.clone();
+                }
+            }
+        }
+
+        // 2. Append catalog providers not already present.
         let existing: std::collections::HashSet<String> = self
             .providers
             .iter()
@@ -201,7 +238,7 @@ impl LlmConfig {
             .map(|p| p.provider_type.clone())
             .collect();
         let mut appended = 0usize;
-        for hp in crate::services::hand_ai_catalog::list_providers() {
+        for hp in catalog {
             if existing.contains(&hp.id) {
                 continue;
             }
@@ -351,14 +388,15 @@ mod tests {
     #[test]
     fn augment_appends_hand_ai_providers_without_clobbering_existing() {
         let mut cfg = LlmConfig::new();
-        // Pretend llm_config.json had a single hand-tuned openai entry with
-        // a custom icon. Augmentation must NOT replace it with a synthesized
-        // version (the legacy hand-tuned metadata wins).
+        // Pretend llm_config.json had a single hand-tuned openai entry with a
+        // custom icon and NO endpoint (the endpoint is hand-ai's fact, filled
+        // by augmentation). Augmentation must NOT replace the hand-tuned
+        // metadata with a synthesized version, but MUST fill the endpoint.
         cfg.providers.push(ProviderConfig {
             provider_type: "openai".into(),
             type_name: "OpenAI".into(),
             default_name: "OpenAI".into(),
-            default_base_url: "https://api.openai.com/v1".into(),
+            default_base_url: String::new(),
             icon: "/logo-openai.png".into(),
             parameters: std::collections::HashMap::new(),
         });
@@ -378,6 +416,10 @@ mod tests {
         assert_eq!(
             openai.type_name, "OpenAI",
             "hand-tuned name must survive augmentation"
+        );
+        assert_eq!(
+            openai.default_base_url, "https://api.openai.com/v1",
+            "empty endpoint on a hand-tuned entry must be filled from the catalog"
         );
 
         // Spot-check that a hand-ai-only provider got synthesized in.

@@ -187,35 +187,30 @@
       "type": "openai",
       "type_name": "OpenAI",
       "default_name": "OpenAI",
-      "default_base_url": "https://api.openai.com/v1",
       "icon": "/logo-openai.png"
     },
     {
       "type": "google",
       "type_name": "Google AI",
       "default_name": "Google AI",
-      "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
       "icon": "/logo-google.png"
     },
     {
       "type": "deepseek",
       "type_name": "DeepSeek",
       "default_name": "DeepSeek",
-      "default_base_url": "https://api.deepseek.com",
       "icon": "/logo-deepseek.png"
     },
     {
       "type": "anthropic",
       "type_name": "Anthropic",
       "default_name": "Anthropic",
-      "default_base_url": "https://api.anthropic.com",
       "icon": "/logo-anthropic.png"
     },
     {
       "type": "openrouter",
       "type_name": "OpenRouter",
       "default_name": "OpenRouter",
-      "default_base_url": "https://openrouter.ai/api/v1",
       "icon": "/logo-openrouter.png",
       "parameters": {
         "reasoning": {
