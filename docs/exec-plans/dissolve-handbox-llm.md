@@ -17,9 +17,9 @@ User-observable behavior does not change. The picker still shows the same 30+ pr
 
 ## Progress
 
-**State:** Running — awaiting user manual UI smoke for M3-T3
-**Active worker:** none (M3-T1+T2 landed at `e7ea789`; static gates of M3-T3 pass; live UI smoke deferred to Gump)
-**Last handoff:** 2026-05-26T10:30Z — M3-T1+T2 — completed
+**State:** Landed — M1-M3 complete; post-M3 UI-smoke regressions fixed; on `model-v0.3.0`
+**Active worker:** none (dissolution merged through `e7ea789`; post-merge follow-ups through `472a085`)
+**Last handoff:** 2026-06-06 — post-M3 follow-ups (UI-smoke fixes + hand-ai v0.3.0 bump) — completed
 
 ### Handoff log
 
@@ -164,6 +164,16 @@ This makes M1-T2 trivial again: pure path-rewrite, single atomic commit, no sema
 3. **Plan briefs systematically underestimated test-callsite scope.** M3-T1b's brief listed 3 import sites but missed the 13 test call sites in `services/{session,message}.rs` that compile under `cargo test --lib`. The implementer surfaced this as BLOCKED with options; widening scope (option 1) was the right call. Future briefs should run `grep -rn "TargetSymbol::new(" src-tauri/src/` pre-dispatch to capture test-only call sites.
 4. **Comment provenance ("Verbatim copy from handbox-llm/src/...") leaves broken pointers after deletion.** Kept in place per the implementer's note about historical archaeology — the original code is findable via `git log` on the dissolve-handbox-llm series. If future readers find these annoying, a sweep replacing them with git-SHA references is a low-risk follow-up.
 5. **The `hand-ai` feature became vestigial — swept post-review.** With handbox-llm gone, the feature reduced to `hand-ai = []` (no-op) but the `#[cfg(feature = "hand-ai")]` gates remained at 7 sites. Independent code review (`fd75315` follow-up) flagged the inconsistency and the feature was deleted entirely in a post-merge cleanup commit. The build matrix is now single-mode.
+
+**Post-M3 follow-ups (UI smoke, 2026-06-05/06):** Gump's live UI smoke surfaced two regressions and a config-cleanup opportunity; all closed.
+
+1. **Models not showing in the picker (`c71a8b8`).** `chat_engine::hand_ai_to_handbox_model` hard-coded `supported_methods: None`, so `ModelResponse::from_model_with_provider` → `is_method_supported(None)` → `chat_method = None` → every freshly-synced model was silently dropped at the IPC `.filter(chat_method.is_some())`. Fixed by deriving `supported_methods` from hand-ai's `Model.api` via an exhaustive `supported_methods_for_api` helper (+1 mapping test; baseline 97→98).
+2. **Dead `chat_api_type` / `model_api_type` fields (`9eb6b9c`).** Post-dissolve the chat path keys off `provider_id` alone; these two `llm_config.json` strings had no runtime reader. Swept across all four layers (JSON, internal + IPC `ProviderConfig`, TS type). Verified no `.chat_api_type` / `.model_api_type` access anywhere in `src/`.
+3. **hand-ai upstream issues filed.** #94 (Cerebras catalog lists a phantom `qwen-3-235b-a22b-instruct-2507` the live `/v1/models` doesn't serve) and #95 (reasoning capability metadata — `thinking_level_map` fill, `Model.thinking_token_budget`, `ApiCapabilities.reasoning_summary_modes`). The architecture principle was confirmed and recorded in `AGENTS.md` (`7fced15`): **HandBox's model list depends entirely on hand-ai's catalog — no HandBox-side live `/v1/models` polling or intersection filtering**; catalog accuracy is hand-ai's responsibility.
+4. **hand-ai bumped `model-v0.2.0` → `model-v0.3.0` (`472a085`).** #94 fixed upstream (merge `7a29ecd`), cut as `model-v0.3.0` (`7394046`). The bump is a minor (additive) version — v0.3.0 adds a `catalog_refresh` runtime API + `ClientBuilder`; the surface HandBox consumes (`Client::new`, `get_models`, `get_providers`, `Context`, `stream_simple`) is unchanged. `cargo check` clean, `cargo test --lib` 98/9/1, dep alignment preserved (openai-rust v0.2.1 / google-genai-rust v0.1.0 identical to v0.3.0's pins). The new runtime catalog-refresh path is available but **not** wired — adopting it is a deferred, independent decision.
+5. **DB cleanup.** The embedded-catalog fix only affects future syncs, so the stale `qwen-3-235b-a22b-instruct-2507` row already in the user's SQLite was deleted directly (app not running), and the one session referencing it (`新会话`) was repointed to `gpt-oss-120b` to avoid a dangling model reference.
+
+**Open at handoff:** hand-ai #95 (reasoning metadata) unstarted; runtime catalog-refresh adoption (uses v0.3.0's `catalog_refresh`) not wired — both independent of the dissolution itself.
 
 ## Context and Orientation
 
