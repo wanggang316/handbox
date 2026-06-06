@@ -67,9 +67,12 @@ image = "0.25"
 arboard = "3.4"
 handbox-mcp = { path = "crates/handbox-mcp" }
 # Direct dep on hand-ai's model crate for services/chat_engine.rs (M2-T1).
-# Pinned to hand-ai's `model-v0.2.0` tag. Single source of truth for
+# Pinned to hand-ai's `model-v0.3.0` tag. Single source of truth for
 # provider catalog + chat after the dissolve-handbox-llm migration.
-hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "model-v0.2.0", package = "model" }
+# v0.3.0 carries the #94 cerebras phantom-model catalog fix + an additive
+# runtime catalog-refresh API (catalog_refresh); HandBox uses the embedded
+# catalog only for now.
+hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "model-v0.3.0", package = "model" }
 tokio-util = "0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
