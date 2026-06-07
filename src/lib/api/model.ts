@@ -83,3 +83,17 @@ export async function getAvailableModels(): Promise<Model[]> {
 export async function countChatsUsingModel(modelId: string): Promise<number> {
 	return apiCall<number>('model_count_chats', { modelId });
 }
+
+/**
+ * 为自定义供应商手动添加模型。
+ *
+ * 自定义端点（openai-compatible / anthropic-compatible）不在 hand-ai 目录中，
+ * 无法自动同步，用户需手填 model id。仅自定义供应商可用。
+ */
+export async function addModel(
+	providerId: UUID,
+	modelId: string,
+	name?: string
+): Promise<Model> {
+	return apiCall<Model>('model_add', { providerId, modelId, name });
+}

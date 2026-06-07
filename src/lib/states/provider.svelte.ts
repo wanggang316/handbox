@@ -73,6 +73,14 @@ export function getProviderConfig(
   ].find((t) => t.provider_type === providerType);
 }
 
+// 判断某供应商类型是否为自定义（openai-compatible / anthropic-compatible 等）。
+// 自定义端点不在 hand-ai 目录中，模型需手动添加。
+export function isCustomProviderType(providerType: string): boolean {
+  return providerConfigs.custom_providers.some(
+    (t) => t.provider_type === providerType,
+  );
+}
+
 // 获取供应商图标
 export function getProviderIcon(provider: Provider): string | undefined {
   const config = getProviderConfig(provider.provider_type);
@@ -466,6 +474,27 @@ export const providerActions = {
       throw error;
     } finally {
       providerState.isFetchingModels = null;
+    }
+  },
+
+  /**
+   * 为自定义供应商手动添加模型，并刷新该供应商的模型列表。
+   */
+  async addModel(
+    providerId: UUID,
+    modelId: string,
+    name?: string,
+  ): Promise<void> {
+    try {
+      await modelApi.addModel(providerId, modelId, name);
+      // 刷新当前模型列表，让新模型出现
+      await providerActions.fetchProviderModels(providerId, false);
+      // 标记带模型的供应商缓存需刷新，使聊天选择弹窗能看到新模型
+      markProvidersWithModelsDirty("model-added", { providerId, modelId });
+    } catch (error) {
+      providerState.error =
+        error instanceof Error ? error.message : "添加模型失败";
+      throw error;
     }
   },
 
