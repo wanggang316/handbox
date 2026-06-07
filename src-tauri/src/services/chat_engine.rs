@@ -272,15 +272,11 @@ pub(crate) fn messages_to_context(
     // reconstruct from the *current* request's model: even if a past turn ran
     // on a different model, the historical record is about *content*, not
     // provenance — and hand-ai's transcript handling doesn't validate prior
-    // turns against the current model. If the current model id isn't in
-    // hand-ai's catalog we surface a clear error rather than fabricate metadata.
+    // turns against the current model. Catalog models resolve from hand-ai;
+    // custom-provider models synthesize a template (same path as the chat
+    // request). Only a non-catalog, non-custom model surfaces a clear error.
     let assistant_meta = if messages.iter().any(|m| m.role == LlmMessageRole::Assistant) {
-        let template = hand_ai_model::get_model(provider_id, model_id).ok_or_else(|| {
-            AppError::validation_error(&format!(
-                "chat_engine: cannot reconstruct prior assistant turn — model '{}' under provider '{}' not in catalog",
-                model_id, provider_id
-            ))
-        })?;
+        let template = resolve_model_template(provider_id, model_id)?;
         Some(AssistantMeta {
             api: template.api,
             provider: template.provider,
@@ -509,23 +505,94 @@ fn translate_tools(tools: &[ChatTool]) -> Vec<Tool> {
 // Model lookup + options building
 // ---------------------------------------------------------------------------
 
-/// Look up the hand-ai `Model` template and override `base_url` from the
-/// caller-supplied `ChatProvider`.
+/// Resolve a `Model` template by `provider_id` (== provider_type) + `model_id`.
+///
+/// Catalog providers resolve from hand-ai's static catalog. Custom providers
+/// (openai-compatible / anthropic-compatible) aren't catalog entries, so a
+/// template is synthesized from the wire protocol the custom type speaks (the
+/// user supplies the model id + base_url). Anything else is a real error.
+fn resolve_model_template(provider_id: &str, model_id: &str) -> Result<model::Model, AppError> {
+    if let Some(m) = hand_ai_model::get_model(provider_id, model_id) {
+        return Ok(m);
+    }
+    if let Some(api) = custom_api_for_provider_type(provider_id) {
+        return Ok(synthesize_custom_model(model_id, api));
+    }
+    Err(AppError::validation_error(&format!(
+        "chat_engine: model '{}' not registered under provider '{}'",
+        model_id, provider_id
+    )))
+}
+
+/// Resolve the model template and override `base_url` from the caller-supplied
+/// `ChatProvider` (mandatory for custom providers — the synthesized template
+/// has no endpoint of its own).
 fn resolve_model(
     provider_id: &str,
     model_id: &str,
     base_url: &str,
 ) -> Result<model::Model, AppError> {
-    let mut m = hand_ai_model::get_model(provider_id, model_id).ok_or_else(|| {
-        AppError::validation_error(&format!(
-            "chat_engine: model '{}' not registered under provider '{}'",
-            model_id, provider_id
-        ))
-    })?;
+    let mut m = resolve_model_template(provider_id, model_id)?;
     if !base_url.is_empty() {
         m.base_url = base_url.to_string();
     }
     Ok(m)
+}
+
+/// Map a HandBox custom-provider type to the hand-ai wire protocol it speaks.
+///
+/// Custom providers are HandBox-owned onboarding templates for unlisted
+/// OpenAI-/Anthropic-compatible endpoints (local LLMs, proxies, vendors not in
+/// hand-ai's catalog). hand-ai can't know about them, so HandBox owns this
+/// fixed mapping. Returns `None` for catalog provider types.
+pub(crate) fn custom_api_for_provider_type(provider_type: &str) -> Option<model::Api> {
+    match provider_type {
+        "openai-compatible" => Some(model::Api::OpenAICompletions),
+        "anthropic-compatible" => Some(model::Api::AnthropicMessages),
+        _ => None,
+    }
+}
+
+/// The chat-method tags a manually-added model under a custom provider should
+/// carry so it renders in the picker. `None` for non-custom provider types.
+pub fn custom_provider_supported_methods(provider_type: &str) -> Option<Vec<String>> {
+    custom_api_for_provider_type(provider_type).map(supported_methods_for_api)
+}
+
+/// Build a minimal `Model` template for a custom-provider model that isn't in
+/// hand-ai's catalog. Stream dispatch keys off `api` (client.rs
+/// `registry.get(&model.api)`), so only `api` + `base_url` (filled by the
+/// caller) are load-bearing. `provider` is metadata only — it feeds the env-key
+/// fallback (we always pass an explicit key) and a GitHubCopilot special-case
+/// (avoided here), so a same-protocol placeholder is safe. Sizes are generous
+/// "unknown but sane" defaults so the model's own cap doesn't truncate the
+/// user's request; the actual limits come from `ChatOptions`.
+fn synthesize_custom_model(model_id: &str, api: model::Api) -> model::Model {
+    let provider = match api {
+        model::Api::AnthropicMessages => model::types::Provider::Anthropic,
+        _ => model::types::Provider::Openrouter,
+    };
+    model::Model {
+        id: model_id.to_string(),
+        name: model_id.to_string(),
+        api,
+        provider,
+        base_url: String::new(),
+        reasoning: false,
+        input: vec![model::InputType::Text],
+        cost: model::Cost {
+            input: 0.0,
+            output: 0.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+        },
+        context_window: 128_000,
+        max_tokens: 16_384,
+        headers: None,
+        // None lets hand-ai auto-detect OpenAI-compat quirks from base_url.
+        compat: None,
+        thinking_level_map: None,
+    }
 }
 
 #[allow(clippy::field_reassign_with_default)]
@@ -965,12 +1032,74 @@ mod tests {
 
     #[test]
     fn assistant_history_errors_when_model_not_in_catalog() {
+        // "openai" is a catalog provider but the model doesn't exist, and
+        // "openai" is not a custom type → no synthesis fallback → clear error.
         let messages = vec![assistant_msg("prior reply")];
         let err = messages_to_context(&messages, "openai", "no-such-model-9999", &ChatOptions::default())
             .expect_err("unknown model must surface clearly");
         let m = format!("{}", err);
-        assert!(m.contains("not in catalog"), "msg: {m}");
+        assert!(m.contains("not registered under provider"), "msg: {m}");
         assert!(m.contains("no-such-model-9999"), "msg: {m}");
+    }
+
+    #[test]
+    fn custom_api_mapping_covers_known_types() {
+        assert_eq!(
+            custom_api_for_provider_type("openai-compatible"),
+            Some(hand_ai_model::Api::OpenAICompletions)
+        );
+        assert_eq!(
+            custom_api_for_provider_type("anthropic-compatible"),
+            Some(hand_ai_model::Api::AnthropicMessages)
+        );
+        assert_eq!(custom_api_for_provider_type("openai"), None);
+        assert_eq!(custom_api_for_provider_type("groq"), None);
+    }
+
+    #[test]
+    fn custom_provider_supported_methods_maps_to_completions() {
+        assert_eq!(
+            custom_provider_supported_methods("openai-compatible"),
+            Some(vec!["completions".to_string()])
+        );
+        assert_eq!(
+            custom_provider_supported_methods("anthropic-compatible"),
+            Some(vec!["completions".to_string()])
+        );
+        assert_eq!(custom_provider_supported_methods("openai"), None);
+    }
+
+    #[test]
+    fn synthesize_custom_model_builds_streamable_template() {
+        // openai-compatible → OpenAICompletions template, dispatch-ready.
+        let m = synthesize_custom_model("my-local-llm", hand_ai_model::Api::OpenAICompletions);
+        assert_eq!(m.id, "my-local-llm");
+        assert_eq!(m.api, hand_ai_model::Api::OpenAICompletions);
+        // provider is a same-protocol placeholder, never GitHubCopilot (which
+        // would trip the special-case in the openai-completions provider).
+        assert_ne!(m.provider, hand_ai_model::types::Provider::GitHubCopilot);
+        assert!(m.max_tokens > 0, "non-zero cap so requests aren't truncated");
+        assert!(m.compat.is_none(), "compat auto-detected from base_url");
+
+        // anthropic-compatible → AnthropicMessages + Anthropic placeholder.
+        let a = synthesize_custom_model("claude-proxy", hand_ai_model::Api::AnthropicMessages);
+        assert_eq!(a.api, hand_ai_model::Api::AnthropicMessages);
+        assert_eq!(a.provider, hand_ai_model::types::Provider::Anthropic);
+    }
+
+    #[test]
+    fn custom_provider_assistant_history_synthesizes_instead_of_erroring() {
+        // A custom provider with prior assistant turns must NOT error — it
+        // synthesizes the assistant_meta from the custom type's protocol.
+        let messages = vec![assistant_msg("prior reply")];
+        let ctx = messages_to_context(
+            &messages,
+            "openai-compatible",
+            "my-local-llm",
+            &ChatOptions::default(),
+        )
+        .expect("custom provider should synthesize, not error");
+        assert_eq!(ctx.messages.len(), 1);
     }
 
     #[test]

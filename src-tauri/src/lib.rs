@@ -182,6 +182,7 @@ pub fn run() {
             model_toggle,
             model_toggle_favorite,
             model_count_chats,
+            model_add,
             // MCP 管理命令
             mcp_list_servers,
             mcp_create_server,

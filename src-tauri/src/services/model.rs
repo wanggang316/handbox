@@ -143,6 +143,93 @@ impl ModelService {
         self.model_repo.get_model(provider_id, model_id).await
     }
 
+    /// 为自定义供应商（openai-compatible / anthropic-compatible）手动添加模型。
+    ///
+    /// 自定义端点不在 hand-ai 目录中，因而无法通过 `fetch_and_sync_models`
+    /// 获得模型。此路径让用户手填 model id；`chat_engine` 在对话时按自定义
+    /// 类型的协议 + 供应商 base_url 合成 `Model` 模板（见 `resolve_model`）。
+    /// 仅对自定义供应商开放：目录供应商的模型来自 hand-ai，禁止手动注入幽灵模型。
+    pub async fn add_manual_model(
+        &self,
+        provider_id: &UUID,
+        model_id: &str,
+        name: Option<String>,
+    ) -> Result<ModelResponse, AppError> {
+        let provider = self
+            .provider_repo
+            .get_provider_by_id(provider_id)
+            .await?
+            .ok_or_else(|| AppError::validation_error("Provider not found"))?;
+
+        // 仅自定义供应商可手动添加模型。
+        let supported_methods = chat_engine::custom_provider_supported_methods(
+            &provider.provider_type,
+        )
+        .ok_or_else(|| {
+            AppError::validation_error(
+                "Manual model entry is only supported for custom providers \
+                 (openai-compatible / anthropic-compatible)",
+            )
+        })?;
+
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return Err(AppError::validation_error("Model id cannot be empty"));
+        }
+
+        let display_name = name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| model_id.to_string());
+
+        let now = Self::current_timestamp();
+        let model = Model {
+            id: model_id.to_string(),
+            provider_id: provider.id.clone(),
+            name: display_name,
+            context_length: None,
+            output_max_tokens: None,
+            supported_features: None,
+            description: None,
+            input_modalities: None,
+            output_modalities: None,
+            metadata: None,
+            pricing: None,
+            url: None,
+            supported_parameters: None,
+            default_parameters: None,
+            max_parameters: None,
+            supported_methods: Some(supported_methods),
+            model_created_at: None,
+            enabled: true,
+            favorite: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // INSERT OR REPLACE — re-adding the same id is idempotent.
+        self.model_repo.create_models(&[model.clone()]).await?;
+
+        tracing::info!(
+            "Manually added model '{}' to custom provider '{}'",
+            model.id,
+            provider.name
+        );
+
+        Ok(ModelResponse::from_model_with_provider(
+            model,
+            Some(&provider.provider_type),
+        ))
+    }
+
+    /// 当前时间戳（毫秒）。
+    fn current_timestamp() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
     /// 切换模型启用状态
     pub async fn toggle_model(
         &self,
