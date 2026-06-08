@@ -137,6 +137,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_agent_session_migrations_applied() {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_agent_sessions.db");
+
+        let service = Database::new(&db_path).await.unwrap();
+        let pool = service.pool();
+
+        // Both new Agent-mode tables exist after migrations 044/045.
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type='table' \
+             AND name IN ('agent_sessions', 'agent_session_messages') ORDER BY name",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            tables,
+            vec![
+                "agent_session_messages".to_string(),
+                "agent_sessions".to_string()
+            ]
+        );
+
+        // Their indexes exist as well.
+        let indexes: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type='index' \
+             AND name IN ('idx_agent_sessions_updated_at', 'idx_agent_sessions_name', \
+             'idx_agent_session_messages_session_seq') ORDER BY name",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            indexes,
+            vec![
+                "idx_agent_session_messages_session_seq".to_string(),
+                "idx_agent_sessions_name".to_string(),
+                "idx_agent_sessions_updated_at".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn test_database_stats() {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test_stats.db");

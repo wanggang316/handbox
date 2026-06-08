@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_session;
 pub mod artifact;
 pub mod common;
 pub mod favorite;
@@ -10,6 +11,9 @@ pub mod session;
 pub mod word;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
+pub use agent_session::{
+    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UpdateAgentSessionRequest,
+};
 pub use artifact::{
     Artifact, ArtifactFilter, ArtifactType, CreateArtifactRequest, ExecuteArtifactRequest,
     ExecutionConfig, ExecutionResult, InstallArtifactRequest, ModelParameters,
