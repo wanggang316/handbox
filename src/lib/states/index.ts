@@ -6,6 +6,9 @@
 export { chatState } from './chat.svelte';
 export { messageStore } from './message.svelte';
 
+// Agent Session 相关
+export { agentSessionState, agentSessionActions } from './agentSession.svelte';
+
 // 供应商相关
 export {
   providerState,
