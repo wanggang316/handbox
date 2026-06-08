@@ -10,6 +10,7 @@
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import AgentSessionCreateModal from "$lib/components/agentsession/AgentSessionCreateModal.svelte";
   import AgentSessionHeader from "$lib/components/agentsession/AgentSessionHeader.svelte";
+  import AgentInput from "$lib/components/agentsession/AgentInput.svelte";
   import { goto } from "$app/navigation";
   import type { AgentSession } from "$lib/types";
   import type { AgentMessage } from "$lib/types/agentSession";
@@ -168,14 +169,11 @@
       {/if}
     </div>
 
-    <!-- Input 槽占位：发送 / 停止由下一个 feature（m1-agent-input）接管。 -->
+    <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->
     <div class="shrink-0 border-t border-base-300 px-4 py-3">
-      <div
-        class="text-xs text-base-content/30 text-center select-none"
-        aria-hidden="true"
-      >
-        输入框（下一步）
-      </div>
+      {#if currentSession}
+        <AgentInput session={currentSession} />
+      {/if}
     </div>
   {:else}
     <!-- 空落地页 -->
