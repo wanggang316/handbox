@@ -4,6 +4,22 @@
 
 import type { Theme, ThemeColor, Language } from "../types";
 
+// 应用模式：聊天 vs Agent
+export type AppMode = "chat" | "agent";
+
+const APP_MODE_KEY = "appMode";
+const LAST_AGENT_SESSION_ID_KEY = "lastAgentSessionId";
+
+function loadPersistedAppMode(): AppMode {
+  if (typeof localStorage === "undefined") return "chat";
+  return localStorage.getItem(APP_MODE_KEY) === "agent" ? "agent" : "chat";
+}
+
+function loadPersistedLastAgentSessionId(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(LAST_AGENT_SESSION_ID_KEY) || null;
+}
+
 // 通知消息接口
 export interface Notification {
   id: string;
@@ -24,6 +40,8 @@ interface UIStateData {
   themeColor: ThemeColor;
   language: Language;
   globalLoading: boolean;
+  appMode: AppMode;
+  lastAgentSessionId: string | null;
 }
 
 class UIState {
@@ -37,6 +55,8 @@ class UIState {
     themeColor: "blue",
     language: "zh-CN",
     globalLoading: false,
+    appMode: loadPersistedAppMode(),
+    lastAgentSessionId: loadPersistedLastAgentSessionId(),
   });
 
   // Getters
@@ -74,6 +94,14 @@ class UIState {
 
   get globalLoading() {
     return this.state.globalLoading;
+  }
+
+  get appMode() {
+    return this.state.appMode;
+  }
+
+  get lastAgentSessionId() {
+    return this.state.lastAgentSessionId;
   }
 
   // 派生状态：是否为暗色主题
@@ -255,6 +283,35 @@ class UIState {
     // 更新 HTML lang 属性
     if (typeof document !== "undefined") {
       document.documentElement.lang = lang;
+    }
+  }
+
+  /**
+   * 设置应用模式（chat / agent），并持久化到 localStorage。
+   */
+  setAppMode(mode: AppMode): void {
+    this.state.appMode = mode;
+
+    if (typeof localStorage !== "undefined") {
+      const current = localStorage.getItem(APP_MODE_KEY);
+      if (current !== mode) {
+        localStorage.setItem(APP_MODE_KEY, mode);
+      }
+    }
+  }
+
+  /**
+   * 记录最近打开的 Agent 会话 ID（用于切回 Agent 模式时恢复），并持久化。
+   */
+  setLastAgentSessionId(id: string | null): void {
+    this.state.lastAgentSessionId = id;
+
+    if (typeof localStorage !== "undefined") {
+      if (id) {
+        localStorage.setItem(LAST_AGENT_SESSION_ID_KEY, id);
+      } else {
+        localStorage.removeItem(LAST_AGENT_SESSION_ID_KEY);
+      }
     }
   }
 }
