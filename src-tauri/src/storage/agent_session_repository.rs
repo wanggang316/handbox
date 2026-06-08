@@ -326,9 +326,16 @@ impl AgentSessionRepository {
                 AppError::internal_error(&format!("Failed to list agent session messages: {}", e))
             })?;
 
+        // 逐行隔离 payload 解析（VAL-PERSIST-012）：单条 payload 的存储 JSON 文本
+        // 损坏（例如被外部写入非法 JSON）时记录并跳过该行，而非让整批 transcript
+        // 加载失败、白屏整条 timeline；其余行照常返回，保持 seq 升序。
         let mut messages = Vec::new();
         for row in rows {
-            messages.push(Self::row_to_message(row)?);
+            match Self::row_to_message(row) {
+                Ok(Some(message)) => messages.push(message),
+                Ok(None) => {}           // 坏 payload 行：已记录并跳过
+                Err(e) => return Err(e), // 真实的 DB 列读取故障：照常冒泡
+            }
         }
 
         Ok(messages)
@@ -373,20 +380,40 @@ impl AgentSessionRepository {
         })
     }
 
-    // 辅助方法：将数据库行转换为 AgentSessionMessage
-    fn row_to_message(row: sqlx::sqlite::SqliteRow) -> Result<AgentSessionMessage, AppError> {
+    // 辅助方法：将数据库行转换为 AgentSessionMessage。
+    //
+    // 区分两类失败：DB 列读取错误（基础设施故障）冒泡为 `Err`；唯独 payload 存储
+    // 的 JSON 文本损坏（无法 parse）返回 `Ok(None)`，由 `list_messages` 跳过该行，
+    // 以实现损坏行的优雅降级（VAL-PERSIST-012）。
+    fn row_to_message(
+        row: sqlx::sqlite::SqliteRow,
+    ) -> Result<Option<AgentSessionMessage>, AppError> {
+        let id: UUID = row.try_get("id")?;
+        let session_id: UUID = row.try_get("session_id")?;
+        let seq: i64 = row.try_get("seq")?;
+        let role: String = row.try_get("role")?;
+        let created_at: Timestamp = row.try_get("created_at")?;
         let payload_json: String = row.try_get("payload")?;
-        let payload: serde_json::Value = serde_json::from_str(&payload_json)
-            .map_err(|e| AppError::internal_error(&format!("Invalid stored payload: {}", e)))?;
 
-        Ok(AgentSessionMessage {
-            id: row.try_get("id")?,
-            session_id: row.try_get("session_id")?,
-            seq: row.try_get("seq")?,
-            role: row.try_get("role")?,
+        let payload: serde_json::Value = match serde_json::from_str(&payload_json) {
+            Ok(value) => value,
+            Err(e) => {
+                eprintln!(
+                    "Skipping corrupt agent transcript row (session_id={}, seq={}): {}",
+                    session_id, seq, e
+                );
+                return Ok(None);
+            }
+        };
+
+        Ok(Some(AgentSessionMessage {
+            id,
+            session_id,
+            seq,
+            role,
             payload,
-            created_at: row.try_get("created_at")?,
-        })
+            created_at,
+        }))
     }
 }
 
@@ -691,5 +718,104 @@ mod tests {
         let reloaded_session = repo2.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(reloaded_session.message_count, 4);
         assert_eq!(reloaded_session.last_message_at, Some(now + 3));
+    }
+
+    /// VAL-PERSIST-007/008: a long transcript (>200 messages) loads completely
+    /// in strict seq order — no silent truncation / pagination in list_messages.
+    #[tokio::test]
+    async fn test_list_messages_long_transcript_full_no_truncation() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentSessionRepository::new(db_arc.clone());
+        let now = now_ms();
+
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Long Session", now);
+        repo.create_session(&session).await.unwrap();
+
+        let total = 250;
+        for i in 0..total {
+            repo.append_message(
+                &session.id,
+                "user",
+                &serde_json::json!({ "role": "user", "content": format!("m{}", i) }),
+                now + i,
+            )
+            .await
+            .unwrap();
+        }
+
+        // Reload via a fresh repo: full count, strictly monotonic gap-free seq.
+        let repo2 = AgentSessionRepository::new(db_arc.clone());
+        let messages = repo2.list_messages(&session.id).await.unwrap();
+        assert_eq!(messages.len(), total as usize);
+
+        let seqs: Vec<i64> = messages.iter().map(|m| m.seq).collect();
+        let expected: Vec<i64> = (0..total).collect();
+        assert_eq!(seqs, expected);
+    }
+
+    /// VAL-PERSIST-012: a row whose stored payload is malformed JSON is skipped
+    /// on load; the rest of the transcript still returns (graceful degrade, no
+    /// whole-batch failure / white screen).
+    #[tokio::test]
+    async fn test_list_messages_skips_corrupt_payload_row() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentSessionRepository::new(db_arc.clone());
+        let now = now_ms();
+
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Corrupt Session", now);
+        repo.create_session(&session).await.unwrap();
+
+        // Two well-formed rows (seq 0, 2) bracketing one corrupt row (seq 1).
+        repo.append_message(
+            &session.id,
+            "user",
+            &serde_json::json!({ "role": "user", "content": "first" }),
+            now,
+        )
+        .await
+        .unwrap();
+
+        // Inject a row whose payload column holds non-JSON text directly.
+        sqlx::query(
+            r#"
+            INSERT INTO agent_session_messages (id, session_id, seq, role, payload, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&session.id)
+        .bind(1_i64)
+        .bind("assistant")
+        .bind("{not valid json")
+        .bind(now + 1)
+        .execute(db_arc.pool())
+        .await
+        .unwrap();
+
+        repo.append_message(
+            &session.id,
+            "user",
+            &serde_json::json!({ "role": "user", "content": "third" }),
+            now + 2,
+        )
+        .await
+        .unwrap();
+
+        // list_messages must NOT error; it returns the two valid rows, skipping
+        // the corrupt one, in seq order.
+        let messages = repo.list_messages(&session.id).await.unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].seq, 0);
+        assert_eq!(messages[1].seq, 2);
+        assert_eq!(
+            messages[0].payload,
+            serde_json::json!({ "role": "user", "content": "first" })
+        );
+        assert_eq!(
+            messages[1].payload,
+            serde_json::json!({ "role": "user", "content": "third" })
+        );
     }
 }

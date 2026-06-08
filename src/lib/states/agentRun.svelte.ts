@@ -28,6 +28,7 @@ import {
   getAgentSessionMessages,
   abortAgentRun,
 } from "$lib/api/agentSession";
+import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
 /**
  * 单个会话的运行 view-model。
@@ -60,6 +61,11 @@ class AgentRunStore {
 
   // 一次性流式监听器的清理函数（store 生命周期内通常不调用）。
   private unlisten: (() => void) | null = null;
+
+  // run 终结回调（VAL-PERSIST-011）：`agent_stream_closed` 抵达时触发。
+  // 由侧栏状态层注册，用于刷新该会话的元数据 / 排序，而不让本 store 反向依赖
+  // session 状态（保持单向：agentSession 不 import agentRun）。
+  private onRunClosed: ((sessionId: string) => void) | null = null;
 
   constructor() {
     // 单例构造即建立监听器：navigation-resilient，跨路由与模式切换持续 reduce。
@@ -210,11 +216,20 @@ class AgentRunStore {
   }
 
   /**
-   * 分发 `agent_stream_closed`：清 isRunning（每个 run 恰好一次）。
+   * 分发 `agent_stream_closed`：清 isRunning（每个 run 恰好一次），并通知
+   * 已注册的 run-终结回调以刷新侧栏元数据（VAL-PERSIST-011）。回调抛错不影响
+   * 本 store 的终结收尾。
    */
   private handleStreamClosed(payload: AgentStreamClosedPayload): void {
     const state = this.ensureState(payload.sessionId);
     state.isRunning = false;
+    if (this.onRunClosed) {
+      try {
+        this.onRunClosed(payload.sessionId);
+      } catch (error) {
+        console.error("Agent run-closed callback failed:", error);
+      }
+    }
   }
 
   // ============================================
@@ -237,20 +252,72 @@ class AgentRunStore {
   }
 
   /**
-   * 加载并 seed 某会话的已提交 transcript（打开会话时调用）。
+   * 注册 run-终结回调（VAL-PERSIST-011）。每次 `agent_stream_closed` 抵达后以
+   * 该会话 id 调用一次，供侧栏状态层刷新 messageCount / lastMessageAt / 排序。
+   * 单例语义：仅保留最后一次注册（store 全生命周期只需一个 reactor）。
+   */
+  setOnRunClosed(callback: (sessionId: string) => void): void {
+    this.onRunClosed = callback;
+  }
+
+  /**
+   * 加载并 seed 某会话的已提交 transcript（打开会话时调用），按 seq 升序
+   * （后端 `list_messages` 以 `ORDER BY seq ASC` 全量返回，无 LIMIT / 分页，故
+   * 长 transcript 完整还原、不静默截断 —— VAL-PERSIST-004/005/007/008）。
    *
    * 不覆盖正在运行中的流式累积；仅写入已提交消息序列。
+   *
+   * 健壮性（VAL-PERSIST-012）：逐行隔离 payload 解析 —— 单条 payload 形状不可
+   * 识别（非 user / assistant / toolResult，或缺失判别字段）时记录并跳过该行，
+   * 绝不让一条坏行抛错而白屏整条 timeline；其余行照常渲染。
    */
   async loadTranscript(sessionId: UUID): Promise<void> {
     try {
-      const messages: AgentSessionMessage[] =
+      const rows: AgentSessionMessage[] =
         await getAgentSessionMessages(sessionId);
+      const messages: AgentMessage[] = [];
+      for (const row of rows) {
+        const parsed = this.parseTranscriptRow(row);
+        if (parsed) {
+          messages.push(parsed);
+        }
+      }
       const state = this.ensureState(sessionId);
-      state.messages = messages.map((m) => m.payload);
+      state.messages = messages;
     } catch (error) {
       console.error("Failed to load agent transcript:", error);
       const state = this.ensureState(sessionId);
       state.error = error instanceof Error ? error.message : "加载会话记录失败";
+    }
+  }
+
+  /**
+   * 校验并归一化单条 transcript 行的 payload。返回合法的 `AgentMessage`，
+   * 或在 payload 缺失 / 形状不可识别 / 解析抛错时返回 `null`（调用方跳过该行）。
+   */
+  private parseTranscriptRow(row: AgentSessionMessage): AgentMessage | null {
+    try {
+      const payload = row?.payload as unknown;
+      if (!payload || typeof payload !== "object") {
+        console.warn(
+          `Skipping corrupt agent transcript row (non-object payload, seq=${row?.seq}).`,
+        );
+        return null;
+      }
+      const role = (payload as { role?: unknown }).role;
+      if (role !== "user" && role !== "assistant" && role !== "toolResult") {
+        console.warn(
+          `Skipping corrupt agent transcript row (unknown role=${String(role)}, seq=${row?.seq}).`,
+        );
+        return null;
+      }
+      return payload as AgentMessage;
+    } catch (error) {
+      console.warn(
+        `Skipping corrupt agent transcript row (seq=${row?.seq}):`,
+        error,
+      );
+      return null;
     }
   }
 
@@ -276,3 +343,10 @@ class AgentRunStore {
 
 // Export singleton instance（单例构造即建立 navigation-resilient 监听器）。
 export const agentRunStore = new AgentRunStore();
+
+// 一次性 wiring（与监听器同属 navigation-resilient 的 app 级接线）：每次 run 终结
+// （`agent_stream_closed`）刷新侧栏该会话的元数据 / 排序（VAL-PERSIST-011）。
+// 依赖方向单向（agentRun -> agentSession），agentSession 不反向 import 本模块。
+agentRunStore.setOnRunClosed((sessionId) => {
+  void agentSessionActions.refreshAfterRun(sessionId);
+});

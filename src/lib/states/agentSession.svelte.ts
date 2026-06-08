@@ -140,4 +140,33 @@ export const agentSessionActions = {
     currentSession = session;
     return session;
   },
+
+  /**
+   * 一次 run 结束后刷新某会话的侧栏元数据（VAL-PERSIST-011）。
+   *
+   * run 期间后端按 message_end 追加 transcript 并 bump 该会话的 `messageCount` /
+   * `lastMessageAt` / `updatedAt`，但前端列表持有的是 run 之前的快照。`agent_stream_closed`
+   * 抵达时调用本方法重新拉取该会话详情，更新列表内对应项与当前会话，并按
+   * `updatedAt DESC` 重排到顶部 —— 使计数 / 最近时间 / 顺序无需手动刷新即更新。
+   *
+   * 该会话不在列表内（例如已被删除）则为干净 no-op；网络错误仅记录、不抛出，
+   * 避免影响 run 终结的其它收尾。
+   */
+  async refreshAfterRun(id: UUID): Promise<void> {
+    try {
+      const updated = await agentSessionApi.getAgentSession(id);
+      const others = sessions.filter((session) => session.id !== id);
+      if (others.length === sessions.length) {
+        // 该会话已不在列表内：不插入幽灵条目。
+        return;
+      }
+      // 置顶 + 刷新元数据（镜像后端 updatedAt DESC 排序）。
+      sessions = [updated, ...others];
+      if (currentSession?.id === id) {
+        currentSession = updated;
+      }
+    } catch (error) {
+      console.error("Failed to refresh agent session after run:", error);
+    }
+  },
 };
