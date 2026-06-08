@@ -138,10 +138,12 @@ class MessageStore {
     return undefined;
   }
 
-  // 根据 providerId 获取 provider 图标
+  // 根据 providerId 获取 provider 图标（统一走 models.dev 远程 SVG，不再用本地图标）
   getProviderIcon(providerId: string): string | undefined {
     const config = this.getProviderConfig(providerId);
-    return config?.icon || undefined;
+    return config?.provider_type
+      ? `https://models.dev/logos/${config.provider_type}.svg`
+      : undefined;
   }
 
   // 批量缓存 providerConfigs（在加载消息时调用）

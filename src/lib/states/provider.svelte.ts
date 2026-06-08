@@ -81,10 +81,19 @@ export function isCustomProviderType(providerType: string): boolean {
   );
 }
 
+// 供应商图标：统一使用 models.dev 的远程 SVG，按 provider_type 取，不再用本地图标。
+// models.dev 对任意 slug 都返回有效 SVG —— 已知 provider 给真 logo，未知 provider
+// 给通用占位图 —— 因此无需处理 404 / broken image。
+export function providerLogoUrl(
+  providerType: string | undefined,
+): string | undefined {
+  if (!providerType) return undefined;
+  return `https://models.dev/logos/${providerType}.svg`;
+}
+
 // 获取供应商图标
 export function getProviderIcon(provider: Provider): string | undefined {
-  const config = getProviderConfig(provider.provider_type);
-  return config?.icon || undefined;
+  return providerLogoUrl(provider.provider_type);
 }
 
 // 根据 providerId 获取供应商配置
@@ -105,8 +114,10 @@ export function getProviderConfigById(
 
 // 根据 providerId 获取供应商图标
 export function getProviderIconById(providerId: string): string | undefined {
-  const config = getProviderConfigById(providerId);
-  return config?.icon || undefined;
+  const provider =
+    providerState.providers.find((p) => p.id === providerId) ||
+    providerState.providersWithModels.find((p) => p.id === providerId);
+  return providerLogoUrl(provider?.provider_type);
 }
 
 // 全局状态对象
@@ -185,14 +196,14 @@ export function getProviderDropdownOptions() {
   const preProviderOptions = providerConfigs.providers.map((provider) => ({
     value: provider.provider_type,
     label: provider.type_name,
-    icon: provider.icon,
+    icon: providerLogoUrl(provider.provider_type),
   }));
 
   const customProviderOptions = providerConfigs.custom_providers.map(
     (provider) => ({
       value: provider.provider_type,
       label: provider.type_name,
-      icon: provider.icon,
+      icon: providerLogoUrl(provider.provider_type),
     }),
   );
 
