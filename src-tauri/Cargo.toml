@@ -72,7 +72,11 @@ handbox-mcp = { path = "crates/handbox-mcp" }
 # v0.3.0 carries the #94 cerebras phantom-model catalog fix + an additive
 # runtime catalog-refresh API (catalog_refresh); HandBox uses the embedded
 # catalog only for now.
-hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "model-v0.3.0", package = "model" }
+hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "model" }
+# Agent runtime crate from hand-ai, same git source + tag as the model crate
+# above so Cargo unifies the transitive `model` dependency to a single copy
+# (hand-agent depends on model via path; same-source+same-tag => dedup).
+hand-agent = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "hand-agent" }
 tokio-util = "0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]

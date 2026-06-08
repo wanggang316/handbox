@@ -232,7 +232,7 @@ pub fn list_catalog_models(provider_type: &str) -> Vec<crate::storage::types::Mo
 // needs to be built once per process).
 // ---------------------------------------------------------------------------
 
-fn shared_client() -> &'static Client {
+pub(crate) fn shared_client() -> &'static Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
     CLIENT.get_or_init(Client::new)
 }
@@ -527,7 +527,7 @@ fn resolve_model_template(provider_id: &str, model_id: &str) -> Result<model::Mo
 /// Resolve the model template and override `base_url` from the caller-supplied
 /// `ChatProvider` (mandatory for custom providers — the synthesized template
 /// has no endpoint of its own).
-fn resolve_model(
+pub(crate) fn resolve_model(
     provider_id: &str,
     model_id: &str,
     base_url: &str,
@@ -599,7 +599,7 @@ fn synthesize_custom_model(model_id: &str, api: model::Api) -> model::Model {
 // StreamOptions and SimpleStreamOptions are #[non_exhaustive] in hand_ai_model
 // (since #32 / commit 7994163). FRU (`..Default::default()`) is illegal from
 // outside the defining crate, so we mutate-default.
-fn build_stream_options(options: &ChatOptions, api_key: &str) -> SimpleStreamOptions {
+pub(crate) fn build_stream_options(options: &ChatOptions, api_key: &str) -> SimpleStreamOptions {
     let mut base = StreamOptions::default();
     base.api_key = Some(api_key.to_string());
     base.temperature = options.temperature;
