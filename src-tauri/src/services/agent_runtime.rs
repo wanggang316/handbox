@@ -495,10 +495,42 @@ impl AgentRuntime {
         });
     }
 
+    /// 中止某个 session 的活跃 run（若有）。
+    ///
+    /// 从 `runs` 注册表取出该 session 的 `RunHandle.cancel` 并 `.cancel()`。这个
+    /// token 与传给 `run_agent_loop` 及 `config.stream_options.base.signal` 的是
+    /// **同一个** —— 触发后 hand-agent 的 loop 在下一个 `select!` 边界终止，合成一条
+    /// `stopReason=aborted` 的终结 assistant 消息并发出 `MessageStart`/`MessageEnd`
+    /// （由既有的 MessageEnd 持久化路径落库），随后 spawned 任务在唯一的 closed
+    /// emit site 发出 `agent_stream_closed` 并自行从 `runs` 移除条目。
+    ///
+    /// 未知 / 已结束的 session 是**干净的 no-op**（不报错、不 panic）—— 前端可能
+    /// 竞态地调用 abort（例如 run 刚自然结束）。这里只取消 token，不主动移除条目：
+    /// 条目的移除统一由 spawned 任务在 loop 收尾时完成，保持单一所有权。
+    pub async fn abort(&self, session_id: &UUID) {
+        if let Some(handle) = self.runs.lock().await.get(session_id) {
+            handle.cancel.cancel();
+        }
+    }
+
     /// 当前活跃 run 数量（测试辅助）。
     #[cfg(test)]
     async fn active_run_count(&self) -> usize {
         self.runs.lock().await.len()
+    }
+
+    /// 测试辅助：直接向 `runs` 注册表插入一个 `RunHandle`，返回其取消 token，
+    /// 以便在不 spawn 真实 loop 的前提下单测 `abort` 的取消语义。
+    #[cfg(test)]
+    async fn insert_run_handle(&self, session_id: &UUID) -> CancellationToken {
+        let cancel = CancellationToken::new();
+        self.runs.lock().await.insert(
+            session_id.clone(),
+            RunHandle {
+                cancel: cancel.clone(),
+            },
+        );
+        cancel
     }
 }
 
@@ -1395,6 +1427,259 @@ mod tests {
         assert!(
             payload.contains("partial answer before drop"),
             "the streamed partial content is preserved in the persisted row: {payload}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Abort: mid-run cancel, abort-before-first-token, unknown-session no-op,
+    // and the delete-mid-run abort semantics at the `AgentRuntime::abort` level.
+    // -------------------------------------------------------------------------
+
+    /// A scripted stream that emits the given events, then PENDS FOREVER on the
+    /// next poll — so the loop blocks at `stream.next()` inside its cancellation
+    /// `select!`, leaving the run "in progress" until `abort()` fires. The token
+    /// the loop selects on is the same one registered in `runs`.
+    fn hanging_stream_fn(events: Vec<AssistantMessageEvent>) -> hand_agent::StreamFn {
+        use futures::StreamExt;
+        let events = Arc::new(StdMutex::new(Some(events)));
+        Arc::new(move |_model, _ctx, _opts, _cancel| {
+            let scripted = events.lock().unwrap().take().unwrap_or_default();
+            Box::pin(futures::stream::iter(scripted).chain(futures::stream::pending()))
+        })
+    }
+
+    /// Drive `abort()` from the test once the run is observed in flight, then
+    /// wait for the terminal closed. Polls the registry so the cancel fires only
+    /// after the run is registered (avoids racing `start_run`'s placeholder).
+    async fn abort_when_active(runtime: &AgentRuntime, session_id: &str, sink: &CapturingSink) {
+        for _ in 0..200 {
+            if runtime.active_run_count().await >= 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        runtime.abort(&session_id.to_string()).await;
+        wait_for_closed(sink).await;
+    }
+
+    /// VAL-RUN-007: aborting mid-stream ends the run with a terminal assistant
+    /// row carrying `stopReason=aborted`, while content that reached a
+    /// `MessageEnd` before the abort remains persisted, and EXACTLY ONE closed
+    /// fires. The pre-abort content is modeled as a prior completed transcript
+    /// row (a finished earlier turn); the aborted turn's stream is gated open so
+    /// the cancel lands while the loop is awaiting the next chunk.
+    #[tokio::test]
+    async fn abort_mid_run_persists_aborted_terminal_and_retains_prior_content() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        // Pre-abort content: a completed earlier turn (user + assistant), each
+        // already persisted at its own MessageEnd (seeded directly here). The
+        // payloads are valid hand-agent `Message`s so the transcript replay in
+        // `assemble_run` succeeds.
+        let repo = AgentSessionRepository::new(Arc::clone(&db));
+        let prior_user = serde_json::to_value(Message::User(UserMessage::new_text(
+            "earlier question".to_string(),
+        )))
+        .unwrap();
+        let prior_assistant =
+            serde_json::to_value(Message::Assistant(done_message("gpt-4o", "earlier answer")))
+                .unwrap();
+        repo.append_message(&session_id, "user", &prior_user, now_ms())
+            .await
+            .unwrap();
+        repo.append_message(&session_id, "assistant", &prior_assistant, now_ms())
+            .await
+            .unwrap();
+
+        // The aborted turn: emit Start + a partial TextDelta, then hang. No Done
+        // arrives, so the loop blocks at `stream.next()` until abort cancels it.
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(hanging_stream_fn(vec![
+            AssistantMessageEvent::Start {
+                partial: done_message("gpt-4o", ""),
+            },
+            AssistantMessageEvent::TextDelta {
+                content_index: 0,
+                delta: "streaming before abort".into(),
+                partial: done_message("gpt-4o", "streaming before abort"),
+            },
+        ]));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "abort me".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        abort_when_active(&runtime, &session_id, &sink).await;
+
+        // Exactly one closed on the abort path (no second emit site), no run-level
+        // error envelope (abort is a clean Ok at the loop level).
+        assert_eq!(
+            sink.closed_count(),
+            1,
+            "exactly one agent_stream_closed on abort"
+        );
+        assert_eq!(sink.error_count(), 0, "abort emits no error envelope");
+
+        // The prior completed content survived, AND a terminal aborted row exists.
+        let rows = sqlx::query(
+            r#"
+            SELECT role,
+                   json_extract(payload, '$.stopReason') AS stop_reason,
+                   payload
+            FROM agent_session_messages
+            WHERE session_id = $1
+            ORDER BY seq ASC
+        "#,
+        )
+        .bind(&session_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+
+        let payloads: Vec<String> = rows.iter().map(|r| r.try_get("payload").unwrap()).collect();
+        assert!(
+            payloads.iter().any(|p| p.contains("earlier answer")),
+            "pre-abort completed content remains persisted: {payloads:?}"
+        );
+
+        let stop_reasons: Vec<Option<String>> = rows
+            .iter()
+            .map(|r| r.try_get::<Option<String>, _>("stop_reason").ok().flatten())
+            .collect();
+        assert!(
+            stop_reasons.iter().any(|s| s.as_deref() == Some("aborted")),
+            "a terminal assistant row with stopReason=aborted is persisted: {stop_reasons:?}"
+        );
+
+        // The run drained from the registry after the abort closed it.
+        assert_eq!(runtime.active_run_count().await, 0);
+    }
+
+    /// Assertion (2): aborting BEFORE the first token ends cleanly — no stuck
+    /// running state, EXACTLY ONE closed, the registry empties. The stream hangs
+    /// from the very first poll (no events), so the abort lands before any
+    /// MessageStart; the synthesized aborted message is the only assistant row.
+    #[tokio::test]
+    async fn abort_before_first_token_ends_clean_one_closed() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        // No scripted events: hang immediately so abort fires before the first token.
+        runtime.stream_fn_override = Some(hanging_stream_fn(vec![]));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "abort early".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        abort_when_active(&runtime, &session_id, &sink).await;
+
+        assert_eq!(sink.closed_count(), 1, "exactly one agent_stream_closed");
+        assert_eq!(sink.error_count(), 0, "abort emits no error envelope");
+
+        // No stuck running state: the registry is empty after the clean abort.
+        assert_eq!(
+            runtime.active_run_count().await,
+            0,
+            "no stuck running state after abort-before-first-token"
+        );
+
+        // The synthesized terminal carries stopReason=aborted.
+        let rows = sqlx::query(
+            r#"
+            SELECT json_extract(payload, '$.stopReason') AS stop_reason
+            FROM agent_session_messages
+            WHERE session_id = $1 AND role = 'assistant'
+            ORDER BY seq ASC
+        "#,
+        )
+        .bind(&session_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 1, "one synthesized aborted assistant row");
+        let stop_reason: Option<String> = rows[0].try_get("stop_reason").ok().flatten();
+        assert_eq!(stop_reason.as_deref(), Some("aborted"));
+    }
+
+    /// `abort()` on an unknown / already-finished session is a clean no-op: it
+    /// must not error or panic (the frontend may call it racily). Asserted both
+    /// before any run exists and after a run has fully drained.
+    #[tokio::test]
+    async fn abort_unknown_session_is_clean_no_op() {
+        let (db, _guard) = test_db().await;
+
+        let runtime = AgentRuntime::new(Arc::clone(&db));
+
+        // No run was ever registered for this id — must be a silent no-op.
+        runtime.abort(&"never-existed".to_string()).await;
+        assert_eq!(runtime.active_run_count().await, 0);
+
+        // After a finished run, aborting the same id again is also a no-op.
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(single_turn_stream_fn("done"));
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "hi".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .unwrap();
+        wait_for_closed(&sink).await;
+        for _ in 0..200 {
+            if runtime.active_run_count().await == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        // The run already drained; aborting again must not error or panic.
+        runtime.abort(&session_id).await;
+        assert_eq!(runtime.active_run_count().await, 0);
+    }
+
+    /// VAL-SESSION-010 (at the `AgentRuntime::abort` level): the
+    /// delete-mid-run path calls `runtime.abort(id)` before deleting. Tested
+    /// directly on the registry: insert a `RunHandle`, call `abort`, and assert
+    /// the registered cancel token is cancelled (so the loop would terminate and
+    /// stop emitting `agent_stream_event` for the deleted session id). The entry
+    /// is left for the spawned task to remove (single ownership of removal); here
+    /// no task drives it, so it stays — what matters is the token is cancelled.
+    #[tokio::test]
+    async fn abort_cancels_registered_token_for_delete_mid_run() {
+        let (db, _guard) = test_db().await;
+        let runtime = AgentRuntime::new(Arc::clone(&db));
+
+        let session_id = "mid-run-session".to_string();
+        let token = runtime.insert_run_handle(&session_id).await;
+        assert!(!token.is_cancelled(), "token starts uncancelled");
+        assert_eq!(runtime.active_run_count().await, 1, "run handle registered");
+
+        // The delete-mid-run path's first action: abort the active run.
+        runtime.abort(&session_id).await;
+
+        assert!(
+            token.is_cancelled(),
+            "abort cancelled the registered token — the loop would terminate, \
+             halting further agent_stream_event for the deleted session"
         );
     }
 }

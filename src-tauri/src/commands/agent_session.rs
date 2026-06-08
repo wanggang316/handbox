@@ -4,7 +4,7 @@
 // transcript 读取；runtime / run / streaming / tools 属于后续 feature。
 
 use crate::models::AppError;
-use crate::services::{AgentSessionParameter, AgentSessionService};
+use crate::services::{AgentRuntime, AgentSessionParameter, AgentSessionService};
 use crate::storage::types::{AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UUID};
 use tauri::State;
 
@@ -125,11 +125,16 @@ pub async fn agent_session_update_field(
 }
 
 /// 删除 Agent Session
+///
+/// 删除前先中止该会话可能存在的活跃 run（`runtime.abort` 对无活跃 run 是 no-op），
+/// 这样删除后不会再有 `agent_stream_event { sessionId: <deleted> }` 抵达前端。
 #[tauri::command]
 pub async fn agent_session_delete(
     session_id: UUID,
     agent_session_service: State<'_, AgentSessionService>,
+    runtime: State<'_, AgentRuntime>,
 ) -> Result<(), AppError> {
+    runtime.abort(&session_id).await;
     agent_session_service.delete_session(session_id).await
 }
 

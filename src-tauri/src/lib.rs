@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentRuntime, AgentService, AgentSessionService, ArtifactService,
-    SessionService, McpService, MessageService, ModelService, ProviderService, SearchService,
+    McpService, MessageService, ModelService, ProviderService, SearchService, SessionService,
     SettingsService, StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
@@ -53,7 +53,6 @@ pub fn run() {
     {
         // 初始化 NSPanel 插件
         builder = builder.plugin(tauri_nspanel::init());
-
     }
 
     builder
@@ -76,7 +75,7 @@ pub fn run() {
                     // 不退出应用，因为选择面板是可选功能
                 }
             }
-            
+
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -85,8 +84,6 @@ pub fn run() {
                     std::process::exit(1);
                 }
             });
-
-             
 
             Ok(())
         })
@@ -161,6 +158,7 @@ pub fn run() {
             agent_session_messages,
             // Agent 模式 run 命令
             agent_run_stream,
+            agent_run_abort,
             // 消息相关命令
             message_user_send,
             message_user_send_stream,
@@ -265,7 +263,6 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-
 /// 初始化服务
 async fn initialize_services(
     app: &tauri::AppHandle,
@@ -331,10 +328,7 @@ async fn initialize_services(
     let settings_service = SettingsService::new(storage_service.clone());
 
     let word_repo = Arc::new(WordRepository::new(database_service.clone()));
-    let word_service = WordService::new(
-        word_repo,
-        settings_service.clone(),
-    );
+    let word_service = WordService::new(word_repo, settings_service.clone());
 
     // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());
