@@ -2,6 +2,7 @@
 pub mod agent;
 pub mod artifact;
 pub mod auth;
+pub mod catalog_sync;
 pub mod chat_engine;
 pub mod hand_ai_catalog;
 pub mod mcp;
