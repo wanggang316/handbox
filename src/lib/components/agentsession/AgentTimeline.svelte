@@ -1,0 +1,220 @@
+<script lang="ts">
+  import { renderMarkdown, markdownInteractions } from "$lib/utils";
+  import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import type { AgentMessage } from "$lib/types/agentSession";
+  import AgentThinkingBlock from "./AgentThinkingBlock.svelte";
+
+  interface Props {
+    sessionId: string;
+  }
+
+  let { sessionId }: Props = $props();
+
+  // 会话运行 view-model（响应式 getter；按 sessionId 分键）。
+  const runState = $derived(agentRunStore.runStateFor(sessionId));
+
+  // 从用户消息提取纯文本（content 为字符串或内容块数组）。
+  function userText(message: Extract<AgentMessage, { role: "user" }>): string {
+    if (typeof message.content === "string") {
+      return message.content;
+    }
+    return message.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("");
+  }
+
+  // 拼接助手消息中所有 text 块（thinking / toolcall 块单独渲染）。
+  function assistantText(
+    message: Extract<AgentMessage, { role: "assistant" }>,
+  ): string {
+    return message.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("");
+  }
+
+  // 提取助手消息中所有 thinking 块文本（present-only：无内容则为空）。
+  function assistantThinking(
+    message: Extract<AgentMessage, { role: "assistant" }>,
+  ): string {
+    return message.content
+      .map((block) => (block.type === "thinking" ? block.thinking : ""))
+      .join("");
+  }
+
+  // 助手消息是否含工具调用块（M2 seam：当前仅占位）。
+  function assistantToolCalls(
+    message: Extract<AgentMessage, { role: "assistant" }>,
+  ) {
+    return message.content.filter((block) => block.type === "toolcall");
+  }
+
+  // 运行中追加的「进行中助手骨架」索引：reducer 在 message_start 时即把助手消息
+  // 追加到 messages（内容尚空、usage 为零），其增量走 streamingText/thinkingText。
+  // 该骨架由下方 LIVE 视图负责呈现，故此处需抑制其空内容/零用量的重复渲染。
+  const liveAssistantIndex = $derived.by(() => {
+    if (!runState.isRunning) {
+      return -1;
+    }
+    const last = runState.messages.length - 1;
+    return last >= 0 && runState.messages[last].role === "assistant"
+      ? last
+      : -1;
+  });
+
+  // 自动滚动到底部（镜像 ChatContent 行为）。
+  let messagesContainer: HTMLDivElement;
+
+  function scrollToBottom() {
+    if (messagesContainer) {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+  }
+
+  // 已提交消息数量变化时滚动。
+  $effect(() => {
+    if (runState.messages.length > 0) {
+      setTimeout(scrollToBottom, 100);
+    }
+  });
+
+  // 流式文本/思考增长时滚动。
+  $effect(() => {
+    if (runState.streamingText || runState.thinkingText) {
+      setTimeout(scrollToBottom, 50);
+    }
+  });
+</script>
+
+<div bind:this={messagesContainer} class="flex-1 overflow-y-auto">
+  <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
+    <!-- 已提交消息（按顺序；多轮历史保留在上方）。 -->
+    {#each runState.messages as message, i (i)}
+      {#if message.role === "user"}
+        <!-- 用户气泡（纯文本）。 -->
+        <div class="flex justify-end">
+          <div class="flex flex-col items-end">
+            <div
+              class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
+            >
+              <div
+                class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+              >
+                {userText(message)}
+              </div>
+            </div>
+          </div>
+        </div>
+      {:else if message.role === "assistant" && i !== liveAssistantIndex}
+        <!-- 助手消息（已完成）：思考块（present-only）+ markdown 文本 + 工具调用占位（M2）+ 用量。 -->
+        <!-- 运行中的进行中助手骨架由下方 LIVE 视图呈现，此处跳过以免重复渲染。 -->
+        <div class="flex flex-col gap-2">
+          <div class="flex-1 min-w-0">
+            {#if assistantThinking(message)}
+              <AgentThinkingBlock thinking={assistantThinking(message)} />
+            {/if}
+
+            {#if assistantText(message)}
+              <div
+                class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+                use:markdownInteractions
+              >
+                {@html renderMarkdown(assistantText(message))}
+              </div>
+            {/if}
+
+            <!-- 工具调用块占位（M2 将替换为 AgentToolCallCard）。 -->
+            {#each assistantToolCalls(message) as block (block.id)}
+              <div
+                class="mt-2 px-3 py-2 rounded-md border border-dashed border-[var(--hairline)] text-xs text-base-content/50"
+              >
+                工具调用：{block.name}
+              </div>
+            {/each}
+
+            <!-- 错误态消息（stopReason=error 携带 errorMessage）。 -->
+            {#if message.stopReason === "error" && message.errorMessage}
+              <div
+                class="mt-2 px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
+              >
+                {message.errorMessage}
+              </div>
+            {/if}
+
+            <!-- Token 用量（输入/输出）。 -->
+            {#if message.usage}
+              <div class="mt-2 flex flex-row gap-2 text-xs text-base-content/50">
+                <span>输入 {message.usage.input}</span>
+                <span>·</span>
+                <span>输出 {message.usage.output}</span>
+              </div>
+            {/if}
+          </div>
+        </div>
+      {:else if message.role === "toolResult"}
+        <!-- toolResult 占位（M2 工具卡片）。 -->
+        <div
+          class="px-3 py-2 rounded-md border border-dashed border-[var(--hairline)] text-xs text-base-content/50"
+        >
+          工具结果：{message.toolName}
+        </div>
+      {/if}
+      <!-- 运行中的进行中助手骨架（i === liveAssistantIndex）有意不在此渲染，由下方 LIVE 视图呈现。 -->
+    {/each}
+
+    <!-- LIVE 流式视图：运行中展示增长的思考块 + 流式文本。 -->
+    {#if runState.isRunning}
+      <div class="flex flex-col gap-2">
+        <div class="flex-1 min-w-0">
+          {#if runState.thinkingText}
+            <AgentThinkingBlock thinking={runState.thinkingText} isStreaming />
+          {/if}
+
+          {#if runState.streamingText}
+            <div
+              class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+              use:markdownInteractions
+            >
+              {@html renderMarkdown(runState.streamingText)}
+            </div>
+          {:else if !runState.thinkingText}
+            <!-- 流式启动但尚无内容：进行中指示。 -->
+            <div class="py-2 text-base-content flex items-center">
+              <div
+                class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+              ></div>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- 错误态：run-level 错误可见，而非静默停止。 -->
+    {#if runState.error}
+      <div
+        class="px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
+      >
+        {runState.error}
+      </div>
+    {/if}
+  </div>
+</div>
+
+<style>
+  /* 自定义滚动条（镜像 ChatContent）。 */
+  .overflow-y-auto::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .overflow-y-auto::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .overflow-y-auto::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--base-content) 15%, transparent);
+    border-radius: 3px;
+  }
+
+  .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--base-content) 25%, transparent);
+  }
+</style>

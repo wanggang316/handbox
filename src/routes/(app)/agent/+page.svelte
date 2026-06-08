@@ -11,9 +11,9 @@
   import AgentSessionCreateModal from "$lib/components/agentsession/AgentSessionCreateModal.svelte";
   import AgentSessionHeader from "$lib/components/agentsession/AgentSessionHeader.svelte";
   import AgentInput from "$lib/components/agentsession/AgentInput.svelte";
+  import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
   import { goto } from "$app/navigation";
   import type { AgentSession } from "$lib/types";
-  import type { AgentMessage } from "$lib/types/agentSession";
 
   // 当前选中的 Agent 会话 ID（来自 ?id= 查询参数）
   let sessionId = $derived(
@@ -64,110 +64,47 @@
     });
   });
 
-  // 当前会话的运行 view-model（响应式 getter；timeline feature 将复用此入口）。
+  // 当前会话的运行 view-model（响应式 getter；用于空态判定，渲染由 AgentTimeline 消费）。
   const runState = $derived(
     sessionId ? agentRunStore.runStateFor(sessionId) : null,
   );
 
+  // 是否处于空态（无任何已提交消息、无流式内容、无错误、未运行）。
+  const isEmpty = $derived(
+    !runState ||
+      (runState.messages.length === 0 &&
+        !runState.streamingText &&
+        !runState.thinkingText &&
+        !runState.error &&
+        !runState.isRunning),
+  );
+
   function handleCreated(session: AgentSession) {
     goto(`/agent?id=${session.id}`);
-  }
-
-  // 从 AgentMessage 提取可显示文本（M1 最小渲染；富 timeline 为下一个 feature）。
-  function messageText(message: AgentMessage): string {
-    if (message.role === "user") {
-      if (typeof message.content === "string") {
-        return message.content;
-      }
-      return message.content
-        .map((block) => (block.type === "text" ? block.text : ""))
-        .join("");
-    }
-    if (message.role === "assistant") {
-      return message.content
-        .map((block) => (block.type === "text" ? block.text : ""))
-        .join("");
-    }
-    // toolResult：M1 仅提取文本块（工具卡片为 M2）。
-    return message.content
-      .map((block) => (block.type === "text" ? block.text : ""))
-      .join("");
-  }
-
-  function messageRoleLabel(message: AgentMessage): string {
-    switch (message.role) {
-      case "user":
-        return "你";
-      case "assistant":
-        return "助手";
-      default:
-        return "工具";
-    }
   }
 </script>
 
 <!-- Agent 模式落地页（将被 (app) 分组布局包裹） -->
 <div class="flex-1 flex flex-col h-full">
   {#if sessionId}
-    <!-- 已选中会话：Header（顶部）+ 内容区（最小 timeline view-model 渲染）+ input 槽。 -->
+    <!-- 已选中会话：Header（顶部）+ 内容区（完整 timeline 渲染）+ input 槽。 -->
     <AgentSessionHeader />
 
     <!--
-      内容区：M1 最小渲染 —— 列出已提交消息文本 + 当前流式文本行 + 错误行。
-      富 timeline（思考块 / 工具卡片）为下一个 feature（m1-agent-timeline-render），
-      它将消费 `agentRunStore.runStateFor(sessionId)` 这一稳定 getter。
+      内容区：完整 timeline 渲染 —— 用户气泡 / 助手 markdown / 思考块 / 用量 / 多轮 / 错误态。
+      AgentTimeline 消费 `agentRunStore.runStateFor(sessionId)` 这一稳定 getter；
+      工具卡片留给 M2（toolResult / toolcall 块当前仅占位）。
     -->
-    <div class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
-      {#if runState}
-        {#each runState.messages as message, i (i)}
-          <div class="flex flex-col gap-1">
-            <span class="text-xs text-base-content/40">
-              {messageRoleLabel(message)}
-            </span>
-            <p class="text-sm text-base-content whitespace-pre-wrap break-words">
-              {messageText(message)}
-            </p>
-          </div>
-        {/each}
-
-        {#if runState.thinkingText}
-          <div class="flex flex-col gap-1">
-            <span class="text-xs text-base-content/40">思考中</span>
-            <p
-              class="text-sm text-base-content/60 italic whitespace-pre-wrap break-words"
-            >
-              {runState.thinkingText}
-            </p>
-          </div>
-        {/if}
-
-        {#if runState.streamingText}
-          <div class="flex flex-col gap-1">
-            <span class="text-xs text-base-content/40">助手</span>
-            <p class="text-sm text-base-content whitespace-pre-wrap break-words">
-              {runState.streamingText}
-            </p>
-          </div>
-        {/if}
-
-        {#if runState.error}
-          <div
-            class="px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
-          >
-            {runState.error}
-          </div>
-        {/if}
-
-        {#if runState.messages.length === 0 && !runState.streamingText && !runState.error}
-          <div
-            class="flex-1 flex flex-col items-center justify-center text-base-content/40"
-          >
-            <Bot size={40} class="mb-3 opacity-20" />
-            <p class="text-sm">开始与 {currentSession?.name ?? "Agent"} 对话</p>
-          </div>
-        {/if}
-      {/if}
-    </div>
+    {#if isEmpty}
+      <div
+        class="flex-1 flex flex-col items-center justify-center text-base-content/40"
+      >
+        <Bot size={40} class="mb-3 opacity-20" />
+        <p class="text-sm">开始与 {currentSession?.name ?? "Agent"} 对话</p>
+      </div>
+    {:else}
+      <AgentTimeline {sessionId} />
+    {/if}
 
     <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->
     <div class="shrink-0 border-t border-base-300 px-4 py-3">
