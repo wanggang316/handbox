@@ -30,6 +30,15 @@ use crate::models::AppError;
 use crate::services::chat_engine::{self, ChatOptions};
 use crate::services::{AgentSessionService, Database, ProviderService};
 use crate::storage::types::UUID;
+use crate::storage::AgentSessionRepository;
+
+/// 当前时间（毫秒），用作 transcript 行的 `created_at`。
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
 
 /// 活跃 run 注册表：`session_id -> RunHandle`。
 ///
@@ -75,6 +84,10 @@ impl RunSink {
 pub struct AgentRuntime {
     sessions: AgentSessionService,
     providers: ProviderService,
+    /// transcript 增量持久化的写入口。spawn 出去的 run 任务在每个
+    /// `AgentEvent::MessageEnd` 上经它把完整 hand-agent `Message` 追加进
+    /// `agent_session_messages`（seq 由仓储事务内分配）。
+    messages: AgentSessionRepository,
     runs: RunsMap,
     /// 测试专用：注入一个 scripted `StreamFn` 取代真实网络流。生产构造器永远
     /// 把它留空（不启用 model 的 `faux` feature，遵守上游 Decision Log D-04）。
@@ -94,7 +107,8 @@ impl AgentRuntime {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             sessions: AgentSessionService::new(Arc::clone(&db)),
-            providers: ProviderService::new(db),
+            providers: ProviderService::new(Arc::clone(&db)),
+            messages: AgentSessionRepository::new(db),
             runs: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             stream_fn_override: None,
@@ -233,8 +247,23 @@ impl AgentRuntime {
     ///
     /// 事件路径的单一 choke point 在此：每个 `AgentEvent` 经 `emit` 转发为
     /// `{ sessionId, event }`；loop future 解析后（任意 Ok/Err）发出终结信号
-    /// **恰好一次**，再从 `runs` 移除 `session_id`。后续 feature 把持久化 /
+    /// **恰好一次**，再从 `runs` 移除 `session_id`。后续 feature 把
     /// 错误映射 / abort 接进这同一处。
+    ///
+    /// 增量持久化（本 feature）也接在这个 choke point 上：每个
+    /// `AgentEvent::MessageEnd { message }`（已完成的消息）把完整的 hand-agent
+    /// `Message` 序列化后经一个有序的单向 channel 交给一个**串行**持久化任务，
+    /// 由它调用 `AgentSessionRepository::append_message` 落库（仓储在同一事务内
+    /// 分配 gap-free 的 per-session `seq` 并 bump `message_count`/`last_message_at`）。
+    ///
+    /// 为什么走 channel 而不在 `emit` 闭包里直接 `append_message`：`emit` 是同步
+    /// 的 `Fn`（`AgentEventSink`），不能 `.await`；而 `run_agent_loop` 按事件
+    /// 发出顺序同步调用 `emit`，因此把 message 按发出顺序压入 channel、由单一
+    /// 消费任务顺序落库，既保住了「user 消息先于 assistant 终结事件落库」的顺序
+    /// （user 的 `MessageEnd` 在 assistant streaming 之前发出），又避免阻塞 loop。
+    /// 终结信号在 loop 结束**且** channel 排空之后才发出 —— 即每条已完成消息都在
+    /// `agent_stream_closed` 之前落库。持久化纯粹是事件处理里的副作用，对发出的
+    /// 事件流完全透明（不重排、不重发）。
     fn spawn_loop(
         &self,
         session_id: UUID,
@@ -246,9 +275,55 @@ impl AgentRuntime {
     ) {
         let runs = Arc::clone(&self.runs);
 
+        // 串行持久化管道：emit 闭包（同步）把每个已完成 Message 的
+        // (role, payload, created_at) 按发出顺序压入 channel；消费任务按序落库。
+        let repo = self.messages.clone();
+        let persist_session = session_id.clone();
+        let (persist_tx, mut persist_rx) =
+            tokio::sync::mpsc::unbounded_channel::<(String, serde_json::Value, i64)>();
+        let persist_task = tokio::spawn(async move {
+            while let Some((role, payload, created_at)) = persist_rx.recv().await {
+                // append_message 失败不影响事件流转发（事件已在 emit 处发出）；
+                // 仅记录，避免一条落库失败拖垮整轮持久化。
+                if let Err(e) = repo
+                    .append_message(&persist_session, &role, &payload, created_at)
+                    .await
+                {
+                    eprintln!(
+                        "agent transcript persist failed (session {}): {}",
+                        persist_session, e
+                    );
+                }
+            }
+        });
+
         let event_session = session_id.clone();
         let on_event = Arc::clone(&sink.on_event);
         let emit: AgentEventSink = Arc::new(move |event: AgentEvent| {
+            // 副作用：仅在 MessageEnd（已完成、可反序列化的完整 Message）上落库；
+            // MessageUpdate（streaming delta）绝不落库。run_agent_loop 只为本轮
+            // 的新消息发事件，故被 seed 的历史 transcript 不会被重复写入。
+            if let AgentEvent::MessageEnd { message } = &event {
+                match serde_json::to_value(message) {
+                    Ok(payload) => {
+                        // role 取序列化后的 tag（Message `#[serde(tag="role")]`），
+                        // 与 assemble_run 反序列化 payload 的方式保持一致。
+                        let role = payload
+                            .get("role")
+                            .and_then(|r| r.as_str())
+                            .unwrap_or("assistant")
+                            .to_string();
+                        let _ = persist_tx.send((role, payload, now_ms()));
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "agent transcript serialize failed (session {}): {}",
+                            event_session, e
+                        );
+                    }
+                }
+            }
+
             let event_json = match serde_json::to_value(&event) {
                 Ok(v) => v,
                 Err(e) => json!({ "type": "serializeError", "message": e.to_string() }),
@@ -280,6 +355,12 @@ impl AgentRuntime {
             )
             .await;
 
+            // loop 结束后丢弃 emit（其中持有 persist_tx），关闭 channel；等持久化
+            // 任务把已入队的消息全部落库后再发终结信号 —— 保证每条已完成消息都在
+            // `agent_stream_closed` 之前入库。
+            drop(emit);
+            let _ = persist_task.await;
+
             // --- (4) 终结：恰好一次发出 closed，再移除注册表条目 ---
             on_closed(json!({ "sessionId": closed_session }));
             runs.lock().await.remove(&closed_session);
@@ -299,6 +380,7 @@ mod tests {
     use crate::storage::types::{AgentSession, Provider};
     use crate::storage::{AgentSessionRepository, ProviderRepository};
     use hand_ai_model::{AssistantMessage, AssistantMessageEvent, StopReason, Usage};
+    use sqlx::Row;
     use std::sync::Mutex as StdMutex;
     use tempfile::TempDir;
 
@@ -562,6 +644,285 @@ mod tests {
             runtime.active_run_count().await,
             0,
             "registry empties after the single run completes"
+        );
+    }
+
+    /// A persisted transcript row, projected from the DB via SQL so the tests
+    /// can assert directly on the stored `role` / `seq` / `payload` columns and
+    /// on SQLite's own `json_valid(payload)` verdict.
+    #[derive(Debug)]
+    struct StoredRow {
+        seq: i64,
+        role: String,
+        json_valid: i64,
+        payload_model: Option<String>,
+    }
+
+    /// Read the persisted transcript rows for a session, ordered by `seq`,
+    /// asking SQLite to validate each payload (`json_valid`) and to extract the
+    /// payload's `$.model` field (NULL for non-assistant rows).
+    async fn query_messages(db: &Arc<Database>, session_id: &str) -> Vec<StoredRow> {
+        let rows = sqlx::query(
+            r#"
+            SELECT seq,
+                   role,
+                   json_valid(payload) AS json_valid,
+                   json_extract(payload, '$.model') AS payload_model
+            FROM agent_session_messages
+            WHERE session_id = $1
+            ORDER BY seq ASC
+        "#,
+        )
+        .bind(session_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+
+        rows.into_iter()
+            .map(|row| StoredRow {
+                seq: row.try_get("seq").unwrap(),
+                role: row.try_get("role").unwrap(),
+                json_valid: row.try_get("json_valid").unwrap(),
+                payload_model: row.try_get("payload_model").ok().flatten(),
+            })
+            .collect()
+    }
+
+    /// A single-turn scripted stream: Start -> TextDelta -> Done. Records the
+    /// model id that reaches the loop boundary so tests can also confirm the
+    /// assembled model matches the session selection.
+    fn single_turn_stream_fn(text: &str) -> hand_agent::StreamFn {
+        let text = text.to_string();
+        Arc::new(move |model, _ctx, _opts, _cancel| {
+            let events = vec![
+                AssistantMessageEvent::Start {
+                    partial: done_message(&model.id, ""),
+                },
+                AssistantMessageEvent::TextDelta {
+                    content_index: 0,
+                    delta: text.clone(),
+                    partial: done_message(&model.id, &text),
+                },
+                AssistantMessageEvent::Done {
+                    reason: StopReason::Stop,
+                    message: done_message(&model.id, &text),
+                },
+            ];
+            Box::pin(futures::stream::iter(events))
+        })
+    }
+
+    /// VAL-PERSIST-001 + VAL-PERSIST-002 + VAL-RUN-004: a scripted run persists
+    /// the new transcript incrementally — a user row AND an assistant row land
+    /// in `agent_session_messages`; EVERY row's payload is valid JSON; the user
+    /// row precedes the assistant row by `seq` (user MessageEnd persists before
+    /// the assistant MessageEnd); and the assistant payload's `model` field
+    /// equals the session's selected model id (no silent substitution).
+    #[tokio::test]
+    async fn run_persists_user_and_assistant_rows_with_valid_json() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(single_turn_stream_fn("hi there"));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "hello".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        wait_for_closed(&sink).await;
+
+        let rows = query_messages(&db, &session_id).await;
+
+        // Exactly the two NEW messages of this run: user prompt + assistant.
+        // (No seeded prior transcript, so nothing should be re-persisted.)
+        assert_eq!(rows.len(), 2, "user row + assistant row persisted");
+
+        // VAL-PERSIST-001: every persisted row's payload is valid JSON.
+        for row in &rows {
+            assert_eq!(
+                row.json_valid, 1,
+                "row seq {} payload must be valid JSON",
+                row.seq
+            );
+        }
+
+        // VAL-PERSIST-002: user is persisted before the assistant terminal —
+        // proven by ordering: seq(user) < seq(assistant), gap-free from 0.
+        assert_eq!(
+            rows[0].role, "user",
+            "first persisted row is the user message"
+        );
+        assert_eq!(rows[0].seq, 0);
+        assert_eq!(
+            rows[1].role, "assistant",
+            "second persisted row is the assistant message"
+        );
+        assert_eq!(rows[1].seq, 1);
+
+        // VAL-RUN-004: the persisted assistant payload's model == session model.
+        assert_eq!(
+            rows[1].payload_model.as_deref(),
+            Some("gpt-4o"),
+            "assistant payload.model equals the selected model id (no silent substitution)"
+        );
+
+        // Session counters reflect the two appends (bumped transactionally).
+        let session = runtime
+            .sessions
+            .get_session(session_id.clone())
+            .await
+            .unwrap();
+        assert_eq!(session.message_count, 2);
+
+        // Persistence drained before close (incremental): the run is gone from
+        // the registry and exactly one closed signal fired.
+        assert_eq!(sink.closed_count(), 1);
+        assert_eq!(runtime.active_run_count().await, 0);
+    }
+
+    /// VAL-PERSIST-002 (ordering proof, isolated): regardless of payload shape,
+    /// the user message always lands at seq 0 (its `MessageEnd` fires at the
+    /// very start of the loop, before any assistant streaming), so
+    /// seq(user) < seq(assistant) holds for the persisted rows.
+    #[tokio::test]
+    async fn user_message_persisted_before_assistant_terminal() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(single_turn_stream_fn("response"));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "the user prompt".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        wait_for_closed(&sink).await;
+
+        let rows = query_messages(&db, &session_id).await;
+        let user_seq = rows
+            .iter()
+            .find(|r| r.role == "user")
+            .map(|r| r.seq)
+            .expect("a user row must be persisted");
+        let assistant_seq = rows
+            .iter()
+            .find(|r| r.role == "assistant")
+            .map(|r| r.seq)
+            .expect("an assistant row must be persisted");
+
+        assert!(
+            user_seq < assistant_seq,
+            "user message (seq {}) must persist before the assistant terminal (seq {})",
+            user_seq,
+            assistant_seq
+        );
+    }
+
+    /// VAL-PERSIST-003: completed messages land incrementally (each at its
+    /// MessageEnd, before the run's `agent_stream_closed`). This run reaches two
+    /// completed MessageEnds (user + assistant) and then the scripted stream
+    /// ends; both already-completed rows remain persisted. The persistence
+    /// logic is abort-agnostic — it only reacts to MessageEnd — so any message
+    /// that reached MessageEnd before an (out-of-scope) abort is already stored.
+    #[tokio::test]
+    async fn completed_messages_persist_incrementally_and_survive_stream_end() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(single_turn_stream_fn("completed turn"));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "go".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        wait_for_closed(&sink).await;
+
+        // Both completed messages survived the stream end, persisted before the
+        // closed signal (drain-before-close), with gap-free seqs from 0.
+        let rows = query_messages(&db, &session_id).await;
+        assert_eq!(rows.len(), 2, "both completed messages are persisted");
+        let seqs: Vec<i64> = rows.iter().map(|r| r.seq).collect();
+        assert_eq!(seqs, vec![0, 1], "completed rows keep gap-free seqs");
+        assert_eq!(sink.closed_count(), 1, "exactly one closed after drain");
+    }
+
+    /// The seeded prior transcript is NOT re-persisted: only the NEW messages of
+    /// this run are appended on top of the existing history. After a run on a
+    /// session that already holds 2 transcript rows, the table holds 2 prior +
+    /// 2 new = 4 rows, with the new rows appended after the seeded seqs.
+    #[tokio::test]
+    async fn seeded_prior_transcript_is_not_repersisted() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        // Seed two prior transcript rows (as if from earlier runs).
+        let repo = AgentSessionRepository::new(Arc::clone(&db));
+        let prior_user = serde_json::to_value(Message::User(UserMessage::new_text(
+            "earlier question".to_string(),
+        )))
+        .unwrap();
+        let prior_assistant =
+            serde_json::to_value(Message::Assistant(done_message("gpt-4o", "earlier answer")))
+                .unwrap();
+        repo.append_message(&session_id, "user", &prior_user, now_ms())
+            .await
+            .unwrap();
+        repo.append_message(&session_id, "assistant", &prior_assistant, now_ms())
+            .await
+            .unwrap();
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(single_turn_stream_fn("new answer"));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "new question".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        wait_for_closed(&sink).await;
+
+        let rows = query_messages(&db, &session_id).await;
+        // 2 prior (seqs 0,1) + 2 new (seqs 2,3); seeded rows not duplicated.
+        assert_eq!(rows.len(), 4, "prior 2 + new 2, no re-persistence of seed");
+        let seqs: Vec<i64> = rows.iter().map(|r| r.seq).collect();
+        assert_eq!(
+            seqs,
+            vec![0, 1, 2, 3],
+            "new rows appended after seeded seqs"
+        );
+        assert_eq!(rows[2].role, "user", "new user row appended at seq 2");
+        assert_eq!(
+            rows[3].role, "assistant",
+            "new assistant row appended at seq 3"
         );
     }
 }
