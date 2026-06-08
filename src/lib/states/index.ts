@@ -8,6 +8,7 @@ export { messageStore } from './message.svelte';
 
 // Agent Session 相关
 export { agentSessionState, agentSessionActions } from './agentSession.svelte';
+export { agentRunStore, type AgentRunState } from './agentRun.svelte';
 
 // 供应商相关
 export {
