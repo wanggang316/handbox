@@ -81,6 +81,18 @@ HandBox 架构设计
   - 流式输出：后端在处理生成式对话时，以事件/分片流（Server-Sent Events 风格）推送，前端订阅并渲染；或使用 Tauri 事件总线进行分段消息 `emit`。
 - 错误协议：统一错误结构（错误码、可读消息、建议操作），区分网络/鉴权/速率/用户输入/内部错误。
 
+### 3.4 Agent 模式（独立子系统，自 milestone M1 起）
+
+Agent 模式是接入 hand-ai `hand-agent` agentic-loop 的自主智能体工作台，与现有 Chat 模式**完全独立**（独立的数据结构、存储、输入框选项与会话视图），通过侧栏「单词本」下方的 `Chat | Agent` 段控开关切换。`appMode` 持久化于 localStorage，默认 `chat`。
+
+- **存储**（与 Chat 的 `sessions`/`messages` 表完全隔离）：迁移 `044_create_agent_sessions.sql` + `045_create_agent_session_messages.sql`。每条 hand-agent `Message` 以完整 JSON 整存于 `agent_session_messages.payload`；transcript 按显式 `seq`（非 `created_at`）排序，重载即还原完整时间线（含 tool call / thinking / usage）。
+- **后端运行时**（`services/agent_runtime.rs`）：复用 `chat_engine::{shared_client, resolve_model, build_stream_options}`（M1 提为 `pub(crate)`，零逻辑改动）装配裸 `model::Client` + `AgentLoopConfig`，驱动 low-level `run_agent_loop`。事件路径收敛到单一 choke point（`RunSink` + 单一 closed emit site）：每个 `AgentEvent` 发为 Tauri 事件 `agent_stream_event {sessionId, event}`，run-level `Err` 发为 sanitized 的 `agent_stream_error {sessionId, error{code,message,hint}}`（在 closed 之前），回合终结发 `agent_stream_closed {sessionId}` 恰好一次。约束：同一 session 同一时刻只允许一个 run（`runs` map 去重）。
+- **错误分型**：① run-level `Err`（如 `ProviderNotFound`）→ sanitized envelope；② in-band `AssistantMessageEvent::Error` → 终结 assistant 消息 `stopReason=error`（走正常持久化路径，不发 envelope）。安全：envelope 永不回显可能携带 API key 的原始 provider 错误文本。
+- **持久化时机**：user 消息发送后立即落库（先于 assistant）；assistant/tool 消息逐 `MessageEnd` 增量落库；只写完整可反序列化的 `Message` JSON；重载对损坏行优雅降级（跳过、不白屏）。
+- **删除级联**：`agent_session_repository.delete_session` 在事务内显式先删 transcript 行再删 session 行（不依赖 `PRAGMA foreign_keys`，作为防御实现）。
+- **命名隔离**：后端 `agent_session_*` / `agent_run_*` 命令、前端 `agentSession` / `agentRun` 状态、路由 `(app)/agent`（单数），与既有 `/agents` 预设（复数）零碰撞。
+- **工具**：M1 为纯文本端到端 MVP，无工具；内置只读 FS + 出站 `web_fetch` 工具及后端工具门禁属 M2。
+
 ## 4. 数据与存储设计
 
 存储位置：平台对应的应用数据目录下，例如：
