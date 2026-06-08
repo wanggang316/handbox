@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::*;
 use crate::services::{
-    selection::setup_selection, AgentService, AgentSessionService, ArtifactService,
+    selection::setup_selection, AgentRuntime, AgentService, AgentSessionService, ArtifactService,
     SessionService, McpService, MessageService, ModelService, ProviderService, SearchService,
     SettingsService, StorageService, UserSessionService, WordService,
 };
@@ -159,6 +159,8 @@ pub fn run() {
             agent_session_update_field,
             agent_session_delete,
             agent_session_messages,
+            // Agent 模式 run 命令
+            agent_run_stream,
             // 消息相关命令
             message_user_send,
             message_user_send_stream,
@@ -355,6 +357,9 @@ async fn initialize_services(
     // 初始化 Agent Session 服务（Agent 模式会话 CRUD）
     let agent_session_service = AgentSessionService::new(database_service.clone());
 
+    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重）
+    let agent_runtime = AgentRuntime::new(database_service.clone());
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(session_service);
@@ -370,6 +375,7 @@ async fn initialize_services(
     app.manage(favorite_repo);
     app.manage(agent_service);
     app.manage(agent_session_service);
+    app.manage(agent_runtime);
 
     // Services are registered — the foreground can now read DB-cached data.
     // Catalog sync runs ENTIRELY in the background from here: prime the
