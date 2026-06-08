@@ -261,6 +261,7 @@
           'chat'
             ? 'bg-base-100 text-base-content shadow-sm'
             : 'text-base-content/60 hover:text-base-content'}"
+          aria-pressed={uiState.appMode === "chat"}
           onclick={selectChatMode}
         >
           Chat
@@ -270,6 +271,7 @@
           'agent'
             ? 'bg-base-100 text-base-content shadow-sm'
             : 'text-base-content/60 hover:text-base-content'}"
+          aria-pressed={uiState.appMode === "agent"}
           onclick={selectAgentMode}
         >
           Agent

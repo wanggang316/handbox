@@ -146,8 +146,12 @@ class AgentRunStore {
         break;
 
       case "agent_end":
-        // 整轮结束：以权威 messages 列表替换已提交序列并清理流式累积。
-        state.messages = event.messages;
+        // 整轮结束：**绝不**用 event.messages 覆盖已提交序列。
+        // hand-agent 的 AgentEnd.messages 只含「本轮新增」消息（本回合的 user +
+        // assistant），不含 seed 进来的历史 transcript。已提交序列已由
+        // message_start/message_end 增量维护为 [history + 本轮]，若在此覆盖会把
+        // 多轮历史抹成仅本轮两条，直到 reload 才恢复（违反 VAL-RUN-005）。
+        // 故 agent_end 仅做流式残留清理，不触碰 state.messages。
         state.streamingText = "";
         state.thinkingText = "";
         break;

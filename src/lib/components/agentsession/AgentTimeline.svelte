@@ -51,15 +51,39 @@
   // 运行中追加的「进行中助手骨架」索引：reducer 在 message_start 时即把助手消息
   // 追加到 messages（内容尚空、usage 为零），其增量走 streamingText/thinkingText。
   // 该骨架由下方 LIVE 视图负责呈现，故此处需抑制其空内容/零用量的重复渲染。
+  //
+  // 仅当「最后一条助手消息尚无已提交内容」时才抑制它（交由 LIVE 视图）。一旦
+  // message_end 把真实内容写入该助手消息，就返回 -1（不抑制），使已完成消息
+  // 立即从已提交序列渲染——避免 message_end 与 agent_stream_closed 之间出现
+  // 答案→pulse-dot→答案的闪烁（此区间 isRunning 仍为 true 而 streamingText 已清空）。
   const liveAssistantIndex = $derived.by(() => {
     if (!runState.isRunning) {
       return -1;
     }
     const last = runState.messages.length - 1;
-    return last >= 0 && runState.messages[last].role === "assistant"
-      ? last
-      : -1;
+    if (last < 0 || runState.messages[last].role !== "assistant") {
+      return -1;
+    }
+    const lastMsg = runState.messages[last] as Extract<
+      AgentMessage,
+      { role: "assistant" }
+    >;
+    const hasContent =
+      assistantText(lastMsg).length > 0 ||
+      assistantThinking(lastMsg).length > 0;
+    return hasContent ? -1 : last;
   });
+
+  // LIVE 流式视图仅在「运行中且尚无可显示的已完成内容」时呈现：
+  // 要么有正在流式累积的文本/思考，要么最后一条助手骨架仍为空（liveAssistantIndex>=0）。
+  // 一旦助手消息已完成（liveAssistantIndex===-1）且流式已清空，便不再显示 LIVE 视图，
+  // 从而消除 message_end 与 agent_stream_closed 之间的 pulse-dot 闪烁。
+  const showLiveView = $derived(
+    runState.isRunning &&
+      (!!runState.streamingText ||
+        !!runState.thinkingText ||
+        liveAssistantIndex >= 0),
+  );
 
   // 自动滚动到底部（镜像 ChatContent 行为）。
   let messagesContainer: HTMLDivElement;
@@ -162,7 +186,7 @@
     {/each}
 
     <!-- LIVE 流式视图：运行中展示增长的思考块 + 流式文本。 -->
-    {#if runState.isRunning}
+    {#if showLiveView}
       <div class="flex flex-col gap-2">
         <div class="flex-1 min-w-0">
           {#if runState.thinkingText}
