@@ -292,15 +292,6 @@ async fn initialize_services(
             .map_err(|e| format!("Failed to initialize database: {e}"))?,
     );
 
-    // Refresh hand-ai's model catalog before building the provider list:
-    // prime the in-memory registry from the local cache (last fetched on a
-    // prior run), then kick off a background loop that pulls hand-ai's
-    // daily-published Release asset. Keeps the catalog fresh without a dep
-    // bump so upstream-added models (e.g. OpenRouter's full tool-capable list,
-    // incl. `~*-latest` aliases) resolve at chat time. No local synthesis.
-    crate::services::catalog_sync::prime_from_cache();
-    crate::services::catalog_sync::spawn_refresh_loop();
-
     let llm_config_value = crate::config::llm_config::LlmConfig::load_from_app(app);
     crate::config::llm_config::install_global_llm_config(llm_config_value.clone());
 
@@ -367,6 +358,15 @@ async fn initialize_services(
     app.manage(artifact_service);
     app.manage(favorite_repo);
     app.manage(agent_service);
+
+    // Services are registered — the foreground can now read DB-cached data.
+    // Catalog sync runs ENTIRELY in the background from here: prime the
+    // in-memory catalog from the local cache, then refresh from hand-ai's
+    // daily-published Release asset and every 24h. Kept off the startup
+    // critical path so it never blocks the session / model list. Upstream
+    // additions (e.g. OpenRouter's full tool-capable list incl. `~*-latest`
+    // aliases) resolve at chat time once the refresh lands. No local synthesis.
+    crate::services::catalog_sync::spawn();
 
     Ok(())
 }

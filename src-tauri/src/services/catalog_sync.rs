@@ -25,31 +25,24 @@ const CATALOG_URL: &str =
 /// unchanged catalog costs a single `304` via the cached ETag.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Load the last-fetched catalog from the local cache (`~/.hand-ai`) into the
-/// in-memory registry, so a fresh catalog from a previous run is used
-/// immediately instead of waiting on the network. No-op (the embedded baseline
-/// stays active) when no cache exists.
+/// Start catalog sync **entirely in the background**.
 ///
-/// Call once at startup **before** the provider list is built so the provider
-/// augmentation reflects the cached catalog.
-pub fn prime_from_cache() {
-    if hand_ai_model::load_cached_catalog() {
-        tracing::info!("Loaded hand-ai catalog from local cache (~/.hand-ai)");
-    } else {
-        tracing::debug!("No cached hand-ai catalog; using embedded baseline");
-    }
-}
-
-/// Spawn a background task that refreshes the catalog from hand-ai's Release
-/// asset immediately and every [`REFRESH_INTERVAL`] thereafter.
+/// Spawned so it never sits on the startup critical path: service registration
+/// and the foreground (session list, model list) must not wait on catalog I/O.
+/// The foreground serves DB-cached data immediately; the catalog primes from
+/// the local cache and refreshes from hand-ai's Release asset behind it, and
+/// subsequent `get_model` / `get_models` reads (chat resolution, model sync)
+/// pick up the fresher catalog without a restart.
 ///
-/// Every step degrades gracefully: on any error the in-memory catalog is left
-/// untouched and the previously installed data keeps serving. The first
-/// successful refresh hot-swaps the in-memory registry, so subsequent
-/// `get_model` / `get_models` reads (chat resolution, model sync) pick up
-/// upstream additions without a restart.
-pub fn spawn_refresh_loop() {
+/// Every step degrades gracefully — on any error the in-memory catalog is left
+/// untouched and the embedded baseline / previously-installed data keeps
+/// serving.
+pub fn spawn() {
     tauri::async_runtime::spawn(async {
+        // Prime from the local cache first (a prior run's fetched catalog), so
+        // it's active before the slower network refresh lands.
+        prime_from_cache();
+
         loop {
             match hand_ai_model::refresh_from_remote(CATALOG_URL).await {
                 Ok(hand_ai_model::RefreshOutcome::Updated { providers, models }) => {
@@ -65,6 +58,18 @@ pub fn spawn_refresh_loop() {
             tokio::time::sleep(REFRESH_INTERVAL).await;
         }
     });
+}
+
+/// Load the last-fetched catalog from the local cache (`~/.hand-ai`) into the
+/// in-memory registry. No-op (the embedded baseline stays active) when no cache
+/// exists. Runs inside [`spawn`]'s background task — never on the foreground
+/// critical path.
+fn prime_from_cache() {
+    if hand_ai_model::load_cached_catalog() {
+        tracing::info!("Loaded hand-ai catalog from local cache (~/.hand-ai)");
+    } else {
+        tracing::debug!("No cached hand-ai catalog; using embedded baseline");
+    }
 }
 
 #[cfg(test)]
