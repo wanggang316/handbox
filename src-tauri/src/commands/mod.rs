@@ -1,6 +1,7 @@
 // IPC 命令模块
 pub mod accessibility;
 pub mod agent;
+pub mod agent_session;
 pub mod artifact;
 pub mod auth;
 pub mod clipboard;
@@ -23,6 +24,7 @@ pub mod word;
 // 重新导出所有命令
 pub use accessibility::*;
 pub use agent::*;
+pub use agent_session::*;
 pub use artifact::*;
 pub use auth::*;
 // 导出 session 命令，同时保留 chat 别名以保持向后兼容
