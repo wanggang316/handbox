@@ -114,9 +114,16 @@ impl AgentSessionRepository {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
 
+        // NOTE: `message_count` and `last_message_at` are deliberately OMITTED here.
+        // Session-field edits go through a read-modify-write (`get_session` then
+        // `update_session`) and can be triggered mid-run (e.g. the user changes the
+        // thinking level / model while a run streams). Writing those two columns back
+        // would clobber the atomic `message_count = message_count + 1` performed by
+        // `append_message`, reverting the run's increments and mis-sorting the list.
+        // `append_message` is therefore the SOLE writer of these two columns.
         let query = r#"
-            UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, tool_execution_mode = $10, message_count = $11, last_message_at = $12, updated_at = $13
-            WHERE id = $14
+            UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, tool_execution_mode = $10, updated_at = $11
+            WHERE id = $12
         "#;
 
         let result = sqlx::query(query)
@@ -130,8 +137,6 @@ impl AgentSessionRepository {
             .bind(&session.working_dir)
             .bind(&enabled_tools_json)
             .bind(&session.tool_execution_mode)
-            .bind(session.message_count)
-            .bind(session.last_message_at)
             .bind(session.updated_at)
             .bind(&session.id)
             .execute(self.db.pool())
@@ -179,10 +184,10 @@ impl AgentSessionRepository {
     ///
     /// # 为什么显式删除而不依赖 `ON DELETE CASCADE`？
     ///
-    /// 连接池上的 `PRAGMA foreign_keys` 处于 OFF 状态（见 `database.rs`，
-    /// 它只设置了 WAL/synchronous/busy_timeout），因此 SQL 级别的级联不会触发。
     /// 这里在同一个事务里先删除全部 `agent_session_messages`，再删除
-    /// `agent_sessions` 行，保证不会留下孤儿 transcript 行。
+    /// `agent_sessions` 行。显式级联是一种防御性写法，与连接的
+    /// `PRAGMA foreign_keys` 状态无关：无论 FK 强制开启与否（sqlx 默认 FK=ON），
+    /// transcript 行都会被原子地清除，保证不会留下孤儿 transcript 行。
     pub async fn delete_session(&self, session_id: &UUID) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {
             AppError::internal_error(&format!("Failed to begin transaction: {}", e))
@@ -513,6 +518,72 @@ mod tests {
         // Delete
         repo.delete_session(&session.id).await.unwrap();
         assert!(repo.get_session_by_id(&session.id).await.unwrap().is_none());
+    }
+
+    /// A session-field edit (rename / thinking-level change) via the
+    /// read-modify-write `update_session` path must NOT touch `message_count` /
+    /// `last_message_at`. Those columns are owned exclusively by `append_message`.
+    /// Regression guard for the lost-update race: a stale in-memory
+    /// `AgentSession` (with its original counters) written back mid-run must not
+    /// revert the increments performed by concurrent appends.
+    #[tokio::test]
+    async fn test_update_session_does_not_clobber_message_count() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentSessionRepository::new(db_arc.clone());
+        let now = now_ms();
+
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Counter Session", now);
+        repo.create_session(&session).await.unwrap();
+
+        // Capture the original (stale) snapshot BEFORE any appends. This mirrors a
+        // client holding an AgentInput it read at session-open time.
+        let stale = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(stale.message_count, 0);
+        let stale_last_message_at = stale.last_message_at;
+
+        // A run streams in: 3 messages get appended, advancing the counters.
+        for i in 0..3 {
+            repo.append_message(
+                &session.id,
+                "user",
+                &serde_json::json!({ "i": i }),
+                now + 10 + i,
+            )
+            .await
+            .unwrap();
+        }
+
+        let after_appends = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(after_appends.message_count, 3);
+        assert_eq!(after_appends.last_message_at, Some(now + 12));
+        // Sanity: the stale snapshot really does differ from the live counters, so
+        // a clobbering write-back would be observable as a regression.
+        assert_ne!(stale.message_count, after_appends.message_count);
+        assert_ne!(stale_last_message_at, after_appends.last_message_at);
+
+        // Now the user edits a field (rename + thinking-level change) using the
+        // STALE snapshot — exactly the read-modify-write that previously raced.
+        let mut edit = stale.clone();
+        edit.name = "Renamed Mid-Run".to_string();
+        edit.thinking_level = Some("low".to_string());
+        edit.updated_at = now + 20;
+        repo.update_session(&edit).await.unwrap();
+
+        // The edit applied, but the counters set by append_message are intact:
+        // they were NOT reverted to the stale snapshot's values.
+        let reloaded = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.name, "Renamed Mid-Run");
+        assert_eq!(reloaded.thinking_level, Some("low".to_string()));
+        assert_eq!(
+            reloaded.message_count, 3,
+            "update_session must not revert message_count"
+        );
+        assert_eq!(
+            reloaded.last_message_at,
+            Some(now + 12),
+            "update_session must not revert last_message_at"
+        );
     }
 
     /// VAL-PERSIST-009: delete_session removes session AND all transcript rows
