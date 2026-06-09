@@ -33,7 +33,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use hand_agent::{AgentTool, ToolResult};
+use hand_ai_model::{ImageContent, ToolResultContent};
 use serde_json::json;
 
 /// Tool names this factory knows how to build.
@@ -43,6 +45,10 @@ const TOOL_WEB_FETCH: &str = "web_fetch";
 
 /// Byte budget for a single `read_file` result before truncation kicks in.
 const READ_FILE_BYTE_BUDGET: usize = 50 * 1024;
+/// Hard cap on the raw bytes of an image we will base64 + return as an image
+/// block. Larger images are refused with a generic message rather than
+/// base64-encoding an unbounded file into the model context.
+const READ_FILE_IMAGE_BYTE_CAP: usize = 5 * 1024 * 1024;
 /// Max entries a single `list_directory` result will emit before truncation.
 const LIST_MAX_ENTRIES: usize = 500;
 
@@ -372,9 +378,25 @@ fn execute_read_file(root: &Path, args: serde_json::Value) -> ToolResult {
         Err(_) => return ToolResult::error("Failed to read file"),
     };
 
-    // Binary-safe: lossy-decode so we never crash on non-UTF-8 / image bytes.
-    // (The image-result-block UI is a later feature; here a placeholder/text
-    // representation is sufficient and must not panic.)
+    // Image files become an Image content block (base64 + mime) so the model
+    // (and the tool-call card) sees the picture, not replacement-char noise from
+    // a lossy UTF-8 decode of binary bytes. Detection is by extension first,
+    // then a magic-byte sniff so an image with a wrong/missing extension is
+    // still handled. Oversize images are refused (we must not base64 an
+    // unbounded file into the context).
+    if let Some(mime) = detect_image_mime(&target, &raw_bytes) {
+        if raw_bytes.len() > READ_FILE_IMAGE_BYTE_CAP {
+            return ToolResult::error("Failed to read file: image is too large");
+        }
+        let data_b64 = BASE64_STANDARD.encode(&raw_bytes);
+        return ToolResult {
+            content: vec![ToolResultContent::Image(ImageContent::new(data_b64, mime))],
+            details: None,
+            terminate: None,
+        };
+    }
+
+    // Text files: lossy-decode (binary-safe — never panics) and truncate.
     let content = String::from_utf8_lossy(&raw_bytes).into_owned();
     let (body, truncated) = truncate_text(&content, READ_FILE_BYTE_BUDGET);
 
@@ -387,6 +409,46 @@ fn execute_read_file(root: &Path, args: serde_json::Value) -> ToolResult {
         ));
     }
     ToolResult::text(output)
+}
+
+/// Detect whether `target`/`bytes` is a supported image, returning its MIME
+/// type when so. Extension match (png/jpg/jpeg/gif/webp/bmp) is checked first;
+/// otherwise a magic-byte sniff covers files with a wrong or missing extension.
+/// Returns `None` for non-image (text/binary) files, which keep the text path.
+fn detect_image_mime(target: &Path, bytes: &[u8]) -> Option<String> {
+    if let Some(ext) = target.extension().and_then(|e| e.to_str()) {
+        match ext.to_ascii_lowercase().as_str() {
+            "png" => return Some("image/png".to_string()),
+            "jpg" | "jpeg" => return Some("image/jpeg".to_string()),
+            "gif" => return Some("image/gif".to_string()),
+            "webp" => return Some("image/webp".to_string()),
+            "bmp" => return Some("image/bmp".to_string()),
+            _ => {}
+        }
+    }
+    sniff_image_mime(bytes).map(str::to_string)
+}
+
+/// Sniff a supported image MIME from leading magic bytes. Covers PNG, JPEG,
+/// GIF, WEBP (RIFF....WEBP), and BMP. Returns `None` when the bytes are not a
+/// recognized image.
+fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("image/png");
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("image/jpeg");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("image/gif");
+    }
+    if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    if bytes.starts_with(b"BM") {
+        return Some("image/bmp");
+    }
+    None
 }
 
 /// `list_directory` body: resolve in sandbox, list entries (dirs first), and
@@ -967,6 +1029,18 @@ mod tests {
         }
     }
 
+    /// Extract the first image content block from a result.
+    fn get_image(result: &ToolResult) -> &hand_ai_model::ImageContent {
+        match &result.content[0] {
+            hand_ai_model::ToolResultContent::Image(img) => img,
+            _ => panic!("expected image content"),
+        }
+    }
+
+    /// The 8-byte PNG signature plus a minimal trailer — enough that both the
+    /// extension match and the magic-byte sniff treat it as a PNG.
+    const PNG_BYTES: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
+
     /// A sandbox root with a few known files, plus a sibling dir OUTSIDE it.
     struct Fixture {
         _outer: TempDir,
@@ -1348,6 +1422,81 @@ mod tests {
         let fx = fixture();
         let result = execute_read_file(&fx.root, json!({"path": "sub/nested.txt"}));
         assert!(get_text(&result).contains("nested body"));
+    }
+
+    /// VAL-TOOLS-002 (image-result gap): reading an in-sandbox image returns an
+    /// Image content block (base64 + mime), NOT a lossy-UTF-8 text dump of the
+    /// binary bytes. This is what lets the tool-call card render the picture.
+    #[test]
+    fn read_in_sandbox_image_returns_image_block() {
+        let fx = fixture();
+        let img = fx.root.join("pic.png");
+        fs::write(&img, PNG_BYTES).unwrap();
+
+        let result = execute_read_file(&fx.root, json!({"path": "pic.png"}));
+
+        // It is an Image block, never a Text block.
+        assert!(
+            matches!(result.content[0], ToolResultContent::Image(_)),
+            "image read must yield an Image content block, not text"
+        );
+        let image = get_image(&result);
+        assert_eq!(image.mime_type, "image/png");
+        // The data is base64 of the file bytes (round-trips back to them).
+        let decoded = BASE64_STANDARD.decode(&image.data).expect("valid base64");
+        assert_eq!(decoded, PNG_BYTES);
+    }
+
+    /// An image with NO recognizable extension is still detected by its magic
+    /// bytes and returned as an Image block (not garbled text).
+    #[test]
+    fn read_extensionless_image_detected_by_magic_bytes() {
+        let fx = fixture();
+        let img = fx.root.join("blob");
+        fs::write(&img, PNG_BYTES).unwrap();
+
+        let result = execute_read_file(&fx.root, json!({"path": "blob"}));
+        assert!(
+            matches!(result.content[0], ToolResultContent::Image(_)),
+            "magic-byte-sniffed image must yield an Image block"
+        );
+        assert_eq!(get_image(&result).mime_type, "image/png");
+    }
+
+    /// A regular (non-image) text file keeps returning a Text block unchanged —
+    /// image handling must not regress the text path.
+    #[test]
+    fn read_text_file_still_returns_text_block() {
+        let fx = fixture();
+        let result = execute_read_file(&fx.root, json!({"path": "inside.txt"}));
+        assert!(
+            matches!(result.content[0], ToolResultContent::Text(_)),
+            "text file must still yield a Text content block"
+        );
+        assert_eq!(get_text(&result), "hello from inside");
+    }
+
+    /// An oversize image is refused with a generic message rather than
+    /// base64-encoding an unbounded file into the model context.
+    #[test]
+    fn read_oversize_image_is_refused() {
+        let fx = fixture();
+        let img = fx.root.join("huge.png");
+        // PNG signature followed by enough bytes to exceed the cap.
+        let mut blob = PNG_BYTES.to_vec();
+        blob.resize(READ_FILE_IMAGE_BYTE_CAP + 1, 0u8);
+        fs::write(&img, &blob).unwrap();
+
+        let result = execute_read_file(&fx.root, json!({"path": "huge.png"}));
+        assert!(
+            matches!(result.content[0], ToolResultContent::Text(_)),
+            "an oversize image is refused with a (text) error, not an image block"
+        );
+        assert!(
+            get_text(&result).contains("too large"),
+            "oversize image refusal should explain the size limit, got: {}",
+            get_text(&result)
+        );
     }
 
     #[test]

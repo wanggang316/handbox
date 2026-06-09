@@ -233,6 +233,14 @@ pub struct AgentRunRequest {
     pub attachments: Vec<AgentRunAttachment>,
 }
 
+/// Per-image byte cap enforced at the IPC boundary (CLAUDE.md「输入验证必须完备」)。
+/// 前端已把附件限制在 10 MiB，但后端不信任前端：超界的附件被防御性跳过，绝不把无界
+/// 字节 base64 进模型上下文。
+const ATTACHMENT_BYTE_CAP: usize = 10 * 1024 * 1024;
+/// 每回合接受的附件数量上限。超过该计数的尾部附件被防御性跳过，使一个病态请求无法
+/// 把装配出的消息撑爆。
+const ATTACHMENT_MAX_COUNT: usize = 16;
+
 /// 从本回合输入与（可选的）图片附件装配一条 user `Message`。
 ///
 /// - 无附件（或全部被防御性跳过）时，回退为纯文本 `UserMessage::new_text(input)`，
@@ -242,6 +250,9 @@ pub struct AgentRunRequest {
 ///   顺序为**图片块在前、文本块在后**（镜像 `chat_engine::chat_user_message`）。
 /// - 仅 `image/*` mime 成为图片块；非图片附件被防御性跳过（前端已过滤，这里是
 ///   belt-and-suspenders）。文本为空时不追加文本块。
+/// - **IPC 边界校验**：超过 `ATTACHMENT_BYTE_CAP` 的单图被跳过；附件数量超过
+///   `ATTACHMENT_MAX_COUNT` 的尾部被截断 —— 前端虽已限制，但 IPC 边界必须独立校验
+///   （CLAUDE.md「输入验证必须完备」），不信任前端。
 ///
 /// 抽成独立可测函数：使「图片附件 -> ImageContent 块」的装配可在不 spawn loop、
 /// 不触网的前提下单测（VAL-RUN-018）。
@@ -251,9 +262,14 @@ fn build_user_message(input: String, attachments: &[AgentRunAttachment]) -> User
     }
 
     let mut blocks: Vec<UserContentBlock> = Vec::with_capacity(attachments.len() + 1);
-    for att in attachments {
+    // 在 IPC 边界限制数量：只考虑前 ATTACHMENT_MAX_COUNT 个附件，其余防御性跳过。
+    for att in attachments.iter().take(ATTACHMENT_MAX_COUNT) {
         if !att.mime_type.starts_with("image/") {
             // 非图片附件防御性跳过（前端已按 image/* 过滤）。
+            continue;
+        }
+        if att.data.len() > ATTACHMENT_BYTE_CAP {
+            // 超出单图字节上限：防御性跳过，不把无界字节 base64 进上下文。
             continue;
         }
         let data_b64 = BASE64_STANDARD.encode(&att.data);
@@ -2751,5 +2767,62 @@ mod tests {
             "image block only; empty text is not appended"
         );
         assert!(matches!(&blocks[0], UserContentBlock::Image(_)));
+    }
+
+    /// IPC-boundary validation: an oversize image attachment (> the backend
+    /// `ATTACHMENT_BYTE_CAP`) is skipped defensively, while a normal-size image
+    /// in the same batch is still encoded into an Image block. The backend must
+    /// not trust the frontend's 10 MiB cap.
+    #[test]
+    fn build_user_message_oversize_attachment_is_skipped() {
+        let small = [0x89u8, 0x50, 0x4e, 0x47]; // small in-bounds image.
+        let oversize = vec![0u8; ATTACHMENT_BYTE_CAP + 1];
+        let attachments = vec![
+            image_attachment("ok.png", "image/png", &small),
+            image_attachment("huge.png", "image/png", &oversize),
+        ];
+
+        let msg = build_user_message("look".to_string(), &attachments);
+
+        let blocks = match &msg.content {
+            model::UserContent::Blocks(b) => b,
+            model::UserContent::Text(_) => panic!("expected content blocks"),
+        };
+        // Only the small image survives + the text block; the oversize one is dropped.
+        assert_eq!(blocks.len(), 2, "oversize image must be skipped");
+        match &blocks[0] {
+            UserContentBlock::Image(img) => {
+                assert_eq!(img.data, BASE64_STANDARD.encode(small));
+                assert_eq!(img.mime_type, "image/png");
+            }
+            other => panic!("first block must be the in-bounds image, got {other:?}"),
+        }
+        assert!(matches!(&blocks[1], UserContentBlock::Text(_)));
+    }
+
+    /// IPC-boundary validation: an over-count attachment list is bounded to
+    /// `ATTACHMENT_MAX_COUNT` image blocks; the tail beyond the cap is skipped.
+    #[test]
+    fn build_user_message_over_count_attachment_list_is_bounded() {
+        let raw = [1u8, 2, 3];
+        let attachments: Vec<AgentRunAttachment> = (0..(ATTACHMENT_MAX_COUNT + 5))
+            .map(|i| image_attachment(&format!("p{i}.png"), "image/png", &raw))
+            .collect();
+
+        // Empty text so the block count is exactly the surviving image blocks.
+        let msg = build_user_message(String::new(), &attachments);
+
+        let blocks = match &msg.content {
+            model::UserContent::Blocks(b) => b,
+            model::UserContent::Text(_) => panic!("expected content blocks"),
+        };
+        assert_eq!(
+            blocks.len(),
+            ATTACHMENT_MAX_COUNT,
+            "attachment count is bounded to ATTACHMENT_MAX_COUNT image blocks"
+        );
+        assert!(blocks
+            .iter()
+            .all(|b| matches!(b, UserContentBlock::Image(_))));
     }
 }
