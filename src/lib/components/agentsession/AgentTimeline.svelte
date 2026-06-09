@@ -1,8 +1,12 @@
 <script lang="ts">
   import { renderMarkdown, markdownInteractions } from "$lib/utils";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
-  import type { AgentMessage } from "$lib/types/agentSession";
+  import type {
+    AgentMessage,
+    ToolResultContent,
+  } from "$lib/types/agentSession";
   import AgentThinkingBlock from "./AgentThinkingBlock.svelte";
+  import AgentToolCallCard from "./AgentToolCallCard.svelte";
 
   interface Props {
     sessionId: string;
@@ -41,11 +45,45 @@
       .join("");
   }
 
-  // 助手消息是否含工具调用块（M2 seam：当前仅占位）。
+  // 助手消息中的工具调用块，按助手内容的**源顺序**保留（多个并行工具调用据此
+  // 渲染为顺序排列的卡片，而非按完成顺序——VAL-TOOLS-004）。
   function assistantToolCalls(
     message: Extract<AgentMessage, { role: "assistant" }>,
   ) {
     return message.content.filter((block) => block.type === "toolcall");
+  }
+
+  // 已提交 transcript 里的 toolResult 消息，按 toolCallId 建索引，供 restored
+  // 路径（reload 后无 live 状态）把 toolcall 块调和成终态卡片。run 期间 live 状态
+  // 优先，此索引仅在 live 缺失时兜底（reconcile：同一 toolCallId 一张卡）。
+  const committedToolResults = $derived.by(() => {
+    const map = new Map<
+      string,
+      { content: ToolResultContent[]; isError: boolean }
+    >();
+    for (const message of runState.messages) {
+      if (message.role === "toolResult") {
+        map.set(message.toolCallId, {
+          content: message.content,
+          isError: message.isError,
+        });
+      }
+    }
+    return map;
+  });
+
+  // 把一个助手 toolcall 块归一化为卡片消费的 view-model：live 优先，restored 兜底。
+  function toolCallView(block: Extract<AgentMessage, { role: "assistant" }>["content"][number]) {
+    if (block.type !== "toolcall") {
+      throw new Error("toolCallView expects a toolcall block");
+    }
+    return agentRunStore.toolCallViewFor(
+      sessionId,
+      block.id,
+      block.name,
+      block.arguments,
+      committedToolResults.get(block.id),
+    );
   }
 
   // 运行中追加的「进行中助手骨架」索引：reducer 在 message_start 时即把助手消息
@@ -68,9 +106,13 @@
       AgentMessage,
       { role: "assistant" }
     >;
+    // 含工具调用块的助手消息也算「有内容」：其工具卡片在已提交分支渲染（卡片
+      // 据 toolCallId 调和 live 状态而就地翻转），不能当作空骨架交给 LIVE 视图，
+      // 否则工具执行期间卡片会被 pulse-dot 顶掉（VAL-TOOLS-004）。
     const hasContent =
       assistantText(lastMsg).length > 0 ||
-      assistantThinking(lastMsg).length > 0;
+      assistantThinking(lastMsg).length > 0 ||
+      assistantToolCalls(lastMsg).length > 0;
     return hasContent ? -1 : last;
   });
 
@@ -111,7 +153,9 @@
 
 <div bind:this={messagesContainer} class="flex-1 overflow-y-auto">
   <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
-    <!-- 已提交消息（按顺序；多轮历史保留在上方）。 -->
+    <!-- 已提交消息（按顺序；多轮历史保留在上方）。messages 为 append-only 序列
+         （reducer 仅追加 / 就地 finalize 同 index，不重排），故 index key 的 DOM
+         复用稳定；卡片自身按 toolCallId 分键，in-place 状态不随消息 index 错位。 -->
     {#each runState.messages as message, i (i)}
       {#if message.role === "user"}
         <!-- 用户气泡（纯文本）。 -->
@@ -129,7 +173,7 @@
           </div>
         </div>
       {:else if message.role === "assistant" && i !== liveAssistantIndex}
-        <!-- 助手消息（已完成）：思考块（present-only）+ markdown 文本 + 工具调用占位（M2）+ 用量。 -->
+        <!-- 助手消息（已完成）：思考块（present-only）+ markdown 文本 + 工具调用卡片 + 用量。 -->
         <!-- 运行中的进行中助手骨架由下方 LIVE 视图呈现，此处跳过以免重复渲染。 -->
         <div class="flex flex-col gap-2">
           <div class="flex-1 min-w-0">
@@ -146,14 +190,16 @@
               </div>
             {/if}
 
-            <!-- 工具调用块占位（M2 将替换为 AgentToolCallCard）。 -->
-            {#each assistantToolCalls(message) as block (block.id)}
-              <div
-                class="mt-2 px-3 py-2 rounded-md border border-dashed border-[var(--hairline)] text-xs text-base-content/50"
-              >
-                工具调用：{block.name}
+            <!-- 工具调用卡片：按助手内容源顺序渲染；同一 toolCallId 一张卡，
+                 就地从 executing 翻转到终态（live），reload 后由 committed
+                 toolResult 调和（restored）。stable key = toolCallId。 -->
+            {#if assistantToolCalls(message).length}
+              <div class="mt-2 space-y-2">
+                {#each assistantToolCalls(message) as block (block.id)}
+                  <AgentToolCallCard toolCall={toolCallView(block)} />
+                {/each}
               </div>
-            {/each}
+            {/if}
 
             <!-- 错误态消息（stopReason=error 携带 errorMessage）。 -->
             {#if message.stopReason === "error" && message.errorMessage}
@@ -174,14 +220,10 @@
             {/if}
           </div>
         </div>
-      {:else if message.role === "toolResult"}
-        <!-- toolResult 占位（M2 工具卡片）。 -->
-        <div
-          class="px-3 py-2 rounded-md border border-dashed border-[var(--hairline)] text-xs text-base-content/50"
-        >
-          工具结果：{message.toolName}
-        </div>
       {/if}
+      <!-- toolResult 消息不单独渲染：其内容由配对的 toolcall 卡片（按 toolCallId
+           调和）在助手回合内就地呈现，避免「答案 + 游离的工具结果块」割裂。 -->
+
       <!-- 运行中的进行中助手骨架（i === liveAssistantIndex）有意不在此渲染，由下方 LIVE 视图呈现。 -->
     {/each}
 

@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { ArrowUp, Square, Plus, X } from "@lucide/svelte";
+  import {
+    ArrowUp,
+    Square,
+    Plus,
+    X,
+    FileText,
+    FolderTree,
+    Globe,
+  } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
@@ -57,6 +65,49 @@
   );
 
   const thinkingLevel = $derived(session.thinkingLevel ?? "off");
+
+  // 内置工具开关（per-session）：勾选写入 session.enabledTools 并持久化
+  // （VAL-TOOLS-005 UI half；后端按 enabledTools 做实际 gating）。
+  // `requiresWorkingDir` 的 FS 工具在会话无 working_dir 时置灰禁用。
+  const builtinTools: {
+    id: string;
+    label: string;
+    icon: typeof FileText;
+    requiresWorkingDir: boolean;
+  }[] = [
+    { id: "read_file", label: "读取文件", icon: FileText, requiresWorkingDir: true },
+    {
+      id: "list_directory",
+      label: "列目录",
+      icon: FolderTree,
+      requiresWorkingDir: true,
+    },
+    { id: "web_fetch", label: "网页抓取", icon: Globe, requiresWorkingDir: false },
+  ];
+
+  const hasWorkingDir = $derived(!!session.workingDir);
+  const enabledTools = $derived(session.enabledTools ?? []);
+
+  function isToolEnabled(toolId: string): boolean {
+    return enabledTools.includes(toolId);
+  }
+
+  function isToolDisabled(tool: (typeof builtinTools)[number]): boolean {
+    return tool.requiresWorkingDir && !hasWorkingDir;
+  }
+
+  function toggleTool(tool: (typeof builtinTools)[number]) {
+    if (isToolDisabled(tool)) return;
+    const current = enabledTools;
+    const next = current.includes(tool.id)
+      ? current.filter((id) => id !== tool.id)
+      : [...current, tool.id];
+    agentSessionActions
+      .updateField(session.id, "enabledTools", next)
+      .catch((error) => {
+        console.error("Failed to update agent session enabled tools:", error);
+      });
+  }
 
   // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
   const running = $derived(agentRunStore.isRunning(session.id));
@@ -273,12 +324,42 @@
   {/if}
 
   <div class="flex flex-row items-center justify-between gap-3 px-4 pt-0 pb-2">
-    <IconButton
-      icon={Plus}
-      ariaLabel="添加图片"
-      title="上传图片"
-      onclick={handleAddAttachment}
-    />
+    <div class="flex flex-row items-center gap-2">
+      <IconButton
+        icon={Plus}
+        ariaLabel="添加图片"
+        title="上传图片"
+        onclick={handleAddAttachment}
+      />
+
+      <!-- 内置工具开关（per-session enabledTools；FS 工具无 working_dir 时置灰）。 -->
+      {#each builtinTools as tool (tool.id)}
+        {@const ToolIcon = tool.icon}
+        {@const active = isToolEnabled(tool.id)}
+        {@const disabled = isToolDisabled(tool)}
+        <button
+          type="button"
+          class={`flex items-center gap-1 px-2 py-1 rounded-md border text-xs transition-colors ${
+            disabled
+              ? "border-[var(--hairline)] text-base-content/30 cursor-not-allowed"
+              : active
+                ? "border-info/50 bg-info/10 text-info"
+                : "border-[var(--hairline)] text-base-content/60 hover:bg-base-200"
+          }`}
+          aria-pressed={active}
+          {disabled}
+          title={disabled
+            ? `${tool.label}（需设置工作目录）`
+            : active
+              ? `${tool.label}：已启用`
+              : `${tool.label}：已禁用`}
+          onclick={() => toggleTool(tool)}
+        >
+          <ToolIcon size={14} />
+          <span>{tool.label}</span>
+        </button>
+      {/each}
+    </div>
     <div class="flex flex-row items-center gap-3">
       <Select
         value={thinkingLevel}

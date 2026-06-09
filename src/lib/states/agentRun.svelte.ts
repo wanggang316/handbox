@@ -10,7 +10,11 @@
  * （VAL-MODE-006）。监听器只订阅 `agent_stream_*` 事件，与 chat 的 `message_stream_*`
  * 互不相干，因此切换不会影响 chat 流（VAL-MODE-007）。
  *
- * 工具调用（toolcall）的渲染留给 M2 —— 此处仅在 reduce 时留出 seam，不消费工具事件。
+ * 工具调用（toolcall）在 M2 消费：`tool_execution_start/update/end` 事件按 `toolCallId`
+ * 分键 reduce 成 live tool-call view-model（VAL-TOOLS-001/002/003/004），由 timeline
+ * 渲染为工具卡片。已提交 transcript 里的 `toolcall` 内容块 + `toolResult` 消息（由
+ * 持久化还原）与 live 状态调和：同一个 `toolCallId` 无论 live 还是 restored 都只呈现
+ * 一张卡片。
  */
 
 import type { UUID } from "$lib/types";
@@ -22,6 +26,7 @@ import type {
   AgentStreamEventPayload,
   AgentStreamErrorPayload,
   AgentStreamClosedPayload,
+  ToolResultContent,
 } from "$lib/types/agentSession";
 import {
   listenToAgentStreamEvents,
@@ -31,11 +36,34 @@ import {
 import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
 /**
+ * 工具调用的归一化 view-model（卡片消费的统一形状）。
+ *
+ * live 路径（run 期间）由 `tool_execution_*` 事件 reduce 产生；restored 路径
+ * （reload 后）由已提交的 `toolcall` 内容块 + 配对的 `toolResult` 消息归一化产生。
+ * 两条路径都映射到此形状，使 `AgentToolCallCard` 无需区分来源即可渲染同一张卡片。
+ *
+ * `status`：`executing`（已 start、result 未到）/ `completed`（end 且非 error）/
+ * `error`（end 且 isError，或 restored 的 `toolResult.isError`）。
+ * `result` 为终态的工具结果内容块（text / image）；`executing` 时为 undefined。
+ */
+export type ToolCallStatus = "executing" | "completed" | "error";
+
+export interface ToolCallView {
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+  status: ToolCallStatus;
+  result?: ToolResultContent[];
+}
+
+/**
  * 单个会话的运行 view-model。
  *
  * `messages` 为已提交（finalized）消息序列；`streamingText` / `thinkingText` 为
  * 当前正在流式累积的助手文本/思考文本；`isRunning` 表示该会话存在活跃 run；
  * `error` 为该会话最近一次 run-level 错误（在 `agent_stream_closed` 之前抵达）。
+ * `toolCalls` 为 live tool-call view-model，**按 `toolCallId` 分键**：同一调用
+ * 的 start/update/end 落到同一条目，使卡片就地从 executing 翻转到终态（VAL-TOOLS-004）。
  */
 export interface AgentRunState {
   messages: AgentMessage[];
@@ -43,6 +71,7 @@ export interface AgentRunState {
   thinkingText: string;
   isRunning: boolean;
   error: string | null;
+  toolCalls: Record<string, ToolCallView>;
 }
 
 function createEmptyRunState(): AgentRunState {
@@ -52,6 +81,7 @@ function createEmptyRunState(): AgentRunState {
     thinkingText: "",
     isRunning: false,
     error: null,
+    toolCalls: {},
   };
 }
 
@@ -156,10 +186,112 @@ class AgentRunStore {
         state.thinkingText = "";
         break;
 
-      // turn_start / turn_end / tool_execution_* 在 M1 不消费（M2 timeline/tool seam）。
+      case "tool_execution_start":
+        // 工具开始执行：创建/追踪一条 tool-call 条目（args 已知、result 待定）。
+        this.startToolCall(sessionId, event.toolCallId, event.toolName, event.args);
+        break;
+
+      case "tool_execution_update":
+        // 流式部分结果：就地更新同一条目（不创建新卡）。
+        this.updateToolCall(
+          sessionId,
+          event.toolCallId,
+          event.toolName,
+          event.args,
+          event.partialResult.content,
+        );
+        break;
+
+      case "tool_execution_end":
+        // 工具执行结束：把同一条目翻转到终态（completed / error）并写入 result。
+        this.endToolCall(
+          sessionId,
+          event.toolCallId,
+          event.toolName,
+          event.result.content,
+          event.isError,
+        );
+        break;
+
+      // turn_start / turn_end 在 M2 不消费（卡片由 message + tool_execution 事件驱动）。
       default:
         break;
     }
+  }
+
+  /**
+   * `tool_execution_start`：按 `toolCallId` 建条目（已存在则保留终态/result，仅刷新
+   * 已知字段——防御重复 start）。新条目进入 `executing`，result 待定。
+   */
+  private startToolCall(
+    sessionId: string,
+    toolCallId: string,
+    toolName: string,
+    args: unknown,
+  ): void {
+    const state = this.ensureState(sessionId);
+    const existing = state.toolCalls[toolCallId];
+    state.toolCalls = {
+      ...state.toolCalls,
+      [toolCallId]: {
+        toolCallId,
+        toolName,
+        args,
+        status: existing?.status ?? "executing",
+        result: existing?.result,
+      },
+    };
+  }
+
+  /**
+   * `tool_execution_update`：就地更新同一 `toolCallId` 条目的部分结果，保持
+   * `executing` 状态（同一张卡，不新建——VAL-TOOLS-004）。条目缺失（update 早于
+   * start 的极端时序）则按 start 语义建条目。
+   */
+  private updateToolCall(
+    sessionId: string,
+    toolCallId: string,
+    toolName: string,
+    args: unknown,
+    partialResult: ToolResultContent[],
+  ): void {
+    const state = this.ensureState(sessionId);
+    const existing = state.toolCalls[toolCallId];
+    state.toolCalls = {
+      ...state.toolCalls,
+      [toolCallId]: {
+        toolCallId,
+        toolName,
+        args: existing?.args ?? args,
+        status: "executing",
+        result: partialResult,
+      },
+    };
+  }
+
+  /**
+   * `tool_execution_end`：把同一 `toolCallId` 条目翻转到终态（`isError` → `error`，
+   * 否则 `completed`）并写入最终 result——卡片就地从 executing 转为终态（不新建卡）。
+   */
+  private endToolCall(
+    sessionId: string,
+    toolCallId: string,
+    toolName: string,
+    result: ToolResultContent[],
+    isError: boolean,
+  ): void {
+    const state = this.ensureState(sessionId);
+    const existing = state.toolCalls[toolCallId];
+    state.toolCalls = {
+      ...state.toolCalls,
+      [toolCallId]: {
+        toolCallId,
+        toolName,
+        args: existing?.args,
+        status: isError ? "error" : "completed",
+        result,
+      },
+    };
   }
 
   /**
@@ -242,10 +374,60 @@ class AgentRunStore {
 
   /**
    * 响应式 getter：返回某会话的运行 view-model（不存在则返回新建的空状态）。
-   * timeline feature 直接消费此 getter；保持稳定的形状以便其无需重构即可接入。
+   * timeline feature 直接消费此 getter；`toolCalls` 为 live tool-call view-model
+   * （按 toolCallId 分键）。
    */
   runStateFor(sessionId: string): AgentRunState {
     return this.ensureState(sessionId);
+  }
+
+  /**
+   * 把一个助手 `toolcall` 内容块归一化为卡片消费的 `ToolCallView`，调和 live 与
+   * restored 两条来源：
+   *  - run 期间：以 live `state.toolCalls[id]` 为准（携带 executing→终态的实时状态）。
+   *  - reload 后：live 缺失，则用配对的已提交 `toolResult` 内容归一化（restored 路径）。
+   *  - 都缺失：仅有 `toolcall` 块（结果尚未抵达 / 未持久化），呈现为 executing。
+   *
+   * 同一个 `toolCallId` 无论 live 还是 restored 都映射到同一张卡（VAL-TOOLS-004）。
+   * `committedResult` 由 timeline 从已提交 transcript 里按 toolCallId 配对后传入。
+   */
+  toolCallViewFor(
+    sessionId: string,
+    toolCallId: string,
+    toolName: string,
+    args: unknown,
+    committedResult?: { content: ToolResultContent[]; isError: boolean },
+  ): ToolCallView {
+    const live = this.states[sessionId]?.toolCalls[toolCallId];
+    if (live) {
+      // live 已有该调用：以其实时状态/结果为准，但回填 name/args（live end 事件
+      // 可能未携带 args；toolcall 块始终有）。
+      return {
+        toolCallId,
+        toolName: live.toolName || toolName,
+        args: live.args ?? args,
+        status: live.status,
+        result: live.result,
+      };
+    }
+    if (committedResult) {
+      // restored：用配对的 toolResult 归一化为终态。
+      return {
+        toolCallId,
+        toolName,
+        args,
+        status: committedResult.isError ? "error" : "completed",
+        result: committedResult.content,
+      };
+    }
+    // 仅有 toolcall 块、无结果：执行中（尚未结束或结果未持久化）。
+    return {
+      toolCallId,
+      toolName,
+      args,
+      status: "executing",
+      result: undefined,
+    };
   }
 
   /**
