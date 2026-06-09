@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -46,7 +47,7 @@ use hand_agent::{
 };
 #[cfg(test)]
 use hand_ai_model::{self as model};
-use hand_ai_model::{Message, UserMessage};
+use hand_ai_model::{ImageContent, Message, TextContent, UserContentBlock, UserMessage};
 
 use crate::models::AppError;
 use crate::services::agent_tools;
@@ -208,12 +209,69 @@ pub struct AgentRuntime {
     model_override: Option<hand_ai_model::Model>,
 }
 
+/// 一个随本回合输入一并发送的图片附件（镜像 chat 的 `MessageRequestAttachment`）。
+///
+/// 前端已把文件读成原始字节并按 `image/*` 过滤；后端在装配 user 消息时把每个
+/// 图片字节做 base64 STANDARD 编码，emit 成一个 `model::ImageContent` 块。非图片
+/// mime 在 `build_user_message` 里被防御性跳过（belt-and-suspenders）。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunAttachment {
+    pub name: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
 /// `agent_run_stream` 的入参。
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunRequest {
     pub session_id: UUID,
     pub input: String,
+    /// 可选的图片附件。缺省（旧调用方 / 纯文本发送）时为空 Vec，走纯文本路径。
+    #[serde(default)]
+    pub attachments: Vec<AgentRunAttachment>,
+}
+
+/// 从本回合输入与（可选的）图片附件装配一条 user `Message`。
+///
+/// - 无附件（或全部被防御性跳过）时，回退为纯文本 `UserMessage::new_text(input)`，
+///   与现有路径完全一致。
+/// - 有图片附件时，emit 一条 **content-block** `UserMessage`：每个 `image/*` 附件的
+///   字节做 base64 STANDARD 编码后成为一个 `UserContentBlock::Image(ImageContent)`，
+///   顺序为**图片块在前、文本块在后**（镜像 `chat_engine::chat_user_message`）。
+/// - 仅 `image/*` mime 成为图片块；非图片附件被防御性跳过（前端已过滤，这里是
+///   belt-and-suspenders）。文本为空时不追加文本块。
+///
+/// 抽成独立可测函数：使「图片附件 -> ImageContent 块」的装配可在不 spawn loop、
+/// 不触网的前提下单测（VAL-RUN-018）。
+fn build_user_message(input: String, attachments: &[AgentRunAttachment]) -> UserMessage {
+    if attachments.is_empty() {
+        return UserMessage::new_text(input);
+    }
+
+    let mut blocks: Vec<UserContentBlock> = Vec::with_capacity(attachments.len() + 1);
+    for att in attachments {
+        if !att.mime_type.starts_with("image/") {
+            // 非图片附件防御性跳过（前端已按 image/* 过滤）。
+            continue;
+        }
+        let data_b64 = BASE64_STANDARD.encode(&att.data);
+        blocks.push(UserContentBlock::Image(ImageContent::new(
+            data_b64,
+            att.mime_type.clone(),
+        )));
+    }
+
+    if blocks.is_empty() {
+        // 全部附件被跳过 —— 回退为纯文本。
+        return UserMessage::new_text(input);
+    }
+
+    if !input.is_empty() {
+        blocks.push(UserContentBlock::Text(TextContent::new(input)));
+    }
+    UserMessage::new_blocks(blocks)
 }
 
 impl AgentRuntime {
@@ -245,6 +303,7 @@ impl AgentRuntime {
         &self,
         session_id: UUID,
         input: String,
+        attachments: Vec<AgentRunAttachment>,
         sink: RunSink,
     ) -> Result<(), AppError> {
         let cancel = CancellationToken::new();
@@ -276,7 +335,13 @@ impl AgentRuntime {
         // 从此处起，任何提前返回都必须先把占位从 `runs` 移除，否则会话会被
         // 永久“卡住”。装配阶段的错误经清理后向上抛出。
         match self
-            .assemble_run(&session_id, input, cancel.clone(), Arc::clone(&steering))
+            .assemble_run(
+                &session_id,
+                input,
+                attachments,
+                cancel.clone(),
+                Arc::clone(&steering),
+            )
             .await
         {
             Ok((prompts, context, config, tools)) => {
@@ -299,6 +364,7 @@ impl AgentRuntime {
         &self,
         session_id: &UUID,
         input: String,
+        attachments: Vec<AgentRunAttachment>,
         cancel: CancellationToken,
         steering: Arc<Mutex<Vec<Message>>>,
     ) -> Result<(Vec<Message>, AgentContext, AgentLoopConfig, Vec<AgentTool>), AppError> {
@@ -332,8 +398,9 @@ impl AgentRuntime {
         };
 
         // 新的 user 消息作为本回合的 prompt（run_agent_loop 会把它 push 进
-        // context 并发出 message_* 事件）。
-        let prompts = vec![Message::User(UserMessage::new_text(input))];
+        // context 并发出 message_* 事件）。含图片附件时装配成 content-block
+        // UserMessage（base64 -> ImageContent，图片块在前）；否则走纯文本路径。
+        let prompts = vec![Message::User(build_user_message(input, &attachments))];
 
         // --- (3) 解析 provider + 装配 model / stream options / loop config ---
         let provider = self.providers.get_provider(&provider_id).await?;
@@ -843,6 +910,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hello".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -902,6 +970,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "first".to_string(),
+                vec![],
                 first_sink.clone().into_run_sink(),
             )
             .await
@@ -916,6 +985,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "second".to_string(),
+                vec![],
                 second_sink.clone().into_run_sink(),
             )
             .await
@@ -1126,6 +1196,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hello".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1200,6 +1271,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "the user prompt".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1247,6 +1319,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "go".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1297,6 +1370,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "new question".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1397,6 +1471,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hello".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1476,6 +1551,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hello".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1558,6 +1634,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hi".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1615,6 +1692,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "ask".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1733,6 +1811,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "abort me".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1803,6 +1882,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "abort early".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1861,6 +1941,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hi".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1975,6 +2056,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "use the disabled tool".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2056,6 +2138,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "read a file".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2140,6 +2223,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "write a file".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2213,6 +2297,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "fetch and read".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2351,6 +2436,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "initial prompt".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2442,6 +2528,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "initial prompt".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2500,6 +2587,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "initial prompt".to_string(),
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2542,5 +2630,126 @@ mod tests {
             runtime.steering_len(&"never-existed".to_string()).await,
             None
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Image attachments: build_user_message (base64 -> ImageContent block).
+    // -------------------------------------------------------------------------
+
+    /// An `image/*` attachment in [`AgentRunAttachment`] shape.
+    fn image_attachment(name: &str, mime: &str, data: &[u8]) -> AgentRunAttachment {
+        AgentRunAttachment {
+            name: name.to_string(),
+            mime_type: mime.to_string(),
+            data: data.to_vec(),
+        }
+    }
+
+    /// VAL-RUN-018: with an image attachment present, `build_user_message`
+    /// produces a content-block `UserMessage` whose first block is a
+    /// `UserContentBlock::Image` carrying the base64-encoded bytes + the source
+    /// mime type, followed by the text block (image first, text last).
+    #[test]
+    fn build_user_message_image_attachment_becomes_image_content_block() {
+        let raw = [0x89u8, 0x50, 0x4e, 0x47, 0x0d, 0x0a]; // PNG-ish header bytes.
+        let attachments = vec![image_attachment("shot.png", "image/png", &raw)];
+
+        let msg = build_user_message("what's in this image?".to_string(), &attachments);
+
+        let blocks = match &msg.content {
+            model::UserContent::Blocks(b) => b,
+            model::UserContent::Text(_) => panic!("expected content blocks, got plain text"),
+        };
+        assert_eq!(blocks.len(), 2, "one image block + one text block");
+
+        // Image block first, carrying base64(data) + the source mime type.
+        match &blocks[0] {
+            UserContentBlock::Image(img) => {
+                assert_eq!(img.data, BASE64_STANDARD.encode(raw));
+                assert_eq!(img.mime_type, "image/png");
+            }
+            other => panic!("first block must be an image, got {other:?}"),
+        }
+        // Text block last, carrying the prompt.
+        match &blocks[1] {
+            UserContentBlock::Text(t) => assert_eq!(t.text, "what's in this image?"),
+            other => panic!("second block must be the text body, got {other:?}"),
+        }
+    }
+
+    /// VAL-RUN-018: a non-image attachment is skipped defensively. When it is
+    /// the ONLY attachment, the message falls back to plain text (no empty
+    /// content-block message).
+    #[test]
+    fn build_user_message_non_image_attachment_is_skipped() {
+        let attachments = vec![image_attachment("notes.txt", "text/plain", b"hello")];
+
+        let msg = build_user_message("ignore the file".to_string(), &attachments);
+
+        match &msg.content {
+            model::UserContent::Text(text) => assert_eq!(text, "ignore the file"),
+            model::UserContent::Blocks(_) => {
+                panic!("non-image attachment must not produce content blocks")
+            }
+        }
+    }
+
+    /// VAL-RUN-018: a mix of image + non-image attachments keeps only the image
+    /// block(s); the non-image one is dropped, text body comes last.
+    #[test]
+    fn build_user_message_mixed_attachments_keeps_only_images() {
+        let img = [1u8, 2, 3, 4];
+        let attachments = vec![
+            image_attachment("doc.pdf", "application/pdf", b"%PDF"),
+            image_attachment("pic.jpg", "image/jpeg", &img),
+        ];
+
+        let msg = build_user_message("describe".to_string(), &attachments);
+
+        let blocks = match &msg.content {
+            model::UserContent::Blocks(b) => b,
+            model::UserContent::Text(_) => panic!("expected content blocks"),
+        };
+        // 1 image (jpg) + 1 text; the pdf is dropped.
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            UserContentBlock::Image(i) => {
+                assert_eq!(i.data, BASE64_STANDARD.encode(img));
+                assert_eq!(i.mime_type, "image/jpeg");
+            }
+            other => panic!("first block must be the surviving image, got {other:?}"),
+        }
+        assert!(matches!(&blocks[1], UserContentBlock::Text(_)));
+    }
+
+    /// No attachments → the existing plain-text path is preserved unchanged.
+    #[test]
+    fn build_user_message_no_attachments_is_plain_text() {
+        let msg = build_user_message("just text".to_string(), &[]);
+        match &msg.content {
+            model::UserContent::Text(text) => assert_eq!(text, "just text"),
+            model::UserContent::Blocks(_) => panic!("text-only send must stay plain text"),
+        }
+    }
+
+    /// An image attachment with an empty text body still produces an image
+    /// block — and only the image block (no empty trailing text block).
+    #[test]
+    fn build_user_message_image_with_empty_text_emits_image_only() {
+        let raw = [9u8, 9, 9];
+        let attachments = vec![image_attachment("p.png", "image/png", &raw)];
+
+        let msg = build_user_message(String::new(), &attachments);
+
+        let blocks = match &msg.content {
+            model::UserContent::Blocks(b) => b,
+            model::UserContent::Text(_) => panic!("expected content blocks"),
+        };
+        assert_eq!(
+            blocks.len(),
+            1,
+            "image block only; empty text is not appended"
+        );
+        assert!(matches!(&blocks[0], UserContentBlock::Image(_)));
     }
 }

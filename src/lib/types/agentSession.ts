@@ -318,6 +318,19 @@ export interface UpdateAgentSessionRequest {
 // Tauri 流式事件 payload（commands/agent_run.rs）
 // ---------------------------------------------------------------------------
 
+/**
+ * 随本回合输入一并发送的图片附件（镜像后端 `AgentRunAttachment`）。
+ *
+ * `data` 是原始字节序列（`number[]`，serde 把 Rust `Vec<u8>` 反序列化自此）。
+ * 仅 `image/*` mime 由后端装配成 `ImageContent` 块；前端在选图时已按 image/*
+ * 过滤，后端再防御性跳过非图片。
+ */
+export interface AgentRunAttachment {
+  name: string;
+  mimeType: string;
+  data: number[];
+}
+
 /** `agent_stream_event` 的 payload：每条 AgentEvent 携 sessionId 发出。 */
 export interface AgentStreamEventPayload {
   sessionId: UUID;
