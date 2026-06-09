@@ -717,20 +717,48 @@ fn scheme_and_host_from_url(url: &reqwest::Url) -> Result<(String, u16), FetchGu
     Ok((host, port))
 }
 
-/// Full guard decision for a single URL (initial or post-redirect target):
-/// scheme allowlist -> host extraction -> resolve-and-classify. Returns `Ok`
-/// only when the target is a public http(s) endpoint.
+/// Full (blocking) guard decision for a single URL: scheme allowlist -> host
+/// extraction -> resolve-and-classify. Returns `Ok` only when the target is a
+/// public http(s) endpoint. The live first-hop path inlines these two steps so
+/// it can run the blocking resolve on `spawn_blocking`; this combined helper is
+/// retained for the resolve-path unit tests.
+#[cfg(test)]
 fn validate_url(url: &reqwest::Url) -> Result<(), FetchGuardError> {
     let (host, port) = scheme_and_host_from_url(url)?;
     resolve_and_validate_host(&host, port)
 }
 
-/// Redirect-policy decision: may we follow a redirect to `target`? Re-applies
-/// the FULL guard (scheme + host/IP) to the hop target, so an
-/// `https://public -> file://` or `-> 169.254.169.254` redirect is refused.
-/// Pure over the parsed target URL (DNS aside), so it is unit-testable.
-fn redirect_is_allowed(target: &reqwest::Url) -> bool {
-    validate_url(target).is_ok()
+/// Redirect-policy decision: may we follow a redirect to `target`, given the
+/// `original_host` that the first hop already resolved-and-validated?
+///
+/// This runs inside reqwest's SYNCHRONOUS redirect closure on a tokio worker, so
+/// it must do NO blocking DNS resolve. We therefore restrict the decision to the
+/// non-blocking facts (approach b3 — block cross-host DNS redirects):
+///   - scheme must stay http(s) (a `-> file://`/`ftp://` downgrade is refused);
+///   - a literal-IP target is classified directly via `is_blocked_ip`
+///     (covers `-> 169.254.169.254` and every encoding bypass — no DNS);
+///   - a DNS-name target is allowed ONLY when it equals `original_host`
+///     (same-host path/scheme redirects are fine because that host was already
+///     resolved-and-validated on the first hop); a redirect to a DIFFERENT DNS
+///     host is refused, because we cannot cheaply resolve it here without
+///     blocking the runtime. The first hop's resolve happens in `spawn_blocking`.
+///
+/// This preserves the SSRF guarantee: every host we actually connect to was
+/// either resolved-and-validated (first hop / same-host redirect) or is a
+/// public literal IP we classified, so a redirect can never reach a blocked
+/// range. Pure over the parsed target URL, so it is unit-testable.
+fn redirect_is_allowed(target: &reqwest::Url, original_host: &str) -> bool {
+    let (host, _port) = match scheme_and_host_from_url(target) {
+        Ok(parts) => parts,
+        Err(_) => return false,
+    };
+    match parse_literal_ip(&host) {
+        // Literal-IP target: classify without DNS.
+        Some(ip) => !is_blocked_ip(ip),
+        // DNS-name target: only the already-validated host is allowed; any
+        // cross-host redirect is refused (no blocking resolve in this closure).
+        None => host == original_host,
+    }
 }
 
 /// Build the `web_fetch` tool. Unlike the FS tools it needs no sandbox root,
@@ -771,26 +799,43 @@ async fn execute_web_fetch(args: serde_json::Value) -> ToolResult {
         Err(_) => return ToolResult::error(FetchGuardError::InvalidUrl.display_message()),
     };
 
-    // Guard the INITIAL target before any network I/O.
-    if let Err(e) = validate_url(&url) {
-        return ToolResult::error(e.display_message());
+    // Extract the normalized host (non-blocking) up front: it both validates the
+    // scheme and gives us the host the redirect policy compares against.
+    let (host, port) = match scheme_and_host_from_url(&url) {
+        Ok(parts) => parts,
+        Err(e) => return ToolResult::error(e.display_message()),
+    };
+
+    // Guard the INITIAL target before any network I/O. The resolve+classify is
+    // blocking (`std::net` DNS), so run it on the blocking pool — a slow/stalled
+    // resolver must not starve a tokio worker on the shared async runtime.
+    let resolve_host = host.clone();
+    let guard =
+        tokio::task::spawn_blocking(move || resolve_and_validate_host(&resolve_host, port)).await;
+    match guard {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return ToolResult::error(e.display_message()),
+        // The blocking task panicked: surface as a generic failure.
+        Err(_) => return ToolResult::error(FETCH_FAILED_MSG),
     }
 
-    fetch_guarded_text(url).await
+    fetch_guarded_text(url, host).await
 }
 
 /// Perform the actual (thin) fetch with a custom redirect policy that
 /// re-validates every hop. The security is in the guard; this just wires reqwest
 /// with the timeout, the byte cap, and the per-hop re-validation.
-async fn fetch_guarded_text(url: reqwest::Url) -> ToolResult {
-    // Custom redirect policy: re-apply the full guard to each hop target. A
-    // blocked or non-http(s) redirect target stops the chain. We DO NOT use
-    // reqwest's default follow (which would happily chase a downgrade).
-    let policy = reqwest::redirect::Policy::custom(|attempt| {
+async fn fetch_guarded_text(url: reqwest::Url, original_host: String) -> ToolResult {
+    // Custom redirect policy: re-apply the (non-blocking) guard to each hop
+    // target. A blocked or non-http(s) redirect target stops the chain. We DO
+    // NOT use reqwest's default follow (which would happily chase a downgrade).
+    // This closure runs on a tokio worker, so it must not resolve DNS — see
+    // `redirect_is_allowed` for the cross-host-block rationale.
+    let policy = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= WEB_FETCH_MAX_REDIRECTS {
             return attempt.error("too many redirects");
         }
-        if redirect_is_allowed(attempt.url()) {
+        if redirect_is_allowed(attempt.url(), &original_host) {
             attempt.follow()
         } else {
             // Stop rather than follow; surfaced to the caller as a generic
@@ -1600,31 +1645,57 @@ mod tests {
 
     // ---- redirect re-validation (req 4) -------------------------------
 
+    // The redirect policy runs in reqwest's sync closure on a tokio worker, so
+    // it must NOT resolve DNS. It is checked against the `original_host` the
+    // first hop already resolved-and-validated. A literal-IP target is still
+    // classified directly; a cross-host DNS target is refused outright.
+    const ORIGIN: &str = "example.com";
+
     #[test]
-    fn redirect_to_blocked_host_is_refused() {
-        assert!(!redirect_is_allowed(&url("http://127.0.0.1/")));
-        assert!(!redirect_is_allowed(&url(
-            "http://169.254.169.254/latest/meta-data/"
-        )));
+    fn redirect_to_blocked_literal_ip_is_refused() {
+        // Literal-IP targets are still classified (no DNS) and blocked ranges
+        // are rejected — the metadata IP and loopback can't be reached.
+        assert!(!redirect_is_allowed(&url("http://127.0.0.1/"), ORIGIN));
+        assert!(!redirect_is_allowed(
+            &url("http://169.254.169.254/latest/meta-data/"),
+            ORIGIN
+        ));
     }
 
     #[test]
     fn redirect_to_non_http_scheme_is_refused() {
         // An https -> file:// downgrade must be refused at the hop.
-        assert!(!redirect_is_allowed(&url("file:///etc/passwd")));
-        assert!(!redirect_is_allowed(&url("ftp://internal/")));
+        assert!(!redirect_is_allowed(&url("file:///etc/passwd"), ORIGIN));
+        assert!(!redirect_is_allowed(&url("ftp://internal/"), ORIGIN));
     }
 
     #[test]
     fn redirect_to_decimal_integer_loopback_is_refused() {
-        assert!(!redirect_is_allowed(&url("http://2130706433/")));
+        // Encoding-bypass literal IP is parsed and classified — still blocked.
+        assert!(!redirect_is_allowed(&url("http://2130706433/"), ORIGIN));
     }
 
     #[test]
-    fn redirect_to_public_host_is_allowed() {
-        // A redirect to a real public host is fine (the guard is not a blanket
-        // "no redirects" rule).
-        assert!(redirect_is_allowed(&url("https://example.com/")));
+    fn redirect_to_same_host_is_allowed() {
+        // A same-host redirect (path/scheme change) is fine: that host was
+        // already resolved-and-validated on the first hop, so no re-resolve.
+        assert!(redirect_is_allowed(
+            &url("https://example.com/page"),
+            ORIGIN
+        ));
+        assert!(redirect_is_allowed(&url("http://example.com/"), ORIGIN));
+    }
+
+    #[test]
+    fn redirect_to_different_dns_host_is_refused() {
+        // A redirect to a DIFFERENT DNS host is blocked: we can't resolve it
+        // here without a blocking DNS call on a tokio worker, so refuse it
+        // rather than risk reaching an un-validated (possibly blocked) host.
+        assert!(!redirect_is_allowed(
+            &url("https://other.example.org/"),
+            ORIGIN
+        ));
+        assert!(!redirect_is_allowed(&url("https://attacker.test/"), ORIGIN));
     }
 
     // ---- error hygiene (req 5) ----------------------------------------
@@ -1658,10 +1729,13 @@ mod tests {
     #[test]
     fn web_fetch_bounds_constants_are_sane() {
         // The byte cap and timeout are the bounds VAL-TOOLS-006 requires; pin
-        // them so a future edit can't silently disable the cap.
-        assert!(WEB_FETCH_BYTE_CAP > 0);
-        assert!(WEB_FETCH_TIMEOUT.as_secs() > 0);
-        assert!(WEB_FETCH_MAX_REDIRECTS > 0);
+        // them so a future edit can't silently disable the cap. These are
+        // compile-time `const _` assertions (the values are consts, so a runtime
+        // `assert!` would be optimized out — clippy::assertions_on_constants); a
+        // regression here fails the build, not just the test run.
+        const _: () = assert!(WEB_FETCH_BYTE_CAP > 0);
+        const _: () = assert!(WEB_FETCH_TIMEOUT.as_secs() > 0);
+        const _: () = assert!(WEB_FETCH_MAX_REDIRECTS > 0);
     }
 
     // ---- readable-text extraction (req 6, happy-path code path) --------

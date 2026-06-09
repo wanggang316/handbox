@@ -2398,7 +2398,7 @@ mod tests {
 
     /// Poll until the session has an active run registered (or panic on timeout),
     /// so a steer lands while the run is genuinely in flight.
-    async fn wait_for_active(runtime: &AgentRuntime, session_id: &str) {
+    async fn wait_for_active(runtime: &AgentRuntime, _session_id: &str) {
         for _ in 0..200 {
             if runtime.active_run_count().await >= 1 {
                 return;
