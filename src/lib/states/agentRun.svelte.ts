@@ -453,6 +453,14 @@ class AgentRunStore {
    *
    * 不覆盖正在运行中的流式累积；仅写入已提交消息序列。
    *
+   * 还原即「从存储重建」（VAL-PERSIST-006）：reopen 时除写入已提交序列外，还在
+   * **无活跃 run** 时丢弃残留的 live `toolCalls`。store 单例 navigation-resilient、
+   * 跨会话开合不卸载，上一轮 run 写入的 live tool-call 条目会存活；若不清，
+   * `toolCallViewFor` 的 live 分支会优先于配对的已提交 `toolResult`，使卡片读取
+   * 陈旧的 live 结果而非持久化结果（二者一致时侥幸正确，但违反「纯从存储重建」）。
+   * 故无活跃 run 时清空 `toolCalls`，让 restored 路径据配对的 `toolResult` 重建终态卡。
+   * run 进行中（reload 落在活跃会话上）则保留 live 条目，避免顶掉就地翻转的实时卡。
+   *
    * 健壮性（VAL-PERSIST-012）：逐行隔离 payload 解析 —— 单条 payload 形状不可
    * 识别（非 user / assistant / toolResult，或缺失判别字段）时记录并跳过该行，
    * 绝不让一条坏行抛错而白屏整条 timeline；其余行照常渲染。
@@ -470,6 +478,10 @@ class AgentRunStore {
       }
       const state = this.ensureState(sessionId);
       state.messages = messages;
+      // 无活跃 run 时丢弃残留 live tool-call，使卡片纯从配对的已提交 toolResult 重建。
+      if (!state.isRunning) {
+        state.toolCalls = {};
+      }
     } catch (error) {
       console.error("Failed to load agent transcript:", error);
       const state = this.ensureState(sessionId);
