@@ -343,22 +343,57 @@ class AgentRunStore {
   }
 
   /**
+   * 安全网（VAL-CROSS-003）：把该会话所有仍处于非终态（`executing`）的 live
+   * tool-call 条目翻转到终态 `error`，使一张「执行中」卡片绝不会在 run 结束后
+   * 仍卡在 spinner 上。
+   *
+   * 正常路径下后端的 abort 会为在途工具发出一个 `tool_execution_end`（携带
+   * `ToolResult::error("...aborted by caller")`，is_error=true），`endToolCall`
+   * 已据此就地翻转到终态——本兜底不替代它，而是覆盖任何缺口：若那条 end 事件
+   * 因 abort 时序 / 流提前关闭而未抵达，dangling 卡片在此被收口。已是终态
+   * （`completed`/`error`）的条目保持不变。无非终态条目时为 no-op（不触发无谓的
+   * 引用替换）。每个 run 恰好在终结时（`agent_stream_closed` / 错误路径）调用。
+   */
+  private settleDanglingToolCalls(sessionId: string): void {
+    const state = this.ensureState(sessionId);
+    let mutated = false;
+    const next: Record<string, ToolCallView> = {};
+    for (const [id, view] of Object.entries(state.toolCalls)) {
+      if (view.status === "executing") {
+        next[id] = { ...view, status: "error" };
+        mutated = true;
+      } else {
+        next[id] = view;
+      }
+    }
+    if (mutated) {
+      state.toolCalls = next;
+    }
+  }
+
+  /**
    * 分发 `agent_stream_error`：为该会话设置错误 view-state（不清 isRunning，
-   * closed 紧随其后才是回合终结信号）。
+   * closed 紧随其后才是回合终结信号），并把任何在途工具卡片收口到终态——
+   * 错误路径下也绝不留下卡死的 spinner（VAL-CROSS-003）。
    */
   private handleStreamError(payload: AgentStreamErrorPayload): void {
     const state = this.ensureState(payload.sessionId);
     state.error = payload.error?.message ?? "Agent run error";
+    this.settleDanglingToolCalls(payload.sessionId);
   }
 
   /**
-   * 分发 `agent_stream_closed`：清 isRunning（每个 run 恰好一次），并通知
-   * 已注册的 run-终结回调以刷新侧栏元数据（VAL-PERSIST-011）。回调抛错不影响
-   * 本 store 的终结收尾。
+   * 分发 `agent_stream_closed`：清 isRunning（每个 run 恰好一次），把任何仍在
+   * 执行中的 live tool-call 卡片收口到终态（abort-mid-tool 兜底，VAL-CROSS-003），
+   * 并通知已注册的 run-终结回调以刷新侧栏元数据（VAL-PERSIST-011）。回调抛错
+   * 不影响本 store 的终结收尾。
    */
   private handleStreamClosed(payload: AgentStreamClosedPayload): void {
     const state = this.ensureState(payload.sessionId);
     state.isRunning = false;
+    // run 结束（任何成因）即收口在途工具卡片：dangling 的 executing 条目翻转到
+    // 终态，使卡片绝不会在 run 终结后仍停留在 spinner 上。
+    this.settleDanglingToolCalls(payload.sessionId);
     if (this.onRunClosed) {
       try {
         this.onRunClosed(payload.sessionId);
