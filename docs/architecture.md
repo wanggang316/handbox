@@ -91,7 +91,13 @@ Agent 模式是接入 hand-ai `hand-agent` agentic-loop 的自主智能体工作
 - **持久化时机**：user 消息发送后立即落库（先于 assistant）；assistant/tool 消息逐 `MessageEnd` 增量落库；只写完整可反序列化的 `Message` JSON；重载对损坏行优雅降级（跳过、不白屏）。
 - **删除级联**：`agent_session_repository.delete_session` 在事务内显式先删 transcript 行再删 session 行（不依赖 `PRAGMA foreign_keys`，作为防御实现）。
 - **命名隔离**：后端 `agent_session_*` / `agent_run_*` 命令、前端 `agentSession` / `agentRun` 状态、路由 `(app)/agent`（单数），与既有 `/agents` 预设（复数）零碰撞。
-- **工具**：M1 为纯文本端到端 MVP，无工具；内置只读 FS + 出站 `web_fetch` 工具及后端工具门禁属 M2。
+- **工具**（自 milestone M2 起，`services/agent_tools.rs`）：内置只读 FS（`read_file` / `list_directory`）+ 出站 `web_fetch`，由 `build_tools(enabled, working_dir)` 单点装配。
+  - **沙箱**：自建 `working_dir` 解析器 `resolve_in_sandbox`——先 `canonicalize` root 与 target（解析符号链接），再按**路径分量**（非字符串前缀）+ 大小写折叠做 containment 校验，拒绝 `..`/绝对路径越界/前缀同级兄弟/`~` 展开/符号链接逃逸/NFD-NFC 变体/空·`.`·空白·NUL，错误信息无泄漏；`read_file` 经 `symlink_metadata` 在任何阻塞读取**之前**拒绝非常规文件（FIFO/设备），并对大文件/大目录按预算截断并标记。TOCTOU 为按 D11/D25 接受的残留风险（模块头注释记录）。
+  - **SSRF 防护**（`web_fetch`，D13/D19）：纯函数化的 scheme 白名单 + host 归一化 + 字面 IP 解析（含十进制/十六进制/八进制·点分变体）+ IPv4/IPv6 分类（loopback/private/link-local 含 `169.254.169.254`/unique-local/IPv4-mapped/broadcast/unspecified）+ 解析后逐地址校验；自定义 redirect policy 对每一跳重新校验，叠加请求超时与响应字节上限。DNS-rebinding 为接受的 v1 残留（模块头记录）。
+  - **门禁为结构性**（D8/D9）：未注册即不可运行——禁用工具、无 `working_dir` 的 FS 工具、以及永不注册的 mutating 名（`write_file`/`run_command`）都由 loop 的 `Tool <name> not found`（`isError=true`）兜底，`agent_runtime.rs` 内无独立 allowlist/denylist。`tool_execution_mode` 仅 `sequential`（去空白·大小写不敏感）→ Sequential，其余 → Parallel。
+- **运行时 steering**（自 M2 起）：`RunHandle` 持有一个 `Arc<Mutex<Vec<Message>>>` steering 队列，与 `AgentLoopConfig.get_steering_messages` 闭包共享同一 `Arc`；`agent_run_steer` 命令向既有 run 入队 user 消息（保持 one-run-per-session），loop 在 turn 边界 drain；空/空白文本与无活跃 run 均为干净 no-op。
+- **图片附件**（自 M2 起）：`build_user_message` 是 attachments → content blocks 的唯一 seam——`image/*` base64 编码为 `UserContentBlock::Image`（图片在前、文本在后，镜像 chat_engine），非图片防御性跳过；前端 `AgentInput` 仅图片选择器 + 缩略图 + 10MiB 软上限（超限跳过不阻塞）。
+- **工具卡片 UI**（自 M2 起）：`agentRun.svelte.ts` 把 `tool_execution_start/update/end` 归并为按 `toolCallId` 键的 `ToolCallView`（executing→completed/error 原地翻转），`toolCallViewFor` 协调 live 优先、回退到已提交 `toolResult`（重载路径）；`AgentToolCallCard.svelte` 单 prop 渲染。重载时 `loadTranscript` 在无活跃 run 时清空 live `toolCalls`，纯从存储重建已终结卡片；run 终结/错误时 `settleDanglingToolCalls` 把仍 executing 的卡片落到 error 终态，杜绝中止后卡 spinner。
 
 ## 4. 数据与存储设计
 
