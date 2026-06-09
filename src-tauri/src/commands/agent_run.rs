@@ -83,3 +83,22 @@ pub async fn agent_run_abort(
     runtime.abort(&session_id).await;
     Ok(())
 }
+
+/// 把一条 steering 消息并入某个 Agent 会话**正在进行**的 run。
+///
+/// 委托给 `AgentRuntime::steer`：从运行时注册表取出该会话进行中 run 的 steering
+/// 队列并把这条 user 消息压入；hand-agent 的 loop 在下一个 turn 边界 drain 该队列
+/// 并把消息注入 context（照常发出 `agent_stream_event` 并落库）。这保持
+/// one-run-per-session —— steering 喂给既有 run，不启动并发 run。
+///
+/// 空 / 纯空白 `text` 是 no-op；该会话无活跃 run 时也是**干净的 no-op**
+/// （返回 `Ok(())`，不报错）—— 前端可能在 run 刚自然结束时竞态地调用本命令。
+#[tauri::command]
+pub async fn agent_run_steer(
+    session_id: UUID,
+    text: String,
+    runtime: State<'_, AgentRuntime>,
+) -> Result<(), AppError> {
+    runtime.steer(&session_id, text).await;
+    Ok(())
+}

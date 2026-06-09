@@ -159,6 +159,7 @@ pub fn run() {
             // Agent 模式 run 命令
             agent_run_stream,
             agent_run_abort,
+            agent_run_steer,
             // 消息相关命令
             message_user_send,
             message_user_send_stream,

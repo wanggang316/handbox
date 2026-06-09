@@ -69,10 +69,17 @@ fn now_ms() -> i64 {
 /// 句柄移除条目（task 是 `'static`，不能借用 `&AgentRuntime`）。
 type RunsMap = Arc<Mutex<HashMap<String, RunHandle>>>;
 
-/// 一次活跃 run 的句柄。当前只持有取消 token —— 并发去重需要这张表，且
-/// 后续 `agent_run_abort` feature 会从这里取出 token 触发取消。
+/// 一次活跃 run 的句柄。持有取消 token（`agent_run_abort` 从这里取出 token 触发
+/// 取消）与 steering 队列。
+///
+/// `steering` 是本 run 的待注入 user 消息队列：`AgentRuntime::steer` 经注册表把
+/// 消息 push 进来；run loop 经 `get_steering_messages` 闭包在每个 turn 边界**drain**
+/// 它（见 `assemble_run`）。二者共享**同一个** `Arc<Mutex<..>>` —— 这是 steering
+/// 抵达进行中 run 的关键：命令通过 handle 入队，loop 通过闭包出队。
 pub struct RunHandle {
     pub cancel: CancellationToken,
+    /// 本 run 的 steering 队列（与 `get_steering_messages` 闭包共享同一 `Arc`）。
+    pub steering: Arc<Mutex<Vec<Message>>>,
 }
 
 /// 事件 sink 抽象 —— 这是错误分型与后续 feature 的扩展缝。
@@ -241,6 +248,11 @@ impl AgentRuntime {
         sink: RunSink,
     ) -> Result<(), AppError> {
         let cancel = CancellationToken::new();
+        // 本 run 的 steering 队列。这个 `Arc` 同时被登记进 `RunHandle`（命令经
+        // 它入队）与 `get_steering_messages` 闭包（loop 经它 drain）—— 同一个
+        // `Arc` 是 steering 抵达进行中 run 的关键。在占位插入处就创建，使其从 run
+        // 登记的那一刻起即可用（与 cancel token 同一时点）。
+        let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
 
         // --- (1) one-run-per-session：在持锁期间完成检查 + 占位插入 ---
         {
@@ -256,13 +268,17 @@ impl AgentRuntime {
                 session_id.clone(),
                 RunHandle {
                     cancel: cancel.clone(),
+                    steering: Arc::clone(&steering),
                 },
             );
         }
 
         // 从此处起，任何提前返回都必须先把占位从 `runs` 移除，否则会话会被
         // 永久“卡住”。装配阶段的错误经清理后向上抛出。
-        match self.assemble_run(&session_id, input, cancel.clone()).await {
+        match self
+            .assemble_run(&session_id, input, cancel.clone(), Arc::clone(&steering))
+            .await
+        {
             Ok((prompts, context, config, tools)) => {
                 self.spawn_loop(session_id, prompts, context, config, tools, cancel, sink);
                 Ok(())
@@ -284,6 +300,7 @@ impl AgentRuntime {
         session_id: &UUID,
         input: String,
         cancel: CancellationToken,
+        steering: Arc<Mutex<Vec<Message>>>,
     ) -> Result<(Vec<Message>, AgentContext, AgentLoopConfig, Vec<AgentTool>), AppError> {
         // --- (2) 载入 session 行 ---
         let session = self.sessions.get_session(session_id.clone()).await?;
@@ -357,6 +374,22 @@ impl AgentRuntime {
         let mut config = AgentLoopConfig::new(model, stream_options);
         // Default to Parallel when unset (matches hand-agent's own default).
         config.tool_execution = tool_execution_mode_from(session.tool_execution_mode.as_deref());
+
+        // run-time steering：在每个 turn 边界 drain 本 run 的 steering 队列，把待注入
+        // 的 user 消息交给 loop（loop 会把它们作为 MessageStart/MessageEnd 注入进
+        // context，并照常落库）。闭包持有的 `Arc` 与 `RunHandle.steering` 是**同一个**
+        // —— `AgentRuntime::steer` 经注册表 push，这里经闭包 drain。`std::mem::take`
+        // 一次性取走全部已入队消息并清空队列；空队列时返回空 Vec（loop 无注入）。
+        // 默认 `steering_mode == OneAtATime`：loop 每个 turn 调用一次本闭包，故按入队
+        // 顺序逐 turn 注入。
+        let steering_for_closure = Arc::clone(&steering);
+        config.get_steering_messages = Some(Arc::new(move || {
+            let queue = Arc::clone(&steering_for_closure);
+            Box::pin(async move {
+                let mut guard = queue.lock().await;
+                std::mem::take(&mut *guard)
+            })
+        }));
 
         // 测试专用：用 scripted StreamFn 取代真实网络流，使 loop 走确定性路径。
         #[cfg(test)]
@@ -538,6 +571,26 @@ impl AgentRuntime {
         }
     }
 
+    /// 把一条 steering 消息并入某个 session **正在进行**的 run（而非另起并发 run）。
+    ///
+    /// 从 `runs` 注册表取出该 session 的 `RunHandle.steering` 队列，构造一条 user
+    /// `Message` 压入其中；run loop 在下一个 turn 边界经 `get_steering_messages`
+    /// 闭包 drain 同一队列并把它注入 context（见 `assemble_run`）。one-run-per-session
+    /// 保持成立：steering 喂给既有 run，**不**启动第二个 run。
+    ///
+    /// - 空 / 纯空白 `text` 是**no-op**：不入队任何东西，run 不受打扰。
+    /// - 该 session **无活跃 run** 时也是**干净的 no-op**（不报错）—— 前端可能在 run
+    ///   刚自然结束时竞态地调用本方法；返回错误会把这种良性竞态变成噪声。
+    pub async fn steer(&self, session_id: &UUID, text: String) {
+        if text.trim().is_empty() {
+            return;
+        }
+        if let Some(handle) = self.runs.lock().await.get(session_id) {
+            let message = Message::User(UserMessage::new_text(text));
+            handle.steering.lock().await.push(message);
+        }
+    }
+
     /// 当前活跃 run 数量（测试辅助）。
     #[cfg(test)]
     async fn active_run_count(&self) -> usize {
@@ -553,9 +606,20 @@ impl AgentRuntime {
             session_id.clone(),
             RunHandle {
                 cancel: cancel.clone(),
+                steering: Arc::new(Mutex::new(Vec::new())),
             },
         );
         cancel
+    }
+
+    /// 测试辅助：返回某个 session 当前已入队的 steering 消息数（不 drain）。
+    /// 不存在活跃 run 时返回 `None`。
+    #[cfg(test)]
+    async fn steering_len(&self, session_id: &UUID) -> Option<usize> {
+        match self.runs.lock().await.get(session_id) {
+            Some(handle) => Some(handle.steering.lock().await.len()),
+            None => None,
+        }
     }
 }
 
@@ -2185,5 +2249,298 @@ mod tests {
         let results = query_tool_results(&db, &session_id).await;
         assert_eq!(results.len(), 1, "the tool dispatch path was exercised");
         assert!(results[0].0, "disabled tool → error result (gate held)");
+    }
+
+    // -------------------------------------------------------------------------
+    // Run-time steering (VAL-RUN-017): a steer submitted during an active run is
+    // delivered INTO that run via `get_steering_messages` at the next turn
+    // boundary — incorporated as a user message — WITHOUT starting a second run;
+    // an empty/whitespace steer is a no-op.
+    //
+    // The crux is that `RunHandle.steering` and the `get_steering_messages`
+    // closure share the SAME `Arc`: the command pushes via the registry handle,
+    // the loop drains via the closure. The tests drive this through the real run
+    // loop with a scripted multi-turn stream (a turn boundary must exist for the
+    // loop to poll steering after the first turn).
+    // -------------------------------------------------------------------------
+
+    /// A two-turn scripted stream whose FIRST turn is GATED on a release signal,
+    /// emitting an assistant `ToolCall` only after the signal fires; the SECOND
+    /// (and any later) turn emits a plain `Stop`. Gating the first turn keeps the
+    /// run reliably "in flight" so a test can `steer` into it; once released, the
+    /// loop finishes the tool turn, then polls steering at the turn boundary and
+    /// injects the queued message before the second turn.
+    fn gated_tool_then_done_stream_fn(
+        release_rx: tokio::sync::oneshot::Receiver<()>,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> hand_agent::StreamFn {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let turn = Arc::new(AtomicUsize::new(0));
+        let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let tool_call_id = tool_call_id.to_string();
+        let tool_name = tool_name.to_string();
+        Arc::new(move |model, _ctx, _opts, _cancel| {
+            let n = turn.fetch_add(1, Ordering::SeqCst);
+            let release_rx = Arc::clone(&release_rx);
+            let model_id = model.id.clone();
+            let tool_call_id = tool_call_id.clone();
+            let tool_name = tool_name.clone();
+            let args = args.clone();
+            if n == 0 {
+                // First turn: block until released, then emit the tool call.
+                Box::pin(futures::stream::once(async move {
+                    if let Some(rx) = release_rx.lock().await.take() {
+                        let _ = rx.await;
+                    }
+                    let msg = tool_call_message(&model_id, &tool_call_id, &tool_name, args);
+                    AssistantMessageEvent::Done {
+                        reason: StopReason::ToolUse,
+                        message: msg,
+                    }
+                }))
+            } else {
+                // Later turns: terminate with a plain Stop.
+                let events = vec![AssistantMessageEvent::Done {
+                    reason: StopReason::Stop,
+                    message: done_message(&model_id, "done after steering"),
+                }];
+                Box::pin(futures::stream::iter(events))
+            }
+        })
+    }
+
+    /// Poll until the session has an active run registered (or panic on timeout),
+    /// so a steer lands while the run is genuinely in flight.
+    async fn wait_for_active(runtime: &AgentRuntime, session_id: &str) {
+        for _ in 0..200 {
+            if runtime.active_run_count().await >= 1 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("run did not become active within timeout");
+    }
+
+    /// VAL-RUN-017 (delivery): a steer submitted during an active run is drained
+    /// by `get_steering_messages` at the turn boundary and incorporated as a user
+    /// message into THAT run — proven by a second `user` transcript row carrying
+    /// the steered text, persisted after the first turn — and NO second run is
+    /// started (the registry holds exactly one entry while the run is in flight).
+    #[tokio::test]
+    async fn steer_during_active_run_is_incorporated_as_user_message() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        // First turn (gated) emits a disabled tool call → tool-not-found result,
+        // the loop continues to a second turn, polling steering in between.
+        runtime.stream_fn_override = Some(gated_tool_then_done_stream_fn(
+            release_rx,
+            "tc-steer",
+            "read_file",
+            json!({"path": "x.txt"}),
+        ));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "initial prompt".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        // The run is in flight (first turn gated). Steer into it.
+        wait_for_active(&runtime, &session_id).await;
+        assert_eq!(
+            runtime.active_run_count().await,
+            1,
+            "exactly one run is active before steering"
+        );
+        runtime
+            .steer(&session_id, "steered follow-up".to_string())
+            .await;
+        // The steered message is queued on THIS run (drained at the turn boundary).
+        assert_eq!(
+            runtime.steering_len(&session_id).await,
+            Some(1),
+            "the steered message is queued on the active run"
+        );
+        // Steering started no second run — still exactly one entry.
+        assert_eq!(
+            runtime.active_run_count().await,
+            1,
+            "steering does not start a second concurrent run"
+        );
+
+        // Release the gated first turn; the run finishes (turn 1 → steering drain
+        // → turn 2 → Stop).
+        let _ = release_tx.send(());
+        wait_for_closed(&sink).await;
+
+        // The steered text was incorporated as a user message into the run: a
+        // user transcript row carrying it was persisted (the loop emitted
+        // MessageStart/MessageEnd for the drained steering message).
+        let user_payloads = sqlx::query(
+            r#"
+            SELECT payload
+            FROM agent_session_messages
+            WHERE session_id = $1 AND role = 'user'
+            ORDER BY seq ASC
+        "#,
+        )
+        .bind(&session_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        let payloads: Vec<String> = user_payloads
+            .iter()
+            .map(|r| r.try_get::<String, _>("payload").unwrap())
+            .collect();
+        assert!(
+            payloads.iter().any(|p| p.contains("steered follow-up")),
+            "the steered text was incorporated as a user message into the run: {payloads:?}"
+        );
+        // Both the initial prompt and the steered follow-up are present as user
+        // messages — the steer joined the SAME run rather than spawning another.
+        assert!(
+            payloads.iter().any(|p| p.contains("initial prompt")),
+            "the initial prompt user message is present: {payloads:?}"
+        );
+
+        // The single run drained from the registry after closing.
+        assert_eq!(runtime.active_run_count().await, 0);
+    }
+
+    /// VAL-RUN-017 (empty steer no-op): an empty / whitespace-only steer queues
+    /// NOTHING — the active run's steering queue stays empty and the run is
+    /// undisturbed (no extra user message is injected).
+    #[tokio::test]
+    async fn empty_or_whitespace_steer_is_a_no_op() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(gated_tool_then_done_stream_fn(
+            release_rx,
+            "tc-empty",
+            "read_file",
+            json!({"path": "x.txt"}),
+        ));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "initial prompt".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        wait_for_active(&runtime, &session_id).await;
+
+        // Empty and whitespace-only steers must queue nothing.
+        runtime.steer(&session_id, String::new()).await;
+        runtime.steer(&session_id, "   \t\n ".to_string()).await;
+        assert_eq!(
+            runtime.steering_len(&session_id).await,
+            Some(0),
+            "empty/whitespace steer queues nothing"
+        );
+
+        let _ = release_tx.send(());
+        wait_for_closed(&sink).await;
+
+        // The run is undisturbed: only the initial prompt user message exists,
+        // no steering-injected user row.
+        let user_rows = sqlx::query(
+            "SELECT COUNT(*) AS n FROM agent_session_messages WHERE session_id = $1 AND role = 'user'",
+        )
+        .bind(&session_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let n: i64 = user_rows.try_get("n").unwrap();
+        assert_eq!(n, 1, "only the initial prompt user message; no steered row");
+
+        assert_eq!(runtime.active_run_count().await, 0);
+    }
+
+    /// VAL-RUN-017 (single run, no second entry): steering an active run never
+    /// adds a second `runs` entry — the registry holds exactly one entry for the
+    /// session across multiple steers while the run is in flight.
+    #[tokio::test]
+    async fn steering_does_not_create_a_second_run_entry() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session(&db, &provider_id, "gpt-4o").await;
+
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(gated_tool_then_done_stream_fn(
+            release_rx,
+            "tc-single",
+            "read_file",
+            json!({"path": "x.txt"}),
+        ));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "initial prompt".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+
+        wait_for_active(&runtime, &session_id).await;
+
+        // Multiple steers, all feeding the one active run.
+        runtime.steer(&session_id, "first steer".to_string()).await;
+        runtime.steer(&session_id, "second steer".to_string()).await;
+        assert_eq!(
+            runtime.active_run_count().await,
+            1,
+            "the runs map still holds exactly one entry for the session"
+        );
+        assert_eq!(
+            runtime.steering_len(&session_id).await,
+            Some(2),
+            "both steers queued on the single active run"
+        );
+
+        let _ = release_tx.send(());
+        wait_for_closed(&sink).await;
+        assert_eq!(runtime.active_run_count().await, 0);
+    }
+
+    /// Steering a session with NO active run is a clean no-op (does not error or
+    /// panic) — the frontend may call it racily as a run naturally ends.
+    #[tokio::test]
+    async fn steer_unknown_session_is_clean_no_op() {
+        let (db, _guard) = test_db().await;
+        let runtime = AgentRuntime::new(Arc::clone(&db));
+
+        // No run ever registered for this id — must be a silent no-op.
+        runtime
+            .steer(&"never-existed".to_string(), "hello".to_string())
+            .await;
+        assert_eq!(runtime.active_run_count().await, 0);
+        assert_eq!(
+            runtime.steering_len(&"never-existed".to_string()).await,
+            None
+        );
     }
 }
