@@ -2,6 +2,7 @@
 pub mod agent;
 pub mod agent_runtime;
 pub mod agent_session;
+pub mod agent_tools;
 pub mod artifact;
 pub mod auth;
 pub mod catalog_sync;
