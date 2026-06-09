@@ -33,6 +33,7 @@
 // `start_run` 以 `AppError` 拒绝，不会启动并发 run。
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -41,13 +42,14 @@ use tokio::sync::Mutex;
 // hand-agent re-exports `CancellationToken`，消费方无需直接依赖 tokio-util。
 use hand_agent::{
     run_agent_loop, AgentContext, AgentError, AgentEvent, AgentEventSink, AgentLoopConfig,
-    CancellationToken,
+    AgentTool, CancellationToken, ToolExecutionMode,
 };
 #[cfg(test)]
 use hand_ai_model::{self as model};
 use hand_ai_model::{Message, UserMessage};
 
 use crate::models::AppError;
+use crate::services::agent_tools;
 use crate::services::chat_engine::{self, ChatOptions};
 use crate::services::{AgentSessionService, Database, ProviderService};
 use crate::storage::types::UUID;
@@ -164,6 +166,17 @@ fn sanitize_agent_error(err: &AgentError) -> AppError {
     }
 }
 
+/// Map a session's `tool_execution_mode` string to hand-agent's
+/// [`ToolExecutionMode`]. `"sequential"` (case-insensitive) maps to
+/// `Sequential`; every other value — including `None`/unset and unknown
+/// strings — falls back to `Parallel`, matching hand-agent's own default.
+fn tool_execution_mode_from(raw: Option<&str>) -> ToolExecutionMode {
+    match raw.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("sequential") => ToolExecutionMode::Sequential,
+        _ => ToolExecutionMode::Parallel,
+    }
+}
+
 /// Agent 模式后端运行时。
 pub struct AgentRuntime {
     sessions: AgentSessionService,
@@ -217,7 +230,8 @@ impl AgentRuntime {
     /// 2. 载入 session 行 + 既有 transcript，把每条 `payload` 反序列化为
     ///    hand-agent `Message` 以 seed `AgentContext`，再追加新的 user 消息。
     /// 3. 解析 provider、装配 `model::Model` 与 `SimpleStreamOptions`、构造
-    ///    `AgentLoopConfig`（NO tools / NO hooks）。
+    ///    `AgentLoopConfig`（含 per-session 内置工具集 + `tool_execution` 模式，
+    ///    NO hooks）。
     /// 4. spawn 后台任务驱动 `run_agent_loop`；每个事件经 sink 转发；loop 返回后
     ///    （任意结果）**恰好一次** 发出终结信号，并从 `runs` 移除 `session_id`。
     pub async fn start_run(
@@ -249,8 +263,8 @@ impl AgentRuntime {
         // 从此处起，任何提前返回都必须先把占位从 `runs` 移除，否则会话会被
         // 永久“卡住”。装配阶段的错误经清理后向上抛出。
         match self.assemble_run(&session_id, input, cancel.clone()).await {
-            Ok((prompts, context, config)) => {
-                self.spawn_loop(session_id, prompts, context, config, cancel, sink);
+            Ok((prompts, context, config, tools)) => {
+                self.spawn_loop(session_id, prompts, context, config, tools, cancel, sink);
                 Ok(())
             }
             Err(e) => {
@@ -270,7 +284,7 @@ impl AgentRuntime {
         session_id: &UUID,
         input: String,
         cancel: CancellationToken,
-    ) -> Result<(Vec<Message>, AgentContext, AgentLoopConfig), AppError> {
+    ) -> Result<(Vec<Message>, AgentContext, AgentLoopConfig, Vec<AgentTool>), AppError> {
         // --- (2) 载入 session 行 ---
         let session = self.sessions.get_session(session_id.clone()).await?;
 
@@ -331,11 +345,18 @@ impl AgentRuntime {
         };
         let stream_options = chat_engine::build_stream_options(&chat_options, &provider.api_key);
 
-        // NO tools, NO hooks in this feature.
-        // `mut` is only exercised by the test-only stream_fn injection below;
-        // suppress the unused-mut lint in the production (non-test) build.
-        #[cfg_attr(not(test), allow(unused_mut))]
+        // Per-session built-in tool set. `build_tools` only registers the
+        // session's enabled, supported, read-only tools: a tool toggled OFF is
+        // absent, the FS tools are omitted when `working_dir` is empty/None, and
+        // mutating names (`write_file`/`run_command`) are never produced. The
+        // gate is therefore "what is not registered cannot run" — the loop's own
+        // `Tool '<name>' not found` enforces it (D8/D9). No hooks in this feature.
+        let working_dir = session.working_dir.as_deref().map(Path::new);
+        let tools = agent_tools::build_tools(&session.enabled_tools, working_dir);
+
         let mut config = AgentLoopConfig::new(model, stream_options);
+        // Default to Parallel when unset (matches hand-agent's own default).
+        config.tool_execution = tool_execution_mode_from(session.tool_execution_mode.as_deref());
 
         // 测试专用：用 scripted StreamFn 取代真实网络流，使 loop 走确定性路径。
         #[cfg(test)]
@@ -343,7 +364,7 @@ impl AgentRuntime {
             config.stream_fn = Some(stream_fn.clone());
         }
 
-        Ok((prompts, context, config))
+        Ok((prompts, context, config, tools))
     }
 
     /// spawn 后台任务驱动 `run_agent_loop`，并保证终结事件恰好发出一次。
@@ -367,12 +388,16 @@ impl AgentRuntime {
     /// 终结信号在 loop 结束**且** channel 排空之后才发出 —— 即每条已完成消息都在
     /// `agent_stream_closed` 之前落库。持久化纯粹是事件处理里的副作用，对发出的
     /// 事件流完全透明（不重排、不重发）。
+    // 8 args: the per-session `tools` list joins the existing run inputs; they are
+    // cohesive run-assembly outputs, not a sign to bundle into a struct here.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_loop(
         &self,
         session_id: UUID,
         prompts: Vec<Message>,
         mut context: AgentContext,
         config: AgentLoopConfig,
+        tools: Vec<AgentTool>,
         cancel: CancellationToken,
         sink: RunSink,
     ) {
@@ -459,7 +484,7 @@ impl AgentRuntime {
             let result = run_agent_loop(
                 prompts,
                 &mut context,
-                &[],
+                &tools,
                 &config,
                 chat_engine::shared_client(),
                 &emit,
@@ -593,6 +618,42 @@ mod tests {
             working_dir: None,
             enabled_tools: vec![],
             tool_execution_mode: None,
+            message_count: 0,
+            last_message_at: None,
+            created_at: now_ms(),
+            updated_at: now_ms(),
+        };
+        AgentSessionRepository::new(Arc::clone(db))
+            .create_session(&session)
+            .await
+            .unwrap();
+        id
+    }
+
+    /// Seed an agent session with an explicit tool configuration —
+    /// `enabled_tools`, `working_dir`, and `tool_execution_mode` — so the
+    /// backend tool-gating tests can drive the per-session filtered tool list.
+    async fn seed_session_with_tools(
+        db: &Arc<Database>,
+        provider_id: &str,
+        model_id: &str,
+        enabled_tools: Vec<String>,
+        working_dir: Option<String>,
+        tool_execution_mode: Option<String>,
+    ) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let session = AgentSession {
+            id: id.clone(),
+            name: "Tool Session".to_string(),
+            model_id: Some(model_id.to_string()),
+            provider_id: Some(provider_id.to_string()),
+            system_prompt: Some("You are a helpful agent.".to_string()),
+            thinking_level: None,
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+            working_dir,
+            enabled_tools,
+            tool_execution_mode,
             message_count: 0,
             last_message_at: None,
             created_at: now_ms(),
@@ -883,6 +944,102 @@ mod tests {
             ];
             Box::pin(futures::stream::iter(events))
         })
+    }
+
+    /// Build a finished `AssistantMessage` whose only content block is a
+    /// `ToolCall` for `tool_name`, with `stop_reason == ToolUse`. The loop will
+    /// extract this call and dispatch it against the registered tool list (or
+    /// return `Tool '<name>' not found` when it is absent).
+    fn tool_call_message(
+        model_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> AssistantMessage {
+        AssistantMessage {
+            role: "assistant".into(),
+            content: vec![model::AssistantContentBlock::ToolCall(
+                model::ToolCall::new(tool_call_id, tool_name, args),
+            )],
+            api: model::Api::OpenAICompletions,
+            provider: model::types::Provider::OpenAI,
+            model: model_id.to_string(),
+            usage: Usage::default(),
+            stop_reason: StopReason::ToolUse,
+            error_message: None,
+            timestamp: 0,
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+        }
+    }
+
+    /// A two-turn scripted stream: the FIRST invocation emits an assistant
+    /// message carrying a single `ToolCall` (so the loop dispatches the tool);
+    /// the SECOND (and any later) invocation emits a plain `Stop` so the loop
+    /// terminates after the tool result is appended. Stateful via an atomic
+    /// turn counter so the run reaches a clean terminal MessageEnd.
+    fn tool_then_done_stream_fn(
+        tool_call_id: &str,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> hand_agent::StreamFn {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let turn = Arc::new(AtomicUsize::new(0));
+        let tool_call_id = tool_call_id.to_string();
+        let tool_name = tool_name.to_string();
+        Arc::new(move |model, _ctx, _opts, _cancel| {
+            let n = turn.fetch_add(1, Ordering::SeqCst);
+            let events = if n == 0 {
+                let msg = tool_call_message(&model.id, &tool_call_id, &tool_name, args.clone());
+                vec![
+                    AssistantMessageEvent::Start {
+                        partial: msg.clone(),
+                    },
+                    AssistantMessageEvent::Done {
+                        reason: StopReason::ToolUse,
+                        message: msg,
+                    },
+                ]
+            } else {
+                vec![
+                    AssistantMessageEvent::Start {
+                        partial: done_message(&model.id, ""),
+                    },
+                    AssistantMessageEvent::Done {
+                        reason: StopReason::Stop,
+                        message: done_message(&model.id, "done after tool"),
+                    },
+                ]
+            };
+            Box::pin(futures::stream::iter(events))
+        })
+    }
+
+    /// Read the persisted `toolResult` rows for a session (role `toolResult`),
+    /// ordered by `seq`, returning each row's `isError` flag and full payload
+    /// text so gating tests can assert on the stored tool outcome.
+    async fn query_tool_results(db: &Arc<Database>, session_id: &str) -> Vec<(bool, String)> {
+        let rows = sqlx::query(
+            r#"
+            SELECT json_extract(payload, '$.isError') AS is_error,
+                   payload
+            FROM agent_session_messages
+            WHERE session_id = $1 AND role = 'toolResult'
+            ORDER BY seq ASC
+        "#,
+        )
+        .bind(session_id)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        rows.into_iter()
+            .map(|row| {
+                let is_error: Option<i64> = row.try_get("is_error").ok().flatten();
+                let payload: String = row.try_get("payload").unwrap();
+                (is_error.unwrap_or(0) != 0, payload)
+            })
+            .collect()
     }
 
     /// VAL-PERSIST-001 + VAL-PERSIST-002 + VAL-RUN-004: a scripted run persists
@@ -1681,5 +1838,352 @@ mod tests {
             "abort cancelled the registered token — the loop would terminate, \
              halting further agent_stream_event for the deleted session"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Backend tool gating (D8/D9) + secret/path hygiene (D14).
+    //
+    // The gate is structural: `build_tools` only registers the session's
+    // enabled, supported, read-only tools, so the loop's own
+    // `Tool '<name>' not found` (is_error=true) is the enforcement for a
+    // disabled tool, the FS tools without a working_dir, and the mutating tool
+    // names that are never registered. These tests script an assistant tool_call
+    // and assert the resulting persisted `toolResult` row.
+    // -------------------------------------------------------------------------
+
+    /// Map a session's `tool_execution_mode` string to hand-agent's enum:
+    /// `"sequential"` (case-insensitive, trimmed) → Sequential; everything else
+    /// — unset, unknown, blank — defaults to Parallel (hand-agent's default).
+    #[test]
+    fn tool_execution_mode_defaults_to_parallel_unless_sequential() {
+        assert_eq!(tool_execution_mode_from(None), ToolExecutionMode::Parallel);
+        assert_eq!(
+            tool_execution_mode_from(Some("sequential")),
+            ToolExecutionMode::Sequential
+        );
+        assert_eq!(
+            tool_execution_mode_from(Some("  Sequential  ")),
+            ToolExecutionMode::Sequential
+        );
+        assert_eq!(
+            tool_execution_mode_from(Some("parallel")),
+            ToolExecutionMode::Parallel
+        );
+        // Unknown / blank strings fall back to the default rather than erroring.
+        assert_eq!(
+            tool_execution_mode_from(Some("nonsense")),
+            ToolExecutionMode::Parallel
+        );
+        assert_eq!(
+            tool_execution_mode_from(Some("")),
+            ToolExecutionMode::Parallel
+        );
+    }
+
+    /// VAL-TOOLS-007: a session with a built-in tool toggled OFF. When the model
+    /// emits that tool call, the loop yields a `toolResult` with `is_error`
+    /// containing "not found" — the tool does not execute (it was never
+    /// registered, because it is not in `enabled_tools`).
+    #[tokio::test]
+    async fn disabled_tool_yields_tool_not_found_and_does_not_execute() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        // `web_fetch` is enabled, but the model calls `read_file`, which is OFF.
+        let session_id = seed_session_with_tools(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec!["web_fetch".to_string()],
+            Some("/tmp".to_string()),
+            None,
+        )
+        .await;
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(tool_then_done_stream_fn(
+            "tc-disabled",
+            "read_file",
+            json!({"path": "inside.txt"}),
+        ));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "use the disabled tool".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+        wait_for_closed(&sink).await;
+
+        let results = query_tool_results(&db, &session_id).await;
+        assert_eq!(results.len(), 1, "exactly one tool result persisted");
+        let (is_error, payload) = &results[0];
+        assert!(*is_error, "the disabled-tool result is an error result");
+        assert!(
+            payload.contains("not found"),
+            "toolResult must say the tool was not found, got: {payload}"
+        );
+    }
+
+    /// VAL-TOOLS-008 (registration half): with an empty/None `working_dir` the FS
+    /// tools (`read_file`/`list_directory`) are NOT registered, while `web_fetch`
+    /// IS — `web_fetch` needs no sandbox root. Asserted directly on the per-
+    /// session `build_tools` output (the same call the assemble path makes).
+    #[test]
+    fn empty_working_dir_omits_fs_tools_keeps_web_fetch() {
+        let enabled = vec![
+            "read_file".to_string(),
+            "list_directory".to_string(),
+            "web_fetch".to_string(),
+        ];
+
+        // None working_dir.
+        let names: Vec<String> = agent_tools::build_tools(&enabled, None)
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["web_fetch".to_string()],
+            "None working_dir: only web_fetch is registered"
+        );
+
+        // Empty-string working_dir behaves the same as None.
+        let empty = Path::new("");
+        let names_empty: Vec<String> = agent_tools::build_tools(&enabled, Some(empty))
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        assert_eq!(
+            names_empty,
+            vec!["web_fetch".to_string()],
+            "empty working_dir: only web_fetch is registered"
+        );
+    }
+
+    /// VAL-TOOLS-008 (runtime half): with no working_dir, a model `read_file`
+    /// call resolves to tool-not-found through the real run loop (the FS tool was
+    /// never registered), confirming the structural gate, not just `build_tools`.
+    #[tokio::test]
+    async fn no_working_dir_read_file_call_is_tool_not_found() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+        let session_id = seed_session_with_tools(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec!["read_file".to_string(), "web_fetch".to_string()],
+            None, // no working_dir → read_file omitted
+            None,
+        )
+        .await;
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(tool_then_done_stream_fn(
+            "tc-nofs",
+            "read_file",
+            json!({"path": "x.txt"}),
+        ));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "read a file".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+        wait_for_closed(&sink).await;
+
+        let results = query_tool_results(&db, &session_id).await;
+        assert_eq!(results.len(), 1);
+        let (is_error, payload) = &results[0];
+        assert!(
+            *is_error,
+            "read_file without a sandbox root is not runnable"
+        );
+        assert!(
+            payload.contains("not found"),
+            "read_file without working_dir is tool-not-found, got: {payload}"
+        );
+    }
+
+    /// VAL-TOOLS-011: the mutating tool names (`write_file`/`run_command`) are
+    /// NEVER registered — `build_tools` ignores unknown names — so a call to one
+    /// resolves to tool-not-found and (because there is no executor) nothing is
+    /// written to disk. We point `working_dir` at a temp dir and assert no file
+    /// the call "asked for" appears there.
+    #[tokio::test]
+    async fn mutating_tools_are_never_registered_and_write_nothing() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let work_path = work.path().to_string_lossy().into_owned();
+        let target = work.path().join("created-by-write.txt");
+
+        // The session even tries to enable the mutating names; build_tools must
+        // still refuse to produce them.
+        let session_id = seed_session_with_tools(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![
+                "write_file".to_string(),
+                "run_command".to_string(),
+                "read_file".to_string(),
+            ],
+            Some(work_path.clone()),
+            None,
+        )
+        .await;
+
+        // build_tools must omit both mutating names regardless of working_dir.
+        let names: Vec<String> = agent_tools::build_tools(
+            &[
+                "write_file".to_string(),
+                "run_command".to_string(),
+                "read_file".to_string(),
+            ],
+            Some(work.path()),
+        )
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+        assert!(
+            !names
+                .iter()
+                .any(|n| n == "write_file" || n == "run_command"),
+            "mutating tools must never be registered, got: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n == "read_file"),
+            "the read-only tool is still registered: {names:?}"
+        );
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        runtime.stream_fn_override = Some(tool_then_done_stream_fn(
+            "tc-write",
+            "write_file",
+            json!({"path": "created-by-write.txt", "content": "pwned"}),
+        ));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "write a file".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+        wait_for_closed(&sink).await;
+
+        let results = query_tool_results(&db, &session_id).await;
+        assert_eq!(results.len(), 1);
+        let (is_error, payload) = &results[0];
+        assert!(*is_error, "write_file call is an error (not registered)");
+        assert!(
+            payload.contains("not found"),
+            "write_file is tool-not-found, got: {payload}"
+        );
+        // Nothing was written to disk: the file the call named does not exist.
+        assert!(
+            !target.exists(),
+            "no mutating tool ran, so the target file must not exist: {target:?}"
+        );
+    }
+
+    /// VAL-TOOLS-012: during a tool-bearing run seeded with a provider key, the
+    /// key never appears in (a) the emitted `agent_stream_event` payloads, nor
+    /// (b) the persisted `agent_session_messages.payload` (including the
+    /// `toolResult` rows). The run scripts a tool_call so the tool-dispatch path
+    /// is exercised; the tool is not registered (disabled) so we also confirm the
+    /// gate, but the focus here is the no-key-leak invariant.
+    #[tokio::test]
+    async fn provider_key_never_leaks_in_events_or_persisted_payload() {
+        let (db, _guard) = test_db().await;
+
+        // Seed a provider whose api_key is the adversarial fake key.
+        let provider_id = uuid::Uuid::new_v4().to_string();
+        let provider = Provider {
+            id: provider_id.clone(),
+            name: "Leaky Tools".to_string(),
+            provider_type: "openai".to_string(),
+            base_url: String::new(),
+            api_key: FAKE_KEY.to_string(),
+            enabled: true,
+            created_at: now_ms(),
+            updated_at: now_ms(),
+        };
+        ProviderRepository::new(Arc::clone(&db))
+            .create_provider(&provider)
+            .await
+            .unwrap();
+
+        let session_id = seed_session_with_tools(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec!["web_fetch".to_string()],
+            Some("/tmp".to_string()),
+            None,
+        )
+        .await;
+
+        let mut runtime = AgentRuntime::new(Arc::clone(&db));
+        // The model calls a disabled tool; the dispatch path runs and yields a
+        // tool-not-found result. No real network I/O, but the key is in the
+        // assembled stream options for the whole run.
+        runtime.stream_fn_override = Some(tool_then_done_stream_fn(
+            "tc-leak",
+            "read_file",
+            json!({"path": "inside.txt"}),
+        ));
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "fetch and read".to_string(),
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+        wait_for_closed(&sink).await;
+
+        // (a) No emitted event payload carries the key.
+        let events = sink.events.lock().unwrap().clone();
+        assert!(!events.is_empty(), "the run emitted events");
+        for ev in &events {
+            let serialized = serde_json::to_string(ev).unwrap();
+            assert!(
+                !serialized.contains(FAKE_KEY),
+                "the API key leaked into an emitted event: {serialized}"
+            );
+        }
+
+        // (b) No persisted payload — including the toolResult row — carries it.
+        let rows = sqlx::query("SELECT payload FROM agent_session_messages WHERE session_id = $1")
+            .bind(&session_id)
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+        assert!(!rows.is_empty(), "the run persisted transcript rows");
+        for row in &rows {
+            let payload: String = row.try_get("payload").unwrap();
+            assert!(
+                !payload.contains(FAKE_KEY),
+                "the API key leaked into a persisted payload: {payload}"
+            );
+        }
+
+        // Sanity: the tool-bearing path actually produced a (gated) tool result.
+        let results = query_tool_results(&db, &session_id).await;
+        assert_eq!(results.len(), 1, "the tool dispatch path was exercised");
+        assert!(results[0].0, "disabled tool → error result (gate held)");
     }
 }
