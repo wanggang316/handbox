@@ -153,14 +153,21 @@ export const agentSessionActions = {
    * 避免影响 run 终结的其它收尾。
    */
   async refreshAfterRun(id: UUID): Promise<void> {
+    if (!sessions.some((session) => session.id === id)) {
+      // 已删除（或从未在列表内）的会话：静默 no-op（GROUP-018 / CROSS-008）。
+      // 不发起重拉——对已删 id 的 agent_session_get 必然 NOT_FOUND，
+      // 落进下方 catch 会留下无意义的 console.error 噪音。
+      return;
+    }
     try {
       const updated = await agentSessionApi.getAgentSession(id);
       const others = sessions.filter((session) => session.id !== id);
       if (others.length === sessions.length) {
-        // 该会话已不在列表内：不插入幽灵条目。
+        // await 期间被删除：不插入幽灵条目。
         return;
       }
-      // 置顶 + 刷新元数据（镜像后端 updatedAt DESC 排序）。
+      // 置顶 + 刷新元数据（重拉对象携带后端最新 lastMessageAt，
+      // groupSessions 据活动键自动把它排到组内第一并上浮该组）。
       sessions = [updated, ...others];
       if (currentSession?.id === id) {
         currentSession = updated;

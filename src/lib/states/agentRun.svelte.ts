@@ -94,6 +94,15 @@ class AgentRunStore {
   // 按 sessionId 分键的运行状态。每个会话独立，互不干扰。
   private states = $state<Record<string, AgentRunState>>({});
 
+  // 已删除会话的 tombstone（GROUP-018）：`removeSession` 之后，该会话在途 run 的
+  // 迟到流事件（后端删除前 abort 产生的 tool_execution_end / agent_stream_closed
+  // 等）不得经 `ensureState` 重建已删条目。守卫只对显式删除过的 id 生效，
+  // 正常流式路径完全不受影响。`agent_stream_closed` 是 run 的终结信号，抵达时
+  // 顺带回收 tombstone（该 run 不再有后续事件；已删 session 也不会有新 run）。
+  // 删除时无在途 run 的 tombstone 不会被 closed 回收而常驻——条目是 UUID 字符串，
+  // 量级可忽略，且 session id 不复用，无误拦截风险。非响应式内部簿记，不进 $state。
+  private deletedSessions = new Set<string>();
+
   // 一次性流式监听器的清理函数（store 生命周期内通常不调用）。
   private unlisten: (() => void) | null = null;
 
@@ -137,9 +146,13 @@ class AgentRunStore {
 
   /**
    * 分发 `agent_stream_event`：按 sessionId 定位状态并 reduce 该会话的 AgentEvent。
+   * 已删除会话的迟到事件直接丢弃，不重建条目。
    */
   private handleStreamEvent(payload: AgentStreamEventPayload): void {
     const { sessionId, event } = payload;
+    if (this.deletedSessions.has(sessionId)) {
+      return;
+    }
     this.reduceEvent(sessionId, event);
   }
 
@@ -382,6 +395,10 @@ class AgentRunStore {
    * 错误路径下也绝不留下卡死的 spinner（VAL-CROSS-003）。
    */
   private handleStreamError(payload: AgentStreamErrorPayload): void {
+    if (this.deletedSessions.has(payload.sessionId)) {
+      // 已删会话的迟到错误：不重建条目。
+      return;
+    }
     const state = this.ensureState(payload.sessionId);
     state.error = payload.error?.message ?? "Agent run error";
     this.settleDanglingToolCalls(payload.sessionId);
@@ -394,6 +411,12 @@ class AgentRunStore {
    * 不影响本 store 的终结收尾。
    */
   private handleStreamClosed(payload: AgentStreamClosedPayload): void {
+    if (this.deletedSessions.has(payload.sessionId)) {
+      // 已删会话的 run 终结：回收 tombstone（closed 后该 run 不再有事件），
+      // 不重建状态、不触发侧栏刷新回调。
+      this.deletedSessions.delete(payload.sessionId);
+      return;
+    }
     const state = this.ensureState(payload.sessionId);
     state.isRunning = false;
     // run 结束（任何成因）即收口在途工具卡片：dangling 的 executing 条目翻转到
@@ -580,6 +603,21 @@ class AgentRunStore {
    */
   clear(sessionId: string): void {
     delete this.states[sessionId];
+  }
+
+  /**
+   * 会话被删除后的清理（GROUP-018）：移除该会话的运行状态，并立 tombstone
+   * 拦截在途 run 的迟到流事件。
+   *
+   * 后端 `agent_session_delete` 先 abort 再删，abort 的收尾事件
+   * （tool_execution_end / agent_stream_closed 等）可能在删除完成后才抵达前端；
+   * 若不拦截，它们会经 `ensureState` 重建已删条目，并由 run-终结回调触发对已删
+   * 会话的侧栏重拉（NOT_FOUND console 噪音）。调用方应在删除成功后调用本方法。
+   * tombstone 由该会话的 `agent_stream_closed` 自然回收。
+   */
+  removeSession(sessionId: string): void {
+    delete this.states[sessionId];
+    this.deletedSessions.add(sessionId);
   }
 }
 

@@ -5,8 +5,11 @@
     ChevronRight,
     Folder,
     FolderOpen,
+    Hash,
     Inbox,
+    PencilLine,
     Plus,
+    Trash2,
   } from "@lucide/svelte";
   import {
     agentProjectState,
@@ -20,6 +23,7 @@
     agentProjectCollapse,
     UNGROUPED_COLLAPSE_KEY,
   } from "$lib/states/agentProjectCollapse.svelte";
+  import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { groupSessions, sessionActivityKey } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
   import type { AgentSession } from "$lib/types";
@@ -86,6 +90,135 @@
     goto(`/agent?id=${session.id}`);
   }
 
+  // ============================================
+  // 右键菜单（session 行）
+  // ============================================
+  // 统一一个 contextMenu state、按 kind 区分目标：同屏天然只有一个菜单
+  // （再次右键直接覆盖旧菜单），后续项目组头菜单以新 kind 加入此联合即可。
+  interface SessionContextMenu {
+    kind: "session";
+    session: AgentSession;
+    x: number;
+    y: number;
+  }
+  type ContextMenu = SessionContextMenu;
+
+  let contextMenu = $state<ContextMenu | null>(null);
+
+  function handleSessionContextMenu(event: MouseEvent, session: AgentSession) {
+    event.preventDefault();
+    // 阻止冒泡到 window 的 oncontextmenu（那里会关掉菜单）。
+    event.stopPropagation();
+    contextMenu = {
+      kind: "session",
+      session,
+      x: event.clientX,
+      y: event.clientY,
+    };
+  }
+
+  // 点击 / 在菜单外右键时关闭菜单（行上的右键已 stopPropagation，不会误关）。
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest(".context-menu")) {
+      contextMenu = null;
+    }
+  }
+
+  // ============================================
+  // 内联重命名
+  // ============================================
+  // 输入态按 session id 存（renamingSessionId 定位目标行）：keyed each 重排时
+  // 输入框随行移动、内容保留，提交始终写回 renamingSessionId 指向的会话。
+  let renamingSessionId = $state("");
+  let renameValue = $state("");
+
+  function startRename() {
+    if (contextMenu?.kind !== "session") return;
+    const session = contextMenu.session;
+    renamingSessionId = session.id;
+    renameValue = session.name;
+    contextMenu = null;
+
+    // 等输入框挂载后聚焦并全选（data-session-id 定位）。
+    setTimeout(() => {
+      const input = document.querySelector(
+        `input[data-session-id="${session.id}"]`,
+      ) as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }, 0);
+  }
+
+  // 确认重命名：纯空白或未变更不写入。先收起输入框再提交，使 Enter 与 blur
+  // 的双触发在第二次进入时因 renamingSessionId 已清空而天然幂等。
+  // rename 经 store 原位替换且排序键只看消息活动（lastMessageAt/createdAt），
+  // 提交后该行保持原位（GROUP-023）。
+  async function confirmRename() {
+    const id = renamingSessionId;
+    const next = renameValue.trim();
+    const session = agentSessionState.sessions.find((s) => s.id === id);
+    cancelRename();
+    if (session && next && next !== session.name) {
+      try {
+        await agentSessionActions.renameSession(id, next);
+      } catch (error) {
+        console.error("Failed to rename agent session:", error);
+      }
+    }
+  }
+
+  function cancelRename() {
+    renamingSessionId = "";
+    renameValue = "";
+  }
+
+  function handleRenameKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      confirmRename();
+    } else if (event.key === "Escape") {
+      cancelRename();
+    }
+  }
+
+  // ============================================
+  // 复制 ID / 删除
+  // ============================================
+  async function handleCopyId() {
+    if (contextMenu?.kind !== "session") return;
+    const id = contextMenu.session.id;
+    contextMenu = null;
+    try {
+      await navigator.clipboard.writeText(id);
+    } catch (error) {
+      console.error("Failed to copy session id:", error);
+    }
+  }
+
+  // 一键删除，无确认。后端 agent_session_delete 先 abort 再删；删除成功后
+  // 清理该会话的运行状态并立 tombstone，拦截 abort 收尾产生的迟到流事件
+  // （GROUP-018：不重建已删条目、无 NOT_FOUND console 噪音）。
+  async function handleDelete() {
+    if (contextMenu?.kind !== "session") {
+      contextMenu = null;
+      return;
+    }
+    const target = contextMenu.session;
+    contextMenu = null;
+    try {
+      await agentSessionActions.deleteSession(target.id);
+      agentRunStore.removeSession(target.id);
+      // 删除的是当前打开的会话则回到 Agent 落地页。
+      if (activeId === target.id) {
+        goto("/agent");
+      }
+    } catch (error) {
+      console.error("Failed to delete agent session:", error);
+    }
+  }
+
   // 组头整行（文件夹图标 / 名称 / 空白）单击切换折叠；组头上的内嵌控件
   // （未来的 hover「+」、右键菜单触发器等）标记 data-group-control 即可
   // 豁免，不会误触 toggle。
@@ -114,18 +247,33 @@
 </script>
 
 {#snippet sessionRow(session: AgentSession)}
-  <button
-    class="w-full flex items-center gap-2 py-0.5 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {session.id ===
-    activeId
-      ? 'bg-base-300 text-base-content'
-      : ''}"
-    onclick={() => handleSessionClick(session)}
-  >
-    <span class="truncate flex-1">{session.name}</span>
-    <span class="flex-shrink-0 text-[11px] text-base-content/40">
-      {formatRelativeTime(sessionActivityKey(session))}
-    </span>
-  </button>
+  {#if renamingSessionId === session.id}
+    <!-- 重命名输入框：随 keyed each 行移动；Enter 提交 / blur 提交 / Esc 取消 -->
+    <div class="pl-5 pr-2">
+      <input
+        data-session-id={session.id}
+        class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+        bind:value={renameValue}
+        onkeydown={handleRenameKeydown}
+        onblur={confirmRename}
+        placeholder="输入新名称"
+      />
+    </div>
+  {:else}
+    <button
+      class="w-full flex items-center gap-2 py-0.5 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {session.id ===
+      activeId
+        ? 'bg-base-300 text-base-content'
+        : ''}"
+      onclick={() => handleSessionClick(session)}
+      oncontextmenu={(event) => handleSessionContextMenu(event, session)}
+    >
+      <span class="truncate flex-1">{session.name}</span>
+      <span class="flex-shrink-0 text-[11px] text-base-content/40">
+        {formatRelativeTime(sessionActivityKey(session))}
+      </span>
+    </button>
+  {/if}
 {/snippet}
 
 <div class="flex flex-col h-full">
@@ -217,3 +365,40 @@
     {/if}
   </div>
 </div>
+
+<!-- 右键菜单（单一 state 按 kind 分发；当前仅 session 行） -->
+{#if contextMenu?.kind === "session"}
+  <div
+    class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
+    style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+  >
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={startRename}
+    >
+      <PencilLine size={14} />
+      重命名
+    </button>
+
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={handleCopyId}
+    >
+      <Hash size={14} />
+      复制ID
+    </button>
+
+    <!-- 分隔线 -->
+    <div class="border-t border-base-300 my-1 mx-2"></div>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-error/10 text-error flex items-center gap-2 whitespace-nowrap"
+      onclick={handleDelete}
+    >
+      <Trash2 size={14} />
+      删除
+    </button>
+  </div>
+{/if}
+
+<!-- 全局事件监听：点击菜单外 / 在菜单外右键关闭菜单（行上右键已 stopPropagation） -->
+<svelte:window onclick={handleClickOutside} oncontextmenu={handleClickOutside} />
