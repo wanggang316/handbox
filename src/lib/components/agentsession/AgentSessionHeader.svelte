@@ -19,7 +19,7 @@
   // System Prompt popover
   // ============================================
   // 草稿绑定「打开时刻」的 sessionId：保存显式写回 capture 的 id，
-  // 用户中途切换会话也不会写错目标（写回原 session，next-run 语义不变）。
+  // 异步保存途中切换会话也不会写错目标（写回原 session，next-run 语义不变）。
   let promptSessionId = $state<string | null>(null);
   let promptDraft = $state("");
   let promptError = $state<string | null>(null);
@@ -88,11 +88,11 @@
     }
   }
 
-  // 当前会话清空（如被删除）时丢弃残留草稿，避免之后选中新会话时
-  // popover 带着旧 session 的草稿重新弹出。切换到另一个会话不关闭——
-  // 草稿绑定 capture 的 sessionId，保存仍写回原会话。
+  // 会话切换或清空（如被删除）时关闭 popover 并丢弃草稿（VAL-CREATE-024
+  // 取「关闭」分支）：header 已显示新会话，留着绑定旧会话草稿的 popover
+  // 会造成心智错位。打开瞬间 promptSessionId 即为当前会话 id，不会误关。
   $effect(() => {
-    if (!session && promptPopoverOpen) {
+    if (promptPopoverOpen && session?.id !== promptSessionId) {
       closePromptPopover();
     }
   });

@@ -9,6 +9,7 @@
 import type { UUID, AgentSession, CreateAgentSessionRequest } from "../types";
 import type { AgentSessionField } from "../api/agentSession";
 import * as agentSessionApi from "../api/agentSession";
+import { normalizeError } from "../utils/error";
 
 // ============================================
 // Agent Session 状态 - 使用 Svelte 5 runes
@@ -149,8 +150,9 @@ export const agentSessionActions = {
    * 抵达时调用本方法重新拉取该会话详情，更新列表内对应项与当前会话，并按
    * `updatedAt DESC` 重排到顶部 —— 使计数 / 最近时间 / 顺序无需手动刷新即更新。
    *
-   * 该会话不在列表内（例如已被删除）则为干净 no-op；网络错误仅记录、不抛出，
-   * 避免影响 run 终结的其它收尾。
+   * 该会话不在列表内（例如已被删除）则为干净 no-op；重拉撞上 NOT_FOUND
+   * （abort 收尾先于 delete IPC 回包的竞态）则静默移除该行；其余错误仅记录、
+   * 不抛出，避免影响 run 终结的其它收尾。
    */
   async refreshAfterRun(id: UUID): Promise<void> {
     if (!sessions.some((session) => session.id === id)) {
@@ -173,6 +175,12 @@ export const agentSessionActions = {
         currentSession = updated;
       }
     } catch (error) {
+      if (normalizeError(error).code === "NOT_FOUND") {
+        // Session deleted while refreshing (abort-closed raced the delete IPC):
+        // drop the stale row silently — no ghost, no console noise (CROSS-008).
+        sessions = sessions.filter((session) => session.id !== id);
+        return;
+      }
       console.error("Failed to refresh agent session after run:", error);
     }
   },

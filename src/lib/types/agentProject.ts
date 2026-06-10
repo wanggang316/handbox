@@ -16,13 +16,3 @@ export interface AgentProject {
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
-
-/**
- * 创建 Agent Project 请求（get-or-create 语义：同 canonical path 返回已有项目）。
- *
- * 后端命令 `agent_project_create` 直接接收 `path` 参数；`name` 由后端从
- * path 推导，前端无需提供。
- */
-export interface CreateAgentProjectRequest {
-  path: string;
-}

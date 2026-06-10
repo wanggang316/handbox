@@ -30,8 +30,9 @@
     }
   });
 
-  // 同一 id 只触发一次列表拉取的去重标记：列表确为空时 `loadSessions` 对
-  // `sessions` 的赋值（新数组引用）会重触发下方 effect，不去重会无限重拉。
+  // 列表拉取的在途去重标记：列表确为空时 `loadSessions` 对 `sessions` 的
+  // 赋值（新数组引用）会重触发下方 effect，不去重会无限重拉。完成（.then/
+  // .catch）即重置，去重只约束在途窗口，同一 id 之后仍可再次发起拉取。
   let probedSessionId = "";
 
   // 恢复指针失效（id 指向已删 session 等）：清当前会话、清掉失效的
@@ -67,13 +68,14 @@
     }
     if (agentSessionState.sessions.length === 0) {
       if (probedSessionId === id) {
-        // 本 id 已拉取过且列表为空：失效判定交由下方 .then，避免重拉循环。
+        // 本 id 拉取在途：失效判定交由下方 .then，避免重拉循环。
         return;
       }
       probedSessionId = id;
       agentSessionActions
         .loadSessions()
         .then(() => {
+          probedSessionId = "";
           // 用户可能已离开该 id（guard 后仅在仍停留时处理失效指针）；
           // 拉取失败走 catch 只记录，不误判为指针失效。
           if (sessionId === id && !agentSessionActions.setCurrentById(id)) {
@@ -81,6 +83,7 @@
           }
         })
         .catch((error) => {
+          probedSessionId = "";
           console.error("Failed to load agent sessions:", error);
         });
       return;

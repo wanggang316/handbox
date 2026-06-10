@@ -28,6 +28,7 @@
   import { groupSessions, sessionActivityKey } from "$lib/utils/agentGrouping";
   import type { AgentProjectGroup } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
+  import { normalizeError } from "$lib/utils/error";
   import type { AgentSession, CreateAgentSessionRequest } from "$lib/types";
   import type { AgentProject } from "$lib/types/agentProject";
 
@@ -53,15 +54,24 @@
       agentSessionState.sessions.length > 0,
   );
 
-  onMount(() => {
-    // 每次挂载重拉项目与会话（对齐旧 AgentSessionList 的刷新行为）。
-    // 两个 action 内部已记录错误，这里只负责结束加载占位。
-    Promise.allSettled([
+  // 任一路加载失败即置位：projects 拉取失败而 sessions 成功时若照常渲染，
+  // 全部会话会被错误归入「未分组」桶（伪呈现），故失败时不进入分组渲染，
+  // 改显示错误条 + 重试。
+  let loadError = $state(false);
+
+  // 每次挂载重拉项目与会话，保证侧栏数据新鲜（重试按钮复用同一逻辑）。
+  // 两个 action 内部已记录错误，这里捕获 settled 结果用于失败可见化。
+  async function loadSidebarData() {
+    const results = await Promise.allSettled([
       agentProjectActions.loadProjects(),
       agentSessionActions.loadSessions(),
-    ]).then(() => {
-      initialLoadDone = true;
-    });
+    ]);
+    loadError = results.some((result) => result.status === "rejected");
+    initialLoadDone = true;
+  }
+
+  onMount(() => {
+    loadSidebarData();
   });
 
   // active session 所属分组的折叠 key（未分组桶用保留 key；
@@ -346,6 +356,7 @@
 
     const containsActive =
       activeId !== "" && memberSessions.some((s) => s.id === activeId);
+    createErrorMessage = null;
     try {
       await agentProjectActions.deleteProject(project.id);
       for (const session of memberSessions) {
@@ -356,6 +367,8 @@
       }
     } catch (error) {
       console.error("Failed to delete agent project:", error);
+      const normalized = normalizeError(error, "删除项目失败");
+      createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
 
@@ -387,8 +400,8 @@
     agentProjectCollapse.toggle(groupId);
   }
 
-  // 顶部「+」建项目 / 组头「+」直建会话共用的失败提示
-  // （非阻塞内联错误条，下一次实际尝试时清除）。
+  // 顶部「+」建项目 / 组头「+」直建会话 / 删除项目共用的失败提示
+  // （非阻塞内联错误条，优先展示 AppError 的 hint，下一次实际尝试时清除）。
   let createErrorMessage = $state<string | null>(null);
 
   // 「+」：选择项目目录并创建项目（后端为 get-or-create by canonical path）。
@@ -417,8 +430,8 @@
         ?.scrollIntoView({ block: "nearest" });
     } catch (error) {
       console.error("Failed to create agent project:", error);
-      createErrorMessage =
-        error instanceof Error ? error.message : "创建项目失败";
+      const normalized = normalizeError(error, "创建项目失败");
+      createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
 
@@ -524,7 +537,7 @@
     </button>
   </div>
 
-  <!-- 建项目失败的非阻塞错误条（下一次实际尝试时自动清除） -->
+  <!-- 建项目 / 直建会话 / 删除项目失败的非阻塞错误条（下一次实际尝试时自动清除） -->
   {#if createErrorMessage}
     <div
       class="mx-2 mb-1 px-2 py-1 rounded-md bg-error/10 text-error text-[12px] leading-[18px] flex-shrink-0"
@@ -539,6 +552,17 @@
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
         加载中…
       </div>
+    {:else if loadError}
+      <!-- 部分加载失败：不进入分组渲染（避免会话被伪归入「未分组」桶） -->
+      <div class="px-2 py-1 text-[12px] leading-[18px] text-error">
+        列表加载失败
+      </div>
+      <button
+        class="mx-2 px-2 py-0.5 rounded-md text-[12px] leading-[18px] border border-base-300 text-base-content/70 hover:text-base-content hover:bg-base-300"
+        onclick={loadSidebarData}
+      >
+        重试
+      </button>
     {:else if isEmpty}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
         点击 + 选择项目目录开始
