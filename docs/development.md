@@ -95,6 +95,10 @@ npm test
 >
 > 另注意 stdin 模式（`rustfmt --check < file`）恒返回 exit 0，不能用作门禁；必须以文件路径调用。
 
+> ⚠️ **前端格式化现状**：仓库未安装 `prettier-plugin-svelte`，`npx prettier --check` 无法解析 `.svelte` 文件——`.svelte` 改动以手工对齐既有风格为准，`prettier` 仅适用于 `.ts`。
+>
+> ⚠️ **Svelte 5 `$derived` 同值陷阱**：字符串/原始值的 `$derived` 重算结果与旧值相等时，下游 `$effect` **不会**重跑。依赖「值变化」触发的副作用（如自动展开分组），在同值场景必须显式调用对应动作，不能只依赖 `$effect`。
+
 ### 质量检查
 
 ```bash
