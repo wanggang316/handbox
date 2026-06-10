@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_project;
 pub mod agent_session;
 pub mod artifact;
 pub mod common;
@@ -11,6 +12,7 @@ pub mod session;
 pub mod word;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
+pub use agent_project::{AgentProject, CreateAgentProjectRequest, UpdateAgentProjectRequest};
 pub use agent_session::{
     AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UpdateAgentSessionRequest,
 };
