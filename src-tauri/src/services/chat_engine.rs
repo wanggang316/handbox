@@ -515,21 +515,21 @@ fn resolve_model_template(provider_id: &str, model_id: &str) -> Result<model::Mo
     if let Some(m) = hand_ai_model::get_model(provider_id, model_id) {
         return Ok(m);
     }
-    // Fallback: the model picker is populated from `get_models()` (the catalog
-    // list, see `list_catalog_models`), which for some catalog providers can
-    // include entries that `get_model()` won't resolve by id — notably OpenRouter
-    // ":free" variants (e.g. `deepseek/deepseek-v4-flash:free`). Searching the
-    // same list the picker uses guarantees that anything offered is actually
-    // runnable, using the catalog's own metadata (api / reasoning / cost) rather
-    // than a synthesized stand-in. Fixes Chat + Agent identically.
-    if let Some(m) = hand_ai_model::get_models(provider_id)
-        .into_iter()
-        .find(|m| m.id.as_str() == model_id)
-    {
-        return Ok(m);
-    }
     if let Some(api) = custom_api_for_provider_type(provider_id) {
         return Ok(synthesize_custom_model(model_id, api));
+    }
+    // OpenRouter is a dynamic model aggregator: it fronts thousands of upstream
+    // models that come and go (incl. ":free" variants), so hand-ai's *static*
+    // catalog snapshot is necessarily incomplete and can lag the user's locally
+    // synced model list — selecting such a model (e.g. `deepseek/deepseek-v4-flash:free`)
+    // otherwise errored "not registered" before the request was even attempted.
+    // The provider API is the real authority here, so synthesize an OpenAI-protocol
+    // template (OpenRouter speaks OpenAI completions; `base_url` is filled in by
+    // `resolve_model` from the provider config) and let OpenRouter validate the id.
+    // Fixed-catalog providers (openai, anthropic, …) keep erroring on unknown ids.
+    // Fixes Chat + Agent identically.
+    if provider_id == "openrouter" {
+        return Ok(synthesize_custom_model(model_id, model::Api::OpenAICompletions));
     }
     Err(AppError::validation_error(&format!(
         "chat_engine: model '{}' not registered under provider '{}'",
@@ -1056,22 +1056,29 @@ mod tests {
     }
 
     #[test]
-    fn every_listed_openrouter_model_is_resolvable() {
-        // Regression: the model picker is built from `get_models()`, which listed
-        // OpenRouter ":free" variants (e.g. `deepseek/deepseek-v4-flash:free`)
-        // that `get_model()` couldn't resolve by id — so creating a session with
-        // one and running it errored ("not registered under provider 'openrouter'").
-        // The catalog-list fallback closes that gap: anything the picker offers
-        // must now resolve.
-        let listed = hand_ai_model::get_models("openrouter");
-        assert!(!listed.is_empty(), "expected a non-empty OpenRouter catalog");
-        for m in &listed {
-            assert!(
-                resolve_model_template("openrouter", &m.id).is_ok(),
-                "picker lists openrouter/{} but resolve_model_template rejects it",
-                m.id
-            );
-        }
+    fn openrouter_model_absent_from_catalog_synthesizes() {
+        // Regression (Stage-3 user-test): creating an agent/chat session with an
+        // OpenRouter model the local sync cached but the *current* static catalog
+        // no longer lists (e.g. `deepseek/deepseek-v4-flash:free`) errored
+        // "not registered under provider 'openrouter'". OpenRouter is a dynamic
+        // aggregator, so resolve now synthesizes an OpenAI-protocol template and
+        // defers id validation to the provider API.
+        assert!(
+            hand_ai_model::get_model("openrouter", "deepseek/deepseek-v4-flash:free").is_none(),
+            "precondition: model is genuinely absent from the static catalog"
+        );
+        let m = resolve_model_template("openrouter", "deepseek/deepseek-v4-flash:free")
+            .expect("openrouter catalog-miss must synthesize, not error");
+        assert_eq!(m.api, hand_ai_model::Api::OpenAICompletions);
+        assert_eq!(m.id, "deepseek/deepseek-v4-flash:free");
+    }
+
+    #[test]
+    fn non_openrouter_unknown_model_still_errors() {
+        // Only the OpenRouter aggregator gets the synthesize fallback. Fixed-catalog
+        // providers must keep erroring on unknown ids (no doomed API call).
+        assert!(resolve_model_template("openai", "no-such-model-9999").is_err());
+        assert!(resolve_model_template("anthropic", "no-such-model-9999").is_err());
     }
 
     #[test]
