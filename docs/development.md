@@ -86,6 +86,15 @@ cargo test
 npm test
 ```
 
+> ⚠️ **rustfmt 注意**：仓库存在大量历史上未按 rustfmt 排版的已提交代码，裸跑 `cargo fmt` 会重排全 crate、污染无关 diff。提交前只对本次触碰的文件做定向格式化/检查：
+>
+> ```bash
+> rustfmt --edition 2021 src-tauri/src/path/to/touched_file.rs
+> rustfmt --edition 2021 --check src-tauri/src/path/to/touched_file.rs
+> ```
+>
+> 另注意 stdin 模式（`rustfmt --check < file`）恒返回 exit 0，不能用作门禁；必须以文件路径调用。
+
 ### 质量检查
 
 ```bash
