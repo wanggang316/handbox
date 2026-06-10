@@ -599,13 +599,6 @@ class AgentRunStore {
   }
 
   /**
-   * 清理某会话的运行状态（不影响其它会话）。
-   */
-  clear(sessionId: string): void {
-    delete this.states[sessionId];
-  }
-
-  /**
    * 会话被删除后的清理（GROUP-018）：移除该会话的运行状态，并立 tombstone
    * 拦截在途 run 的迟到流事件。
    *
