@@ -12,7 +12,7 @@ pub mod session;
 pub mod word;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
-pub use agent_project::{AgentProject, CreateAgentProjectRequest, UpdateAgentProjectRequest};
+pub use agent_project::{AgentProject, CreateAgentProjectRequest};
 pub use agent_session::{
     AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UpdateAgentSessionRequest,
 };
@@ -21,7 +21,6 @@ pub use artifact::{
     ExecutionConfig, ExecutionResult, InstallArtifactRequest, ModelParameters,
     UpdateArtifactRequest,
 };
-pub use session::{McpServerConfig, Session, SessionReasoningConfig};
 pub use common::{Timestamp, UUID};
 pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag};
 pub use mcp::{
@@ -34,4 +33,5 @@ pub use message::{
 };
 pub use model::{Model, ModelModality};
 pub use provider::Provider;
+pub use session::{McpServerConfig, Session, SessionReasoningConfig};
 pub use word::Word;

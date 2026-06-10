@@ -373,15 +373,40 @@ mod tests {
             .is_none());
         assert!(repo.get_project_by_path("/nope").await.unwrap().is_none());
 
-        // List
+        // List: stable order is created_at DESC, then id ASC (as promised by
+        // the list_projects doc comment). Sleep so created_at values differ.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         let second = repo
             .create_project(&sample_request("/tmp/workspace/beta", "beta"))
             .await
             .unwrap();
+        assert!(second.created_at > created.created_at);
         let projects = repo.list_projects().await.unwrap();
         assert_eq!(projects.len(), 2);
-        assert!(projects.iter().any(|p| p.id == created.id));
-        assert!(projects.iter().any(|p| p.id == second.id));
+        assert_eq!(projects[0].id, second.id, "newest created_at lists first");
+        assert_eq!(projects[1].id, created.id);
+
+        // Equal created_at ties break by id ASC: seed two rows sharing one
+        // (older) timestamp, in reverse id order, and expect id-ascending.
+        for tie_id in ["tie-b", "tie-a"] {
+            sqlx::query(
+                "INSERT INTO agent_projects (id, path, name, created_at, updated_at) \
+                 VALUES ($1, $2, $3, 1, 1)",
+            )
+            .bind(tie_id)
+            .bind(format!("/tmp/workspace/{tie_id}"))
+            .bind(tie_id)
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+        }
+        let projects = repo.list_projects().await.unwrap();
+        let ids: Vec<&str> = projects.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![second.id.as_str(), created.id.as_str(), "tie-a", "tie-b"],
+            "created_at DESC overall, id ASC within equal created_at"
+        );
 
         // Rename bumps updated_at and keeps created_at / path.
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;

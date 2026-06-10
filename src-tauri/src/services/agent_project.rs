@@ -72,7 +72,8 @@ impl AgentProjectService {
 
     /// 重命名 Agent Project。
     ///
-    /// trim 后为空白 -> `VALIDATION_ERROR`（对齐 session rename 惯例）；
+    /// trim 后为空白 -> `VALIDATION_ERROR`：项目名是分组侧栏的组头，空白名
+    /// 会产生不可辨识的分组，故 trim 后拒空（session rename 无此约束）；
     /// 存储 trim 后的 name；项目不存在时透传仓储层的 `NOT_FOUND`。
     pub async fn rename_project(
         &self,

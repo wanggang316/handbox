@@ -328,6 +328,16 @@ mod tests {
         insert_legacy_agent_session(&seed_pool, "s5", Some(""), Some(9100), 8100).await;
         // Root path has an empty basename -> project name falls back to the path.
         insert_legacy_agent_session(&seed_pool, "s6", Some("/"), None, 7000).await;
+        // Unicode basename (CJK + space + emoji) must survive the SQL basename
+        // extraction in migration 047 character-for-character.
+        insert_legacy_agent_session(
+            &seed_pool,
+            "s7",
+            Some("/Users/me/我的 项目 🚀"),
+            Some(6000),
+            5500,
+        )
+        .await;
 
         // Chat-mode and /agents preset rows that migrations 046+ must never touch.
         sqlx::query(
@@ -356,7 +366,7 @@ mod tests {
             .fetch_all(&seed_pool)
             .await
             .unwrap();
-        assert_eq!(fingerprint_before.len(), 6);
+        assert_eq!(fingerprint_before.len(), 7);
         seed_pool.close().await;
 
         // Upgrade: Database::new applies 046+ including the backfill.
@@ -375,7 +385,7 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap();
-        assert_eq!(distinct_dirs, 3);
+        assert_eq!(distinct_dirs, 4);
         assert_eq!(project_count, distinct_dirs);
 
         // Session total unchanged; every non-empty-dir session linked to the
@@ -384,7 +394,7 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap();
-        assert_eq!(session_count, 6);
+        assert_eq!(session_count, 7);
         let linked: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM agent_sessions s \
              JOIN agent_projects p ON p.id = s.project_id \
@@ -393,7 +403,7 @@ mod tests {
         .fetch_one(pool)
         .await
         .unwrap();
-        assert_eq!(linked, 4); // s1, s2, s3, s6
+        assert_eq!(linked, 5); // s1, s2, s3, s6, s7
         let unlinked: Vec<String> = sqlx::query_scalar(
             "SELECT id FROM agent_sessions WHERE project_id IS NULL ORDER BY id",
         )
@@ -425,6 +435,14 @@ mod tests {
                     "beta".to_string(),
                     500,
                     500
+                ),
+                // BINARY collation: '我' (0xE6..) sorts after 'd' (0x64), so the
+                // unicode path lists last. Name must come out intact.
+                (
+                    "/Users/me/我的 项目 🚀".to_string(),
+                    "我的 项目 🚀".to_string(),
+                    6000,
+                    6000
                 ),
             ]
         );

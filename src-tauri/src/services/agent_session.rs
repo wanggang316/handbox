@@ -45,8 +45,9 @@ impl AgentSessionService {
     /// 创建 Agent Session
     ///
     /// `project_id` 挂靠：若提供（空字符串视为未设置），则按 id 解析 project
-    /// （不存在 -> `NOT_FOUND`），并要求 `project.path` 当前磁盘上仍是一个
-    /// 存在的目录（否则 `VALIDATION_ERROR`）。校验失败一律不写入任何行。
+    /// （不存在 -> `NOT_FOUND`），并要求 `project.path` 当前仍 canonicalize
+    /// 回它自己且是目录——目录未被删除、也未被换成 symlink（否则
+    /// `VALIDATION_ERROR`）。校验失败一律不写入任何行。
     /// 通过后把 `project.path`（创建时已 canonical）复制进 `working_dir`，
     /// **覆盖** 请求中的 working_dir——project 优先，runtime 的 working_dir
     /// 消费点因此零改动。
@@ -76,13 +77,20 @@ impl AgentSessionService {
                         AppError::not_found(&format!("Agent project not found: {}", pid))
                     })?;
 
-                // project.path 创建时已 canonical；此处只需确认它在磁盘上仍是
-                // 一个存在的目录（项目目录可能在创建 project 后被删除）。
-                if !std::path::Path::new(&project.path).is_dir() {
+                // project.path 创建时已 canonical；此处复核它当前仍 canonicalize
+                // 回它自己且是目录：目录可能在创建 project 后被删除，或被换成
+                // 指向别处的 symlink（canonicalize 结果将不再等于自身）。
+                let still_canonical = std::fs::canonicalize(&project.path)
+                    .map(|c| c == std::path::Path::new(&project.path) && c.is_dir())
+                    .unwrap_or(false);
+                if !still_canonical {
                     return Err(AppError::with_hint(
                         "VALIDATION_ERROR",
-                        &format!("project path no longer exists on disk: {}", project.path),
-                        "项目目录已不存在或不是目录，请重新选择项目",
+                        &format!(
+                            "project path is no longer a canonical existing directory: {}",
+                            project.path
+                        ),
+                        "项目目录已不存在或已被替换，请重新选择项目",
                     ));
                 }
 
@@ -459,6 +467,30 @@ mod tests {
         // Wire shape for the sidebar consumer: camelCase `projectId`.
         let json = serde_json::to_string(&listed[0]).unwrap();
         assert!(json.contains(&format!("\"projectId\":\"{}\"", project.id)));
+    }
+
+    #[tokio::test]
+    async fn create_session_with_project_skips_invalid_working_dir_entirely() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db);
+
+        let project_dir = TempDir::new().unwrap();
+        let project = projects
+            .create_project(project_dir.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+
+        // A working_dir that would be REJECTED on its own (relative garbage):
+        // with a project attached it is skipped entirely — never validated —
+        // and the stored working_dir is the project path.
+        let mut req = base_request("Project Beats Garbage WorkingDir");
+        req.project_id = Some(project.id.clone());
+        req.working_dir = Some("relative/garbage".to_string());
+
+        let created = service.create_session(req).await.expect("create failed");
+        assert_eq!(created.project_id, Some(project.id));
+        assert_eq!(created.working_dir, Some(project.path));
     }
 
     #[tokio::test]

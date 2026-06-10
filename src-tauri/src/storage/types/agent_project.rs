@@ -23,13 +23,6 @@ pub struct CreateAgentProjectRequest {
     pub name: String,
 }
 
-/// 更新 Agent Project 请求（path 不可变，仅 name 可更新）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateAgentProjectRequest {
-    pub name: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,16 +57,5 @@ mod tests {
         let req: CreateAgentProjectRequest = serde_json::from_str(json).expect("deserialize");
         assert_eq!(req.path, "/tmp/workspace/demo");
         assert_eq!(req.name, "demo");
-    }
-
-    #[test]
-    fn update_agent_project_request_partial() {
-        let json = r#"{}"#;
-        let req: UpdateAgentProjectRequest = serde_json::from_str(json).expect("deserialize");
-        assert!(req.name.is_none());
-
-        let json = r#"{"name": "renamed"}"#;
-        let req: UpdateAgentProjectRequest = serde_json::from_str(json).expect("deserialize");
-        assert_eq!(req.name.as_deref(), Some("renamed"));
     }
 }
