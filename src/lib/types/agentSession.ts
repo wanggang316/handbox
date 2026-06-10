@@ -291,6 +291,12 @@ export interface AgentSessionMessage {
 /** 创建 Agent Session 请求。 */
 export interface CreateAgentSessionRequest {
   name: string;
+  /**
+   * 可选：挂靠到某个 Agent Project（后端 `project_id: Option<UUID>`）。
+   * 提供时后端以 project.path 覆盖 workingDir；项目不存在 → NOT_FOUND，
+   * 项目目录已失效 → VALIDATION_ERROR，均不写入任何行。
+   */
+  projectId?: UUID;
   modelId?: string;
   providerId?: string;
   systemPrompt?: string;

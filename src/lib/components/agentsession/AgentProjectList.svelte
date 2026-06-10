@@ -26,8 +26,9 @@
   } from "$lib/states/agentProjectCollapse.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { groupSessions, sessionActivityKey } from "$lib/utils/agentGrouping";
+  import type { AgentProjectGroup } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
-  import type { AgentSession } from "$lib/types";
+  import type { AgentSession, CreateAgentSessionRequest } from "$lib/types";
   import type { AgentProject } from "$lib/types/agentProject";
 
   interface Props {
@@ -359,8 +360,8 @@
   }
 
   // 组头整行（文件夹图标 / 名称 / 空白）单击切换折叠；组头上的内嵌控件
-  // （未来的 hover「+」、右键菜单触发器等）标记 data-group-control 即可
-  // 豁免，不会误触 toggle。
+  // （hover「+」直建 session 等）标记 data-group-control 即可豁免，
+  // 不会误触 toggle。
   function handleGroupHeaderClick(event: MouseEvent, groupId: string) {
     if (
       event.target instanceof Element &&
@@ -371,7 +372,23 @@
     agentProjectCollapse.toggle(groupId);
   }
 
-  // 「+」建项目的失败提示（非阻塞内联错误条，下一次实际尝试时清除）。
+  // 组头是 role="button" 的 div（HTML 禁止 button 嵌套，而控件槽里的
+  // hover「+」是真按钮）：Enter / Space 保持原生按钮的折叠切换语义；
+  // 焦点落在槽内控件上时交还控件自身处理（豁免规则同 click）。
+  function handleGroupHeaderKeydown(event: KeyboardEvent, groupId: string) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest("[data-group-control]")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    agentProjectCollapse.toggle(groupId);
+  }
+
+  // 顶部「+」建项目 / 组头「+」直建会话共用的失败提示
+  // （非阻塞内联错误条，下一次实际尝试时清除）。
   let createErrorMessage = $state<string | null>(null);
 
   // 「+」：选择项目目录并创建项目（后端为 get-or-create by canonical path）。
@@ -402,6 +419,59 @@
       console.error("Failed to create agent project:", error);
       createErrorMessage =
         error instanceof Error ? error.message : "创建项目失败";
+    }
+  }
+
+  // 组头 hover「+」：零弹窗在该项目下直建「未命名」session。
+  //
+  // 继承源 = 组内排序首位 session：groupSessions 已按活动键
+  // coalesce(lastMessageAt, createdAt) 降序排好，首位即活动键最大者
+  // （绝不看 updatedAt）。只复制持久化配置字段 —— modelId+providerId
+  // 二元组同源同取、thinkingLevel、enabledTools、systemPrompt、
+  // temperature、maxTokens、toolExecutionMode；不带 workingDir（后端以
+  // project.path 覆盖），不带任何内容性状态（name/transcript/计数）。
+  // 继承源正在流式中也只读 store 里已落库的配置快照，新 session 无任何
+  // 运行态（agentRun state 按 session id 隔离）。空项目无继承源 →
+  // 配置全部留空走默认，不报错。
+  //
+  // 成功：createSession 内部 prepend + 设 current，随后 goto；activeId
+  // 变化触发上方 $effect 自动展开该组（折叠组直建也可见）。
+  // 失败（项目目录已删 VALIDATION_ERROR / 项目刚被删 NOT_FOUND）：走
+  // 共用内联错误条、不跳转；store 只在成功后插入，无幽灵行。
+  // 连点安全：两次点击各自独立建出两条「未命名」（不去重）；store 在
+  // 每次完成时基于最新列表 prepend，两次 await 互不覆盖，currentSession
+  // 由最后完成者持有。
+  async function handleCreateSessionInProject(
+    event: MouseEvent,
+    group: AgentProjectGroup,
+  ) {
+    // 槽内控件已被 handleGroupHeaderClick 豁免；stopPropagation 再加一道
+    // 保险，确保不触发折叠切换。
+    event.stopPropagation();
+    contextMenu = null;
+    createErrorMessage = null;
+
+    const source = group.sessions.at(0);
+    const request: CreateAgentSessionRequest = {
+      name: "未命名",
+      projectId: group.project.id,
+      modelId: source?.modelId,
+      providerId: source?.providerId,
+      systemPrompt: source?.systemPrompt,
+      thinkingLevel: source?.thinkingLevel,
+      temperature: source?.temperature,
+      maxTokens: source?.maxTokens,
+      enabledTools: source ? [...source.enabledTools] : undefined,
+      toolExecutionMode: source?.toolExecutionMode,
+    };
+
+    try {
+      const session = await agentSessionActions.createSession(request);
+      goto(`/agent?id=${session.id}`);
+    } catch (error) {
+      console.error("Failed to create agent session:", error);
+      createErrorMessage =
+        error instanceof Error ? error.message : "创建会话失败";
     }
   }
 </script>
@@ -499,11 +569,18 @@
             </span>
           </div>
         {:else}
-          <button
+          <!-- 组头宿主是 role="button" 的 div 而非 <button>：控件槽里的
+               hover「+」是真按钮，HTML 禁止 button 嵌套。click/Enter/Space
+               切换折叠的语义由 handleGroupHeaderClick / Keydown 保持。 -->
+          <div
             data-project-id={group.project.id}
-            class="w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300"
+            class="group w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+            role="button"
+            tabindex="0"
             aria-expanded={!collapsed}
             onclick={(event) => handleGroupHeaderClick(event, group.project.id)}
+            onkeydown={(event) =>
+              handleGroupHeaderKeydown(event, group.project.id)}
             oncontextmenu={(event) =>
               handleProjectContextMenu(event, group.project)}
           >
@@ -516,19 +593,26 @@
               />
             {/if}
             <span class="truncate flex-1">{group.project.name}</span>
-            <!-- 右侧控件槽：下一个 feature 的 hover「+」（直建 session）放
-                 这里；已在 data-group-control 豁免区内，不会误触折叠。 -->
-            <span
-              data-group-control
-              class="flex items-center flex-shrink-0 empty:hidden"
-            ></span>
+            <!-- 右侧控件槽：hover「+」直建 session；在 data-group-control
+                 豁免区内，点击不会误触折叠。未分组桶组头无此槽。 -->
+            <span data-group-control class="flex items-center flex-shrink-0">
+              <button
+                class="p-0.5 rounded text-base-content/50 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+                title="新建会话"
+                aria-label="在项目 {group.project.name} 中新建会话"
+                onclick={(event) =>
+                  handleCreateSessionInProject(event, group)}
+              >
+                <Plus size={14} />
+              </button>
+            </span>
             <ChevronRight
               size={14}
               class="flex-shrink-0 text-base-content/40 transition-transform {collapsed
                 ? ''
                 : 'rotate-90'}"
             />
-          </button>
+          </div>
         {/if}
         {#if !collapsed}
           {#if group.sessions.length === 0}
