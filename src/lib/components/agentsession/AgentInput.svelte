@@ -26,7 +26,7 @@
 
   let { session }: Props = $props();
 
-  // 思考强度档位（与 AgentSessionCreateModal 保持一致；thinkingLevel 为后端自由文本字段）。
+  // 思考强度档位（thinkingLevel 为后端自由文本字段）。
   const thinkingLevelOptions = [
     { value: "off", label: "关闭" },
     { value: "low", label: "低" },

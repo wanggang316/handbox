@@ -8,19 +8,18 @@
     agentSessionActions,
   } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
-  import AgentSessionCreateModal from "$lib/components/agentsession/AgentSessionCreateModal.svelte";
+  import { agentProjectState } from "$lib/states/agentProject.svelte";
   import AgentSessionHeader from "$lib/components/agentsession/AgentSessionHeader.svelte";
   import AgentInput from "$lib/components/agentsession/AgentInput.svelte";
   import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
-  import { goto } from "$app/navigation";
-  import type { AgentSession } from "$lib/types";
 
   // 当前选中的 Agent 会话 ID（来自 ?id= 查询参数）
   let sessionId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : "",
   );
 
-  let showCreateModal = $state(false);
+  // 侧栏 AgentProjectList 挂载时已拉取项目列表，这里只读以区分引导文案分支。
+  const hasProjects = $derived(agentProjectState.projects.length > 0);
 
   // 记录最近打开的会话，供切换回 Agent 模式时恢复（VAL-MODE-005）
   $effect(() => {
@@ -78,10 +77,6 @@
         !runState.error &&
         !runState.isRunning),
   );
-
-  function handleCreated(session: AgentSession) {
-    goto(`/agent?id=${session.id}`);
-  }
 </script>
 
 <!-- Agent 模式落地页（将被 (app) 分组布局包裹） -->
@@ -113,18 +108,14 @@
       {/if}
     </div>
   {:else}
-    <!-- 空落地页 -->
+    <!-- 空落地页：无任何新建动作，引导走侧栏常驻入口（VAL-CREATE-005） -->
     <div class="flex-1 flex flex-col items-center justify-center text-base-content/50">
       <Bot size={48} class="mb-4 opacity-20" />
-      <p class="text-sm">选择或新建一个 Agent 会话</p>
-      <button
-        class="mt-4 px-3 py-1.5 text-[13px] rounded-md bg-primary text-primary-content hover:opacity-90"
-        onclick={() => (showCreateModal = true)}
-      >
-        新建 Agent 会话
-      </button>
+      {#if hasProjects}
+        <p class="text-sm">在左侧选择一个会话，或在项目上点 + 新建</p>
+      {:else}
+        <p class="text-sm">先在左侧点 + 选择项目目录</p>
+      {/if}
     </div>
   {/if}
 </div>
-
-<AgentSessionCreateModal bind:open={showCreateModal} onCreated={handleCreated} />
