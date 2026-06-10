@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import {
     ChevronRight,
+    Copy,
     Folder,
     FolderOpen,
     Hash,
@@ -27,6 +28,7 @@
   import { groupSessions, sessionActivityKey } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
   import type { AgentSession } from "$lib/types";
+  import type { AgentProject } from "$lib/types/agentProject";
 
   interface Props {
     activeId?: string;
@@ -91,17 +93,25 @@
   }
 
   // ============================================
-  // 右键菜单（session 行）
+  // 右键菜单（session 行 / 项目组头）
   // ============================================
   // 统一一个 contextMenu state、按 kind 区分目标：同屏天然只有一个菜单
-  // （再次右键直接覆盖旧菜单），后续项目组头菜单以新 kind 加入此联合即可。
+  // （再次右键直接覆盖旧菜单），项目菜单与 session 菜单天然互斥。
+  // 未分组桶组头刻意不挂 oncontextmenu —— 右键它不弹任何自定义菜单
+  // （冒泡到 window 只会关闭已开菜单），也绝不会误弹 session 菜单。
   interface SessionContextMenu {
     kind: "session";
     session: AgentSession;
     x: number;
     y: number;
   }
-  type ContextMenu = SessionContextMenu;
+  interface ProjectContextMenu {
+    kind: "project";
+    project: AgentProject;
+    x: number;
+    y: number;
+  }
+  type ContextMenu = SessionContextMenu | ProjectContextMenu;
 
   let contextMenu = $state<ContextMenu | null>(null);
 
@@ -112,6 +122,17 @@
     contextMenu = {
       kind: "session",
       session,
+      x: event.clientX,
+      y: event.clientY,
+    };
+  }
+
+  function handleProjectContextMenu(event: MouseEvent, project: AgentProject) {
+    event.preventDefault();
+    event.stopPropagation();
+    contextMenu = {
+      kind: "project",
+      project,
       x: event.clientX,
       y: event.clientY,
     };
@@ -219,6 +240,124 @@
     }
   }
 
+  // ============================================
+  // 项目重命名（组头内联输入框）
+  // ============================================
+  // 与 session 重命名同构：按 project id 存输入态，keyed each 重排时输入框
+  // 随组头移动、提交始终写回 renamingProjectId 指向的项目。
+  let renamingProjectId = $state("");
+  let renameProjectValue = $state("");
+
+  function startProjectRename() {
+    if (contextMenu?.kind !== "project") return;
+    const project = contextMenu.project;
+    renamingProjectId = project.id;
+    renameProjectValue = project.name;
+    contextMenu = null;
+
+    // 等输入框挂载后聚焦并全选（input[data-project-id] 定位，
+    // 组头按钮此时已被输入行替换，选择器不会撞上按钮）。
+    setTimeout(() => {
+      const input = document.querySelector(
+        `input[data-project-id="${project.id}"]`,
+      ) as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }, 0);
+  }
+
+  // 语义对齐 session 重命名：Enter 提交 / 含变更失焦提交 / Esc 取消 /
+  // 纯空白或未变更不写入。先收起输入框再提交，Enter 与 blur 双触发幂等。
+  async function confirmProjectRename() {
+    const id = renamingProjectId;
+    const next = renameProjectValue.trim();
+    const project = agentProjectState.projects.find((p) => p.id === id);
+    cancelProjectRename();
+    if (project && next && next !== project.name) {
+      try {
+        await agentProjectActions.renameProject(id, next);
+      } catch (error) {
+        console.error("Failed to rename agent project:", error);
+      }
+    }
+  }
+
+  function cancelProjectRename() {
+    renamingProjectId = "";
+    renameProjectValue = "";
+  }
+
+  function handleProjectRenameKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      confirmProjectRename();
+    } else if (event.key === "Escape") {
+      cancelProjectRename();
+    }
+  }
+
+  // ============================================
+  // 项目复制路径 / 删除
+  // ============================================
+  async function handleCopyProjectPath() {
+    if (contextMenu?.kind !== "project") return;
+    const path = contextMenu.project.path;
+    contextMenu = null;
+    try {
+      await navigator.clipboard.writeText(path);
+    } catch (error) {
+      console.error("Failed to copy project path:", error);
+    }
+  }
+
+  // 原生 confirm（对齐 states/auth.svelte.ts 的动态 import + 浏览器兜底）。
+  async function confirmNative(message: string): Promise<boolean> {
+    try {
+      const { confirm } = await import("@tauri-apps/plugin-dialog");
+      return await confirm(message);
+    } catch (error) {
+      console.warn("Native confirm unavailable, falling back:", error);
+      return window.confirm(message);
+    }
+  }
+
+  // 删除项目：confirm 文案带该组真实 session 数（confirm 前从 store 取
+  // 快照）；取消 = 全保留零副作用。确认后 store 联动移除该组会话并清
+  // currentSession（后端先 abort 后级联），随后逐会话清运行状态 + 立
+  // tombstone（同 session 删除路径，拦截 abort 收尾的迟到流事件）；
+  // 若 active session 属于该项目则回 Agent 落地页（/agent 无 id 即落地态）。
+  async function handleProjectDelete() {
+    if (contextMenu?.kind !== "project") {
+      contextMenu = null;
+      return;
+    }
+    const project = contextMenu.project;
+    contextMenu = null;
+
+    const memberSessions = agentSessionState.sessions.filter(
+      (session) => session.projectId === project.id,
+    );
+    const confirmed = await confirmNative(
+      `将删除项目“${project.name}”及其 ${memberSessions.length} 个会话，不可恢复。`,
+    );
+    if (!confirmed) return;
+
+    const containsActive =
+      activeId !== "" && memberSessions.some((s) => s.id === activeId);
+    try {
+      await agentProjectActions.deleteProject(project.id);
+      for (const session of memberSessions) {
+        agentRunStore.removeSession(session.id);
+      }
+      if (containsActive) {
+        goto("/agent");
+      }
+    } catch (error) {
+      console.error("Failed to delete agent project:", error);
+    }
+  }
+
   // 组头整行（文件夹图标 / 名称 / 空白）单击切换折叠；组头上的内嵌控件
   // （未来的 hover「+」、右键菜单触发器等）标记 data-group-control 即可
   // 豁免，不会误触 toggle。
@@ -232,16 +371,37 @@
     agentProjectCollapse.toggle(groupId);
   }
 
+  // 「+」建项目的失败提示（非阻塞内联错误条，下一次实际尝试时清除）。
+  let createErrorMessage = $state<string | null>(null);
+
   // 「+」：选择项目目录并创建项目（后端为 get-or-create by canonical path）。
+  // 取消选择器（返回非 string）= 静默 no-op，不碰任何状态。去重命中与
+  // 新建走同一条路：store 按 id 原位替换/插入且保留服务端返回值（不改写
+  // 已有显示名/时间戳），随后展开该组并滚动组头进视口。
   async function handleCreateProject() {
+    let dir: string | null = null;
     try {
       const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-      const dir = await openDialog({ directory: true });
-      if (typeof dir === "string") {
-        await agentProjectActions.createProject(dir);
-      }
+      const picked = await openDialog({ directory: true });
+      if (typeof picked !== "string") return;
+      dir = picked;
+    } catch (error) {
+      console.error("Failed to open directory picker:", error);
+      return;
+    }
+
+    createErrorMessage = null;
+    try {
+      const project = await agentProjectActions.createProject(dir);
+      agentProjectCollapse.expand(project.id);
+      await tick();
+      document
+        .querySelector(`[data-project-id="${project.id}"]`)
+        ?.scrollIntoView({ block: "nearest" });
     } catch (error) {
       console.error("Failed to create agent project:", error);
+      createErrorMessage =
+        error instanceof Error ? error.message : "创建项目失败";
     }
   }
 </script>
@@ -290,6 +450,15 @@
     </button>
   </div>
 
+  <!-- 建项目失败的非阻塞错误条（下一次实际尝试时自动清除） -->
+  {#if createErrorMessage}
+    <div
+      class="mx-2 mb-1 px-2 py-1 rounded-md bg-error/10 text-error text-[12px] leading-[18px] flex-shrink-0"
+    >
+      {createErrorMessage}
+    </div>
+  {/if}
+
   <!-- 项目分组列表 -->
   <div class="flex-1 overflow-y-auto space-y-0.5 px-2">
     {#if !initialLoadDone}
@@ -303,24 +472,64 @@
     {:else}
       {#each grouped.groups as group (group.project.id)}
         {@const collapsed = agentProjectCollapse.isCollapsed(group.project.id)}
-        <button
-          class="w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300"
-          aria-expanded={!collapsed}
-          onclick={(event) => handleGroupHeaderClick(event, group.project.id)}
-        >
-          {#if collapsed}
-            <Folder size={14} class="flex-shrink-0 text-base-content/60" />
-          {:else}
-            <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
-          {/if}
-          <span class="truncate flex-1">{group.project.name}</span>
-          <ChevronRight
-            size={14}
-            class="flex-shrink-0 text-base-content/40 transition-transform {collapsed
-              ? ''
-              : 'rotate-90'}"
-          />
-        </button>
+        {#if renamingProjectId === group.project.id}
+          <!-- 项目重命名输入行：替换组头按钮（同 session 重命名的结构），
+               输入框包在 data-group-control 豁免区内 —— 即便未来此行恢复
+               折叠点击，点击输入框/选中文本也不会触发 toggle（GROUP-025）。 -->
+          <div
+            class="w-full flex items-center gap-1.5 py-0.5 px-2 text-[12px] leading-[18px]"
+          >
+            {#if collapsed}
+              <Folder size={14} class="flex-shrink-0 text-base-content/60" />
+            {:else}
+              <FolderOpen
+                size={14}
+                class="flex-shrink-0 text-base-content/60"
+              />
+            {/if}
+            <span data-group-control class="flex-1 min-w-0">
+              <input
+                data-project-id={group.project.id}
+                class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                bind:value={renameProjectValue}
+                onkeydown={handleProjectRenameKeydown}
+                onblur={confirmProjectRename}
+                placeholder="输入新名称"
+              />
+            </span>
+          </div>
+        {:else}
+          <button
+            data-project-id={group.project.id}
+            class="w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300"
+            aria-expanded={!collapsed}
+            onclick={(event) => handleGroupHeaderClick(event, group.project.id)}
+            oncontextmenu={(event) =>
+              handleProjectContextMenu(event, group.project)}
+          >
+            {#if collapsed}
+              <Folder size={14} class="flex-shrink-0 text-base-content/60" />
+            {:else}
+              <FolderOpen
+                size={14}
+                class="flex-shrink-0 text-base-content/60"
+              />
+            {/if}
+            <span class="truncate flex-1">{group.project.name}</span>
+            <!-- 右侧控件槽：下一个 feature 的 hover「+」（直建 session）放
+                 这里；已在 data-group-control 豁免区内，不会误触折叠。 -->
+            <span
+              data-group-control
+              class="flex items-center flex-shrink-0 empty:hidden"
+            ></span>
+            <ChevronRight
+              size={14}
+              class="flex-shrink-0 text-base-content/40 transition-transform {collapsed
+                ? ''
+                : 'rotate-90'}"
+            />
+          </button>
+        {/if}
         {#if !collapsed}
           {#if group.sessions.length === 0}
             <div
@@ -366,8 +575,39 @@
   </div>
 </div>
 
-<!-- 右键菜单（单一 state 按 kind 分发；当前仅 session 行） -->
-{#if contextMenu?.kind === "session"}
+<!-- 右键菜单（单一 state 按 kind 分发：session 行 / 项目组头互斥） -->
+{#if contextMenu?.kind === "project"}
+  <div
+    class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
+    style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+  >
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={startProjectRename}
+    >
+      <PencilLine size={14} />
+      重命名
+    </button>
+
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      onclick={handleCopyProjectPath}
+    >
+      <Copy size={14} />
+      复制路径
+    </button>
+
+    <!-- 分隔线 -->
+    <div class="border-t border-base-300 my-1 mx-2"></div>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-error/10 text-error flex items-center gap-2 whitespace-nowrap"
+      onclick={handleProjectDelete}
+    >
+      <Trash2 size={14} />
+      删除项目
+    </button>
+  </div>
+{:else if contextMenu?.kind === "session"}
   <div
     class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
