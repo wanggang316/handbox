@@ -515,6 +515,19 @@ fn resolve_model_template(provider_id: &str, model_id: &str) -> Result<model::Mo
     if let Some(m) = hand_ai_model::get_model(provider_id, model_id) {
         return Ok(m);
     }
+    // Fallback: the model picker is populated from `get_models()` (the catalog
+    // list, see `list_catalog_models`), which for some catalog providers can
+    // include entries that `get_model()` won't resolve by id — notably OpenRouter
+    // ":free" variants (e.g. `deepseek/deepseek-v4-flash:free`). Searching the
+    // same list the picker uses guarantees that anything offered is actually
+    // runnable, using the catalog's own metadata (api / reasoning / cost) rather
+    // than a synthesized stand-in. Fixes Chat + Agent identically.
+    if let Some(m) = hand_ai_model::get_models(provider_id)
+        .into_iter()
+        .find(|m| m.id.as_str() == model_id)
+    {
+        return Ok(m);
+    }
     if let Some(api) = custom_api_for_provider_type(provider_id) {
         return Ok(synthesize_custom_model(model_id, api));
     }
@@ -1040,6 +1053,25 @@ mod tests {
         let m = format!("{}", err);
         assert!(m.contains("not registered under provider"), "msg: {m}");
         assert!(m.contains("no-such-model-9999"), "msg: {m}");
+    }
+
+    #[test]
+    fn every_listed_openrouter_model_is_resolvable() {
+        // Regression: the model picker is built from `get_models()`, which listed
+        // OpenRouter ":free" variants (e.g. `deepseek/deepseek-v4-flash:free`)
+        // that `get_model()` couldn't resolve by id — so creating a session with
+        // one and running it errored ("not registered under provider 'openrouter'").
+        // The catalog-list fallback closes that gap: anything the picker offers
+        // must now resolve.
+        let listed = hand_ai_model::get_models("openrouter");
+        assert!(!listed.is_empty(), "expected a non-empty OpenRouter catalog");
+        for m in &listed {
+            assert!(
+                resolve_model_template("openrouter", &m.id).is_ok(),
+                "picker lists openrouter/{} but resolve_model_template rejects it",
+                m.id
+            );
+        }
     }
 
     #[test]
