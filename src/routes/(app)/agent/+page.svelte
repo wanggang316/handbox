@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { browser } from "$app/environment";
   import { page } from "$app/stores";
+  import { goto } from "$app/navigation";
   import { Bot } from "@lucide/svelte";
   import { uiState } from "$lib/states/ui.svelte";
   import {
@@ -28,6 +30,25 @@
     }
   });
 
+  // 同一 id 只触发一次列表拉取的去重标记：列表确为空时 `loadSessions` 对
+  // `sessions` 的赋值（新数组引用）会重触发下方 effect，不去重会无限重拉。
+  let probedSessionId = "";
+
+  // 恢复指针失效（id 指向已删 session 等）：清当前会话、清掉失效的
+  // lastAgentSessionId，并回 Agent 落地页（VAL-CROSS-013 / 009）。
+  // replaceState 避免返回键回到死 id 再次触发重定向。
+  function handleMissingSession(id: string) {
+    agentSessionState.currentSession = null;
+    // untrack：本函数会在下方 effect 内同步调用，指针的读-写不进依赖
+    // （对齐 AgentProjectList 折叠展开的 untrack 惯例），避免冗余重跑。
+    untrack(() => {
+      if (uiState.lastAgentSessionId === id) {
+        uiState.setLastAgentSessionId(null);
+      }
+    });
+    goto("/agent", { replaceState: true });
+  }
+
   // 将 store 当前会话与 ?id= 同步。
   // 列表可能尚未加载（直接打开 /agent?id= 时），此时先拉取列表再定位。
   // 工作目录是否仍存在于磁盘只在 M2 工具调用阶段才有意义，此处仅渲染、绝不崩溃。
@@ -40,15 +61,32 @@
       agentSessionState.currentSession = null;
       return;
     }
-    const matched = agentSessionActions.setCurrentById(sessionId);
-    if (!matched && agentSessionState.sessions.length === 0) {
+    const id = sessionId;
+    if (agentSessionActions.setCurrentById(id)) {
+      return;
+    }
+    if (agentSessionState.sessions.length === 0) {
+      if (probedSessionId === id) {
+        // 本 id 已拉取过且列表为空：失效判定交由下方 .then，避免重拉循环。
+        return;
+      }
+      probedSessionId = id;
       agentSessionActions
         .loadSessions()
-        .then(() => agentSessionActions.setCurrentById(sessionId))
+        .then(() => {
+          // 用户可能已离开该 id（guard 后仅在仍停留时处理失效指针）；
+          // 拉取失败走 catch 只记录，不误判为指针失效。
+          if (sessionId === id && !agentSessionActions.setCurrentById(id)) {
+            handleMissingSession(id);
+          }
+        })
         .catch((error) => {
           console.error("Failed to load agent sessions:", error);
         });
+      return;
     }
+    // 列表已就绪但查不到：指针指向不存在的会话，优雅回落地态。
+    handleMissingSession(id);
   });
 
   const currentSession = $derived(agentSessionState.currentSession);
