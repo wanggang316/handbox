@@ -434,8 +434,8 @@
   // 运行态（agentRun state 按 session id 隔离）。空项目无继承源 →
   // 配置全部留空走默认，不报错。
   //
-  // 成功：createSession 内部 prepend + 设 current，随后 goto；activeId
-  // 变化触发上方 $effect 自动展开该组（折叠组直建也可见）。
+  // 成功：createSession 内部 prepend + 设 current，显式展开该组后 goto
+  // （折叠组直建也可见，VAL-CREATE-008）。
   // 失败（项目目录已删 VALIDATION_ERROR / 项目刚被删 NOT_FOUND）：走
   // 共用内联错误条、不跳转；store 只在成功后插入，无幽灵行。
   // 连点安全：两次点击各自独立建出两条「未命名」（不去重）；store 在
@@ -467,6 +467,10 @@
 
     try {
       const session = await agentSessionActions.createSession(request);
+      // 显式展开（镜像 handleCreateProject）：直建发生在当前 active 组时，
+      // activeGroupId 这个 $derived 重算为同值，Svelte 5 同值不触发下游
+      // 反应，上方自动展开的 $effect 不会重跑，必须在此显式 expand。
+      agentProjectCollapse.expand(group.project.id);
       goto(`/agent?id=${session.id}`);
     } catch (error) {
       console.error("Failed to create agent session:", error);
