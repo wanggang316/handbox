@@ -4,7 +4,7 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import ChatList from "$lib/components/ui/ChatList.svelte";
-  import AgentSessionList from "$lib/components/agentsession/AgentSessionList.svelte";
+  import AgentProjectList from "$lib/components/agentsession/AgentProjectList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import { uiState } from "$lib/states/ui.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
@@ -59,7 +59,7 @@
     goto(`/agents`);
   }
 
-  // 当前选中的 Agent 会话 ID（用于 AgentSessionList 高亮）
+  // 当前选中的 Agent 会话 ID（用于 AgentProjectList 高亮）
   let currentAgentSessionId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : ""
   );
@@ -283,7 +283,7 @@
   <!-- 中间可滚动区域 -->
   <div class="flex-1 min-h-0">
     {#if uiState.appMode === "agent"}
-      <AgentSessionList activeId={currentAgentSessionId} />
+      <AgentProjectList activeId={currentAgentSessionId} />
     {:else}
       <ChatList
         {chats}
