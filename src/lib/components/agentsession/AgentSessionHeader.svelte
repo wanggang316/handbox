@@ -128,8 +128,12 @@
       </div>
     </div>
 
-    <!-- System Prompt 设置入口 + popover（相对容器锚定，右对齐展开） -->
-    <div class="relative ml-auto shrink-0">
+    <!-- System Prompt 设置入口 + popover（相对容器锚定，右对齐展开）。
+         z-[10000]：header 顶部条带被 TitleBar 的 .drag-region（fixed,
+         height:50px, z-index:9999）覆盖，按钮 mousedown 会触发窗口拖拽而非
+         点击；提升到拖拽层之上（镜像 TitleBar 自身按钮的 z-index:10000
+         模式），popover 卡片随容器一并抬升，内部交互不被吞。 -->
+    <div class="relative z-[10000] ml-auto shrink-0">
       <IconButton
         icon={Settings2}
         iconSize={16}
