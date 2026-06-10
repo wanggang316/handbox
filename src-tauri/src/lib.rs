@@ -17,9 +17,10 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::*;
 use crate::services::{
-    selection::setup_selection, AgentRuntime, AgentService, AgentSessionService, ArtifactService,
-    McpService, MessageService, ModelService, ProviderService, SearchService, SessionService,
-    SettingsService, StorageService, UserSessionService, WordService,
+    selection::setup_selection, AgentProjectService, AgentRuntime, AgentService,
+    AgentSessionService, ArtifactService, McpService, MessageService, ModelService,
+    ProviderService, SearchService, SessionService, SettingsService, StorageService,
+    UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
@@ -156,6 +157,11 @@ pub fn run() {
             agent_session_update_field,
             agent_session_delete,
             agent_session_messages,
+            // Agent Project（按工作目录分组会话）命令
+            agent_project_create,
+            agent_project_list,
+            agent_project_rename,
+            agent_project_delete,
             // Agent 模式 run 命令
             agent_run_stream,
             agent_run_abort,
@@ -352,6 +358,9 @@ async fn initialize_services(
     // 初始化 Agent Session 服务（Agent 模式会话 CRUD）
     let agent_session_service = AgentSessionService::new(database_service.clone());
 
+    // 初始化 Agent Project 服务（按工作目录分组 Agent 模式会话）
+    let agent_project_service = AgentProjectService::new(database_service.clone());
+
     // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重）
     let agent_runtime = AgentRuntime::new(database_service.clone());
 
@@ -370,6 +379,7 @@ async fn initialize_services(
     app.manage(favorite_repo);
     app.manage(agent_service);
     app.manage(agent_session_service);
+    app.manage(agent_project_service);
     app.manage(agent_runtime);
 
     // Services are registered — the foreground can now read DB-cached data.

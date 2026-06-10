@@ -1,5 +1,6 @@
 // 服务层模块
 pub mod agent;
+pub mod agent_project;
 pub mod agent_runtime;
 pub mod agent_session;
 pub mod agent_tools;
@@ -23,6 +24,7 @@ pub mod word;
 // 重新导出服务
 pub use crate::storage::Database;
 pub use agent::{AgentParameter, AgentService};
+pub use agent_project::AgentProjectService;
 pub use agent_runtime::{AgentRunRequest, AgentRuntime, RunSink};
 pub use agent_session::{AgentSessionParameter, AgentSessionService};
 pub use artifact::ArtifactService;
