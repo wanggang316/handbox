@@ -360,6 +360,13 @@ impl AgentSessionRepository {
     }
 
     // 辅助方法：将数据库行转换为 AgentSession
+    //
+    // 可空列必须用显式的 `try_get::<Option<T>, _>(...)?` 读取，绝不能用
+    // `try_get::<T, _>(...).ok()`：sqlx-sqlite 对 SQL NULL 解码进非 Option
+    // 类型时返回 `Ok(0)` / `Ok("")` 而不是 Err（见测试
+    // `test_sqlx_sqlite_null_decode_footgun_probe`），`.ok()` 习语因此把
+    // NULL 悄悄变成 `Some(0)` / `Some("")`，wire 上携带 0/"" 而非 null。
+    // last_message_at 曾因此让无消息会话显示「56 年前」并沉底（VAL-GROUP-003）。
     fn row_to_session(&self, row: sqlx::sqlite::SqliteRow) -> Result<AgentSession, AppError> {
         let enabled_tools_json: Option<String> = row.try_get("enabled_tools")?;
         let enabled_tools: Vec<String> = if let Some(json) = enabled_tools_json {
@@ -374,18 +381,18 @@ impl AgentSessionRepository {
         Ok(AgentSession {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            project_id: row.try_get("project_id").ok(),
-            model_id: row.try_get("model_id").ok(),
-            provider_id: row.try_get("provider_id").ok(),
-            system_prompt: row.try_get("system_prompt").ok(),
-            thinking_level: row.try_get("thinking_level").ok(),
+            project_id: row.try_get::<Option<String>, _>("project_id")?,
+            model_id: row.try_get::<Option<String>, _>("model_id")?,
+            provider_id: row.try_get::<Option<String>, _>("provider_id")?,
+            system_prompt: row.try_get::<Option<String>, _>("system_prompt")?,
+            thinking_level: row.try_get::<Option<String>, _>("thinking_level")?,
             temperature,
             max_tokens,
-            working_dir: row.try_get("working_dir").ok(),
+            working_dir: row.try_get::<Option<String>, _>("working_dir")?,
             enabled_tools,
-            tool_execution_mode: row.try_get("tool_execution_mode").ok(),
+            tool_execution_mode: row.try_get::<Option<String>, _>("tool_execution_mode")?,
             message_count: row.try_get("message_count")?,
-            last_message_at: row.try_get("last_message_at").ok(),
+            last_message_at: row.try_get::<Option<i64>, _>("last_message_at")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -479,6 +486,111 @@ mod tests {
         .await
         .unwrap();
         row.try_get::<i64, _>("count").unwrap()
+    }
+
+    /// Empirical probe documenting the sqlx-sqlite NULL-decode footgun that
+    /// caused VAL-GROUP-003: decoding SQL NULL into a NON-Option type does NOT
+    /// error — it yields `Ok(0)` for i64 and `Ok("")` for String. The
+    /// `try_get(...).ok()` idiom therefore silently turns NULL into `Some(0)` /
+    /// `Some("")` instead of `None`. This is why `row_to_session` must read
+    /// nullable columns with an explicit `try_get::<Option<T>, _>(...)?`.
+    #[tokio::test]
+    async fn test_sqlx_sqlite_null_decode_footgun_probe() {
+        let (db, _temp_dir) = create_test_db().await;
+        let now = now_ms();
+
+        // Insert a row whose nullable columns are all SQL NULL.
+        sqlx::query(
+            r#"
+            INSERT INTO agent_sessions (id, name, message_count, created_at, updated_at)
+            VALUES ('probe', 'Probe', 0, $1, $1)
+        "#,
+        )
+        .bind(now)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let row =
+            sqlx::query("SELECT model_id, last_message_at FROM agent_sessions WHERE id = 'probe'")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+
+        // The footgun: non-Option decode of NULL succeeds with a zero value.
+        assert_eq!(
+            row.try_get::<i64, _>("last_message_at").ok(),
+            Some(0),
+            "sqlx-sqlite decodes NULL INTEGER into i64 as Ok(0), not Err"
+        );
+        assert_eq!(
+            row.try_get::<String, _>("model_id").ok(),
+            Some(String::new()),
+            "sqlx-sqlite decodes NULL TEXT into String as Ok(\"\"), not Err"
+        );
+
+        // The correct idiom: Option<T> decode maps NULL to None.
+        assert_eq!(
+            row.try_get::<Option<i64>, _>("last_message_at").unwrap(),
+            None
+        );
+        assert_eq!(row.try_get::<Option<String>, _>("model_id").unwrap(), None);
+    }
+
+    /// VAL-GROUP-003 regression: a messageless session whose optional columns
+    /// are all NULL must round-trip create→get→list as `None` — not `Some(0)`
+    /// for last_message_at (which rendered "56 years ago" and sank the session
+    /// to the bottom of the list) and not `Some("")` for the TEXT fields.
+    #[tokio::test]
+    async fn test_messageless_session_null_columns_round_trip_as_none() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        let session = AgentSession {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Fresh Session".to_string(),
+            project_id: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            thinking_level: None,
+            temperature: None,
+            max_tokens: None,
+            working_dir: None,
+            enabled_tools: Vec::new(),
+            tool_execution_mode: None,
+            message_count: 0,
+            last_message_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        repo.create_session(&session).await.unwrap();
+
+        let assert_all_none = |s: &AgentSession| {
+            assert_eq!(s.last_message_at, None, "NULL must not become Some(0)");
+            assert_eq!(s.project_id, None);
+            assert_eq!(s.model_id, None);
+            assert_eq!(s.provider_id, None);
+            assert_eq!(s.system_prompt, None);
+            assert_eq!(s.thinking_level, None);
+            assert_eq!(s.working_dir, None);
+            assert_eq!(s.tool_execution_mode, None);
+        };
+
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_all_none(&fetched);
+
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_all_none(&listed[0]);
+
+        // Once a message lands, last_message_at becomes a real timestamp.
+        repo.append_message(&session.id, "user", &serde_json::json!({ "x": 1 }), now + 5)
+            .await
+            .unwrap();
+        let after = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(after.last_message_at, Some(now + 5));
     }
 
     #[tokio::test]

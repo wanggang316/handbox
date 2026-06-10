@@ -112,6 +112,49 @@ mod tests {
         assert_eq!(session.message_count, deserialized.message_count);
     }
 
+    /// VAL-GROUP-003 wire shape: a messageless session must serialize
+    /// `lastMessageAt` as JSON null — never 0. A literal 0 short-circuits the
+    /// frontend's `lastMessageAt ?? createdAt` coalescing and renders the
+    /// session as "56 years ago", sinking it to the bottom of the list.
+    #[test]
+    fn agent_session_messageless_serializes_last_message_at_as_null() {
+        let session = AgentSession {
+            id: "agent_session_2".to_string(),
+            name: "Fresh Session".to_string(),
+            project_id: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            thinking_level: None,
+            temperature: None,
+            max_tokens: None,
+            working_dir: None,
+            enabled_tools: Vec::new(),
+            tool_execution_mode: None,
+            message_count: 0,
+            last_message_at: None,
+            created_at: 1000,
+            updated_at: 1000,
+        };
+
+        let json = serde_json::to_string(&session).expect("serialize");
+        assert!(
+            json.contains("\"lastMessageAt\":null"),
+            "messageless session must carry lastMessageAt: null on the wire, got: {}",
+            json
+        );
+        assert!(!json.contains("\"lastMessageAt\":0"));
+
+        // The other nullable fields likewise carry true null, not "".
+        assert!(json.contains("\"modelId\":null"));
+        assert!(json.contains("\"projectId\":null"));
+        assert!(json.contains("\"workingDir\":null"));
+
+        let deserialized: AgentSession = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.last_message_at, None);
+        assert_eq!(deserialized.model_id, None);
+    }
+
     #[test]
     fn agent_session_message_serialization_roundtrip() {
         let message = AgentSessionMessage {
