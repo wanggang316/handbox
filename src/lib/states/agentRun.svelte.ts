@@ -85,6 +85,11 @@ function createEmptyRunState(): AgentRunState {
   };
 }
 
+// 共享的只读空状态：供 `runStateFor` 在某会话状态尚未创建时返回一个引用稳定的占位，
+// 避免在 `$derived` / 模板表达式里触发 `$state` 写入（Svelte 5 的 state_unsafe_mutation）。
+// 仅供读取；真正的 per-session 状态由写入路径（loadTranscript / 事件 reduce）惰性创建。
+const EMPTY_RUN_STATE: AgentRunState = Object.freeze(createEmptyRunState());
+
 class AgentRunStore {
   // 按 sessionId 分键的运行状态。每个会话独立，互不干扰。
   private states = $state<Record<string, AgentRunState>>({});
@@ -408,12 +413,16 @@ class AgentRunStore {
   // ============================================
 
   /**
-   * 响应式 getter：返回某会话的运行 view-model（不存在则返回新建的空状态）。
+   * 响应式 getter：返回某会话的运行 view-model（不存在则返回共享只读空状态）。
+   * **只读**：绝不在此创建状态——它会被 `$derived` / 模板表达式消费，写入 `$state`
+   * 会触发 Svelte 的 state_unsafe_mutation 而使整页渲染崩溃。真正的 per-session
+   * 状态由写入路径（`loadTranscript` / 事件 reduce）在非响应式上下文中惰性创建；
+   * 对缺失键的读取仍会建立依赖，状态创建后本 getter 会自动重算。
    * timeline feature 直接消费此 getter；`toolCalls` 为 live tool-call view-model
    * （按 toolCallId 分键）。
    */
   runStateFor(sessionId: string): AgentRunState {
-    return this.ensureState(sessionId);
+    return this.states[sessionId] ?? EMPTY_RUN_STATE;
   }
 
   /**
