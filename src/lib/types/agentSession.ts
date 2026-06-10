@@ -257,6 +257,8 @@ export type AgentEvent =
 /** Agent Session 实体 - Agent 模式下的会话实例。 */
 export interface AgentSession {
   id: UUID;
+  /** 所属 Agent Project（可选；后端 `project_id: Option<UUID>` 序列化为 camelCase）。 */
+  projectId?: UUID;
   name: string;
   modelId?: string;
   providerId?: string;
