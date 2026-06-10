@@ -160,6 +160,7 @@ async fn seeded_runtime(
     let session = AgentSession {
         id: session_id.clone(),
         name: "Live Probe".to_string(),
+        project_id: None,
         model_id: Some(model_id.to_string()),
         provider_id: Some(provider_id),
         system_prompt: Some("You are a terse assistant.".to_string()),

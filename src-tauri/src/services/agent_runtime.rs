@@ -756,6 +756,7 @@ mod tests {
         let session = AgentSession {
             id: id.clone(),
             name: "Run Session".to_string(),
+            project_id: None,
             model_id: Some(model_id.to_string()),
             provider_id: Some(provider_id.to_string()),
             system_prompt: Some("You are a helpful agent.".to_string()),
@@ -792,6 +793,7 @@ mod tests {
         let session = AgentSession {
             id: id.clone(),
             name: "Tool Session".to_string(),
+            project_id: None,
             model_id: Some(model_id.to_string()),
             provider_id: Some(provider_id.to_string()),
             system_prompt: Some("You are a helpful agent.".to_string()),

@@ -8,7 +8,7 @@
 use crate::models::AppError;
 use crate::services::Database;
 use crate::storage::types::{AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UUID};
-use crate::storage::AgentSessionRepository;
+use crate::storage::{AgentProjectRepository, AgentSessionRepository};
 use std::sync::Arc;
 
 /// Agent Session 可更新参数类型（镜像 `AgentParameter`，按字段更新）
@@ -29,32 +29,76 @@ pub enum AgentSessionParameter {
 #[derive(Clone)]
 pub struct AgentSessionService {
     repository: AgentSessionRepository,
+    /// 直接持有 project 仓储层（而非 `AgentProjectService`）：create 挂靠
+    /// project 时只需按 id 解析一行，轻依赖即可，避免 service 间环状耦合。
+    projects: AgentProjectRepository,
 }
 
 impl AgentSessionService {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
-            repository: AgentSessionRepository::new(db),
+            repository: AgentSessionRepository::new(Arc::clone(&db)),
+            projects: AgentProjectRepository::new(db),
         }
     }
 
     /// 创建 Agent Session
     ///
-    /// `working_dir` 校验：若提供，则必须是一个 **绝对路径** 且能 canonicalize
-    /// 到一个 **已存在的目录**（symlink-to-dir 解析为其 canonical 目标后被接受）。
-    /// 存储 canonical 绝对路径。非绝对路径 / 不存在的路径 / 指向文件（非目录）的
-    /// 路径一律以 `AppError` 拒绝，且不写入任何行。空字符串 / None 视为未设置，
-    /// 存储为 null。
+    /// `project_id` 挂靠：若提供（空字符串视为未设置），则按 id 解析 project
+    /// （不存在 -> `NOT_FOUND`），并要求 `project.path` 当前磁盘上仍是一个
+    /// 存在的目录（否则 `VALIDATION_ERROR`）。校验失败一律不写入任何行。
+    /// 通过后把 `project.path`（创建时已 canonical）复制进 `working_dir`，
+    /// **覆盖** 请求中的 working_dir——project 优先，runtime 的 working_dir
+    /// 消费点因此零改动。
+    ///
+    /// 无 `project_id` 时行为不变：`working_dir` 若提供，则必须是一个
+    /// **绝对路径** 且能 canonicalize 到一个 **已存在的目录**（symlink-to-dir
+    /// 解析为其 canonical 目标后被接受）。存储 canonical 绝对路径。非绝对路径 /
+    /// 不存在的路径 / 指向文件（非目录）的路径一律以 `AppError` 拒绝，且不写入
+    /// 任何行。空字符串 / None 视为未设置，存储为 null。
     pub async fn create_session(
         &self,
         request: CreateAgentSessionRequest,
     ) -> Result<AgentSession, AppError> {
-        let working_dir = Self::validate_working_dir(request.working_dir.as_deref())?;
+        let requested_project_id = request
+            .project_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned);
+
+        let (project_id, working_dir) = match requested_project_id {
+            Some(pid) => {
+                let project = self
+                    .projects
+                    .get_project_by_id(&pid)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::not_found(&format!("Agent project not found: {}", pid))
+                    })?;
+
+                // project.path 创建时已 canonical；此处只需确认它在磁盘上仍是
+                // 一个存在的目录（项目目录可能在创建 project 后被删除）。
+                if !std::path::Path::new(&project.path).is_dir() {
+                    return Err(AppError::with_hint(
+                        "VALIDATION_ERROR",
+                        &format!("project path no longer exists on disk: {}", project.path),
+                        "项目目录已不存在或不是目录，请重新选择项目",
+                    ));
+                }
+
+                (Some(project.id), Some(project.path))
+            }
+            None => (
+                None,
+                Self::validate_working_dir(request.working_dir.as_deref())?,
+            ),
+        };
 
         let now = Self::current_timestamp();
         let session = AgentSession {
             id: uuid::Uuid::new_v4().to_string(),
             name: request.name,
+            project_id,
             model_id: request.model_id,
             provider_id: request.provider_id,
             system_prompt: request.system_prompt,
@@ -75,12 +119,15 @@ impl AgentSessionService {
     }
 
     /// 获取 Agent Session 列表（按 updated_at 降序）
+    ///
+    /// 不传 `limit` 即全量返回：前端分组侧栏按 project 分组消费完整列表，
+    /// 默认值绝不能静默截断（`i32::MAX` 对 SQLite 的 LIMIT 等效于无上限）。
     pub async fn list_sessions(
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Vec<AgentSession>, AppError> {
-        let limit = limit.unwrap_or(50);
+        let limit = limit.unwrap_or(i32::MAX);
         let offset = offset.unwrap_or(0);
         self.repository.list_sessions(limit, offset).await
     }
@@ -223,6 +270,7 @@ mod tests {
     fn base_request(name: &str) -> CreateAgentSessionRequest {
         CreateAgentSessionRequest {
             name: name.to_string(),
+            project_id: None,
             model_id: Some("gpt-4o".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: None,
@@ -372,6 +420,120 @@ mod tests {
             .await
             .expect("create failed");
         assert_eq!(created_empty.working_dir, None);
+    }
+
+    // --- VAL-CREATE-010 + project attach: create_session with project_id ---
+
+    #[tokio::test]
+    async fn create_session_with_project_copies_path_and_overrides_working_dir() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db);
+
+        let project_dir = TempDir::new().unwrap();
+        let project = projects
+            .create_project(project_dir.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+
+        // The request also carries a DIFFERENT (valid) working_dir: the project
+        // path must win.
+        let other_dir = TempDir::new().unwrap();
+        let mut req = base_request("Attached Session");
+        req.project_id = Some(project.id.clone());
+        req.working_dir = Some(other_dir.path().to_string_lossy().into_owned());
+
+        let created = service.create_session(req).await.expect("create failed");
+        assert_eq!(created.project_id, Some(project.id.clone()));
+        assert_eq!(created.working_dir, Some(project.path.clone()));
+
+        // Round-trip via get and list: projectId survives persistence.
+        let fetched = service.get_session(created.id.clone()).await.unwrap();
+        assert_eq!(fetched.project_id, Some(project.id.clone()));
+        assert_eq!(fetched.working_dir, Some(project.path));
+
+        let listed = service.list_sessions(None, None).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].project_id, Some(project.id.clone()));
+
+        // Wire shape for the sidebar consumer: camelCase `projectId`.
+        let json = serde_json::to_string(&listed[0]).unwrap();
+        assert!(json.contains(&format!("\"projectId\":\"{}\"", project.id)));
+    }
+
+    #[tokio::test]
+    async fn create_session_with_unknown_project_returns_not_found_and_no_row() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let mut req = base_request("Ghost Project");
+        req.project_id = Some("nonexistent-project".to_string());
+
+        let err = service
+            .create_session(req)
+            .await
+            .expect_err("should reject");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 0);
+    }
+
+    #[tokio::test]
+    async fn create_session_with_deleted_project_dir_rejects_and_writes_no_row() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db.clone());
+
+        // Create the project while the directory exists, then delete the
+        // directory from disk before attaching a session.
+        let project_dir = TempDir::new().unwrap();
+        let project = projects
+            .create_project(project_dir.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        drop(project_dir); // removes the directory from disk
+
+        let mut req = base_request("Stale Project Dir");
+        req.project_id = Some(project.id);
+
+        let err = service
+            .create_session(req)
+            .await
+            .expect_err("should reject");
+        assert_eq!(err.code, "VALIDATION_ERROR");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 0);
+    }
+
+    #[tokio::test]
+    async fn create_session_empty_project_id_treated_as_unset() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        let mut req = base_request("Empty ProjectId");
+        req.project_id = Some(String::new());
+
+        let created = service.create_session(req).await.expect("create failed");
+        assert_eq!(created.project_id, None);
+        assert_eq!(created.working_dir, None);
+    }
+
+    // --- sidebar consumer: default list must not silently truncate ---
+
+    #[tokio::test]
+    async fn list_sessions_default_limit_does_not_truncate() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        // 60 sessions exceeds the previous default limit of 50.
+        let total = 60;
+        for i in 0..total {
+            service
+                .create_session(base_request(&format!("Session {}", i)))
+                .await
+                .unwrap();
+        }
+
+        let listed = service.list_sessions(None, None).await.unwrap();
+        assert_eq!(listed.len(), total, "default list must return all sessions");
     }
 
     // --- CRUD roundtrip via the service ---

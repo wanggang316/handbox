@@ -27,13 +27,14 @@ impl AgentSessionRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
 
         let query = r#"
-            INSERT INTO agent_sessions (id, name, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            INSERT INTO agent_sessions (id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         "#;
 
         sqlx::query(query)
             .bind(&session.id)
             .bind(&session.name)
+            .bind(&session.project_id)
             .bind(&session.model_id)
             .bind(&session.provider_id)
             .bind(&session.system_prompt)
@@ -63,7 +64,7 @@ impl AgentSessionRepository {
         offset: i32,
     ) -> Result<Vec<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -90,7 +91,7 @@ impl AgentSessionRepository {
         session_id: &UUID,
     ) -> Result<Option<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions WHERE id = $1
         "#;
 
@@ -121,6 +122,10 @@ impl AgentSessionRepository {
         // would clobber the atomic `message_count = message_count + 1` performed by
         // `append_message`, reverting the run's increments and mis-sorting the list.
         // `append_message` is therefore the SOLE writer of these two columns.
+        //
+        // `project_id` is likewise deliberately OMITTED: the project attachment is
+        // write-once at `create_session` and must never be rewritten through the
+        // generic update path (no "move session between projects" semantics).
         let query = r#"
             UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, tool_execution_mode = $10, updated_at = $11
             WHERE id = $12
@@ -369,6 +374,7 @@ impl AgentSessionRepository {
         Ok(AgentSession {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
+            project_id: row.try_get("project_id").ok(),
             model_id: row.try_get("model_id").ok(),
             provider_id: row.try_get("provider_id").ok(),
             system_prompt: row.try_get("system_prompt").ok(),
@@ -446,6 +452,7 @@ mod tests {
         AgentSession {
             id: id.to_string(),
             name: name.to_string(),
+            project_id: None,
             model_id: Some("gpt-4o".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a coding agent.".to_string()),
@@ -583,6 +590,56 @@ mod tests {
             reloaded.last_message_at,
             Some(now + 12),
             "update_session must not revert last_message_at"
+        );
+    }
+
+    /// `project_id` persists on create, round-trips through get/list, and is
+    /// NOT rewritable through `update_session` (write-once at create).
+    #[tokio::test]
+    async fn test_project_id_persists_and_is_immutable_via_update() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentSessionRepository::new(db_arc.clone());
+        let now = now_ms();
+
+        // Seed a real agent_projects row to satisfy the FK on project_id.
+        let project_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO agent_projects (id, path, name, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(&project_id)
+        .bind("/tmp/project")
+        .bind("project")
+        .bind(now)
+        .bind(now)
+        .execute(db_arc.pool())
+        .await
+        .unwrap();
+
+        let mut session = sample_session(&uuid::Uuid::new_v4().to_string(), "Attached", now);
+        session.project_id = Some(project_id.clone());
+        repo.create_session(&session).await.unwrap();
+
+        // Round-trip via get and list.
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(fetched.project_id, Some(project_id.clone()));
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed[0].project_id, Some(project_id.clone()));
+
+        // An update_session carrying a different (even cleared) project_id must
+        // NOT rewrite the stored attachment.
+        let mut edit = fetched.clone();
+        edit.name = "Renamed".to_string();
+        edit.project_id = None;
+        edit.updated_at = now + 1000;
+        repo.update_session(&edit).await.unwrap();
+
+        let reloaded = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.name, "Renamed");
+        assert_eq!(
+            reloaded.project_id,
+            Some(project_id),
+            "update_session must not rewrite project_id"
         );
     }
 
