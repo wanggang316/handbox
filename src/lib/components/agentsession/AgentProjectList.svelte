@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import {
     ChevronRight,
@@ -57,8 +57,46 @@
     });
   });
 
+  // active session 所属分组的折叠 key（未分组桶用保留 key；
+  // 无 active / 数据未就绪 / 未匹配时为 undefined）。
+  const activeGroupId = $derived.by(() => {
+    if (!activeId) return undefined;
+    for (const group of grouped.groups) {
+      if (group.sessions.some((s) => s.id === activeId)) {
+        return group.project.id;
+      }
+    }
+    if (grouped.ungrouped.some((s) => s.id === activeId)) {
+      return UNGROUPED_COLLAPSE_KEY;
+    }
+    return undefined;
+  });
+
+  // 打开 / 切换到某 session 时自动展开其所属分组（含未分组桶）。
+  // 折叠态的读取放进 untrack：本 effect 只跟踪 activeGroupId 的变化，
+  // 手动折叠 active 组是合法操作，不会被这里立即弹回。
+  $effect(() => {
+    const groupId = activeGroupId;
+    if (groupId !== undefined) {
+      untrack(() => agentProjectCollapse.expand(groupId));
+    }
+  });
+
   function handleSessionClick(session: AgentSession) {
     goto(`/agent?id=${session.id}`);
+  }
+
+  // 组头整行（文件夹图标 / 名称 / 空白）单击切换折叠；组头上的内嵌控件
+  // （未来的 hover「+」、右键菜单触发器等）标记 data-group-control 即可
+  // 豁免，不会误触 toggle。
+  function handleGroupHeaderClick(event: MouseEvent, groupId: string) {
+    if (
+      event.target instanceof Element &&
+      event.target.closest("[data-group-control]")
+    ) {
+      return;
+    }
+    agentProjectCollapse.toggle(groupId);
   }
 
   // 「+」：选择项目目录并创建项目（后端为 get-or-create by canonical path）。
@@ -120,7 +158,7 @@
         <button
           class="w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300"
           aria-expanded={!collapsed}
-          onclick={() => agentProjectCollapse.toggle(group.project.id)}
+          onclick={(event) => handleGroupHeaderClick(event, group.project.id)}
         >
           {#if collapsed}
             <Folder size={14} class="flex-shrink-0 text-base-content/60" />
@@ -158,7 +196,8 @@
         <button
           class="w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300"
           aria-expanded={!ungroupedCollapsed}
-          onclick={() => agentProjectCollapse.toggle(UNGROUPED_COLLAPSE_KEY)}
+          onclick={(event) =>
+            handleGroupHeaderClick(event, UNGROUPED_COLLAPSE_KEY)}
         >
           <Inbox size={14} class="flex-shrink-0 text-base-content/60" />
           <span class="truncate flex-1">未分组</span>
