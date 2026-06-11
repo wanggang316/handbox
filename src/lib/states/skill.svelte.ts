@@ -66,11 +66,12 @@ class SkillState {
   async toggleSkill(name: string, disabled: boolean): Promise<void> {
     try {
       await skillApi.setSkillDisabled(name, disabled);
-      // 更新本地内存态
+      // 更新本地内存态，并清除上一次失败遗留的错误横幅
       const skill = this.state.skills.find((s) => s.name === name);
       if (skill) {
         skill.disabled = disabled;
       }
+      this.setError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : '切换技能状态失败';
       this.setError(message);

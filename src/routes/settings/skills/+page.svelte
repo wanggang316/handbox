@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
@@ -15,7 +16,9 @@
   } from "@lucide/svelte";
 
   let expandedBodies = $state<Record<string, boolean>>({});
-  let inFlightSkills = $state<Set<string>>(new Set());
+  // SvelteSet: plain Set in $state is not deeply reactive, so has() in the
+  // Toggle disabled binding would never re-run on add/delete
+  let inFlightSkills = new SvelteSet<string>();
 
   onMount(() => {
     if (!skillState.initialized) {
