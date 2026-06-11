@@ -17,13 +17,13 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::*;
 use crate::services::{
-    selection::setup_selection, AgentService, ArtifactService,
-    SessionService, McpService, MessageService, ModelService, ProviderService, SearchService,
-    SettingsService, StorageService, UserSessionService, WordService,
+    selection::setup_selection, AgentProjectService, AgentRuntime, AgentService,
+    AgentSessionService, ArtifactService, McpService, MessageService, ModelService,
+    ProviderService, SearchService, SessionService, SettingsService, StorageService,
+    UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
-use handbox_llm::config::LlmConfigProvider;
 use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -54,7 +54,6 @@ pub fn run() {
     {
         // 初始化 NSPanel 插件
         builder = builder.plugin(tauri_nspanel::init());
-
     }
 
     builder
@@ -77,7 +76,7 @@ pub fn run() {
                     // 不退出应用，因为选择面板是可选功能
                 }
             }
-            
+
             // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -86,8 +85,6 @@ pub fn run() {
                     std::process::exit(1);
                 }
             });
-
-             
 
             Ok(())
         })
@@ -152,6 +149,23 @@ pub fn run() {
             agent_update_field,
             agent_update_name,
             agent_delete,
+            // Agent Session（Agent 模式会话 CRUD）命令
+            agent_session_create,
+            agent_session_list,
+            agent_session_get,
+            agent_session_rename,
+            agent_session_update_field,
+            agent_session_delete,
+            agent_session_messages,
+            // Agent Project（按工作目录分组会话）命令
+            agent_project_create,
+            agent_project_list,
+            agent_project_rename,
+            agent_project_delete,
+            // Agent 模式 run 命令
+            agent_run_stream,
+            agent_run_abort,
+            agent_run_steer,
             // 消息相关命令
             message_user_send,
             message_user_send_stream,
@@ -161,6 +175,7 @@ pub fn run() {
             message_delete,
             message_assistant_regenerate_stream,
             message_user_resend_stream,
+            message_stop_stream,
             // message_execute_mcp_call, // Temporarily removed
             message_execute_tool_calls,
             message_execute_tool_calls_stream,
@@ -182,6 +197,7 @@ pub fn run() {
             model_toggle,
             model_toggle_favorite,
             model_count_chats,
+            model_add,
             // MCP 管理命令
             mcp_list_servers,
             mcp_create_server,
@@ -211,6 +227,7 @@ pub fn run() {
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
+            hand_ai_list_providers,
             // 搜索相关命令
             search_query,
             search_history,
@@ -253,7 +270,6 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-
 /// 初始化服务
 async fn initialize_services(
     app: &tauri::AppHandle,
@@ -292,24 +308,18 @@ async fn initialize_services(
 
     let llm_config_value = crate::config::llm_config::LlmConfig::load_from_app(app);
     crate::config::llm_config::install_global_llm_config(llm_config_value.clone());
-    let llm_config = Arc::new(llm_config_value);
-    let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
 
     // 初始化各个服务
-    let provider_service =
-        ProviderService::new(database_service.clone(), llm_config_provider.clone());
+    let provider_service = ProviderService::new(database_service.clone());
     let provider_service_shared = Arc::new(provider_service.clone());
 
-    let model_service = ModelService::new(database_service.clone(), llm_config_provider.clone());
+    let model_service = ModelService::new(database_service.clone());
 
     let mcp_service = McpService::new(database_service.clone());
     let mcp_service_shared = Arc::new(mcp_service.clone());
 
-    let session_service = SessionService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        llm_config_provider.clone(),
-    );
+    let session_service =
+        SessionService::new(database_service.clone(), provider_service_shared.clone());
     let session_service_shared = Arc::new(session_service.clone());
 
     let message_service = MessageService::new(
@@ -318,7 +328,6 @@ async fn initialize_services(
         session_service_shared,
         mcp_service_shared,
         storage_service.clone(),
-        llm_config_provider.clone(),
     );
 
     let search_service = SearchService::new(database_service.clone(), storage_service.clone());
@@ -326,10 +335,7 @@ async fn initialize_services(
     let settings_service = SettingsService::new(storage_service.clone());
 
     let word_repo = Arc::new(WordRepository::new(database_service.clone()));
-    let word_service = WordService::new(
-        word_repo,
-        settings_service.clone(),
-    );
+    let word_service = WordService::new(word_repo, settings_service.clone());
 
     // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());
@@ -349,6 +355,15 @@ async fn initialize_services(
     // 初始化 Agent 服务
     let agent_service = AgentService::new(database_service.clone());
 
+    // 初始化 Agent Session 服务（Agent 模式会话 CRUD）
+    let agent_session_service = AgentSessionService::new(database_service.clone());
+
+    // 初始化 Agent Project 服务（按工作目录分组 Agent 模式会话）
+    let agent_project_service = AgentProjectService::new(database_service.clone());
+
+    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重）
+    let agent_runtime = AgentRuntime::new(database_service.clone());
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(session_service);
@@ -363,6 +378,18 @@ async fn initialize_services(
     app.manage(artifact_service);
     app.manage(favorite_repo);
     app.manage(agent_service);
+    app.manage(agent_session_service);
+    app.manage(agent_project_service);
+    app.manage(agent_runtime);
+
+    // Services are registered — the foreground can now read DB-cached data.
+    // Catalog sync runs ENTIRELY in the background from here: prime the
+    // in-memory catalog from the local cache, then refresh from hand-ai's
+    // daily-published Release asset and every 24h. Kept off the startup
+    // critical path so it never blocks the session / model list. Upstream
+    // additions (e.g. OpenRouter's full tool-capable list incl. `~*-latest`
+    // aliases) resolve at chat time once the refresh lands. No local synthesis.
+    crate::services::catalog_sync::spawn();
 
     Ok(())
 }

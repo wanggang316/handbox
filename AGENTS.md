@@ -103,3 +103,33 @@ Follow Conventional Commits: `feat:`, `refactor:`, `fix:`, `docs:`, `chore:`
 - Rust layer depends on sibling `openai-rust` and `google-genai-rust` crates
 - Redact `tracing` logs before sharing externally
 - Use `dotenvy` for local dev (non-fatal if `.env` missing)
+
+## Upstream Dependency: hand-ai
+
+HandBox's model catalog, capability metadata, and chat dispatch run entirely on the
+sibling `hand-ai` project (the `hand-ai-model` crate from `wanggang316/hand-ai`). The
+model list shown in the UI comes **100% from hand-ai's static catalog** — HandBox does
+**no** live `/v1/models` polling. This is a deliberate single-source-of-truth design;
+see `docs/exec-plans/dissolve-handbox-llm.md`.
+
+**When you hit a hand-ai problem, file an issue upstream — do not work around it in
+HandBox.** Catalog drift (a model the provider doesn't actually serve), missing
+capability metadata, or a bug inside `hand_ai_model` are hand-ai's responsibility;
+patching around them here re-introduces the divergence the dissolve migration removed.
+
+How to file:
+
+```bash
+gh issue create --repo wanggang316/hand-ai \
+  --label bug \                 # or: enhancement
+  --title "[catalog] <one-line>" \
+  --body-file /tmp/issue.md     # heredoc; include repro + ground-truth verification
+```
+
+- Lead with a reproducible case and a ground-truth check (e.g. `curl …/v1/models` vs.
+  the catalog) so the maintainer can confirm without guessing.
+- Log every hand-ai ask in `docs/proposals/hand-ai-reasoning-capabilities.md` (the
+  running ledger). Examples already filed: #94 (Cerebras catalog drift), #95 (reasoning
+  capability metadata).
+- HandBox-side processing is limited to disabling the affected model or surfacing a
+  clearer error — never add live polling or per-account filtering to compensate.

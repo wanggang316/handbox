@@ -1,12 +1,12 @@
 // Session 服务实现
 
 use crate::models::AppError;
+use crate::models::llm_types::LlmMessageRole;
+use crate::services::chat_engine::{self, ChatMessage, ChatOptions, ChatProvider};
 use crate::services::{Database, ProviderService};
-use crate::storage::types::{Session, SessionReasoningConfig, McpServerConfig, Provider, UUID};
-use crate::storage::{AgentRepository, SessionRepository, MessageRepository};
-use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::types::{LlmMessage, LlmMessageRole, LlmRequest};
-use handbox_llm::{create_llm_client, LlmProvider};
+use crate::storage::types::{McpServerConfig, Session, SessionReasoningConfig, UUID};
+use crate::storage::{AgentRepository, MessageRepository, SessionRepository};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Session 参数类型
@@ -34,28 +34,15 @@ pub struct SessionService {
     agent_repository: AgentRepository,
     message_repository: MessageRepository,
     provider_service: Arc<ProviderService>,
-    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl SessionService {
-    pub fn new(
-        db: Arc<Database>,
-        provider_service: Arc<ProviderService>,
-        llm_config: Arc<dyn LlmConfigProvider>,
-    ) -> Self {
+    pub fn new(db: Arc<Database>, provider_service: Arc<ProviderService>) -> Self {
         Self {
             repository: SessionRepository::new(db.clone()),
             agent_repository: AgentRepository::new(db.clone()),
             message_repository: MessageRepository::new(db),
             provider_service,
-            llm_config,
-        }
-    }
-
-    fn provider_context(provider: &Provider) -> LlmProvider {
-        LlmProvider {
-            base_url: provider.base_url.clone(),
-            api_key: provider.api_key.clone(),
         }
     }
 
@@ -340,70 +327,57 @@ impl SessionService {
         // 7. 获取提供商信息
         let provider = self.provider_service.get_provider(&provider_id).await?;
 
-        // 8. 创建LLM客户端
-        let llm_client = create_llm_client(
-            &provider.provider_type,
-            Arc::clone(&self.llm_config),
+        // 8. 构造 chat_engine ChatProvider（不再创建 handbox-llm 客户端）
+        let chat_provider = ChatProvider {
+            provider_type: provider.provider_type.clone(),
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
+        };
+
+        // 9. 构造单条 User ChatMessage 承载标题生成提示词。
+        //    标题生成无附件、无工具、无 reasoning，因此 attachment_ids/tool_calls/
+        //    tool_call_id 全部留空，hydrated_attachments 为空 map。
+        let chat_messages = vec![ChatMessage {
+            id: "title-gen-0".to_string(),
+            role: LlmMessageRole::User,
+            content: title_prompt,
+            reasoning: None,
+            tool_calls: None,
+            tool_call_id: None,
+            attachment_ids: Vec::new(),
+        }];
+
+        // 10. 构造 ChatOptions。保留原有的低 temperature (0.1) 与
+        //     max_tokens (50) 以维持标题生成的确定性短输出。
+        let chat_options = ChatOptions {
+            temperature: Some(0.1),
+            max_tokens: Some(50),
+            tools: Vec::new(),
+            reasoning_effort: None,
+            signal: None,
+            hydrated_attachments: HashMap::new(),
+        };
+
+        // 11. 调用 chat_engine 非流式 API
+        let chunk = chat_engine::complete_chat(
+            &chat_provider,
+            &model_id,
+            &chat_messages,
+            chat_options,
         )
+        .await
         .map_err(|e| {
-            let error: AppError = e.into();
             tracing::error!(
-                "[SessionService::generate_title] Failed to create LLM client for provider type {}: {}",
+                "[SessionService::generate_title] chat_engine::complete_chat returned error for provider {}: {}",
                 provider.provider_type,
-                error.message
+                e.message
             );
-            error
+            e
         })?;
 
-        // 9. 构建API请求
-        let api_request = LlmRequest {
-            model: model_id,
-            messages: vec![LlmMessage {
-                role: LlmMessageRole::User,
-                content: title_prompt,
-                reasoning: None,
-                tool_calls: None,
-                tool_call_id: None,
-                attachments: None,
-            }],
-            temperature: Some(0.1), // 使用低温度确保稳定输出
-            top_p: None,
-            top_k: None,
-            max_tokens: Some(50), // 限制输出长度
-            stream: Some(false),
-            reasoning: None,
-            reasoning_effort: None,
-            thinking: None,
-            tools: None,
-            tool_choice: None,
-            parallel_tool_calls: None,
-        };
-
-        // 10. 调用LLM API
-        let provider_context = SessionService::provider_context(&provider);
-        let response = llm_client
-            .chat(&provider_context, api_request)
-            .await
-            .map_err(|e| {
-                let error: AppError = e.into();
-                tracing::error!(
-                    "[SessionService::generate_title] Failed to call LLM API for provider {}: {}",
-                    provider.provider_type,
-                    error.message
-                );
-                error
-            })?;
-
-        // 11. 提取并清理标题
-        let generated_title = if let Some(choice) = response.choices.first() {
-            if let Some(message) = &choice.delta {
-                message.content.trim()
-            } else {
-                return Err(AppError::internal_error("No message in response"));
-            }
-        } else {
-            return Err(AppError::internal_error("No choices in response"));
-        };
+        // 12. 提取并清理标题
+        let raw_title = chunk.content.unwrap_or_default();
+        let generated_title = raw_title.trim();
 
         // 确保标题不为空且长度合理
         if generated_title.is_empty() {
@@ -428,7 +402,6 @@ impl SessionService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::llm_config::LlmConfig;
     use crate::models::ModelParameters;
     use crate::services::ProviderService;
     use crate::storage::Database;
@@ -448,25 +421,15 @@ mod tests {
     #[tokio::test]
     async fn creates_service_successfully() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let _service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let _service = SessionService::new(db, provider_service);
     }
 
     #[tokio::test]
     async fn creates_chat_with_all_fields() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         let chat = service
             .create_chat(
@@ -512,13 +475,8 @@ mod tests {
     #[tokio::test]
     async fn lists_chats_sorted_by_updated_at() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         service
             .create_chat(
@@ -567,13 +525,8 @@ mod tests {
     #[tokio::test]
     async fn fetches_chat_by_id() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -603,13 +556,8 @@ mod tests {
     #[tokio::test]
     async fn get_chat_returns_not_found_error() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         let err = service
             .get_chat("nonexistent_chat".to_string())
@@ -622,13 +570,8 @@ mod tests {
     #[tokio::test]
     async fn updates_existing_chat() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -705,13 +648,8 @@ mod tests {
     #[tokio::test]
     async fn delete_chat_removes_record() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -745,13 +683,8 @@ mod tests {
     #[tokio::test]
     async fn generate_title_requires_messages() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         let chat = service
             .create_chat(
@@ -797,13 +730,8 @@ mod tests {
     #[tokio::test]
     async fn clears_parameters_when_passed_some_none() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         // 创建带有参数的聊天
         let created = service
@@ -857,13 +785,8 @@ mod tests {
     #[tokio::test]
     async fn clears_parameters_via_service_method() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         let created = service
             .create_chat(
@@ -897,13 +820,8 @@ mod tests {
     #[tokio::test]
     async fn preserves_parameters_when_passed_none() {
         let db = create_test_database().await;
-        let llm_config = Arc::new(LlmConfig::new());
-        let llm_config_provider: Arc<dyn LlmConfigProvider> = llm_config.clone();
-        let provider_service = Arc::new(ProviderService::new(
-            db.clone(),
-            llm_config_provider.clone(),
-        ));
-        let service = SessionService::new(db, provider_service, llm_config_provider);
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
 
         // 创建带有参数的聊天
         let created = service

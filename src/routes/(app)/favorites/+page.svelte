@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
   import {
@@ -12,6 +12,8 @@
     MoreVertical,
     Pencil,
     Star,
+    ChevronDown,
+    ChevronUp,
   } from "@lucide/svelte";
   import { favoriteStore } from "$lib/states";
   import type {
@@ -30,6 +32,9 @@
   let selectedType = $state<FavoriteMessageType | "all">("all");
   let selectedTags = $state<string[]>([]);
   let expandedFavorites = $state<Record<string, boolean>>({});
+  let tagFilterExpanded = $state(false);
+  let tagFilterOverflow = $state(false);
+  let tagFilterEl = $state<HTMLDivElement | null>(null);
 
   let showContextMenu = $state(false);
   let contextMenuX = $state(0);
@@ -42,6 +47,10 @@
   let editingFavoriteId = $state<string | null>(null);
   let newTagName = $state("");
   let newTagColor = $state<TagColor>("info");
+  let tagFilterResizeObserver: ResizeObserver | null = null;
+  let observedTagFilterEl: HTMLDivElement | null = null;
+
+  const COLLAPSED_TAG_FILTER_HEIGHT = 48;
 
   const messageTypes: { value: FavoriteMessageType | "all"; label: string }[] =
     [
@@ -366,6 +375,32 @@
     }
   }
 
+  function updateTagFilterOverflow() {
+    if (!tagFilterEl) {
+      tagFilterOverflow = false;
+      return;
+    }
+
+    tagFilterOverflow =
+      tagFilterEl.scrollHeight > COLLAPSED_TAG_FILTER_HEIGHT + 1;
+  }
+
+  function syncTagFilterObserver() {
+    if (!tagFilterResizeObserver || observedTagFilterEl === tagFilterEl) {
+      return;
+    }
+
+    if (observedTagFilterEl) {
+      tagFilterResizeObserver.unobserve(observedTagFilterEl);
+    }
+
+    observedTagFilterEl = tagFilterEl;
+
+    if (observedTagFilterEl) {
+      tagFilterResizeObserver.observe(observedTagFilterEl);
+    }
+  }
+
   function formatTime(timestamp: number): string {
     return new Date(timestamp).toLocaleString("zh-CN", {
       month: "short",
@@ -452,8 +487,28 @@
 
   onMount(() => {
     if (browser) {
+      tagFilterResizeObserver = new ResizeObserver(updateTagFilterOverflow);
+      syncTagFilterObserver();
       favoriteStore.loadFavorites();
       favoriteStore.loadTags();
+    }
+
+    return () => {
+      tagFilterResizeObserver?.disconnect();
+      tagFilterResizeObserver = null;
+      observedTagFilterEl = null;
+    };
+  });
+
+  $effect(() => {
+    allTags.length;
+    selectedTags.length;
+    tagFilterExpanded;
+    tagFilterEl;
+
+    if (browser) {
+      syncTagFilterObserver();
+      tick().then(updateTagFilterOverflow);
     }
   });
 </script>
@@ -506,24 +561,47 @@
     </div>
 
     {#if allTags.length > 0}
-      <div class="flex flex-wrap gap-2 mt-3">
-        {#each allTags as tag}
+      <div class="mt-3">
+        <div
+          bind:this={tagFilterEl}
+          class="flex flex-wrap items-center gap-1.5 overflow-hidden transition-[max-height] duration-200"
+          style:max-height={tagFilterExpanded
+            ? "none"
+            : `${COLLAPSED_TAG_FILTER_HEIGHT}px`}
+        >
+          {#each allTags as tag}
+            <button
+              class="inline-flex h-5 max-w-36 items-center rounded-full border px-1.5 text-[11px] leading-none transition-colors cursor-pointer
+                {selectedTags.includes(tag)
+                ? 'bg-primary text-primary-content border-primary'
+                : 'bg-base-200 text-base-content border-base-300 hover:border-primary/50'}"
+              title={tag}
+              onclick={() => toggleTag(tag)}
+            >
+              <span class="truncate">{tag}</span>
+            </button>
+          {/each}
+          {#if selectedTags.length > 0}
+            <button
+              class="inline-flex h-5 items-center rounded-full border border-dashed border-base-300 px-1.5 text-[11px] leading-none text-base-content/50 hover:text-base-content hover:border-base-content/50 transition-colors cursor-pointer"
+              onclick={() => (selectedTags = [])}
+            >
+              清除
+            </button>
+          {/if}
+        </div>
+        {#if tagFilterOverflow}
           <button
-            class="px-2 py-1 text-xs rounded-full border transition-colors cursor-pointer
-              {selectedTags.includes(tag)
-              ? 'bg-primary text-primary-content border-primary'
-              : 'bg-base-200 text-base-content border-base-300 hover:border-primary/50'}"
-            onclick={() => toggleTag(tag)}
+            class="mt-1.5 inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-base-content/60 hover:bg-base-200 hover:text-base-content transition-colors cursor-pointer"
+            onclick={() => (tagFilterExpanded = !tagFilterExpanded)}
           >
-            {tag}
-          </button>
-        {/each}
-        {#if selectedTags.length > 0}
-          <button
-            class="px-2 py-1 text-xs rounded-full border border-dashed border-base-300 text-base-content/50 hover:text-base-content hover:border-base-content/50 transition-colors cursor-pointer"
-            onclick={() => (selectedTags = [])}
-          >
-            清除筛选
+            {#if tagFilterExpanded}
+              <ChevronUp size={12} />
+              收起
+            {:else}
+              <ChevronDown size={12} />
+              展开
+            {/if}
           </button>
         {/if}
       </div>
@@ -579,12 +657,13 @@
                   <div class="flex flex-wrap items-center gap-1">
                     {#each favorite.tags as tag}
                       <span
-                        class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full {getTagColorClass(
+                        class="inline-flex h-5 max-w-32 items-center gap-1 rounded-full px-1.5 text-[11px] leading-none {getTagColorClass(
                           tag.color
                         )}"
+                        title={tag.name}
                       >
                         <Tag size={10} />
-                        {tag.name}
+                        <span class="truncate">{tag.name}</span>
                       </span>
                     {/each}
                   </div>

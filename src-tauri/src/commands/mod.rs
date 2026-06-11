@@ -1,12 +1,16 @@
 // IPC 命令模块
 pub mod accessibility;
 pub mod agent;
+pub mod agent_project;
+pub mod agent_run;
+pub mod agent_session;
 pub mod artifact;
 pub mod auth;
 pub mod clipboard;
 pub mod debug;
 pub mod selection;
 pub mod favorite;
+pub mod hand_ai;
 pub mod image;
 pub mod llm_config;
 pub mod mcp;
@@ -22,6 +26,9 @@ pub mod word;
 // 重新导出所有命令
 pub use accessibility::*;
 pub use agent::*;
+pub use agent_project::*;
+pub use agent_run::*;
+pub use agent_session::*;
 pub use artifact::*;
 pub use auth::*;
 // 导出 session 命令，同时保留 chat 别名以保持向后兼容
@@ -30,6 +37,7 @@ pub use clipboard::*;
 pub use debug::*;
 pub use selection::*;
 pub use favorite::*;
+pub use hand_ai::*;
 pub use image::*;
 pub use llm_config::*;
 pub use mcp::*;

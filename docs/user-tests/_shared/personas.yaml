@@ -1,0 +1,9 @@
+personas:
+  - id: developer_operator
+    description: The HandBox developer running the desktop app locally, with shell access to logs, the SQLite DB file, and the Tauri stdout/stderr. The only persona today; HandBox doesn't yet have role-based UI behavior.
+    role: developer-operator
+    fixtures: []
+    notes: |
+      Has at least one valid provider configured with a working API key
+      (typically OpenAI gpt-4o) for live-chat cases. When a case requires
+      offline behavior only, this is called out in the case Preconditions.

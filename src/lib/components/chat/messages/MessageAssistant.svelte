@@ -14,6 +14,7 @@
   import type { Message, MessageAttachment } from "$lib/types";
   import type { TextRange } from "$lib/types/favorite";
   import { messageStore, favoriteStore } from "$lib/states";
+  import { providerLogoUrl } from "$lib/states/provider.svelte";
   import { highlightRange, openInBrowser, renderMarkdown, markdownInteractions, copyToClipboard } from "$lib/utils";
   import {
     resolveLocalAssetPath,
@@ -329,7 +330,7 @@
         class="w-8 h-8 rounded-full bg-base-300 flex items-center justify-center"
       >
         <img
-          src={providerConfig()?.icon}
+          src={providerLogoUrl(providerConfig()?.provider_type)}
           alt={providerConfig()?.type_name || "AI"}
           class="w-4 h-4 object-contain"
         />

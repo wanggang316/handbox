@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::storage::types::{MessageAttachment, MessageToolCall, UUID};
-use handbox_llm::types::LlmMessage;
+use crate::models::llm_types::LlmMessage;
 
 /// 消息请求附件
 #[derive(Debug, Clone, Serialize, Deserialize)]

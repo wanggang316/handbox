@@ -1,7 +1,14 @@
 // 服务层模块
 pub mod agent;
+pub mod agent_project;
+pub mod agent_runtime;
+pub mod agent_session;
+pub mod agent_tools;
 pub mod artifact;
 pub mod auth;
+pub mod catalog_sync;
+pub mod chat_engine;
+pub mod hand_ai_catalog;
 pub mod mcp;
 pub mod message;
 pub mod model;
@@ -17,6 +24,9 @@ pub mod word;
 // 重新导出服务
 pub use crate::storage::Database;
 pub use agent::{AgentParameter, AgentService};
+pub use agent_project::AgentProjectService;
+pub use agent_runtime::{AgentRunRequest, AgentRuntime, RunSink};
+pub use agent_session::{AgentSessionParameter, AgentSessionService};
 pub use artifact::ArtifactService;
 pub use auth::GoogleOAuthService;
 pub use session::{SessionParameter, SessionService};

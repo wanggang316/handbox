@@ -7,6 +7,8 @@
     providerActions,
     providerStateActions,
     getProviderIcon,
+    providerConfigs,
+    isCustomProviderType,
   } from "$lib/states/provider.svelte";
   import type { Model } from "$lib/types/provider";
   import {
@@ -16,6 +18,7 @@
     Star,
     Info,
     RefreshCw,
+    Plus,
     Eye as EyeIcon,
   } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
@@ -44,6 +47,18 @@
   // 使用统一的当前供应商状态
   const currentProvider = $derived(providerState.currentProvider);
 
+  // 自定义供应商（openai-compatible / anthropic-compatible）：端点不在 hand-ai
+  // 目录中，模型需手动添加。
+  const isCustom = $derived(
+    !!currentProvider && isCustomProviderType(currentProvider.provider_type)
+  );
+
+  // 手动添加模型的内联表单状态
+  let showAddModel = $state(false);
+  let newModelId = $state("");
+  let addingModel = $state(false);
+  let addModelError = $state("");
+
   // 配置表单
   let formData = $state({
     name: "",
@@ -71,6 +86,11 @@
     if (!providerId) return;
 
     try {
+      // 确保供应商配置模板已加载（isCustom 依赖 custom_providers）。
+      if (providerConfigs.custom_providers.length === 0) {
+        await providerActions.loadProviderConfigs();
+      }
+
       // 尝试从全局状态中设置当前供应商
       let provider = providerStateActions.setCurrentProviderById(providerId);
 
@@ -261,6 +281,31 @@
     }
   }
 
+  async function handleAddModel() {
+    if (!currentProvider?.id) return;
+    const id = newModelId.trim();
+    if (!id) return;
+
+    addingModel = true;
+    addModelError = "";
+    try {
+      await providerActions.addModel(currentProvider.id, id);
+      newModelId = "";
+      showAddModel = false;
+    } catch (error) {
+      addModelError =
+        error instanceof Error ? error.message : "添加模型失败";
+    } finally {
+      addingModel = false;
+    }
+  }
+
+  function cancelAddModel() {
+    showAddModel = false;
+    newModelId = "";
+    addModelError = "";
+  }
+
   async function confirmDelete() {
     if (!currentProvider || !currentProvider.id) return;
 
@@ -342,7 +387,49 @@
 
     <div class="flex items-center mt-6 mb-2">
       <div class="flex-1 text-base-content text-base mx-2">模型列表</div>
+      {#if isCustom}
+        <button
+          onclick={() => (showAddModel = !showAddModel)}
+          class="flex items-center gap-1 px-2 py-1 mr-2 rounded-md text-xs bg-base-300 text-base-content border border-[var(--hairline)] hover:bg-base-300/80"
+        >
+          <Plus size={14} />
+          添加模型
+        </button>
+      {/if}
     </div>
+
+    {#if isCustom && showAddModel}
+      <div
+        class="flex items-center gap-2 mb-3 px-2 py-2 bg-base-200 rounded-lg"
+      >
+        <input
+          type="text"
+          bind:value={newModelId}
+          placeholder="输入 model id，例如 llama-3.1-8b"
+          onkeydown={(e) => {
+            if (e.key === "Enter") handleAddModel();
+            if (e.key === "Escape") cancelAddModel();
+          }}
+          class="flex-1 px-3 py-1.5 text-sm border border-[var(--hairline)] bg-base-100 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+        <button
+          onclick={handleAddModel}
+          disabled={addingModel || !newModelId.trim()}
+          class="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-content disabled:opacity-50"
+        >
+          {addingModel ? "添加中…" : "添加"}
+        </button>
+        <button
+          onclick={cancelAddModel}
+          class="px-3 py-1.5 text-sm rounded-md bg-base-300 text-base-content hover:bg-base-300/80"
+        >
+          取消
+        </button>
+      </div>
+      {#if addModelError}
+        <div class="text-error text-xs mb-2 px-2">{addModelError}</div>
+      {/if}
+    {/if}
 
     {#if currentProvider}
       {@const providerModels = providerState.currentModels}
@@ -433,7 +520,11 @@
         </div>
       {:else}
         <div class="text-center text-sm py-8 text-base-content/70">
-          暂无模型数据，请检查供应商配置或网络连接
+          {#if isCustom}
+            该自定义供应商暂无模型，点击「添加模型」手动添加端点支持的 model id
+          {:else}
+            暂无模型数据，请检查供应商配置或网络连接
+          {/if}
         </div>
       {/if}
     {/if}

@@ -7,7 +7,9 @@
         "max_tokens",
         "streaming"
       ],
-      "additional_parameters": ["turn_count"],
+      "additional_parameters": [
+        "turn_count"
+      ],
       "parameters": {
         "temperature": {
           "component": "slider",
@@ -73,7 +75,12 @@
           "tips": "OpenAI 推理模式通过内部思考过程增强模型处理复杂问题的能力。选择不同的努力程度来平衡推理深度和响应速度: minimal 适合简单任务，low 用于一般问题，medium 处理中等复杂度任务，high 专注于复杂推理、数学和编程等高难度问题。",
           "include_reasoning": true,
           "effort_options": {
-            "common": ["minimal", "low", "medium", "high"]
+            "common": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ]
           }
         }
       }
@@ -86,12 +93,26 @@
           "name": "Reasoning",
           "tips": "OpenAI 扩展推理模式，提供更强的问题解决能力。effort 控制推理深度，summary 决定思考过程的展示方式: auto 让模型自动决定，detailed 显示完整推理过程，concise 提供简化的思考摘要。推荐复杂任务使用 high effort + detailed summary 组合。",
           "effort_options": {
-            "common": ["minimal", "low", "medium", "high"],
-            "openai/gpt-5-pro": ["high"]
+            "common": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "openai/gpt-5-pro": [
+              "high"
+            ]
           },
           "summary_options": {
-            "common": ["auto", "detailed"],
-            "openai/computer-use-preview": ["auto", "concise", "detailed"]
+            "common": [
+              "auto",
+              "detailed"
+            ],
+            "openai/computer-use-preview": [
+              "auto",
+              "concise",
+              "detailed"
+            ]
           }
         }
       }
@@ -114,10 +135,15 @@
           "budget_tip": "控制模型用于思考的 token 配额。Dynamic(-1) 让模型根据任务复杂度自动调整深度，适合大多数场景;Disable(0) 完全关闭思考以降低延迟，适合简单的事实查询或分类任务;Custom 允许你手动设置具体 token 数，更高的预算支持更详细的推理，但会增加成本和响应时间。建议:简单任务禁用，中等任务使用动态模式，复杂编程/数学问题使用较高的自定义预算。",
           "budget_configs": [
             {
-              "models": ["google/gemini-2.5-pro"],
+              "models": [
+                "google/gemini-2.5-pro"
+              ],
               "options": {
                 "dynamic": -1,
-                "range": [128, 32768]
+                "range": [
+                  128,
+                  32768
+                ]
               },
               "default": "dynamic"
             },
@@ -129,7 +155,10 @@
               "options": {
                 "dynamic": -1,
                 "disable": 0,
-                "range": [1, 24576]
+                "range": [
+                  1,
+                  24576
+                ]
               },
               "default": "dynamic"
             },
@@ -141,7 +170,10 @@
               "options": {
                 "dynamic": -1,
                 "disable": 0,
-                "range": [512, 24576]
+                "range": [
+                  512,
+                  24576
+                ]
               },
               "default": "disable"
             }
@@ -155,85 +187,31 @@
       "type": "openai",
       "type_name": "OpenAI",
       "default_name": "OpenAI",
-      "default_base_url": "https://api.openai.com/v1",
-      "icon": "/logo-openai.png",
-      "chat_api_type": "openai-responses",
-      "model_api_type": "openai",
-      "supplement_file": "openai_models.json",
-      "supplement_fields": [
-        "name",
-        "description",
-        "input_modalities",
-        "output_modalities",
-        "context_length",
-        "output_max_tokens",
-        "pricing",
-        "url",
-        "supported_features",
-        "supported_methods",
-        "supported_parameters"
-      ]
+      "icon": "/logo-openai.png"
     },
     {
       "type": "google",
       "type_name": "Google AI",
       "default_name": "Google AI",
-      "default_base_url": "https://generativelanguage.googleapis.com/v1beta",
-      "icon": "/logo-google.png",
-      "chat_api_type": "google",
-      "model_api_type": "google",
-      "supplement_file": "google_models.json",
-      "supplement_fields": [
-        "input_modalities",
-        "output_modalities",
-        "context_length",
-        "output_max_tokens",
-        "pricing",
-        "url",
-        "supported_features",
-        "supported_parameters"
-      ]
+      "icon": "/logo-google.png"
     },
     {
       "type": "deepseek",
       "type_name": "DeepSeek",
       "default_name": "DeepSeek",
-      "default_base_url": "https://api.deepseek.com",
-      "icon": "/logo-deepseek.png",
-      "chat_api_type": "openai-completions",
-      "model_api_type": "openai",
-      "supplement_file": "deepseek_models.json",
-      "supplement_fields": [
-        "name",
-        "description",
-        "input_modalities",
-        "output_modalities",
-        "context_length",
-        "output_max_tokens",
-        "pricing",
-        "url",
-        "supported_features",
-        "supported_methods",
-        "supported_parameters"
-      ]
+      "icon": "/logo-deepseek.png"
     },
     {
       "type": "anthropic",
       "type_name": "Anthropic",
       "default_name": "Anthropic",
-      "default_base_url": "https://api.anthropic.com",
-      "icon": "/logo-anthropic.png",
-      "chat_api_type": "anthropic",
-      "model_api_type": "anthropic"
+      "icon": "/logo-anthropic.png"
     },
     {
       "type": "openrouter",
       "type_name": "OpenRouter",
       "default_name": "OpenRouter",
-      "default_base_url": "https://openrouter.ai/api/v1",
       "icon": "/logo-openrouter.png",
-      "chat_api_type": "openai-completions",
-      "model_api_type": "openrouter",
       "parameters": {
         "reasoning": {
           "component": "openrouter_reasoning",
@@ -242,14 +220,26 @@
           "tips": "OpenRouter 推理模式允许兼容的模型进行深度思考。通过调整努力程度来平衡推理质量和成本。对于 Anthropic 模型，还可以设置推理 token 配额以精确控制思考预算。",
           "effect_tips": "控制模型推理的努力程度。low 适合简单任务，medium 处理中等复杂度问题，high 专注于需要深度推理的复杂任务。更高的努力程度会增加响应时间和成本，但能获得更好的推理质量。",
           "max_tokens_tips": "为推理过程分配的 token 配额。更高的配额允许模型进行更深入的思考，但会增加成本。建议根据任务复杂度调整: 简单问题 1000-5000，中等复杂度 5000-20000，复杂推理任务 20000+。",
-          "default_props": ["effect", "exclude"],
+          "default_props": [
+            "effect",
+            "exclude"
+          ],
           "special_props": {
-            "^anthropic/.*$": ["max_tokens"]
+            "^anthropic/.*$": [
+              "max_tokens"
+            ]
           },
           "effort_options": {
-            "common": ["low", "medium", "high"]
+            "common": [
+              "low",
+              "medium",
+              "high"
+            ]
           },
-          "max_tokens": [1, 99999999]
+          "max_tokens": [
+            1,
+            99999999
+          ]
         }
       }
     }
@@ -260,18 +250,14 @@
       "type_name": "OpenAI Compatible",
       "default_name": "Custom Provider",
       "default_base_url": "",
-      "icon": "/logo-openai-compatible.png",
-      "chat_api_type": "openai-completions",
-      "model_api_type": "openai"
+      "icon": "/logo-openai-compatible.png"
     },
     {
       "type": "anthropic-compatible",
       "type_name": "Anthropic Compatible",
       "default_name": "Custom Provider",
       "default_base_url": "",
-      "icon": "/logo-anthropic-compatible.png",
-      "chat_api_type": "anthropic",
-      "model_api_type": "anthropic"
+      "icon": "/logo-anthropic-compatible.png"
     }
   ]
 }

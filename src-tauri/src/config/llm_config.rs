@@ -1,8 +1,6 @@
 // LLM 配置管理器
 // 从 llm_config.json 读取供应商配置信息
 
-use handbox_llm::config::{LlmConfigProvider, LlmProviderConfig};
-use handbox_llm::types::{LlmApiType, LlmModelApiType, SupplementField};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -126,12 +124,16 @@ pub struct ProviderConfig {
     pub provider_type: String,
     pub type_name: String,
     pub default_name: String,
+    // The provider's API endpoint is a fact owned by hand-ai's catalog, not
+    // HandBox: `augment_with_hand_ai_providers` fills this from
+    // `hand_ai_catalog::list_providers()` for every catalog provider, so the
+    // hand-tuned entries in llm_config.json no longer carry it. Custom
+    // providers (openai-compatible / anthropic-compatible) are NOT in the
+    // catalog, so theirs stays empty — the user supplies a base_url when
+    // adding the provider.
+    #[serde(default)]
     pub default_base_url: String,
     pub icon: String,
-    pub chat_api_type: String,  // "openai" | "google" | "anthropic"
-    pub model_api_type: String, // "openai" | "google" | "anthropic" | "openrouter"
-    pub supplement_file: Option<String>,
-    pub supplement_fields: Option<Vec<SupplementField>>,
     #[serde(default)]
     pub parameters: HashMap<String, ParameterConfig>, // 供应商级别的参数配置
 }
@@ -189,7 +191,78 @@ impl LlmConfig {
                 tracing::warn!("Failed to load {}: {}. Using empty config", path.display(), e);
             }
         }
+        config.augment_with_hand_ai_providers();
         config
+    }
+
+    /// Merge hand-ai's catalog into the loaded config:
+    ///
+    /// 1. **Fill endpoints.** For every provider already present (the
+    ///    hand-tuned entries in llm_config.json) whose `default_base_url` is
+    ///    empty, fill it from the catalog. The endpoint is hand-ai's fact, so
+    ///    HandBox no longer hard-codes it. Custom providers
+    ///    (openai-compatible / anthropic-compatible) aren't in the catalog and
+    ///    keep their empty base_url — the user supplies one when adding them.
+    /// 2. **Append catalog-only providers.** Synthesize a `ProviderConfig`
+    ///    for every catalog provider not already present, so the
+    ///    `get_provider_configs` IPC and `LlmConfig::get_provider_config`
+    ///    lookups surface the 30+ vendors hand-ai knows about (Bedrock, Groq,
+    ///    xAI, Cerebras, etc.) without HandBox maintaining its own catalog.
+    fn augment_with_hand_ai_providers(&mut self) {
+        let catalog = crate::services::hand_ai_catalog::list_providers();
+
+        // Single source of truth for provider endpoints: provider_type -> base_url.
+        let base_url_by_type: HashMap<String, String> = catalog
+            .iter()
+            .map(|hp| (hp.id.clone(), hp.default_base_url.clone()))
+            .collect();
+
+        // 1. Fill empty endpoints on existing (hand-tuned) entries from the catalog.
+        for p in self
+            .providers
+            .iter_mut()
+            .chain(self.custom_providers.iter_mut())
+        {
+            if p.default_base_url.is_empty() {
+                if let Some(url) = base_url_by_type.get(&p.provider_type) {
+                    p.default_base_url = url.clone();
+                }
+            }
+        }
+
+        // 2. Append catalog providers not already present.
+        let existing: std::collections::HashSet<String> = self
+            .providers
+            .iter()
+            .chain(self.custom_providers.iter())
+            .map(|p| p.provider_type.clone())
+            .collect();
+        let mut appended = 0usize;
+        for hp in catalog {
+            if existing.contains(&hp.id) {
+                continue;
+            }
+            let display_name = humanize_id(&hp.id);
+            self.providers.push(ProviderConfig {
+                provider_type: hp.id.clone(),
+                type_name: display_name.clone(),
+                default_name: display_name,
+                default_base_url: hp.default_base_url.clone(),
+                // Generic placeholder — `static/logo-150.png` exists; per-
+                // provider art lands when a designer touches each one.
+                // Tracked as a deferred decision in the overnight summary.
+                icon: "/logo-150.png".to_string(),
+                parameters: std::collections::HashMap::new(),
+            });
+            appended += 1;
+        }
+        if appended > 0 {
+            tracing::info!(
+                "Augmented LLM config with {} hand-ai providers ({} total now)",
+                appended,
+                self.providers.len(),
+            );
+        }
     }
 
     /// 加载配置文件（按指定路径）
@@ -267,23 +340,6 @@ impl LlmConfig {
     }
 }
 
-impl LlmConfigProvider for LlmConfig {
-    fn get_provider_config(&self, provider_type: &str) -> Option<LlmProviderConfig> {
-        self.get_provider_config(provider_type).and_then(|config| {
-            let chat_api_type = LlmApiType::try_from(config.chat_api_type.as_str()).ok()?;
-            let model_api_type = LlmModelApiType::try_from(config.model_api_type.as_str()).ok()?;
-
-            Some(LlmProviderConfig {
-                provider_type: config.provider_type.clone(),
-                chat_api_type,
-                model_api_type,
-                supplement_file: config.supplement_file.clone(),
-                supplement_fields: config.supplement_fields.clone(),
-            })
-        })
-    }
-}
-
 /// 全局配置实例
 static GLOBAL_LLM_CONFIG: OnceLock<LlmConfig> = OnceLock::new();
 
@@ -299,9 +355,87 @@ pub fn install_global_llm_config(config: LlmConfig) {
     }
 }
 
+/// Format a kebab-case provider id (e.g. `"github-copilot"`) into a
+/// space-separated, title-cased display name (`"Github Copilot"`). Used
+/// when synthesizing `ProviderConfig` entries for hand-ai-only providers
+/// that don't have hand-tuned metadata in `llm_config.json`.
+fn humanize_id(id: &str) -> String {
+    id.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn humanize_id_handles_kebab_and_single_word() {
+        assert_eq!(humanize_id("openai"), "Openai");
+        assert_eq!(humanize_id("github-copilot"), "Github Copilot");
+        assert_eq!(humanize_id("amazon-bedrock"), "Amazon Bedrock");
+        assert_eq!(humanize_id("xiaomi-token-plan-cn"), "Xiaomi Token Plan Cn");
+        assert_eq!(humanize_id(""), "");
+    }
+
+    #[test]
+    fn augment_appends_hand_ai_providers_without_clobbering_existing() {
+        let mut cfg = LlmConfig::new();
+        // Pretend llm_config.json had a single hand-tuned openai entry with a
+        // custom icon and NO endpoint (the endpoint is hand-ai's fact, filled
+        // by augmentation). Augmentation must NOT replace the hand-tuned
+        // metadata with a synthesized version, but MUST fill the endpoint.
+        cfg.providers.push(ProviderConfig {
+            provider_type: "openai".into(),
+            type_name: "OpenAI".into(),
+            default_name: "OpenAI".into(),
+            default_base_url: String::new(),
+            icon: "/logo-openai.png".into(),
+            parameters: std::collections::HashMap::new(),
+        });
+        let before = cfg.providers.len();
+        cfg.augment_with_hand_ai_providers();
+        let after = cfg.providers.len();
+        assert!(
+            after > before,
+            "augmentation should add hand-ai-only providers"
+        );
+
+        let openai = cfg
+            .providers
+            .iter()
+            .find(|p| p.provider_type == "openai")
+            .unwrap();
+        assert_eq!(
+            openai.type_name, "OpenAI",
+            "hand-tuned name must survive augmentation"
+        );
+        assert_eq!(
+            openai.default_base_url, "https://api.openai.com/v1",
+            "empty endpoint on a hand-tuned entry must be filled from the catalog"
+        );
+
+        // Spot-check that a hand-ai-only provider got synthesized in.
+        assert!(
+            cfg.providers.iter().any(|p| p.provider_type == "groq"),
+            "groq (hand-ai-only) should now appear"
+        );
+        let groq = cfg
+            .providers
+            .iter()
+            .find(|p| p.provider_type == "groq")
+            .unwrap();
+        assert_eq!(groq.type_name, "Groq");
+        // Generic placeholder until per-provider art is added.
+        assert_eq!(groq.icon, "/logo-150.png");
+    }
 
     #[test]
     fn test_reasoning_parameter_config() {

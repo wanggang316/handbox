@@ -49,3 +49,16 @@ pub async fn model_count_chats(
 ) -> Result<i32, AppError> {
     model_service.count_chats_using_model(&model_id).await
 }
+
+/// 为自定义供应商手动添加模型（自定义端点的模型不在 hand-ai 目录中）。
+#[tauri::command]
+pub async fn model_add(
+    provider_id: String,
+    model_id: String,
+    name: Option<String>,
+    model_service: State<'_, ModelService>,
+) -> Result<ModelResponse, AppError> {
+    model_service
+        .add_manual_model(&provider_id, &model_id, name)
+        .await
+}

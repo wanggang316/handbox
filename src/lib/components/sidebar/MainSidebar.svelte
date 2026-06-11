@@ -4,7 +4,9 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import ChatList from "$lib/components/ui/ChatList.svelte";
+  import AgentProjectList from "$lib/components/agentsession/AgentProjectList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
+  import { uiState } from "$lib/states/ui.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
   import { BookOpen, Bot, Search, Settings, User, LogOut, Star, Box } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
@@ -55,6 +57,26 @@
   function handleAgentClick() {
     console.log("Clicked agent menu");
     goto(`/agents`);
+  }
+
+  // 当前选中的 Agent 会话 ID（用于 AgentProjectList 高亮）
+  let currentAgentSessionId = $derived(
+    browser && $page.url ? $page.url.searchParams.get("id") || "" : ""
+  );
+
+  // 切换到 Chat 模式：重复点击当前激活段为 no-op
+  function selectChatMode() {
+    if (uiState.appMode === "chat") return;
+    uiState.setAppMode("chat");
+    goto("/chat");
+  }
+
+  // 切换到 Agent 模式：重复点击为 no-op；有上次会话则恢复
+  function selectAgentMode() {
+    if (uiState.appMode === "agent") return;
+    uiState.setAppMode("agent");
+    const lastId = uiState.lastAgentSessionId;
+    goto(lastId ? `/agent?id=${lastId}` : "/agent");
   }
 
   let showSearchModal = $state(false);
@@ -230,18 +252,48 @@
         onClick={() => handleWordsClick()}
       />
     </div>
+
+    <!-- Chat | Agent 模式分段控件 -->
+    <div class="px-2">
+      <div class="flex p-0.5 bg-base-300 rounded-md">
+        <button
+          class="flex-1 py-1 text-[12px] leading-[18px] rounded-[5px] font-normal transition-colors {uiState.appMode ===
+          'chat'
+            ? 'bg-base-100 text-base-content shadow-sm'
+            : 'text-base-content/60 hover:text-base-content'}"
+          aria-pressed={uiState.appMode === "chat"}
+          onclick={selectChatMode}
+        >
+          Chat
+        </button>
+        <button
+          class="flex-1 py-1 text-[12px] leading-[18px] rounded-[5px] font-normal transition-colors {uiState.appMode ===
+          'agent'
+            ? 'bg-base-100 text-base-content shadow-sm'
+            : 'text-base-content/60 hover:text-base-content'}"
+          aria-pressed={uiState.appMode === "agent"}
+          onclick={selectAgentMode}
+        >
+          Agent
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- 中间可滚动区域 -->
   <div class="flex-1 min-h-0">
-    <ChatList
-      {chats}
-      activeId={currentChatId}
-      onChatClick={handleChatClick}
-      onRename={handleChatRename}
-      onDelete={handleChatDelete}
-      onGenerateTitle={handleGenerateTitle}
-    />
+    {#if uiState.appMode === "agent"}
+      <AgentProjectList activeId={currentAgentSessionId} />
+    {:else}
+      <ChatList
+        {chats}
+        activeId={currentChatId}
+        onChatClick={handleChatClick}
+        onRename={handleChatRename}
+        onDelete={handleChatDelete}
+        onGenerateTitle={handleGenerateTitle}
+      />
+    {/if}
   </div>
 
   <!-- 用户信息 -->

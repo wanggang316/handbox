@@ -73,10 +73,27 @@ export function getProviderConfig(
   ].find((t) => t.provider_type === providerType);
 }
 
+// 判断某供应商类型是否为自定义（openai-compatible / anthropic-compatible 等）。
+// 自定义端点不在 hand-ai 目录中，模型需手动添加。
+export function isCustomProviderType(providerType: string): boolean {
+  return providerConfigs.custom_providers.some(
+    (t) => t.provider_type === providerType,
+  );
+}
+
+// 供应商图标：统一使用 models.dev 的远程 SVG，按 provider_type 取，不再用本地图标。
+// models.dev 对任意 slug 都返回有效 SVG —— 已知 provider 给真 logo，未知 provider
+// 给通用占位图 —— 因此无需处理 404 / broken image。
+export function providerLogoUrl(
+  providerType: string | undefined,
+): string | undefined {
+  if (!providerType) return undefined;
+  return `https://models.dev/logos/${providerType}.svg`;
+}
+
 // 获取供应商图标
 export function getProviderIcon(provider: Provider): string | undefined {
-  const config = getProviderConfig(provider.provider_type);
-  return config?.icon || undefined;
+  return providerLogoUrl(provider.provider_type);
 }
 
 // 根据 providerId 获取供应商配置
@@ -97,8 +114,10 @@ export function getProviderConfigById(
 
 // 根据 providerId 获取供应商图标
 export function getProviderIconById(providerId: string): string | undefined {
-  const config = getProviderConfigById(providerId);
-  return config?.icon || undefined;
+  const provider =
+    providerState.providers.find((p) => p.id === providerId) ||
+    providerState.providersWithModels.find((p) => p.id === providerId);
+  return providerLogoUrl(provider?.provider_type);
 }
 
 // 全局状态对象
@@ -177,14 +196,14 @@ export function getProviderDropdownOptions() {
   const preProviderOptions = providerConfigs.providers.map((provider) => ({
     value: provider.provider_type,
     label: provider.type_name,
-    icon: provider.icon,
+    icon: providerLogoUrl(provider.provider_type),
   }));
 
   const customProviderOptions = providerConfigs.custom_providers.map(
     (provider) => ({
       value: provider.provider_type,
       label: provider.type_name,
-      icon: provider.icon,
+      icon: providerLogoUrl(provider.provider_type),
     }),
   );
 
@@ -466,6 +485,27 @@ export const providerActions = {
       throw error;
     } finally {
       providerState.isFetchingModels = null;
+    }
+  },
+
+  /**
+   * 为自定义供应商手动添加模型，并刷新该供应商的模型列表。
+   */
+  async addModel(
+    providerId: UUID,
+    modelId: string,
+    name?: string,
+  ): Promise<void> {
+    try {
+      await modelApi.addModel(providerId, modelId, name);
+      // 刷新当前模型列表，让新模型出现
+      await providerActions.fetchProviderModels(providerId, false);
+      // 标记带模型的供应商缓存需刷新，使聊天选择弹窗能看到新模型
+      markProvidersWithModelsDirty("model-added", { providerId, modelId });
+    } catch (error) {
+      providerState.error =
+        error instanceof Error ? error.message : "添加模型失败";
+      throw error;
     }
   },
 

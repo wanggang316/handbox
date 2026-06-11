@@ -2,14 +2,12 @@
 
 use crate::models::model::ModelResponse;
 use crate::models::AppError;
+use crate::services::chat_engine;
 use crate::services::Database;
-use crate::storage::types::{Model, ModelModality, Provider, Timestamp, UUID};
+use crate::storage::types::{Model, Provider, UUID};
 use crate::storage::{SessionRepository, ModelRepository, ProviderRepository};
-use handbox_llm::config::LlmConfigProvider;
-use handbox_llm::{create_llm_client, LlmModel, LlmModelModality, LlmProvider};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 模型服务
 #[derive(Clone)]
@@ -17,21 +15,24 @@ pub struct ModelService {
     model_repo: ModelRepository,
     provider_repo: ProviderRepository,
     chat_repo: SessionRepository,
-    llm_config: Arc<dyn LlmConfigProvider>,
 }
 
 impl ModelService {
     /// 创建新的模型服务实例
-    pub fn new(db: Arc<Database>, llm_config: Arc<dyn LlmConfigProvider>) -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
             model_repo: ModelRepository::new(Arc::clone(&db)),
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
             chat_repo: SessionRepository::new(db),
-            llm_config,
         }
     }
 
-    /// 从远程 API 获取模型并保存到数据库
+    /// 从 hand-ai 静态目录获取模型并保存到数据库
+    ///
+    /// M2-T4 起，模型列表的真理源来自 hand-ai 的静态目录（`hand_ai_model::get_models`），
+    /// 经 `chat_engine::list_catalog_models` 适配为 `storage::types::Model`。
+    /// 不再向 `/v1/models` 发起在线请求；网络/认证错误路径随之消失。
+    /// 显式权衡：用户自定义的、不在 hand-ai 目录里的模型 id 将不再出现。
     ///
     /// # 参数
     /// - `provider`: 供应商信息
@@ -41,52 +42,53 @@ impl ModelService {
         provider: &Provider,
         sync: bool,
     ) -> Result<(), AppError> {
-        tracing::info!("Fetching models from API for provider: {}", provider.name);
-
-        let client = create_llm_client(&provider.provider_type, Arc::clone(&self.llm_config))
-            .map_err(AppError::from)?;
-        let context = Self::provider_context(provider);
-
-        // 获取模型列表，使用友好的错误转换
-        let llm_models = client
-            .list_models(&context)
-            .await
-            .map_err(AppError::from_llm_fetch_error)?;
-
         tracing::info!(
-            "Successfully fetched {} models for provider: {}",
-            llm_models.len(),
+            "Loading catalog models from hand-ai for provider: {}",
             provider.name
         );
 
-        // 适配为我们的 Model 结构
-        let now = self.current_timestamp();
-        let models: Vec<Model> = llm_models
+        // hand-ai 目录读取：纯内存、同步、返回已映射好的 storage::types::Model
+        let catalog_models = chat_engine::list_catalog_models(&provider.provider_type);
+
+        // 目录未命中（DB 中 provider_type 拼写错误、新供应商尚未进入 hand-ai 发布等）
+        // 单独走 WARN 路径，便于运维 grep；已落库的模型行保持不动。
+        if catalog_models.is_empty() {
+            tracing::warn!(
+                provider_name = %provider.name,
+                provider_type = %provider.provider_type,
+                "hand-ai catalog returned 0 models; existing DB rows preserved"
+            );
+            return Ok(());
+        }
+
+        // 用应用层的 provider_id 覆盖 catalog 返回的占位 provider_id
+        let models: Vec<Model> = catalog_models
             .into_iter()
-            .map(|llm_model| adapt_model(llm_model, provider.id.clone(), now))
+            .map(|mut model| {
+                model.provider_id = provider.id.clone();
+                model
+            })
             .collect();
 
         // 保存或同步模型
-        if !models.is_empty() {
-            if sync {
-                // 同步模型，保留用户状态
-                self.model_repo
-                    .sync_provider_models(&provider.id, &models)
-                    .await?;
-                tracing::info!(
-                    "Successfully synced {} models for provider: {}",
-                    models.len(),
-                    provider.name
-                );
-            } else {
-                // 创建新模型
-                self.model_repo.create_models(&models).await?;
-                tracing::info!(
-                    "Successfully created {} models for provider: {}",
-                    models.len(),
-                    provider.name
-                );
-            }
+        if sync {
+            // 同步模型，保留用户状态
+            self.model_repo
+                .sync_provider_models(&provider.id, &models)
+                .await?;
+            tracing::info!(
+                "Successfully synced {} models for provider: {}",
+                models.len(),
+                provider.name
+            );
+        } else {
+            // 创建新模型
+            self.model_repo.create_models(&models).await?;
+            tracing::info!(
+                "Successfully created {} models for provider: {}",
+                models.len(),
+                provider.name
+            );
         }
 
         Ok(())
@@ -139,6 +141,93 @@ impl ModelService {
         model_id: &str,
     ) -> Result<Option<Model>, AppError> {
         self.model_repo.get_model(provider_id, model_id).await
+    }
+
+    /// 为自定义供应商（openai-compatible / anthropic-compatible）手动添加模型。
+    ///
+    /// 自定义端点不在 hand-ai 目录中，因而无法通过 `fetch_and_sync_models`
+    /// 获得模型。此路径让用户手填 model id；`chat_engine` 在对话时按自定义
+    /// 类型的协议 + 供应商 base_url 合成 `Model` 模板（见 `resolve_model`）。
+    /// 仅对自定义供应商开放：目录供应商的模型来自 hand-ai，禁止手动注入幽灵模型。
+    pub async fn add_manual_model(
+        &self,
+        provider_id: &UUID,
+        model_id: &str,
+        name: Option<String>,
+    ) -> Result<ModelResponse, AppError> {
+        let provider = self
+            .provider_repo
+            .get_provider_by_id(provider_id)
+            .await?
+            .ok_or_else(|| AppError::validation_error("Provider not found"))?;
+
+        // 仅自定义供应商可手动添加模型。
+        let supported_methods = chat_engine::custom_provider_supported_methods(
+            &provider.provider_type,
+        )
+        .ok_or_else(|| {
+            AppError::validation_error(
+                "Manual model entry is only supported for custom providers \
+                 (openai-compatible / anthropic-compatible)",
+            )
+        })?;
+
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return Err(AppError::validation_error("Model id cannot be empty"));
+        }
+
+        let display_name = name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| model_id.to_string());
+
+        let now = Self::current_timestamp();
+        let model = Model {
+            id: model_id.to_string(),
+            provider_id: provider.id.clone(),
+            name: display_name,
+            context_length: None,
+            output_max_tokens: None,
+            supported_features: None,
+            description: None,
+            input_modalities: None,
+            output_modalities: None,
+            metadata: None,
+            pricing: None,
+            url: None,
+            supported_parameters: None,
+            default_parameters: None,
+            max_parameters: None,
+            supported_methods: Some(supported_methods),
+            model_created_at: None,
+            enabled: true,
+            favorite: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // INSERT OR REPLACE — re-adding the same id is idempotent.
+        self.model_repo.create_models(&[model.clone()]).await?;
+
+        tracing::info!(
+            "Manually added model '{}' to custom provider '{}'",
+            model.id,
+            provider.name
+        );
+
+        Ok(ModelResponse::from_model_with_provider(
+            model,
+            Some(&provider.provider_type),
+        ))
+    }
+
+    /// 当前时间戳（毫秒）。
+    fn current_timestamp() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
     }
 
     /// 切换模型启用状态
@@ -270,118 +359,9 @@ impl ModelService {
         }
     }
 
-    // === 私有辅助方法 ===
-
-    /// 构建 LLM Provider 上下文
-    fn provider_context(provider: &Provider) -> LlmProvider {
-        LlmProvider {
-            base_url: provider.base_url.clone(),
-            api_key: provider.api_key.clone(),
-        }
-    }
-
-    /// 获取当前时间戳
-    fn current_timestamp(&self) -> Timestamp {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64
-    }
-
     /// 统计使用指定模型的聊天数量
     pub async fn count_chats_using_model(&self, model_id: &str) -> Result<i32, AppError> {
         self.chat_repo.count_chats_using_model(model_id).await
-    }
-}
-
-/// 将标准模型适配为应用内部的 `Model`
-pub(crate) fn adapt_model(llm_model: LlmModel, provider_id: String, now: i64) -> Model {
-    let LlmModel {
-        id,
-        name,
-        context_length,
-        output_max_tokens,
-        supported_features,
-        description,
-        input_modalities,
-        output_modalities,
-        metadata,
-        pricing,
-        url,
-        supported_parameters,
-        default_parameters,
-        max_parameters,
-        supported_methods,
-        created_at,
-    } = llm_model;
-
-    let supported_features = supported_features.and_then(|features| {
-        let mapped: Vec<String> = features
-            .into_iter()
-            .filter(|f| !f.trim().is_empty())
-            .collect();
-        if mapped.is_empty() {
-            None
-        } else {
-            Some(mapped)
-        }
-    });
-
-    let input_modalities = input_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let output_modalities = output_modalities.map(|modalities| {
-        modalities
-            .into_iter()
-            .filter_map(map_llm_modality)
-            .collect()
-    });
-
-    let supported_methods = supported_methods.and_then(|methods| {
-        if methods.is_empty() {
-            None
-        } else {
-            Some(methods)
-        }
-    });
-
-    Model {
-        id,
-        provider_id,
-        name,
-        context_length,
-        output_max_tokens,
-        supported_features,
-        description,
-        input_modalities,
-        output_modalities,
-        metadata,
-        pricing,
-        url,
-        supported_parameters,
-        default_parameters,
-        max_parameters,
-        supported_methods,
-        model_created_at: created_at,
-        enabled: true,
-        favorite: false,
-        created_at: now,
-        updated_at: now,
-    }
-}
-
-fn map_llm_modality(modality: LlmModelModality) -> Option<ModelModality> {
-    match modality {
-        LlmModelModality::Text => Some(ModelModality::Text),
-        LlmModelModality::Image => Some(ModelModality::Image),
-        LlmModelModality::Pdf => Some(ModelModality::Pdf),
-        LlmModelModality::File => Some(ModelModality::File),
-        LlmModelModality::Audio => Some(ModelModality::Audio),
-        LlmModelModality::Video => Some(ModelModality::Video),
     }
 }
 

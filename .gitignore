@@ -70,3 +70,6 @@ vite.config.ts.timestamp-*
 
 .agents/
 skills-lock.json
+
+# harness-stack FDD runtime state (per-plan; never committed)
+.harness-runtime/

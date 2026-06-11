@@ -203,8 +203,6 @@ export interface ProviderConfig {
   default_name: string;
   default_base_url: string;
   icon: string;
-  chat_api_type: string;
-  model_api_type: string;
   description?: string;
 }
 

@@ -2,7 +2,7 @@
 
 use crate::config::llm_config::{get_global_llm_config, ChatMethodConfig};
 use crate::storage::types::{Model, ModelModality, Timestamp, UUID};
-use handbox_llm::types::{LlmModelParameter, ModelPricing};
+use crate::models::llm_types::{LlmModelParameter, ModelPricing};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 

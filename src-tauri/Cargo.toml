@@ -51,8 +51,10 @@ jsonwebtoken = "9.3"
 dotenvy = "0.15"
 urlencoding = "2.1"
 once_cell = "1.19"
-openai-rust = { git = "https://github.com/wanggang316/openai-rust.git", branch = "master" }
-google-genai-rust = { git = "https://github.com/wanggang316/google-genai-rust.git", branch = "main" }
+# Align with hand-ai/crates/model so both pull the same crate copy
+# (avoids double-link). See exec-plans/hand-ai-integration.md.
+openai-rust = { git = "https://github.com/wanggang316/openai-rust", tag = "v0.2.1" }
+google-genai-rust = { git = "https://github.com/wanggang316/google-genai-rust", tag = "v0.1.0" }
 async-stream = "0.3"
 rmcp = { version = "0.7", features = [
     "client",
@@ -63,8 +65,19 @@ rmcp = { version = "0.7", features = [
 shlex = "1.3"
 image = "0.25"
 arboard = "3.4"
-handbox-llm = { path = "crates/handbox-llm" }
 handbox-mcp = { path = "crates/handbox-mcp" }
+# Direct dep on hand-ai's model crate for services/chat_engine.rs (M2-T1).
+# Pinned to hand-ai's `model-v0.3.0` tag. Single source of truth for
+# provider catalog + chat after the dissolve-handbox-llm migration.
+# v0.3.0 carries the #94 cerebras phantom-model catalog fix + an additive
+# runtime catalog-refresh API (catalog_refresh); HandBox uses the embedded
+# catalog only for now.
+hand-ai-model = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "model" }
+# Agent runtime crate from hand-ai, same git source + tag as the model crate
+# above so Cargo unifies the transitive `model` dependency to a single copy
+# (hand-agent depends on model via path; same-source+same-tag => dedup).
+hand-agent = { git = "ssh://git@github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "hand-agent" }
+tokio-util = "0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"
