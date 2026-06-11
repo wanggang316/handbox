@@ -72,11 +72,44 @@ pub async fn skill_list(
     Ok(to_skill_infos(skills, errors, &settings.skills.disabled))
 }
 
+/// Maximum accepted skill-name length in bytes (after trimming). Generous
+/// versus real skill names (lowercase dir basenames) but bounds what an
+/// arbitrary IPC caller can grow the persisted disabled list with.
+const MAX_SKILL_NAME_BYTES: usize = 256;
+
+/// Validate a caller-supplied skill name at the IPC boundary and return the
+/// trimmed form that gets stored (security audit L-2).
+///
+/// Rejected with a structured `VALIDATION_ERROR`: empty or whitespace-only
+/// names, names longer than [`MAX_SKILL_NAME_BYTES`] bytes after trimming,
+/// and names containing control characters. Trimming does not change
+/// exact-match semantics — discovery-produced names carry no surrounding
+/// whitespace.
+fn validate_skill_name(name: &str) -> Result<&str, AppError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::validation_error("技能名称不能为空"));
+    }
+    if trimmed.len() > MAX_SKILL_NAME_BYTES {
+        return Err(AppError::validation_error(&format!(
+            "技能名称过长（最多 {MAX_SKILL_NAME_BYTES} 字节）"
+        )));
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err(AppError::validation_error("技能名称不能包含控制字符"));
+    }
+    Ok(trimmed)
+}
+
 /// Set a skill's global disabled flag in the config.json `skills.disabled`
 /// list.
 ///
-/// Thin wrapper over [`SettingsService::set_skill_disabled`], which performs a
-/// whole-file read-modify-write: `disabled = true` inserts `name` (dedup),
+/// The name is validated first ([`validate_skill_name`]): empty/whitespace,
+/// oversized or control-character names are rejected with a structured
+/// `VALIDATION_ERROR` before any settings I/O, and the trimmed form is what
+/// gets stored. Then a thin wrapper over
+/// [`SettingsService::set_skill_disabled`], which performs a whole-file
+/// read-modify-write: `disabled = true` inserts `name` (dedup),
 /// `disabled = false` removes every equal entry, and all other settings
 /// sections are preserved. A read, parse or disk-write failure surfaces as the
 /// settings service's structured `{ code, message, hint }` AppError — never a
@@ -87,7 +120,8 @@ pub async fn skill_set_disabled(
     disabled: bool,
     settings_service: State<'_, SettingsService>,
 ) -> Result<(), AppError> {
-    settings_service.set_skill_disabled(&name, disabled)?;
+    let name = validate_skill_name(&name)?;
+    settings_service.set_skill_disabled(name, disabled)?;
     Ok(())
 }
 
@@ -656,6 +690,80 @@ mod tests {
         let idx = by_name(&infos);
         assert_eq!(idx.len(), 1);
         assert!(!idx["myskill"].disabled, "exact match only: {infos:?}");
+    }
+
+    // L-2 (security audit): the command layer rejects structurally invalid
+    // skill names with a structured VALIDATION_ERROR before any settings I/O.
+    #[test]
+    fn validate_skill_name_rejects_empty_and_whitespace_only() {
+        for bad in ["", " ", "  \t ", "\n", "\u{a0}"] {
+            let err = validate_skill_name(bad).unwrap_err();
+            let json = serde_json::to_value(&err).unwrap();
+            assert_eq!(json["code"], "VALIDATION_ERROR", "input {bad:?}");
+            assert!(json["message"].is_string());
+            assert!(json.get("hint").is_some());
+        }
+    }
+
+    // L-2: names longer than 256 bytes (measured after trim, on the value
+    // that would be stored) are rejected; exactly 256 bytes passes. The
+    // multi-byte case checks the limit is bytes, not chars.
+    #[test]
+    fn validate_skill_name_enforces_256_byte_limit() {
+        let max = "a".repeat(256);
+        assert_eq!(validate_skill_name(&max).unwrap(), max);
+
+        let over = "a".repeat(257);
+        let err = validate_skill_name(&over).unwrap_err();
+        assert_eq!(
+            serde_json::to_value(&err).unwrap()["code"],
+            "VALIDATION_ERROR"
+        );
+
+        // 86 × 3-byte chars = 258 bytes but only 86 chars.
+        let multibyte = "技".repeat(86);
+        let err = validate_skill_name(&multibyte).unwrap_err();
+        assert_eq!(
+            serde_json::to_value(&err).unwrap()["code"],
+            "VALIDATION_ERROR"
+        );
+
+        // Surrounding whitespace is trimmed before measuring.
+        let padded = format!("  {}  ", "a".repeat(256));
+        assert_eq!(validate_skill_name(&padded).unwrap(), "a".repeat(256));
+    }
+
+    // L-2: control characters (C0, DEL, C1) anywhere in the name are rejected.
+    #[test]
+    fn validate_skill_name_rejects_control_characters() {
+        for bad in ["a\nb", "a\tb", "a\u{0}b", "a\u{7f}b", "a\u{9b}b"] {
+            let err = validate_skill_name(bad).unwrap_err();
+            assert_eq!(
+                serde_json::to_value(&err).unwrap()["code"],
+                "VALIDATION_ERROR",
+                "input {bad:?}"
+            );
+        }
+    }
+
+    // L-2: valid names pass through trimmed, and the trimmed name is what the
+    // settings write stores — mirroring `skill_set_disabled`'s body minus the
+    // Tauri `State` unwrap. Discovery-produced names have no surrounding
+    // whitespace, so exact-match semantics are unaffected.
+    #[test]
+    fn validate_skill_name_trims_and_round_trips_through_settings() {
+        assert_eq!(validate_skill_name("alpha").unwrap(), "alpha");
+        assert_eq!(validate_skill_name("  alpha ").unwrap(), "alpha");
+
+        let data = TempDir::new().unwrap();
+        let settings = settings_service(&data);
+        let name = validate_skill_name("  alpha ").unwrap();
+        settings.set_skill_disabled(name, true).unwrap();
+        assert_eq!(
+            settings.get_settings().unwrap().skills.disabled,
+            vec!["alpha"],
+            "the stored entry must be the trimmed name"
+        );
     }
 
     // VAL-CONFIG-015: empty / whitespace-only entries are inert — nothing is
