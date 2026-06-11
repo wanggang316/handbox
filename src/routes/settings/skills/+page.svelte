@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import Button from "$lib/components/ui/Button.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
   import { skillState, skillActions } from "$lib/states/skill.svelte";
   import type { SkillInfo, SkillScope } from "$lib/types";
   import {
@@ -14,6 +15,7 @@
   } from "@lucide/svelte";
 
   let expandedBodies = $state<Record<string, boolean>>({});
+  let inFlightSkills = $state<Set<string>>(new Set());
 
   onMount(() => {
     if (!skillState.initialized) {
@@ -62,6 +64,26 @@
       console.error("[Skills] Failed to reveal skill directory", error);
     }
   }
+
+  async function handleToggleSkill(skill: SkillInfo, newDisabled: boolean) {
+    // Double-click guard: ignore if already in flight
+    if (inFlightSkills.has(skill.name)) {
+      return;
+    }
+
+    const previousDisabled = skill.disabled;
+    inFlightSkills.add(skill.name);
+
+    try {
+      await skillActions.toggleSkill(skill.name, newDisabled);
+    } catch (error) {
+      console.error("Failed to toggle skill:", error);
+      // 失败时回退
+      skill.disabled = previousDisabled;
+    } finally {
+      inFlightSkills.delete(skill.name);
+    }
+  }
 </script>
 
 <div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
@@ -70,7 +92,7 @@
     <div>
       <h1 class="text-base font-medium text-base-content">技能</h1>
       <p class="text-xs text-base-content/60 mt-0.5">
-        将 SKILL.md 放入技能目录后会在此处展示（只读）
+        将 SKILL.md 放入技能目录后会在此处展示，可启停有效的技能
       </p>
     </div>
     <Button
@@ -130,14 +152,23 @@
               {/if}
             </div>
 
-            <button
-              type="button"
-              class="flex items-center gap-1 shrink-0 text-xs text-base-content/60 hover:text-base-content hover:bg-base-300 rounded px-2 py-1 transition-colors"
-              onclick={() => handleOpenDir(skill)}
-            >
-              <FolderOpen size={14} />
-              <span>打开目录</span>
-            </button>
+            <div class="flex items-center gap-2 shrink-0">
+              {#if !hasError}
+                <Toggle
+                  checked={!skill.disabled}
+                  disabled={inFlightSkills.has(skill.name)}
+                  onChange={(enabled) => handleToggleSkill(skill, !enabled)}
+                />
+              {/if}
+              <button
+                type="button"
+                class="flex items-center gap-1 shrink-0 text-xs text-base-content/60 hover:text-base-content hover:bg-base-300 rounded px-2 py-1 transition-colors"
+                onclick={() => handleOpenDir(skill)}
+              >
+                <FolderOpen size={14} />
+                <span>打开目录</span>
+              </button>
+            </div>
           </div>
 
           <!-- 诊断信息（校验失败项） -->
