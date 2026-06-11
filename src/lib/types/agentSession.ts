@@ -268,6 +268,8 @@ export interface AgentSession {
   maxTokens?: number;
   workingDir?: string;
   enabledTools: string[];
+  /** per-session 启用的 skill name 列表（后端 `enabled_skills`，assemble_run 注入据此 gating）。 */
+  enabledSkills?: string[];
   toolExecutionMode?: string;
   messageCount: number;
   lastMessageAt?: Timestamp;
@@ -319,6 +321,7 @@ export interface UpdateAgentSessionRequest {
   maxTokens?: number;
   workingDir?: string;
   enabledTools?: string[];
+  enabledSkills?: string[];
   toolExecutionMode?: string;
 }
 

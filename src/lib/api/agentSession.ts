@@ -71,6 +71,7 @@ export type AgentSessionField =
   | "maxTokens"
   | "workingDir"
   | "enabledTools"
+  | "enabledSkills"
   | "toolExecutionMode";
 
 /**
