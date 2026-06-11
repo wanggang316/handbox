@@ -72,6 +72,25 @@ pub async fn skill_list(
     Ok(to_skill_infos(skills, errors, &settings.skills.disabled))
 }
 
+/// Set a skill's global disabled flag in the config.json `skills.disabled`
+/// list.
+///
+/// Thin wrapper over [`SettingsService::set_skill_disabled`], which performs a
+/// whole-file read-modify-write: `disabled = true` inserts `name` (dedup),
+/// `disabled = false` removes every equal entry, and all other settings
+/// sections are preserved. A read, parse or disk-write failure surfaces as the
+/// settings service's structured `{ code, message, hint }` AppError — never a
+/// panic. Callers re-fetch `skill_list` to observe the updated flags.
+#[tauri::command]
+pub async fn skill_set_disabled(
+    name: String,
+    disabled: bool,
+    settings_service: State<'_, SettingsService>,
+) -> Result<(), AppError> {
+    settings_service.set_skill_disabled(&name, disabled)?;
+    Ok(())
+}
+
 /// Fold discovery output `(skills, errors)` into a flat [`SkillInfo`] list,
 /// annotating each entry's `disabled` flag from the global disabled list.
 ///
@@ -453,6 +472,72 @@ mod tests {
             assert_eq!(info.diagnostics.len(), 1);
             assert!(!info.diagnostics[0].is_empty());
         }
+    }
+
+    /// Build a [`SettingsService`] over a temp data dir, mirroring how
+    /// `skill_set_disabled` / `skill_list` receive it as Tauri state.
+    fn settings_service(dir: &TempDir) -> SettingsService {
+        let storage = crate::services::StorageService::new(dir.path().to_path_buf()).unwrap();
+        SettingsService::new(Arc::new(storage))
+    }
+
+    /// Run `skill_list`'s inner logic against the *persisted* settings —
+    /// everything the command does apart from the Tauri `State` unwraps.
+    fn list_with_settings(app: &Path, user: &Path, settings: &SettingsService) -> Vec<SkillInfo> {
+        let svc = SkillService::for_test(app.to_path_buf(), user.to_path_buf());
+        let (skills, errors) = svc.discover(None);
+        to_skill_infos(
+            skills,
+            errors,
+            &settings.get_settings().unwrap().skills.disabled,
+        )
+    }
+
+    // VAL-CONFIG-003 / VAL-CONFIG-004: `skill_set_disabled`'s pipeline —
+    // the service write followed by a `skill_list` read — flips exactly the
+    // targeted skill's `disabled` flag, and flips it back on re-enable.
+    #[test]
+    fn val_config_003_004_set_disabled_round_trips_through_skill_list() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+        write_skill_raw(user.path(), "beta", &skill_md("b", "b"));
+        let settings = settings_service(&data);
+
+        // Disable: alpha flips to true, beta stays false.
+        settings.set_skill_disabled("alpha", true).unwrap();
+        let idx_owned = list_with_settings(app.path(), user.path(), &settings);
+        let idx = by_name(&idx_owned);
+        assert!(idx["alpha"].disabled, "alpha must be disabled: {idx:?}");
+        assert!(!idx["beta"].disabled, "beta must stay enabled: {idx:?}");
+
+        // Re-enable: alpha flips back to false.
+        settings.set_skill_disabled("alpha", false).unwrap();
+        let idx_owned = list_with_settings(app.path(), user.path(), &settings);
+        let idx = by_name(&idx_owned);
+        assert!(!idx["alpha"].disabled, "alpha must be re-enabled: {idx:?}");
+        assert!(!idx["beta"].disabled);
+    }
+
+    // VAL-CONFIG-006: disabling two distinct skills shows both as disabled in
+    // the skill_list view (read-modify-write keeps the earlier entry).
+    #[test]
+    fn val_config_006_disabling_two_skills_shows_both_disabled() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+        write_skill_raw(user.path(), "beta", &skill_md("b", "b"));
+        let settings = settings_service(&data);
+
+        settings.set_skill_disabled("alpha", true).unwrap();
+        settings.set_skill_disabled("beta", true).unwrap();
+
+        let infos = list_with_settings(app.path(), user.path(), &settings);
+        let idx = by_name(&infos);
+        assert!(idx["alpha"].disabled, "alpha kept after second disable");
+        assert!(idx["beta"].disabled);
     }
 
     // VAL-CONFIG-001: empty disabled list → every skill reports disabled=false.

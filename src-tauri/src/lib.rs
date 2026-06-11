@@ -210,6 +210,7 @@ pub fn run() {
             mcp_remove_server_from_chats,
             // Skill 管理命令
             skill_list,
+            skill_set_disabled,
             // 设置相关命令
             settings_get,
             settings_update,
