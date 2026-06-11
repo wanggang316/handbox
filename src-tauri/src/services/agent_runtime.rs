@@ -875,7 +875,6 @@ mod tests {
             max_tokens: Some(1024),
             working_dir: None,
             enabled_tools: vec![],
-            enabled_skills: vec![],
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
@@ -913,7 +912,6 @@ mod tests {
             max_tokens: Some(1024),
             working_dir,
             enabled_tools,
-            enabled_skills: vec![],
             tool_execution_mode,
             message_count: 0,
             last_message_at: None,
@@ -2982,13 +2980,13 @@ mod tests {
         .unwrap();
     }
 
-    /// Seed an agent session with explicit `enabled_skills`, `working_dir`, and
-    /// a chosen base `system_prompt` (None → no base prompt).
+    /// Seed an agent session with explicit `working_dir` and a chosen base
+    /// `system_prompt` (None → no base prompt). Per-session skill enablement
+    /// is deprecated: there is no skills knob to seed anymore.
     async fn seed_session_with_skills(
         db: &Arc<Database>,
         provider_id: &str,
         model_id: &str,
-        enabled_skills: Vec<String>,
         enabled_tools: Vec<String>,
         working_dir: Option<String>,
         system_prompt: Option<String>,
@@ -3006,7 +3004,6 @@ mod tests {
             max_tokens: Some(1024),
             working_dir,
             enabled_tools,
-            enabled_skills,
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
@@ -3064,7 +3061,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![], // no enabled_tools at all → skill tool must STILL be injected
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE PROMPT".to_string()),
@@ -3121,7 +3117,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec!["web_fetch".to_string()],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE PROMPT".to_string()),
@@ -3177,7 +3172,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             None,
@@ -3249,7 +3243,6 @@ mod tests {
             &provider_id,
             "gpt-4o",
             vec![],
-            vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
         )
@@ -3309,7 +3302,6 @@ mod tests {
             &provider_id,
             "gpt-4o",
             vec![],
-            vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
         )
@@ -3353,7 +3345,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3417,7 +3408,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3484,7 +3474,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![
                 "read_file".to_string(), // built-in FS tools, gated on working_dir
                 "list_directory".to_string(),
@@ -3541,7 +3530,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3630,8 +3618,8 @@ mod tests {
 
     /// VAL-ASSEMBLE-001 + 006: with NO disabled entries, EVERY discovered-and-
     /// validated skill enters the index (name + description) and the single
-    /// `skill` tool resolves each of them — with the session's `enabled_skills`
-    /// left EMPTY, proving assemble no longer consults the per-session list.
+    /// `skill` tool resolves each of them — the per-session enablement knob no
+    /// longer exists, so nothing gates the discovered set.
     #[tokio::test]
     async fn default_all_on_injects_every_discovered_skill() {
         let (db, _guard) = test_db().await;
@@ -3646,7 +3634,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![], // per-session enablement is dead: empty must NOT gate skills
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE PROMPT".to_string()),
@@ -3697,6 +3684,63 @@ mod tests {
         assert_eq!(invoke_skill(&tools, "beta").await, "BETA BODY");
     }
 
+    /// VAL-ASSEMBLE-004 / VAL-DEPRECATE-002: a legacy `enabled_skills` column
+    /// value (`["only-foo"]`) is IGNORED — the column is never parsed, so the
+    /// effective set is the full discovered set (foo AND bar), not the column's
+    /// subset. The filter code is deleted, not merely defaulted.
+    #[tokio::test]
+    async fn legacy_enabled_skills_column_value_is_ignored_by_assemble() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "foo", "Foo does things.", "FOO BODY", false);
+        write_skill_md(&proj, "bar", "Bar does other things.", "BAR BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        // The struct field is gone, so plant the legacy column value directly
+        // via SQL — exactly like a pre-deprecation row left behind on disk.
+        sqlx::query("UPDATE agent_sessions SET enabled_skills = $1 WHERE id = $2")
+            .bind(r#"["only-foo"]"#)
+            .bind(&session_id)
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+
+        // BOTH skills are in the effective set despite the column's subset.
+        assert!(
+            prompt.contains("<name>foo</name>"),
+            "foo listed despite legacy column:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>bar</name>"),
+            "bar listed despite legacy column subset:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "foo").await, "FOO BODY");
+        assert_eq!(invoke_skill(&tools, "bar").await, "BAR BODY");
+    }
+
     /// VAL-ASSEMBLE-002: a globally disabled skill is absent from the index AND
     /// from the tool's lookup map (`skill(name)` → generic not-found, no path);
     /// other skills are unaffected.
@@ -3714,7 +3758,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3769,7 +3812,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec!["web_fetch".to_string()],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE PROMPT".to_string()),
@@ -3822,7 +3864,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3883,7 +3924,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3948,7 +3988,6 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),

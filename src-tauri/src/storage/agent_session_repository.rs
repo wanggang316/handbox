@@ -22,15 +22,16 @@ impl AgentSessionRepository {
     }
 
     /// 创建 Agent Session
+    ///
+    /// NOTE: 已废弃的 `enabled_skills` 列保留在 schema 中但不再读写——新行
+    /// 该列恒为 NULL（VAL-DEPRECATE-009）。
     pub async fn create_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
-        let enabled_skills_json = serde_json::to_string(&session.enabled_skills)
-            .map_err(|e| AppError::validation_error(&format!("Invalid enabled skills: {}", e)))?;
 
         let query = r#"
-            INSERT INTO agent_sessions (id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, enabled_skills, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            INSERT INTO agent_sessions (id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         "#;
 
         sqlx::query(query)
@@ -45,7 +46,6 @@ impl AgentSessionRepository {
             .bind(session.max_tokens)
             .bind(&session.working_dir)
             .bind(&enabled_tools_json)
-            .bind(&enabled_skills_json)
             .bind(&session.tool_execution_mode)
             .bind(session.message_count)
             .bind(session.last_message_at)
@@ -67,7 +67,7 @@ impl AgentSessionRepository {
         offset: i32,
     ) -> Result<Vec<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, enabled_skills, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -94,7 +94,7 @@ impl AgentSessionRepository {
         session_id: &UUID,
     ) -> Result<Option<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, enabled_skills, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions WHERE id = $1
         "#;
 
@@ -117,8 +117,6 @@ impl AgentSessionRepository {
     pub async fn update_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
-        let enabled_skills_json = serde_json::to_string(&session.enabled_skills)
-            .map_err(|e| AppError::validation_error(&format!("Invalid enabled skills: {}", e)))?;
 
         // NOTE: `message_count` and `last_message_at` are deliberately OMITTED here.
         // Session-field edits go through a read-modify-write (`get_session` then
@@ -132,8 +130,8 @@ impl AgentSessionRepository {
         // write-once at `create_session` and must never be rewritten through the
         // generic update path (no "move session between projects" semantics).
         let query = r#"
-            UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, enabled_skills = $10, tool_execution_mode = $11, updated_at = $12
-            WHERE id = $13
+            UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, tool_execution_mode = $10, updated_at = $11
+            WHERE id = $12
         "#;
 
         let result = sqlx::query(query)
@@ -146,7 +144,6 @@ impl AgentSessionRepository {
             .bind(session.max_tokens)
             .bind(&session.working_dir)
             .bind(&enabled_tools_json)
-            .bind(&enabled_skills_json)
             .bind(&session.tool_execution_mode)
             .bind(session.updated_at)
             .bind(&session.id)
@@ -381,13 +378,6 @@ impl AgentSessionRepository {
             Vec::new()
         };
 
-        let enabled_skills_json: Option<String> = row.try_get("enabled_skills")?;
-        let enabled_skills: Vec<String> = if let Some(json) = enabled_skills_json {
-            serde_json::from_str(&json).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-
         let temperature: Option<f32> = row.try_get::<Option<f32>, _>("temperature")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
 
@@ -403,7 +393,6 @@ impl AgentSessionRepository {
             max_tokens,
             working_dir: row.try_get::<Option<String>, _>("working_dir")?,
             enabled_tools,
-            enabled_skills,
             tool_execution_mode: row.try_get::<Option<String>, _>("tool_execution_mode")?,
             message_count: row.try_get("message_count")?,
             last_message_at: row.try_get::<Option<i64>, _>("last_message_at")?,
@@ -482,7 +471,6 @@ mod tests {
             max_tokens: Some(2048),
             working_dir: Some("/tmp/project".to_string()),
             enabled_tools: vec!["read".to_string(), "write".to_string()],
-            enabled_skills: vec!["pdf".to_string()],
             tool_execution_mode: Some("auto".to_string()),
             message_count: 0,
             last_message_at: None,
@@ -574,7 +562,6 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: Vec::new(),
-            enabled_skills: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
@@ -625,7 +612,6 @@ mod tests {
         assert_eq!(fetched.name, session.name);
         assert_eq!(fetched.model_id, session.model_id);
         assert_eq!(fetched.enabled_tools, session.enabled_tools);
-        assert_eq!(fetched.enabled_skills, session.enabled_skills);
         assert_eq!(fetched.thinking_level, session.thinking_level);
         assert_eq!(fetched.message_count, 0);
 
@@ -637,14 +623,12 @@ mod tests {
         let mut updated = session.clone();
         updated.name = "Renamed Session".to_string();
         updated.enabled_tools = vec!["read".to_string()];
-        updated.enabled_skills = vec!["csv".to_string()];
         updated.updated_at = now + 1000;
         repo.update_session(&updated).await.unwrap();
 
         let fetched_updated = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(fetched_updated.name, "Renamed Session");
         assert_eq!(fetched_updated.enabled_tools, vec!["read".to_string()]);
-        assert_eq!(fetched_updated.enabled_skills, vec!["csv".to_string()]);
 
         // Rename
         repo.rename_session(&session.id, "Final Name")
@@ -658,107 +642,128 @@ mod tests {
         assert!(repo.get_session_by_id(&session.id).await.unwrap().is_none());
     }
 
-    /// VAL-PERSIST-001 / VAL-PERSIST-007: enabled_skills round-trips create→get
-    /// byte-for-byte, including order and duplicates — the storage layer stores
-    /// the list verbatim and does NOT dedupe or sort.
+    /// VAL-DEPRECATE-009: new sessions never write the deactivated
+    /// enabled_skills column — it stays SQL NULL after create AND after a
+    /// full-row update_session.
     #[tokio::test]
-    async fn test_enabled_skills_round_trip_verbatim_no_dedup() {
+    async fn test_new_sessions_leave_enabled_skills_column_null() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = AgentSessionRepository::new(Arc::new(db));
         let now = now_ms();
 
-        let mut session = sample_session(&uuid::Uuid::new_v4().to_string(), "Skills", now);
-        // Intentional duplicates and an empty string: stored verbatim.
-        session.enabled_skills = vec!["a".to_string(), "a".to_string(), "".to_string()];
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "No Skills Column", now);
         repo.create_session(&session).await.unwrap();
 
-        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        async fn column_value(repo: &AgentSessionRepository, id: &str) -> Option<String> {
+            sqlx::query("SELECT enabled_skills FROM agent_sessions WHERE id = $1")
+                .bind(id)
+                .fetch_one(repo.db.pool())
+                .await
+                .unwrap()
+                .try_get("enabled_skills")
+                .unwrap()
+        }
+
         assert_eq!(
-            fetched.enabled_skills,
-            vec!["a".to_string(), "a".to_string(), "".to_string()],
-            "storage must persist enabled_skills verbatim, no dedup/sort"
+            column_value(&repo, &session.id).await,
+            None,
+            "create must leave enabled_skills NULL"
         );
+
+        // A full-row update no longer touches the column either.
+        let mut edit = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        edit.name = "Renamed".to_string();
+        edit.updated_at = now + 1000;
+        repo.update_session(&edit).await.unwrap();
+
+        assert_eq!(
+            column_value(&repo, &session.id).await,
+            None,
+            "update_session must leave enabled_skills NULL"
+        );
+    }
+
+    /// VAL-DEPRECATE-004 / VAL-DEPRECATE-005: the deactivated column is kept in
+    /// the schema (no 049 drop migration) — PRAGMA table_info still lists it.
+    #[tokio::test]
+    async fn test_enabled_skills_column_still_in_schema() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let rows = sqlx::query("PRAGMA table_info(agent_sessions)")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+        let columns: Vec<String> = rows
+            .iter()
+            .map(|row| row.try_get::<String, _>("name").unwrap())
+            .collect();
+        assert!(
+            columns.contains(&"enabled_skills".to_string()),
+            "enabled_skills column must remain in the schema, got: {columns:?}"
+        );
+    }
+
+    /// VAL-DEPRECATE-010: legacy rows whose enabled_skills column holds a real
+    /// value, NULL, or non-JSON garbage all load via get AND list without error —
+    /// the column is never parsed anymore.
+    #[tokio::test]
+    async fn test_legacy_enabled_skills_column_values_load_without_error() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        for (id, column_value) in [
+            ("legacy-value", Some(r#"["only-foo"]"#)),
+            ("legacy-null", None),
+            ("legacy-garbage", Some("{not valid json")),
+        ] {
+            sqlx::query(
+                r#"
+                INSERT INTO agent_sessions
+                    (id, name, enabled_skills, message_count, created_at, updated_at)
+                VALUES ($1, $2, $3, 0, $4, $4)
+            "#,
+            )
+            .bind(id)
+            .bind(format!("Legacy {id}"))
+            .bind(column_value)
+            .bind(now)
+            .execute(repo.db.pool())
+            .await
+            .unwrap();
+
+            let fetched = repo
+                .get_session_by_id(&id.to_string())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(fetched.id, id, "row {id} must load via get");
+        }
 
         let listed = repo.list_sessions(10, 0).await.unwrap();
-        assert_eq!(listed[0].enabled_skills, fetched.enabled_skills);
+        assert_eq!(listed.len(), 3, "all legacy rows must load via list");
     }
 
-    /// VAL-PERSIST-003: a NULL enabled_skills column reads back as an empty Vec
-    /// (not a panic, not Some("")). Mirrors the legacy-row case after migration.
+    /// The deactivated column is no longer in the UPDATE SET clause: a
+    /// full-row update_session leaves a legacy column value byte-for-byte
+    /// untouched on disk (and errors never surface from it).
     #[tokio::test]
-    async fn test_enabled_skills_null_column_reads_empty_vec() {
+    async fn test_update_session_leaves_legacy_enabled_skills_column_untouched() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = AgentSessionRepository::new(Arc::new(db));
         let now = now_ms();
 
-        // Insert a row leaving enabled_skills entirely unset (SQL NULL).
-        sqlx::query(
-            r#"
-            INSERT INTO agent_sessions (id, name, message_count, created_at, updated_at)
-            VALUES ('null-skills', 'Null Skills', 0, $1, $1)
-        "#,
-        )
-        .bind(now)
-        .execute(repo.db.pool())
-        .await
-        .unwrap();
-
-        let fetched = repo
-            .get_session_by_id(&"null-skills".to_string())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            fetched.enabled_skills,
-            Vec::<String>::new(),
-            "NULL enabled_skills must decode to an empty Vec"
-        );
-        // The legacy enabled_tools column behaves identically; sanity-check both.
-        assert_eq!(fetched.enabled_tools, Vec::<String>::new());
-    }
-
-    /// VAL-PERSIST-004: a malformed JSON value stored in enabled_skills degrades
-    /// gracefully to an empty Vec on read (unwrap_or_default), never panicking.
-    #[tokio::test]
-    async fn test_enabled_skills_corrupt_json_reads_empty_vec() {
-        let (db, _temp_dir) = create_test_db().await;
-        let repo = AgentSessionRepository::new(Arc::new(db));
-        let now = now_ms();
-
-        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Corrupt Skills", now);
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Legacy Holder", now);
         repo.create_session(&session).await.unwrap();
 
-        // Overwrite enabled_skills with non-JSON text directly.
+        // Plant a legacy value directly (the struct field is gone).
         sqlx::query("UPDATE agent_sessions SET enabled_skills = $1 WHERE id = $2")
-            .bind("{not valid json")
+            .bind(r#"["legacy"]"#)
             .bind(&session.id)
             .execute(repo.db.pool())
             .await
             .unwrap();
 
-        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            fetched.enabled_skills,
-            Vec::<String>::new(),
-            "corrupt enabled_skills JSON must degrade to an empty Vec"
-        );
-    }
-
-    /// VAL-PERSIST-005: enabled_skills is part of the UPDATE SET clause, so it
-    /// SURVIVES an edit of unrelated fields (it is read-modify-write, not
-    /// dropped). A rename that does not change enabled_skills must leave it
-    /// intact; a rename that does change it must persist the new value.
-    #[tokio::test]
-    async fn test_enabled_skills_survives_unrelated_field_edit() {
-        let (db, _temp_dir) = create_test_db().await;
-        let repo = AgentSessionRepository::new(Arc::new(db));
-        let now = now_ms();
-
-        let mut session = sample_session(&uuid::Uuid::new_v4().to_string(), "Survivor", now);
-        session.enabled_skills = vec!["pdf".to_string(), "csv".to_string()];
-        repo.create_session(&session).await.unwrap();
-
-        // Edit ONLY the name (read-modify-write of the full row).
         let mut edit = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         edit.name = "Renamed Only".to_string();
         edit.updated_at = now + 1000;
@@ -766,79 +771,27 @@ mod tests {
 
         let reloaded = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(reloaded.name, "Renamed Only");
-        assert_eq!(
-            reloaded.enabled_skills,
-            vec!["pdf".to_string(), "csv".to_string()],
-            "editing an unrelated field must not clear enabled_skills"
-        );
-    }
 
-    /// VAL-PERSIST-006: editing enabled_skills through update_session must NOT
-    /// revert message_count / last_message_at (owned solely by append_message)
-    /// nor rewrite the write-once project_id.
-    #[tokio::test]
-    async fn test_editing_enabled_skills_does_not_revert_counters_or_project_id() {
-        let (db, _temp_dir) = create_test_db().await;
-        let db_arc = Arc::new(db);
-        let repo = AgentSessionRepository::new(db_arc.clone());
-        let now = now_ms();
-
-        // Seed a project so project_id has a real FK target.
-        let project_id = uuid::Uuid::new_v4().to_string();
-        sqlx::query(
-            "INSERT INTO agent_projects (id, path, name, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(&project_id)
-        .bind("/tmp/project")
-        .bind("project")
-        .bind(now)
-        .bind(now)
-        .execute(db_arc.pool())
-        .await
-        .unwrap();
-
-        let mut session = sample_session(&uuid::Uuid::new_v4().to_string(), "Counter+Skills", now);
-        session.project_id = Some(project_id.clone());
-        repo.create_session(&session).await.unwrap();
-
-        // Capture the stale snapshot, then a run appends messages.
-        let stale = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
-        for i in 0..3 {
-            repo.append_message(&session.id, "user", &serde_json::json!({ "i": i }), now + 10 + i)
+        let column: Option<String> =
+            sqlx::query("SELECT enabled_skills FROM agent_sessions WHERE id = $1")
+                .bind(&session.id)
+                .fetch_one(repo.db.pool())
                 .await
+                .unwrap()
+                .try_get("enabled_skills")
                 .unwrap();
-        }
-
-        // Edit enabled_skills using the stale snapshot (read-modify-write).
-        let mut edit = stale.clone();
-        edit.enabled_skills = vec!["new-skill".to_string()];
-        edit.updated_at = now + 20;
-        repo.update_session(&edit).await.unwrap();
-
-        let reloaded = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
-        assert_eq!(reloaded.enabled_skills, vec!["new-skill".to_string()]);
         assert_eq!(
-            reloaded.message_count, 3,
-            "editing enabled_skills must not revert message_count"
-        );
-        assert_eq!(
-            reloaded.last_message_at,
-            Some(now + 12),
-            "editing enabled_skills must not revert last_message_at"
-        );
-        assert_eq!(
-            reloaded.project_id,
-            Some(project_id),
-            "editing enabled_skills must not rewrite project_id"
+            column,
+            Some(r#"["legacy"]"#.to_string()),
+            "update_session must not rewrite the deactivated column"
         );
     }
 
-    /// VAL-PERSIST-009: a row written through the legacy column set (pre-048,
-    /// no enabled_skills column value) reads back with enabled_skills == [] and
-    /// every other column unchanged. Simulated here by an INSERT that omits the
-    /// enabled_skills column entirely.
+    /// VAL-DEPRECATE-010: a row written through the legacy column set (pre-048,
+    /// no enabled_skills column value) loads with every other column unchanged.
+    /// Simulated here by an INSERT that omits the enabled_skills column entirely.
     #[tokio::test]
-    async fn test_legacy_row_without_enabled_skills_reads_empty_and_preserves_other_columns() {
+    async fn test_legacy_row_without_enabled_skills_loads_and_preserves_other_columns() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = AgentSessionRepository::new(Arc::new(db));
         let now = now_ms();
@@ -860,7 +813,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(fetched.enabled_skills, Vec::<String>::new());
         // Other columns survive the migration untouched.
         assert_eq!(fetched.name, "Legacy Session");
         assert_eq!(fetched.model_id, Some("gpt-4o".to_string()));
