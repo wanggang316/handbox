@@ -7,6 +7,7 @@
     Hash,
     LoaderCircle,
     Star,
+    Plus,
   } from "@lucide/svelte";
   import * as chatApi from "$lib/api/chat";
   import * as messageApi from "$lib/api/message";
@@ -21,6 +22,7 @@
     chats?: Chat[];
     activeId?: string;
     onChatClick?: (chat: Chat) => void;
+    onNewChat?: () => void;
     onRename?: (chat: Chat, newName: string) => void;
     onDelete?: (chat: Chat) => void;
     onGenerateTitle?: (chat: Chat, newTitle: string) => void;
@@ -30,6 +32,7 @@
     chats = [],
     activeId = "",
     onChatClick = () => {},
+    onNewChat,
     onRename,
     onDelete,
     onGenerateTitle,
@@ -230,8 +233,20 @@
 </script>
 
 <div class="flex flex-col h-full">
-  <!-- 标题 -->
-  <div class="text-sm text-base-content/70 pb-2 pl-4 flex-shrink-0">聊天</div>
+  <!-- 标题 + 新建会话 -->
+  <div class="flex items-center justify-between pb-2 pl-4 pr-2 flex-shrink-0">
+    <span class="text-sm text-base-content/70">聊天</span>
+    {#if onNewChat}
+      <button
+        class="p-1 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-300 transition-colors"
+        onclick={onNewChat}
+        title="新建会话"
+        aria-label="新建会话"
+      >
+        <Plus size={16} />
+      </button>
+    {/if}
+  </div>
 
   <!-- 聊天列表 -->
   <div class="flex-1 overflow-y-auto space-y-0.5 px-2">

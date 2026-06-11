@@ -8,7 +8,16 @@
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import { uiState } from "$lib/states/ui.svelte";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
-  import { BookOpen, Bot, Search, Settings, User, LogOut, Star, Box } from "@lucide/svelte";
+  import {
+    BookOpen,
+    Bot,
+    Search,
+    Settings,
+    User,
+    LogOut,
+    Star,
+    Box,
+  } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import SearchModal from "$lib/components/search/SearchModal.svelte";
@@ -57,6 +66,11 @@
   function handleAgentClick() {
     console.log("Clicked agent menu");
     goto(`/agents`);
+  }
+
+  // 新建会话（Chat 模式专属操作，入口为 ChatList 标题右侧的加号）
+  function handleNewChat() {
+    goto(`/chat`);
   }
 
   // 当前选中的 Agent 会话 ID（用于 AgentProjectList 高亮）
@@ -218,6 +232,7 @@
       </div>
     </div>
 
+    <!-- 全局入口：收藏 / Artifacts -->
     <div class="flex flex-col px-2 space-y-0.5">
       <MenuButton
         title="收藏"
@@ -234,22 +249,6 @@
         isActive={currentRoute === "/artifacts"}
         buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
         onClick={() => handleArtifactClick()}
-      />
-      <MenuButton
-        title="Agents"
-        icon={Bot}
-        iconSize={16}
-        isActive={currentRoute === "/agents"}
-        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onClick={() => handleAgentClick()}
-      />
-      <MenuButton
-        title="单词本"
-        icon={BookOpen}
-        iconSize={16}
-        isActive={currentRoute === "/words"}
-        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onClick={() => handleWordsClick()}
       />
     </div>
 
@@ -285,14 +284,40 @@
     {#if uiState.appMode === "agent"}
       <AgentProjectList activeId={currentAgentSessionId} />
     {:else}
-      <ChatList
-        {chats}
-        activeId={currentChatId}
-        onChatClick={handleChatClick}
-        onRename={handleChatRename}
-        onDelete={handleChatDelete}
-        onGenerateTitle={handleGenerateTitle}
-      />
+      <div class="flex flex-col h-full">
+        <!-- Chat 模式专属入口：Agents、单词本 -->
+        <div class="flex-shrink-0 flex flex-col px-2 space-y-0.5 mb-3">
+          <MenuButton
+            title="Agents"
+            icon={Bot}
+            iconSize={16}
+            isActive={currentRoute === "/agents"}
+            buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+            onClick={() => handleAgentClick()}
+          />
+          <MenuButton
+            title="单词本"
+            icon={BookOpen}
+            iconSize={16}
+            isActive={currentRoute === "/words"}
+            buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+            onClick={() => handleWordsClick()}
+          />
+        </div>
+
+        <!-- 聊天列表（新建会话入口在列表标题右侧） -->
+        <div class="flex-1 min-h-0">
+          <ChatList
+            {chats}
+            activeId={currentChatId}
+            onChatClick={handleChatClick}
+            onNewChat={handleNewChat}
+            onRename={handleChatRename}
+            onDelete={handleChatDelete}
+            onGenerateTitle={handleGenerateTitle}
+          />
+        </div>
+      </div>
     {/if}
   </div>
 
