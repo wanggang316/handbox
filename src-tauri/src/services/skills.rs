@@ -5,14 +5,16 @@
 //! `disable-model-invocation`); the body is the prose injected into the system
 //! prompt's "Skills" section when the skill is enabled.
 //!
-//! This module owns the skill data model and validation only. Discovery
-//! (filesystem traversal, dedup) lives in a separate module and feeds its
-//! parsed results into [`validate`], which is filesystem-independent so it can
-//! be unit-tested in isolation.
+//! This module owns the skill data model, validation, and filesystem
+//! discovery. [`validate`] is filesystem-independent (it takes already-parsed
+//! inputs) so it can be unit-tested in isolation; [`discover_skills`] walks
+//! the on-disk scope roots, parses each `SKILL.md`, deduplicates by name, and
+//! feeds the survivors through `validate`.
 
-use crate::utils::frontmatter::FrontmatterError;
+use crate::utils::frontmatter::{parse_frontmatter, FrontmatterError};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// Skill name length cap (bytes) per the Agent Skills spec.
@@ -87,8 +89,22 @@ pub struct Skill {
 /// Each variant carries the offending `path` for diagnostics.
 #[derive(Debug, Error)]
 pub enum SkillError {
-    /// IO or frontmatter error from the underlying loader. Used by the
-    /// discovery module; defined here so the error surface is complete.
+    /// IO error from the underlying loader (e.g., a scope root that is a
+    /// regular file, or a `SKILL.md` that cannot be read). Collected so a
+    /// single unreadable entry does not abort discovery.
+    ///
+    /// This is a separate variant from [`SkillError::Loader`] because
+    /// [`FrontmatterError`] — what `Loader` wraps — has no IO representation;
+    /// `std::io::Error` is also non-`Clone`, so it cannot be folded in there.
+    #[error("I/O error reading {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// Frontmatter parse error from the underlying loader (malformed YAML, an
+    /// unterminated block, or a field whose YAML type doesn't match the
+    /// schema — e.g. a non-boolean `disable-model-invocation`).
     #[error("loader error in {path}: {source}")]
     Loader {
         path: PathBuf,
@@ -215,6 +231,164 @@ fn validate_name(name: &str) -> Result<(), &'static str> {
         return Err("name must not contain consecutive hyphens");
     }
     Ok(())
+}
+
+/// A skill that loaded cleanly (file read + frontmatter parsed) but has not yet
+/// been validated. This is the unit deduplicated by name before validation.
+///
+/// Keeping load and validation as two passes is deliberate: an entry only
+/// claims a name slot once it has *loaded* successfully. A higher-priority
+/// entry that fails to load (e.g. broken frontmatter) never occupies the slot,
+/// so a lower-priority same-named good skill remains visible. A higher-priority
+/// entry that loads but later fails *validation* does occupy the slot, so it
+/// shadows the lower-priority skill — its diagnostic is reported in its place.
+struct LoadedSkill {
+    /// Canonical name, derived from the parent directory basename.
+    name: String,
+    metadata: Option<SkillMetadata>,
+    body: String,
+    source: SourceInfo,
+}
+
+/// Discover `SKILL.md` files across the given scope roots and validate them.
+///
+/// `roots` is ordered from **lowest to highest** priority — callers pass
+/// `[(appdata, AppData), (user, User), (project, Project)]`. For each root:
+///
+/// 1. `read_dir` the root. A missing root (`NotFound`) is silently skipped;
+///    any other IO error on the root is collected as [`SkillError::Io`].
+/// 2. Only immediate subdirectories are considered (non-recursive). Each must
+///    contain a `SKILL.md` file (`is_file()`); subdirectories without one, and
+///    non-directory entries directly under the root, are ignored.
+/// 3. The file is read and its frontmatter parsed. IO and frontmatter errors
+///    (the latter including a field whose YAML type is wrong, e.g. a non-bool
+///    `disable-model-invocation`) are collected, not fatal.
+///
+/// Deduplication happens **after a successful load but before validation**:
+/// each loaded skill is inserted into a `BTreeMap` keyed by name, so a later
+/// (higher-priority) root overwrites an earlier same-named entry. The
+/// `BTreeMap` yields both the dedup and an alphabetical name order. Each
+/// surviving entry is then validated; successes become [`Skill`]s and failures
+/// become [`SkillError`]s.
+///
+/// Returns `(skills, errors)`. Discovery is lenient: a single bad skill yields
+/// a diagnostic but never aborts the walk, and the function never panics.
+pub fn discover_skills(roots: &[(PathBuf, SourceScope)]) -> (Vec<Skill>, Vec<SkillError>) {
+    let mut by_name: BTreeMap<String, LoadedSkill> = BTreeMap::new();
+    let mut errors: Vec<SkillError> = Vec::new();
+
+    for (root, scope) in roots {
+        let entries = match std::fs::read_dir(root) {
+            Ok(entries) => entries,
+            // A scope whose directory doesn't exist is simply not configured.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            // Any other IO error on the root (e.g. it's a regular file, or
+            // permission denied) is a diagnostic but not fatal.
+            Err(err) => {
+                errors.push(SkillError::Io {
+                    path: root.clone(),
+                    source: err,
+                });
+                continue;
+            }
+        };
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    errors.push(SkillError::Io {
+                        path: root.clone(),
+                        source: err,
+                    });
+                    continue;
+                }
+            };
+
+            let dir_path = entry.path();
+
+            // Non-recursive: only immediate subdirectories are skill candidates.
+            // Stray files directly under the root are ignored.
+            match entry.file_type() {
+                Ok(ft) if ft.is_dir() => {}
+                Ok(_) => continue,
+                Err(err) => {
+                    errors.push(SkillError::Io {
+                        path: dir_path,
+                        source: err,
+                    });
+                    continue;
+                }
+            }
+
+            // Each skill directory must contain a `SKILL.md` at its root.
+            let candidate = dir_path.join("SKILL.md");
+            if !candidate.is_file() {
+                continue;
+            }
+
+            match load_skill(&candidate, *scope) {
+                Ok(loaded) => {
+                    // Insert after a SUCCESSFUL load, before validation: a
+                    // higher-priority root overwrites the same-named slot.
+                    by_name.insert(loaded.name.clone(), loaded);
+                }
+                Err(err) => errors.push(err),
+            }
+        }
+    }
+
+    let mut skills: Vec<Skill> = Vec::with_capacity(by_name.len());
+    for loaded in by_name.into_values() {
+        match validate(loaded.name, loaded.metadata, loaded.body, loaded.source) {
+            Ok(skill) => skills.push(skill),
+            Err(err) => errors.push(err),
+        }
+    }
+
+    (skills, errors)
+}
+
+/// Read and parse a single `SKILL.md`, deriving its canonical name from the
+/// parent directory. IO failures and frontmatter parse failures are mapped to
+/// [`SkillError::Io`] / [`SkillError::Loader`] respectively.
+fn load_skill(path: &Path, scope: SourceScope) -> Result<LoadedSkill, SkillError> {
+    let content = std::fs::read_to_string(path).map_err(|err| SkillError::Io {
+        path: path.to_path_buf(),
+        source: err,
+    })?;
+
+    let parsed =
+        parse_frontmatter::<SkillMetadata>(&content).map_err(|err| SkillError::Loader {
+            path: path.to_path_buf(),
+            source: err,
+        })?;
+
+    let name = parent_dir_name(path).ok_or_else(|| SkillError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SKILL.md has no usable parent directory name",
+        ),
+    })?;
+
+    Ok(LoadedSkill {
+        name,
+        metadata: parsed.metadata,
+        body: parsed.body,
+        source: SourceInfo {
+            scope,
+            path: path.to_path_buf(),
+        },
+    })
+}
+
+/// The lossy UTF-8 basename of `path`'s parent directory, or `None` when there
+/// is no parent (which cannot happen for a `<root>/<dir>/SKILL.md` candidate).
+fn parent_dir_name(path: &Path) -> Option<String> {
+    path.parent()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -557,5 +731,389 @@ mod tests {
         // Absent → defaults to false.
         let off: SkillMetadata = serde_yaml::from_str("description: x\n").unwrap();
         assert!(!off.disable_model_invocation);
+    }
+
+    // ---- Discovery tests (VAL-DISCOVERY-001..010) ----------------------------
+
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Write `<root>/<dir>/SKILL.md` with `content`, creating parents.
+    fn write_skill(root: &Path, dir: &str, content: &str) -> PathBuf {
+        let skill_dir = root.join(dir);
+        fs::create_dir_all(&skill_dir).unwrap();
+        let file = skill_dir.join("SKILL.md");
+        fs::write(&file, content).unwrap();
+        file
+    }
+
+    /// Minimal valid SKILL.md body with a description and matching/no name.
+    fn skill_md(description: &str, body: &str) -> String {
+        format!("---\ndescription: {description}\n---\n{body}")
+    }
+
+    /// Convenience: the three real scope roots in priority order, lowest first.
+    fn roots(appdata: &Path, user: &Path, project: &Path) -> Vec<(PathBuf, SourceScope)> {
+        vec![
+            (appdata.to_path_buf(), SourceScope::AppData),
+            (user.to_path_buf(), SourceScope::User),
+            (project.to_path_buf(), SourceScope::Project),
+        ]
+    }
+
+    // VAL-DISCOVERY-001: a skill in each of the three scopes is discovered,
+    // name = parent directory name, scope correctly labelled.
+    #[test]
+    fn val_discovery_001_three_scopes_discovered() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let proj = TempDir::new().unwrap();
+        write_skill(app.path(), "alpha", &skill_md("from app", "a body"));
+        write_skill(user.path(), "beta", &skill_md("from user", "b body"));
+        write_skill(proj.path(), "gamma", &skill_md("from proj", "g body"));
+
+        let (skills, errors) = discover_skills(&roots(app.path(), user.path(), proj.path()));
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let by: std::collections::HashMap<_, _> =
+            skills.iter().map(|s| (s.name.as_str(), s)).collect();
+        assert_eq!(by.len(), 3);
+        assert_eq!(by["alpha"].source.scope, SourceScope::AppData);
+        assert_eq!(by["beta"].source.scope, SourceScope::User);
+        assert_eq!(by["gamma"].source.scope, SourceScope::Project);
+        assert_eq!(by["alpha"].description, "from app");
+        assert_eq!(by["gamma"].body, "g body");
+    }
+
+    // VAL-DISCOVERY-002: same-named skill across scopes — Project shadows User
+    // shadows AppData; winner's body/description/scope come from the highest.
+    #[test]
+    fn val_discovery_002_same_name_project_shadows_user_shadows_appdata() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let proj = TempDir::new().unwrap();
+        write_skill(app.path(), "shared", &skill_md("from app", "app body"));
+        write_skill(user.path(), "shared", &skill_md("from user", "user body"));
+        write_skill(proj.path(), "shared", &skill_md("from proj", "proj body"));
+
+        let (skills, errors) = discover_skills(&roots(app.path(), user.path(), proj.path()));
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        assert_eq!(skills.len(), 1, "dedup should collapse to one: {skills:?}");
+        assert_eq!(skills[0].name, "shared");
+        assert_eq!(skills[0].source.scope, SourceScope::Project);
+        assert_eq!(skills[0].description, "from proj");
+        assert_eq!(skills[0].body, "proj body");
+
+        // And User shadows AppData when Project is absent.
+        let app2 = TempDir::new().unwrap();
+        let user2 = TempDir::new().unwrap();
+        write_skill(app2.path(), "shared", &skill_md("from app", "app body"));
+        write_skill(user2.path(), "shared", &skill_md("from user", "user body"));
+        let (skills2, errors2) = discover_skills(&[
+            (app2.path().to_path_buf(), SourceScope::AppData),
+            (user2.path().to_path_buf(), SourceScope::User),
+        ]);
+        assert!(errors2.is_empty(), "unexpected errors: {errors2:?}");
+        assert_eq!(skills2.len(), 1);
+        assert_eq!(skills2[0].source.scope, SourceScope::User);
+        assert_eq!(skills2[0].description, "from user");
+    }
+
+    // VAL-DISCOVERY-003: missing scope directories are silently skipped (no
+    // error) and the result is sorted by name.
+    #[test]
+    fn val_discovery_003_missing_scope_silently_skipped() {
+        let app = TempDir::new().unwrap();
+        let proj = TempDir::new().unwrap();
+        // `user` root is never created.
+        let user_missing = app.path().join("does-not-exist-user-root");
+        write_skill(app.path(), "zeta", &skill_md("z", "z"));
+        write_skill(proj.path(), "alpha", &skill_md("a", "a"));
+
+        let (skills, errors) = discover_skills(&[
+            (app.path().to_path_buf(), SourceScope::AppData),
+            (user_missing, SourceScope::User),
+            (proj.path().to_path_buf(), SourceScope::Project),
+        ]);
+        assert!(errors.is_empty(), "missing dir must not error: {errors:?}");
+        let names: Vec<_> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["alpha", "zeta"]);
+    }
+
+    // VAL-DISCOVERY-004: non-recursive — a SKILL.md one level deeper than the
+    // immediate subdirectory is NOT discovered when the immediate subdir has no
+    // SKILL.md of its own.
+    #[test]
+    fn val_discovery_004_non_recursive() {
+        let root = TempDir::new().unwrap();
+        // `<root>/outer/inner/SKILL.md` but no `<root>/outer/SKILL.md`.
+        let inner = root.path().join("outer").join("inner");
+        fs::create_dir_all(&inner).unwrap();
+        fs::write(inner.join("SKILL.md"), skill_md("nested", "n")).unwrap();
+
+        let (skills, errors) =
+            discover_skills(&[(root.path().to_path_buf(), SourceScope::Project)]);
+        assert!(
+            skills.is_empty(),
+            "nested skill must not be found: {skills:?}"
+        );
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    // VAL-DISCOVERY-005: a non-directory file directly under the scope root and
+    // a subdirectory lacking SKILL.md are both ignored.
+    #[test]
+    fn val_discovery_005_stray_file_and_dir_without_skill_md_ignored() {
+        let root = TempDir::new().unwrap();
+        // Stray file directly under the root.
+        fs::write(root.path().join("README.md"), "not a skill").unwrap();
+        // Subdir with no SKILL.md.
+        fs::create_dir_all(root.path().join("empty-dir")).unwrap();
+        // Subdir holding a differently-named file (not SKILL.md). Note: the
+        // candidate match is case-insensitive on macOS/Windows, so the wrong
+        // name must differ by more than case to be portable across filesystems.
+        let wrong = root.path().join("wrong");
+        fs::create_dir_all(&wrong).unwrap();
+        fs::write(wrong.join("NOTES.md"), skill_md("x", "x")).unwrap();
+        // One real skill so we know discovery itself works.
+        write_skill(root.path(), "real", &skill_md("real desc", "real body"));
+
+        let (skills, errors) =
+            discover_skills(&[(root.path().to_path_buf(), SourceScope::Project)]);
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "real");
+    }
+
+    // VAL-DISCOVERY-006: results are sorted by name regardless of insertion or
+    // directory-iteration order.
+    #[test]
+    fn val_discovery_006_sorted_by_name() {
+        let root = TempDir::new().unwrap();
+        for n in ["mango", "apple", "zebra", "banana"] {
+            write_skill(root.path(), n, &skill_md("d", "b"));
+        }
+        let (skills, errors) =
+            discover_skills(&[(root.path().to_path_buf(), SourceScope::Project)]);
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        let names: Vec<_> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["apple", "banana", "mango", "zebra"]);
+    }
+
+    // VAL-DISCOVERY-007 (loader-bad branch): a higher-priority entry that fails
+    // to LOAD (broken frontmatter) never claims the name slot, so a
+    // lower-priority same-named GOOD skill still surfaces. The error is also
+    // reported.
+    #[test]
+    fn val_discovery_007_loader_bad_does_not_shadow_lower_priority() {
+        let app = TempDir::new().unwrap();
+        let proj = TempDir::new().unwrap();
+        // Low-priority (AppData) good skill.
+        write_skill(app.path(), "dup", &skill_md("good from app", "app body"));
+        // High-priority (Project) BROKEN frontmatter — load fails.
+        let bad_path = write_skill(proj.path(), "dup", "---\nname: : :\n---\nbody");
+
+        let (skills, errors) = discover_skills(&[
+            (app.path().to_path_buf(), SourceScope::AppData),
+            (proj.path().to_path_buf(), SourceScope::Project),
+        ]);
+        // The good low-priority skill is NOT shadowed.
+        assert_eq!(
+            skills.len(),
+            1,
+            "low-priority good skill should remain: {skills:?}"
+        );
+        assert_eq!(skills[0].name, "dup");
+        assert_eq!(skills[0].source.scope, SourceScope::AppData);
+        assert_eq!(skills[0].description, "good from app");
+        // And the broken one is reported as a Loader error at its path.
+        assert_eq!(errors.len(), 1, "expected one loader error: {errors:?}");
+        match &errors[0] {
+            SkillError::Loader { path, source } => {
+                assert_eq!(path, &bad_path);
+                assert!(matches!(source, FrontmatterError::InvalidYaml(_)));
+            }
+            other => panic!("expected Loader error, got {other:?}"),
+        }
+    }
+
+    // VAL-DISCOVERY-008 (validate-bad branch): a higher-priority entry that
+    // LOADS but fails VALIDATION occupies the name slot, so it shadows a
+    // lower-priority same-named good skill (which therefore does NOT surface).
+    // The validation error is reported in its place.
+    #[test]
+    fn val_discovery_008_validate_bad_shadows_lower_priority() {
+        let app = TempDir::new().unwrap();
+        let proj = TempDir::new().unwrap();
+        // Low-priority (AppData) good skill.
+        write_skill(app.path(), "dup", &skill_md("good from app", "app body"));
+        // High-priority (Project) loads fine but fails validation: frontmatter
+        // `name` mismatches the directory name.
+        let bad_path = write_skill(
+            proj.path(),
+            "dup",
+            "---\nname: not-dup\ndescription: d\n---\nbody",
+        );
+
+        let (skills, errors) = discover_skills(&[
+            (app.path().to_path_buf(), SourceScope::AppData),
+            (proj.path().to_path_buf(), SourceScope::Project),
+        ]);
+        // The low-priority good skill is SHADOWED — it does not surface.
+        assert!(
+            skills.is_empty(),
+            "validate-bad winner should shadow the lower skill: {skills:?}"
+        );
+        assert_eq!(errors.len(), 1, "expected one validation error: {errors:?}");
+        match &errors[0] {
+            SkillError::NameMismatch {
+                path,
+                frontmatter_name,
+                dir_name,
+            } => {
+                assert_eq!(path, &bad_path);
+                assert_eq!(frontmatter_name, "not-dup");
+                assert_eq!(dir_name, "dup");
+            }
+            other => panic!("expected NameMismatch error, got {other:?}"),
+        }
+    }
+
+    // VAL-DISCOVERY-009: disable-model-invocation parses true/false/absent
+    // normally; a non-boolean value is a Loader error (Frontmatter→InvalidYaml)
+    // and does not abort discovery of the other (valid) skills.
+    #[test]
+    fn val_discovery_009_disable_model_invocation_parsing() {
+        let root = TempDir::new().unwrap();
+        write_skill(
+            root.path(),
+            "on",
+            "---\ndescription: d\ndisable-model-invocation: true\n---\nb",
+        );
+        write_skill(
+            root.path(),
+            "off",
+            "---\ndescription: d\ndisable-model-invocation: false\n---\nb",
+        );
+        write_skill(root.path(), "absent", &skill_md("d", "b"));
+        // Non-boolean value → deserialization of `bool` fails → InvalidYaml.
+        let bad_path = write_skill(
+            root.path(),
+            "wrong-type",
+            "---\ndescription: d\ndisable-model-invocation: maybe\n---\nb",
+        );
+
+        let (skills, errors) =
+            discover_skills(&[(root.path().to_path_buf(), SourceScope::Project)]);
+        let by: std::collections::HashMap<_, _> =
+            skills.iter().map(|s| (s.name.as_str(), s)).collect();
+        assert_eq!(by.len(), 3, "three good skills expected: {skills:?}");
+        assert!(by["on"].disable_model_invocation);
+        assert!(!by["off"].disable_model_invocation);
+        assert!(!by["absent"].disable_model_invocation);
+
+        assert_eq!(errors.len(), 1, "expected one loader error: {errors:?}");
+        match &errors[0] {
+            SkillError::Loader { path, source } => {
+                assert_eq!(path, &bad_path);
+                assert!(matches!(source, FrontmatterError::InvalidYaml(_)));
+            }
+            other => panic!("expected Loader error, got {other:?}"),
+        }
+    }
+
+    // VAL-DISCOVERY-010 (a): a scope root that is a regular file (not a dir)
+    // surfaces an Io error and does not panic; other scopes still resolve.
+    #[test]
+    fn val_discovery_010_root_is_a_file_yields_io_error() {
+        let real_root = TempDir::new().unwrap();
+        write_skill(real_root.path(), "ok", &skill_md("d", "b"));
+        // A path that points at a regular file rather than a directory.
+        let file_root = TempDir::new().unwrap();
+        let file_path = file_root.path().join("not-a-dir");
+        fs::write(&file_path, "i am a file").unwrap();
+
+        let (skills, errors) = discover_skills(&[
+            (file_path.clone(), SourceScope::AppData),
+            (real_root.path().to_path_buf(), SourceScope::Project),
+        ]);
+        assert_eq!(
+            skills.len(),
+            1,
+            "good scope should still resolve: {skills:?}"
+        );
+        assert_eq!(skills[0].name, "ok");
+        assert_eq!(errors.len(), 1, "expected one io error: {errors:?}");
+        match &errors[0] {
+            SkillError::Io { path, .. } => assert_eq!(path, &file_path),
+            other => panic!("expected Io error, got {other:?}"),
+        }
+    }
+
+    // VAL-DISCOVERY-010 (b): a SKILL.md that cannot be read (no read
+    // permission) surfaces an Io error rather than panicking. Unix-only because
+    // permission bits are not portable; skipped when running as root (where the
+    // mode is ignored).
+    #[cfg(unix)]
+    #[test]
+    fn val_discovery_010_unreadable_skill_md_yields_io_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Running as root bypasses permission checks, so this assertion is only
+        // meaningful for an unprivileged user.
+        if unsafe { libc_geteuid() } == 0 {
+            return;
+        }
+
+        let root = TempDir::new().unwrap();
+        let file = write_skill(root.path(), "locked", &skill_md("d", "b"));
+        let mut perms = fs::metadata(&file).unwrap().permissions();
+        perms.set_mode(0o000);
+        fs::set_permissions(&file, perms).unwrap();
+
+        let (skills, errors) =
+            discover_skills(&[(root.path().to_path_buf(), SourceScope::Project)]);
+        assert!(
+            skills.is_empty(),
+            "unreadable skill should not load: {skills:?}"
+        );
+        assert_eq!(errors.len(), 1, "expected one io error: {errors:?}");
+        assert!(
+            matches!(errors[0], SkillError::Io { .. }),
+            "expected Io error, got {:?}",
+            errors[0]
+        );
+
+        // Restore permissions so the tempdir can be cleaned up.
+        let mut perms = fs::metadata(&file).unwrap().permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&file, perms).unwrap();
+    }
+
+    // Minimal libc `geteuid` shim so the permission test can skip under root
+    // without pulling in the `libc` crate as a dependency.
+    #[cfg(unix)]
+    extern "C" {
+        #[link_name = "geteuid"]
+        fn libc_geteuid() -> u32;
+    }
+
+    // Lenient end-to-end: one broken skill produces a diagnostic but the rest
+    // of discovery still completes (VAL-DISCOVERY-007/008/009/010 share this
+    // property; this is the integrated assertion).
+    #[test]
+    fn discovery_is_lenient_one_bad_does_not_abort() {
+        let root = TempDir::new().unwrap();
+        write_skill(root.path(), "good-a", &skill_md("a", "a"));
+        write_skill(root.path(), "good-b", &skill_md("b", "b"));
+        write_skill(root.path(), "broken", "---\nname: : :\n---\nbody");
+        write_skill(root.path(), "no-desc", "---\nname: no-desc\n---\nbody");
+
+        let (skills, errors) =
+            discover_skills(&[(root.path().to_path_buf(), SourceScope::Project)]);
+        let names: Vec<_> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["good-a", "good-b"]);
+        // One Loader (broken yaml) + one MissingDescription.
+        assert_eq!(errors.len(), 2, "expected two diagnostics: {errors:?}");
     }
 }
