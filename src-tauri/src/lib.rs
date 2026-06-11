@@ -378,9 +378,14 @@ async fn initialize_services(
         skill_user_root,
     ));
 
-    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重 + skill 注入）
-    let agent_runtime =
-        AgentRuntime::new_with_skills(database_service.clone(), skill_service.clone());
+    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重 + skill 注入）。
+    // 注入 SettingsService 的 clone：assemble 每个 run 现场重读 config.json 的
+    // skills.disabled 全局禁用名单（不缓存）。
+    let agent_runtime = AgentRuntime::new_with_skills(
+        database_service.clone(),
+        skill_service.clone(),
+        settings_service.clone(),
+    );
 
     // 将服务注册到应用状态
     app.manage(storage_service);

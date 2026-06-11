@@ -53,7 +53,9 @@ use crate::models::AppError;
 use crate::services::agent_tools;
 use crate::services::chat_engine::{self, ChatOptions};
 use crate::services::skill_service::SkillService;
-use crate::services::{AgentSessionService, Database, ProviderService};
+use crate::services::{
+    AgentSessionService, Database, ProviderService, SettingsService, StorageService,
+};
 use crate::storage::types::UUID;
 use crate::storage::AgentSessionRepository;
 
@@ -199,6 +201,10 @@ pub struct AgentRuntime {
     /// runs discovery at assemble time so the run's enabled skills can be turned
     /// into a system-prompt index plus an auto-injected `skill` tool.
     skill_service: Arc<SkillService>,
+    /// Settings store (config.json). `assemble_run` reads `skills.disabled`
+    /// FRESH from it on every run — never cached — so toggling a skill's
+    /// global opt-out applies to the very next run without a restart.
+    settings: SettingsService,
     /// 测试专用：注入一个 scripted `StreamFn` 取代真实网络流。生产构造器永远
     /// 把它留空（不启用 model 的 `faux` feature，遵守上游 Decision Log D-04）。
     #[cfg(test)]
@@ -296,11 +302,13 @@ fn build_user_message(input: String, attachments: &[AgentRunAttachment]) -> User
 }
 
 impl AgentRuntime {
-    /// Construct a runtime with an inert skill service (no skills discovered).
+    /// Construct a runtime with an inert skill service (no skills discovered)
+    /// and an inert settings store (default settings, empty disabled list).
     ///
     /// Retained as the dependency-light constructor used by tests and by call
     /// sites that do not resolve OS skill roots. Production wires the real
-    /// skill service via [`AgentRuntime::new_with_skills`] (it holds the
+    /// skill service and the shared `SettingsService` via
+    /// [`AgentRuntime::new_with_skills`] (the production caller holds the
     /// `AppHandle` needed to resolve the app-data and home directories).
     pub fn new(db: Arc<Database>) -> Self {
         // Roots that do not exist → discovery silently finds nothing (missing
@@ -309,19 +317,35 @@ impl AgentRuntime {
             PathBuf::from("/nonexistent/handbox-skills/appdata"),
             PathBuf::from("/nonexistent/handbox-skills/user"),
         ));
-        Self::new_with_skills(db, inert_skills)
+        // A settings store rooted under a unique temp dir: `get_settings()`
+        // materializes a default config there (empty `skills.disabled`), so
+        // this runtime applies no global opt-out — matching its inert skills.
+        let settings_dir = std::env::temp_dir()
+            .join("handbox-inert-settings")
+            .join(uuid::Uuid::new_v4().to_string());
+        let storage =
+            StorageService::new(settings_dir).expect("create inert settings dir under temp_dir");
+        let inert_settings = SettingsService::new(Arc::new(storage));
+        Self::new_with_skills(db, inert_skills, inert_settings)
     }
 
-    /// Construct a runtime with an explicit skill service. The production path
-    /// (`initialize_services`) passes one whose roots are resolved from Tauri's
-    /// `PathResolver` (`<app_data_dir>/skills` + `~/.agents/skills`).
-    pub fn new_with_skills(db: Arc<Database>, skill_service: Arc<SkillService>) -> Self {
+    /// Construct a runtime with an explicit skill service and settings store.
+    /// The production path (`initialize_services`) passes a skill service whose
+    /// roots are resolved from Tauri's `PathResolver` (`<app_data_dir>/skills`
+    /// + `~/.agents/skills`) and a clone of the managed `SettingsService` (the
+    /// global skill opt-out list lives in its config.json).
+    pub fn new_with_skills(
+        db: Arc<Database>,
+        skill_service: Arc<SkillService>,
+        settings: SettingsService,
+    ) -> Self {
         Self {
             sessions: AgentSessionService::new(Arc::clone(&db)),
             providers: ProviderService::new(Arc::clone(&db)),
             messages: AgentSessionRepository::new(db),
             runs: Arc::new(Mutex::new(HashMap::new())),
             skill_service,
+            settings,
             #[cfg(test)]
             stream_fn_override: None,
             #[cfg(test)]
@@ -2917,6 +2941,16 @@ mod tests {
 
     use crate::services::skill_service::SkillService;
 
+    /// A tempdir-backed `SettingsService` (fresh default config → empty global
+    /// disabled list). Returns the guard so the config dir outlives the test;
+    /// the service handle lets a test toggle `skills.disabled` between
+    /// assembles (the runtime re-reads the list fresh on every run).
+    fn temp_settings() -> (SettingsService, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let storage = StorageService::new(dir.path().to_path_buf()).unwrap();
+        (SettingsService::new(Arc::new(storage)), dir)
+    }
+
     /// Write `<root>/<dir>/SKILL.md` with a description, body, and optional
     /// `disable-model-invocation`. Returns the SKILL.md path.
     fn write_skill_md(root: &std::path::Path, dir: &str, description: &str, body: &str, opt_in: bool) {
@@ -3025,7 +3059,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
@@ -3074,7 +3109,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
@@ -3120,7 +3156,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
@@ -3178,7 +3215,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
@@ -3218,7 +3256,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
         assert!(!names.contains(&"skill".to_string()), "no skill tool: {names:?}");
@@ -3259,7 +3298,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
         assert!(names.contains(&"skill".to_string()), "opt-in skill still injects tool: {names:?}");
@@ -3307,7 +3347,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         // Assemble, then load "shared" through the injected skill tool's handler.
         let cancel = CancellationToken::new();
@@ -3371,7 +3412,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (_prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
@@ -3419,7 +3461,8 @@ mod tests {
             app.path().to_path_buf(),
             user.path().to_path_buf(),
         ));
-        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let cancel = CancellationToken::new();
         let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
