@@ -208,6 +208,8 @@ pub fn run() {
             mcp_update_tool_enabled,
             mcp_count_chats_using_server,
             mcp_remove_server_from_chats,
+            // Skill 管理命令
+            skill_list,
             // 设置相关命令
             settings_get,
             settings_update,
@@ -376,7 +378,8 @@ async fn initialize_services(
     ));
 
     // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重 + skill 注入）
-    let agent_runtime = AgentRuntime::new_with_skills(database_service.clone(), skill_service);
+    let agent_runtime =
+        AgentRuntime::new_with_skills(database_service.clone(), skill_service.clone());
 
     // 将服务注册到应用状态
     app.manage(storage_service);
@@ -395,6 +398,7 @@ async fn initialize_services(
     app.manage(agent_session_service);
     app.manage(agent_project_service);
     app.manage(agent_runtime);
+    app.manage(skill_service);
 
     // Services are registered — the foreground can now read DB-cached data.
     // Catalog sync runs ENTIRELY in the background from here: prime the
