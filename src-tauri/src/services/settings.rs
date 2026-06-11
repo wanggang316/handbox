@@ -57,6 +57,27 @@ impl SettingsService {
         Ok(settings)
     }
 
+    /// Set a skill's global disabled flag in `skills.disabled` via a whole-file
+    /// read-modify-write.
+    ///
+    /// `disabled = true` appends the name unless an equal entry already exists
+    /// (dedup on insert); `disabled = false` removes every equal entry. All
+    /// other list entries — orphans, duplicates, whitespace — are opaque
+    /// storage and stay verbatim, and every other settings section round-trips
+    /// untouched through the same load/save path as any settings update.
+    pub fn set_skill_disabled(&self, name: &str, disabled: bool) -> Result<AppSettings, AppError> {
+        let mut settings = self.load_or_default()?;
+        if disabled {
+            if !settings.skills.disabled.iter().any(|entry| entry == name) {
+                settings.skills.disabled.push(name.to_string());
+            }
+        } else {
+            settings.skills.disabled.retain(|entry| entry != name);
+        }
+        self.save_settings(&settings)?;
+        Ok(settings)
+    }
+
     pub fn reset_settings(&self, sections: Option<Vec<String>>) -> Result<AppSettings, AppError> {
         let default_settings = default_settings();
         let settings = match sections {
@@ -304,6 +325,166 @@ mod tests {
                 "file must stay untouched on a structural error"
             );
         }
+    }
+
+    /// Snapshot the four legacy sections as serde values for
+    /// "other sections untouched" assertions (value equivalence after a
+    /// serialization round-trip, per the validation contract).
+    fn legacy_sections(settings: &AppSettings) -> [(&'static str, serde_json::Value); 4] {
+        [
+            ("general", serde_json::to_value(&settings.general).unwrap()),
+            ("mcp", serde_json::to_value(&settings.mcp).unwrap()),
+            ("account", serde_json::to_value(&settings.account).unwrap()),
+            (
+                "translation",
+                serde_json::to_value(&settings.translation).unwrap(),
+            ),
+        ]
+    }
+
+    // VAL-CONFIG-003: disabling a skill writes its name into the config.json
+    // `skills.disabled` array while every other section stays value-identical.
+    #[test]
+    fn set_skill_disabled_true_writes_name_and_preserves_other_sections() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        // Seed non-default values so "preserved" is distinguishable from
+        // "reset to default".
+        svc.update_settings(UpdateSettingsRequest {
+            section: "general".to_string(),
+            data: serde_json::json!({ "autoScroll": false, "theme": "dark" }),
+        })
+        .unwrap();
+        let before = svc.get_settings().unwrap();
+        let snapshot = legacy_sections(&before);
+
+        let updated = svc.set_skill_disabled("alpha", true).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha"]);
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["skills"]["disabled"], serde_json::json!(["alpha"]));
+        for (key, expected) in snapshot {
+            assert_eq!(written[key], expected, "section `{key}` must be untouched");
+        }
+    }
+
+    // VAL-CONFIG-004: re-enabling removes the name (all equal entries) from
+    // the persisted list.
+    #[test]
+    fn set_skill_disabled_false_removes_all_equal_entries() {
+        let dir = TempDir::new().unwrap();
+        // Seed a list that already contains duplicates of the target plus an
+        // unrelated opaque entry.
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value["skills"]["disabled"] = serde_json::json!(["alpha", "ghost", "alpha"]);
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let svc = service(&dir);
+        let updated = svc.set_skill_disabled("alpha", false).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["ghost"]);
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["skills"]["disabled"], serde_json::json!(["ghost"]));
+    }
+
+    // Re-enabling a name that is not in the list is a no-op, not an error.
+    #[test]
+    fn set_skill_disabled_false_on_absent_name_is_noop() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        let updated = svc.set_skill_disabled("never-disabled", false).unwrap();
+        assert!(updated.skills.disabled.is_empty());
+    }
+
+    // Insert is deduplicating: disabling an already-disabled skill must not
+    // grow the list.
+    #[test]
+    fn set_skill_disabled_true_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        svc.set_skill_disabled("alpha", true).unwrap();
+        let updated = svc.set_skill_disabled("alpha", true).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha"]);
+    }
+
+    // VAL-CONFIG-006 / VAL-CONFIG-007: back-to-back disables of distinct
+    // skills read-modify-write the list — no lost update, both names persist.
+    #[test]
+    fn back_to_back_disables_keep_both_names() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        svc.set_skill_disabled("alpha", true).unwrap();
+        let updated = svc.set_skill_disabled("beta", true).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha", "beta"]);
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(
+            written["skills"]["disabled"],
+            serde_json::json!(["alpha", "beta"])
+        );
+    }
+
+    // VAL-CONFIG-005: the list survives a "restart" — a fresh service over
+    // the same data dir (config.json is the durable store) reads it back.
+    #[test]
+    fn disabled_list_survives_service_restart() {
+        let dir = TempDir::new().unwrap();
+        service(&dir).set_skill_disabled("alpha", true).unwrap();
+
+        let reread = service(&dir).get_settings().unwrap();
+        assert_eq!(reread.skills.disabled, vec!["alpha"]);
+    }
+
+    // Pre-existing opaque entries (orphans, duplicates, whitespace) stay
+    // verbatim when an unrelated name is toggled.
+    #[test]
+    fn set_skill_disabled_preserves_opaque_entries_verbatim() {
+        let dir = TempDir::new().unwrap();
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value["skills"]["disabled"] = serde_json::json!(["ghost", "ghost", "", "  "]);
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let updated = service(&dir).set_skill_disabled("alpha", true).unwrap();
+        assert_eq!(
+            updated.skills.disabled,
+            vec!["ghost", "ghost", "", "  ", "alpha"]
+        );
+    }
+
+    // VAL-CONFIG-018: a disk-write failure surfaces as a structured
+    // INTERNAL_ERROR — no panic. (fs::write is non-atomic; this asserts error
+    // reporting only, not absence of partial writes.)
+    #[cfg(unix)]
+    #[test]
+    fn set_skill_disabled_write_failure_returns_structured_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        // Materialize a valid config first, then make it unwritable.
+        svc.get_settings().unwrap();
+        fs::set_permissions(config_path(&dir), fs::Permissions::from_mode(0o444)).unwrap();
+
+        let err = svc.set_skill_disabled("alpha", true).unwrap_err();
+        assert_eq!(error_code(&err), "INTERNAL_ERROR");
+        let json = serde_json::to_value(&err).unwrap();
+        assert!(json["message"].is_string());
+        assert!(json.get("hint").is_some());
+
+        // Restore permissions so TempDir cleanup succeeds.
+        fs::set_permissions(config_path(&dir), fs::Permissions::from_mode(0o644)).unwrap();
     }
 
     // The closed section enum recognizes "skills" in both update and reset.
