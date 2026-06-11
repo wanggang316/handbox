@@ -566,6 +566,38 @@ mod tests {
         ));
     }
 
+    // VAL-VALIDATION-003 (byte semantics): unlike `description`, `name` has no
+    // pure byte-vs-char discriminator test, and this records WHY. The name cap
+    // is also measured in bytes (`validate_name` uses `str::len`), but the legal
+    // character set is ASCII (`a-z`, `0-9`, `-`), where bytes ≡ chars — so no
+    // *legal* string can have bytes > 64 while chars ≤ 64. Any multi-byte name
+    // is non-ASCII and trips the character-set check FIRST, before the length
+    // check is even relevant. This test pins that ordering: 32 two-byte chars
+    // (64 bytes, 32 chars — well within the 64-byte cap) is still rejected as
+    // InvalidName for invalid characters, not for length. frontmatter.name ==
+    // dir_name keeps us on the name-validation path (avoids NameMismatch).
+    #[test]
+    fn val_003_multibyte_name_hits_charset_before_length() {
+        let name = "é".repeat(32);
+        // Premise: 64 bytes (== MAX_NAME_LENGTH, so length alone would pass),
+        // 32 chars. The rejection below is therefore the charset rule, not length.
+        assert_eq!(name.len(), 64);
+        assert_eq!(name.chars().count(), 32);
+        assert_eq!(name.len(), MAX_NAME_LENGTH);
+        match run(&name, Some(meta(Some(&name), Some("ok")))) {
+            Err(SkillError::InvalidName {
+                name: got, reason, ..
+            }) => {
+                assert_eq!(got, name);
+                assert!(
+                    reason.contains("invalid characters"),
+                    "expected charset reason, got {reason:?}",
+                );
+            }
+            other => panic!("expected InvalidName (charset), got {other:?}"),
+        }
+    }
+
     // VAL-VALIDATION-004: description missing → MissingDescription.
     #[test]
     fn val_004_missing_description() {
@@ -611,6 +643,28 @@ mod tests {
         match run("ok-skill", Some(meta(None, Some(&too_long)))) {
             Err(SkillError::DescriptionTooLong { actual, max, .. }) => {
                 assert_eq!(actual, 1025);
+                assert_eq!(max, MAX_DESCRIPTION_LENGTH);
+            }
+            other => panic!("expected DescriptionTooLong, got {other:?}"),
+        }
+    }
+
+    // VAL-VALIDATION-005 (byte discriminator): the description cap is measured
+    // in BYTES (`String::len`), not Unicode scalar values. A description of 513
+    // two-byte chars is 1026 bytes but only 513 chars; were the cap measured by
+    // `.chars().count()` it would (wrongly) pass at 513 < 1024. Asserting
+    // DescriptionTooLong { actual: 1026 } locks the byte contract and would
+    // fail if `.len()` were ever refactored to `.chars().count()`.
+    #[test]
+    fn val_005_description_length_is_bytes_not_chars() {
+        let desc = "é".repeat(513);
+        // Fix the premise: 1026 bytes, 513 chars (513 < MAX so char-counting passes).
+        assert_eq!(desc.len(), 1026);
+        assert_eq!(desc.chars().count(), 513);
+        assert!(desc.chars().count() < MAX_DESCRIPTION_LENGTH);
+        match run("ok-skill", Some(meta(None, Some(&desc)))) {
+            Err(SkillError::DescriptionTooLong { actual, max, .. }) => {
+                assert_eq!(actual, 1026);
                 assert_eq!(max, MAX_DESCRIPTION_LENGTH);
             }
             other => panic!("expected DescriptionTooLong, got {other:?}"),
