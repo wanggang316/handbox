@@ -7,23 +7,44 @@ use crate::models::{
 };
 use crate::services::StorageService;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 #[derive(Clone)]
 pub struct SettingsService {
     storage: Arc<StorageService>,
+    /// Serializes every load→mutate→save critical section across clones so a
+    /// concurrent writer cannot overwrite another writer's freshly saved
+    /// state (security audit M-1: the disabled list must not fail open by
+    /// race). Held only at the public entry points — never re-acquired by
+    /// internal helpers, so there is no re-entrant deadlock.
+    write_lock: Arc<Mutex<()>>,
 }
 
 impl SettingsService {
     pub fn new(storage: Arc<StorageService>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            write_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// Acquire the whole-file critical-section lock. A poisoned lock (a
+    /// writer panicked) degrades to a structured INTERNAL_ERROR, never a
+    /// panic. `get_settings` takes it too: `load_or_default` writes the
+    /// default config on first run, which is itself a read-modify-write.
+    fn lock_writes(&self) -> Result<MutexGuard<'_, ()>, AppError> {
+        self.write_lock
+            .lock()
+            .map_err(|_| AppError::internal_error("设置锁已损坏，请重启应用"))
     }
 
     pub fn get_settings(&self) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
         self.load_or_default()
     }
 
     pub fn update_settings(&self, request: UpdateSettingsRequest) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
         let mut settings = self.load_or_default()?;
         let section = request.section.as_str();
 
@@ -66,6 +87,7 @@ impl SettingsService {
     /// storage and stay verbatim, and every other settings section round-trips
     /// untouched through the same load/save path as any settings update.
     pub fn set_skill_disabled(&self, name: &str, disabled: bool) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
         let mut settings = self.load_or_default()?;
         if disabled {
             if !settings.skills.disabled.iter().any(|entry| entry == name) {
@@ -79,6 +101,7 @@ impl SettingsService {
     }
 
     pub fn reset_settings(&self, sections: Option<Vec<String>>) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
         let default_settings = default_settings();
         let settings = match sections {
             None => default_settings,
@@ -485,6 +508,59 @@ mod tests {
 
         // Restore permissions so TempDir cleanup succeeds.
         fs::set_permissions(config_path(&dir), fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    // M-1 (security audit): the load→mutate→save critical section is
+    // serialized across clones — a concurrent `set_skill_disabled` and
+    // `update_settings` must never lose the freshly written disabled entry
+    // (the safety switch must not fail open by race). Threads are released
+    // by a barrier to maximize interleaving; repeated rounds make a lost
+    // update overwhelmingly likely without the lock.
+    #[test]
+    fn concurrent_disable_and_update_never_lose_disabled_entry() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        // Materialize a valid config so neither thread hits the first-run path.
+        svc.get_settings().unwrap();
+
+        for round in 0..32 {
+            let name = format!("skill-{round}");
+            let barrier = Arc::new(Barrier::new(2));
+
+            let disable = {
+                let svc = svc.clone();
+                let barrier = barrier.clone();
+                let name = name.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    svc.set_skill_disabled(&name, true).unwrap();
+                })
+            };
+            let update = {
+                let svc = svc.clone();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    svc.update_settings(UpdateSettingsRequest {
+                        section: "general".to_string(),
+                        data: serde_json::json!({ "autoScroll": round % 2 == 0 }),
+                    })
+                    .unwrap();
+                })
+            };
+            disable.join().unwrap();
+            update.join().unwrap();
+
+            let settings = svc.get_settings().unwrap();
+            assert!(
+                settings.skills.disabled.iter().any(|entry| entry == &name),
+                "round {round}: disabled entry `{name}` was lost: {:?}",
+                settings.skills.disabled
+            );
+        }
     }
 
     // The closed section enum recognizes "skills" in both update and reset.
