@@ -16,4 +16,6 @@ export interface SkillInfo {
   body: string | null;
   /** 校验诊断信息；成功项为空数组 */
   diagnostics: string[];
+  /** 是否已禁用 */
+  disabled: boolean;
 }

@@ -62,10 +62,26 @@ class SkillState {
       this.setLoading(false);
     }
   }
+
+  async toggleSkill(name: string, disabled: boolean): Promise<void> {
+    try {
+      await skillApi.setSkillDisabled(name, disabled);
+      // 更新本地内存态
+      const skill = this.state.skills.find((s) => s.name === name);
+      if (skill) {
+        skill.disabled = disabled;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '切换技能状态失败';
+      this.setError(message);
+      throw error;
+    }
+  }
 }
 
 export const skillState = new SkillState();
 
 export const skillActions = {
   loadSkills: (force = false) => skillState.loadSkills(force),
+  toggleSkill: (name: string, disabled: boolean) => skillState.toggleSkill(name, disabled),
 };

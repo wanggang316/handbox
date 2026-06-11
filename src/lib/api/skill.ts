@@ -9,3 +9,13 @@ import type { SkillInfo } from '../types';
 export async function listSkills(workingDir?: string): Promise<SkillInfo[]> {
   return apiCall<SkillInfo[]>('skill_list', { workingDir });
 }
+
+/**
+ * 设置 skill 的禁用状态。
+ *
+ * @param name skill 名称
+ * @param disabled 是否禁用
+ */
+export async function setSkillDisabled(name: string, disabled: boolean): Promise<void> {
+  return apiCall<void>('skill_set_disabled', { name, disabled });
+}
