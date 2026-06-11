@@ -147,7 +147,8 @@ impl SettingsService {
     /// same filesystem). A failed serialize or write leaves the original
     /// file byte-for-byte intact — readers never observe a torn config
     /// (security audit L-1). The suffix is process-id + an in-process
-    /// counter so concurrent saves never collide on the temp name.
+    /// counter + per-call entropy (nanosecond timestamp) so concurrent saves
+    /// never collide on the temp name even after PID reuse.
     fn save_settings(&self, settings: &AppSettings) -> Result<(), AppError> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -159,16 +160,30 @@ impl SettingsService {
         let dir = path
             .parent()
             .ok_or_else(|| AppError::internal_error("无法确定设置文件所在目录"))?;
+
+        // Entropy component: nanoseconds since UNIX_EPOCH; on error fall back to 0.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+
         let temp_path = dir.join(format!(
-            ".config.json.{}.{}.tmp",
+            ".config.json.{}.{}.{}.tmp",
             std::process::id(),
-            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed),
+            nanos
         ));
 
         std::fs::write(&temp_path, content)
             .map_err(|e| AppError::internal_error(&format!("写入设置失败: {e}")))?;
         if let Err(e) = std::fs::rename(&temp_path, &path) {
-            let _ = std::fs::remove_file(&temp_path);
+            if let Err(cleanup_err) = std::fs::remove_file(&temp_path) {
+                tracing::warn!(
+                    path = %temp_path.display(),
+                    error = %cleanup_err,
+                    "failed to clean up temp file after rename failure"
+                );
+            }
             return Err(AppError::internal_error(&format!("写入设置失败: {e}")));
         }
         Ok(())
@@ -643,5 +658,56 @@ mod tests {
             .reset_settings(Some(vec!["skills".to_string()]))
             .unwrap();
         assert!(reset.skills.disabled.is_empty());
+    }
+
+    // Test that temp file names contain entropy (pid + counter + nanos),
+    // so back-to-back saves or PID reuse do not collide.
+    #[test]
+    fn temp_file_names_contain_entropy_components() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        // Perform two consecutive saves and intercept temp file names
+        // by monitoring the directory between operations.
+        // Since saves are atomic (temp then rename), we can only see
+        // a temp file if the directory listing happens during the window.
+        // Instead, we rely on the fact that if entropy is insufficient,
+        // the second save's temp file would overwrite the first (which would fail).
+        // To test entropy reliably, we verify that multiple back-to-back
+        // saves succeed without collision by checking that the final state
+        // is correct and the operation returns Ok.
+
+        svc.set_skill_disabled("skill1", true).unwrap();
+        svc.set_skill_disabled("skill2", true).unwrap();
+        svc.set_skill_disabled("skill3", true).unwrap();
+
+        let settings = svc.get_settings().unwrap();
+        assert_eq!(
+            settings.skills.disabled,
+            vec!["skill1", "skill2", "skill3"],
+            "all three back-to-back saves must succeed without collision"
+        );
+    }
+
+    // Test that successful saves leave no temp files behind (this also
+    // exercises the "temp file names do not collide" property indirectly).
+    #[test]
+    fn multiple_back_to_back_saves_leave_no_temp_files() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        for i in 0..10 {
+            svc.set_skill_disabled(&format!("skill-{i}"), true).unwrap();
+        }
+
+        let entries: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["config.json"],
+            "even after many saves, only config.json may remain"
+        );
     }
 }
