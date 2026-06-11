@@ -107,6 +107,12 @@ pub async fn agent_session_update_field(
             })?;
             AgentSessionParameter::EnabledTools(tools)
         }
+        "enabledSkills" => {
+            let skills: Vec<String> = serde_json::from_value(value).map_err(|e| {
+                AppError::validation_error(&format!("Invalid enabled_skills value: {}", e))
+            })?;
+            AgentSessionParameter::EnabledSkills(skills)
+        }
         "toolExecutionMode" => AgentSessionParameter::ToolExecutionMode(parse_optional_string(
             &value,
             "tool_execution_mode",
@@ -161,5 +167,70 @@ fn parse_optional_string(
                 .ok_or_else(|| AppError::validation_error(&format!("Invalid {} value", field)))?
                 .to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mirrors the exact expression the `"enabledSkills"` branch of
+    /// `agent_session_update_field` runs to coerce the IPC value into a
+    /// `Vec<String>`. Centralizing the contract here keeps VAL-PERSIST-008
+    /// (reject non-array / non-string element / null) and VAL-PERSIST-012
+    /// (a well-formed array maps to `EnabledSkills`) directly testable without a
+    /// Tauri runtime.
+    fn parse_enabled_skills(value: serde_json::Value) -> Result<AgentSessionParameter, AppError> {
+        let skills: Vec<String> = serde_json::from_value(value).map_err(|e| {
+            AppError::validation_error(&format!("Invalid enabled_skills value: {}", e))
+        })?;
+        Ok(AgentSessionParameter::EnabledSkills(skills))
+    }
+
+    /// VAL-PERSIST-012: a well-formed string array is accepted and produces the
+    /// EnabledSkills parameter verbatim (no dedup at the wire layer).
+    #[test]
+    fn enabled_skills_accepts_string_array_verbatim() {
+        let param =
+            parse_enabled_skills(serde_json::json!(["a", "a", ""])).expect("array must parse");
+        match param {
+            AgentSessionParameter::EnabledSkills(skills) => {
+                assert_eq!(skills, vec!["a".to_string(), "a".to_string(), "".to_string()]);
+            }
+            _ => panic!("expected EnabledSkills variant"),
+        }
+
+        // Empty array is valid and yields an empty Vec.
+        let empty = parse_enabled_skills(serde_json::json!([])).expect("empty array must parse");
+        match empty {
+            AgentSessionParameter::EnabledSkills(skills) => assert!(skills.is_empty()),
+            _ => panic!("expected EnabledSkills variant"),
+        }
+    }
+
+    /// VAL-PERSIST-008: non-array, null, and arrays containing non-string
+    /// elements are all rejected with a VALIDATION_ERROR — the bad value never
+    /// becomes an EnabledSkills parameter, so no row is ever written.
+    #[test]
+    fn enabled_skills_rejects_non_array_null_and_non_string_elements() {
+        for bad in [
+            serde_json::json!(null),
+            serde_json::json!("not-an-array"),
+            serde_json::json!(42),
+            serde_json::json!({ "k": "v" }),
+            serde_json::json!(["ok", 1]),
+            serde_json::json!([true]),
+            serde_json::json!([null]),
+        ] {
+            // AgentSessionParameter is not Debug, so match instead of expect_err.
+            match parse_enabled_skills(bad.clone()) {
+                Ok(_) => panic!("value must be rejected: {}", bad),
+                Err(err) => assert_eq!(
+                    err.code, "VALIDATION_ERROR",
+                    "rejection must be a VALIDATION_ERROR for {}",
+                    bad
+                ),
+            }
+        }
     }
 }

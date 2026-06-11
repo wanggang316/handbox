@@ -17,6 +17,7 @@ pub struct AgentSession {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Vec<String>, // JSON: Vec<String> (tool names)
+    pub enabled_skills: Vec<String>, // JSON: Vec<String> (skill names)
     pub tool_execution_mode: Option<String>,
     pub message_count: i32,
     pub last_message_at: Option<Timestamp>,
@@ -52,6 +53,7 @@ pub struct CreateAgentSessionRequest {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Option<Vec<String>>,
+    pub enabled_skills: Option<Vec<String>>,
     pub tool_execution_mode: Option<String>,
 }
 
@@ -68,6 +70,7 @@ pub struct UpdateAgentSessionRequest {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Option<Vec<String>>,
+    pub enabled_skills: Option<Vec<String>>,
     pub tool_execution_mode: Option<String>,
 }
 
@@ -89,6 +92,7 @@ mod tests {
             max_tokens: Some(2048),
             working_dir: Some("/tmp/project".to_string()),
             enabled_tools: vec!["read".to_string(), "write".to_string()],
+            enabled_skills: vec!["pdf".to_string(), "csv".to_string()],
             tool_execution_mode: Some("auto".to_string()),
             message_count: 3,
             last_message_at: Some(2000),
@@ -101,6 +105,8 @@ mod tests {
         assert!(json.contains("\"modelId\""));
         assert!(json.contains("\"projectId\""));
         assert!(json.contains("\"enabledTools\""));
+        // VAL-PERSIST-010: enabled_skills serializes as camelCase enabledSkills.
+        assert!(json.contains("\"enabledSkills\""));
         assert!(json.contains("\"messageCount\""));
         assert!(json.contains("\"lastMessageAt\""));
 
@@ -109,6 +115,7 @@ mod tests {
         assert_eq!(session.name, deserialized.name);
         assert_eq!(session.project_id, deserialized.project_id);
         assert_eq!(session.enabled_tools, deserialized.enabled_tools);
+        assert_eq!(session.enabled_skills, deserialized.enabled_skills);
         assert_eq!(session.message_count, deserialized.message_count);
     }
 
@@ -130,6 +137,7 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: Vec::new(),
+            enabled_skills: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
@@ -149,6 +157,8 @@ mod tests {
         assert!(json.contains("\"modelId\":null"));
         assert!(json.contains("\"projectId\":null"));
         assert!(json.contains("\"workingDir\":null"));
+        // VAL-PERSIST-010: an empty enabled_skills carries [] on the wire, not null.
+        assert!(json.contains("\"enabledSkills\":[]"));
 
         let deserialized: AgentSession = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.last_message_at, None);
@@ -186,5 +196,6 @@ mod tests {
         assert!(req.project_id.is_none());
         assert!(req.model_id.is_none());
         assert!(req.enabled_tools.is_none());
+        assert!(req.enabled_skills.is_none());
     }
 }

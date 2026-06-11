@@ -22,6 +22,7 @@ pub enum AgentSessionParameter {
     MaxTokens(Option<i32>),
     WorkingDir(Option<String>),
     EnabledTools(Vec<String>),
+    EnabledSkills(Vec<String>),
     ToolExecutionMode(Option<String>),
 }
 
@@ -115,6 +116,7 @@ impl AgentSessionService {
             max_tokens: request.max_tokens,
             working_dir,
             enabled_tools: request.enabled_tools.unwrap_or_default(),
+            enabled_skills: request.enabled_skills.unwrap_or_default(),
             tool_execution_mode: request.tool_execution_mode,
             message_count: 0,
             last_message_at: None,
@@ -182,6 +184,7 @@ impl AgentSessionService {
                 session.working_dir = Self::validate_working_dir(working_dir.as_deref())?;
             }
             AgentSessionParameter::EnabledTools(tools) => session.enabled_tools = tools,
+            AgentSessionParameter::EnabledSkills(skills) => session.enabled_skills = skills,
             AgentSessionParameter::ToolExecutionMode(mode) => session.tool_execution_mode = mode,
         }
 
@@ -287,6 +290,7 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: None,
+            enabled_skills: None,
             tool_execution_mode: None,
         }
     }
@@ -613,6 +617,68 @@ mod tests {
         service.delete_session(created.id.clone()).await.unwrap();
         let err = service.get_session(created.id).await.expect_err("gone");
         assert_eq!(err.code, "NOT_FOUND");
+    }
+
+    /// VAL-PERSIST-011: a create request that omits enabledSkills lands an empty
+    /// Vec in storage and reads back as an empty Vec (unwrap_or_default).
+    #[tokio::test]
+    async fn create_without_enabled_skills_defaults_to_empty_vec() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        // base_request leaves enabled_skills as None.
+        let created = service
+            .create_session(base_request("No Skills"))
+            .await
+            .unwrap();
+        assert_eq!(created.enabled_skills, Vec::<String>::new());
+
+        // Reads back as [] after a fresh fetch.
+        let fetched = service.get_session(created.id).await.unwrap();
+        assert_eq!(fetched.enabled_skills, Vec::<String>::new());
+    }
+
+    /// VAL-PERSIST-002: update_session_field(EnabledSkills) persists the new
+    /// list and bumps updated_at.
+    #[tokio::test]
+    async fn update_field_enabled_skills_persists_and_bumps_updated_at() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        let created = service
+            .create_session(base_request("Skills Update"))
+            .await
+            .unwrap();
+        let created_updated_at = created.updated_at;
+
+        // Ensure the millisecond clock advances so updated_at is observably newer.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        let updated = service
+            .update_session_field(
+                created.id.clone(),
+                AgentSessionParameter::EnabledSkills(vec![
+                    "pdf".to_string(),
+                    "csv".to_string(),
+                ]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            updated.enabled_skills,
+            vec!["pdf".to_string(), "csv".to_string()]
+        );
+        assert!(
+            updated.updated_at > created_updated_at,
+            "update_session_field must bump updated_at"
+        );
+
+        // Persisted, not just returned in-memory.
+        let reloaded = service.get_session(created.id).await.unwrap();
+        assert_eq!(
+            reloaded.enabled_skills,
+            vec!["pdf".to_string(), "csv".to_string()]
+        );
     }
 
     #[tokio::test]
