@@ -15,7 +15,7 @@ use tauri::State;
 
 use crate::models::AppError;
 use crate::services::skills::{Skill, SkillError, SourceScope};
-use crate::services::SkillService;
+use crate::services::{SettingsService, SkillService};
 
 /// A single discovered skill as seen by the frontend.
 ///
@@ -42,6 +42,9 @@ pub struct SkillInfo {
     pub body: Option<String>,
     /// Validation diagnostics. Empty for a clean skill; non-empty otherwise.
     pub diagnostics: Vec<String>,
+    /// Whether the skill name appears in the global `skills.disabled` list
+    /// (exact-string match, applied after cross-scope dedup).
+    pub disabled: bool,
 }
 
 /// List discovered skills (including validation diagnostics) for the given
@@ -55,23 +58,38 @@ pub struct SkillInfo {
 ///
 /// The command itself does not fail on a malformed skill; per-skill problems
 /// are reported as `diagnostics` on the offending [`SkillInfo`]. It returns an
-/// `AppError` only on a command-level fault.
+/// `AppError` only on a command-level fault — notably an unreadable or
+/// structurally invalid `config.json`, which surfaces as the settings
+/// service's structured `INTERNAL_ERROR` (the file is left untouched).
 #[tauri::command]
 pub async fn skill_list(
     working_dir: Option<String>,
     skill_service: State<'_, Arc<SkillService>>,
+    settings_service: State<'_, SettingsService>,
 ) -> Result<Vec<SkillInfo>, AppError> {
+    let settings = settings_service.get_settings()?;
     let (skills, errors) = skill_service.discover(working_dir.as_deref().map(Path::new));
-    Ok(to_skill_infos(skills, errors))
+    Ok(to_skill_infos(skills, errors, &settings.skills.disabled))
 }
 
-/// Fold discovery output `(skills, errors)` into a flat [`SkillInfo`] list.
+/// Fold discovery output `(skills, errors)` into a flat [`SkillInfo`] list,
+/// annotating each entry's `disabled` flag from the global disabled list.
 ///
 /// Pure and filesystem-independent so it can be unit-tested directly. Clean
 /// skills map to entries with an empty `diagnostics`; each [`SkillError`] maps
 /// to a diagnostic entry whose `name`/`scope`/`path` are derived from the error
 /// (which carries the offending path for exactly this purpose).
-fn to_skill_infos(skills: Vec<Skill>, errors: Vec<SkillError>) -> Vec<SkillInfo> {
+///
+/// The `disabled` annotation is an exact-string name match applied after
+/// discovery's cross-scope dedup, so a shadowed name yields exactly one
+/// (winning-scope) row. The list itself is opaque storage: orphan, duplicate,
+/// empty or case-mismatched entries are simply inert here — no phantom rows,
+/// no false disables, no errors.
+fn to_skill_infos(
+    skills: Vec<Skill>,
+    errors: Vec<SkillError>,
+    disabled: &[String],
+) -> Vec<SkillInfo> {
     let mut infos: Vec<SkillInfo> = Vec::with_capacity(skills.len() + errors.len());
 
     for skill in skills {
@@ -82,11 +100,16 @@ fn to_skill_infos(skills: Vec<Skill>, errors: Vec<SkillError>) -> Vec<SkillInfo>
             path: skill_dir(&skill.source.path),
             body: Some(skill.body),
             diagnostics: Vec::new(),
+            disabled: false,
         });
     }
 
     for error in errors {
         infos.push(error_to_skill_info(error));
+    }
+
+    for info in &mut infos {
+        info.disabled = disabled.iter().any(|name| name == &info.name);
     }
 
     infos
@@ -117,6 +140,7 @@ fn error_to_skill_info(error: SkillError) -> SkillInfo {
         path: dir,
         body: None,
         diagnostics: vec![diagnostic],
+        disabled: false,
     }
 }
 
@@ -170,11 +194,27 @@ mod tests {
 
     /// Run `skill_list`'s inner logic against fixture roots — exercises the
     /// real `SkillService::discover` plus the `to_skill_infos` fold, which is
-    /// everything `skill_list` does apart from the Tauri `State` unwrap.
-    fn run(app: &Path, user: &Path, working_dir: Option<&Path>) -> Vec<SkillInfo> {
+    /// everything `skill_list` does apart from the Tauri `State` unwraps and
+    /// the settings read (the `disabled` list is injected directly here).
+    fn run_with_disabled(
+        app: &Path,
+        user: &Path,
+        working_dir: Option<&Path>,
+        disabled: &[String],
+    ) -> Vec<SkillInfo> {
         let svc = SkillService::for_test(app.to_path_buf(), user.to_path_buf());
         let (skills, errors) = svc.discover(working_dir);
-        to_skill_infos(skills, errors)
+        to_skill_infos(skills, errors, disabled)
+    }
+
+    /// [`run_with_disabled`] with an empty disabled list.
+    fn run(app: &Path, user: &Path, working_dir: Option<&Path>) -> Vec<SkillInfo> {
+        run_with_disabled(app, user, working_dir, &[])
+    }
+
+    /// Owned `Vec<String>` from string literals, for disabled-list fixtures.
+    fn names(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
     }
 
     // VAL-IPC-001: no workingDir → user + app-data skills, each with
@@ -311,6 +351,7 @@ mod tests {
             path: PathBuf::from("/skills/x"),
             body: Some("b".to_string()),
             diagnostics: Vec::new(),
+            disabled: false,
         };
         let json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["scope"], "appData");
@@ -402,7 +443,7 @@ mod tests {
             },
         ];
 
-        let infos = to_skill_infos(Vec::new(), errors);
+        let infos = to_skill_infos(Vec::new(), errors, &[]);
         assert_eq!(infos.len(), 6);
         for info in &infos {
             assert_eq!(info.name, "widget", "name from parent dir: {info:?}");
@@ -411,6 +452,140 @@ mod tests {
             assert!(info.body.is_none());
             assert_eq!(info.diagnostics.len(), 1);
             assert!(!info.diagnostics[0].is_empty());
+        }
+    }
+
+    // VAL-CONFIG-001: empty disabled list → every skill reports disabled=false.
+    #[test]
+    fn val_config_001_default_all_enabled() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+        write_skill_raw(user.path(), "beta", &skill_md("b", "b"));
+
+        let infos = run(app.path(), user.path(), None);
+        assert_eq!(infos.len(), 2);
+        for info in &infos {
+            assert!(!info.disabled, "default must be enabled: {info:?}");
+        }
+    }
+
+    // VAL-CONFIG-002: `disabled` is a definite camelCase boolean wire key.
+    #[test]
+    fn val_config_002_disabled_is_camel_case_boolean_wire_key() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+
+        for disabled in [Vec::new(), names(&["alpha"])] {
+            let infos = run_with_disabled(app.path(), user.path(), None, &disabled);
+            let json = serde_json::to_value(&infos[0]).unwrap();
+            assert!(
+                json.get("disabled").is_some_and(|v| v.is_boolean()),
+                "wire key `disabled` must be a boolean: {json}"
+            );
+            assert_eq!(json["disabled"], !disabled.is_empty());
+        }
+    }
+
+    // VAL-CONFIG-008: an orphan name in the list (skill not discoverable)
+    // produces no phantom row and no error.
+    #[test]
+    fn val_config_008_orphan_name_produces_no_phantom_row() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+
+        let infos = run_with_disabled(app.path(), user.path(), None, &names(&["ghost"]));
+        let idx = by_name(&infos);
+        assert_eq!(idx.len(), 1, "no phantom row for `ghost`: {infos:?}");
+        assert!(!idx["alpha"].disabled);
+    }
+
+    // VAL-CONFIG-009: a cross-scope shadowed name in the list → exactly one
+    // row (the winning scope) with disabled=true, no duplicates.
+    #[test]
+    fn val_config_009_shadowed_name_single_winner_disabled() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let proj = TempDir::new().unwrap();
+        let proj_skills = proj.path().join(".handbox").join("skills");
+        write_skill_raw(app.path(), "shared", &skill_md("from app", "a"));
+        write_skill_raw(user.path(), "shared", &skill_md("from user", "u"));
+        write_skill_raw(&proj_skills, "shared", &skill_md("from proj", "p"));
+
+        let infos = run_with_disabled(
+            app.path(),
+            user.path(),
+            Some(proj.path()),
+            &names(&["shared"]),
+        );
+        assert_eq!(infos.len(), 1, "one winner row only: {infos:?}");
+        assert_eq!(infos[0].scope, SourceScope::Project);
+        assert!(infos[0].disabled);
+    }
+
+    // VAL-CONFIG-010: duplicate names in the list collapse onto the single
+    // skill row, disabled=true, no crash.
+    #[test]
+    fn val_config_010_duplicate_list_entries_single_row() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+
+        let infos = run_with_disabled(app.path(), user.path(), None, &names(&["alpha", "alpha"]));
+        assert_eq!(infos.len(), 1, "no duplicate rows: {infos:?}");
+        assert!(infos[0].disabled);
+    }
+
+    // VAL-CONFIG-012: the global list applies to project-scope (workingDir)
+    // skills as well.
+    #[test]
+    fn val_config_012_disable_applies_to_project_scope() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let proj = TempDir::new().unwrap();
+        let proj_skills = proj.path().join(".handbox").join("skills");
+        write_skill_raw(&proj_skills, "gamma", &skill_md("from proj", "g"));
+
+        let infos = run_with_disabled(
+            app.path(),
+            user.path(),
+            Some(proj.path()),
+            &names(&["gamma"]),
+        );
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].scope, SourceScope::Project);
+        assert!(infos[0].disabled);
+    }
+
+    // VAL-CONFIG-014: matching is exact-string only — a case-mismatched entry
+    // never disables a skill (valid skill names are all-lowercase).
+    #[test]
+    fn val_config_014_case_mismatched_entry_does_not_disable() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "myskill", &skill_md("m", "m"));
+
+        let infos = run_with_disabled(app.path(), user.path(), None, &names(&["MySkill"]));
+        let idx = by_name(&infos);
+        assert_eq!(idx.len(), 1);
+        assert!(!idx["myskill"].disabled, "exact match only: {infos:?}");
+    }
+
+    // VAL-CONFIG-015: empty / whitespace-only entries are inert — nothing is
+    // falsely disabled and the fold does not panic.
+    #[test]
+    fn val_config_015_empty_and_whitespace_entries_are_inert() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+        write_skill_raw(user.path(), "beta", &skill_md("b", "b"));
+
+        let infos = run_with_disabled(app.path(), user.path(), None, &names(&["", "  ", "\t"]));
+        assert_eq!(infos.len(), 2);
+        for info in &infos {
+            assert!(!info.disabled, "whitespace entries must be inert: {info:?}");
         }
     }
 }
