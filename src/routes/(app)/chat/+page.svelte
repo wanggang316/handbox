@@ -201,9 +201,35 @@
     await sendMessageInternal(message, attachments);
   }
 
-  // 为新会话生成标题（在 user 消息确认落库后触发）。
-  // 标题生成为尽力而为：失败时给出可见提示但不影响消息收发，仍可右键手动生成。
-  async function generateTitleForNewChat(targetChatId: string) {
+  // 仍为占位名（未生成过标题）的会话名集合。createChat 用「新会话」，
+  // 草稿态用「未命名」，两者都视为「未生成过」。
+  const TITLE_PLACEHOLDERS = new Set(["新会话", "未命名"]);
+
+  // 正在生成标题的会话 id，避免快路径与发送后兜底并发重复触发。
+  const titleGenInFlight = new Set<string>();
+
+  // 判断会话标题是否仍是占位（即尚未生成过标题）。
+  function chatTitleIsPlaceholder(name: string | undefined): boolean {
+    return !name || TITLE_PLACEHOLDERS.has(name.trim());
+  }
+
+  // 尽力而为地为会话生成标题：仅当标题仍为占位且当前无同会话生成在途时执行。
+  // 幂等可重入——快路径（onUserMessageSaved）与发送后兜底共用，失败给出可见提示，
+  // 不影响消息收发，仍可右键手动生成；占位未变则下次发送会再次尝试补齐。
+  async function maybeGenerateTitle(targetChatId: string) {
+    if (!targetChatId || titleGenInFlight.has(targetChatId)) {
+      return;
+    }
+
+    const chat =
+      chatState.currentChat?.id === targetChatId
+        ? chatState.currentChat
+        : chatState.chats.find((c) => c.id === targetChatId);
+    if (chat && !chatTitleIsPlaceholder(chat.name)) {
+      return; // 已有真实标题，无需生成
+    }
+
+    titleGenInFlight.add(targetChatId);
     try {
       const result = await chatApi.generateChatTitle(targetChatId);
       if (result.title) {
@@ -212,6 +238,8 @@
     } catch (error) {
       console.error("Failed to generate title:", error);
       toastActions.warning("自动生成标题失败，可右键会话手动生成");
+    } finally {
+      titleGenInFlight.delete(targetChatId);
     }
   }
 
@@ -229,6 +257,8 @@
         await messageStore.resendMessage(chatId, editingMessageId, message);
         // 清除编辑状态
         editingMessageId = null;
+        // 发送后兜底：标题仍为占位则补生成
+        void maybeGenerateTitle(chatId);
         return;
       }
 
@@ -251,9 +281,17 @@
       const titleChatId = newChatIdForTitle;
       await messageStore.sendMessage(message, attachments, {
         onUserMessageSaved: titleChatId
-          ? () => generateTitleForNewChat(titleChatId)
+          ? () => maybeGenerateTitle(titleChatId)
           : undefined,
       });
+
+      // 发送后兜底：无论是否新会话，只要标题仍为占位（含首条快路径失败、
+      // 历史无标题会话等）就补生成一次。maybeGenerateTitle 幂等且有占位判断，
+      // 标题已生成时此处会直接跳过。
+      const activeChatId = chatState.currentChat?.id;
+      if (activeChatId) {
+        void maybeGenerateTitle(activeChatId);
+      }
     } catch (error) {
       console.error("Failed to send message:", error);
       // 如果是模型选择错误，可以在这里显示提示
