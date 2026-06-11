@@ -21,6 +21,7 @@
   import * as chatApi from "$lib/api/chat";
   import { goto } from "$app/navigation";
   import { messageStore } from "$lib/states";
+  import { toastActions } from "$lib/states";
   import type { ChatAttachment } from "$lib/types/chat";
 
   let chatId = $state("");
@@ -200,6 +201,48 @@
     await sendMessageInternal(message, attachments);
   }
 
+  // 仍为占位名（未生成过标题）的会话名集合。createChat 用「新会话」，
+  // 草稿态用「未命名」，两者都视为「未生成过」。
+  const TITLE_PLACEHOLDERS = new Set(["新会话", "未命名"]);
+
+  // 正在生成标题的会话 id，避免快路径与发送后兜底并发重复触发。
+  const titleGenInFlight = new Set<string>();
+
+  // 判断会话标题是否仍是占位（即尚未生成过标题）。
+  function chatTitleIsPlaceholder(name: string | undefined): boolean {
+    return !name || TITLE_PLACEHOLDERS.has(name.trim());
+  }
+
+  // 尽力而为地为会话生成标题：仅当标题仍为占位且当前无同会话生成在途时执行。
+  // 幂等可重入——快路径（onUserMessageSaved）与发送后兜底共用，失败给出可见提示，
+  // 不影响消息收发，仍可右键手动生成；占位未变则下次发送会再次尝试补齐。
+  async function maybeGenerateTitle(targetChatId: string) {
+    if (!targetChatId || titleGenInFlight.has(targetChatId)) {
+      return;
+    }
+
+    const chat =
+      chatState.currentChat?.id === targetChatId
+        ? chatState.currentChat
+        : chatState.chats.find((c) => c.id === targetChatId);
+    if (chat && !chatTitleIsPlaceholder(chat.name)) {
+      return; // 已有真实标题，无需生成
+    }
+
+    titleGenInFlight.add(targetChatId);
+    try {
+      const result = await chatApi.generateChatTitle(targetChatId);
+      if (result.title) {
+        await chatActions.renameChat(targetChatId, result.title);
+      }
+    } catch (error) {
+      console.error("Failed to generate title:", error);
+      toastActions.warning("自动生成标题失败，可右键会话手动生成");
+    } finally {
+      titleGenInFlight.delete(targetChatId);
+    }
+  }
+
   // 实际发送消息的内部方法
   async function sendMessageInternal(
     message: string,
@@ -214,35 +257,41 @@
         await messageStore.resendMessage(chatId, editingMessageId, message);
         // 清除编辑状态
         editingMessageId = null;
+        // 发送后兜底：标题仍为占位则补生成
+        void maybeGenerateTitle(chatId);
         return;
       }
 
       // 否则是新消息
+      let newChatIdForTitle: string | undefined;
       if (!hasActiveChat()) {
         console.log("No active chat, creating new chat");
         // 如果没有活跃聊天，创建新聊天
         await chatActions.createChat("新会话");
         // 立即更新 URL，通知页面切换到新会话
         if (chatState.currentChat?.id) {
+          newChatIdForTitle = chatState.currentChat.id;
           await goto(`/chat?id=${chatState.currentChat.id}`);
-
-          // 异步生成标题，不阻塞消息发送
-          const chatId = chatState.currentChat.id;
-          setTimeout(async () => {
-            try {
-              const result = await chatApi.generateChatTitle(chatId);
-              if (result.title) {
-                await chatActions.renameChat(chatId, result.title);
-              }
-            } catch (error) {
-              console.error("Failed to generate title:", error);
-            }
-          }, 100); // 给一点延迟确保消息先发送
         }
       }
 
-      // 使用简化的 messageStore 发送消息
-        await messageStore.sendMessage(message, attachments);
+      // 使用简化的 messageStore 发送消息。
+      // 新会话的标题生成挂在 onUserMessageSaved（后端确认 user 消息落库后触发），
+      // 避免标题生成早于消息写库、后端读不到消息而静默失败。
+      const titleChatId = newChatIdForTitle;
+      await messageStore.sendMessage(message, attachments, {
+        onUserMessageSaved: titleChatId
+          ? () => maybeGenerateTitle(titleChatId)
+          : undefined,
+      });
+
+      // 发送后兜底：无论是否新会话，只要标题仍为占位（含首条快路径失败、
+      // 历史无标题会话等）就补生成一次。maybeGenerateTitle 幂等且有占位判断，
+      // 标题已生成时此处会直接跳过。
+      const activeChatId = chatState.currentChat?.id;
+      if (activeChatId) {
+        void maybeGenerateTitle(activeChatId);
+      }
     } catch (error) {
       console.error("Failed to send message:", error);
       // 如果是模型选择错误，可以在这里显示提示

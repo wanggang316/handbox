@@ -7,6 +7,7 @@
     Hash,
     LoaderCircle,
     Star,
+    Plus,
   } from "@lucide/svelte";
   import * as chatApi from "$lib/api/chat";
   import * as messageApi from "$lib/api/message";
@@ -20,7 +21,10 @@
   interface Props {
     chats?: Chat[];
     activeId?: string;
+    /** 正在接收流式响应的会话 id：该会话项显示 loading */
+    streamingChatId?: string | null;
     onChatClick?: (chat: Chat) => void;
+    onNewChat?: () => void;
     onRename?: (chat: Chat, newName: string) => void;
     onDelete?: (chat: Chat) => void;
     onGenerateTitle?: (chat: Chat, newTitle: string) => void;
@@ -29,7 +33,9 @@
   let {
     chats = [],
     activeId = "",
+    streamingChatId = null,
     onChatClick = () => {},
+    onNewChat,
     onRename,
     onDelete,
     onGenerateTitle,
@@ -230,8 +236,20 @@
 </script>
 
 <div class="flex flex-col h-full">
-  <!-- 标题 -->
-  <div class="text-sm text-base-content/70 pb-2 pl-4 flex-shrink-0">聊天</div>
+  <!-- 标题 + 新建会话 -->
+  <div class="flex items-center justify-between pb-2 pl-4 pr-2 flex-shrink-0">
+    <span class="text-sm text-base-content/70">聊天</span>
+    {#if onNewChat}
+      <button
+        class="p-1 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-300 transition-colors"
+        onclick={onNewChat}
+        title="新建会话"
+        aria-label="新建会话"
+      >
+        <Plus size={16} />
+      </button>
+    {/if}
+  </div>
 
   <!-- 聊天列表 -->
   <div class="flex-1 overflow-y-auto space-y-0.5 px-2">
@@ -260,7 +278,13 @@
         >
           <div class="flex items-center justify-between">
             <span class="truncate">{chat.title}</span>
-            {#if isGeneratingTitle && generatingChatId === chat.id}
+            {#if streamingChatId === chat.id}
+              <!-- 正在接收流式响应 -->
+              <LoaderCircle
+                size={12}
+                class="text-primary animate-spin flex-shrink-0 ml-2"
+              />
+            {:else if isGeneratingTitle && generatingChatId === chat.id}
               <LoaderCircle
                 size={12}
                 class="text-base-content/60 animate-spin flex-shrink-0 ml-2"

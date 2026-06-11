@@ -29,6 +29,8 @@ interface MessageState {
   providerConfigsCache: Record<string, ProviderConfig>;
   isLoading: boolean;
   isSending: boolean;
+  // 正在接收流式响应的会话 id（用于侧栏对应会话项显示 loading）；空闲为 null
+  streamingChatId: string | null;
   error: string | null;
   // 流式响应状态
   streamingMessageId: string | null;
@@ -49,6 +51,7 @@ class MessageStore {
     providerConfigsCache: {},
     isLoading: false,
     isSending: false,
+    streamingChatId: null,
     error: null,
     streamingMessageId: null,
     streamingContent: "",
@@ -67,6 +70,10 @@ class MessageStore {
 
   get isSending() {
     return this.state.isSending;
+  }
+
+  get streamingChatId() {
+    return this.state.streamingChatId;
   }
 
   get error() {
@@ -234,8 +241,11 @@ class MessageStore {
     this.state.isLoading = loading;
   }
 
-  setSending(sending: boolean) {
+  // 开始发送时传入对应会话 id，使侧栏能在该会话项显示 loading；
+  // 结束时（sending=false）无论是否传 id 都清空。
+  setSending(sending: boolean, chatId?: string | null) {
     this.state.isSending = sending;
+    this.state.streamingChatId = sending ? (chatId ?? null) : null;
   }
 
   setError(error: string | null) {
@@ -569,6 +579,7 @@ class MessageStore {
   async sendMessage(
     content: string,
     attachments: ChatAttachment[],
+    options?: { onUserMessageSaved?: () => void },
   ): Promise<void> {
     // 获取当前聊天信息
     const currentChat = chatState.currentChat;
@@ -583,7 +594,7 @@ class MessageStore {
     }
 
     try {
-      this.setSending(true);
+      this.setSending(true, currentChat.id);
       this.setError(null);
 
       const apiAttachments: MessageRequestAttachment[] = attachments.map(
@@ -620,6 +631,13 @@ class MessageStore {
         attachments: apiAttachments,
       };
 
+      // 内部「user 消息已落库」回调（在 currentChat.id 收窄仍生效处构建，
+      // 避免在下方闭包内丢失非空收窄）。
+      const internalUserMessageSaved = this.createUserMessageSavedCallback(
+        currentChat.id,
+        "sendMessage",
+      );
+
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
         this.currentStreamUnlisten();
@@ -638,10 +656,12 @@ class MessageStore {
             this.setSending(false);
           },
         ),
-        onUserMessageSaved: this.createUserMessageSavedCallback(
-          currentChat.id,
-          "sendMessage",
-        ),
+        onUserMessageSaved: (data) => {
+          // 内部协调（temp id → 落库 id）后，再触发调用方的「消息已落库」钩子。
+          // 新会话标题生成挂在此处，确保后端读得到已持久化的 user 消息。
+          internalUserMessageSaved(data);
+          options?.onUserMessageSaved?.();
+        },
       });
 
       // 事件监听器设置完成后，再发送流式消息
@@ -709,7 +729,7 @@ class MessageStore {
     console.log("[regenerateMessage] 开始重新生成消息:", messageId);
 
     try {
-      this.setSending(true);
+      this.setSending(true, chatState.currentChat?.id);
 
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
@@ -773,7 +793,7 @@ class MessageStore {
     );
 
     try {
-      this.setSending(true);
+      this.setSending(true, chatId);
 
       if (typeof content === "string") {
         this.updateMessage(chatId, messageId, {

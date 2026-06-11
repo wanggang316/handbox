@@ -1,18 +1,12 @@
 <script lang="ts">
   import IconButton from "$lib/components/ui/IconButton.svelte";
-  import {
-    PanelLeft,
-    MessageSquarePlus,
-    MessageSquareDashed,
-  } from "@lucide/svelte";
+  import { PanelLeft } from "@lucide/svelte";
 
   interface Props {
     sidebarOpen?: boolean;
     showToggleButton?: boolean;
     onToggle?: () => void;
     children?: import("svelte").Snippet;
-    onNewChat?: () => void;
-    onImplicitCreate?: () => void;
   }
 
   let {
@@ -20,20 +14,10 @@
     showToggleButton = true,
     onToggle,
     children,
-    onNewChat,
-    onImplicitCreate,
   }: Props = $props();
 
   function handleToggle() {
     onToggle?.();
-  }
-
-  async function handleNewChat() {
-    onNewChat?.();
-  }
-
-  function handleImplicitCreate() {
-    onImplicitCreate?.();
   }
 </script>
 
@@ -47,27 +31,6 @@
         strokeWidth={1.5}
         ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
         onclick={handleToggle}
-      />
-    </div>
-    <!-- 中间：头部操作按钮 -->
-    <div class="header-actions">
-      <IconButton
-        icon={MessageSquarePlus}
-        iconSize={15}
-        strokeWidth={1.5}
-        ariaLabel="新建会话"
-        onclick={handleNewChat}
-        customClass="new-chat-button"
-        title="新建会话"
-      />
-      <IconButton
-        icon={MessageSquareDashed}
-        iconSize={15}
-        strokeWidth={1.5}
-        ariaLabel="临时会话"
-        onclick={handleImplicitCreate}
-        customClass="implicit-create-button"
-        title="临时会话"
       />
     </div>
   {/if}
@@ -104,38 +67,11 @@
     opacity: 1;
   }
 
-  /* 头部操作按钮区域 */
-  .header-actions {
-    position: absolute;
-    top: 11px;
-    left: 140px; /* 侧边栏切换按钮右侧 */
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    pointer-events: auto;
-    z-index: 10000;
-  }
-
-  /* New Chat 按钮样式 */
-  :global(.new-chat-button) {
-    min-width: 28px;
-    min-height: 28px;
-  }
-
-  /* 隐式创建按钮样式 */
-  :global(.implicit-create-button) {
-    width: 28px;
-    height: 28px;
-  }
-
   /* 响应式设计：调整标题栏按钮位置 */
   /* @media (max-width: 500px) {
     .sidebar-toggle-button {
       left: 20px;
       top: 12px;
-    }
-    .header-actions {
-      left: 60px;
     }
   } */
 
@@ -143,9 +79,6 @@
     .sidebar-toggle-button {
       left: 15px;
       top: 10px;
-    }
-    .header-actions {
-      left: 50px;
     }
   } */
 </style>
