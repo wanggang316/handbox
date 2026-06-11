@@ -12,6 +12,16 @@ pub struct SessionRepository {
     db: Arc<Database>,
 }
 
+/// 把空白的可选外键引用归一化为 `None`，使其以 SQL NULL 形式绑定。
+///
+/// 空字符串的 `agent_id` / `artifact_id` 语义上等同「无引用」。若按 `""` 绑定，
+/// 会触发 `agent_id -> agents(id)` 外键约束失败（不存在 id == "" 的行），导致整行
+/// UPDATE（如重命名）整体回滚。配合读取侧将 NULL 正确解码为 `None`，杜绝 `""` 进入
+/// 外键列。
+fn blank_ref_to_none(value: &Option<String>) -> Option<&str> {
+    value.as_deref().filter(|s| !s.trim().is_empty())
+}
+
 impl SessionRepository {
     pub fn new(db: Arc<Database>) -> Self {
         Self { db }
@@ -45,8 +55,8 @@ impl SessionRepository {
             .bind(&session.system_prompt)
             .bind(&mcp_servers_json)
             .bind(session.turn_count)
-            .bind(&session.artifact_id)
-            .bind(&session.agent_id)
+            .bind(blank_ref_to_none(&session.artifact_id))
+            .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
             .bind(session.created_at)
             .bind(session.updated_at)
@@ -141,8 +151,8 @@ impl SessionRepository {
             .bind(&session.system_prompt)
             .bind(&mcp_servers_json)
             .bind(session.turn_count)
-            .bind(&session.artifact_id)
-            .bind(&session.agent_id)
+            .bind(blank_ref_to_none(&session.artifact_id))
+            .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
             .bind(session.updated_at)
             .bind(&session.id)
@@ -397,8 +407,18 @@ impl SessionRepository {
             system_prompt: row.try_get("system_prompt").ok(),
             mcp_servers,
             turn_count: row.try_get("turn_count").ok(),
-            artifact_id: row.try_get("artifact_id").ok(),
-            agent_id: row.try_get("agent_id").ok(),
+            // 显式按 Option 解码：避免 NULL 经 `try_get::<String>().ok()` 落成
+            // `Some("")`（再回写时触发 agents 外键失败）。空白同样视为「无引用」。
+            artifact_id: row
+                .try_get::<Option<String>, _>("artifact_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.trim().is_empty()),
+            agent_id: row
+                .try_get::<Option<String>, _>("agent_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.trim().is_empty()),
             reasoning,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -495,14 +515,27 @@ mod tests {
     #[tokio::test]
     async fn test_session_with_agent_id() {
         let (db, _temp_dir) = create_test_db().await;
-        let repo = SessionRepository::new(Arc::new(db));
+        let db = Arc::new(db);
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
 
+        // 先 seed 被引用的 agent，满足 sessions.agent_id -> agents(id) 外键
+        // （sqlx 默认 FK=ON），否则 create_session 会以 787 失败。
         let agent_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+            .bind(&agent_id)
+            .bind("Test Agent")
+            .bind(now)
+            .bind(now)
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let repo = SessionRepository::new(db);
+
         let session = Session {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Session from Agent".to_string(),
@@ -529,5 +562,58 @@ mod tests {
 
         let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(fetched.agent_id, Some(agent_id));
+    }
+
+    // 回归：空字符串的 agent_id / artifact_id 必须归一化为 NULL（读回 None）。
+    // 此前整行 UPDATE（重命名 / 自动生成标题）会绑定 ""，触发 agents 外键失败而整体
+    // 回滚，导致标题永远写不进去。
+    #[tokio::test]
+    async fn test_blank_agent_and_artifact_ids_normalize_to_none() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = SessionRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let session = Session {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "新会话".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: Some("gpt-4o".to_string()),
+            provider_id: Some("openai".to_string()),
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: Some(String::new()),
+            agent_id: Some(String::new()),
+            reasoning: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // 创建：空白引用落库为 NULL，读回为 None。
+        repo.create_session(&session).await.unwrap();
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(fetched.agent_id, None);
+        assert_eq!(fetched.artifact_id, None);
+
+        // 重命名（整行 UPDATE）：归一化后不再绑定 ""，可正常持久化。
+        let mut renamed = fetched.clone();
+        renamed.name = "已生成标题".to_string();
+        renamed.updated_at = now + 1000;
+        repo.update_session(&renamed).await.unwrap();
+
+        let after = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(after.name, "已生成标题");
+        assert_eq!(after.agent_id, None);
+        assert_eq!(after.artifact_id, None);
     }
 }
