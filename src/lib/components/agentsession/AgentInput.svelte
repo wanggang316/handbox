@@ -7,7 +7,6 @@
     FileText,
     FolderTree,
     Globe,
-    BookOpen,
   } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
@@ -18,11 +17,9 @@
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
-  import { listSkills } from "$lib/api/skill";
   import type {
     AgentSession,
     AgentRunAttachment,
-    SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
 
@@ -115,54 +112,6 @@
       });
   }
 
-  // per-session skill 勾选：与内置工具开关并列、但写的是 enabledSkills 这条独立链
-  // （VAL-UI-012）。可用 skill 由 `listSkills(session.workingDir)` 给出 —— 传 workingDir
-  // 才能纳入 project scope；无 workingDir 时 project skill 直接缺席（非置灰，VAL-UI-010）。
-  // 跨 scope 同名已由后端 shadow 去重为单项（VAL-UI-017）。
-  let availableSkills = $state<SkillInfo[]>([]);
-
-  // workingDir 变化即重载可用 skill（含/不含 project scope）。$effect 跟踪
-  // session.workingDir；其 cleanup 在 effect 重跑前把上一次的 `cancelled` 置真，
-  // 使旧 workingDir 的迟到响应成为 no-op、不覆盖新值（VAL-UI-009）。
-  $effect(() => {
-    const workingDir = session.workingDir;
-    let cancelled = false;
-    listSkills(workingDir)
-      .then((skills) => {
-        if (!cancelled) {
-          availableSkills = skills;
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.error("Failed to list skills for agent session:", error);
-          availableSkills = [];
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  const enabledSkills = $derived(session.enabledSkills ?? []);
-
-  function isSkillEnabled(name: string): boolean {
-    return enabledSkills.includes(name);
-  }
-
-  // 非乐观：await IPC 返回的整条 session 替换本地态后勾选才翻转；失败仅 console.error，
-  // 本地态保持原值（VAL-UI-011）。写入 name 单份（VAL-UI-017）。
-  function toggleSkill(skill: SkillInfo) {
-    const current = enabledSkills;
-    const next = current.includes(skill.name)
-      ? current.filter((name) => name !== skill.name)
-      : [...current, skill.name];
-    agentSessionActions
-      .updateField(session.id, "enabledSkills", next)
-      .catch((error) => {
-        console.error("Failed to update agent session enabled skills:", error);
-      });
-  }
 
   // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
   const running = $derived(agentRunStore.isRunning(session.id));
@@ -438,28 +387,6 @@
         </button>
       {/each}
 
-      <!-- per-session skill 勾选（enabledSkills 独立链；只渲染 listSkills 实际返回的
-           skill，磁盘失踪的幽灵勾选 name 自然缺席、不呈静默坏勾选，VAL-UI-014；
-           project skill 在无 workingDir 时不出现，VAL-UI-010）。 -->
-      {#each availableSkills as skill (skill.name)}
-        {@const active = isSkillEnabled(skill.name)}
-        <button
-          type="button"
-          class={`flex items-center gap-1 px-2 py-1 rounded-md border text-xs transition-colors max-w-[160px] ${
-            active
-              ? "border-info/50 bg-info/10 text-info"
-              : "border-[var(--hairline)] text-base-content/60 hover:bg-base-200"
-          }`}
-          aria-pressed={active}
-          title={active
-            ? `Skill ${skill.name}：已启用`
-            : `Skill ${skill.name}：已禁用`}
-          onclick={() => toggleSkill(skill)}
-        >
-          <BookOpen size={14} class="shrink-0" />
-          <span class="truncate">{skill.name}</span>
-        </button>
-      {/each}
     </div>
     <div class="flex flex-row items-center gap-3">
       <Select
