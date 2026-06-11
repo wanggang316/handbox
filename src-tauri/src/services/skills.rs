@@ -391,6 +391,77 @@ fn parent_dir_name(path: &Path) -> Option<String> {
         .map(|name| name.to_string_lossy().into_owned())
 }
 
+/// Format the available-skills index for the system prompt as an
+/// `<available_skills>` XML block. Each skill becomes a `<skill>` element with
+/// `<name>` and `<description>` children only.
+///
+/// This deliberately diverges from the upstream `format_skills_section`:
+///
+/// 1. **No `<location>` line.** The model is never handed a filesystem path; it
+///    invokes a skill by name through the skill tool, not by reading a file.
+/// 2. **Guidance prose points at the skill tool.** Where upstream said "Use the
+///    read tool to load a skill's file…", here the model is told to "call the
+///    skill tool" — there is intentionally no `read tool to load` substring.
+///
+/// `disable_model_invocation` skills are still listed but tagged
+/// `<skill opt-in="true">` so the model knows not to auto-invoke them.
+///
+/// Returns `None` for an empty list (no section emitted at all). Skills are
+/// sorted alphabetically by name for byte-deterministic output.
+pub fn format_skills_section(skills: &[Skill]) -> Option<String> {
+    if skills.is_empty() {
+        return None;
+    }
+
+    let mut sorted: Vec<&Skill> = skills.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut out = String::new();
+    out.push_str("The following skills provide specialized instructions for specific tasks.\n");
+    out.push_str(
+        "When a task matches a skill's description, call the skill tool with that skill's name \
+         to load its full instructions.\n\n",
+    );
+    out.push_str("<available_skills>\n");
+    for skill in sorted {
+        if skill.disable_model_invocation {
+            out.push_str("  <skill opt-in=\"true\">\n");
+        } else {
+            out.push_str("  <skill>\n");
+        }
+        out.push_str(&format!("    <name>{}</name>\n", escape_xml(&skill.name)));
+        out.push_str(&format!(
+            "    <description>{}</description>\n",
+            escape_xml(&skill.description)
+        ));
+        out.push_str("  </skill>\n");
+    }
+    out.push_str("</available_skills>");
+    Some(out)
+}
+
+/// Minimal XML entity escape for the skills section.
+///
+/// Escapes the five XML metacharacters character-by-character: `&`→`&amp;`,
+/// `<`→`&lt;`, `>`→`&gt;`, `"`→`&quot;`, `'`→`&apos;`. Because each input `&`
+/// is matched as a literal character (not re-scanning the inserted entity),
+/// already-emitted entities are never double-escaped. Newlines are passed
+/// through verbatim so multi-line descriptions keep their line breaks.
+fn escape_xml(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1115,5 +1186,187 @@ mod tests {
         assert_eq!(names, vec!["good-a", "good-b"]);
         // One Loader (broken yaml) + one MissingDescription.
         assert_eq!(errors.len(), 2, "expected two diagnostics: {errors:?}");
+    }
+
+    // ---- System-prompt section tests (VAL-PROMPT-001..008) -------------------
+
+    /// Build a `Skill` directly (bypassing validation) for prompt-formatting
+    /// tests. The path is set but must never appear in the formatted output.
+    fn skill(name: &str, description: &str, disable: bool) -> Skill {
+        Skill {
+            name: name.to_string(),
+            description: description.to_string(),
+            body: "ignored body".to_string(),
+            disable_model_invocation: disable,
+            source: SourceInfo {
+                scope: SourceScope::Project,
+                path: PathBuf::from(format!("/abs/secret/path/{name}/SKILL.md")),
+            },
+        }
+    }
+
+    // VAL-PROMPT-002: an empty list emits no section at all.
+    #[test]
+    fn val_prompt_002_empty_list_is_none() {
+        assert_eq!(format_skills_section(&[]), None);
+    }
+
+    // VAL-PROMPT-001: a non-empty list emits an <available_skills> block with a
+    // <name> and <description> for the skill. (Minimal single-skill block.)
+    #[test]
+    fn val_prompt_001_non_empty_emits_name_and_description() {
+        let out = format_skills_section(&[skill("alpha", "Alpha does things.", false)]).unwrap();
+        assert!(
+            out.contains("<available_skills>"),
+            "missing wrapper:\n{out}"
+        );
+        assert!(out.contains("</available_skills>"), "missing close:\n{out}");
+        assert!(out.contains("<name>alpha</name>"), "missing name:\n{out}");
+        assert!(
+            out.contains("<description>Alpha does things.</description>"),
+            "missing description:\n{out}"
+        );
+        // Exact minimal block shape for a single, auto-invocable skill.
+        assert!(
+            out.contains("  <skill>\n    <name>alpha</name>\n    <description>Alpha does things.</description>\n  </skill>\n"),
+            "unexpected single-skill block:\n{out}"
+        );
+    }
+
+    // VAL-PROMPT-003: skills are rendered in alphabetical order by name even
+    // when the input is in a different order.
+    #[test]
+    fn val_prompt_003_sorted_by_name() {
+        let out = format_skills_section(&[
+            skill("zebra", "z", false),
+            skill("apple", "a", false),
+            skill("mango", "m", false),
+        ])
+        .unwrap();
+        let pos_apple = out.find("<name>apple</name>").expect("apple");
+        let pos_mango = out.find("<name>mango</name>").expect("mango");
+        let pos_zebra = out.find("<name>zebra</name>").expect("zebra");
+        assert!(
+            pos_apple < pos_mango && pos_mango < pos_zebra,
+            "names not alphabetical:\n{out}"
+        );
+    }
+
+    // VAL-PROMPT-004: disable_model_invocation → <skill opt-in="true">; a
+    // normal skill → plain <skill>.
+    #[test]
+    fn val_prompt_004_opt_in_attribute() {
+        let out = format_skills_section(&[
+            skill("auto", "auto-invocable", false),
+            skill("manual", "opt-in only", true),
+        ])
+        .unwrap();
+        // The opt-in block.
+        assert!(
+            out.contains("  <skill opt-in=\"true\">\n    <name>manual</name>"),
+            "missing opt-in block:\n{out}"
+        );
+        // The plain block.
+        assert!(
+            out.contains("  <skill>\n    <name>auto</name>"),
+            "missing plain block:\n{out}"
+        );
+        // The auto skill must NOT carry the opt-in attribute.
+        assert!(
+            !out.contains("<skill opt-in=\"true\">\n    <name>auto</name>"),
+            "auto skill wrongly tagged opt-in:\n{out}"
+        );
+    }
+
+    // VAL-PROMPT-005: the five XML metacharacters are escaped in both <name>
+    // and <description>, and an `&` is not double-escaped.
+    #[test]
+    fn val_prompt_005_special_characters_escaped() {
+        // Name uses only legal-ish chars plus the metacharacters we can exercise
+        // there; description carries all five plus an existing entity.
+        let s = skill(
+            "a&b<c",
+            "quotes \" and ' and < and > and & and &amp;",
+            false,
+        );
+        let out = format_skills_section(&[s]).unwrap();
+
+        // Name escaping.
+        assert!(out.contains("<name>a&amp;b&lt;c</name>"), "name:\n{out}");
+
+        // Description: every metacharacter escaped, and the literal "&amp;"
+        // input becomes "&amp;amp;" (the leading & is escaped, the rest is
+        // verbatim) — i.e. no double-escaping of an already-emitted entity.
+        assert!(
+            out.contains(
+                "<description>quotes &quot; and &apos; and &lt; and &gt; and &amp; and &amp;amp;</description>"
+            ),
+            "description escaping:\n{out}"
+        );
+        // Sanity: the raw metacharacters do not survive inside the values.
+        assert!(!out.contains("a&b<c"), "raw name leaked:\n{out}");
+    }
+
+    // VAL-PROMPT-005 (direct): escape_xml maps each metacharacter and does not
+    // re-escape inserted entities.
+    #[test]
+    fn val_prompt_005_escape_xml_unit() {
+        assert_eq!(escape_xml("&"), "&amp;");
+        assert_eq!(escape_xml("<"), "&lt;");
+        assert_eq!(escape_xml(">"), "&gt;");
+        assert_eq!(escape_xml("\""), "&quot;");
+        assert_eq!(escape_xml("'"), "&apos;");
+        // No double-escaping: an existing entity's `&` is escaped once.
+        assert_eq!(escape_xml("&amp;"), "&amp;amp;");
+        // Mixed run.
+        assert_eq!(escape_xml("a<b>c"), "a&lt;b&gt;c");
+    }
+
+    // VAL-PROMPT-006: guidance prose tells the model to "call the skill tool"
+    // and never contains the upstream "read tool to load" substring.
+    #[test]
+    fn val_prompt_006_guidance_prose() {
+        let out = format_skills_section(&[skill("alpha", "a", false)]).unwrap();
+        assert!(
+            out.contains("call the skill tool"),
+            "missing 'call the skill tool':\n{out}"
+        );
+        assert!(
+            !out.contains("read tool to load"),
+            "must not contain 'read tool to load':\n{out}"
+        );
+    }
+
+    // VAL-PROMPT-007: a skill block contains no <location> element and no
+    // absolute path from the source.
+    #[test]
+    fn val_prompt_007_no_location_or_path() {
+        let out = format_skills_section(&[skill("alpha", "a", false)]).unwrap();
+        assert!(
+            !out.contains("<location>"),
+            "location element present:\n{out}"
+        );
+        assert!(
+            !out.contains("/abs/secret/path/"),
+            "absolute path leaked:\n{out}"
+        );
+        assert!(!out.contains("SKILL.md"), "SKILL.md path leaked:\n{out}");
+    }
+
+    // VAL-PROMPT-008: a multi-line description keeps its newlines verbatim
+    // inside the <description> element (escape_xml does not touch '\n').
+    #[test]
+    fn val_prompt_008_multiline_description_preserved() {
+        let desc = "line one\nline two\nline three";
+        let out = format_skills_section(&[skill("alpha", desc, false)]).unwrap();
+        assert!(
+            out.contains("<description>line one\nline two\nline three</description>"),
+            "newlines not preserved:\n{out}"
+        );
+        // Newlines must not be turned into entities.
+        assert!(
+            !out.contains("&#"),
+            "newline wrongly entity-encoded:\n{out}"
+        );
     }
 }
