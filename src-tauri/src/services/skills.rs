@@ -33,9 +33,9 @@ const MAX_DESCRIPTION_LENGTH: usize = 1024;
 pub enum SourceScope {
     /// Application-bundled defaults — lowest priority.
     AppData,
-    /// User-level skills, typically `~/.hand/skills/`.
+    /// User-level skills, typically `~/.agents/skills/`.
     User,
-    /// Project-level skills, typically `<cwd>/.hand/skills/` — highest priority.
+    /// Project-level skills, typically `<wd>/.handbox/skills/` — highest priority.
     Project,
 }
 

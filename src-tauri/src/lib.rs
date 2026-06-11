@@ -361,8 +361,22 @@ async fn initialize_services(
     // 初始化 Agent Project 服务（按工作目录分组 Agent 模式会话）
     let agent_project_service = AgentProjectService::new(database_service.clone());
 
-    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重）
-    let agent_runtime = AgentRuntime::new(database_service.clone());
+    // 初始化 Skill 服务（解析三个 scope 根：app-data + user；project 按 run 解析）。
+    // app-data: <app_data_dir>/skills；user: ~/.agents/skills（home_dir 解析失败时
+    // 退回一个不存在的根，使 user scope 静默为空而非阻断启动）。
+    let skill_appdata_root = data_dir.join("skills");
+    let skill_user_root = app
+        .path()
+        .home_dir()
+        .map(|home| home.join(".agents").join("skills"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("/nonexistent/handbox-skills/user"));
+    let skill_service = Arc::new(crate::services::SkillService::new(
+        skill_appdata_root,
+        skill_user_root,
+    ));
+
+    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重 + skill 注入）
+    let agent_runtime = AgentRuntime::new_with_skills(database_service.clone(), skill_service);
 
     // 将服务注册到应用状态
     app.manage(storage_service);
