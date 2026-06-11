@@ -21,6 +21,8 @@
   interface Props {
     chats?: Chat[];
     activeId?: string;
+    /** 正在接收流式响应的会话 id：该会话项显示 loading */
+    streamingChatId?: string | null;
     onChatClick?: (chat: Chat) => void;
     onNewChat?: () => void;
     onRename?: (chat: Chat, newName: string) => void;
@@ -31,6 +33,7 @@
   let {
     chats = [],
     activeId = "",
+    streamingChatId = null,
     onChatClick = () => {},
     onNewChat,
     onRename,
@@ -275,7 +278,13 @@
         >
           <div class="flex items-center justify-between">
             <span class="truncate">{chat.title}</span>
-            {#if isGeneratingTitle && generatingChatId === chat.id}
+            {#if streamingChatId === chat.id}
+              <!-- 正在接收流式响应 -->
+              <LoaderCircle
+                size={12}
+                class="text-primary animate-spin flex-shrink-0 ml-2"
+              />
+            {:else if isGeneratingTitle && generatingChatId === chat.id}
               <LoaderCircle
                 size={12}
                 class="text-base-content/60 animate-spin flex-shrink-0 ml-2"

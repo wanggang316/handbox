@@ -1,5 +1,6 @@
 <script lang="ts">
   import { chatState, chatActions } from "$lib/states/chat.svelte";
+  import { messageStore } from "$lib/states";
   import { browser } from "$app/environment";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
@@ -310,6 +311,7 @@
           <ChatList
             {chats}
             activeId={currentChatId}
+            streamingChatId={messageStore.streamingChatId}
             onChatClick={handleChatClick}
             onNewChat={handleNewChat}
             onRename={handleChatRename}
