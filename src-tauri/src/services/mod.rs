@@ -17,6 +17,7 @@ pub mod search;
 pub mod selection;
 pub mod session;
 pub mod settings;
+pub mod skills;
 pub mod storage;
 pub mod user_session;
 pub mod word;
