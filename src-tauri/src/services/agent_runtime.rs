@@ -3334,4 +3334,136 @@ mod tests {
         };
         assert_eq!(text, "PROJECT BODY", "winner (project) body resolved, not app-data");
     }
+
+    /// VAL-TOOL-010: a session that enables a built-in FS tool (`read_file`) AND
+    /// a skill yields a tool set containing BOTH `read_file` and `skill` —
+    /// enabling a skill must not displace an injected built-in, and vice versa.
+    #[tokio::test]
+    async fn skill_and_builtin_tool_coexist() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        // The same working_dir is the FS sandbox root (so read_file registers) and
+        // the project skills root (so alpha is discoverable).
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec!["alpha".to_string()],
+            vec!["read_file".to_string()], // built-in FS tool, gated on working_dir
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+
+        let (_prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
+
+        assert!(
+            names.contains(&"read_file".to_string()),
+            "built-in read_file survives alongside a skill: {names:?}"
+        );
+        assert!(
+            names.contains(&"skill".to_string()),
+            "skill tool injected alongside a built-in: {names:?}"
+        );
+    }
+
+    /// VAL-TOOL-011: a duplicated enabled name (`["foo","foo"]`) dedups at the
+    /// runtime layer — exactly ONE `<name>foo</name>` index block, exactly ONE
+    /// `skill` tool entry, and `skill("foo")` returns a single body.
+    #[tokio::test]
+    async fn duplicate_enabled_skill_name_dedups() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "foo",
+            "Foo does things.",
+            "FOO BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec!["foo".to_string(), "foo".to_string()], // duplicate enabled name
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills);
+
+        let cancel = CancellationToken::new();
+        let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+        let (_p, ctx_run, _cfg, tools) = runtime
+            .assemble_run(&session_id, "hi".to_string(), vec![], cancel, steering)
+            .await
+            .expect("assemble ok");
+
+        // Exactly one index block for foo.
+        assert_eq!(
+            ctx_run.system_prompt.matches("<name>foo</name>").count(),
+            1,
+            "duplicate enabled name yields a single index block:\n{}",
+            ctx_run.system_prompt
+        );
+        // Exactly one skill tool entry.
+        let skill_count = tools.iter().filter(|t| t.name == "skill").count();
+        assert_eq!(
+            skill_count, 1,
+            "exactly one skill tool entry, got {skill_count}"
+        );
+
+        // skill("foo") returns a single body.
+        let skill_tool = tools
+            .into_iter()
+            .find(|t| t.name == "skill")
+            .expect("skill tool present");
+        let exec_ctx = hand_agent::ToolExecuteCtx {
+            tool_call_id: "tc".to_string(),
+            args: json!({"name": "foo"}),
+            cancel: CancellationToken::new(),
+            on_update: Arc::new(|_: hand_agent::ToolResult| {}),
+        };
+        let result = (skill_tool.execute)(exec_ctx).await.expect("execute ok");
+        assert_eq!(
+            result.content.len(),
+            1,
+            "single body content, got {}",
+            result.content.len()
+        );
+        let text = match &result.content[0] {
+            hand_ai_model::ToolResultContent::Text(t) => t.text.clone(),
+            _ => panic!("expected text result"),
+        };
+        assert_eq!(text, "FOO BODY", "single resolved body");
+    }
 }
