@@ -21,6 +21,7 @@
   import * as chatApi from "$lib/api/chat";
   import { goto } from "$app/navigation";
   import { messageStore } from "$lib/states";
+  import { toastActions } from "$lib/states";
   import type { ChatAttachment } from "$lib/types/chat";
 
   let chatId = $state("");
@@ -200,6 +201,20 @@
     await sendMessageInternal(message, attachments);
   }
 
+  // 为新会话生成标题（在 user 消息确认落库后触发）。
+  // 标题生成为尽力而为：失败时给出可见提示但不影响消息收发，仍可右键手动生成。
+  async function generateTitleForNewChat(targetChatId: string) {
+    try {
+      const result = await chatApi.generateChatTitle(targetChatId);
+      if (result.title) {
+        await chatActions.renameChat(targetChatId, result.title);
+      }
+    } catch (error) {
+      console.error("Failed to generate title:", error);
+      toastActions.warning("自动生成标题失败，可右键会话手动生成");
+    }
+  }
+
   // 实际发送消息的内部方法
   async function sendMessageInternal(
     message: string,
@@ -218,31 +233,27 @@
       }
 
       // 否则是新消息
+      let newChatIdForTitle: string | undefined;
       if (!hasActiveChat()) {
         console.log("No active chat, creating new chat");
         // 如果没有活跃聊天，创建新聊天
         await chatActions.createChat("新会话");
         // 立即更新 URL，通知页面切换到新会话
         if (chatState.currentChat?.id) {
+          newChatIdForTitle = chatState.currentChat.id;
           await goto(`/chat?id=${chatState.currentChat.id}`);
-
-          // 异步生成标题，不阻塞消息发送
-          const chatId = chatState.currentChat.id;
-          setTimeout(async () => {
-            try {
-              const result = await chatApi.generateChatTitle(chatId);
-              if (result.title) {
-                await chatActions.renameChat(chatId, result.title);
-              }
-            } catch (error) {
-              console.error("Failed to generate title:", error);
-            }
-          }, 100); // 给一点延迟确保消息先发送
         }
       }
 
-      // 使用简化的 messageStore 发送消息
-        await messageStore.sendMessage(message, attachments);
+      // 使用简化的 messageStore 发送消息。
+      // 新会话的标题生成挂在 onUserMessageSaved（后端确认 user 消息落库后触发），
+      // 避免标题生成早于消息写库、后端读不到消息而静默失败。
+      const titleChatId = newChatIdForTitle;
+      await messageStore.sendMessage(message, attachments, {
+        onUserMessageSaved: titleChatId
+          ? () => generateTitleForNewChat(titleChatId)
+          : undefined,
+      });
     } catch (error) {
       console.error("Failed to send message:", error);
       // 如果是模型选择错误，可以在这里显示提示

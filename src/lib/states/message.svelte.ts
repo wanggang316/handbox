@@ -569,6 +569,7 @@ class MessageStore {
   async sendMessage(
     content: string,
     attachments: ChatAttachment[],
+    options?: { onUserMessageSaved?: () => void },
   ): Promise<void> {
     // 获取当前聊天信息
     const currentChat = chatState.currentChat;
@@ -620,6 +621,13 @@ class MessageStore {
         attachments: apiAttachments,
       };
 
+      // 内部「user 消息已落库」回调（在 currentChat.id 收窄仍生效处构建，
+      // 避免在下方闭包内丢失非空收窄）。
+      const internalUserMessageSaved = this.createUserMessageSavedCallback(
+        currentChat.id,
+        "sendMessage",
+      );
+
       // 清理之前的监听器（如果存在）
       if (this.currentStreamUnlisten) {
         this.currentStreamUnlisten();
@@ -638,10 +646,12 @@ class MessageStore {
             this.setSending(false);
           },
         ),
-        onUserMessageSaved: this.createUserMessageSavedCallback(
-          currentChat.id,
-          "sendMessage",
-        ),
+        onUserMessageSaved: (data) => {
+          // 内部协调（temp id → 落库 id）后，再触发调用方的「消息已落库」钩子。
+          // 新会话标题生成挂在此处，确保后端读得到已持久化的 user 消息。
+          internalUserMessageSaved(data);
+          options?.onUserMessageSaved?.();
+        },
       });
 
       // 事件监听器设置完成后，再发送流式消息
