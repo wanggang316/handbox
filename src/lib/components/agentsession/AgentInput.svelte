@@ -16,7 +16,7 @@
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { getAllModels } from "$lib/states/provider.svelte";
-  import { runAgentStream } from "$lib/api/agentSession";
+  import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import type { AgentSession, AgentRunAttachment } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
 
@@ -197,6 +197,29 @@
   });
 
   async function sendAgentRun() {
+    // run 进行中：消息走 steering 队列，不起第二个 run。后端 agent_run_steer 把
+    // 文本压入活跃 run 的 steering 队列、在 turn 边界 drain；纯空白为干净 no-op。
+    // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）。
+    // 活跃 run 必有模型，故此分支无需查 model 守卫；放在 model 守卫之前自洽。
+    if (running) {
+      // 纯空白输入：干净 no-op（不清空、不入队、不调用）。
+      if (!input.trim()) return;
+      modelPrompt = null;
+      const text = input;
+      resetAttachments();
+      input = "";
+      adjustTextareaHeight();
+      try {
+        await steerAgentRun(session.id, text);
+      } catch (error) {
+        // steer 失败：仅提示，不回填覆盖已清空的 input（保持简单）。
+        console.error("Failed to steer agent run:", error);
+        modelPrompt =
+          error instanceof Error ? error.message : "发送 steering 消息失败";
+      }
+      return;
+    }
+
     // 空/纯空白输入且无附件为 no-op：不发起 run，不产生气泡（VAL-RUN-010）。
     if (!input.trim() && attachments.length === 0) return;
 

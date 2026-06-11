@@ -130,6 +130,20 @@ export async function runAgentStream(
 }
 
 /**
+ * 向某个会话进行中的 run 注入一条 steering 消息。
+ *
+ * 后端 `agent_run_steer(sessionId, text)` 把消息压入活跃 run 的 steering 队列，
+ * 在 turn 边界 drain；空/纯空白文本与无活跃 run 均为干净 no-op。
+ * 不起第二个 run（run 进行中调 `agent_run_stream` 会得到 AGENT_RUN_ALREADY_ACTIVE）。
+ */
+export async function steerAgentRun(
+  sessionId: UUID,
+  text: string,
+): Promise<void> {
+  await apiCall<void>("agent_run_steer", { sessionId, text });
+}
+
+/**
  * 中止某个 Agent 会话的活跃 run（对无活跃 run 为干净 no-op）。
  */
 export async function abortAgentRun(sessionId: UUID): Promise<void> {
