@@ -142,12 +142,35 @@ impl SettingsService {
         Ok(settings)
     }
 
+    /// Persist the settings atomically: write a uniquely named temp file in
+    /// the same directory, then `rename` it over config.json (atomic on the
+    /// same filesystem). A failed serialize or write leaves the original
+    /// file byte-for-byte intact — readers never observe a torn config
+    /// (security audit L-1). The suffix is process-id + an in-process
+    /// counter so concurrent saves never collide on the temp name.
     fn save_settings(&self, settings: &AppSettings) -> Result<(), AppError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
         let path = self.storage.get_config_path();
         let content = serde_json::to_string_pretty(settings)
             .map_err(|e| AppError::internal_error(&format!("序列化设置失败: {e}")))?;
-        std::fs::write(&path, content)
+
+        let dir = path
+            .parent()
+            .ok_or_else(|| AppError::internal_error("无法确定设置文件所在目录"))?;
+        let temp_path = dir.join(format!(
+            ".config.json.{}.{}.tmp",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        std::fs::write(&temp_path, content)
             .map_err(|e| AppError::internal_error(&format!("写入设置失败: {e}")))?;
+        if let Err(e) = std::fs::rename(&temp_path, &path) {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(AppError::internal_error(&format!("写入设置失败: {e}")));
+        }
         Ok(())
     }
 
@@ -486,9 +509,12 @@ mod tests {
         );
     }
 
-    // VAL-CONFIG-018: a disk-write failure surfaces as a structured
-    // INTERNAL_ERROR — no panic. (fs::write is non-atomic; this asserts error
-    // reporting only, not absence of partial writes.)
+    // VAL-CONFIG-018 + L-1 (security audit): a disk-write failure surfaces as
+    // a structured INTERNAL_ERROR — no panic — and, because saving goes
+    // through a same-directory temp file + rename, the original config.json
+    // is left byte-for-byte intact. A read-only *directory* blocks temp-file
+    // creation (the write failure point under atomic replacement) while the
+    // config file itself stays readable.
     #[cfg(unix)]
     #[test]
     fn set_skill_disabled_write_failure_returns_structured_error() {
@@ -496,9 +522,11 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let svc = service(&dir);
-        // Materialize a valid config first, then make it unwritable.
+        // Materialize a valid config first, then make the directory
+        // unwritable so no new file can be created in it.
         svc.get_settings().unwrap();
-        fs::set_permissions(config_path(&dir), fs::Permissions::from_mode(0o444)).unwrap();
+        let original = fs::read_to_string(config_path(&dir)).unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
 
         let err = svc.set_skill_disabled("alpha", true).unwrap_err();
         assert_eq!(error_code(&err), "INTERNAL_ERROR");
@@ -507,7 +535,38 @@ mod tests {
         assert!(json.get("hint").is_some());
 
         // Restore permissions so TempDir cleanup succeeds.
-        fs::set_permissions(config_path(&dir), fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(config_path(&dir)).unwrap(),
+            original,
+            "a failed save must leave the original config.json intact"
+        );
+        assert_eq!(
+            svc.get_settings().unwrap().skills.disabled,
+            Vec::<String>::new(),
+            "the failed disable must not be half-applied"
+        );
+    }
+
+    // L-1 (security audit): a successful save replaces config.json atomically
+    // via rename and leaves no temp-file droppings behind in the data dir.
+    #[test]
+    fn save_leaves_no_temp_files_behind() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        svc.set_skill_disabled("alpha", true).unwrap();
+        svc.set_skill_disabled("alpha", false).unwrap();
+
+        let entries: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["config.json"],
+            "only config.json may remain after saves"
+        );
     }
 
     // M-1 (security audit): the load→mutate→save critical section is
