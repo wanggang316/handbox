@@ -2,7 +2,7 @@
 
 use crate::models::{
     AccountSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
-    QuickToolsSettings, ShortcutConfig, Theme, ThemeColor, TranslationSettings,
+    QuickToolsSettings, ShortcutConfig, SkillSettings, Theme, ThemeColor, TranslationSettings,
     UpdateSettingsRequest,
 };
 use crate::services::StorageService;
@@ -45,6 +45,9 @@ impl SettingsService {
                 settings.quick_tools =
                     self.merge_section(settings.quick_tools, request.data, "quickTools")?;
             }
+            "skills" => {
+                settings.skills = self.merge_section(settings.skills, request.data, "skills")?;
+            }
             _ => {
                 return Err(AppError::validation_error("未知设置分组"));
             }
@@ -66,9 +69,8 @@ impl SettingsService {
                         "mcp" => current.mcp = default_settings.mcp.clone(),
                         "account" => current.account = default_settings.account.clone(),
                         "translation" => current.translation = default_settings.translation.clone(),
-                        "quickTools" => {
-                            current.quick_tools = default_settings.quick_tools.clone()
-                        }
+                        "quickTools" => current.quick_tools = default_settings.quick_tools.clone(),
+                        "skills" => current.skills = default_settings.skills.clone(),
                         _ => return Err(AppError::validation_error("未知设置分组")),
                     }
                 }
@@ -151,12 +153,179 @@ fn default_settings() -> AppSettings {
             user: None,
             is_logged_in: false,
         },
-        translation: TranslationSettings {
-            session_id: None,
-        },
+        translation: TranslationSettings { session_id: None },
         quick_tools: QuickToolsSettings {
             show_toolbar_on_selection: false,
             selection_blacklist: Default::default(),
         },
+        skills: SkillSettings::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn service(dir: &TempDir) -> SettingsService {
+        let storage = StorageService::new(dir.path().to_path_buf()).unwrap();
+        SettingsService::new(Arc::new(storage))
+    }
+
+    fn config_path(dir: &TempDir) -> PathBuf {
+        dir.path().join("config.json")
+    }
+
+    /// A valid pre-revamp config: the four legacy sections present, no
+    /// `skills` section at all.
+    fn config_without_skills_section() -> String {
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        let map = value.as_object_mut().unwrap();
+        map.remove("skills");
+        assert!(map.contains_key("general"), "fixture keeps legacy sections");
+        assert!(map.contains_key("mcp"));
+        assert!(map.contains_key("account"));
+        assert!(map.contains_key("translation"));
+        serde_json::to_string_pretty(&value).unwrap()
+    }
+
+    fn error_code(err: &AppError) -> String {
+        serde_json::to_value(err).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    // VAL-CONFIG-001 (storage half): fresh environment, no settings ever
+    // written → skills.disabled defaults to empty, and the auto-written
+    // config.json carries an empty (or absent) skills.disabled.
+    #[test]
+    fn fresh_env_defaults_to_empty_disabled_list() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let settings = svc.get_settings().unwrap();
+        assert!(settings.skills.disabled.is_empty());
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        let disabled = written.pointer("/skills/disabled");
+        assert!(
+            disabled.is_none() || disabled == Some(&serde_json::json!([])),
+            "default skills.disabled must be empty or absent: {disabled:?}"
+        );
+    }
+
+    // VAL-CONFIG-013: a valid config.json missing the `skills` section parses
+    // without error via serde(default) → all enabled.
+    #[test]
+    fn missing_skills_section_parses_with_all_enabled() {
+        let dir = TempDir::new().unwrap();
+        fs::write(config_path(&dir), config_without_skills_section()).unwrap();
+
+        let settings = service(&dir).get_settings().unwrap();
+        assert!(settings.skills.disabled.is_empty());
+    }
+
+    // VAL-CONFIG-008 / VAL-CONFIG-011 (storage half): the disabled list is
+    // opaque storage — orphan, duplicate, empty and whitespace entries persist
+    // verbatim across an unrelated settings update (no prune, no
+    // normalization, no dedup).
+    #[test]
+    fn disabled_entries_persist_verbatim_across_unrelated_update() {
+        let dir = TempDir::new().unwrap();
+        let entries = serde_json::json!(["ghost", "ghost", "", "  ", "MySkill"]);
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value["skills"]["disabled"] = entries.clone();
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let svc = service(&dir);
+        let settings = svc.get_settings().unwrap();
+        assert_eq!(
+            settings.skills.disabled,
+            vec!["ghost", "ghost", "", "  ", "MySkill"]
+        );
+
+        // Unrelated update re-saves the file; the list must survive verbatim.
+        svc.update_settings(UpdateSettingsRequest {
+            section: "general".to_string(),
+            data: serde_json::json!({ "autoScroll": false }),
+        })
+        .unwrap();
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["skills"]["disabled"], entries);
+    }
+
+    // VAL-CONFIG-017: corrupt (non-JSON) config.json → structured
+    // INTERNAL_ERROR, file not silently overwritten.
+    #[test]
+    fn corrupt_config_returns_internal_error_and_keeps_file() {
+        let dir = TempDir::new().unwrap();
+        let corrupt = "not json {{{";
+        fs::write(config_path(&dir), corrupt).unwrap();
+
+        let err = service(&dir).get_settings().unwrap_err();
+        assert_eq!(error_code(&err), "INTERNAL_ERROR");
+        assert_eq!(
+            fs::read_to_string(config_path(&dir)).unwrap(),
+            corrupt,
+            "corrupt file must not be overwritten"
+        );
+    }
+
+    // VAL-CONFIG-016: structurally illegal skills.disabled (non-array, or a
+    // non-string element) → structured INTERNAL_ERROR, file untouched.
+    #[test]
+    fn illegal_disabled_shape_returns_internal_error() {
+        for bad in [
+            serde_json::json!("nope"),
+            serde_json::json!(["ok", 42]),
+            serde_json::json!({ "k": "v" }),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let mut value = serde_json::to_value(default_settings()).unwrap();
+            value["skills"]["disabled"] = bad;
+            let content = serde_json::to_string_pretty(&value).unwrap();
+            fs::write(config_path(&dir), &content).unwrap();
+
+            let err = service(&dir).get_settings().unwrap_err();
+            assert_eq!(error_code(&err), "INTERNAL_ERROR");
+            assert_eq!(
+                fs::read_to_string(config_path(&dir)).unwrap(),
+                content,
+                "file must stay untouched on a structural error"
+            );
+        }
+    }
+
+    // The closed section enum recognizes "skills" in both update and reset.
+    #[test]
+    fn update_and_reset_recognize_skills_section() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "skills".to_string(),
+                data: serde_json::json!({ "disabled": ["alpha"] }),
+            })
+            .unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha"]);
+
+        let reread = svc.get_settings().unwrap();
+        assert_eq!(reread.skills.disabled, vec!["alpha"]);
+
+        let reset = svc
+            .reset_settings(Some(vec!["skills".to_string()]))
+            .unwrap();
+        assert!(reset.skills.disabled.is_empty());
     }
 }
