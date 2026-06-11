@@ -332,8 +332,8 @@ impl AgentRuntime {
     /// Construct a runtime with an explicit skill service and settings store.
     /// The production path (`initialize_services`) passes a skill service whose
     /// roots are resolved from Tauri's `PathResolver` (`<app_data_dir>/skills`
-    /// + `~/.agents/skills`) and a clone of the managed `SettingsService` (the
-    /// global skill opt-out list lives in its config.json).
+    /// and `~/.agents/skills`) and a clone of the managed `SettingsService`
+    /// (the global skill opt-out list lives in its config.json).
     pub fn new_with_skills(
         db: Arc<Database>,
         skill_service: Arc<SkillService>,
@@ -503,12 +503,15 @@ impl AgentRuntime {
         let working_dir = session.working_dir.as_deref().map(Path::new);
         let mut tools = agent_tools::build_tools(&session.enabled_tools, working_dir);
 
-        // Skill wiring (M2): discover skills across the three scope roots, filter
-        // to the run's EFFECTIVE enabled set (enabled-by-name ∩ discovered-and-
-        // validated), and — only when that set is non-empty — (a) append the
-        // available-skills index to the system prompt and (b) auto-inject the
-        // `skill` tool (NOT via enabled_tools). Discovery errors are non-fatal:
-        // they are logged but never abort the run.
+        // Skill wiring: discover skills across the three scope roots, then take
+        // the run's EFFECTIVE set = discovered-and-validated ∖ the GLOBAL
+        // opt-out list (settings `skills.disabled`). There is NO per-session
+        // filter: a freshly dropped valid skill is usable on the next run with
+        // zero enablement action (default all-on, VAL-CROSS-004). Only when the
+        // effective set is non-empty: (a) append the available-skills index to
+        // the system prompt and (b) auto-inject the `skill` tool (NOT via
+        // enabled_tools). Discovery errors are non-fatal: they are logged but
+        // never abort the run.
         let (discovered, skill_errs) = self.skill_service.discover(working_dir);
         if !skill_errs.is_empty() {
             tracing::warn!(
@@ -516,28 +519,35 @@ impl AgentRuntime {
                 skill_errs.len()
             );
         }
-        // `discovered` is already deduped (highest scope wins) and alphabetically
-        // sorted by `discover_skills`. Keep only those the session enabled by
-        // name; empty/unknown/validation-failed names are naturally absent from
-        // `discovered`, so they drop out here (VAL-TOOL-002/006/010/012/016).
-        let enabled_names: std::collections::HashSet<&str> = session
-            .enabled_skills
-            .iter()
-            .map(String::as_str)
-            .filter(|n| !n.is_empty())
-            .collect();
-        let enabled_valid: Vec<crate::services::skills::Skill> = discovered
+        // The disabled list is read FRESH from config.json on every run — never
+        // cached — so a toggle applies to the very next run without a restart
+        // (VAL-ASSEMBLE-005). A settings read failure aborts assembly with its
+        // structured error rather than failing open (failing open would
+        // silently re-enable skills the user disabled). Matching is exact: the
+        // list is opaque storage (no trim, no case folding), so orphan or
+        // whitespace entries simply never match a discovered name.
+        let disabled: std::collections::HashSet<String> = self
+            .settings
+            .get_settings()?
+            .skills
+            .disabled
             .into_iter()
-            .filter(|s| enabled_names.contains(s.name.as_str()))
+            .collect();
+        // `discovered` is already deduped (highest scope wins), alphabetically
+        // sorted, and validation-filtered by `discover_skills`; broken skills
+        // are naturally absent and never abort the run (VAL-ASSEMBLE-028).
+        let effective: Vec<crate::services::skills::Skill> = discovered
+            .into_iter()
+            .filter(|s| !disabled.contains(&s.name))
             .collect();
 
         // Gate strictly on the EFFECTIVE set: only inject when it is non-empty.
-        if !enabled_valid.is_empty() {
+        if !effective.is_empty() {
             // (a) System-prompt index. `format_skills_section` returns the
             // `<available_skills>` block (None only for an empty slice, which we
             // already excluded). Compose with the base prompt: base first when
             // present, otherwise the section alone (no leading separator).
-            if let Some(section) = crate::services::skills::format_skills_section(&enabled_valid) {
+            if let Some(section) = crate::services::skills::format_skills_section(&effective) {
                 let base = std::mem::take(&mut context.system_prompt);
                 context.system_prompt = if base.is_empty() {
                     section
@@ -549,10 +559,8 @@ impl AgentRuntime {
             // (b) Auto-inject the `skill` tool over a name->body map of the
             // effective set. Bodies live ONLY in the tool's lookup table, never
             // in the system prompt (VAL-TOOL-014).
-            let skill_bodies: HashMap<String, String> = enabled_valid
-                .into_iter()
-                .map(|s| (s.name, s.body))
-                .collect();
+            let skill_bodies: HashMap<String, String> =
+                effective.into_iter().map(|s| (s.name, s.body)).collect();
             tools.push(agent_tools::make_skill_tool(skill_bodies));
         }
 
@@ -2953,7 +2961,13 @@ mod tests {
 
     /// Write `<root>/<dir>/SKILL.md` with a description, body, and optional
     /// `disable-model-invocation`. Returns the SKILL.md path.
-    fn write_skill_md(root: &std::path::Path, dir: &str, description: &str, body: &str, opt_in: bool) {
+    fn write_skill_md(
+        root: &std::path::Path,
+        dir: &str,
+        description: &str,
+        body: &str,
+        opt_in: bool,
+    ) {
         let skill_dir = root.join(dir);
         std::fs::create_dir_all(&skill_dir).unwrap();
         let dmi = if opt_in {
@@ -3027,9 +3041,9 @@ mod tests {
         (context.system_prompt, names)
     }
 
-    /// VAL-TOOL-001 + 013 + 009: an effective enabled set (enabled-by-name ∩
-    /// discovered-and-validated) that is non-empty auto-injects the `skill` tool
-    /// EVEN WITH `enabled_tools` empty (no read_file gate), and appends the
+    /// A non-empty effective set (discovered-and-validated ∖ disabled, here
+    /// with an empty disabled list) auto-injects the `skill` tool EVEN WITH
+    /// `enabled_tools` empty (no read_file gate), and appends the
     /// `<available_skills>` index AFTER a non-empty base prompt.
     #[tokio::test]
     async fn nonempty_effective_set_injects_skill_tool_and_index() {
@@ -3038,13 +3052,19 @@ mod tests {
 
         let work = TempDir::new().unwrap();
         let proj_skills = work.path().join(".handbox").join("skills");
-        write_skill_md(&proj_skills, "alpha", "Alpha does things.", "ALPHA BODY", false);
+        write_skill_md(
+            &proj_skills,
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
 
         let session_id = seed_session_with_skills(
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["alpha".to_string()],
+            vec![],
             vec![], // no enabled_tools at all → skill tool must STILL be injected
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE PROMPT".to_string()),
@@ -3064,39 +3084,44 @@ mod tests {
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
-        assert!(names.contains(&"skill".to_string()), "skill tool injected: {names:?}");
-        assert!(prompt.contains("<available_skills>"), "index appended:\n{prompt}");
-        assert!(prompt.contains("<name>alpha</name>"), "skill listed:\n{prompt}");
+        assert!(
+            names.contains(&"skill".to_string()),
+            "skill tool injected: {names:?}"
+        );
+        assert!(
+            prompt.contains("<available_skills>"),
+            "index appended:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "skill listed:\n{prompt}"
+        );
         // VAL-TOOL-009: base first, then index.
         let base_pos = prompt.find("BASE PROMPT").expect("base present");
         let idx_pos = prompt.find("<available_skills>").expect("index present");
         assert!(base_pos < idx_pos, "base must precede the index:\n{prompt}");
         // VAL-TOOL-014: the body must NOT appear in the system prompt.
-        assert!(!prompt.contains("ALPHA BODY"), "body leaked into prompt:\n{prompt}");
+        assert!(
+            !prompt.contains("ALPHA BODY"),
+            "body leaked into prompt:\n{prompt}"
+        );
     }
 
-    /// VAL-TOOL-002: an EMPTY effective set injects no `skill` tool and adds no
-    /// index. Here the session enables a skill that does not exist.
+    /// VAL-ASSEMBLE-003 (zero discovered): nothing to discover at all → no
+    /// `skill` tool, no index, base prompt untouched, builtins unaffected.
     #[tokio::test]
-    async fn empty_effective_set_injects_nothing() {
+    async fn zero_discovered_injects_nothing() {
         let (db, _guard) = test_db().await;
         let provider_id = seed_provider(&db).await;
 
+        // A working dir WITHOUT any project skills dir; app/user roots empty.
         let work = TempDir::new().unwrap();
-        // Project skills dir exists but holds nothing the session enabled.
-        write_skill_md(
-            &work.path().join(".handbox").join("skills"),
-            "present",
-            "Present but not enabled.",
-            "PRESENT BODY",
-            false,
-        );
 
         let session_id = seed_session_with_skills(
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["ghost".to_string()], // enabled name that is not discovered
+            vec![],
             vec!["web_fetch".to_string()],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE PROMPT".to_string()),
@@ -3114,10 +3139,19 @@ mod tests {
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
-        assert!(!names.contains(&"skill".to_string()), "no skill tool: {names:?}");
-        assert!(!prompt.contains("<available_skills>"), "no index:\n{prompt}");
+        assert!(
+            !names.contains(&"skill".to_string()),
+            "no skill tool: {names:?}"
+        );
+        assert!(
+            !prompt.contains("<available_skills>"),
+            "no index:\n{prompt}"
+        );
         // The non-skill tool (web_fetch) is still present, unaffected.
-        assert!(names.contains(&"web_fetch".to_string()), "web_fetch kept: {names:?}");
+        assert!(
+            names.contains(&"web_fetch".to_string()),
+            "web_fetch kept: {names:?}"
+        );
         // Base prompt is untouched (no trailing separator garbage).
         assert_eq!(prompt, "BASE PROMPT");
     }
@@ -3143,7 +3177,7 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["alpha".to_string()],
+            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             None,
@@ -3161,7 +3195,10 @@ mod tests {
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
-        assert!(names.contains(&"skill".to_string()), "skill tool injected: {names:?}");
+        assert!(
+            names.contains(&"skill".to_string()),
+            "skill tool injected: {names:?}"
+        );
         // No leading newline/space: the prompt begins with the section's first
         // guidance line, not a separator.
         assert!(
@@ -3174,23 +3211,36 @@ mod tests {
         );
     }
 
-    /// VAL-TOOL-006 + 016: only enabled ∩ discovered-and-validated skills enter
-    /// the effective set. A discovered-but-not-enabled skill, an enabled-but-
-    /// invalid skill, and an empty-string enabled entry are all excluded.
+    /// VAL-ASSEMBLE-028 + 002: a working dir mixing valid, broken, and globally
+    /// disabled skills assembles WITHOUT aborting — valid skills are in, broken
+    /// ones (validation failures) are absent, disabled ones are subtracted.
     #[tokio::test]
-    async fn effective_set_excludes_unenabled_invalid_and_empty_names() {
+    async fn mixed_valid_broken_and_disabled_assembles_clean() {
         let (db, _guard) = test_db().await;
         let provider_id = seed_provider(&db).await;
 
         let work = TempDir::new().unwrap();
         let proj = work.path().join(".handbox").join("skills");
-        write_skill_md(&proj, "enabled-good", "Enabled and valid.", "GOOD BODY", false);
-        write_skill_md(&proj, "present-unenabled", "Discovered but not enabled.", "OTHER", false);
-        // Enabled but INVALID: frontmatter name mismatches the dir → not discovered.
-        std::fs::create_dir_all(proj.join("enabled-bad")).unwrap();
+        write_skill_md(&proj, "good", "Good and valid.", "GOOD BODY", false);
+        write_skill_md(
+            &proj,
+            "muted",
+            "Valid but globally disabled.",
+            "MUTED BODY",
+            false,
+        );
+        // BROKEN: frontmatter name mismatches the dir → fails validation.
+        std::fs::create_dir_all(proj.join("broken-name")).unwrap();
         std::fs::write(
-            proj.join("enabled-bad").join("SKILL.md"),
+            proj.join("broken-name").join("SKILL.md"),
             "---\nname: different\ndescription: d\n---\nBAD BODY",
+        )
+        .unwrap();
+        // BROKEN: no description at all → fails validation.
+        std::fs::create_dir_all(proj.join("broken-desc")).unwrap();
+        std::fs::write(
+            proj.join("broken-desc").join("SKILL.md"),
+            "---\nname: broken-desc\n---\nNO DESC BODY",
         )
         .unwrap();
 
@@ -3198,11 +3248,7 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec![
-                "enabled-good".to_string(),
-                "enabled-bad".to_string(), // discovered? no (validation fails)
-                String::new(),             // empty string is silently dropped
-            ],
+            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3216,34 +3262,53 @@ mod tests {
             user.path().to_path_buf(),
         ));
         let (settings, _cfg) = temp_settings();
+        settings.set_skill_disabled("muted", true).unwrap();
         let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
+        // assemble completes (helper expects Ok) — broken skills never abort.
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
-        assert!(names.contains(&"skill".to_string()), "skill tool injected: {names:?}");
-        assert!(prompt.contains("<name>enabled-good</name>"), "good skill listed:\n{prompt}");
-        assert!(!prompt.contains("present-unenabled"), "unenabled excluded:\n{prompt}");
-        assert!(!prompt.contains("enabled-bad"), "invalid excluded:\n{prompt}");
+        assert!(
+            names.contains(&"skill".to_string()),
+            "skill tool injected: {names:?}"
+        );
+        assert!(
+            prompt.contains("<name>good</name>"),
+            "good skill listed:\n{prompt}"
+        );
+        assert!(!prompt.contains("muted"), "disabled excluded:\n{prompt}");
+        assert!(
+            !prompt.contains("broken-name"),
+            "broken (name) excluded:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("broken-desc"),
+            "broken (desc) excluded:\n{prompt}"
+        );
     }
 
-    /// VAL-TOOL-010: every enabled skill fails validation → empty effective set
-    /// → nothing injected.
+    /// Every discovered skill fails validation → empty effective set → nothing
+    /// injected (and no abort).
     #[tokio::test]
-    async fn all_enabled_invalid_injects_nothing() {
+    async fn all_discovered_invalid_injects_nothing() {
         let (db, _guard) = test_db().await;
         let provider_id = seed_provider(&db).await;
 
         let work = TempDir::new().unwrap();
         let proj = work.path().join(".handbox").join("skills");
-        // Enabled but invalid (no description → MissingDescription).
+        // Present but invalid (no description → MissingDescription).
         std::fs::create_dir_all(proj.join("bad")).unwrap();
-        std::fs::write(proj.join("bad").join("SKILL.md"), "---\nname: bad\n---\nBODY").unwrap();
+        std::fs::write(
+            proj.join("bad").join("SKILL.md"),
+            "---\nname: bad\n---\nBODY",
+        )
+        .unwrap();
 
         let session_id = seed_session_with_skills(
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["bad".to_string()],
+            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3260,15 +3325,18 @@ mod tests {
         let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
         let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
-        assert!(!names.contains(&"skill".to_string()), "no skill tool: {names:?}");
+        assert!(
+            !names.contains(&"skill".to_string()),
+            "no skill tool: {names:?}"
+        );
         assert_eq!(prompt, "BASE", "base untouched, no index");
     }
 
-    /// VAL-TOOL-007: an opt-in (`disable-model-invocation`) skill that is enabled
-    /// still enters the effective set: it is listed with the `opt-in="true"` tag
-    /// and is loadable through the injected skill tool.
+    /// VAL-ASSEMBLE-012: an opt-in (`disable-model-invocation`) skill that is
+    /// not disabled still enters the effective set: it is listed with the
+    /// `opt-in="true"` tag and is loadable through the injected skill tool.
     #[tokio::test]
-    async fn opt_in_skill_enabled_is_listed_and_loadable() {
+    async fn opt_in_skill_is_listed_and_loadable() {
         let (db, _guard) = test_db().await;
         let provider_id = seed_provider(&db).await;
 
@@ -3285,7 +3353,7 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["manual".to_string()],
+            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3301,13 +3369,21 @@ mod tests {
         let (settings, _cfg) = temp_settings();
         let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
-        let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
-        assert!(names.contains(&"skill".to_string()), "opt-in skill still injects tool: {names:?}");
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            tools.iter().any(|t| t.name == "skill"),
+            "opt-in skill still injects the tool"
+        );
         assert!(
             prompt.contains("<skill opt-in=\"true\">"),
             "opt-in tag present:\n{prompt}"
         );
-        assert!(prompt.contains("<name>manual</name>"), "opt-in skill listed:\n{prompt}");
+        assert!(
+            prompt.contains("<name>manual</name>"),
+            "opt-in skill listed:\n{prompt}"
+        );
+        // Still tool-callable: opt-in gates auto-invocation guidance, not lookup.
+        assert_eq!(invoke_skill(&tools, "manual").await, "MANUAL BODY");
     }
 
     /// VAL-TOOL-017: a name present in multiple scopes resolves to the winning
@@ -3320,7 +3396,13 @@ mod tests {
 
         // app-data scope holds a low-priority "shared"; project holds the winner.
         let app = TempDir::new().unwrap();
-        write_skill_md(app.path(), "shared", "From app-data.", "APPDATA BODY", false);
+        write_skill_md(
+            app.path(),
+            "shared",
+            "From app-data.",
+            "APPDATA BODY",
+            false,
+        );
 
         let work = TempDir::new().unwrap();
         write_skill_md(
@@ -3335,7 +3417,7 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["shared".to_string()],
+            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3373,12 +3455,15 @@ mod tests {
             hand_ai_model::ToolResultContent::Text(t) => t.text.clone(),
             _ => panic!("expected text result"),
         };
-        assert_eq!(text, "PROJECT BODY", "winner (project) body resolved, not app-data");
+        assert_eq!(
+            text, "PROJECT BODY",
+            "winner (project) body resolved, not app-data"
+        );
     }
 
-    /// VAL-TOOL-010: a session that enables a built-in FS tool (`read_file`) AND
-    /// a skill yields a tool set containing BOTH `read_file` and `skill` —
-    /// enabling a skill must not displace an injected built-in, and vice versa.
+    /// VAL-ASSEMBLE-006 + 007: the injected `skill` tool coexists with the
+    /// built-in tools — builtin names (read_file / list_directory / web_fetch)
+    /// are unchanged, and exactly one tool is named `skill`.
     #[tokio::test]
     async fn skill_and_builtin_tool_coexist() {
         let (db, _guard) = test_db().await;
@@ -3399,8 +3484,12 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["alpha".to_string()],
-            vec!["read_file".to_string()], // built-in FS tool, gated on working_dir
+            vec![],
+            vec![
+                "read_file".to_string(), // built-in FS tools, gated on working_dir
+                "list_directory".to_string(),
+                "web_fetch".to_string(),
+            ],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE PROMPT".to_string()),
         )
@@ -3417,21 +3506,25 @@ mod tests {
 
         let (_prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
 
-        assert!(
-            names.contains(&"read_file".to_string()),
-            "built-in read_file survives alongside a skill: {names:?}"
-        );
-        assert!(
-            names.contains(&"skill".to_string()),
-            "skill tool injected alongside a built-in: {names:?}"
+        for builtin in ["read_file", "list_directory", "web_fetch"] {
+            assert!(
+                names.contains(&builtin.to_string()),
+                "built-in {builtin} survives alongside a skill: {names:?}"
+            );
+        }
+        assert_eq!(
+            names.iter().filter(|n| n.as_str() == "skill").count(),
+            1,
+            "exactly one skill tool alongside the builtins: {names:?}"
         );
     }
 
-    /// VAL-TOOL-011: a duplicated enabled name (`["foo","foo"]`) dedups at the
-    /// runtime layer — exactly ONE `<name>foo</name>` index block, exactly ONE
-    /// `skill` tool entry, and `skill("foo")` returns a single body.
+    /// Opaque `skills.disabled` entries — orphans, duplicates, empty and
+    /// whitespace strings — never match a discovered name (exact match, no
+    /// normalization) and never break assembly: the discovered skill is still
+    /// injected once, with exactly ONE `skill` tool entry and a single body.
     #[tokio::test]
-    async fn duplicate_enabled_skill_name_dedups() {
+    async fn opaque_disabled_entries_never_match_and_never_break() {
         let (db, _guard) = test_db().await;
         let provider_id = seed_provider(&db).await;
 
@@ -3448,7 +3541,414 @@ mod tests {
             &db,
             &provider_id,
             "gpt-4o",
-            vec!["foo".to_string(), "foo".to_string()], // duplicate enabled name
+            vec![],
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        // Orphan (twice), empty, whitespace, and a near-miss with whitespace:
+        // all opaque, none may match `foo`.
+        for entry in ["ghost", "", "  ", " foo "] {
+            settings.set_skill_disabled(entry, true).unwrap();
+        }
+        settings.set_skill_disabled("ghost", true).unwrap(); // duplicate insert
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+
+        // Exactly one index block for foo.
+        assert_eq!(
+            prompt.matches("<name>foo</name>").count(),
+            1,
+            "a single index block for foo:\n{prompt}"
+        );
+        // Exactly one skill tool entry, resolving the single body.
+        assert_eq!(
+            tools.iter().filter(|t| t.name == "skill").count(),
+            1,
+            "exactly one skill tool entry"
+        );
+        assert_eq!(invoke_skill(&tools, "foo").await, "FOO BODY");
+    }
+
+    // -------------------------------------------------------------------------
+    // Global opt-out semantics (VAL-ASSEMBLE-001/002/003/005/006, VAL-CROSS-004):
+    // effective set = discovered-and-validated ∖ settings `skills.disabled`,
+    // re-read fresh from config.json on every assemble. The per-session
+    // `enabled_skills` filter is GONE: assemble must not consult it.
+    // -------------------------------------------------------------------------
+
+    /// Assemble the session's run and return `(system_prompt, tools)` so tests
+    /// can invoke the assembled tool handlers directly.
+    async fn assemble_prompt_and_tools(
+        runtime: &AgentRuntime,
+        session_id: &str,
+    ) -> (String, Vec<AgentTool>) {
+        let cancel = CancellationToken::new();
+        let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+        let (_prompts, context, _config, tools) = runtime
+            .assemble_run(
+                &session_id.to_string(),
+                "hello".to_string(),
+                vec![],
+                cancel,
+                steering,
+            )
+            .await
+            .expect("assemble_run should succeed");
+        (context.system_prompt, tools)
+    }
+
+    /// Invoke the assembled `skill` tool with `{"name": <name>}` and return the
+    /// first text block of its result (body on a hit, error message on a miss).
+    async fn invoke_skill(tools: &[AgentTool], name: &str) -> String {
+        let skill_tool = tools
+            .iter()
+            .find(|t| t.name == "skill")
+            .expect("skill tool present");
+        let ctx = hand_agent::ToolExecuteCtx {
+            tool_call_id: "tc".to_string(),
+            args: json!({ "name": name }),
+            cancel: CancellationToken::new(),
+            on_update: Arc::new(|_: hand_agent::ToolResult| {}),
+        };
+        let result = (skill_tool.execute)(ctx).await.expect("execute ok");
+        match &result.content[0] {
+            hand_ai_model::ToolResultContent::Text(t) => t.text.clone(),
+            _ => panic!("expected text result"),
+        }
+    }
+
+    /// VAL-ASSEMBLE-001 + 006: with NO disabled entries, EVERY discovered-and-
+    /// validated skill enters the index (name + description) and the single
+    /// `skill` tool resolves each of them — with the session's `enabled_skills`
+    /// left EMPTY, proving assemble no longer consults the per-session list.
+    #[tokio::test]
+    async fn default_all_on_injects_every_discovered_skill() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha does things.", "ALPHA BODY", false);
+        write_skill_md(&proj, "beta", "Beta does other things.", "BETA BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![], // per-session enablement is dead: empty must NOT gate skills
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        // Both skills indexed with name + description.
+        assert!(
+            prompt.contains("<available_skills>"),
+            "index present:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "alpha listed:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("Alpha does things."),
+            "alpha description:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>beta</name>"),
+            "beta listed:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("Beta does other things."),
+            "beta description:\n{prompt}"
+        );
+
+        // Exactly ONE tool named `skill`, resolving every indexed skill.
+        assert_eq!(
+            names.iter().filter(|n| **n == "skill").count(),
+            1,
+            "exactly one skill tool: {names:?}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+        assert_eq!(invoke_skill(&tools, "beta").await, "BETA BODY");
+    }
+
+    /// VAL-ASSEMBLE-002: a globally disabled skill is absent from the index AND
+    /// from the tool's lookup map (`skill(name)` → generic not-found, no path);
+    /// other skills are unaffected.
+    #[tokio::test]
+    async fn globally_disabled_skill_excluded_others_unaffected() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha does things.", "ALPHA BODY", false);
+        write_skill_md(&proj, "beta", "Beta does other things.", "BETA BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        settings.set_skill_disabled("beta", true).unwrap();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "alpha kept:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("beta"),
+            "disabled beta absent from index:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+        let miss = invoke_skill(&tools, "beta").await;
+        assert_eq!(miss, "skill not found", "disabled name is a plain miss");
+        assert!(!miss.contains('/'), "no path in the miss error: {miss:?}");
+        assert!(!miss.contains("BETA BODY"), "no body leak: {miss:?}");
+    }
+
+    /// VAL-ASSEMBLE-003 (all disabled): every discovered skill is globally
+    /// disabled → no `<available_skills>` section, no `skill` tool, base prompt
+    /// intact, unrelated builtin tools unaffected.
+    #[tokio::test]
+    async fn all_disabled_injects_nothing() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            vec!["web_fetch".to_string()],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        settings.set_skill_disabled("alpha", true).unwrap();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(!names.contains(&"skill"), "no skill tool: {names:?}");
+        assert!(
+            !prompt.contains("<available_skills>"),
+            "no index:\n{prompt}"
+        );
+        assert_eq!(prompt, "BASE PROMPT", "base prompt intact");
+        assert!(
+            names.contains(&"web_fetch"),
+            "builtin unaffected: {names:?}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-005: the disabled list is re-read from config.json on EVERY
+    /// assemble — same session, same runtime: run1 (empty list) has the skill,
+    /// run2 (after disabling) lacks it, run3 (after re-enabling) has it again.
+    #[tokio::test]
+    async fn disabled_list_is_reread_every_assemble() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings.clone());
+
+        // Run 1: empty disabled list → alpha present.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "run1 has alpha:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+
+        // Disable BETWEEN runs (no runtime reconstruction, same session).
+        settings.set_skill_disabled("alpha", true).unwrap();
+
+        // Run 2: the fresh read sees the disable → alpha gone, nothing injected.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            !prompt.contains("<available_skills>"),
+            "run2 has no index:\n{prompt}"
+        );
+        assert!(
+            !tools.iter().any(|t| t.name == "skill"),
+            "run2 has no skill tool"
+        );
+
+        // Re-enable → run 3 has it back.
+        settings.set_skill_disabled("alpha", false).unwrap();
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "run3 has alpha:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+    }
+
+    /// VAL-CROSS-004 (default all-on, end to end at the assemble layer): a
+    /// freshly dropped valid SKILL.md is usable on the very next run with ZERO
+    /// enablement action — config.json gains no entry for it.
+    #[tokio::test]
+    async fn freshly_dropped_skill_usable_next_run_without_enablement() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings.clone());
+
+        // Run 1: nothing discovered → nothing injected.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(!prompt.contains("<available_skills>"), "run1 has no index");
+        assert!(!tools.iter().any(|t| t.name == "skill"), "run1 has no tool");
+
+        // Drop a brand-new valid skill between runs. NO settings write.
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "fresh",
+            "Fresh skill.",
+            "FRESH BODY",
+            false,
+        );
+
+        // Run 2: discovered → indexed and callable, zero enablement action.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            prompt.contains("<name>fresh</name>"),
+            "run2 lists fresh:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "fresh").await, "FRESH BODY");
+        // config.json has no entry for it (default all-on needs none).
+        assert!(
+            settings.get_settings().unwrap().skills.disabled.is_empty(),
+            "no config entry was created for the fresh skill"
+        );
+    }
+
+    /// VAL-ASSEMBLE-008 at the assemble layer: a 1MiB body flows file → map →
+    /// tool verbatim and untruncated.
+    #[tokio::test]
+    async fn large_body_resolves_verbatim_through_assemble() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let big = "K".repeat(1024 * 1024);
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "big",
+            "Big skill.",
+            &big,
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
             vec![],
             Some(work.path().to_string_lossy().into_owned()),
             Some("BASE".to_string()),
@@ -3464,49 +3964,9 @@ mod tests {
         let (settings, _cfg) = temp_settings();
         let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
 
-        let cancel = CancellationToken::new();
-        let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
-        let (_p, ctx_run, _cfg, tools) = runtime
-            .assemble_run(&session_id, "hi".to_string(), vec![], cancel, steering)
-            .await
-            .expect("assemble ok");
-
-        // Exactly one index block for foo.
-        assert_eq!(
-            ctx_run.system_prompt.matches("<name>foo</name>").count(),
-            1,
-            "duplicate enabled name yields a single index block:\n{}",
-            ctx_run.system_prompt
-        );
-        // Exactly one skill tool entry.
-        let skill_count = tools.iter().filter(|t| t.name == "skill").count();
-        assert_eq!(
-            skill_count, 1,
-            "exactly one skill tool entry, got {skill_count}"
-        );
-
-        // skill("foo") returns a single body.
-        let skill_tool = tools
-            .into_iter()
-            .find(|t| t.name == "skill")
-            .expect("skill tool present");
-        let exec_ctx = hand_agent::ToolExecuteCtx {
-            tool_call_id: "tc".to_string(),
-            args: json!({"name": "foo"}),
-            cancel: CancellationToken::new(),
-            on_update: Arc::new(|_: hand_agent::ToolResult| {}),
-        };
-        let result = (skill_tool.execute)(exec_ctx).await.expect("execute ok");
-        assert_eq!(
-            result.content.len(),
-            1,
-            "single body content, got {}",
-            result.content.len()
-        );
-        let text = match &result.content[0] {
-            hand_ai_model::ToolResultContent::Text(t) => t.text.clone(),
-            _ => panic!("expected text result"),
-        };
-        assert_eq!(text, "FOO BODY", "single resolved body");
+        let (_prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        let body = invoke_skill(&tools, "big").await;
+        assert_eq!(body.len(), big.len(), "untruncated 1MiB body");
+        assert_eq!(body, big, "verbatim body");
     }
 }
