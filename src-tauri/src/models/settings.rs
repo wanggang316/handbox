@@ -134,6 +134,16 @@ pub struct QuickToolsSettings {
     pub selection_blacklist: SelectionBlacklist,
 }
 
+/// Skill 设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSettings {
+    /// 全局禁用的 skill 名单（按 name 精确匹配；不透明存储：孤儿/重复/空白
+    /// 条目原样保留，不归一化、不去重、不清理）
+    #[serde(default)]
+    pub disabled: Vec<String>,
+}
+
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,6 +154,8 @@ pub struct AppSettings {
     pub translation: TranslationSettings,
     #[serde(default)]
     pub quick_tools: QuickToolsSettings,
+    #[serde(default)]
+    pub skills: SkillSettings,
 }
 
 /// 设置更新请求

@@ -54,7 +54,22 @@ pub async fn agent_session_update_field(
     value: serde_json::Value,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<AgentSession, AppError> {
-    let parameter = match field_name.as_str() {
+    let parameter = parse_session_parameter(&field_name, value)?;
+
+    agent_session_service
+        .update_session_field(session_id, parameter)
+        .await
+}
+
+/// 将 IPC 字段名 + JSON 值解析为 `AgentSessionParameter`。
+///
+/// 未知字段（包括已废弃的 `"enabledSkills"`）一律返回 VALIDATION_ERROR，
+/// 此时参数从未构造、service 从未被调用，因此不会写入任何行。
+fn parse_session_parameter(
+    field_name: &str,
+    value: serde_json::Value,
+) -> Result<AgentSessionParameter, AppError> {
+    let parameter = match field_name {
         "name" => {
             let name = value
                 .as_str()
@@ -118,10 +133,7 @@ pub async fn agent_session_update_field(
             )))
         }
     };
-
-    agent_session_service
-        .update_session_field(session_id, parameter)
-        .await
+    Ok(parameter)
 }
 
 /// 删除 Agent Session
@@ -161,5 +173,69 @@ fn parse_optional_string(
                 .ok_or_else(|| AppError::validation_error(&format!("Invalid {} value", field)))?
                 .to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// VAL-DEPRECATE-006 (inverted from the old presence test): `"enabledSkills"`
+    /// is no longer a known field — every value shape falls into the
+    /// Unknown-field VALIDATION_ERROR. The parameter is never constructed, the
+    /// service is never invoked, so no row can be written.
+    #[test]
+    fn update_field_enabled_skills_is_unknown_field() {
+        for value in [
+            serde_json::json!(["a", "b"]),
+            serde_json::json!([]),
+            serde_json::json!(null),
+            serde_json::json!("not-an-array"),
+        ] {
+            // AgentSessionParameter is not Debug, so match instead of expect_err.
+            match parse_session_parameter("enabledSkills", value.clone()) {
+                Ok(_) => panic!("enabledSkills must be rejected as unknown: {}", value),
+                Err(err) => {
+                    assert_eq!(
+                        err.code, "VALIDATION_ERROR",
+                        "rejection must be a VALIDATION_ERROR for {}",
+                        value
+                    );
+                    assert!(
+                        err.message.contains("Unknown field: enabledSkills"),
+                        "must fall into the Unknown-field branch, got: {}",
+                        err.message
+                    );
+                }
+            }
+        }
+    }
+
+    /// VAL-DEPRECATE-003: removing the enabledSkills branch leaves every other
+    /// field mapping intact — thinkingLevel / enabledTools / workingDir /
+    /// modelId still parse into their parameter variants.
+    #[test]
+    fn other_field_mappings_survive_enabled_skills_removal() {
+        match parse_session_parameter("thinkingLevel", serde_json::json!("high")) {
+            Ok(AgentSessionParameter::ThinkingLevel(Some(level))) => assert_eq!(level, "high"),
+            _ => panic!("thinkingLevel must map to ThinkingLevel(Some)"),
+        }
+
+        match parse_session_parameter("enabledTools", serde_json::json!(["read", "write"])) {
+            Ok(AgentSessionParameter::EnabledTools(tools)) => {
+                assert_eq!(tools, vec!["read".to_string(), "write".to_string()]);
+            }
+            _ => panic!("enabledTools must map to EnabledTools"),
+        }
+
+        match parse_session_parameter("workingDir", serde_json::json!("/tmp")) {
+            Ok(AgentSessionParameter::WorkingDir(Some(dir))) => assert_eq!(dir, "/tmp"),
+            _ => panic!("workingDir must map to WorkingDir(Some)"),
+        }
+
+        match parse_session_parameter("modelId", serde_json::json!(null)) {
+            Ok(AgentSessionParameter::ModelId(None)) => {}
+            _ => panic!("modelId null must map to ModelId(None)"),
+        }
     }
 }

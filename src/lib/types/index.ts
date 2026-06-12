@@ -38,6 +38,7 @@ export * from "./provider";
 export * from "./artifact";
 export * from "./settings";
 export * from "./mcp";
+export * from "./skill";
 export * from "./user";
 export * from "./word";
 export * from "./agentSession";

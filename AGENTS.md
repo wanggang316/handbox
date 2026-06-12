@@ -28,7 +28,8 @@ Reference docs under `docs/`; treat `handbox.db` as disposable dev data.
 - `npm run build` / `npm run preview` – produce and inspect production SPA bundle
 
 **Backend (from src-tauri/):**
-- `cargo fmt -- --check` – enforce Rust formatting
+- `cargo fmt -- --check` – enforce Rust formatting (repo-wide; currently red on legacy files)
+- `rustfmt --edition 2021 --check --config skip_children=true <files>` – the only safe **per-file** format check; never run bare `rustfmt` or `cargo fmt -- <file>` on `lib.rs`-reachable files, as rustfmt follows `mod` declarations and reformats the whole crate
 - `cargo test` – run all backend tests
 - `cargo test test_name` – run single test by name
 - `cargo test -- --ignored` – run ignored tests (useful when migrations change storage)

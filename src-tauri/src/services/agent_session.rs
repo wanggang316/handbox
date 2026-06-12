@@ -615,6 +615,69 @@ mod tests {
         assert_eq!(err.code, "NOT_FOUND");
     }
 
+    /// VAL-DEPRECATE-008 / VAL-DEPRECATE-009: a create request still carrying
+    /// the deprecated enabledSkills key succeeds (serde ignores unknown keys)
+    /// and the deactivated DB column stays NULL.
+    #[tokio::test]
+    async fn create_with_deprecated_enabled_skills_key_succeeds_and_column_stays_null() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let req: CreateAgentSessionRequest =
+            serde_json::from_str(r#"{"name": "Deprecated Key", "enabledSkills": ["pdf"]}"#)
+                .expect("unknown enabledSkills key must be ignored by serde");
+        let created = service.create_session(req).await.unwrap();
+        assert_eq!(created.name, "Deprecated Key");
+
+        let column: Option<String> =
+            sqlx::query("SELECT enabled_skills FROM agent_sessions WHERE id = $1")
+                .bind(&created.id)
+                .fetch_one(db.pool())
+                .await
+                .unwrap()
+                .try_get("enabled_skills")
+                .unwrap();
+        assert_eq!(column, None, "new sessions must leave enabled_skills NULL");
+    }
+
+    /// VAL-DEPRECATE-003: removing the EnabledSkills variant leaves every other
+    /// field mapping intact — thinkingLevel / enabledTools / workingDir /
+    /// modelId still persist through update_session_field.
+    #[tokio::test]
+    async fn update_field_other_parameters_persist_after_variant_removal() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        let created = service
+            .create_session(base_request("Field Mappings"))
+            .await
+            .unwrap();
+
+        let work_dir = TempDir::new().unwrap();
+        let canonical = std::fs::canonicalize(work_dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        for parameter in [
+            AgentSessionParameter::ThinkingLevel(Some("low".to_string())),
+            AgentSessionParameter::EnabledTools(vec!["read".to_string()]),
+            AgentSessionParameter::WorkingDir(Some(canonical.clone())),
+            AgentSessionParameter::ModelId(Some("gpt-4.1".to_string())),
+        ] {
+            service
+                .update_session_field(created.id.clone(), parameter)
+                .await
+                .unwrap();
+        }
+
+        let reloaded = service.get_session(created.id).await.unwrap();
+        assert_eq!(reloaded.thinking_level, Some("low".to_string()));
+        assert_eq!(reloaded.enabled_tools, vec!["read".to_string()]);
+        assert_eq!(reloaded.working_dir, Some(canonical));
+        assert_eq!(reloaded.model_id, Some("gpt-4.1".to_string()));
+    }
+
     #[tokio::test]
     async fn get_session_returns_not_found() {
         let (db, _guard) = create_test_database().await;

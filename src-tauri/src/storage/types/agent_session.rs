@@ -101,6 +101,9 @@ mod tests {
         assert!(json.contains("\"modelId\""));
         assert!(json.contains("\"projectId\""));
         assert!(json.contains("\"enabledTools\""));
+        // VAL-DEPRECATE-007 (inverted from VAL-PERSIST-010): the deprecated
+        // enabledSkills key must be ABSENT from the wire JSON.
+        assert!(!json.contains("\"enabledSkills\""));
         assert!(json.contains("\"messageCount\""));
         assert!(json.contains("\"lastMessageAt\""));
 
@@ -149,6 +152,9 @@ mod tests {
         assert!(json.contains("\"modelId\":null"));
         assert!(json.contains("\"projectId\":null"));
         assert!(json.contains("\"workingDir\":null"));
+        // VAL-DEPRECATE-007 (inverted from VAL-PERSIST-010): no enabledSkills
+        // key on the wire at all — not even an empty [].
+        assert!(!json.contains("\"enabledSkills\""));
 
         let deserialized: AgentSession = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.last_message_at, None);
@@ -186,5 +192,19 @@ mod tests {
         assert!(req.project_id.is_none());
         assert!(req.model_id.is_none());
         assert!(req.enabled_tools.is_none());
+    }
+
+    /// VAL-DEPRECATE-008: a create/update request still carrying the deprecated
+    /// enabledSkills key deserializes fine — serde ignores unknown keys, so old
+    /// frontends keep working.
+    #[test]
+    fn requests_ignore_deprecated_enabled_skills_key() {
+        let json = r#"{"name": "Test Session", "enabledSkills": ["pdf", "csv"]}"#;
+        let req: CreateAgentSessionRequest = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(req.name, "Test Session");
+
+        let json = r#"{"name": "Renamed", "enabledSkills": []}"#;
+        let req: UpdateAgentSessionRequest = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(req.name, Some("Renamed".to_string()));
     }
 }

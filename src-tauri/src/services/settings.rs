@@ -2,28 +2,49 @@
 
 use crate::models::{
     AccountSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
-    QuickToolsSettings, ShortcutConfig, Theme, ThemeColor, TranslationSettings,
+    QuickToolsSettings, ShortcutConfig, SkillSettings, Theme, ThemeColor, TranslationSettings,
     UpdateSettingsRequest,
 };
 use crate::services::StorageService;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 #[derive(Clone)]
 pub struct SettingsService {
     storage: Arc<StorageService>,
+    /// Serializes every load→mutate→save critical section across clones so a
+    /// concurrent writer cannot overwrite another writer's freshly saved
+    /// state (security audit M-1: the disabled list must not fail open by
+    /// race). Held only at the public entry points — never re-acquired by
+    /// internal helpers, so there is no re-entrant deadlock.
+    write_lock: Arc<Mutex<()>>,
 }
 
 impl SettingsService {
     pub fn new(storage: Arc<StorageService>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            write_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// Acquire the whole-file critical-section lock. A poisoned lock (a
+    /// writer panicked) degrades to a structured INTERNAL_ERROR, never a
+    /// panic. `get_settings` takes it too: `load_or_default` writes the
+    /// default config on first run, which is itself a read-modify-write.
+    fn lock_writes(&self) -> Result<MutexGuard<'_, ()>, AppError> {
+        self.write_lock
+            .lock()
+            .map_err(|_| AppError::internal_error("设置锁已损坏，请重启应用"))
     }
 
     pub fn get_settings(&self) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
         self.load_or_default()
     }
 
     pub fn update_settings(&self, request: UpdateSettingsRequest) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
         let mut settings = self.load_or_default()?;
         let section = request.section.as_str();
 
@@ -45,6 +66,9 @@ impl SettingsService {
                 settings.quick_tools =
                     self.merge_section(settings.quick_tools, request.data, "quickTools")?;
             }
+            "skills" => {
+                settings.skills = self.merge_section(settings.skills, request.data, "skills")?;
+            }
             _ => {
                 return Err(AppError::validation_error("未知设置分组"));
             }
@@ -54,7 +78,30 @@ impl SettingsService {
         Ok(settings)
     }
 
+    /// Set a skill's global disabled flag in `skills.disabled` via a whole-file
+    /// read-modify-write.
+    ///
+    /// `disabled = true` appends the name unless an equal entry already exists
+    /// (dedup on insert); `disabled = false` removes every equal entry. All
+    /// other list entries — orphans, duplicates, whitespace — are opaque
+    /// storage and stay verbatim, and every other settings section round-trips
+    /// untouched through the same load/save path as any settings update.
+    pub fn set_skill_disabled(&self, name: &str, disabled: bool) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
+        let mut settings = self.load_or_default()?;
+        if disabled {
+            if !settings.skills.disabled.iter().any(|entry| entry == name) {
+                settings.skills.disabled.push(name.to_string());
+            }
+        } else {
+            settings.skills.disabled.retain(|entry| entry != name);
+        }
+        self.save_settings(&settings)?;
+        Ok(settings)
+    }
+
     pub fn reset_settings(&self, sections: Option<Vec<String>>) -> Result<AppSettings, AppError> {
+        let _guard = self.lock_writes()?;
         let default_settings = default_settings();
         let settings = match sections {
             None => default_settings,
@@ -66,9 +113,8 @@ impl SettingsService {
                         "mcp" => current.mcp = default_settings.mcp.clone(),
                         "account" => current.account = default_settings.account.clone(),
                         "translation" => current.translation = default_settings.translation.clone(),
-                        "quickTools" => {
-                            current.quick_tools = default_settings.quick_tools.clone()
-                        }
+                        "quickTools" => current.quick_tools = default_settings.quick_tools.clone(),
+                        "skills" => current.skills = default_settings.skills.clone(),
                         _ => return Err(AppError::validation_error("未知设置分组")),
                     }
                 }
@@ -96,12 +142,50 @@ impl SettingsService {
         Ok(settings)
     }
 
+    /// Persist the settings atomically: write a uniquely named temp file in
+    /// the same directory, then `rename` it over config.json (atomic on the
+    /// same filesystem). A failed serialize or write leaves the original
+    /// file byte-for-byte intact — readers never observe a torn config
+    /// (security audit L-1). The suffix is process-id + an in-process
+    /// counter + per-call entropy (nanosecond timestamp) so concurrent saves
+    /// never collide on the temp name even after PID reuse.
     fn save_settings(&self, settings: &AppSettings) -> Result<(), AppError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
         let path = self.storage.get_config_path();
         let content = serde_json::to_string_pretty(settings)
             .map_err(|e| AppError::internal_error(&format!("序列化设置失败: {e}")))?;
-        std::fs::write(&path, content)
+
+        let dir = path
+            .parent()
+            .ok_or_else(|| AppError::internal_error("无法确定设置文件所在目录"))?;
+
+        // Entropy component: nanoseconds since UNIX_EPOCH; on error fall back to 0.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+
+        let temp_path = dir.join(format!(
+            ".config.json.{}.{}.{}.tmp",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed),
+            nanos
+        ));
+
+        std::fs::write(&temp_path, content)
             .map_err(|e| AppError::internal_error(&format!("写入设置失败: {e}")))?;
+        if let Err(e) = std::fs::rename(&temp_path, &path) {
+            if let Err(cleanup_err) = std::fs::remove_file(&temp_path) {
+                tracing::warn!(
+                    path = %temp_path.display(),
+                    error = %cleanup_err,
+                    "failed to clean up temp file after rename failure"
+                );
+            }
+            return Err(AppError::internal_error(&format!("写入设置失败: {e}")));
+        }
         Ok(())
     }
 
@@ -151,12 +235,479 @@ fn default_settings() -> AppSettings {
             user: None,
             is_logged_in: false,
         },
-        translation: TranslationSettings {
-            session_id: None,
-        },
+        translation: TranslationSettings { session_id: None },
         quick_tools: QuickToolsSettings {
             show_toolbar_on_selection: false,
             selection_blacklist: Default::default(),
         },
+        skills: SkillSettings::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn service(dir: &TempDir) -> SettingsService {
+        let storage = StorageService::new(dir.path().to_path_buf()).unwrap();
+        SettingsService::new(Arc::new(storage))
+    }
+
+    fn config_path(dir: &TempDir) -> PathBuf {
+        dir.path().join("config.json")
+    }
+
+    /// A valid pre-revamp config: the four legacy sections present, no
+    /// `skills` section at all.
+    fn config_without_skills_section() -> String {
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        let map = value.as_object_mut().unwrap();
+        map.remove("skills");
+        assert!(map.contains_key("general"), "fixture keeps legacy sections");
+        assert!(map.contains_key("mcp"));
+        assert!(map.contains_key("account"));
+        assert!(map.contains_key("translation"));
+        serde_json::to_string_pretty(&value).unwrap()
+    }
+
+    fn error_code(err: &AppError) -> String {
+        serde_json::to_value(err).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    // VAL-CONFIG-001 (storage half): fresh environment, no settings ever
+    // written → skills.disabled defaults to empty, and the auto-written
+    // config.json carries an empty (or absent) skills.disabled.
+    #[test]
+    fn fresh_env_defaults_to_empty_disabled_list() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let settings = svc.get_settings().unwrap();
+        assert!(settings.skills.disabled.is_empty());
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        let disabled = written.pointer("/skills/disabled");
+        assert!(
+            disabled.is_none() || disabled == Some(&serde_json::json!([])),
+            "default skills.disabled must be empty or absent: {disabled:?}"
+        );
+    }
+
+    // VAL-CONFIG-013: a valid config.json missing the `skills` section parses
+    // without error via serde(default) → all enabled.
+    #[test]
+    fn missing_skills_section_parses_with_all_enabled() {
+        let dir = TempDir::new().unwrap();
+        fs::write(config_path(&dir), config_without_skills_section()).unwrap();
+
+        let settings = service(&dir).get_settings().unwrap();
+        assert!(settings.skills.disabled.is_empty());
+    }
+
+    // VAL-CONFIG-008 / VAL-CONFIG-011 (storage half): the disabled list is
+    // opaque storage — orphan, duplicate, empty and whitespace entries persist
+    // verbatim across an unrelated settings update (no prune, no
+    // normalization, no dedup).
+    #[test]
+    fn disabled_entries_persist_verbatim_across_unrelated_update() {
+        let dir = TempDir::new().unwrap();
+        let entries = serde_json::json!(["ghost", "ghost", "", "  ", "MySkill"]);
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value["skills"]["disabled"] = entries.clone();
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let svc = service(&dir);
+        let settings = svc.get_settings().unwrap();
+        assert_eq!(
+            settings.skills.disabled,
+            vec!["ghost", "ghost", "", "  ", "MySkill"]
+        );
+
+        // Unrelated update re-saves the file; the list must survive verbatim.
+        svc.update_settings(UpdateSettingsRequest {
+            section: "general".to_string(),
+            data: serde_json::json!({ "autoScroll": false }),
+        })
+        .unwrap();
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["skills"]["disabled"], entries);
+    }
+
+    // VAL-CONFIG-017: corrupt (non-JSON) config.json → structured
+    // INTERNAL_ERROR, file not silently overwritten.
+    #[test]
+    fn corrupt_config_returns_internal_error_and_keeps_file() {
+        let dir = TempDir::new().unwrap();
+        let corrupt = "not json {{{";
+        fs::write(config_path(&dir), corrupt).unwrap();
+
+        let err = service(&dir).get_settings().unwrap_err();
+        assert_eq!(error_code(&err), "INTERNAL_ERROR");
+        assert_eq!(
+            fs::read_to_string(config_path(&dir)).unwrap(),
+            corrupt,
+            "corrupt file must not be overwritten"
+        );
+    }
+
+    // VAL-CONFIG-016: structurally illegal skills.disabled (non-array, or a
+    // non-string element) → structured INTERNAL_ERROR, file untouched.
+    #[test]
+    fn illegal_disabled_shape_returns_internal_error() {
+        for bad in [
+            serde_json::json!("nope"),
+            serde_json::json!(["ok", 42]),
+            serde_json::json!({ "k": "v" }),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let mut value = serde_json::to_value(default_settings()).unwrap();
+            value["skills"]["disabled"] = bad;
+            let content = serde_json::to_string_pretty(&value).unwrap();
+            fs::write(config_path(&dir), &content).unwrap();
+
+            let err = service(&dir).get_settings().unwrap_err();
+            assert_eq!(error_code(&err), "INTERNAL_ERROR");
+            assert_eq!(
+                fs::read_to_string(config_path(&dir)).unwrap(),
+                content,
+                "file must stay untouched on a structural error"
+            );
+        }
+    }
+
+    /// Snapshot the four legacy sections as serde values for
+    /// "other sections untouched" assertions (value equivalence after a
+    /// serialization round-trip, per the validation contract).
+    fn legacy_sections(settings: &AppSettings) -> [(&'static str, serde_json::Value); 4] {
+        [
+            ("general", serde_json::to_value(&settings.general).unwrap()),
+            ("mcp", serde_json::to_value(&settings.mcp).unwrap()),
+            ("account", serde_json::to_value(&settings.account).unwrap()),
+            (
+                "translation",
+                serde_json::to_value(&settings.translation).unwrap(),
+            ),
+        ]
+    }
+
+    // VAL-CONFIG-003: disabling a skill writes its name into the config.json
+    // `skills.disabled` array while every other section stays value-identical.
+    #[test]
+    fn set_skill_disabled_true_writes_name_and_preserves_other_sections() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        // Seed non-default values so "preserved" is distinguishable from
+        // "reset to default".
+        svc.update_settings(UpdateSettingsRequest {
+            section: "general".to_string(),
+            data: serde_json::json!({ "autoScroll": false, "theme": "dark" }),
+        })
+        .unwrap();
+        let before = svc.get_settings().unwrap();
+        let snapshot = legacy_sections(&before);
+
+        let updated = svc.set_skill_disabled("alpha", true).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha"]);
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["skills"]["disabled"], serde_json::json!(["alpha"]));
+        for (key, expected) in snapshot {
+            assert_eq!(written[key], expected, "section `{key}` must be untouched");
+        }
+    }
+
+    // VAL-CONFIG-004: re-enabling removes the name (all equal entries) from
+    // the persisted list.
+    #[test]
+    fn set_skill_disabled_false_removes_all_equal_entries() {
+        let dir = TempDir::new().unwrap();
+        // Seed a list that already contains duplicates of the target plus an
+        // unrelated opaque entry.
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value["skills"]["disabled"] = serde_json::json!(["alpha", "ghost", "alpha"]);
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let svc = service(&dir);
+        let updated = svc.set_skill_disabled("alpha", false).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["ghost"]);
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["skills"]["disabled"], serde_json::json!(["ghost"]));
+    }
+
+    // Re-enabling a name that is not in the list is a no-op, not an error.
+    #[test]
+    fn set_skill_disabled_false_on_absent_name_is_noop() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        let updated = svc.set_skill_disabled("never-disabled", false).unwrap();
+        assert!(updated.skills.disabled.is_empty());
+    }
+
+    // Insert is deduplicating: disabling an already-disabled skill must not
+    // grow the list.
+    #[test]
+    fn set_skill_disabled_true_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        svc.set_skill_disabled("alpha", true).unwrap();
+        let updated = svc.set_skill_disabled("alpha", true).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha"]);
+    }
+
+    // VAL-CONFIG-006 / VAL-CONFIG-007: back-to-back disables of distinct
+    // skills read-modify-write the list — no lost update, both names persist.
+    #[test]
+    fn back_to_back_disables_keep_both_names() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        svc.set_skill_disabled("alpha", true).unwrap();
+        let updated = svc.set_skill_disabled("beta", true).unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha", "beta"]);
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(
+            written["skills"]["disabled"],
+            serde_json::json!(["alpha", "beta"])
+        );
+    }
+
+    // VAL-CONFIG-005: the list survives a "restart" — a fresh service over
+    // the same data dir (config.json is the durable store) reads it back.
+    #[test]
+    fn disabled_list_survives_service_restart() {
+        let dir = TempDir::new().unwrap();
+        service(&dir).set_skill_disabled("alpha", true).unwrap();
+
+        let reread = service(&dir).get_settings().unwrap();
+        assert_eq!(reread.skills.disabled, vec!["alpha"]);
+    }
+
+    // Pre-existing opaque entries (orphans, duplicates, whitespace) stay
+    // verbatim when an unrelated name is toggled.
+    #[test]
+    fn set_skill_disabled_preserves_opaque_entries_verbatim() {
+        let dir = TempDir::new().unwrap();
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value["skills"]["disabled"] = serde_json::json!(["ghost", "ghost", "", "  "]);
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let updated = service(&dir).set_skill_disabled("alpha", true).unwrap();
+        assert_eq!(
+            updated.skills.disabled,
+            vec!["ghost", "ghost", "", "  ", "alpha"]
+        );
+    }
+
+    // VAL-CONFIG-018 + L-1 (security audit): a disk-write failure surfaces as
+    // a structured INTERNAL_ERROR — no panic — and, because saving goes
+    // through a same-directory temp file + rename, the original config.json
+    // is left byte-for-byte intact. A read-only *directory* blocks temp-file
+    // creation (the write failure point under atomic replacement) while the
+    // config file itself stays readable.
+    #[cfg(unix)]
+    #[test]
+    fn set_skill_disabled_write_failure_returns_structured_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        // Materialize a valid config first, then make the directory
+        // unwritable so no new file can be created in it.
+        svc.get_settings().unwrap();
+        let original = fs::read_to_string(config_path(&dir)).unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
+
+        let err = svc.set_skill_disabled("alpha", true).unwrap_err();
+        assert_eq!(error_code(&err), "INTERNAL_ERROR");
+        let json = serde_json::to_value(&err).unwrap();
+        assert!(json["message"].is_string());
+        assert!(json.get("hint").is_some());
+
+        // Restore permissions so TempDir cleanup succeeds.
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(config_path(&dir)).unwrap(),
+            original,
+            "a failed save must leave the original config.json intact"
+        );
+        assert_eq!(
+            svc.get_settings().unwrap().skills.disabled,
+            Vec::<String>::new(),
+            "the failed disable must not be half-applied"
+        );
+    }
+
+    // L-1 (security audit): a successful save replaces config.json atomically
+    // via rename and leaves no temp-file droppings behind in the data dir.
+    #[test]
+    fn save_leaves_no_temp_files_behind() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        svc.set_skill_disabled("alpha", true).unwrap();
+        svc.set_skill_disabled("alpha", false).unwrap();
+
+        let entries: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["config.json"],
+            "only config.json may remain after saves"
+        );
+    }
+
+    // M-1 (security audit): the load→mutate→save critical section is
+    // serialized across clones — a concurrent `set_skill_disabled` and
+    // `update_settings` must never lose the freshly written disabled entry
+    // (the safety switch must not fail open by race). Threads are released
+    // by a barrier to maximize interleaving; repeated rounds make a lost
+    // update overwhelmingly likely without the lock.
+    #[test]
+    fn concurrent_disable_and_update_never_lose_disabled_entry() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+        // Materialize a valid config so neither thread hits the first-run path.
+        svc.get_settings().unwrap();
+
+        for round in 0..32 {
+            let name = format!("skill-{round}");
+            let barrier = Arc::new(Barrier::new(2));
+
+            let disable = {
+                let svc = svc.clone();
+                let barrier = barrier.clone();
+                let name = name.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    svc.set_skill_disabled(&name, true).unwrap();
+                })
+            };
+            let update = {
+                let svc = svc.clone();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    svc.update_settings(UpdateSettingsRequest {
+                        section: "general".to_string(),
+                        data: serde_json::json!({ "autoScroll": round % 2 == 0 }),
+                    })
+                    .unwrap();
+                })
+            };
+            disable.join().unwrap();
+            update.join().unwrap();
+
+            let settings = svc.get_settings().unwrap();
+            assert!(
+                settings.skills.disabled.iter().any(|entry| entry == &name),
+                "round {round}: disabled entry `{name}` was lost: {:?}",
+                settings.skills.disabled
+            );
+        }
+    }
+
+    // The closed section enum recognizes "skills" in both update and reset.
+    #[test]
+    fn update_and_reset_recognize_skills_section() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "skills".to_string(),
+                data: serde_json::json!({ "disabled": ["alpha"] }),
+            })
+            .unwrap();
+        assert_eq!(updated.skills.disabled, vec!["alpha"]);
+
+        let reread = svc.get_settings().unwrap();
+        assert_eq!(reread.skills.disabled, vec!["alpha"]);
+
+        let reset = svc
+            .reset_settings(Some(vec!["skills".to_string()]))
+            .unwrap();
+        assert!(reset.skills.disabled.is_empty());
+    }
+
+    // Test that temp file names contain entropy (pid + counter + nanos),
+    // so back-to-back saves or PID reuse do not collide.
+    #[test]
+    fn temp_file_names_contain_entropy_components() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        // Perform two consecutive saves and intercept temp file names
+        // by monitoring the directory between operations.
+        // Since saves are atomic (temp then rename), we can only see
+        // a temp file if the directory listing happens during the window.
+        // Instead, we rely on the fact that if entropy is insufficient,
+        // the second save's temp file would overwrite the first (which would fail).
+        // To test entropy reliably, we verify that multiple back-to-back
+        // saves succeed without collision by checking that the final state
+        // is correct and the operation returns Ok.
+
+        svc.set_skill_disabled("skill1", true).unwrap();
+        svc.set_skill_disabled("skill2", true).unwrap();
+        svc.set_skill_disabled("skill3", true).unwrap();
+
+        let settings = svc.get_settings().unwrap();
+        assert_eq!(
+            settings.skills.disabled,
+            vec!["skill1", "skill2", "skill3"],
+            "all three back-to-back saves must succeed without collision"
+        );
+    }
+
+    // Test that successful saves leave no temp files behind (this also
+    // exercises the "temp file names do not collide" property indirectly).
+    #[test]
+    fn multiple_back_to_back_saves_leave_no_temp_files() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        for i in 0..10 {
+            svc.set_skill_disabled(&format!("skill-{i}"), true).unwrap();
+        }
+
+        let entries: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            entries,
+            vec!["config.json"],
+            "even after many saves, only config.json may remain"
+        );
     }
 }

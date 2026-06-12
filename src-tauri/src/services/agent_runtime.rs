@@ -33,7 +33,7 @@
 // `start_run` 以 `AppError` 拒绝，不会启动并发 run。
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -52,7 +52,10 @@ use hand_ai_model::{ImageContent, Message, TextContent, UserContentBlock, UserMe
 use crate::models::AppError;
 use crate::services::agent_tools;
 use crate::services::chat_engine::{self, ChatOptions};
-use crate::services::{AgentSessionService, Database, ProviderService};
+use crate::services::skill_service::SkillService;
+use crate::services::{
+    AgentSessionService, Database, ProviderService, SettingsService, StorageService,
+};
 use crate::storage::types::UUID;
 use crate::storage::AgentSessionRepository;
 
@@ -194,6 +197,14 @@ pub struct AgentRuntime {
     /// `agent_session_messages`（seq 由仓储事务内分配）。
     messages: AgentSessionRepository,
     runs: RunsMap,
+    /// Skill discovery facade (M2 wiring). Resolves the three scope roots and
+    /// runs discovery at assemble time so the run's enabled skills can be turned
+    /// into a system-prompt index plus an auto-injected `skill` tool.
+    skill_service: Arc<SkillService>,
+    /// Settings store (config.json). `assemble_run` reads `skills.disabled`
+    /// FRESH from it on every run — never cached — so toggling a skill's
+    /// global opt-out applies to the very next run without a restart.
+    settings: SettingsService,
     /// 测试专用：注入一个 scripted `StreamFn` 取代真实网络流。生产构造器永远
     /// 把它留空（不启用 model 的 `faux` feature，遵守上游 Decision Log D-04）。
     #[cfg(test)]
@@ -231,6 +242,14 @@ pub struct AgentRunRequest {
     /// 可选的图片附件。缺省（旧调用方 / 纯文本发送）时为空 Vec，走纯文本路径。
     #[serde(default)]
     pub attachments: Vec<AgentRunAttachment>,
+    /// 本回合显式强制加载的 skill 名（wire 上 camelCase `forcedSkills`）。缺省
+    /// （旧的三字段 payload / 无强制注入）时为空 Vec。每个名针对**当前有效集**
+    /// （discovered-and-validated ∖ globally-disabled）解析；解析到的 skill body
+    /// 被逐字注入装配期的 system_prompt。unknown / 未发现 / 校验失败 / 全局禁用 /
+    /// 空串一律静默跳过（disabled 优先于 forced）；但强制一个 opt-in skill 仍注入
+    /// （显式用户意图覆盖 opt-in 抑制）。
+    #[serde(default)]
+    pub forced_skills: Vec<String>,
 }
 
 /// Per-image byte cap enforced at the IPC boundary (CLAUDE.md「输入验证必须完备」)。
@@ -290,13 +309,135 @@ fn build_user_message(input: String, attachments: &[AgentRunAttachment]) -> User
     UserMessage::new_blocks(blocks)
 }
 
+/// The wrapper marker that brackets each forced-skill body in the system
+/// prompt. Names the skill, is visually distinct from the `<available_skills>`
+/// index elements, and contains the body VERBATIM (no `escape_xml`, no
+/// truncation). `<forced_skill name="...">` cannot collide with the index's
+/// `<skill>` / `<name>` / `<description>` tags, so it never disturbs the index
+/// XML boundaries even when a body embeds `</available_skills>` or other
+/// metacharacters.
+///
+/// TRUST + DELIMITING CONTRACT: the marker is a NAME-BASED, BEST-EFFORT
+/// delimiter, not a strict-XML container. Because the body is injected verbatim,
+/// a body MAY itself contain a literal `</forced_skill>`, which would close the
+/// wrapper early for any consumer that pairs tags strictly. This is accepted by
+/// design: skill bodies are TRUSTED LOCAL CONTENT — the same `SKILL.md` text is
+/// already model-reachable in full through the `skill` tool, so forcing only
+/// changes its injection POSITION, not its trust level. Skills are discovered
+/// solely from local roots (app-data bundle, `~/.agents/skills`,
+/// `<workingDir>/.handbox/skills`); there is no install/marketplace path that
+/// introduces an untrusted source. Downstream consumers MUST NOT rely on strict
+/// XML pairing of this marker. (For an untrusted `<workingDir>`, a project-scope
+/// skill body is as untrusted as the working directory itself — running an agent
+/// there already exposes that content to the model via the skill index/tool.)
+fn open_forced_marker(name: &str) -> String {
+    format!("<forced_skill name=\"{name}\">")
+}
+const FORCED_MARKER_CLOSE: &str = "</forced_skill>";
+
+/// Append the resolved forced-skill bodies to `system_prompt`, in place.
+///
+/// Each name in `forced` is resolved against the run's EFFECTIVE skill set
+/// (`effective`, already discovered-validated-and-not-globally-disabled) — no
+/// second IO. Resolution rules (all silent, never panicking):
+///
+/// - unknown / undiscovered / validation-failed / globally-disabled names are
+///   simply absent from `effective`, so they resolve to nothing and are skipped
+///   (disabled therefore wins over forced);
+/// - an empty-string name never matches and is skipped;
+/// - duplicate names inject the body only ONCE (first forced-list occurrence);
+/// - an opt-in (`disable-model-invocation`) skill that survived into `effective`
+///   IS injected — explicit forcing overrides the opt-in suppression.
+///
+/// Surviving bodies are appended in forced-list order, each bracketed by a
+/// `<forced_skill name="...">` … `</forced_skill>` marker, with the body copied
+/// VERBATIM (no escaping, no truncation). When `system_prompt` is non-empty the
+/// forced block is separated from it by a blank line; when it is empty there is
+/// NO leading separator (no whitespace garbage). With nothing to inject the
+/// prompt is left byte-for-byte unchanged.
+fn append_forced_skill_bodies(
+    system_prompt: &mut String,
+    forced: &[String],
+    effective: &[crate::services::skills::Skill],
+) {
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut block = String::new();
+    for name in forced {
+        if name.is_empty() || !seen.insert(name.as_str()) {
+            // Empty name never matches; a repeated name injects only once.
+            continue;
+        }
+        let Some(skill) = effective.iter().find(|s| &s.name == name) else {
+            // Unknown / undiscovered / invalid / disabled → silently skipped.
+            continue;
+        };
+        if !block.is_empty() {
+            block.push('\n');
+        }
+        block.push_str(&open_forced_marker(&skill.name));
+        block.push('\n');
+        // VERBATIM body — no escape_xml, no truncation, full large bodies.
+        block.push_str(&skill.body);
+        block.push('\n');
+        block.push_str(FORCED_MARKER_CLOSE);
+    }
+
+    if block.is_empty() {
+        return;
+    }
+    if system_prompt.is_empty() {
+        *system_prompt = block;
+    } else {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&block);
+    }
+}
+
 impl AgentRuntime {
+    /// Construct a runtime with an inert skill service (no skills discovered)
+    /// and an inert settings store (default settings, empty disabled list).
+    ///
+    /// Retained as the dependency-light constructor used by tests and by call
+    /// sites that do not resolve OS skill roots. Production wires the real
+    /// skill service and the shared `SettingsService` via
+    /// [`AgentRuntime::new_with_skills`] (the production caller holds the
+    /// `AppHandle` needed to resolve the app-data and home directories).
     pub fn new(db: Arc<Database>) -> Self {
+        // Roots that do not exist → discovery silently finds nothing (missing
+        // roots are skipped, not errors), so this runtime never injects skills.
+        let inert_skills = Arc::new(SkillService::new(
+            PathBuf::from("/nonexistent/handbox-skills/appdata"),
+            PathBuf::from("/nonexistent/handbox-skills/user"),
+        ));
+        // A settings store rooted under a unique temp dir: `get_settings()`
+        // materializes a default config there (empty `skills.disabled`), so
+        // this runtime applies no global opt-out — matching its inert skills.
+        let settings_dir = std::env::temp_dir()
+            .join("handbox-inert-settings")
+            .join(uuid::Uuid::new_v4().to_string());
+        let storage =
+            StorageService::new(settings_dir).expect("create inert settings dir under temp_dir");
+        let inert_settings = SettingsService::new(Arc::new(storage));
+        Self::new_with_skills(db, inert_skills, inert_settings)
+    }
+
+    /// Construct a runtime with an explicit skill service and settings store.
+    /// The production path (`initialize_services`) passes a skill service whose
+    /// roots are resolved from Tauri's `PathResolver` (`<app_data_dir>/skills`
+    /// and `~/.agents/skills`) and a clone of the managed `SettingsService`
+    /// (the global skill opt-out list lives in its config.json).
+    pub fn new_with_skills(
+        db: Arc<Database>,
+        skill_service: Arc<SkillService>,
+        settings: SettingsService,
+    ) -> Self {
         Self {
             sessions: AgentSessionService::new(Arc::clone(&db)),
             providers: ProviderService::new(Arc::clone(&db)),
             messages: AgentSessionRepository::new(db),
             runs: Arc::new(Mutex::new(HashMap::new())),
+            skill_service,
+            settings,
             #[cfg(test)]
             stream_fn_override: None,
             #[cfg(test)]
@@ -320,6 +461,7 @@ impl AgentRuntime {
         session_id: UUID,
         input: String,
         attachments: Vec<AgentRunAttachment>,
+        forced_skills: Vec<String>,
         sink: RunSink,
     ) -> Result<(), AppError> {
         let cancel = CancellationToken::new();
@@ -355,6 +497,7 @@ impl AgentRuntime {
                 &session_id,
                 input,
                 attachments,
+                forced_skills,
                 cancel.clone(),
                 Arc::clone(&steering),
             )
@@ -381,6 +524,7 @@ impl AgentRuntime {
         session_id: &UUID,
         input: String,
         attachments: Vec<AgentRunAttachment>,
+        forced_skills: Vec<String>,
         cancel: CancellationToken,
         steering: Arc<Mutex<Vec<Message>>>,
     ) -> Result<(Vec<Message>, AgentContext, AgentLoopConfig, Vec<AgentTool>), AppError> {
@@ -408,7 +552,7 @@ impl AgentRuntime {
             messages.push(msg);
         }
 
-        let context = AgentContext {
+        let mut context = AgentContext {
             system_prompt: session.system_prompt.clone().unwrap_or_default(),
             messages,
         };
@@ -452,7 +596,88 @@ impl AgentRuntime {
         // gate is therefore "what is not registered cannot run" — the loop's own
         // `Tool '<name>' not found` enforces it (D8/D9). No hooks in this feature.
         let working_dir = session.working_dir.as_deref().map(Path::new);
-        let tools = agent_tools::build_tools(&session.enabled_tools, working_dir);
+        let mut tools = agent_tools::build_tools(&session.enabled_tools, working_dir);
+
+        // Skill wiring: discover skills across the three scope roots, then take
+        // the run's EFFECTIVE set = discovered-and-validated ∖ the GLOBAL
+        // opt-out list (settings `skills.disabled`). There is NO per-session
+        // filter: a freshly dropped valid skill is usable on the next run with
+        // zero enablement action (default all-on, VAL-CROSS-004). Only when the
+        // effective set is non-empty: (a) append the available-skills index to
+        // the system prompt and (b) auto-inject the `skill` tool (NOT via
+        // enabled_tools). Discovery errors are non-fatal: they are logged but
+        // never abort the run.
+        let (discovered, skill_errs) = self.skill_service.discover(working_dir);
+        if !skill_errs.is_empty() {
+            tracing::warn!(
+                "skill discovery produced {} non-fatal diagnostic(s)",
+                skill_errs.len()
+            );
+        }
+        // The disabled list is read FRESH from config.json on every run — never
+        // cached — so a toggle applies to the very next run without a restart
+        // (VAL-ASSEMBLE-005). A settings read failure aborts assembly with its
+        // structured error rather than failing open (failing open would
+        // silently re-enable skills the user disabled). Matching is exact: the
+        // list is opaque storage (no trim, no case folding), so orphan or
+        // whitespace entries simply never match a discovered name.
+        let disabled: std::collections::HashSet<String> = self
+            .settings
+            .get_settings()?
+            .skills
+            .disabled
+            .into_iter()
+            .collect();
+        // `discovered` is already deduped (highest scope wins), alphabetically
+        // sorted, and validation-filtered by `discover_skills`; broken skills
+        // are naturally absent and never abort the run (VAL-ASSEMBLE-028).
+        let effective: Vec<crate::services::skills::Skill> = discovered
+            .into_iter()
+            .filter(|s| !disabled.contains(&s.name))
+            .collect();
+
+        // Gate strictly on the EFFECTIVE set: only inject when it is non-empty.
+        if !effective.is_empty() {
+            // (a) System-prompt index. `format_skills_section` returns the
+            // `<available_skills>` block (None only for an empty slice, which we
+            // already excluded). Compose with the base prompt: base first when
+            // present, otherwise the section alone (no leading separator).
+            if let Some(section) = crate::services::skills::format_skills_section(&effective) {
+                let base = std::mem::take(&mut context.system_prompt);
+                context.system_prompt = if base.is_empty() {
+                    section
+                } else {
+                    format!("{base}\n\n{section}")
+                };
+            }
+
+            // (c) Forced-skill bodies. Resolve each requested name against the
+            // EFFECTIVE set (discovered-and-validated ∖ disabled) — REUSING the
+            // already-discovered Vec, no second IO. A name that is unknown,
+            // unvalidated, globally disabled, or empty is silently skipped
+            // (disabled wins over forced, since it is already absent from
+            // `effective`); an opt-in skill that survives into `effective` is
+            // still injected (explicit user intent overrides the opt-in
+            // auto-invocation suppression). Bodies are appended VERBATIM — no
+            // escape_xml, no truncation — each wrapped in a `<forced_skill>`
+            // marker naming the skill, in forced-list order, deduped by name.
+            // The marker is distinct from the `<available_skills>`/`<skill>`
+            // index elements so it never breaks the index XML boundaries.
+            // Concatenation order is base → index → forced bodies. Inside this
+            // `effective` non-empty branch the index always made the prompt
+            // non-empty, so forced bodies append after it; the helper's
+            // empty-prompt branch exists only for its standalone contract.
+            append_forced_skill_bodies(&mut context.system_prompt, &forced_skills, &effective);
+
+            // (b) Auto-inject the `skill` tool over a name->body map of the
+            // effective set. Bodies live ONLY in the tool's lookup table, never
+            // in the system prompt index (VAL-TOOL-014). Forced injection is
+            // ADDITIVE: a forced skill stays in this map and in the index, so
+            // `skill(name)` still resolves its body.
+            let skill_bodies: HashMap<String, String> =
+                effective.into_iter().map(|s| (s.name, s.body)).collect();
+            tools.push(agent_tools::make_skill_tool(skill_bodies));
+        }
 
         let mut config = AgentLoopConfig::new(model, stream_options);
         // Default to Parallel when unset (matches hand-agent's own default).
@@ -929,6 +1154,7 @@ mod tests {
                 session_id.clone(),
                 "hello".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -989,6 +1215,7 @@ mod tests {
                 session_id.clone(),
                 "first".to_string(),
                 vec![],
+                vec![],
                 first_sink.clone().into_run_sink(),
             )
             .await
@@ -1003,6 +1230,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "second".to_string(),
+                vec![],
                 vec![],
                 second_sink.clone().into_run_sink(),
             )
@@ -1215,6 +1443,7 @@ mod tests {
                 session_id.clone(),
                 "hello".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1290,6 +1519,7 @@ mod tests {
                 session_id.clone(),
                 "the user prompt".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1337,6 +1567,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "go".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -1388,6 +1619,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "new question".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -1490,6 +1722,7 @@ mod tests {
                 session_id.clone(),
                 "hello".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1569,6 +1802,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hello".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -1653,6 +1887,7 @@ mod tests {
                 session_id.clone(),
                 "hi".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1710,6 +1945,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "ask".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -1830,6 +2066,7 @@ mod tests {
                 session_id.clone(),
                 "abort me".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1901,6 +2138,7 @@ mod tests {
                 session_id.clone(),
                 "abort early".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -1959,6 +2197,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "hi".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -2075,6 +2314,7 @@ mod tests {
                 session_id.clone(),
                 "use the disabled tool".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2156,6 +2396,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "read a file".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -2242,6 +2483,7 @@ mod tests {
                 session_id.clone(),
                 "write a file".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2315,6 +2557,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "fetch and read".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -2455,6 +2698,7 @@ mod tests {
                 session_id.clone(),
                 "initial prompt".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2547,6 +2791,7 @@ mod tests {
                 session_id.clone(),
                 "initial prompt".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -2605,6 +2850,7 @@ mod tests {
             .start_run(
                 session_id.clone(),
                 "initial prompt".to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
@@ -2826,5 +3072,2146 @@ mod tests {
         assert!(blocks
             .iter()
             .all(|b| matches!(b, UserContentBlock::Image(_))));
+    }
+
+    // -------------------------------------------------------------------------
+    // Skill injection at assemble time (VAL-TOOL-001/002/006/007/008/009/010/
+    // 011/013/014/016/017). These drive the real `assemble_run` with a
+    // `SkillService` rooted at tempdirs, then assert on the returned
+    // `(context.system_prompt, tools)` — no loop spawn, no network.
+    // -------------------------------------------------------------------------
+
+    use crate::services::skill_service::SkillService;
+
+    /// A tempdir-backed `SettingsService` (fresh default config → empty global
+    /// disabled list). Returns the guard so the config dir outlives the test;
+    /// the service handle lets a test toggle `skills.disabled` between
+    /// assembles (the runtime re-reads the list fresh on every run).
+    fn temp_settings() -> (SettingsService, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let storage = StorageService::new(dir.path().to_path_buf()).unwrap();
+        (SettingsService::new(Arc::new(storage)), dir)
+    }
+
+    /// Write `<root>/<dir>/SKILL.md` with a description, body, and optional
+    /// `disable-model-invocation`. Returns the SKILL.md path.
+    fn write_skill_md(
+        root: &std::path::Path,
+        dir: &str,
+        description: &str,
+        body: &str,
+        opt_in: bool,
+    ) {
+        let skill_dir = root.join(dir);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let dmi = if opt_in {
+            "\ndisable-model-invocation: true"
+        } else {
+            ""
+        };
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\ndescription: {description}{dmi}\n---\n{body}"),
+        )
+        .unwrap();
+    }
+
+    /// Seed an agent session with explicit `working_dir` and a chosen base
+    /// `system_prompt` (None → no base prompt). Per-session skill enablement
+    /// is deprecated: there is no skills knob to seed anymore.
+    async fn seed_session_with_skills(
+        db: &Arc<Database>,
+        provider_id: &str,
+        model_id: &str,
+        enabled_tools: Vec<String>,
+        working_dir: Option<String>,
+        system_prompt: Option<String>,
+    ) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let session = AgentSession {
+            id: id.clone(),
+            name: "Skill Session".to_string(),
+            project_id: None,
+            model_id: Some(model_id.to_string()),
+            provider_id: Some(provider_id.to_string()),
+            system_prompt,
+            thinking_level: None,
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+            working_dir,
+            enabled_tools,
+            tool_execution_mode: None,
+            message_count: 0,
+            last_message_at: None,
+            created_at: now_ms(),
+            updated_at: now_ms(),
+        };
+        AgentSessionRepository::new(Arc::clone(db))
+            .create_session(&session)
+            .await
+            .unwrap();
+        id
+    }
+
+    /// Run `assemble_run` and return its `(system_prompt, tool_names)`.
+    async fn assemble_prompt_and_tool_names(
+        runtime: &AgentRuntime,
+        session_id: &str,
+    ) -> (String, Vec<String>) {
+        let cancel = CancellationToken::new();
+        let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+        let (_prompts, context, _config, tools) = runtime
+            .assemble_run(
+                &session_id.to_string(),
+                "hello".to_string(),
+                vec![],
+                vec![],
+                cancel,
+                steering,
+            )
+            .await
+            .expect("assemble_run should succeed");
+        let names = tools.into_iter().map(|t| t.name).collect();
+        (context.system_prompt, names)
+    }
+
+    /// A non-empty effective set (discovered-and-validated ∖ disabled, here
+    /// with an empty disabled list) auto-injects the `skill` tool EVEN WITH
+    /// `enabled_tools` empty (no read_file gate), and appends the
+    /// `<available_skills>` index AFTER a non-empty base prompt.
+    #[tokio::test]
+    async fn nonempty_effective_set_injects_skill_tool_and_index() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj_skills = work.path().join(".handbox").join("skills");
+        write_skill_md(
+            &proj_skills,
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![], // no enabled_tools at all → skill tool must STILL be injected
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        // SkillService whose app-data/user roots are empty tempdirs; the project
+        // root is derived from working_dir by the service.
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
+
+        assert!(
+            names.contains(&"skill".to_string()),
+            "skill tool injected: {names:?}"
+        );
+        assert!(
+            prompt.contains("<available_skills>"),
+            "index appended:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "skill listed:\n{prompt}"
+        );
+        // VAL-TOOL-009: base first, then index.
+        let base_pos = prompt.find("BASE PROMPT").expect("base present");
+        let idx_pos = prompt.find("<available_skills>").expect("index present");
+        assert!(base_pos < idx_pos, "base must precede the index:\n{prompt}");
+        // VAL-TOOL-014: the body must NOT appear in the system prompt.
+        assert!(
+            !prompt.contains("ALPHA BODY"),
+            "body leaked into prompt:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-003 (zero discovered): nothing to discover at all → no
+    /// `skill` tool, no index, base prompt untouched, builtins unaffected.
+    #[tokio::test]
+    async fn zero_discovered_injects_nothing() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        // A working dir WITHOUT any project skills dir; app/user roots empty.
+        let work = TempDir::new().unwrap();
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec!["web_fetch".to_string()],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
+
+        assert!(
+            !names.contains(&"skill".to_string()),
+            "no skill tool: {names:?}"
+        );
+        assert!(
+            !prompt.contains("<available_skills>"),
+            "no index:\n{prompt}"
+        );
+        // The non-skill tool (web_fetch) is still present, unaffected.
+        assert!(
+            names.contains(&"web_fetch".to_string()),
+            "web_fetch kept: {names:?}"
+        );
+        // Base prompt is untouched (no trailing separator garbage).
+        assert_eq!(prompt, "BASE PROMPT");
+    }
+
+    /// VAL-TOOL-008: an EMPTY base prompt produces an index-only system prompt —
+    /// no leading separator/whitespace before `<available_skills>` guidance.
+    #[tokio::test]
+    async fn empty_base_prompt_yields_index_only_no_leading_separator() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA BODY",
+            false,
+        );
+
+        // No base prompt at all (None → unwrap_or_default → "").
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            None,
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
+
+        assert!(
+            names.contains(&"skill".to_string()),
+            "skill tool injected: {names:?}"
+        );
+        // No leading newline/space: the prompt begins with the section's first
+        // guidance line, not a separator.
+        assert!(
+            !prompt.starts_with('\n') && !prompt.starts_with(' '),
+            "no leading separator before index:\n{prompt:?}"
+        );
+        assert!(
+            prompt.starts_with("The following skills"),
+            "index-only prompt begins with the section guidance:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-028 + 002: a working dir mixing valid, broken, and globally
+    /// disabled skills assembles WITHOUT aborting — valid skills are in, broken
+    /// ones (validation failures) are absent, disabled ones are subtracted.
+    #[tokio::test]
+    async fn mixed_valid_broken_and_disabled_assembles_clean() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "good", "Good and valid.", "GOOD BODY", false);
+        write_skill_md(
+            &proj,
+            "muted",
+            "Valid but globally disabled.",
+            "MUTED BODY",
+            false,
+        );
+        // BROKEN: frontmatter name mismatches the dir → fails validation.
+        std::fs::create_dir_all(proj.join("broken-name")).unwrap();
+        std::fs::write(
+            proj.join("broken-name").join("SKILL.md"),
+            "---\nname: different\ndescription: d\n---\nBAD BODY",
+        )
+        .unwrap();
+        // BROKEN: no description at all → fails validation.
+        std::fs::create_dir_all(proj.join("broken-desc")).unwrap();
+        std::fs::write(
+            proj.join("broken-desc").join("SKILL.md"),
+            "---\nname: broken-desc\n---\nNO DESC BODY",
+        )
+        .unwrap();
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        settings.set_skill_disabled("muted", true).unwrap();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        // assemble completes (helper expects Ok) — broken skills never abort.
+        let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
+
+        assert!(
+            names.contains(&"skill".to_string()),
+            "skill tool injected: {names:?}"
+        );
+        assert!(
+            prompt.contains("<name>good</name>"),
+            "good skill listed:\n{prompt}"
+        );
+        assert!(!prompt.contains("muted"), "disabled excluded:\n{prompt}");
+        assert!(
+            !prompt.contains("broken-name"),
+            "broken (name) excluded:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("broken-desc"),
+            "broken (desc) excluded:\n{prompt}"
+        );
+    }
+
+    /// Every discovered skill fails validation → empty effective set → nothing
+    /// injected (and no abort).
+    #[tokio::test]
+    async fn all_discovered_invalid_injects_nothing() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        // Present but invalid (no description → MissingDescription).
+        std::fs::create_dir_all(proj.join("bad")).unwrap();
+        std::fs::write(
+            proj.join("bad").join("SKILL.md"),
+            "---\nname: bad\n---\nBODY",
+        )
+        .unwrap();
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
+        assert!(
+            !names.contains(&"skill".to_string()),
+            "no skill tool: {names:?}"
+        );
+        assert_eq!(prompt, "BASE", "base untouched, no index");
+    }
+
+    /// VAL-ASSEMBLE-012: an opt-in (`disable-model-invocation`) skill that is
+    /// not disabled still enters the effective set: it is listed with the
+    /// `opt-in="true"` tag and is loadable through the injected skill tool.
+    #[tokio::test]
+    async fn opt_in_skill_is_listed_and_loadable() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "manual",
+            "Opt-in only.",
+            "MANUAL BODY",
+            true, // disable-model-invocation
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            tools.iter().any(|t| t.name == "skill"),
+            "opt-in skill still injects the tool"
+        );
+        assert!(
+            prompt.contains("<skill opt-in=\"true\">"),
+            "opt-in tag present:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>manual</name>"),
+            "opt-in skill listed:\n{prompt}"
+        );
+        // Still tool-callable: opt-in gates auto-invocation guidance, not lookup.
+        assert_eq!(invoke_skill(&tools, "manual").await, "MANUAL BODY");
+    }
+
+    /// VAL-TOOL-017: a name present in multiple scopes resolves to the winning
+    /// (highest-priority) scope's body via the injected skill tool. Project
+    /// shadows the (lower) app-data scope.
+    #[tokio::test]
+    async fn shadowed_name_resolves_to_winner_body() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        // app-data scope holds a low-priority "shared"; project holds the winner.
+        let app = TempDir::new().unwrap();
+        write_skill_md(
+            app.path(),
+            "shared",
+            "From app-data.",
+            "APPDATA BODY",
+            false,
+        );
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "shared",
+            "From project.",
+            "PROJECT BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        // Assemble, then load "shared" through the injected skill tool's handler.
+        let cancel = CancellationToken::new();
+        let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+        let (_p, _ctx, _cfg, tools) = runtime
+            .assemble_run(
+                &session_id,
+                "hi".to_string(),
+                vec![],
+                vec![],
+                cancel,
+                steering,
+            )
+            .await
+            .expect("assemble ok");
+        let skill_tool = tools
+            .into_iter()
+            .find(|t| t.name == "skill")
+            .expect("skill tool present");
+
+        let ctx = hand_agent::ToolExecuteCtx {
+            tool_call_id: "tc".to_string(),
+            args: json!({"name": "shared"}),
+            cancel: CancellationToken::new(),
+            on_update: Arc::new(|_: hand_agent::ToolResult| {}),
+        };
+        let result = (skill_tool.execute)(ctx).await.expect("execute ok");
+        let text = match &result.content[0] {
+            hand_ai_model::ToolResultContent::Text(t) => t.text.clone(),
+            _ => panic!("expected text result"),
+        };
+        assert_eq!(
+            text, "PROJECT BODY",
+            "winner (project) body resolved, not app-data"
+        );
+    }
+
+    /// VAL-ASSEMBLE-006 + 007: the injected `skill` tool coexists with the
+    /// built-in tools — builtin names (read_file / list_directory / web_fetch)
+    /// are unchanged, and exactly one tool is named `skill`.
+    #[tokio::test]
+    async fn skill_and_builtin_tool_coexist() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        // The same working_dir is the FS sandbox root (so read_file registers) and
+        // the project skills root (so alpha is discoverable).
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![
+                "read_file".to_string(), // built-in FS tools, gated on working_dir
+                "list_directory".to_string(),
+                "web_fetch".to_string(),
+            ],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (_prompt, names) = assemble_prompt_and_tool_names(&runtime, &session_id).await;
+
+        for builtin in ["read_file", "list_directory", "web_fetch"] {
+            assert!(
+                names.contains(&builtin.to_string()),
+                "built-in {builtin} survives alongside a skill: {names:?}"
+            );
+        }
+        assert_eq!(
+            names.iter().filter(|n| n.as_str() == "skill").count(),
+            1,
+            "exactly one skill tool alongside the builtins: {names:?}"
+        );
+    }
+
+    /// Opaque `skills.disabled` entries — orphans, duplicates, empty and
+    /// whitespace strings — never match a discovered name (exact match, no
+    /// normalization) and never break assembly: the discovered skill is still
+    /// injected once, with exactly ONE `skill` tool entry and a single body.
+    #[tokio::test]
+    async fn opaque_disabled_entries_never_match_and_never_break() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "foo",
+            "Foo does things.",
+            "FOO BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        // Orphan (twice), empty, whitespace, and a near-miss with whitespace:
+        // all opaque, none may match `foo`.
+        for entry in ["ghost", "", "  ", " foo "] {
+            settings.set_skill_disabled(entry, true).unwrap();
+        }
+        settings.set_skill_disabled("ghost", true).unwrap(); // duplicate insert
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+
+        // Exactly one index block for foo.
+        assert_eq!(
+            prompt.matches("<name>foo</name>").count(),
+            1,
+            "a single index block for foo:\n{prompt}"
+        );
+        // Exactly one skill tool entry, resolving the single body.
+        assert_eq!(
+            tools.iter().filter(|t| t.name == "skill").count(),
+            1,
+            "exactly one skill tool entry"
+        );
+        assert_eq!(invoke_skill(&tools, "foo").await, "FOO BODY");
+    }
+
+    // -------------------------------------------------------------------------
+    // Global opt-out semantics (VAL-ASSEMBLE-001/002/003/005/006, VAL-CROSS-004):
+    // effective set = discovered-and-validated ∖ settings `skills.disabled`,
+    // re-read fresh from config.json on every assemble. The per-session
+    // `enabled_skills` filter is GONE: assemble must not consult it.
+    // -------------------------------------------------------------------------
+
+    /// Assemble the session's run and return `(system_prompt, tools)` so tests
+    /// can invoke the assembled tool handlers directly. No forced skills.
+    async fn assemble_prompt_and_tools(
+        runtime: &AgentRuntime,
+        session_id: &str,
+    ) -> (String, Vec<AgentTool>) {
+        assemble_with_forced(runtime, session_id, vec![]).await
+    }
+
+    /// Assemble the session's run with an explicit `forced_skills` list and
+    /// return `(system_prompt, tools)`. Drives the real `assemble_run` so the
+    /// forced-skill injection is exercised end to end at the assemble layer.
+    async fn assemble_with_forced(
+        runtime: &AgentRuntime,
+        session_id: &str,
+        forced_skills: Vec<String>,
+    ) -> (String, Vec<AgentTool>) {
+        let cancel = CancellationToken::new();
+        let steering: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(Vec::new()));
+        let (_prompts, context, _config, tools) = runtime
+            .assemble_run(
+                &session_id.to_string(),
+                "hello".to_string(),
+                vec![],
+                forced_skills,
+                cancel,
+                steering,
+            )
+            .await
+            .expect("assemble_run should succeed");
+        (context.system_prompt, tools)
+    }
+
+    /// Invoke the assembled `skill` tool with `{"name": <name>}` and return the
+    /// first text block of its result (body on a hit, error message on a miss).
+    async fn invoke_skill(tools: &[AgentTool], name: &str) -> String {
+        let skill_tool = tools
+            .iter()
+            .find(|t| t.name == "skill")
+            .expect("skill tool present");
+        let ctx = hand_agent::ToolExecuteCtx {
+            tool_call_id: "tc".to_string(),
+            args: json!({ "name": name }),
+            cancel: CancellationToken::new(),
+            on_update: Arc::new(|_: hand_agent::ToolResult| {}),
+        };
+        let result = (skill_tool.execute)(ctx).await.expect("execute ok");
+        match &result.content[0] {
+            hand_ai_model::ToolResultContent::Text(t) => t.text.clone(),
+            _ => panic!("expected text result"),
+        }
+    }
+
+    /// VAL-ASSEMBLE-001 + 006: with NO disabled entries, EVERY discovered-and-
+    /// validated skill enters the index (name + description) and the single
+    /// `skill` tool resolves each of them — the per-session enablement knob no
+    /// longer exists, so nothing gates the discovered set.
+    #[tokio::test]
+    async fn default_all_on_injects_every_discovered_skill() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha does things.", "ALPHA BODY", false);
+        write_skill_md(&proj, "beta", "Beta does other things.", "BETA BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        // Both skills indexed with name + description.
+        assert!(
+            prompt.contains("<available_skills>"),
+            "index present:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "alpha listed:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("Alpha does things."),
+            "alpha description:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>beta</name>"),
+            "beta listed:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("Beta does other things."),
+            "beta description:\n{prompt}"
+        );
+
+        // Exactly ONE tool named `skill`, resolving every indexed skill.
+        assert_eq!(
+            names.iter().filter(|n| **n == "skill").count(),
+            1,
+            "exactly one skill tool: {names:?}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+        assert_eq!(invoke_skill(&tools, "beta").await, "BETA BODY");
+    }
+
+    /// VAL-ASSEMBLE-004 / VAL-DEPRECATE-002: a legacy `enabled_skills` column
+    /// value (`["only-foo"]`) is IGNORED — the column is never parsed, so the
+    /// effective set is the full discovered set (foo AND bar), not the column's
+    /// subset. The filter code is deleted, not merely defaulted.
+    #[tokio::test]
+    async fn legacy_enabled_skills_column_value_is_ignored_by_assemble() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "foo", "Foo does things.", "FOO BODY", false);
+        write_skill_md(&proj, "bar", "Bar does other things.", "BAR BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        // The struct field is gone, so plant the legacy column value directly
+        // via SQL — exactly like a pre-deprecation row left behind on disk.
+        sqlx::query("UPDATE agent_sessions SET enabled_skills = $1 WHERE id = $2")
+            .bind(r#"["only-foo"]"#)
+            .bind(&session_id)
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+
+        // BOTH skills are in the effective set despite the column's subset.
+        assert!(
+            prompt.contains("<name>foo</name>"),
+            "foo listed despite legacy column:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("<name>bar</name>"),
+            "bar listed despite legacy column subset:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "foo").await, "FOO BODY");
+        assert_eq!(invoke_skill(&tools, "bar").await, "BAR BODY");
+    }
+
+    /// VAL-ASSEMBLE-002: a globally disabled skill is absent from the index AND
+    /// from the tool's lookup map (`skill(name)` → generic not-found, no path);
+    /// other skills are unaffected.
+    #[tokio::test]
+    async fn globally_disabled_skill_excluded_others_unaffected() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha does things.", "ALPHA BODY", false);
+        write_skill_md(&proj, "beta", "Beta does other things.", "BETA BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        settings.set_skill_disabled("beta", true).unwrap();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "alpha kept:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("beta"),
+            "disabled beta absent from index:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+        let miss = invoke_skill(&tools, "beta").await;
+        assert_eq!(miss, "skill not found", "disabled name is a plain miss");
+        assert!(!miss.contains('/'), "no path in the miss error: {miss:?}");
+        assert!(!miss.contains("BETA BODY"), "no body leak: {miss:?}");
+    }
+
+    /// VAL-ASSEMBLE-003 (all disabled): every discovered skill is globally
+    /// disabled → no `<available_skills>` section, no `skill` tool, base prompt
+    /// intact, unrelated builtin tools unaffected.
+    #[tokio::test]
+    async fn all_disabled_injects_nothing() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec!["web_fetch".to_string()],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        settings.set_skill_disabled("alpha", true).unwrap();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(!names.contains(&"skill"), "no skill tool: {names:?}");
+        assert!(
+            !prompt.contains("<available_skills>"),
+            "no index:\n{prompt}"
+        );
+        assert_eq!(prompt, "BASE PROMPT", "base prompt intact");
+        assert!(
+            names.contains(&"web_fetch"),
+            "builtin unaffected: {names:?}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-005: the disabled list is re-read from config.json on EVERY
+    /// assemble — same session, same runtime: run1 (empty list) has the skill,
+    /// run2 (after disabling) lacks it, run3 (after re-enabling) has it again.
+    #[tokio::test]
+    async fn disabled_list_is_reread_every_assemble() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings.clone());
+
+        // Run 1: empty disabled list → alpha present.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "run1 has alpha:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+
+        // Disable BETWEEN runs (no runtime reconstruction, same session).
+        settings.set_skill_disabled("alpha", true).unwrap();
+
+        // Run 2: the fresh read sees the disable → alpha gone, nothing injected.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            !prompt.contains("<available_skills>"),
+            "run2 has no index:\n{prompt}"
+        );
+        assert!(
+            !tools.iter().any(|t| t.name == "skill"),
+            "run2 has no skill tool"
+        );
+
+        // Re-enable → run 3 has it back.
+        settings.set_skill_disabled("alpha", false).unwrap();
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            prompt.contains("<name>alpha</name>"),
+            "run3 has alpha:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+    }
+
+    /// VAL-CROSS-004 (default all-on, end to end at the assemble layer): a
+    /// freshly dropped valid SKILL.md is usable on the very next run with ZERO
+    /// enablement action — config.json gains no entry for it.
+    #[tokio::test]
+    async fn freshly_dropped_skill_usable_next_run_without_enablement() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings.clone());
+
+        // Run 1: nothing discovered → nothing injected.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(!prompt.contains("<available_skills>"), "run1 has no index");
+        assert!(!tools.iter().any(|t| t.name == "skill"), "run1 has no tool");
+
+        // Drop a brand-new valid skill between runs. NO settings write.
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "fresh",
+            "Fresh skill.",
+            "FRESH BODY",
+            false,
+        );
+
+        // Run 2: discovered → indexed and callable, zero enablement action.
+        let (prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        assert!(
+            prompt.contains("<name>fresh</name>"),
+            "run2 lists fresh:\n{prompt}"
+        );
+        assert_eq!(invoke_skill(&tools, "fresh").await, "FRESH BODY");
+        // config.json has no entry for it (default all-on needs none).
+        assert!(
+            settings.get_settings().unwrap().skills.disabled.is_empty(),
+            "no config entry was created for the fresh skill"
+        );
+    }
+
+    /// VAL-ASSEMBLE-008 at the assemble layer: a 1MiB body flows file → map →
+    /// tool verbatim and untruncated.
+    #[tokio::test]
+    async fn large_body_resolves_verbatim_through_assemble() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let big = "K".repeat(1024 * 1024);
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "big",
+            "Big skill.",
+            &big,
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, _cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(&db), skills, settings);
+
+        let (_prompt, tools) = assemble_prompt_and_tools(&runtime, &session_id).await;
+        let body = invoke_skill(&tools, "big").await;
+        assert_eq!(body.len(), big.len(), "untruncated 1MiB body");
+        assert_eq!(body, big, "verbatim body");
+    }
+
+    // -------------------------------------------------------------------------
+    // Forced-skill loading at assemble time (VAL-ASSEMBLE-013..027, VAL-SLASH-
+    // 019/020). `forced_skills` are resolved against the EFFECTIVE set
+    // (discovered-validated ∖ globally-disabled); each surviving body is
+    // appended VERBATIM to the system prompt, bracketed by a `<forced_skill
+    // name="...">` marker, in forced-list order, deduped by name, AFTER the
+    // base prompt and the `<available_skills>` index. Forced injection is
+    // ADDITIVE: a forced skill stays in the index and stays resolvable through
+    // the `skill` tool. unknown / undiscovered / validation-failed / globally-
+    // disabled / empty-string names are silently skipped (disabled wins).
+    // -------------------------------------------------------------------------
+
+    /// Build a runtime whose project skills live under `work/.handbox/skills`
+    /// and whose app-data/user roots are empty tempdirs, with a fresh (empty
+    /// disabled list) settings store. Returns `(runtime, settings, guards)` so a
+    /// test can toggle disabled state and keep the tempdirs alive.
+    #[allow(clippy::type_complexity)]
+    fn forced_runtime(
+        db: &Arc<Database>,
+        work: &TempDir,
+    ) -> (AgentRuntime, SettingsService, (TempDir, TempDir, TempDir)) {
+        let _ = work; // project root is derived from the session's working_dir
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        let skills = Arc::new(SkillService::for_test(
+            app.path().to_path_buf(),
+            user.path().to_path_buf(),
+        ));
+        let (settings, cfg) = temp_settings();
+        let runtime = AgentRuntime::new_with_skills(Arc::clone(db), skills, settings.clone());
+        (runtime, settings, (app, user, cfg))
+    }
+
+    /// The opening marker substring this feature wraps a forced body with.
+    fn forced_open(name: &str) -> String {
+        format!("<forced_skill name=\"{name}\">")
+    }
+
+    /// VAL-ASSEMBLE-013: forcing a valid skill puts its body VERBATIM into the
+    /// assembled system prompt (not just the index entry), bracketed by a marker
+    /// that names the skill.
+    #[tokio::test]
+    async fn forced_valid_skill_body_enters_system_prompt() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(
+            &proj,
+            "alpha",
+            "Alpha does things.",
+            "ALPHA FULL BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["alpha".to_string()]).await;
+
+        // The marker names the skill and the body is present verbatim.
+        assert!(
+            prompt.contains(&forced_open("alpha")),
+            "forced marker names the skill:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("ALPHA FULL BODY"),
+            "forced body appears verbatim in the prompt:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-014: a forced body containing `<`, `&`, and even a literal
+    /// `</available_skills>` is injected as RAW bytes (no escape_xml), wrapped in
+    /// the forced marker, and does NOT corrupt the real index's XML boundary —
+    /// the genuine `<available_skills>` … `</available_skills>` index block is
+    /// still well-formed and precedes the forced block.
+    #[tokio::test]
+    async fn forced_body_metacharacters_injected_verbatim_without_breaking_index() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        let nasty = "raw < and & and </available_skills> inside the body";
+        write_skill_md(&proj, "evil", "Evil metachar skill.", nasty, false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["evil".to_string()]).await;
+
+        // Verbatim: the raw metacharacters appear UN-escaped.
+        assert!(
+            prompt.contains(nasty),
+            "metachar body injected verbatim (not escaped):\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("&lt;"),
+            "forced body must NOT be escape_xml'd:\n{prompt}"
+        );
+
+        // The real index block is still intact and precedes the forced block.
+        let index_open = prompt.find("<available_skills>").expect("index present");
+        // The first `</available_skills>` after the open is the GENUINE index
+        // close (the body's stray copy comes later, inside the forced marker).
+        let index_close = prompt[index_open..]
+            .find("</available_skills>")
+            .map(|rel| index_open + rel)
+            .expect("index close present");
+        let forced_pos = prompt.find(&forced_open("evil")).expect("forced marker");
+        assert!(
+            index_close < forced_pos,
+            "the genuine index close precedes the forced block:\n{prompt}"
+        );
+        // The index entry for `evil` is well-formed inside the index region.
+        assert!(
+            prompt[index_open..index_close].contains("<name>evil</name>"),
+            "evil's index entry sits inside the index block:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-014 (marker-self-escape facet): a body containing a literal
+    /// `</forced_skill>` is still injected VERBATIM. The wrapper marker is a
+    /// name-based, best-effort delimiter — NOT a strict-XML container — so the
+    /// literal close is copied through unchanged; the open marker is still
+    /// emitted exactly once and assembly never panics. Pins the trust contract:
+    /// skill bodies are trusted local content, downstream must not rely on
+    /// strict XML pairing of `<forced_skill>`.
+    #[tokio::test]
+    async fn forced_body_with_literal_close_marker_is_injected_verbatim() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        let trap = "before </forced_skill> after";
+        write_skill_md(&proj, "trap", "Trap skill.", trap, false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["trap".to_string()]).await;
+
+        // The body's literal close marker is present verbatim, un-altered.
+        assert!(
+            prompt.contains(trap),
+            "body with a literal </forced_skill> injected verbatim:\n{prompt}"
+        );
+        // The open marker is emitted exactly once (no duplication, no panic).
+        assert_eq!(
+            prompt.matches(&forced_open("trap")).count(),
+            1,
+            "the open marker appears exactly once:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-015: with `forced_skills` absent/empty (serde default), the
+    /// assembled prompt is identical to the pre-feature behaviour — index only,
+    /// zero forced body, no marker.
+    #[tokio::test]
+    async fn empty_forced_list_injects_no_body() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha does things.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) = assemble_with_forced(&runtime, &session_id, vec![]).await;
+
+        assert!(
+            prompt.contains("<available_skills>"),
+            "index present:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("<forced_skill"),
+            "no forced marker with an empty forced list:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("ALPHA BODY"),
+            "no body injected with an empty forced list:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-016: a skill that is discovered (so its body is loadable via
+    /// the tool) but NOT forced never has its body string appear in the prompt.
+    #[tokio::test]
+    async fn non_forced_skill_body_never_in_prompt() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha.", "ALPHA BODY", false);
+        write_skill_md(&proj, "beta", "Beta.", "BETA BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        // Force only alpha; beta is discovered but not forced.
+        let (prompt, tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["alpha".to_string()]).await;
+
+        assert!(prompt.contains("ALPHA BODY"), "forced alpha body present");
+        assert!(
+            !prompt.contains("BETA BODY"),
+            "un-forced beta body must NOT appear in the prompt:\n{prompt}"
+        );
+        // beta is still indexed and tool-resolvable (additive, not removed).
+        assert!(prompt.contains("<name>beta</name>"), "beta still indexed");
+        assert_eq!(invoke_skill(&tools, "beta").await, "BETA BODY");
+    }
+
+    /// VAL-ASSEMBLE-017: concatenation order is base → index → forced body, with
+    /// strictly increasing byte offsets; and with an EMPTY base prompt the index
+    /// begins with no leading separator garbage.
+    #[tokio::test]
+    async fn order_is_base_then_index_then_forced_and_empty_base_has_no_leading_garbage() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA BODY",
+            false,
+        );
+
+        // (a) Non-empty base: base < index < forced by byte offset.
+        let with_base = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE PROMPT".to_string()),
+        )
+        .await;
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &with_base, vec!["alpha".to_string()]).await;
+
+        let base_pos = prompt.find("BASE PROMPT").expect("base present");
+        let idx_pos = prompt.find("<available_skills>").expect("index present");
+        let forced_pos = prompt.find(&forced_open("alpha")).expect("forced present");
+        assert!(
+            base_pos < idx_pos && idx_pos < forced_pos,
+            "order must be base < index < forced:\n{prompt}"
+        );
+
+        // (b) Empty base: index-only lead, no leading whitespace/separator, and
+        // the forced block still follows the index.
+        let no_base = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            None,
+        )
+        .await;
+        let (prompt2, _t2) =
+            assemble_with_forced(&runtime, &no_base, vec!["alpha".to_string()]).await;
+        assert!(
+            !prompt2.starts_with('\n') && !prompt2.starts_with(' '),
+            "empty base → no leading separator garbage:\n{prompt2:?}"
+        );
+        assert!(
+            prompt2.starts_with("The following skills"),
+            "empty base → prompt begins with the index guidance:\n{prompt2}"
+        );
+        let idx2 = prompt2.find("<available_skills>").unwrap();
+        let forced2 = prompt2.find(&forced_open("alpha")).unwrap();
+        assert!(idx2 < forced2, "index precedes forced even with empty base");
+    }
+
+    /// VAL-ASSEMBLE-018: forcing a skill that is already in the index keeps the
+    /// index entry exactly once (name appears once) AND injects the body exactly
+    /// once (a single forced marker for it).
+    #[tokio::test]
+    async fn forcing_indexed_skill_keeps_index_entry_once_and_body_once() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["alpha".to_string()]).await;
+
+        assert_eq!(
+            prompt.matches("<name>alpha</name>").count(),
+            1,
+            "alpha indexed exactly once:\n{prompt}"
+        );
+        assert_eq!(
+            prompt.matches(&forced_open("alpha")).count(),
+            1,
+            "alpha body forced exactly once:\n{prompt}"
+        );
+        assert_eq!(
+            prompt.matches("ALPHA BODY").count(),
+            1,
+            "alpha body appears exactly once:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-019: forcing a skill is ADDITIVE — `skill(name)` through the
+    /// injected tool still returns the body (the forced skill is not removed from
+    /// the index or the tool's lookup map).
+    #[tokio::test]
+    async fn forced_skill_still_resolvable_through_skill_tool() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (_prompt, tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["alpha".to_string()]).await;
+
+        assert!(
+            tools.iter().any(|t| t.name == "skill"),
+            "skill tool still injected"
+        );
+        assert_eq!(
+            invoke_skill(&tools, "alpha").await,
+            "ALPHA BODY",
+            "forced skill remains resolvable through the skill tool"
+        );
+    }
+
+    /// VAL-ASSEMBLE-020: multiple forced skills inject their bodies in
+    /// FORCED-LIST order, and a repeated name is injected only ONCE; the byte
+    /// layout is stable across repeated assembles.
+    #[tokio::test]
+    async fn multiple_forced_inject_in_list_order_and_dedupe() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha.", "ALPHA BODY", false);
+        write_skill_md(&proj, "beta", "Beta.", "BETA BODY", false);
+        write_skill_md(&proj, "gamma", "Gamma.", "GAMMA BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        // Force gamma, beta, alpha — note alpha repeated; expect order gamma,
+        // beta, alpha and alpha only once.
+        let forced = vec![
+            "gamma".to_string(),
+            "beta".to_string(),
+            "alpha".to_string(),
+            "alpha".to_string(),
+        ];
+        let (prompt, _tools) = assemble_with_forced(&runtime, &session_id, forced.clone()).await;
+
+        let g = prompt.find(&forced_open("gamma")).expect("gamma forced");
+        let b = prompt.find(&forced_open("beta")).expect("beta forced");
+        let a = prompt.find(&forced_open("alpha")).expect("alpha forced");
+        assert!(
+            g < b && b < a,
+            "forced bodies follow forced-list order:\n{prompt}"
+        );
+        assert_eq!(
+            prompt.matches(&forced_open("alpha")).count(),
+            1,
+            "repeated name forced only once:\n{prompt}"
+        );
+
+        // Byte-stable across a repeated assemble (deterministic concatenation).
+        let (prompt_again, _t) = assemble_with_forced(&runtime, &session_id, forced).await;
+        assert_eq!(prompt, prompt_again, "forced injection is byte-stable");
+    }
+
+    /// VAL-ASSEMBLE-021: when EVERY effective skill is forced, the `skill` tool
+    /// is STILL injected — the gate is "effective set non-empty", not "some skill
+    /// remains un-forced".
+    #[tokio::test]
+    async fn all_effective_forced_still_injects_skill_tool() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha.", "ALPHA BODY", false);
+        write_skill_md(&proj, "beta", "Beta.", "BETA BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let forced = vec!["alpha".to_string(), "beta".to_string()];
+        let (prompt, tools) = assemble_with_forced(&runtime, &session_id, forced).await;
+
+        assert!(
+            tools.iter().any(|t| t.name == "skill"),
+            "skill tool still injected when all effective skills are forced"
+        );
+        // Both forced bodies present and both still resolvable.
+        assert!(prompt.contains("ALPHA BODY") && prompt.contains("BETA BODY"));
+        assert_eq!(invoke_skill(&tools, "alpha").await, "ALPHA BODY");
+        assert_eq!(invoke_skill(&tools, "beta").await, "BETA BODY");
+    }
+
+    /// VAL-ASSEMBLE-022: forcing an opt-in (`disable-model-invocation`) skill
+    /// that survives into the effective set DOES inject its body — explicit user
+    /// forcing overrides the opt-in auto-invocation suppression.
+    #[tokio::test]
+    async fn forced_opt_in_skill_body_is_injected() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "manual",
+            "Opt-in only.",
+            "MANUAL BODY",
+            true, // disable-model-invocation
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["manual".to_string()]).await;
+
+        assert!(
+            prompt.contains(&forced_open("manual")),
+            "opt-in skill forced marker present:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("MANUAL BODY"),
+            "opt-in skill body injected when forced:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-023: forcing an unknown / undiscovered name does not panic,
+    /// injects no body, and leaves the rest of the assembly intact.
+    #[tokio::test]
+    async fn forced_unknown_name_is_skipped_cleanly() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        // alpha is real; "ghost" is undiscovered.
+        let forced = vec!["ghost".to_string(), "alpha".to_string()];
+        let (prompt, tools) = assemble_with_forced(&runtime, &session_id, forced).await;
+
+        assert!(
+            !prompt.contains(&forced_open("ghost")),
+            "unknown name injects no forced marker:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("ALPHA BODY"),
+            "the real forced body is still injected"
+        );
+        // The run is otherwise healthy: skill tool present, alpha resolvable.
+        assert!(tools.iter().any(|t| t.name == "skill"));
+    }
+
+    /// VAL-ASSEMBLE-024: forcing a name that is in the GLOBAL disabled list
+    /// injects no body (disabled wins over forced) and does not crash.
+    #[tokio::test]
+    async fn forced_disabled_name_is_not_injected_disabled_wins() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha.", "ALPHA BODY", false);
+        write_skill_md(&proj, "muted", "Muted.", "MUTED BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, settings, _g) = forced_runtime(&db, &work);
+        settings.set_skill_disabled("muted", true).unwrap();
+
+        // Force the disabled name plus a live one.
+        let forced = vec!["muted".to_string(), "alpha".to_string()];
+        let (prompt, tools) = assemble_with_forced(&runtime, &session_id, forced).await;
+
+        assert!(
+            !prompt.contains(&forced_open("muted")),
+            "disabled name yields no forced marker (disabled wins):\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("MUTED BODY"),
+            "disabled forced body must NOT appear:\n{prompt}"
+        );
+        // The live forced body is still injected and the run is healthy.
+        assert!(prompt.contains("ALPHA BODY"));
+        assert_eq!(invoke_skill(&tools, "muted").await, "skill not found");
+    }
+
+    /// VAL-ASSEMBLE-025: forcing a name whose SKILL.md fails validation (here a
+    /// frontmatter NameMismatch) is treated exactly like an unknown name — no
+    /// body injected — because it never entered the effective set.
+    #[tokio::test]
+    async fn forced_validation_failed_name_is_skipped_like_unknown() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha.", "ALPHA BODY", false);
+        // broken: frontmatter name mismatches its directory → fails validation.
+        std::fs::create_dir_all(proj.join("broken")).unwrap();
+        std::fs::write(
+            proj.join("broken").join("SKILL.md"),
+            "---\nname: different\ndescription: d\n---\nBROKEN BODY",
+        )
+        .unwrap();
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let forced = vec!["broken".to_string(), "alpha".to_string()];
+        let (prompt, _tools) = assemble_with_forced(&runtime, &session_id, forced).await;
+
+        assert!(
+            !prompt.contains(&forced_open("broken")),
+            "validation-failed name injects no forced marker:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("BROKEN BODY"),
+            "validation-failed body must NOT appear:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("ALPHA BODY"),
+            "the valid forced body is still injected"
+        );
+    }
+
+    /// VAL-ASSEMBLE-026: an empty-string entry in `forced_skills` is ignored — no
+    /// crash, no malformed marker — while real names alongside it still inject.
+    #[tokio::test]
+    async fn forced_empty_string_entry_is_ignored() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let forced = vec![String::new(), "alpha".to_string(), String::new()];
+        let (prompt, _tools) = assemble_with_forced(&runtime, &session_id, forced).await;
+
+        // No malformed marker for an empty name.
+        assert!(
+            !prompt.contains("<forced_skill name=\"\">"),
+            "empty name must not produce a marker:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("ALPHA BODY"),
+            "real forced name still injects"
+        );
+        assert_eq!(
+            prompt.matches("<forced_skill name=").count(),
+            1,
+            "exactly one forced marker (alpha); empties ignored:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-027: a large forced body is injected in FULL — untruncated.
+    #[tokio::test]
+    async fn forced_large_body_is_injected_untruncated() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let big = "Z".repeat(1024 * 1024);
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "huge",
+            "Huge skill.",
+            &big,
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["huge".to_string()]).await;
+
+        assert!(
+            prompt.contains(&big),
+            "the full large body must be injected untruncated"
+        );
+    }
+
+    /// VAL-SLASH-019: an old `{ sessionId, input, attachments }` payload (no
+    /// `forcedSkills`) deserializes into `AgentRunRequest` with `forced_skills`
+    /// defaulting to an empty Vec.
+    #[test]
+    fn legacy_payload_deserializes_with_empty_forced_skills() {
+        // Three-field legacy payload.
+        let json = r#"{ "sessionId": "s-1", "input": "hi", "attachments": [] }"#;
+        let req: AgentRunRequest = serde_json::from_str(json).expect("legacy payload deserializes");
+        assert_eq!(req.session_id, "s-1");
+        assert_eq!(req.input, "hi");
+        assert!(req.attachments.is_empty());
+        assert!(
+            req.forced_skills.is_empty(),
+            "forced_skills defaults to empty for a legacy payload"
+        );
+
+        // Even the two-field payload (no attachments) defaults both.
+        let minimal = r#"{ "sessionId": "s-2", "input": "yo" }"#;
+        let req2: AgentRunRequest = serde_json::from_str(minimal).expect("minimal payload");
+        assert!(req2.attachments.is_empty());
+        assert!(req2.forced_skills.is_empty());
+
+        // A payload WITH forcedSkills round-trips into the field.
+        let with = r#"{ "sessionId": "s-3", "input": "go", "forcedSkills": ["alpha", "beta"] }"#;
+        let req3: AgentRunRequest = serde_json::from_str(with).expect("forced payload");
+        assert_eq!(
+            req3.forced_skills,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    /// VAL-SLASH-020: a request carrying a forced name flows through the full
+    /// `start_run → assemble_run` chain so the forced body lands in the system
+    /// prompt that reaches the loop. Proven by capturing the `model::Context`
+    /// the scripted stream receives and asserting the forced marker + body.
+    #[tokio::test]
+    async fn forced_name_threads_through_start_run_into_system_prompt() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA RUN BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        // Capture the system prompt the loop hands to the stream function.
+        let seen_prompt: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
+        let seen_prompt_cl = Arc::clone(&seen_prompt);
+        let stream_fn: hand_agent::StreamFn = Arc::new(move |model, ctx, _opts, _cancel| {
+            *seen_prompt_cl.lock().unwrap() = ctx.system_prompt.clone();
+            Box::pin(futures::stream::iter(vec![AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                message: done_message(&model.id, "ok"),
+            }]))
+        });
+
+        let (mut runtime, _settings, _g) = forced_runtime(&db, &work);
+        runtime.stream_fn_override = Some(stream_fn);
+
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "hello".to_string(),
+                vec![],
+                vec!["alpha".to_string()],
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+        wait_for_closed(&sink).await;
+
+        let prompt = seen_prompt
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the loop received a system prompt");
+        assert!(
+            prompt.contains(&forced_open("alpha")),
+            "forced marker threaded through start_run into the loop prompt:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("ALPHA RUN BODY"),
+            "forced body reached the system prompt via the run chain:\n{prompt}"
+        );
+    }
+
+    /// VAL-SLASH-025 (end-to-end): a request carrying MULTIPLE forced names flows
+    /// through the full `start_run → assemble_run` chain so every surviving body
+    /// lands in the loop's system prompt in FORCED-LIST order, each exactly once
+    /// (a repeated name is injected only one time). Pins the run-chain twin of the
+    /// assemble-level VAL-ASSEMBLE-020.
+    #[tokio::test]
+    async fn multiple_forced_names_thread_through_start_run_in_order() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha.", "ALPHA RUN BODY", false);
+        write_skill_md(&proj, "beta", "Beta.", "BETA RUN BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        // Capture the system prompt the loop hands to the stream function.
+        let seen_prompt: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
+        let seen_prompt_cl = Arc::clone(&seen_prompt);
+        let stream_fn: hand_agent::StreamFn = Arc::new(move |model, ctx, _opts, _cancel| {
+            *seen_prompt_cl.lock().unwrap() = ctx.system_prompt.clone();
+            Box::pin(futures::stream::iter(vec![AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                message: done_message(&model.id, "ok"),
+            }]))
+        });
+
+        let (mut runtime, _settings, _g) = forced_runtime(&db, &work);
+        runtime.stream_fn_override = Some(stream_fn);
+
+        // Force beta then alpha, with alpha repeated — expect order beta, alpha
+        // and alpha only once.
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "hello".to_string(),
+                vec![],
+                vec!["beta".to_string(), "alpha".to_string(), "alpha".to_string()],
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+        wait_for_closed(&sink).await;
+
+        let prompt = seen_prompt
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the loop received a system prompt");
+
+        let beta_pos = prompt.find(&forced_open("beta")).expect("beta forced");
+        let alpha_pos = prompt.find(&forced_open("alpha")).expect("alpha forced");
+        assert!(
+            beta_pos < alpha_pos,
+            "forced bodies follow forced-list order through the run chain:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("BETA RUN BODY") && prompt.contains("ALPHA RUN BODY"),
+            "both forced bodies reached the run-chain system prompt:\n{prompt}"
+        );
+        assert_eq!(
+            prompt.matches(&forced_open("alpha")).count(),
+            1,
+            "a repeated forced name is injected exactly once via the run chain:\n{prompt}"
+        );
+    }
+
+    /// VAL-CROSS-003 / VAL-SLASH-021 (per-turn lifecycle, end-to-end): forcing a
+    /// skill on one run injects its body into THAT run's system prompt; a
+    /// SUBSEQUENT run on the same session WITHOUT forced names injects no body —
+    /// the forced state is single-turn and never persists across runs. The
+    /// frontend clears the chip after a successful dispatch (VAL-SLASH-021); this
+    /// pins that an empty forced list on the next request yields a body-free
+    /// prompt through the real run chain.
+    #[tokio::test]
+    async fn forced_body_is_single_turn_across_consecutive_runs() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA RUN BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        // Collect the system prompt seen on each consecutive run, in order.
+        let seen: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let seen_cl = Arc::clone(&seen);
+        let stream_fn: hand_agent::StreamFn = Arc::new(move |model, ctx, _opts, _cancel| {
+            seen_cl
+                .lock()
+                .unwrap()
+                .push(ctx.system_prompt.clone().unwrap_or_default());
+            Box::pin(futures::stream::iter(vec![AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                message: done_message(&model.id, "ok"),
+            }]))
+        });
+
+        let (mut runtime, _settings, _g) = forced_runtime(&db, &work);
+        runtime.stream_fn_override = Some(stream_fn);
+
+        // Turn 1: force alpha — its body must enter this run's prompt.
+        let sink1 = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "first".to_string(),
+                vec![],
+                vec!["alpha".to_string()],
+                sink1.clone().into_run_sink(),
+            )
+            .await
+            .expect("first start_run should succeed");
+        wait_for_closed(&sink1).await;
+
+        // Turn 2: same session, NO forced names — the body must be gone. The
+        // first run must have been removed from `runs` for this to start (the
+        // one-run-per-session guard); `wait_for_closed` guarantees that.
+        let sink2 = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "second".to_string(),
+                vec![],
+                vec![],
+                sink2.clone().into_run_sink(),
+            )
+            .await
+            .expect("second start_run should succeed");
+        wait_for_closed(&sink2).await;
+
+        let prompts = seen.lock().unwrap().clone();
+        assert_eq!(prompts.len(), 2, "exactly two runs reached the stream fn");
+
+        // Turn 1 carries the forced marker + body.
+        assert!(
+            prompts[0].contains(&forced_open("alpha")) && prompts[0].contains("ALPHA RUN BODY"),
+            "turn 1 forced body present:\n{}",
+            prompts[0]
+        );
+        // Turn 2 (no forced) carries neither the marker nor the body — forced
+        // state did not persist across the run boundary.
+        assert!(
+            !prompts[1].contains("<forced_skill"),
+            "turn 2 has no forced marker (single-turn lifecycle):\n{}",
+            prompts[1]
+        );
+        assert!(
+            !prompts[1].contains("ALPHA RUN BODY"),
+            "turn 2 has no leaked forced body:\n{}",
+            prompts[1]
+        );
+        // The index itself is unchanged — alpha is still discoverable both turns.
+        assert!(
+            prompts[1].contains("<name>alpha</name>"),
+            "alpha stays indexed on turn 2 (only the forced body is single-turn):\n{}",
+            prompts[1]
+        );
     }
 }

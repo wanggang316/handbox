@@ -22,6 +22,9 @@ impl AgentSessionRepository {
     }
 
     /// 创建 Agent Session
+    ///
+    /// NOTE: 已废弃的 `enabled_skills` 列保留在 schema 中但不再读写——新行
+    /// 该列恒为 NULL（VAL-DEPRECATE-009）。
     pub async fn create_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
@@ -637,6 +640,184 @@ mod tests {
         // Delete
         repo.delete_session(&session.id).await.unwrap();
         assert!(repo.get_session_by_id(&session.id).await.unwrap().is_none());
+    }
+
+    /// VAL-DEPRECATE-009: new sessions never write the deactivated
+    /// enabled_skills column — it stays SQL NULL after create AND after a
+    /// full-row update_session.
+    #[tokio::test]
+    async fn test_new_sessions_leave_enabled_skills_column_null() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "No Skills Column", now);
+        repo.create_session(&session).await.unwrap();
+
+        async fn column_value(repo: &AgentSessionRepository, id: &str) -> Option<String> {
+            sqlx::query("SELECT enabled_skills FROM agent_sessions WHERE id = $1")
+                .bind(id)
+                .fetch_one(repo.db.pool())
+                .await
+                .unwrap()
+                .try_get("enabled_skills")
+                .unwrap()
+        }
+
+        assert_eq!(
+            column_value(&repo, &session.id).await,
+            None,
+            "create must leave enabled_skills NULL"
+        );
+
+        // A full-row update no longer touches the column either.
+        let mut edit = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        edit.name = "Renamed".to_string();
+        edit.updated_at = now + 1000;
+        repo.update_session(&edit).await.unwrap();
+
+        assert_eq!(
+            column_value(&repo, &session.id).await,
+            None,
+            "update_session must leave enabled_skills NULL"
+        );
+    }
+
+    /// VAL-DEPRECATE-004 / VAL-DEPRECATE-005: the deactivated column is kept in
+    /// the schema (no 049 drop migration) — PRAGMA table_info still lists it.
+    #[tokio::test]
+    async fn test_enabled_skills_column_still_in_schema() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        let rows = sqlx::query("PRAGMA table_info(agent_sessions)")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+        let columns: Vec<String> = rows
+            .iter()
+            .map(|row| row.try_get::<String, _>("name").unwrap())
+            .collect();
+        assert!(
+            columns.contains(&"enabled_skills".to_string()),
+            "enabled_skills column must remain in the schema, got: {columns:?}"
+        );
+    }
+
+    /// VAL-DEPRECATE-010: legacy rows whose enabled_skills column holds a real
+    /// value, NULL, or non-JSON garbage all load via get AND list without error —
+    /// the column is never parsed anymore.
+    #[tokio::test]
+    async fn test_legacy_enabled_skills_column_values_load_without_error() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        for (id, column_value) in [
+            ("legacy-value", Some(r#"["only-foo"]"#)),
+            ("legacy-null", None),
+            ("legacy-garbage", Some("{not valid json")),
+        ] {
+            sqlx::query(
+                r#"
+                INSERT INTO agent_sessions
+                    (id, name, enabled_skills, message_count, created_at, updated_at)
+                VALUES ($1, $2, $3, 0, $4, $4)
+            "#,
+            )
+            .bind(id)
+            .bind(format!("Legacy {id}"))
+            .bind(column_value)
+            .bind(now)
+            .execute(repo.db.pool())
+            .await
+            .unwrap();
+
+            let fetched = repo
+                .get_session_by_id(&id.to_string())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(fetched.id, id, "row {id} must load via get");
+        }
+
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 3, "all legacy rows must load via list");
+    }
+
+    /// The deactivated column is no longer in the UPDATE SET clause: a
+    /// full-row update_session leaves a legacy column value byte-for-byte
+    /// untouched on disk (and errors never surface from it).
+    #[tokio::test]
+    async fn test_update_session_leaves_legacy_enabled_skills_column_untouched() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Legacy Holder", now);
+        repo.create_session(&session).await.unwrap();
+
+        // Plant a legacy value directly (the struct field is gone).
+        sqlx::query("UPDATE agent_sessions SET enabled_skills = $1 WHERE id = $2")
+            .bind(r#"["legacy"]"#)
+            .bind(&session.id)
+            .execute(repo.db.pool())
+            .await
+            .unwrap();
+
+        let mut edit = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        edit.name = "Renamed Only".to_string();
+        edit.updated_at = now + 1000;
+        repo.update_session(&edit).await.unwrap();
+
+        let reloaded = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.name, "Renamed Only");
+
+        let column: Option<String> =
+            sqlx::query("SELECT enabled_skills FROM agent_sessions WHERE id = $1")
+                .bind(&session.id)
+                .fetch_one(repo.db.pool())
+                .await
+                .unwrap()
+                .try_get("enabled_skills")
+                .unwrap();
+        assert_eq!(
+            column,
+            Some(r#"["legacy"]"#.to_string()),
+            "update_session must not rewrite the deactivated column"
+        );
+    }
+
+    /// VAL-DEPRECATE-010: a row written through the legacy column set (pre-048,
+    /// no enabled_skills column value) loads with every other column unchanged.
+    /// Simulated here by an INSERT that omits the enabled_skills column entirely.
+    #[tokio::test]
+    async fn test_legacy_row_without_enabled_skills_loads_and_preserves_other_columns() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_sessions
+                (id, name, model_id, enabled_tools, message_count, created_at, updated_at)
+            VALUES ('legacy', 'Legacy Session', 'gpt-4o', '["read"]', 7, $1, $1)
+        "#,
+        )
+        .bind(now)
+        .execute(repo.db.pool())
+        .await
+        .unwrap();
+
+        let fetched = repo
+            .get_session_by_id(&"legacy".to_string())
+            .await
+            .unwrap()
+            .unwrap();
+        // Other columns survive the migration untouched.
+        assert_eq!(fetched.name, "Legacy Session");
+        assert_eq!(fetched.model_id, Some("gpt-4o".to_string()));
+        assert_eq!(fetched.enabled_tools, vec!["read".to_string()]);
+        assert_eq!(fetched.message_count, 7);
     }
 
     /// A session-field edit (rename / thinking-level change) via the

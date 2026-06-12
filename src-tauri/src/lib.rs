@@ -208,6 +208,9 @@ pub fn run() {
             mcp_update_tool_enabled,
             mcp_count_chats_using_server,
             mcp_remove_server_from_chats,
+            // Skill 管理命令
+            skill_list,
+            skill_set_disabled,
             // 设置相关命令
             settings_get,
             settings_update,
@@ -361,8 +364,28 @@ async fn initialize_services(
     // 初始化 Agent Project 服务（按工作目录分组 Agent 模式会话）
     let agent_project_service = AgentProjectService::new(database_service.clone());
 
-    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重）
-    let agent_runtime = AgentRuntime::new(database_service.clone());
+    // 初始化 Skill 服务（解析三个 scope 根：app-data + user；project 按 run 解析）。
+    // app-data: <app_data_dir>/skills；user: ~/.agents/skills（home_dir 解析失败时
+    // 退回一个不存在的根，使 user scope 静默为空而非阻断启动）。
+    let skill_appdata_root = data_dir.join("skills");
+    let skill_user_root = app
+        .path()
+        .home_dir()
+        .map(|home| home.join(".agents").join("skills"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("/nonexistent/handbox-skills/user"));
+    let skill_service = Arc::new(crate::services::SkillService::new(
+        skill_appdata_root,
+        skill_user_root,
+    ));
+
+    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重 + skill 注入）。
+    // 注入 SettingsService 的 clone：assemble 每个 run 现场重读 config.json 的
+    // skills.disabled 全局禁用名单（不缓存）。
+    let agent_runtime = AgentRuntime::new_with_skills(
+        database_service.clone(),
+        skill_service.clone(),
+        settings_service.clone(),
+    );
 
     // 将服务注册到应用状态
     app.manage(storage_service);
@@ -381,6 +404,7 @@ async fn initialize_services(
     app.manage(agent_session_service);
     app.manage(agent_project_service);
     app.manage(agent_runtime);
+    app.manage(skill_service);
 
     // Services are registered — the foreground can now read DB-cached data.
     // Catalog sync runs ENTIRELY in the background from here: prime the

@@ -63,7 +63,13 @@ pub async fn agent_run_stream(
     }));
 
     runtime
-        .start_run(request.session_id, request.input, request.attachments, sink)
+        .start_run(
+            request.session_id,
+            request.input,
+            request.attachments,
+            request.forced_skills,
+            sink,
+        )
         .await
 }
 

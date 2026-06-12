@@ -20,6 +20,7 @@ pub mod provider;
 pub mod search;
 pub mod session;
 pub mod settings;
+pub mod skill;
 pub mod window;
 pub mod word;
 
@@ -46,5 +47,6 @@ pub use model::*;
 pub use provider::*;
 pub use search::*;
 pub use settings::*;
+pub use skill::*;
 pub use window::*;
 pub use word::*;

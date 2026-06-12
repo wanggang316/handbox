@@ -29,6 +29,7 @@
 // single-user local; closing the race is out of scope and intentionally not
 // attempted.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -42,6 +43,9 @@ use serde_json::json;
 const TOOL_READ_FILE: &str = "read_file";
 const TOOL_LIST_DIRECTORY: &str = "list_directory";
 const TOOL_WEB_FETCH: &str = "web_fetch";
+/// The skill tool's fixed name. Auto-injected when a run has enabled skills;
+/// distinct from every `build_tools`-produced name so it never collides.
+const TOOL_SKILL: &str = "skill";
 
 /// Byte budget for a single `read_file` result before truncation kicks in.
 const READ_FILE_BYTE_BUDGET: usize = 50 * 1024;
@@ -1015,6 +1019,74 @@ fn strip_tag_block(input: &str, tag: &str) -> String {
     result
 }
 
+// ===========================================================================
+// skill — load an enabled skill's full instructions by name (NOT by path).
+// ===========================================================================
+//
+// SECURITY (VAL-TOOL-018): this tool NEVER touches the filesystem. The model
+// supplies a `name`; we look that name up in an in-memory map of
+// already-discovered, already-validated skills (name -> body). A miss — including
+// a path-shaped argument like `/etc/passwd` or `../x` — returns a generic error
+// that contains NO path and NO file contents. There is no read-from-disk path to
+// abuse, so traversal/escape is structurally impossible here.
+
+/// Generic, leak-free message for a skill lookup that finds no match. MUST NOT
+/// echo the requested name verbatim if it is path-shaped, nor any file content.
+const SKILL_NOT_FOUND_MSG: &str = "skill not found";
+/// Message for a missing / empty / non-string `name` argument.
+const SKILL_INVALID_ARG_MSG: &str = "invalid skill name argument";
+
+/// Build the `skill` tool over a fixed `name -> body` map of the run's enabled,
+/// discovered, validated skills.
+///
+/// The handler is a PURE table lookup: it reads `args["name"]`, trims it, and
+/// returns the mapped body on a hit or a generic error on a miss/bad-arg. It
+/// performs NO filesystem access — the only legitimate way to reach a skill body
+/// is to name one that the run already gated into the map (VAL-TOOL-018). The
+/// map is captured and `.clone()`d into the async future, mirroring the FS
+/// tools' `PathBuf` capture pattern.
+pub fn make_skill_tool(map: HashMap<String, String>) -> AgentTool {
+    AgentTool::simple(
+        TOOL_SKILL,
+        "Load an enabled skill's full instructions by name. Pass the exact \
+         skill name from the available-skills index; the full instruction body \
+         is returned. Skills are referenced by name only, never by file path.",
+        json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The exact name of an enabled skill to load."
+                }
+            },
+            "required": ["name"]
+        }),
+        "Load skill",
+        move |_tool_call_id, args| {
+            let map = map.clone();
+            async move { execute_skill(&map, args) }
+        },
+    )
+}
+
+/// `skill` tool body: look the requested name up in `map` and return its body,
+/// or a generic, leak-free error. NO filesystem access of any kind.
+fn execute_skill(map: &HashMap<String, String>, args: serde_json::Value) -> ToolResult {
+    // A missing / non-string / empty (after trim) name is a bad argument.
+    let name = match args.get("name").and_then(|v| v.as_str()) {
+        Some(n) if !n.trim().is_empty() => n.trim(),
+        _ => return ToolResult::error(SKILL_INVALID_ARG_MSG),
+    };
+
+    // Pure table lookup by name. A path-shaped name (`/etc/passwd`, `../x`)
+    // simply isn't a key, so it falls through to the generic not-found message —
+    // we never interpret the argument as a path or read any file (VAL-TOOL-018).
+    match map.get(name) {
+        Some(body) => ToolResult::text(body.clone()),
+        None => ToolResult::error(SKILL_NOT_FOUND_MSG),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1916,5 +1988,153 @@ mod tests {
             .build()
             .expect("build current-thread runtime")
             .block_on(fut)
+    }
+
+    // -----------------------------------------------------------------------
+    // skill tool — name-keyed lookup, never a filesystem read (VAL-TOOL-003/
+    // 004/005/015/018).
+    // -----------------------------------------------------------------------
+
+    /// Build a `name -> body` map from `(name, body)` pairs.
+    fn skill_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(n, b)| (n.to_string(), b.to_string()))
+            .collect()
+    }
+
+    /// VAL-TOOL-015: the skill tool's name is the fixed `"skill"` and does not
+    /// collide with any built-in tool name `build_tools` can produce.
+    #[test]
+    fn skill_tool_name_is_unique_and_does_not_collide() {
+        let tool = make_skill_tool(skill_map(&[("alpha", "body")]));
+        assert_eq!(tool.name, "skill");
+        // None of the built-in factory names is "skill".
+        for builtin in [TOOL_READ_FILE, TOOL_LIST_DIRECTORY, TOOL_WEB_FETCH] {
+            assert_ne!(tool.name, builtin, "skill name collides with {builtin}");
+        }
+    }
+
+    /// VAL-TOOL-003: a hit returns the skill's body VERBATIM, untruncated, even
+    /// for a large body (well past the read_file truncation budget — the skill
+    /// tool has no byte cap).
+    #[test]
+    fn skill_hit_returns_full_body_untruncated() {
+        let big = "B".repeat(READ_FILE_BYTE_BUDGET * 4);
+        let map = skill_map(&[("alpha", &big)]);
+        let result = execute_skill(&map, json!({"name": "alpha"}));
+        assert_eq!(
+            get_text(&result),
+            big,
+            "skill body must be returned verbatim and untruncated"
+        );
+        // Sanity: it is a Text block, with no truncation marker.
+        assert!(matches!(result.content[0], ToolResultContent::Text(_)));
+        assert!(!get_text(&result).contains("[Truncated"));
+    }
+
+    /// A name with surrounding whitespace still resolves (the handler trims).
+    #[test]
+    fn skill_hit_trims_surrounding_whitespace() {
+        let map = skill_map(&[("alpha", "alpha body")]);
+        let result = execute_skill(&map, json!({"name": "  alpha  "}));
+        assert_eq!(get_text(&result), "alpha body");
+    }
+
+    /// VAL-TOOL-004: a miss returns a generic error — no panic, and the error
+    /// text leaks NO filesystem path and NO file contents.
+    #[test]
+    fn skill_miss_is_generic_error_no_leak() {
+        let map = skill_map(&[("alpha", "secret body")]);
+        let result = execute_skill(&map, json!({"name": "ghost"}));
+        let text = get_text(&result);
+        assert_eq!(text, SKILL_NOT_FOUND_MSG);
+        assert!(!text.contains('/'), "no path in error: {text:?}");
+        assert!(!text.contains("secret body"), "no body leak: {text:?}");
+    }
+
+    /// VAL-TOOL-005: a missing, non-string, or empty/whitespace `name` argument
+    /// yields the invalid-arg error (no panic).
+    #[test]
+    fn skill_bad_arg_yields_invalid_arg_error() {
+        let map = skill_map(&[("alpha", "body")]);
+
+        // Missing entirely.
+        assert_eq!(
+            get_text(&execute_skill(&map, json!({}))),
+            SKILL_INVALID_ARG_MSG
+        );
+        // Wrong type (number, not string).
+        assert_eq!(
+            get_text(&execute_skill(&map, json!({"name": 42}))),
+            SKILL_INVALID_ARG_MSG
+        );
+        // Empty string.
+        assert_eq!(
+            get_text(&execute_skill(&map, json!({"name": ""}))),
+            SKILL_INVALID_ARG_MSG
+        );
+        // Whitespace-only.
+        assert_eq!(
+            get_text(&execute_skill(&map, json!({"name": "   "}))),
+            SKILL_INVALID_ARG_MSG
+        );
+    }
+
+    /// VAL-TOOL-018 (SECURITY): a path-shaped `name` is treated as an ordinary
+    /// (missing) key — the tool NEVER reads from disk. We seed the map with one
+    /// real skill, then ask for filesystem-y names; each must return the generic
+    /// not-found error with no file contents and no path echo.
+    #[test]
+    fn skill_path_shaped_name_never_reads_disk() {
+        let map = skill_map(&[("alpha", "alpha body")]);
+        for malicious in [
+            "/etc/passwd",
+            "../secret.txt",
+            "../../etc/hosts",
+            "sub/../../escape",
+            "~/.ssh/id_rsa",
+            "alpha/../../etc/passwd",
+        ] {
+            let result = execute_skill(&map, json!({ "name": malicious }));
+            let text = get_text(&result);
+            assert_eq!(
+                text, SKILL_NOT_FOUND_MSG,
+                "path-shaped name {malicious:?} must be a plain miss"
+            );
+            // The error must not echo the (path-shaped) argument or any content.
+            assert!(
+                !text.contains(malicious),
+                "error leaked the path argument {malicious:?}: {text:?}"
+            );
+            assert!(
+                !text.contains("root:") && !text.contains("alpha body"),
+                "error leaked file/skill content: {text:?}"
+            );
+        }
+    }
+
+    /// The skill tool resolves via the registered `execute` closure (end-to-end
+    /// through `AgentTool`), not just the bare helper — proving the wiring.
+    #[test]
+    fn skill_tool_execute_closure_resolves_hit_and_miss() {
+        let tool = make_skill_tool(skill_map(&[("alpha", "alpha body")]));
+        let ctx_hit = hand_agent::ToolExecuteCtx {
+            tool_call_id: "tc-1".to_string(),
+            args: json!({"name": "alpha"}),
+            cancel: hand_agent::CancellationToken::new(),
+            on_update: std::sync::Arc::new(|_: ToolResult| {}),
+        };
+        let hit = tokio_test_block((tool.execute)(ctx_hit)).expect("execute ok");
+        assert_eq!(get_text(&hit), "alpha body");
+
+        let ctx_miss = hand_agent::ToolExecuteCtx {
+            tool_call_id: "tc-2".to_string(),
+            args: json!({"name": "ghost"}),
+            cancel: hand_agent::CancellationToken::new(),
+            on_update: std::sync::Arc::new(|_: ToolResult| {}),
+        };
+        let miss = tokio_test_block((tool.execute)(ctx_miss)).expect("execute ok");
+        assert_eq!(get_text(&miss), SKILL_NOT_FOUND_MSG);
     }
 }

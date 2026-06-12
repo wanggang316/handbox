@@ -143,9 +143,17 @@
     {/if}
 
     <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->
+    <!--
+      `{#key currentSession.id}` 强制 per-session 重新挂载 AgentInput：切换会话时
+      销毁旧实例、重建新实例，使所有瞬时 composer 态（input / attachments /
+      forced chip / slash 浮层）全部回到初值，绝不在会话 A 与 B 间串台
+      （VAL-SLASH-023）。组件实例被复用是底层 bug；重新挂载即正确语义。
+    -->
     <div class="shrink-0 border-t border-base-300 px-4 py-3">
       {#if currentSession}
-        <AgentInput session={currentSession} />
+        {#key currentSession.id}
+          <AgentInput session={currentSession} />
+        {/key}
       {/if}
     </div>
   {:else}
