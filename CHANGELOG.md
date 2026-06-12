@@ -16,6 +16,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.2.0] - 2026-06-12
+
+### Added
+- Agent mode: a new Agent workspace alongside Chat (toggle in the sidebar) for
+  multi-turn agent runs with streaming replies, thinking blocks, and token usage.
+- Agent tools — the agent can read files, list directories, and fetch web pages,
+  sandboxed to a per-session working directory (web fetches are SSRF-guarded).
+- Image attachments in agent messages.
+- Mid-run steering: send extra guidance to an agent while it's still running.
+- Per-session system prompt editor, opened from the session header.
+- Agent sessions grouped by project in the sidebar, with project create / rename /
+  delete and zero-dialog session creation from the project header.
+- Skills: a slash-command popover in the agent composer, a Settings → Skills page,
+  and per-session skill enablement.
+- Custom providers: manual model entry and custom-endpoint chat for providers that
+  aren't in the catalog.
+- Favorites: collapsible tag filter that detects overflow.
+
+### Changed
+- Provider catalog is now sourced live from the models.dev catalog with runtime
+  refresh, fixing stale / drifting OpenRouter and Cerebras model lists; provider
+  icons also come from models.dev instead of bundled assets.
+- Reworked the new-chat flow and made session title generation reliable.
+- Moved catalog sync off the startup critical path for faster launch.
+
+### Fixed
+- API keys are now redacted from debug and log output.
+
 ## [0.1.3] - 2026-05-24
 
 ### Added
