@@ -322,6 +322,7 @@ async fn live_agent_plain_turn_and_web_fetch_tool() {
                 session_id.clone(),
                 "Reply with exactly the word: HELLO".to_string(),
                 vec![],
+                vec![],
                 sink.clone().into_run_sink(),
             )
             .await
@@ -400,6 +401,7 @@ async fn live_agent_plain_turn_and_web_fetch_tool() {
                 "Use the web_fetch tool to fetch https://example.com \
                  and tell me the page title."
                     .to_string(),
+                vec![],
                 vec![],
                 sink.clone().into_run_sink(),
             )
