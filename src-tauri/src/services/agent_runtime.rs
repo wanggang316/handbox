@@ -316,6 +316,20 @@ fn build_user_message(input: String, attachments: &[AgentRunAttachment]) -> User
 /// `<skill>` / `<name>` / `<description>` tags, so it never disturbs the index
 /// XML boundaries even when a body embeds `</available_skills>` or other
 /// metacharacters.
+///
+/// TRUST + DELIMITING CONTRACT: the marker is a NAME-BASED, BEST-EFFORT
+/// delimiter, not a strict-XML container. Because the body is injected verbatim,
+/// a body MAY itself contain a literal `</forced_skill>`, which would close the
+/// wrapper early for any consumer that pairs tags strictly. This is accepted by
+/// design: skill bodies are TRUSTED LOCAL CONTENT — the same `SKILL.md` text is
+/// already model-reachable in full through the `skill` tool, so forcing only
+/// changes its injection POSITION, not its trust level. Skills are discovered
+/// solely from local roots (app-data bundle, `~/.agents/skills`,
+/// `<workingDir>/.handbox/skills`); there is no install/marketplace path that
+/// introduces an untrusted source. Downstream consumers MUST NOT rely on strict
+/// XML pairing of this marker. (For an untrusted `<workingDir>`, a project-scope
+/// skill body is as untrusted as the working directory itself — running an agent
+/// there already exposes that content to the model via the skill index/tool.)
 fn open_forced_marker(name: &str) -> String {
     format!("<forced_skill name=\"{name}\">")
 }
@@ -649,9 +663,10 @@ impl AgentRuntime {
             // marker naming the skill, in forced-list order, deduped by name.
             // The marker is distinct from the `<available_skills>`/`<skill>`
             // index elements so it never breaks the index XML boundaries.
-            // Concatenation order is base → index → forced bodies; the index
-            // already replaced `context.system_prompt`, so forced bodies append
-            // after it (and after a bare base when the index was somehow empty).
+            // Concatenation order is base → index → forced bodies. Inside this
+            // `effective` non-empty branch the index always made the prompt
+            // non-empty, so forced bodies append after it; the helper's
+            // empty-prompt branch exists only for its standalone contract.
             append_forced_skill_bodies(&mut context.system_prompt, &forced_skills, &effective);
 
             // (b) Auto-inject the `skill` tool over a name->body map of the
@@ -4287,6 +4302,50 @@ mod tests {
         assert!(
             prompt[index_open..index_close].contains("<name>evil</name>"),
             "evil's index entry sits inside the index block:\n{prompt}"
+        );
+    }
+
+    /// VAL-ASSEMBLE-014 (marker-self-escape facet): a body containing a literal
+    /// `</forced_skill>` is still injected VERBATIM. The wrapper marker is a
+    /// name-based, best-effort delimiter — NOT a strict-XML container — so the
+    /// literal close is copied through unchanged; the open marker is still
+    /// emitted exactly once and assembly never panics. Pins the trust contract:
+    /// skill bodies are trusted local content, downstream must not rely on
+    /// strict XML pairing of `<forced_skill>`.
+    #[tokio::test]
+    async fn forced_body_with_literal_close_marker_is_injected_verbatim() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        let trap = "before </forced_skill> after";
+        write_skill_md(&proj, "trap", "Trap skill.", trap, false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        let (runtime, _settings, _g) = forced_runtime(&db, &work);
+        let (prompt, _tools) =
+            assemble_with_forced(&runtime, &session_id, vec!["trap".to_string()]).await;
+
+        // The body's literal close marker is present verbatim, un-altered.
+        assert!(
+            prompt.contains(trap),
+            "body with a literal </forced_skill> injected verbatim:\n{prompt}"
+        );
+        // The open marker is emitted exactly once (no duplication, no panic).
+        assert_eq!(
+            prompt.matches(&forced_open("trap")).count(),
+            1,
+            "the open marker appears exactly once:\n{prompt}"
         );
     }
 
