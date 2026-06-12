@@ -13,13 +13,16 @@
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
+  import { listSkills } from "$lib/api/skill";
   import type {
     AgentSession,
     AgentRunAttachment,
+    SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
 
@@ -116,6 +119,79 @@
   // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
   const running = $derived(agentRunStore.isRunning(session.id));
 
+  // ── Slash skill 自动补全浮层 ──────────────────────────────────────────
+  // 触发条件：空输入框（整段 textarea 为空）首字符**键入** `/`（非粘贴、非词中、
+  // 非 Shift+Enter 后行首、非 IME 合成）→ 打开锚定 textarea 的 skill 浮层。
+  // 候选只含未禁用 skill；query 为 `/` 之后的文本，大小写不敏感子串匹配 name。
+  // 选中 → 追加可移除的 forced-skill chip（按 name 去重）并清掉 textarea 的 /query。
+  //
+  // forcedSkills：选中的强制 skill 列表（按 name 去重）。本 feature 仅维护与渲染；
+  // 下个 feature（forced-chip-send-lifecycle）把这些 skill 的 name 接入 sendAgentRun。
+  let forcedSkills = $state<SkillInfo[]>([]);
+
+  let slashOpen = $state(false);
+  let slashQuery = $state("");
+  let slashHighlight = $state(0);
+  let availableSkills = $state<SkillInfo[]>([]);
+  // composing 标记：IME 合成期间不触发浮层、不选中、不发送（VAL-SLASH-014）。
+  let composing = $state(false);
+
+  // 候选：未禁用 skill 经大小写不敏感 name 子串过滤（query 为空 → 全部）。
+  const slashCandidates = $derived.by(() => {
+    const q = slashQuery.trim().toLowerCase();
+    const enabled = availableSkills.filter((s) => !s.disabled);
+    if (!q) return enabled;
+    return enabled.filter((s) => s.name.toLowerCase().includes(q));
+  });
+
+  // 高亮越界（过滤后列表缩短）时回钳到末项；空列表时无高亮（-1）。
+  const effectiveHighlight = $derived(
+    slashCandidates.length === 0
+      ? -1
+      : Math.min(slashHighlight, slashCandidates.length - 1),
+  );
+
+  async function loadAvailableSkills() {
+    try {
+      availableSkills = await listSkills(session.workingDir ?? undefined);
+    } catch (error) {
+      console.error("Failed to list skills for slash popover:", error);
+      availableSkills = [];
+    }
+  }
+
+  function openSlashPopover() {
+    slashOpen = true;
+    slashHighlight = 0;
+    slashQuery = "";
+    void loadAvailableSkills();
+  }
+
+  function closeSlashPopover() {
+    slashOpen = false;
+    slashQuery = "";
+    slashHighlight = 0;
+  }
+
+  // 清掉 textarea 里从触发用 `/` 起的 query 文本（选中 / Escape / 退格关闭后）。
+  function clearSlashQuery() {
+    input = "";
+    adjustTextareaHeight();
+  }
+
+  function selectSkill(skill: SkillInfo) {
+    // 按 name 去重：已存在则仅消费 query、不重复加 chip。
+    if (!forcedSkills.some((s) => s.name === skill.name)) {
+      forcedSkills = [...forcedSkills, skill];
+    }
+    clearSlashQuery();
+    closeSlashPopover();
+  }
+
+  function removeForcedSkill(name: string) {
+    forcedSkills = forcedSkills.filter((s) => s.name !== name);
+  }
+
   function adjustTextareaHeight() {
     if (textareaRef) {
       textareaRef.style.height = "auto";
@@ -126,11 +202,91 @@
   }
 
   // Enter 发送；Shift+Enter 换行（镜像 ChatInput）（VAL-RUN-011）。
+  // 浮层打开时优先消费键盘：↑/↓ 移高亮、Enter 选中、Escape 关闭——Enter 在浮层
+  // 打开时绝不发送（VAL-SLASH-016）。IME 合成期间 Enter 不选不发（VAL-SLASH-014）。
   function handleKeydown(event: KeyboardEvent) {
+    // IME 合成中：所有键交给输入法，不触发选中/发送（双保险：标记 + isComposing）。
+    if (composing || event.isComposing) return;
+
+    if (slashOpen) {
+      if (event.key === "ArrowDown") {
+        // 端点有界、不动文本光标（preventDefault）。
+        event.preventDefault();
+        if (slashCandidates.length > 0) {
+          slashHighlight = Math.min(
+            effectiveHighlight + 1,
+            slashCandidates.length - 1,
+          );
+        }
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (slashCandidates.length > 0) {
+          slashHighlight = Math.max(effectiveHighlight - 1, 0);
+        }
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        // 浮层打开时 Enter = 选中而非发送；无高亮时干净 no-op。
+        event.preventDefault();
+        const target = slashCandidates[effectiveHighlight];
+        if (target) selectSkill(target);
+        return;
+      }
+      if (event.key === "Escape") {
+        // 关闭并消费 /query。
+        event.preventDefault();
+        clearSlashQuery();
+        closeSlashPopover();
+        return;
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendAgentRun();
     }
+  }
+
+  function handleCompositionStart() {
+    composing = true;
+  }
+
+  function handleCompositionEnd() {
+    composing = false;
+    // 合成提交后正常字符流参与触发/过滤（VAL-SLASH-014）。
+    syncSlashState(false);
+  }
+
+  // textarea 输入变化驱动浮层触发与 query 同步。`fromPaste` 时不开浮层
+  // （粘贴的 `/` 不当触发，VAL-SLASH-012）。
+  function syncSlashState(fromPaste: boolean) {
+    // 合成中不触发（字符尚未提交）。
+    if (composing) return;
+
+    // 触发：整段输入恰为单个 `/` 且非粘贴 → 开浮层。
+    if (!slashOpen) {
+      if (!fromPaste && input === "/") openSlashPopover();
+      return;
+    }
+
+    // 已打开：query = `/` 之后的文本。退格删掉触发用 `/`（input 不再以 `/` 开头
+    // 或已空）→ 关闭浮层（VAL-SLASH-011）。
+    if (!input.startsWith("/")) {
+      closeSlashPopover();
+      return;
+    }
+    slashQuery = input.slice(1);
+    slashHighlight = 0;
+  }
+
+  function handleInput(event: Event) {
+    adjustTextareaHeight();
+    const inputType = (event as InputEvent).inputType;
+    const fromPaste =
+      inputType === "insertFromPaste" || inputType === "insertFromDrop";
+    syncSlashState(fromPaste);
   }
 
   function handleAddAttachment(event?: MouseEvent) {
@@ -310,15 +466,51 @@
 <div
   class="flex flex-col bg-base-300 rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
 >
-  <textarea
-    bind:this={textareaRef}
-    bind:value={input}
-    placeholder="在这里输入消息，按 Enter 发送"
-    onkeydown={handleKeydown}
-    oninput={adjustTextareaHeight}
-    rows="1"
-    class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
-  ></textarea>
+  <!-- relative 容器锚定浮层；浮层向上弹（bottom-full）以免落屏外/被时间线裁切。 -->
+  <div class="relative">
+    {#if slashOpen}
+      <div class="absolute bottom-full left-3 z-30 mb-1">
+        <SkillSlashPopover
+          items={slashCandidates}
+          highlightedIndex={effectiveHighlight}
+          onSelect={selectSkill}
+          onHover={(index) => (slashHighlight = index)}
+        />
+      </div>
+    {/if}
+    <textarea
+      bind:this={textareaRef}
+      bind:value={input}
+      placeholder="在这里输入消息，按 Enter 发送"
+      onkeydown={handleKeydown}
+      oninput={handleInput}
+      oncompositionstart={handleCompositionStart}
+      oncompositionend={handleCompositionEnd}
+      rows="1"
+      class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
+    ></textarea>
+  </div>
+
+  {#if forcedSkills.length}
+    <div class="px-4 pb-2 flex flex-wrap gap-2">
+      {#each forcedSkills as skill (skill.name)}
+        <span
+          class="flex items-center gap-1 rounded-md border border-info/50 bg-info/10 px-2 py-1 text-xs text-info"
+        >
+          <span class="truncate max-w-[160px]">{skill.name}</span>
+          <button
+            type="button"
+            class="rounded-full p-0.5 transition-colors hover:bg-info/20"
+            title="移除 skill"
+            aria-label={`移除 skill ${skill.name}`}
+            onclick={() => removeForcedSkill(skill.name)}
+          >
+            <X size={12} />
+          </button>
+        </span>
+      {/each}
+    </div>
+  {/if}
 
   {#if attachments.length}
     <div class="px-4 pb-2 flex flex-wrap gap-3">
