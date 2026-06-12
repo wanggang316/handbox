@@ -5030,4 +5030,188 @@ mod tests {
             "forced body reached the system prompt via the run chain:\n{prompt}"
         );
     }
+
+    /// VAL-SLASH-025 (end-to-end): a request carrying MULTIPLE forced names flows
+    /// through the full `start_run → assemble_run` chain so every surviving body
+    /// lands in the loop's system prompt in FORCED-LIST order, each exactly once
+    /// (a repeated name is injected only one time). Pins the run-chain twin of the
+    /// assemble-level VAL-ASSEMBLE-020.
+    #[tokio::test]
+    async fn multiple_forced_names_thread_through_start_run_in_order() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        let proj = work.path().join(".handbox").join("skills");
+        write_skill_md(&proj, "alpha", "Alpha.", "ALPHA RUN BODY", false);
+        write_skill_md(&proj, "beta", "Beta.", "BETA RUN BODY", false);
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        // Capture the system prompt the loop hands to the stream function.
+        let seen_prompt: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
+        let seen_prompt_cl = Arc::clone(&seen_prompt);
+        let stream_fn: hand_agent::StreamFn = Arc::new(move |model, ctx, _opts, _cancel| {
+            *seen_prompt_cl.lock().unwrap() = ctx.system_prompt.clone();
+            Box::pin(futures::stream::iter(vec![AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                message: done_message(&model.id, "ok"),
+            }]))
+        });
+
+        let (mut runtime, _settings, _g) = forced_runtime(&db, &work);
+        runtime.stream_fn_override = Some(stream_fn);
+
+        // Force beta then alpha, with alpha repeated — expect order beta, alpha
+        // and alpha only once.
+        let sink = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "hello".to_string(),
+                vec![],
+                vec!["beta".to_string(), "alpha".to_string(), "alpha".to_string()],
+                sink.clone().into_run_sink(),
+            )
+            .await
+            .expect("start_run should succeed");
+        wait_for_closed(&sink).await;
+
+        let prompt = seen_prompt
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the loop received a system prompt");
+
+        let beta_pos = prompt.find(&forced_open("beta")).expect("beta forced");
+        let alpha_pos = prompt.find(&forced_open("alpha")).expect("alpha forced");
+        assert!(
+            beta_pos < alpha_pos,
+            "forced bodies follow forced-list order through the run chain:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("BETA RUN BODY") && prompt.contains("ALPHA RUN BODY"),
+            "both forced bodies reached the run-chain system prompt:\n{prompt}"
+        );
+        assert_eq!(
+            prompt.matches(&forced_open("alpha")).count(),
+            1,
+            "a repeated forced name is injected exactly once via the run chain:\n{prompt}"
+        );
+    }
+
+    /// VAL-CROSS-003 / VAL-SLASH-021 (per-turn lifecycle, end-to-end): forcing a
+    /// skill on one run injects its body into THAT run's system prompt; a
+    /// SUBSEQUENT run on the same session WITHOUT forced names injects no body —
+    /// the forced state is single-turn and never persists across runs. The
+    /// frontend clears the chip after a successful dispatch (VAL-SLASH-021); this
+    /// pins that an empty forced list on the next request yields a body-free
+    /// prompt through the real run chain.
+    #[tokio::test]
+    async fn forced_body_is_single_turn_across_consecutive_runs() {
+        let (db, _guard) = test_db().await;
+        let provider_id = seed_provider(&db).await;
+
+        let work = TempDir::new().unwrap();
+        write_skill_md(
+            &work.path().join(".handbox").join("skills"),
+            "alpha",
+            "Alpha.",
+            "ALPHA RUN BODY",
+            false,
+        );
+
+        let session_id = seed_session_with_skills(
+            &db,
+            &provider_id,
+            "gpt-4o",
+            vec![],
+            Some(work.path().to_string_lossy().into_owned()),
+            Some("BASE".to_string()),
+        )
+        .await;
+
+        // Collect the system prompt seen on each consecutive run, in order.
+        let seen: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let seen_cl = Arc::clone(&seen);
+        let stream_fn: hand_agent::StreamFn = Arc::new(move |model, ctx, _opts, _cancel| {
+            seen_cl
+                .lock()
+                .unwrap()
+                .push(ctx.system_prompt.clone().unwrap_or_default());
+            Box::pin(futures::stream::iter(vec![AssistantMessageEvent::Done {
+                reason: StopReason::Stop,
+                message: done_message(&model.id, "ok"),
+            }]))
+        });
+
+        let (mut runtime, _settings, _g) = forced_runtime(&db, &work);
+        runtime.stream_fn_override = Some(stream_fn);
+
+        // Turn 1: force alpha — its body must enter this run's prompt.
+        let sink1 = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "first".to_string(),
+                vec![],
+                vec!["alpha".to_string()],
+                sink1.clone().into_run_sink(),
+            )
+            .await
+            .expect("first start_run should succeed");
+        wait_for_closed(&sink1).await;
+
+        // Turn 2: same session, NO forced names — the body must be gone. The
+        // first run must have been removed from `runs` for this to start (the
+        // one-run-per-session guard); `wait_for_closed` guarantees that.
+        let sink2 = CapturingSink::default();
+        runtime
+            .start_run(
+                session_id.clone(),
+                "second".to_string(),
+                vec![],
+                vec![],
+                sink2.clone().into_run_sink(),
+            )
+            .await
+            .expect("second start_run should succeed");
+        wait_for_closed(&sink2).await;
+
+        let prompts = seen.lock().unwrap().clone();
+        assert_eq!(prompts.len(), 2, "exactly two runs reached the stream fn");
+
+        // Turn 1 carries the forced marker + body.
+        assert!(
+            prompts[0].contains(&forced_open("alpha")) && prompts[0].contains("ALPHA RUN BODY"),
+            "turn 1 forced body present:\n{}",
+            prompts[0]
+        );
+        // Turn 2 (no forced) carries neither the marker nor the body — forced
+        // state did not persist across the run boundary.
+        assert!(
+            !prompts[1].contains("<forced_skill"),
+            "turn 2 has no forced marker (single-turn lifecycle):\n{}",
+            prompts[1]
+        );
+        assert!(
+            !prompts[1].contains("ALPHA RUN BODY"),
+            "turn 2 has no leaked forced body:\n{}",
+            prompts[1]
+        );
+        // The index itself is unchanged — alpha is still discoverable both turns.
+        assert!(
+            prompts[1].contains("<name>alpha</name>"),
+            "alpha stays indexed on turn 2 (only the forced body is single-turn):\n{}",
+            prompts[1]
+        );
+    }
 }
