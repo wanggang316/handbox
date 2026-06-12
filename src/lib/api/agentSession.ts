@@ -115,17 +115,21 @@ export async function getAgentSessionMessages(
  *
  * 立即返回；真实输出经 `agent_stream_event` / `agent_stream_closed`
  * （以及 run-level 错误的 `agent_stream_error`）异步抵达。
- * 后端签名: agent_run_stream(request: AgentRunRequest { sessionId, input, attachments })
+ * 后端签名: agent_run_stream(request: AgentRunRequest { sessionId, input, attachments, forcedSkills })
  *
  * `attachments` 为可选图片附件；缺省时后端走纯文本路径。
+ * `forcedSkills` 为本回合强制加载的 skill 名（顺序即注入序）；后端按此 list
+ * 把每个存活 skill 的 body 逐字注入装配期 system_prompt（单回合，不持久化）。
+ * 缺省空数组即旧三字段行为（serde default，后端 `forced_skills` 为空）。
  */
 export async function runAgentStream(
   sessionId: UUID,
   input: string,
   attachments: AgentRunAttachment[] = [],
+  forcedSkills: string[] = [],
 ): Promise<void> {
   await apiCall<void>("agent_run_stream", {
-    request: { sessionId, input, attachments },
+    request: { sessionId, input, attachments, forcedSkills },
   });
 }
 
