@@ -68,21 +68,26 @@
     }
   }
 
-  async function handleToggleSkill(skill: SkillInfo, newDisabled: boolean) {
-    // Double-click guard: ignore if already in flight
+  // 非乐观提交：把 IPC 写放进 onChangeBefore，返回 false 时 Toggle 自动把
+  // 可见态回退到点击前（成功路径上 store 改写后 checked={!skill.disabled}
+  // 已与新值一致；失败路径上 store 未被改写，无 prop 变化信号，必须靠返回
+  // false 触发 Toggle 自身的 target.checked / checked 回退）。
+  async function handleToggleSkillBefore(
+    skill: SkillInfo,
+    enabled: boolean
+  ): Promise<boolean> {
+    // Double-click guard: reject overlapping toggles for the same skill
     if (inFlightSkills.has(skill.name)) {
-      return;
+      return false;
     }
 
-    const previousDisabled = skill.disabled;
     inFlightSkills.add(skill.name);
-
     try {
-      await skillActions.toggleSkill(skill.name, newDisabled);
+      await skillActions.toggleSkill(skill.name, !enabled);
+      return true;
     } catch (error) {
       console.error("Failed to toggle skill:", error);
-      // 失败时回退
-      skill.disabled = previousDisabled;
+      return false;
     } finally {
       inFlightSkills.delete(skill.name);
     }
@@ -160,7 +165,8 @@
                 <Toggle
                   checked={!skill.disabled}
                   disabled={inFlightSkills.has(skill.name)}
-                  onChange={(enabled) => handleToggleSkill(skill, !enabled)}
+                  onChangeBefore={(enabled) =>
+                    handleToggleSkillBefore(skill, enabled)}
                 />
               {/if}
               <button
