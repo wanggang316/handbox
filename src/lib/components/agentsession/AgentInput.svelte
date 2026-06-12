@@ -359,7 +359,9 @@
   async function sendAgentRun() {
     // run 进行中：消息走 steering 队列，不起第二个 run。后端 agent_run_steer 把
     // 文本压入活跃 run 的 steering 队列、在 turn 边界 drain；纯空白为干净 no-op。
-    // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）。
+    // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）；forced
+    // chip 同样不随 steer 发送、也不被清空——forced 是给下一个完整 run 的瞬时态，
+    // 不该被 mid-run steering 误清，故此分支不触碰 forcedSkills。
     // 活跃 run 必有模型，故此分支无需查 model 守卫；放在 model 守卫之前自洽。
     if (running) {
       // 纯空白输入：干净 no-op（不清空、不入队、不调用）。
@@ -400,11 +402,24 @@
       data: Array.from(a.data),
     }));
     const sentAttachments = attachments;
+    // forced chip 是本回合（per-turn）瞬时态：dispatch 前快照 + 清空，与 input/
+    // attachments 同构。成功则保持清空（下一 run 的 forced_skills 为空，
+    // VAL-SLASH-021）；失败则在 catch 里与文本/附件一并原子回填，杜绝「文本回来了
+    // 但强制丢了」的不一致（VAL-SLASH-024）。chip 文案=skill 名，slash 已被消费，
+    // 故发给模型的 user message 正文绝不含字面 `/skillname`（VAL-SLASH-007）。
+    const sentForcedSkills = forcedSkills;
+    const forcedSkillNames = forcedSkills.map((s) => s.name);
     input = "";
     attachments = [];
+    forcedSkills = [];
     adjustTextareaHeight();
     try {
-      await runAgentStream(session.id, text, payloadAttachments);
+      await runAgentStream(
+        session.id,
+        text,
+        payloadAttachments,
+        forcedSkillNames,
+      );
       // 发送成功后再 revoke 预览 URL（此时缩略图已从 DOM 移除）。
       sentAttachments.forEach((a) => {
         if (a.previewUrl.startsWith("blob:")) {
@@ -412,9 +427,10 @@
         }
       });
     } catch (error) {
-      // 启动失败：回填输入与附件，提示错误，便于重试。
+      // 启动失败：回填输入、附件与 forced chip，提示错误，便于重试。
       input = text;
       attachments = sentAttachments;
+      forcedSkills = sentForcedSkills;
       adjustTextareaHeight();
       modelPrompt =
         error instanceof Error ? error.message : "启动 Agent 运行失败";
