@@ -18,8 +18,8 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    ArtifactService, JobExecutor, JobService, McpService, MessageService, ModelService,
-    ProviderService, SearchService, SessionService, SettingsService, StorageService,
+    ArtifactService, JobExecutor, JobScheduler, JobService, McpService, MessageService,
+    ModelService, ProviderService, SearchService, SessionService, SettingsService, StorageService,
     UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
@@ -384,6 +384,12 @@ async fn initialize_services(
     // 供后续 scheduler/run_now 以 State 取用。
     let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared);
 
+    // 初始化定时任务调度器（后台 tick loop，驱动到点任务自动执行）。
+    // 复用执行器（clone 走 Arc 字段，不 clone 服务本体）。启动接线在
+    // initialize_services 末尾：reconcile 残留 running → 按 now 重算 next_run_at
+    // → 启动 tick loop。
+    let job_scheduler = JobScheduler::from_db(database_service.clone(), job_executor.clone());
+
     // 初始化 Skill 服务（解析三个 scope 根：app-data + user；project 按 run 解析）。
     // app-data: <app_data_dir>/skills；user: ~/.agents/skills（home_dir 解析失败时
     // 退回一个不存在的根，使 user scope 静默为空而非阻断启动）。
@@ -450,6 +456,7 @@ async fn initialize_services(
     app.manage(skill_service);
     app.manage(job_service);
     app.manage(job_executor);
+    app.manage(job_scheduler.clone());
 
     // Services are registered — the foreground can now read DB-cached data.
     // Catalog sync runs ENTIRELY in the background from here: prime the
@@ -459,6 +466,25 @@ async fn initialize_services(
     // additions (e.g. OpenRouter's full tool-capable list incl. `~*-latest`
     // aliases) resolve at chat time once the refresh lands. No local synthesis.
     crate::services::catalog_sync::spawn();
+
+    // 启动定时任务调度。仅在应用运行期间调度（关闭即停、重启按 now 重算、不补跑）。
+    // 顺序：migrations/services 已就绪 → ① reconcile 上次进程残留的 running 执行行
+    // （崩溃或正常退出都可能留下，无活进程，标 failed）→ ② 对每个 enabled job 按
+    // 当前 now 重算 next_run_at（仅取下一个 > now 的 cron occurrence，错过的触发不
+    // 补跑、过期任务不在启动即跑）→ ③ 启动后台 tick loop（固定 30s，DB 为唯一事实
+    // 来源，每 tick 重读）。reconcile / recompute 失败只告警、不阻断启动与 tick。
+    {
+        let scheduler = job_scheduler;
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = scheduler.reconcile_stale_running().await {
+                tracing::warn!("[JobScheduler] startup reconcile failed (continuing): {e:?}");
+            }
+            if let Err(e) = scheduler.recompute_all_enabled().await {
+                tracing::warn!("[JobScheduler] startup recompute failed (continuing): {e:?}");
+            }
+            scheduler.spawn_tick_loop();
+        });
+    }
 
     Ok(())
 }

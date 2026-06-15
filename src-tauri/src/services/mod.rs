@@ -16,6 +16,7 @@ pub mod coding_agent_session;
 pub mod hand_ai_catalog;
 pub mod job;
 pub mod job_executor;
+pub mod job_scheduler;
 pub mod mcp;
 pub mod message;
 pub mod model;
@@ -47,6 +48,7 @@ pub use coding_agent_runtime::{
 };
 pub use job::{JobCreateRequest, JobService, JobUpdateRequest};
 pub use job_executor::JobExecutor;
+pub use job_scheduler::JobScheduler;
 pub use mcp::McpService;
 pub use message::MessageService;
 pub use model::ModelService;
