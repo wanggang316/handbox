@@ -22,6 +22,7 @@ Mobile, web SaaS, CLI are explicitly out of scope.
 - **Invocation:**
   - Start the app: `npm run tauri dev` from the repo root. Wait until the title-bar window appears and the dev server logs `ready in NNNms`.
   - Inspect Tauri logs: tail stdout of `npm run tauri dev`; backend logs use `tracing` — grep on `[ServiceName::method_name]` prefix.
+  - Scheduled-jobs observability (milestone `scheduled-jobs` M1): the background scheduler logs at INFO with these grep prefixes — `[JobScheduler::tick]` per 30s tick (`idle tick — no due jobs` when nothing is due; `firing <id> (next_run_at advanced to ...)`; `skipped <id> — previous execution still in flight`; `dispatched N job(s)`), `[JobScheduler::recompute]` and `[JobScheduler::reconcile]` at startup, and `[JobScheduler::run]` per completed run. Tick interval is fixed at 30s (`JobScheduler::TICK_INTERVAL`), so a 1-minute cron is observed within the minute it is due.
   - Inspect SQLite DB: `sqlite3 ~/Library/Application\ Support/com.gumpw.handbox/handbox.db "<SQL>"` (path may vary per Tauri 2 `app_data_dir`).
   - Inspect IPC payloads: the frontend's `apiCall` wrapper logs request/response to the browser console; open WKWebView devtools via the in-app menu.
 - **Ready signal:** the app's main window renders the sidebar AND the Tauri stdout contains `Successfully loaded LLM config from`.
