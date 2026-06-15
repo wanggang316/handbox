@@ -27,6 +27,7 @@
   import DefaultRow from "$lib/components/ui/table/DefaultRow.svelte";
   import {
     TableGroup,
+    TableBaseRow,
     SwitchRow,
     SelectRow,
     NumberStepperRow,
@@ -55,6 +56,12 @@
   let tableNumber = $state(2);
   let tableTextarea = $state("配置说明，支持多行内容。");
   let tableText = $state("可编辑值");
+
+  // 表单状态校验演示
+  let requiredValue = $state("");
+  let errorValue = $state("");
+  let tableErrorText = $state("");
+  let passwordValue = $state("secret123");
 
   let activeMenuId = $state("profile");
   let activeMenuButtonId = $state("active");
@@ -234,6 +241,64 @@
   </section>
 
   <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">表单状态校验</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Disabled Input / TextRow</div>
+        <Input label="名称（禁用）" value="只读内容" placeholder="请输入名称" disabled />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow label="显示名称（禁用）" value="只读内容" disabled />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Required Input / TextRow</div>
+        <Input
+          label="必填名称"
+          placeholder="必须填写"
+          required
+          value={requiredValue}
+          onInput={(val) => (requiredValue = val)}
+        />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow label="必填显示名称" bind:value={requiredValue} required />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Error Input / TextRow</div>
+        <Input
+          label="邮箱"
+          placeholder="name@example.com"
+          value={errorValue}
+          onInput={(val) => (errorValue = val)}
+          error="请输入有效的邮箱地址"
+        />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow
+            label="显示名称"
+            bind:value={errorValue}
+            error="名称不能为空"
+          />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Vertical Password TextRow</div>
+        <div class="rounded-lg border border-[var(--hairline)] p-2">
+          <TextRow
+            label="访问密钥"
+            layout="vertical"
+            isPassword
+            bind:value={passwordValue}
+            placeholder="输入密钥"
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">导航与布局</h2>
     <div class="grid gap-4 lg:grid-cols-2">
       <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
@@ -384,6 +449,15 @@
           bind:value={tableText}
           placeholder="输入名称"
         />
+        <TextRow
+          label="API 名称"
+          bind:value={tableErrorText}
+          placeholder="输入名称"
+          error="名称已被占用"
+        />
+        <TableBaseRow label="端点地址" error="格式无效，需以 https:// 开头">
+          <span class="text-sm text-base-content/70">https//api.example</span>
+        </TableBaseRow>
         <StatusLabelRow
           label="供应商状态"
           status="enabled"
