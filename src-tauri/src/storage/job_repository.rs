@@ -45,6 +45,20 @@ fn execution_status_from_str(value: &str) -> Result<ExecutionStatus, AppError> {
     }
 }
 
+/// 一次运行结束后对 `failure_count`（连续失败计数）的更新意图。
+///
+/// `failure_count` 与 `run_count`（累计触发计数）语义不同：前者是「连续」失败，
+/// 一旦成功就清零；后者只增不减。手动触发完全不参与连续失败统计。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureCountUpdate {
+    /// 一次（自动调度的）失败/超时收尾：`failure_count + 1`。
+    Increment,
+    /// 一次（自动调度的）成功收尾：`failure_count` 清零（连续失败链中断）。
+    Reset,
+    /// 不改动 `failure_count`（手动触发：不计入连续失败统计）。
+    Unchanged,
+}
+
 /// `Trigger` 的 `trigger` 列字符串表示。
 fn trigger_as_str(trigger: Trigger) -> &'static str {
     match trigger {
@@ -228,39 +242,49 @@ impl JobRepository {
     }
 
     /// 一次运行结束后写入统计：`last_run_at` / `last_status` / `next_run_at`，
-    /// 并把 `run_count` 自增 1；失败时 `failure_count` 也自增 1。
+    /// 并把 `run_count`（累计触发）自增 1。`failure_count`（连续失败）的改动由
+    /// caller 通过 [`FailureCountUpdate`] 显式决定：
+    /// - [`FailureCountUpdate::Increment`]：自动调度的失败/超时 → `+1`；
+    /// - [`FailureCountUpdate::Reset`]：自动调度的成功 → 清零（连续失败链中断）；
+    /// - [`FailureCountUpdate::Unchanged`]：手动触发 → 不参与连续失败统计。
     ///
-    /// `next_run_at` 由 caller（scheduler）算好后传入；本层不重算 cron。
+    /// 一次（可能含多次重试的）触发即一个 envelope，对 `run_count` 只 `+1`，与
+    /// 内部尝试次数无关。`next_run_at` 由 caller（scheduler）算好后传入；本层不
+    /// 重算 cron。
     pub async fn update_after_run(
         &self,
         id: &str,
         last_run_at: Timestamp,
         last_status: ExecutionStatus,
+        failure_count_update: FailureCountUpdate,
         next_run_at: Option<Timestamp>,
         updated_at: Timestamp,
     ) -> Result<(), AppError> {
-        let failure_increment: i32 = if matches!(last_status, ExecutionStatus::Success) {
-            0
-        } else {
-            1
+        // `failure_count` 的写法因意图而异：递增/清零用一条 SQL 表达式即可，
+        // 「不变」则完全不在 SET 子句里碰它。
+        let failure_count_expr = match failure_count_update {
+            FailureCountUpdate::Increment => "failure_count = failure_count + 1,",
+            FailureCountUpdate::Reset => "failure_count = 0,",
+            FailureCountUpdate::Unchanged => "",
         };
 
-        let query = r#"
+        let query = format!(
+            r#"
             UPDATE jobs SET
                 last_run_at = $1,
                 last_status = $2,
                 next_run_at = $3,
                 run_count = run_count + 1,
-                failure_count = failure_count + $4,
-                updated_at = $5
-            WHERE id = $6
-        "#;
+                {failure_count_expr}
+                updated_at = $4
+            WHERE id = $5
+        "#
+        );
 
-        let result = sqlx::query(query)
+        let result = sqlx::query(&query)
             .bind(last_run_at)
             .bind(execution_status_as_str(last_status))
             .bind(next_run_at)
-            .bind(failure_increment)
             .bind(updated_at)
             .bind(id)
             .execute(self.db.pool())
@@ -461,15 +485,20 @@ impl JobExecutionRepository {
         Ok(id.to_string())
     }
 
-    /// 把同一行执行记录原地更新到终态。
+    /// 把同一行执行记录原地更新到终态，并写入最终 `attempt`。
     ///
     /// `status` 必须是终态之一（success/failed/timeout）；传入 `Running` 视为调用方
     /// 错误并拒绝，以免把一行「完成」回退成运行中。
+    ///
+    /// `attempt` 是该 envelope 实际跑到的最后一次尝试编号（从 1 计；首次失败即
+    /// 终态时为 1，重试 N 次后为 N+1）。一次触发只对应一行，所以这里把行内的
+    /// `attempt` 列更新为终态尝试编号，而非每次重试新开一行。
     #[allow(clippy::too_many_arguments)]
     pub async fn finalize(
         &self,
         id: &str,
         status: ExecutionStatus,
+        attempt: i32,
         stdout: Option<&str>,
         stderr: Option<&str>,
         exit_code: Option<i32>,
@@ -486,13 +515,14 @@ impl JobExecutionRepository {
 
         let query = r#"
             UPDATE job_executions SET
-                status = $1, stdout = $2, stderr = $3, exit_code = $4, error = $5,
-                result_ref = $6, ended_at = $7, duration = $8
-            WHERE id = $9
+                status = $1, attempt = $2, stdout = $3, stderr = $4, exit_code = $5,
+                error = $6, result_ref = $7, ended_at = $8, duration = $9
+            WHERE id = $10
         "#;
 
         let result = sqlx::query(query)
             .bind(execution_status_as_str(status))
+            .bind(attempt)
             .bind(stdout)
             .bind(stderr)
             .bind(exit_code)
@@ -886,11 +916,12 @@ mod tests {
         let job = sample_job("job_1", now);
         repo.create(&job).await.unwrap();
 
-        // success run: run_count +1, failure_count unchanged.
+        // success run: run_count +1, failure_count reset (stays 0 here).
         repo.update_after_run(
             "job_1",
             now + 100,
             ExecutionStatus::Success,
+            FailureCountUpdate::Reset,
             Some(now + 9000),
             now + 100,
         )
@@ -903,11 +934,12 @@ mod tests {
         assert_eq!(after.last_status, Some(ExecutionStatus::Success));
         assert_eq!(after.next_run_at, Some(now + 9000));
 
-        // failed run: both counters +1.
+        // failed run: run_count +1, failure_count +1.
         repo.update_after_run(
             "job_1",
             now + 200,
             ExecutionStatus::Failed,
+            FailureCountUpdate::Increment,
             None,
             now + 200,
         )
@@ -919,11 +951,12 @@ mod tests {
         assert_eq!(after.last_status, Some(ExecutionStatus::Failed));
         assert_eq!(after.next_run_at, None);
 
-        // timeout counts as failure too.
+        // timeout counts as a continuous failure too: failure_count 1 -> 2.
         repo.update_after_run(
             "job_1",
             now + 300,
             ExecutionStatus::Timeout,
+            FailureCountUpdate::Increment,
             Some(now + 9999),
             now + 300,
         )
@@ -933,8 +966,63 @@ mod tests {
         assert_eq!(after.run_count, 3);
         assert_eq!(after.failure_count, 2);
 
+        // a success now resets the continuous-failure counter to 0 (the chain
+        // is broken), while run_count keeps climbing.
+        repo.update_after_run(
+            "job_1",
+            now + 400,
+            ExecutionStatus::Success,
+            FailureCountUpdate::Reset,
+            None,
+            now + 400,
+        )
+        .await
+        .unwrap();
+        let after = repo.get("job_1").await.unwrap().unwrap();
+        assert_eq!(after.run_count, 4);
+        assert_eq!(after.failure_count, 0, "success resets the failure chain");
+
+        // a manual run leaves failure_count untouched (Unchanged), but still
+        // advances run_count. Seed a non-zero failure_count first to prove the
+        // counter is genuinely left alone rather than coincidentally 0.
+        repo.update_after_run(
+            "job_1",
+            now + 500,
+            ExecutionStatus::Failed,
+            FailureCountUpdate::Increment,
+            None,
+            now + 500,
+        )
+        .await
+        .unwrap();
+        let before_manual = repo.get("job_1").await.unwrap().unwrap();
+        assert_eq!(before_manual.failure_count, 1);
+        repo.update_after_run(
+            "job_1",
+            now + 600,
+            ExecutionStatus::Failed,
+            FailureCountUpdate::Unchanged,
+            None,
+            now + 600,
+        )
+        .await
+        .unwrap();
+        let after = repo.get("job_1").await.unwrap().unwrap();
+        assert_eq!(after.run_count, 6, "manual run still advances run_count");
+        assert_eq!(
+            after.failure_count, 1,
+            "manual run leaves failure_count untouched"
+        );
+
         assert!(repo
-            .update_after_run("ghost", now, ExecutionStatus::Success, None, now)
+            .update_after_run(
+                "ghost",
+                now,
+                ExecutionStatus::Success,
+                FailureCountUpdate::Reset,
+                None,
+                now
+            )
             .await
             .is_err());
     }
@@ -1036,11 +1124,13 @@ mod tests {
         assert_eq!(running[0].ended_at, None);
         assert_eq!(running[0].duration, None);
 
-        // finalize updates the SAME row in place.
+        // finalize updates the SAME row in place, and writes the final attempt
+        // (here 3, to prove the column is overwritten from its insert-time 1).
         execs
             .finalize(
                 "exec_1",
                 ExecutionStatus::Success,
+                3,
                 Some("out"),
                 Some("err"),
                 Some(0),
@@ -1056,6 +1146,7 @@ mod tests {
         assert_eq!(after.len(), 1, "finalize must not create a new row");
         assert_eq!(after[0].id, "exec_1");
         assert_eq!(after[0].status, ExecutionStatus::Success);
+        assert_eq!(after[0].attempt, 3, "finalize overwrites the attempt column");
         assert_eq!(after[0].stdout.as_deref(), Some("out"));
         assert_eq!(after[0].exit_code, Some(0));
         assert_eq!(after[0].error, None);
@@ -1068,6 +1159,7 @@ mod tests {
             .finalize(
                 "exec_1",
                 ExecutionStatus::Running,
+                1,
                 None,
                 None,
                 None,
@@ -1084,6 +1176,7 @@ mod tests {
             .finalize(
                 "ghost",
                 ExecutionStatus::Failed,
+                1,
                 None,
                 None,
                 None,
@@ -1144,6 +1237,7 @@ mod tests {
                 .finalize(
                     &id,
                     ExecutionStatus::Success,
+                    1,
                     None,
                     None,
                     Some(0),
@@ -1285,6 +1379,7 @@ mod tests {
             .finalize(
                 "done",
                 ExecutionStatus::Success,
+                1,
                 None,
                 None,
                 Some(0),
