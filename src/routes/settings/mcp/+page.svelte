@@ -261,7 +261,7 @@
           <p class="text-base text-base-content/70 mb-4">
             添加 MCP 服务器来扩展 AI 能力
           </p>
-          <Button variant="primary" size="sm" on:click={handleAddServer}>
+          <Button variant="primary" size="sm" onclick={handleAddServer}>
             添加 MCP 服务器
           </Button>
         </div>
@@ -272,7 +272,7 @@
   <!-- 添加按钮 -->
   {#if mcpState.servers.length > 0}
     <div>
-      <Button variant="gray" size="sm" on:click={handleAddServer}>
+      <Button variant="gray" size="sm" onclick={handleAddServer}>
         添加 MCP 服务器
       </Button>
     </div>

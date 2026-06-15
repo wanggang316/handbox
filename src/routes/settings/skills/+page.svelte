@@ -107,7 +107,7 @@
       variant="gray"
       size="sm"
       disabled={skillState.isLoading}
-      on:click={handleRefresh}
+      onclick={handleRefresh}
     >
       {#if skillState.isLoading}
         <LoaderCircle size={14} class="animate-spin" />

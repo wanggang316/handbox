@@ -248,21 +248,21 @@
       <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Toast</div>
         <div class="flex flex-wrap gap-2">
-          <Button size="sm" on:click={() => triggerToast("success")}>Success</Button>
-          <Button size="sm" variant="secondary" on:click={() => triggerToast("info")}>Info</Button>
-          <Button size="sm" variant="gray" on:click={() => triggerToast("warning")}>Warning</Button>
-          <Button size="sm" variant="danger" on:click={() => triggerToast("error")}>Error</Button>
+          <Button size="sm" onclick={() => triggerToast("success")}>Success</Button>
+          <Button size="sm" variant="secondary" onclick={() => triggerToast("info")}>Info</Button>
+          <Button size="sm" variant="gray" onclick={() => triggerToast("warning")}>Warning</Button>
+          <Button size="sm" variant="danger" onclick={() => triggerToast("error")}>Error</Button>
         </div>
       </div>
 
       <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Modal / ConfirmModal / Drawer</div>
         <div class="flex flex-wrap gap-2">
-          <Button size="sm" on:click={() => (modalOpen = true)}>打开 Modal</Button>
-          <Button size="sm" variant="secondary" on:click={() => (confirmOpen = true)}>
+          <Button size="sm" onclick={() => (modalOpen = true)}>打开 Modal</Button>
+          <Button size="sm" variant="secondary" onclick={() => (confirmOpen = true)}>
             打开 Confirm
           </Button>
-          <Button size="sm" variant="gray" on:click={() => (drawerOpen = true)}>
+          <Button size="sm" variant="gray" onclick={() => (drawerOpen = true)}>
             打开 Drawer
           </Button>
         </div>
@@ -385,10 +385,10 @@
         这里可以放置表单、说明文字或操作按钮。
       </p>
       <div class="flex gap-2">
-        <Button size="sm" variant="secondary" on:click={() => (modalOpen = false)}>
+        <Button size="sm" variant="secondary" onclick={() => (modalOpen = false)}>
           关闭
         </Button>
-        <Button size="sm" on:click={() => triggerToast("success")}>执行操作</Button>
+        <Button size="sm" onclick={() => triggerToast("success")}>执行操作</Button>
       </div>
     </div>
   </div>
@@ -415,6 +415,6 @@
     <p class="text-sm text-base-content/70">
       抽屉适合放置批量操作或辅助信息。
     </p>
-    <Button size="sm" on:click={() => (drawerOpen = false)}>关闭</Button>
+    <Button size="sm" onclick={() => (drawerOpen = false)}>关闭</Button>
   </div>
 </Drawer>

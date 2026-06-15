@@ -216,14 +216,14 @@
     <div class="flex items-center justify-end gap-3 pt-4 border-t border-base-300">
       <Button
         variant="ghost"
-        on:click={onClose}
+        onclick={onClose}
         disabled={saving}
       >
         取消
       </Button>
       <Button
         variant="primary"
-        on:click={handleSave}
+        onclick={handleSave}
         disabled={saving || !formData.name.trim()}
       >
         {saving ? "保存中..." : agent ? "保存" : "创建"}

@@ -168,7 +168,7 @@
       <Button
         variant="primary"
         size="sm"
-        on:click={openCreateModal}
+        onclick={openCreateModal}
         customClass="flex items-center gap-2"
       >
         <Plus size={16} />
