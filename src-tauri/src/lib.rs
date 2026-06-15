@@ -18,9 +18,9 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    ArtifactService, JobService, McpService, MessageService, ModelService, ProviderService,
-    SearchService, SessionService, SettingsService, StorageService, UserSessionService,
-    WordService,
+    ArtifactService, JobExecutor, JobService, McpService, MessageService, ModelService,
+    ProviderService, SearchService, SessionService, SettingsService, StorageService,
+    UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
@@ -359,7 +359,11 @@ async fn initialize_services(
 
     // 初始化 Artifact 服务
     let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
-    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
+    let artifact_service = ArtifactService::new(artifact_repo.clone(), app.clone());
+    // 供 JobExecutor 复用的共享 ArtifactService（与被 manage 的实例共享同一
+    // repo + AppHandle，行为一致）。ArtifactService 的派生 Clone 带 `R: Clone`
+    // 约束（Wry 不满足），故另建一个实例而非 clone。
+    let artifact_service_shared = Arc::new(ArtifactService::new(artifact_repo, app.clone()));
 
     // 初始化 Favorite 服务
     let favorite_repo = FavoriteRepository::new(database_service.clone());
@@ -375,6 +379,10 @@ async fn initialize_services(
 
     // 初始化定时任务服务（Job CRUD + 校验）
     let job_service = JobService::from_db(database_service.clone());
+
+    // 初始化任务执行器（执行一个任务并落库；M1 仅分派 artifact 目标）。
+    // 供后续 scheduler/run_now 以 State 取用。
+    let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared);
 
     // 初始化 Skill 服务（解析三个 scope 根：app-data + user；project 按 run 解析）。
     // app-data: <app_data_dir>/skills；user: ~/.agents/skills（home_dir 解析失败时
@@ -441,6 +449,7 @@ async fn initialize_services(
     app.manage(agent_project_service);
     app.manage(skill_service);
     app.manage(job_service);
+    app.manage(job_executor);
 
     // Services are registered — the foreground can now read DB-cached data.
     // Catalog sync runs ENTIRELY in the background from here: prime the
