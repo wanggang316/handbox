@@ -1,6 +1,24 @@
 <script lang="ts">
   import type { Icon as IconType } from '@lucide/svelte';
 
+  type Variant = 'ghost';
+
+  type VariantClasses = {
+    bg: string;
+    hover: string;
+    text: string;
+  };
+
+  // Authoritative variant → class map. `ghost` reproduces the exact former
+  // default (transparent rest, base-300 hover, base-content text).
+  const VARIANT_CLASSES: Record<Variant, VariantClasses> = {
+    ghost: {
+      bg: 'bg-transparent',
+      hover: 'hover:bg-base-300',
+      text: 'text-base-content',
+    },
+  };
+
   interface Props {
     icon: typeof IconType;
     iconSize?: number;
@@ -8,9 +26,7 @@
     ariaLabel?: string;
     size?: string;
     rounded?: string;
-    bgColor?: string;
-    hoverColor?: string;
-    textColor?: string;
+    variant?: Variant;
     disabled?: boolean;
     customClass?: string;
     onclick?: (event: MouseEvent) => void;
@@ -25,15 +41,15 @@
     ariaLabel = '',
     size = 'w-7 h-7',
     rounded = 'rounded-md',
-    bgColor = 'bg-transparent',
-    hoverColor = 'hover:bg-base-300',
-    textColor = 'text-base-content',
+    variant = 'ghost',
     disabled = false,
     customClass = '',
     onclick,
     elementRef,
     title = '',
   }: Props = $props();
+
+  const colors = $derived(VARIANT_CLASSES[variant]);
   let buttonEl: HTMLButtonElement | null = null;
   $effect(() => {
     elementRef?.(buttonEl);
@@ -47,7 +63,7 @@
 </script>
 
 <button
-  class="{size} {bgColor} {hoverColor} {textColor} {rounded} flex items-center justify-center transition-colors {customClass}"
+  class="{size} {colors.bg} {colors.hover} {colors.text} {rounded} flex items-center justify-center transition-colors {customClass}"
   class:opacity-80={disabled}
   class:cursor-not-allowed={disabled}
   aria-label={ariaLabel}

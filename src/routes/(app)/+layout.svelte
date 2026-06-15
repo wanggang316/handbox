@@ -127,15 +127,15 @@
     aria-hidden={!uiState.sidebarOpen}
   >
     <ResizableSidebar
-      on:resizeStart={() => {
+      onResizeStart={() => {
         isDragging = true;
       }}
-      on:resizing={(e) => {
-        sidebarWidth = e.detail.width;
+      onResizing={(w) => {
+        sidebarWidth = w;
       }}
-      on:resizeEnd={(e) => {
+      onResizeEnd={(w) => {
         isDragging = false;
-        sidebarWidth = e.detail.width;
+        sidebarWidth = w;
       }}
       bind:width={sidebarWidth}
       initialWidth={SIDEBAR_INITIAL_WIDTH}

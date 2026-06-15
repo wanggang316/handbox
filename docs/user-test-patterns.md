@@ -27,6 +27,17 @@ Mobile, web SaaS, CLI are explicitly out of scope.
 - **Ready signal:** the app's main window renders the sidebar AND the Tauri stdout contains `Successfully loaded LLM config from`.
 - **Base URL discovery:** N/A — app launches its own window.
 
+### Frontend UI / component gallery (web preview)
+
+For pure-frontend work (UI consistency, component refactors, theming, accessibility) that needs no Tauri IPC, the vite web preview is a cheaper, deterministic surface than `npm run tauri dev`.
+
+- **Primary:** `npm run dev` → http://localhost:1420/ (vite, **strictPort** — port 1420 must be free) → navigate to the live component gallery at **`/settings/components`** (demos ~24 of 26 `ui/` components with real `$state` bindings). Probe with Chrome MCP (`mcp__claude-in-chrome__*`) or computer-use screenshots.
+- **Theme toggle (runtime):** inject `document.documentElement.setAttribute("data-theme", "dark" | "light")` — this is exactly what the `[data-theme="dark"]` CSS selectors match; most reliable, fewest side effects. Capture both themes for any visual assertion.
+- **Static-check diff:** `npm run check` (= `svelte-kit sync && svelte-check`). It is the only frontend static gate (no prettier/eslint configured). Assertions compare against a **recorded baseline** (state the baseline error/warning count + files in the case); any failure beyond baseline = FAIL.
+- **Structural guards (grep):** for invariants with no visible surface (an anti-pattern removed, a token present/absent), `grep` the source as terminal-output evidence — e.g. `grep -rn "var(--color-blue-500)" src` returns empty. These are `(guard: ...)` assertions, not user-observable behavior.
+- **Ready signal:** vite stdout logs `ready in NNNms` AND the gallery page renders its "UI 组件测试" heading with no console errors.
+- **Coverage gap:** the gallery does NOT demo `MenuButton` or `TitleBar`; assert those separately (extend the gallery, or inspect in `tauri dev`).
+
 ### HTTP API / Web / Mobile
 
 Not in scope for HandBox.

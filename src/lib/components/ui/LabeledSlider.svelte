@@ -142,7 +142,7 @@
         onkeydown={handleKeydown}
         {disabled}
         size={inputValue.length || 4}
-        class="text-sm font-mono text-base-content/80 bg-base-300 px-2 py-1 rounded-lg whitespace-nowrap w-auto text-center border border-transparent hover:border-base-content/20 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+        class="text-sm font-mono text-base-content/80 bg-base-300 px-2 py-1 rounded-lg whitespace-nowrap w-auto text-center border border-transparent hover:border-base-content/20 focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
       />
     {/if}
   </div>

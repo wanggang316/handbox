@@ -168,7 +168,7 @@
       <Button
         variant="primary"
         size="sm"
-        on:click={openCreateModal}
+        onclick={openCreateModal}
         customClass="flex items-center gap-2"
       >
         <Plus size={16} />
@@ -180,7 +180,7 @@
       <input
         type="text"
         placeholder="搜索 Agent 名称或技能..."
-        class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+        class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 text-sm"
         bind:value={searchQuery}
       />
       <Settings

@@ -1,17 +1,36 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { createEventDispatcher } from "svelte";
+  import type { Snippet } from "svelte";
 
-  export let initialWidth = 347;
-  export let minWidth = 240;
-  export let maxWidth = 600;
-  export let storageKey: string | null = null;
-  export let containerClass: string = "";
+  interface Props {
+    initialWidth?: number;
+    minWidth?: number;
+    maxWidth?: number;
+    storageKey?: string | null;
+    containerClass?: string;
+    /** 受控宽度；未传时回退到 initialWidth */
+    width?: number;
+    onResizeStart?: () => void;
+    onResizing?: (width: number) => void;
+    onResizeEnd?: (width: number) => void;
+    children?: Snippet;
+  }
 
-  export let width = initialWidth;
+  let {
+    initialWidth = 347,
+    minWidth = 240,
+    maxWidth = 600,
+    storageKey = null,
+    containerClass = "",
+    width = $bindable(initialWidth),
+    onResizeStart,
+    onResizing,
+    onResizeEnd,
+    children,
+  }: Props = $props();
+
   let dragging = false;
   let container: HTMLDivElement;
-  const dispatch = createEventDispatcher();
 
   onMount(() => {
     if (storageKey) {
@@ -49,7 +68,7 @@
     (bodyStyle as any).webkitUserSelect = "none";
     bodyStyle.cursor = "col-resize";
 
-    dispatch("resizeStart");
+    onResizeStart?.();
   }
 
   let rafId: number | null = null;
@@ -65,7 +84,7 @@
       rafId = requestAnimationFrame(() => {
         if (pendingWidth !== null) {
           width = pendingWidth;
-          dispatch("resizing", { width });
+          onResizing?.(width);
           pendingWidth = null;
         }
         rafId = null;
@@ -89,7 +108,7 @@
     // @ts-ignore
     (bodyStyle as any).webkitUserSelect = originalWebkitUserSelect;
     bodyStyle.cursor = originalCursor;
-    dispatch("resizeEnd", { width });
+    onResizeEnd?.(width);
   }
 
   function resetWidth() {
@@ -103,7 +122,7 @@
   class={`relative flex-shrink-0 ${containerClass}`}
   style={`width:${width}px; height:100%`}
 >
-  <slot />
+  {@render children?.()}
   <div
     class="absolute right-0 top-0 h-full w-1 cursor-col-resize bg-transparent active:bg-base-300 z-[10001]"
     role="separator"
@@ -111,11 +130,11 @@
     aria-valuenow={width}
     aria-valuemin={minWidth}
     aria-valuemax={maxWidth}
-    on:pointerdown={startDrag}
-    on:pointermove={onDrag}
-    on:pointerup={endDrag}
-    on:pointercancel={endDrag}
-    on:dblclick={resetWidth}
+    onpointerdown={startDrag}
+    onpointermove={onDrag}
+    onpointerup={endDrag}
+    onpointercancel={endDrag}
+    ondblclick={resetWidth}
     aria-label="调整侧栏宽度"
   ></div>
 </div>

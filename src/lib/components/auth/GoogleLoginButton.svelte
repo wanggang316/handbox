@@ -10,7 +10,7 @@
 <Button
   variant="gray"
   size="sm"
-  on:click={handleLogin}
+  onclick={handleLogin}
   disabled={authState.isLoading}
 >
   {#if authState.isLoading}

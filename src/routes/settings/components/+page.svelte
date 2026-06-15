@@ -4,6 +4,7 @@
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
+  import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
   import TrafficLightsRedButton from "$lib/components/ui/TrafficLightsRedButton.svelte";
   import Input from "$lib/components/ui/Input.svelte";
@@ -26,6 +27,7 @@
   import DefaultRow from "$lib/components/ui/table/DefaultRow.svelte";
   import {
     TableGroup,
+    TableBaseRow,
     SwitchRow,
     SelectRow,
     NumberStepperRow,
@@ -55,7 +57,23 @@
   let tableTextarea = $state("配置说明，支持多行内容。");
   let tableText = $state("可编辑值");
 
+  // 表单状态校验演示
+  let requiredValue = $state("");
+  let errorValue = $state("");
+  let tableErrorText = $state("");
+  let passwordValue = $state("secret123");
+
   let activeMenuId = $state("profile");
+  let activeMenuButtonId = $state("active");
+
+  const menuButtonSamples = [
+    { id: "active", title: "当前选中项", icon: LayoutGrid },
+    {
+      id: "long",
+      title: "一个非常非常长的菜单标题用于演示文本截断的省略号显示效果",
+      icon: Box
+    }
+  ];
 
   const selectOptions = [
     { value: "alpha", label: "Alpha" },
@@ -117,6 +135,9 @@
           <Button variant="ghost">Ghost</Button>
           <Button variant="danger">Danger</Button>
           <Button variant="clear">Clear</Button>
+          <Button variant="primary" disabled onclick={() => triggerToast("error")}>
+            Disabled
+          </Button>
         </div>
       </div>
 
@@ -127,7 +148,22 @@
           <RoundButton label="加载中" loading />
           <CircleButton icon={Box} ariaLabel="Circle" />
           <IconButton icon={Settings} ariaLabel="Settings" />
+          <IconButton icon={Settings} ariaLabel="Settings 禁用" disabled />
           <TrafficLightsRedButton />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">MenuButton</div>
+        <div class="max-w-60 space-y-1">
+          {#each menuButtonSamples as item (item.id)}
+            <MenuButton
+              title={item.title}
+              icon={item.icon}
+              isActive={item.id === activeMenuButtonId}
+              onclick={() => (activeMenuButtonId = item.id)}
+            />
+          {/each}
         </div>
       </div>
 
@@ -205,6 +241,64 @@
   </section>
 
   <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">表单状态校验</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Disabled Input / TextRow</div>
+        <Input label="名称（禁用）" value="只读内容" placeholder="请输入名称" disabled />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow label="显示名称（禁用）" value="只读内容" disabled />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Required Input / TextRow</div>
+        <Input
+          label="必填名称"
+          placeholder="必须填写"
+          required
+          value={requiredValue}
+          onInput={(val) => (requiredValue = val)}
+        />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow label="必填显示名称" bind:value={requiredValue} required />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Error Input / TextRow</div>
+        <Input
+          label="邮箱"
+          placeholder="name@example.com"
+          value={errorValue}
+          onInput={(val) => (errorValue = val)}
+          error="请输入有效的邮箱地址"
+        />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow
+            label="显示名称"
+            bind:value={errorValue}
+            error="名称不能为空"
+          />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Vertical Password TextRow</div>
+        <div class="rounded-lg border border-[var(--hairline)] p-2">
+          <TextRow
+            label="访问密钥"
+            layout="vertical"
+            isPassword
+            bind:value={passwordValue}
+            placeholder="输入密钥"
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">导航与布局</h2>
     <div class="grid gap-4 lg:grid-cols-2">
       <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
@@ -248,21 +342,21 @@
       <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Toast</div>
         <div class="flex flex-wrap gap-2">
-          <Button size="sm" on:click={() => triggerToast("success")}>Success</Button>
-          <Button size="sm" variant="secondary" on:click={() => triggerToast("info")}>Info</Button>
-          <Button size="sm" variant="gray" on:click={() => triggerToast("warning")}>Warning</Button>
-          <Button size="sm" variant="danger" on:click={() => triggerToast("error")}>Error</Button>
+          <Button size="sm" onclick={() => triggerToast("success")}>Success</Button>
+          <Button size="sm" variant="secondary" onclick={() => triggerToast("info")}>Info</Button>
+          <Button size="sm" variant="gray" onclick={() => triggerToast("warning")}>Warning</Button>
+          <Button size="sm" variant="danger" onclick={() => triggerToast("error")}>Error</Button>
         </div>
       </div>
 
       <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
         <div class="text-xs text-base-content/60">Modal / ConfirmModal / Drawer</div>
         <div class="flex flex-wrap gap-2">
-          <Button size="sm" on:click={() => (modalOpen = true)}>打开 Modal</Button>
-          <Button size="sm" variant="secondary" on:click={() => (confirmOpen = true)}>
+          <Button size="sm" onclick={() => (modalOpen = true)}>打开 Modal</Button>
+          <Button size="sm" variant="secondary" onclick={() => (confirmOpen = true)}>
             打开 Confirm
           </Button>
-          <Button size="sm" variant="gray" on:click={() => (drawerOpen = true)}>
+          <Button size="sm" variant="gray" onclick={() => (drawerOpen = true)}>
             打开 Drawer
           </Button>
         </div>
@@ -355,6 +449,15 @@
           bind:value={tableText}
           placeholder="输入名称"
         />
+        <TextRow
+          label="API 名称"
+          bind:value={tableErrorText}
+          placeholder="输入名称"
+          error="名称已被占用"
+        />
+        <TableBaseRow label="端点地址" error="格式无效，需以 https:// 开头">
+          <span class="text-sm text-base-content/70">https//api.example</span>
+        </TableBaseRow>
         <StatusLabelRow
           label="供应商状态"
           status="enabled"
@@ -385,10 +488,10 @@
         这里可以放置表单、说明文字或操作按钮。
       </p>
       <div class="flex gap-2">
-        <Button size="sm" variant="secondary" on:click={() => (modalOpen = false)}>
+        <Button size="sm" variant="secondary" onclick={() => (modalOpen = false)}>
           关闭
         </Button>
-        <Button size="sm" on:click={() => triggerToast("success")}>执行操作</Button>
+        <Button size="sm" onclick={() => triggerToast("success")}>执行操作</Button>
       </div>
     </div>
   </div>
@@ -415,6 +518,6 @@
     <p class="text-sm text-base-content/70">
       抽屉适合放置批量操作或辅助信息。
     </p>
-    <Button size="sm" on:click={() => (drawerOpen = false)}>关闭</Button>
+    <Button size="sm" onclick={() => (drawerOpen = false)}>关闭</Button>
   </div>
 </Drawer>

@@ -28,7 +28,7 @@
   }
 </script>
 
-<Button {variant} {size} {customClass} on:click={() => (open = true)}>
+<Button {variant} {size} {customClass} onclick={() => (open = true)}>
   {selectedModel ? selectedModel.name : "选择模型"}
   <ChevronsUpDown size={14} />
 </Button>

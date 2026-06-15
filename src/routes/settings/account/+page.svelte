@@ -106,7 +106,7 @@
             <Button
               variant="gray"
               size="sm"
-              on:click={handleEditProfile}
+              onclick={handleEditProfile}
               disabled={isLoading}
             >
               编辑资料
@@ -121,7 +121,7 @@
       <Button
         variant="gray"
         size="sm"
-        on:click={handleLogout}
+        onclick={handleLogout}
         disabled={isLoading}
       >
         {isLoading ? "退出中..." : "退出登录"}

@@ -573,9 +573,14 @@ HandBox's `@theme` in `src/app.css` exclusively uses `oklch()` to enable `color-
 
 Linear marketing uses only `success` as a semantic color. HandBox keeps the full `info / success / warning / error` set because the application surfaces these states (model probe results, API errors, rate-limit warnings, tool-call outcomes). These tokens are unaffected by the Linear migration.
 
-### 4. Typography: System Stack
+### 4. Typography: Bundled Geist
 
-Linear's proprietary typeface is not available. HandBox uses a system stack: `-apple-system, system-ui, "SF Pro Display", "Helvetica Neue", Inter, sans-serif` for display and body, and the existing `"Fira Code", Monaco, Consolas` chain for mono. No web fonts are loaded — desktop apps cannot tolerate font-flash on cold start.
+Linear's proprietary typeface is not publicly distributed. HandBox ships **Geist Variable** (sans) and **Geist Mono Variable** (mono) as the primary families, bundled locally via `@fontsource-variable/geist` and `@fontsource-variable/geist-mono` (imported in `src/app.css`). The exact stacks (`--font-sans` / `--font-mono` in `src/app.css`) are:
+
+- Sans: `"Geist Variable", -apple-system, system-ui, "SF Pro Display", "Helvetica Neue", sans-serif`
+- Mono: `"Geist Mono Variable", "Fira Code", ui-monospace, "SF Mono", Menlo, monospace`
+
+Because `@fontsource` packages the font files into the build (served locally, never fetched remotely), there is no cold-start font-flash — the font-flash concern that desktop apps cannot tolerate is resolved by local bundling rather than by avoiding web fonts. The system entries after the Geist families are pure fallbacks for the brief moment before the bundled font paints.
 
 ### 5. Tailwind Utility Class Naming Preserved
 

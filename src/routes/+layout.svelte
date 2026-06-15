@@ -7,7 +7,7 @@
   import { settingsState } from "$lib/states/settings.svelte";
   import { initAuth, cleanupAuth } from "$lib/states/auth.svelte";
   import Toast from "$lib/components/ui/Toast.svelte";
-  import type { Theme, ThemeColor } from "$lib/types/settings";
+  import type { Theme } from "$lib/types/settings";
 
   let { children } = $props();
 
@@ -26,11 +26,6 @@
       uiState.setTheme("system");
     }
 
-    const savedThemeColor = localStorage.getItem("themeColor");
-    if (savedThemeColor) {
-      uiState.setThemeColor(savedThemeColor as ThemeColor);
-    }
-
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleSystemThemeChange = () => {
       if (uiState.theme === "system") {
@@ -46,11 +41,6 @@
         } else if (event.newValue === null) {
           uiState.setTheme("system");
         }
-      }
-
-      if (event.key === "themeColor") {
-        const newColor = (event.newValue ?? "system") as ThemeColor;
-        uiState.setThemeColor(newColor);
       }
     };
     window.addEventListener("storage", handleStorageChange);

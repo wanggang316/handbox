@@ -44,7 +44,7 @@
       {max}
       {step}
       {disabled}
-      class="slider w-full h-2 bg-base-300 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="slider w-full h-2 bg-base-300 rounded-lg appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       style="background: linear-gradient(to right, var(--primary) 0%, var(--primary) {percentage}%, var(--base-300) {percentage}%, var(--base-300) 100%)"
     />
   </div>

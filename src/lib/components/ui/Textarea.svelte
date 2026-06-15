@@ -49,7 +49,7 @@
     {value}
     oninput={handleInput}
     class="w-full px-3 py-2 border border-[var(--hairline)] rounded-md resize-none
-           focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+           focus:border-transparent
            font-mono text-sm text-base-content bg-base-300
            scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200
            hover:scrollbar-thumb-base-300/80

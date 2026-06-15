@@ -94,7 +94,7 @@
           <p class="text-base text-base-content/70 mb-4">
             添加 AI 供应商开始使用各种模型
           </p>
-          <Button variant="primary" size="sm" on:click={handleAddProvider}>
+          <Button variant="primary" size="sm" onclick={handleAddProvider}>
             添加供应商
           </Button>
         </div>
@@ -105,7 +105,7 @@
   <!-- 添加供应商按钮 -->
   {#if providerState.providers.length > 0}
     <div>
-      <Button variant="gray" size="sm" on:click={handleAddProvider}>
+      <Button variant="gray" size="sm" onclick={handleAddProvider}>
         添加其它供应商
       </Button>
     </div>

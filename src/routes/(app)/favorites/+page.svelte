@@ -531,7 +531,7 @@
         <input
           type="text"
           placeholder="搜索收藏内容或标签..."
-          class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+          class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 text-sm"
           bind:value={searchQuery}
         />
         {#if searchQuery}
@@ -546,7 +546,7 @@
 
       <div class="relative">
         <select
-          class="h-9 px-3 bg-base-200 rounded-lg text-base-content text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 appearance-none cursor-pointer pr-8"
+          class="h-9 px-3 bg-base-200 rounded-lg text-base-content text-sm appearance-none cursor-pointer pr-8"
           bind:value={selectedType}
         >
           {#each messageTypes as type}
@@ -902,7 +902,7 @@
       <input
         type="text"
         placeholder="标签名称..."
-        class="flex-1 h-8 px-2 text-xs bg-base-200 rounded border border-base-300 focus:outline-none focus:border-primary"
+        class="flex-1 h-8 px-2 text-xs bg-base-200 rounded border border-base-300 focus:border-primary"
         bind:value={newTagName}
         onkeydown={(e) => {
           if (e.key === "Enter") {

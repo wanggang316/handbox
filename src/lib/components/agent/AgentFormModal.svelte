@@ -120,7 +120,7 @@
           placeholder="输入系统提示词..."
           rows="4"
           class="w-full px-3 py-2 border border-base-300 rounded-md resize-none
-                 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+                 focus:border-transparent
                  font-mono text-sm text-base-content bg-base-300"
         ></textarea>
         <div class="mt-1 text-xs text-base-content/50 text-right">
@@ -137,7 +137,7 @@
           bind:value={formData.skills}
           placeholder="例如: coding, writing, translation"
           class="w-full px-3 py-2 border border-base-300 rounded-md
-                 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+                 focus:border-transparent
                  text-sm text-base-content bg-base-300"
         />
         <p class="mt-1 text-xs text-base-content/50">
@@ -157,7 +157,7 @@
             max="2"
             placeholder="0.7"
             class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+                   focus:border-transparent
                    text-sm text-base-content bg-base-300"
             bind:value={formData.temperature}
           />
@@ -171,7 +171,7 @@
             max="1"
             placeholder="0.9"
             class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+                   focus:border-transparent
                    text-sm text-base-content bg-base-300"
             bind:value={formData.topP}
           />
@@ -183,7 +183,7 @@
             min="1"
             placeholder="40"
             class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+                   focus:border-transparent
                    text-sm text-base-content bg-base-300"
             bind:value={formData.topK}
           />
@@ -195,7 +195,7 @@
             min="1"
             placeholder="2048"
             class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+                   focus:border-transparent
                    text-sm text-base-content bg-base-300"
             bind:value={formData.maxTokens}
           />
@@ -216,14 +216,14 @@
     <div class="flex items-center justify-end gap-3 pt-4 border-t border-base-300">
       <Button
         variant="ghost"
-        on:click={onClose}
+        onclick={onClose}
         disabled={saving}
       >
         取消
       </Button>
       <Button
         variant="primary"
-        on:click={handleSave}
+        onclick={handleSave}
         disabled={saving || !formData.name.trim()}
       >
         {saving ? "保存中..." : agent ? "保存" : "创建"}

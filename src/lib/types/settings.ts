@@ -5,18 +5,6 @@
 // 主题类型
 export type Theme = "light" | "dark" | "system";
 
-// 主题色
-export type ThemeColor =
-  | "blue"
-  | "green"
-  | "red"
-  | "yellow"
-  | "purple"
-  | "orange"
-  | "pink"
-  | "brown"
-  | "system";
-
 // 语言
 export type Language = "zh-CN" | "en-US";
 
@@ -33,7 +21,6 @@ export interface ShortcutConfig {
 // 通用设置
 export interface GeneralSettings {
   theme: Theme;
-  themeColor: ThemeColor;
   language: Language;
   autoScroll: boolean;
   shortcuts: ShortcutConfig;

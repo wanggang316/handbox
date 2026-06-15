@@ -77,9 +77,7 @@
 			<RoundButton
 				customClass="w-18"
 				label="取消"
-				bgColor="bg-base-300"
-				textColor="text-base-content/80"
-				hoverColor="hover:text-base-content"
+				variant="secondary"
 				onclick={handleClose}
 			></RoundButton>
 			<RoundButton

@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { TableGroup, SwitchRow, SelectRow } from "$lib/components/ui/table";
   import { settingsState, uiState } from "$lib/states";
-  import type { Theme, ThemeColor, Language } from "$lib/types/settings";
+  import type { Theme, Language } from "$lib/types/settings";
 
   // 外观样式选项
   const themeOptions = [
@@ -17,23 +17,9 @@
     { value: "en-US", label: "English" },
   ];
 
-  // 主题色选项
-  const themeColorOptions = [
-    { value: "system", label: "跟随系统" },
-    { value: "blue", label: "蓝色" },
-    { value: "green", label: "绿色" },
-    { value: "red", label: "红色" },
-    { value: "yellow", label: "黄色" },
-    { value: "purple", label: "紫色" },
-    { value: "orange", label: "橙色" },
-    { value: "pink", label: "粉色" },
-    { value: "brown", label: "棕色" },
-  ];
-
   // 本地状态
   let theme: Theme = "system";
   let language: Language = "zh-CN";
-  let themeColor: ThemeColor = "system";
   let autoScroll: boolean = true;
 
   // 加载设置
@@ -43,12 +29,10 @@
       if (settingsState.settings?.general) {
         theme = settingsState.settings.general.theme;
         language = settingsState.settings.general.language;
-        themeColor = settingsState.settings.general.themeColor;
         autoScroll = settingsState.settings.general.autoScroll;
 
         uiState.setTheme(theme);
         uiState.setLanguage(language);
-        uiState.setThemeColor(themeColor);
       }
 
     } catch (error) {
@@ -82,13 +66,6 @@
     updateGeneralSetting("language", language);
   }
 
-  // 处理主题色变更
-  function handleThemeColorChange(value: string) {
-    themeColor = value as ThemeColor;
-    uiState.setThemeColor(themeColor);
-    updateGeneralSetting("themeColor", themeColor);
-  }
-
   // 处理自动下滑变更
   function handleAutoScrollChange(checked: boolean) {
     autoScroll = checked;
@@ -111,13 +88,6 @@
       options={languageOptions}
       bind:selectedValue={language}
       onSelect={(value) => handleLanguageChange(value)}
-    />
-
-    <SelectRow
-      label="主题色"
-      options={themeColorOptions}
-      bind:selectedValue={themeColor}
-      onSelect={(value) => handleThemeColorChange(value)}
     />
 
     <SwitchRow

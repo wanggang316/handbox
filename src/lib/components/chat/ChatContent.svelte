@@ -372,7 +372,7 @@
 
 <style>
   :global(.search-highlight) {
-    box-shadow: 0 0 0 2px var(--theme-color, rgba(59, 130, 246, 0.5));
+    box-shadow: 0 0 0 2px var(--primary);
     border-radius: 16px;
     transition: box-shadow 0.3s ease;
   }

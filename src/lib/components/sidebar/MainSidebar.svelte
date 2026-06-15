@@ -226,7 +226,7 @@
         <input
           type="text"
           placeholder="搜索..."
-          class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-[12px]"
+          class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 text-[12px]"
           onfocus={() => (showSearchModal = true)}
           readonly
         />
@@ -241,7 +241,7 @@
         iconSize={16}
         isActive={currentRoute === "/favorites"}
         buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onClick={() => handleFavoriteClick()}
+        onclick={() => handleFavoriteClick()}
       />
       <MenuButton
         title="Artifacts"
@@ -249,7 +249,7 @@
         iconSize={16}
         isActive={currentRoute === "/artifacts"}
         buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onClick={() => handleArtifactClick()}
+        onclick={() => handleArtifactClick()}
       />
     </div>
 
@@ -294,7 +294,7 @@
             iconSize={16}
             isActive={currentRoute === "/agents"}
             buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-            onClick={() => handleAgentClick()}
+            onclick={() => handleAgentClick()}
           />
           <MenuButton
             title="单词本"
@@ -302,7 +302,7 @@
             iconSize={16}
             isActive={currentRoute === "/words"}
             buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-            onClick={() => handleWordsClick()}
+            onclick={() => handleWordsClick()}
           />
         </div>
 

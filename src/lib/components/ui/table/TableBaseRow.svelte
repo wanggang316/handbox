@@ -8,6 +8,7 @@
     py?: string;
     rightContent?: any; // 标题行右边的内容
     helpText?: string; // 可选的帮助提示文本，显示为问号图标
+    error?: string; // 可选的字段级错误，行内显示在控件下方
     children?: any;
   }
 
@@ -18,8 +19,11 @@
     py = "4",
     rightContent,
     helpText,
+    error,
     children,
   }: Props = $props();
+
+  const errorId = `tblrow-${Math.random().toString(36).slice(2)}-error`;
 </script>
 
 <div class="px-6 py-{py}">
@@ -45,6 +49,9 @@
         <div>
           {@render children?.()}
         </div>
+        {#if error}
+          <p id={errorId} class="text-xs text-error mt-1">{error}</p>
+        {/if}
       </div>
     {:else}
       <div class="flex items-center justify-between">
@@ -57,12 +64,24 @@
             <InfoTooltip content={helpText} />
           {/if}
         </div>
-        <div class="flex justify-end flex-1 ml-4">
-          {@render children?.()}
-        </div>
+        {#if error}
+          <div class="flex flex-col items-end flex-1 ml-4">
+            <div class="flex justify-end w-full">
+              {@render children?.()}
+            </div>
+            <p id={errorId} class="text-xs text-error mt-1">{error}</p>
+          </div>
+        {:else}
+          <div class="flex justify-end flex-1 ml-4">
+            {@render children?.()}
+          </div>
+        {/if}
       </div>
     {/if}
   {:else}
     {@render children?.()}
+    {#if error}
+      <p id={errorId} class="text-xs text-error mt-1">{error}</p>
+    {/if}
   {/if}
 </div>

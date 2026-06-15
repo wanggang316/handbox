@@ -67,7 +67,7 @@
     {disabled}
     oninput={handleInput}
     onkeydown={handleKeydown}
-    class="flex-1 px-3 py-1 pr-7 text-sm text-right bg-transparent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+    class="flex-1 px-3 py-1 pr-7 text-sm text-right bg-transparent disabled:opacity-50 disabled:cursor-not-allowed"
   />
   
   <div class="absolute right-1 flex flex-col">

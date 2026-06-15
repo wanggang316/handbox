@@ -499,7 +499,7 @@
     <div class="pl-5 pr-2">
       <input
         data-session-id={session.id}
-        class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+        class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
         bind:value={renameValue}
         onkeydown={handleRenameKeydown}
         onblur={confirmRename}
@@ -588,7 +588,7 @@
             <span data-group-control class="flex-1 min-w-0">
               <input
                 data-project-id={group.project.id}
-                class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
                 bind:value={renameProjectValue}
                 onkeydown={handleProjectRenameKeydown}
                 onblur={confirmProjectRename}
