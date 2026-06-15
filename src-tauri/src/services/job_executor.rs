@@ -29,6 +29,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::models::{AppError, UserMessageSendRequest};
 use crate::services::{
@@ -359,7 +360,7 @@ impl<R: Runtime> JobExecutor<R> {
         // shown immediately and later flipped in place to its terminal state.
         self.emit_executed(&job.id, &exec_id, ExecutionStatus::Running);
 
-        let outcome = self.dispatch(job).await;
+        let outcome = self.dispatch_with_timeout(job).await;
 
         let ended_at = current_timestamp();
         let duration = (ended_at - started_at).max(0);
@@ -416,23 +417,62 @@ impl<R: Runtime> JobExecutor<R> {
         })
     }
 
-    /// Dispatch a job's target to the matching backend and map the result onto a
-    /// terminal `DispatchOutcome`. Never returns `Err`: a failed dispatch is a
-    /// `failed` outcome with an `error` message so the caller can finalize one
-    /// consistent row.
-    async fn dispatch(&self, job: &Job) -> DispatchOutcome {
+    /// Dispatch a job's target under the job's `exec_timeout_secs` bound.
+    ///
+    /// The timeout is enforced on the EXECUTION side (here), decoupled from the
+    /// scheduler's 30s tick, so a `timeout > tick interval` is honored at the
+    /// threshold rather than at the next tick (VAL-ROBUST-007). `0` means no
+    /// bound — the dispatch runs to its natural end (VAL-ROBUST-008).
+    ///
+    /// When the bound elapses the execution is interrupted near the threshold
+    /// and recorded as a `timeout` outcome (VAL-ROBUST-004). Orphan cleanup is
+    /// per-target:
+    /// - artifact: the spawned `tokio::process::Command` carries
+    ///   `kill_on_drop(true)`, so dropping the timed-out future kills the OS
+    ///   child — no orphan process (VAL-ROBUST-005). The job-level bound here is
+    ///   the single upper limit and overrides the artifact's built-in 30s
+    ///   `ExecutionConfig.timeout` (when `>0`), and a hit is recorded as
+    ///   `timeout`, NOT the artifact's generalized `failed` (VAL-TARGET-036).
+    /// - prompt: dropping the future cancels the in-flight non-streaming send;
+    ///   the chat and (already-persisted) user message stay reachable, no
+    ///   running session is left behind (VAL-ROBUST-006 / VAL-ROBUST-022).
+    /// - agent: the run is driven inside `dispatch_agent`, which on timeout
+    ///   issues the runtime's cooperative abort for the minted session so the
+    ///   loop closes (one `closed` signal, registry entry removed) and the same
+    ///   job can be triggered again — no orphan running session (VAL-ROBUST-006
+    ///   / VAL-ROBUST-022).
+    ///
+    /// Never returns `Err`: a failed or timed-out dispatch is a terminal
+    /// `DispatchOutcome` so the caller can finalize one consistent row.
+    async fn dispatch_with_timeout(&self, job: &Job) -> DispatchOutcome {
+        let timeout = timeout_duration(job.exec_timeout_secs);
+
         match &job.target {
             JobTarget::Artifact {
                 artifact_id,
                 args,
                 env,
-            } => self.dispatch_artifact(artifact_id, args, env).await,
+            } => {
+                let dispatch = self.dispatch_artifact(artifact_id, args, env);
+                match timeout {
+                    // Dropping the timed-out future drops the artifact's
+                    // `Command::output` future; `kill_on_drop(true)` reaps the
+                    // OS child (VAL-ROBUST-005).
+                    Some(dur) => match tokio::time::timeout(dur, dispatch).await {
+                        Ok(outcome) => outcome,
+                        Err(_) => DispatchOutcome::timeout(job.exec_timeout_secs),
+                    },
+                    None => dispatch.await,
+                }
+            }
             JobTarget::Agent {
                 agent_id,
                 initial_message,
                 project_id,
             } => {
-                self.dispatch_agent(agent_id, initial_message, project_id.as_deref())
+                // The agent path takes the bound directly: only it knows the
+                // minted session id needed for the cooperative abort on timeout.
+                self.dispatch_agent(agent_id, initial_message, project_id.as_deref(), timeout)
                     .await
             }
             JobTarget::Prompt {
@@ -441,8 +481,17 @@ impl<R: Runtime> JobExecutor<R> {
                 prompt,
                 ..
             } => {
-                self.dispatch_prompt(&job.name, provider_id, model_id, prompt)
-                    .await
+                let dispatch = self.dispatch_prompt(&job.name, provider_id, model_id, prompt);
+                match timeout {
+                    // Dropping the timed-out future cancels the in-flight send;
+                    // the chat + persisted user message remain reachable, no
+                    // running session leaks (VAL-ROBUST-006).
+                    Some(dur) => match tokio::time::timeout(dur, dispatch).await {
+                        Ok(outcome) => outcome,
+                        Err(_) => DispatchOutcome::timeout(job.exec_timeout_secs),
+                    },
+                    None => dispatch.await,
+                }
             }
         }
     }
@@ -645,11 +694,21 @@ impl<R: Runtime> JobExecutor<R> {
     /// through [`sanitize_agent_dispatch_error`], so no raw upstream URL, header,
     /// or key fragment can reach `job_executions.error` — raw detail goes to
     /// `tracing` only.
+    ///
+    /// `timeout` is the job's `exec_timeout_secs` bound (`None` = unbounded).
+    /// When set, only the RUN itself (`start_run` + awaiting the close signal)
+    /// is bounded; the offline pre-flight (template / provider / session
+    /// creation) is fast and intentionally not counted. On elapse the runtime's
+    /// cooperative `abort(session_id)` is issued so the loop closes (fires the
+    /// single `closed`, removes its `runs` registry entry) and the job can be
+    /// triggered again, then a `timeout` outcome is returned with `result_ref`
+    /// pointing at the minted session (VAL-ROBUST-006).
     async fn dispatch_agent(
         &self,
         agent_id: &str,
         initial_message: &str,
         project_id: Option<&str>,
+        timeout: Option<Duration>,
     ) -> DispatchOutcome {
         let Some(services) = self.agent_services.as_ref() else {
             // No agent collaborators wired (artifact-only unit harness): fail
@@ -750,7 +809,30 @@ impl<R: Runtime> JobExecutor<R> {
         // means the sink was dropped without closing (should not happen given
         // closed-once); treat it as a completed-but-unknown run and fall through
         // to transcript classification.
-        let run_error = signal.await.unwrap_or(None);
+        //
+        // Under a timeout bound the wait is capped at the threshold: on elapse
+        // the runtime's cooperative abort closes the run (loop ends at its next
+        // `select!` boundary, persists a `stopReason=aborted` terminal turn,
+        // fires the single `closed`, and removes its `runs` registry entry — so
+        // no orphan running session and the job can fire again). The minted
+        // session stays referenced (VAL-ROBUST-006 / VAL-ROBUST-022).
+        let run_error = match timeout {
+            Some(dur) => match tokio::time::timeout(dur, signal).await {
+                Ok(result) => result.unwrap_or(None),
+                Err(_) => {
+                    services.runtime.abort(&session.id).await;
+                    return DispatchOutcome {
+                        status: ExecutionStatus::Timeout,
+                        stdout: None,
+                        stderr: None,
+                        exit_code: None,
+                        error: Some(timeout_error_message(timeout_secs_of(dur))),
+                        result_ref: Some(session.id),
+                    };
+                }
+            },
+            None => signal.await.unwrap_or(None),
+        };
 
         // 5. Classify the terminal outcome. `result_ref` points at the session
         //    in every post-creation outcome so its transcript stays reachable.
@@ -866,6 +948,50 @@ impl DispatchOutcome {
             result_ref: None,
         }
     }
+
+    /// A `timeout` outcome for a dispatch that exceeded the job's
+    /// `exec_timeout_secs` bound. Carries a stable timeout `error` naming the
+    /// threshold; no process output. Used by the artifact and prompt paths
+    /// (the agent path builds its own timeout outcome so it can attach the
+    /// minted session as `result_ref`).
+    fn timeout(timeout_secs: i64) -> Self {
+        Self {
+            status: ExecutionStatus::Timeout,
+            stdout: None,
+            stderr: None,
+            exit_code: None,
+            error: Some(timeout_error_message(timeout_secs)),
+            result_ref: None,
+        }
+    }
+}
+
+/// Convert a job's `exec_timeout_secs` into an enforcement `Duration`: `0` (or
+/// negative, defensively) means no bound (`None`); any positive value is a
+/// `Duration` of that many seconds.
+fn timeout_duration(exec_timeout_secs: i64) -> Option<Duration> {
+    if exec_timeout_secs > 0 {
+        Some(Duration::from_secs(exec_timeout_secs as u64))
+    } else {
+        None
+    }
+}
+
+/// The whole-seconds view of a `Duration`, for naming the threshold in a
+/// timeout error message. The agent path holds only the `Duration` at the point
+/// it builds its outcome, so this recovers the second count without re-threading
+/// the raw config value.
+fn timeout_secs_of(dur: Duration) -> i64 {
+    dur.as_secs() as i64
+}
+
+/// Stable error message persisted on a `timeout` execution row, naming the
+/// configured threshold. No secret material; safe for the UI.
+fn timeout_error_message(timeout_secs: i64) -> String {
+    format!(
+        "execution exceeded the configured timeout of {}s and was interrupted",
+        timeout_secs
+    )
 }
 
 /// Stable failure message when the executor was built without the prompt
@@ -3111,5 +3237,345 @@ mod tests {
         let (_sink, _rx) = oneshot_run_sink();
         // Constructing the production pair must not panic; the signal semantics
         // are covered by the `build_oneshot_signal` tests above.
+    }
+
+    // ---- exec timeout (VAL-ROBUST-004/005/006/007/008/022, VAL-TARGET-036) ----
+
+    // `exec_timeout_secs == 0` (or, defensively, negative) means no bound — no
+    // `tokio::time::timeout` wrapper is applied. `> 0` maps to a `Duration` of
+    // that many seconds. This is the single switch that decides whether a
+    // dispatch is bounded (VAL-ROBUST-008).
+    #[test]
+    fn timeout_duration_zero_is_unbounded_positive_is_bounded() {
+        assert_eq!(timeout_duration(0), None, "0 => no timeout bound");
+        assert_eq!(timeout_duration(-5), None, "negative => no timeout bound");
+        assert_eq!(
+            timeout_duration(7),
+            Some(Duration::from_secs(7)),
+            "positive => a Duration of that many seconds"
+        );
+    }
+
+    // The timeout error message names the configured threshold and carries no
+    // secret material — it is persisted on the row and shown in the UI.
+    #[test]
+    fn timeout_error_message_names_threshold() {
+        let msg = timeout_error_message(30);
+        assert!(msg.to_lowercase().contains("timeout"));
+        assert!(msg.contains("30"));
+        assert!(!msg.contains("sk-"));
+    }
+
+    // `timeout_secs_of` recovers the whole-seconds view of a `Duration` (the
+    // agent path holds only the Duration when it builds its timeout outcome).
+    #[test]
+    fn timeout_secs_of_recovers_whole_seconds() {
+        assert_eq!(timeout_secs_of(Duration::from_secs(12)), 12);
+        assert_eq!(timeout_secs_of(Duration::from_millis(3500)), 3);
+    }
+
+    // `DispatchOutcome::timeout` is a terminal `timeout` outcome carrying the
+    // threshold-naming error and no process output / result ref.
+    #[test]
+    fn dispatch_outcome_timeout_shape() {
+        let outcome = DispatchOutcome::timeout(15);
+        assert_eq!(outcome.status, ExecutionStatus::Timeout);
+        assert!(outcome.stdout.is_none());
+        assert!(outcome.stderr.is_none());
+        assert!(outcome.exit_code.is_none());
+        assert!(outcome.result_ref.is_none());
+        assert!(outcome.error.as_deref().unwrap().contains("15"));
+    }
+
+    // VAL-ROBUST-004 + VAL-ROBUST-005 + VAL-ROBUST-007 + VAL-TARGET-036: an
+    // artifact that runs far longer than the job's `exec_timeout_secs` is
+    // interrupted near the threshold and recorded as `timeout` (NOT the
+    // artifact's generalized `failed`), with a duration close to the bound and a
+    // timeout-naming error. The bound (1s) is enforced by the execution-side
+    // timer; the spawned `sleep 30` child is reaped by `kill_on_drop(true)`, so
+    // the call returns promptly rather than hanging for the full sleep — that
+    // prompt return is the observable proof the OS child did not keep the future
+    // alive (VAL-ROBUST-005). Because the threshold (1s) is unrelated to any
+    // 30s scheduler tick, this also pins the execution-side timing
+    // (VAL-ROBUST-007).
+    #[tokio::test]
+    async fn artifact_exceeding_timeout_records_timeout_not_failed() {
+        let env = setup().await;
+        // Sleeps far past the 1s bound; if the timer or kill failed this test
+        // would hang for ~30s instead of returning near the threshold.
+        let artifact_id = install_shell_artifact(&env, "sleep 30\necho done\nexit 0\n").await;
+        let mut job = make_job("job_timeout", artifact_target(&artifact_id)).await;
+        job.exec_timeout_secs = 1;
+        seed_job(&env, &job).await;
+
+        let start = std::time::Instant::now();
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        let wall = start.elapsed();
+
+        assert_eq!(
+            exec.status,
+            ExecutionStatus::Timeout,
+            "an over-budget artifact is recorded as timeout, not the artifact's failed"
+        );
+        // Duration is recorded and close to the 1s threshold (well under the
+        // 30s sleep), proving interruption near the bound.
+        let duration = exec.duration.expect("timeout rows record a duration");
+        assert!(
+            (800..3_000).contains(&duration),
+            "duration should be near the 1s threshold, got {duration}ms"
+        );
+        // The future returned promptly — the killed child did not hold it open
+        // for the full sleep.
+        assert!(
+            wall < Duration::from_secs(10),
+            "the timed-out dispatch must return near the threshold, took {wall:?}"
+        );
+        let err = exec.error.as_deref().unwrap_or_default();
+        assert!(
+            err.to_lowercase().contains("timeout"),
+            "error explains the timeout, got: {err}"
+        );
+
+        let rows = read_rows(&env, "job_timeout").await;
+        assert_eq!(rows.len(), 1, "one trigger => exactly one row");
+        assert_eq!(rows[0].status, "timeout");
+        assert!(rows[0].ended_at.is_some());
+    }
+
+    // VAL-ROBUST-008: with `exec_timeout_secs == 0` the dispatch is NOT wrapped
+    // in a timeout and runs to its natural end — a brief `sleep` artifact
+    // completes successfully rather than being interrupted.
+    #[tokio::test]
+    async fn artifact_with_zero_timeout_runs_to_completion() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "sleep 0.3\necho slept\nexit 0\n").await;
+        let job = make_job("job_unbounded", artifact_target(&artifact_id)).await;
+        // make_job defaults exec_timeout_secs to 0 — assert it explicitly so the
+        // intent of this test is unmistakable.
+        assert_eq!(job.exec_timeout_secs, 0, "0 = unbounded");
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(
+            exec.status,
+            ExecutionStatus::Success,
+            "an unbounded run completes naturally, error: {:?}",
+            exec.error
+        );
+        assert!(exec.stdout.as_deref().unwrap().contains("slept"));
+    }
+
+    // A fast artifact under a generous timeout still completes normally — the
+    // timeout wrapper does not perturb a run that finishes well inside the bound.
+    #[tokio::test]
+    async fn artifact_within_timeout_completes_normally() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo quick\nexit 0\n").await;
+        let mut job = make_job("job_under", artifact_target(&artifact_id)).await;
+        job.exec_timeout_secs = 30;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        assert!(exec.stdout.as_deref().unwrap().contains("quick"));
+    }
+
+    /// Bind a local TCP listener that ACCEPTS connections but never writes a
+    /// byte, so any HTTP client awaiting a response hangs deterministically.
+    /// Returns its `http://addr` base url plus the acceptor task handle (kept
+    /// alive so accepted sockets are not RST'd for the test's duration).
+    async fn spawn_hanging_http_server() -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let acceptor = tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                match listener.accept().await {
+                    Ok((sock, _)) => held.push(sock),
+                    Err(_) => break,
+                }
+            }
+        });
+        (format!("http://{addr}"), acceptor)
+    }
+
+    // VAL-ROBUST-022 (prompt leg): a prompt whose LLM call does not return within
+    // the job's `exec_timeout_secs` is interrupted at the threshold and recorded
+    // as `timeout` (not `failed`). The send is made to hang deterministically by
+    // pointing an openai-compatible provider at a TCP server that never responds;
+    // the executor's short bound fires first. Dropping the timed-out future
+    // cancels the in-flight send, and the chat + persisted user message stay
+    // reachable via `result_ref` — no orphan running session (VAL-ROBUST-006).
+    #[tokio::test]
+    async fn prompt_exceeding_timeout_records_timeout_not_failed() {
+        let (base_url, _acceptor) = spawn_hanging_http_server().await;
+
+        let env = with_prompt_services(setup().await);
+        seed_provider(
+            &env,
+            "prov_phang",
+            "openai-compatible",
+            true,
+            "sk-live-abcd",
+        )
+        .await;
+        sqlx::query("UPDATE providers SET base_url = $1 WHERE id = $2")
+            .bind(&base_url)
+            .bind("prov_phang")
+            .execute(env.db.pool())
+            .await
+            .unwrap();
+
+        let target = JobTarget::Prompt {
+            provider_id: "prov_phang".to_string(),
+            model_id: "hang-model".to_string(),
+            prompt: "summarize".to_string(),
+            session_strategy: SessionStrategy::NewSession,
+        };
+        let mut job = make_job("job_prompt_timeout", target).await;
+        job.exec_timeout_secs = 1;
+        seed_job(&env, &job).await;
+
+        let start = std::time::Instant::now();
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        let wall = start.elapsed();
+
+        assert_eq!(
+            exec.status,
+            ExecutionStatus::Timeout,
+            "an over-budget prompt send is recorded as timeout, error: {:?}",
+            exec.error
+        );
+        assert!(
+            wall < Duration::from_secs(10),
+            "the timed-out prompt dispatch must return near the threshold, took {wall:?}"
+        );
+        let err = exec.error.as_deref().unwrap_or_default();
+        assert!(
+            err.to_lowercase().contains("timeout"),
+            "error explains the timeout, got: {err}"
+        );
+
+        let rows = read_rows(&env, "job_prompt_timeout").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "timeout");
+    }
+
+    // VAL-ROBUST-006 + VAL-ROBUST-022: an agent run that does not close within
+    // the job's `exec_timeout_secs` is interrupted via the runtime's cooperative
+    // abort and recorded as `timeout`. After the timeout: the `runs` registry is
+    // empty (no orphan running session) AND the same session can start a fresh
+    // run (the one-run-per-session gate is released), so the job is
+    // re-triggerable.
+    //
+    // The run is made to hang deterministically — without touching the runtime —
+    // by pointing the provider at a local TCP listener that ACCEPTS connections
+    // but never responds, so the real client blocks awaiting the SSE response
+    // until the executor's short bound fires.
+    #[tokio::test]
+    async fn agent_exceeding_timeout_aborts_and_records_timeout() {
+        use crate::services::{AgentService, AgentSessionService, ProviderService};
+
+        let (base_url, _acceptor) = spawn_hanging_http_server().await;
+
+        let env = setup().await;
+        // An openai-compatible provider whose model synthesizes to an OpenAI
+        // completions template; the base_url override points at the hanging TCP
+        // server so the run blocks on the network.
+        seed_provider(&env, "prov_hang", "openai-compatible", true, "sk-live-abcd").await;
+        // Override the seeded provider's base_url to our hanging listener.
+        sqlx::query("UPDATE providers SET base_url = $1 WHERE id = $2")
+            .bind(&base_url)
+            .bind("prov_hang")
+            .execute(env.db.pool())
+            .await
+            .unwrap();
+        seed_model(&env, "prov_hang", "hang-model").await;
+
+        let agent_id = seed_agent(&env, Some("hang-model")).await;
+
+        // Wire real agent collaborators sharing the env DB.
+        let provider_service = Arc::new(ProviderService::new(env.db.clone()));
+        let agent_service = Arc::new(AgentService::new(env.db.clone()));
+        let agent_session_service = Arc::new(AgentSessionService::new(env.db.clone()));
+        let runtime = Arc::new(AgentRuntime::new(env.db.clone()));
+        let executor = env.executor.clone().with_agent_services(
+            runtime.clone(),
+            agent_service,
+            agent_session_service,
+            provider_service,
+        );
+
+        let mut job = make_job("job_agent_timeout", agent_target(&agent_id, "go")).await;
+        job.exec_timeout_secs = 1;
+        seed_job(&env, &job).await;
+
+        let exec = executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(
+            exec.status,
+            ExecutionStatus::Timeout,
+            "an over-budget agent run is recorded as timeout, error: {:?}",
+            exec.error
+        );
+        let err = exec.error.as_deref().unwrap_or_default();
+        assert!(
+            err.to_lowercase().contains("timeout"),
+            "error explains the timeout, got: {err}"
+        );
+        // The minted session stays referenced so its (partial) transcript is
+        // reachable.
+        let session_id = exec
+            .result_ref
+            .clone()
+            .expect("timed-out agent run still references its session");
+
+        // No orphan running session + the job is re-triggerable: the cooperative
+        // abort closes the run and releases the one-run-per-session slot, so a
+        // FRESH `start_run` for the SAME session succeeds. A still-registered
+        // run would instead be rejected with `AGENT_RUN_ALREADY_ACTIVE`. The
+        // abort closes the loop at its next `select!` boundary, so poll briefly
+        // for the slot to free (VAL-ROBUST-006). The retry sink is dropped each
+        // attempt; only the success path matters here.
+        let mut restarted = false;
+        for _ in 0..200 {
+            let (resink, _rx) = oneshot_run_sink();
+            match runtime
+                .start_run(
+                    session_id.clone(),
+                    "again".to_string(),
+                    Vec::new(),
+                    Vec::new(),
+                    resink,
+                )
+                .await
+            {
+                Ok(()) => {
+                    restarted = true;
+                    break;
+                }
+                // The previous run has not finished closing yet; wait and retry.
+                Err(e) if e.code == "AGENT_RUN_ALREADY_ACTIVE" => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                // Any other error (e.g. the new run's own network failure) still
+                // proves the slot was free — the gate let the run start.
+                Err(_) => {
+                    restarted = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            restarted,
+            "after the abort the session's run slot must free so the job can be triggered again"
+        );
+
+        // The persisted execution row is terminal `timeout`.
+        let rows = read_rows(&env, "job_agent_timeout").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "timeout");
     }
 }

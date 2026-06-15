@@ -705,6 +705,11 @@ impl<R: Runtime> ArtifactService<R> {
         request: &ExecuteArtifactRequest,
     ) -> Result<(String, String, i32), AppError> {
         let mut cmd = Command::new("sh");
+        // Kill the spawned child if its `output()` future is dropped (e.g. the
+        // job executor's `exec_timeout_secs` wrapper times out and drops this
+        // future). Without this, an enforced timeout above would leave the OS
+        // child process orphaned (exec-timeout: VAL-ROBUST-005).
+        cmd.kill_on_drop(true);
         cmd.arg(entry_path);
 
         // 添加参数
@@ -749,6 +754,11 @@ impl<R: Runtime> ArtifactService<R> {
         request: &ExecuteArtifactRequest,
     ) -> Result<(String, String, i32), AppError> {
         let mut cmd = Command::new("python3");
+        // Kill the spawned child if its `output()` future is dropped (e.g. the
+        // job executor's `exec_timeout_secs` wrapper times out and drops this
+        // future). Without this, an enforced timeout above would leave the OS
+        // child process orphaned (exec-timeout: VAL-ROBUST-005).
+        cmd.kill_on_drop(true);
         cmd.arg(entry_path);
 
         if let Some(args) = &request.args {
