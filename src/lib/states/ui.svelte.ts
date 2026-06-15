@@ -2,7 +2,7 @@
  * UI 状态管理 - Svelte 5
  */
 
-import type { Theme, ThemeColor, Language } from "../types";
+import type { Theme, Language } from "../types";
 
 // 应用模式：聊天 vs Agent
 export type AppMode = "chat" | "agent";
@@ -37,7 +37,6 @@ interface UIStateData {
   modals: Record<string, boolean>;
   notifications: Notification[];
   theme: Theme;
-  themeColor: ThemeColor;
   language: Language;
   globalLoading: boolean;
   appMode: AppMode;
@@ -52,7 +51,6 @@ class UIState {
     modals: {},
     notifications: [],
     theme: "system",
-    themeColor: "blue",
     language: "zh-CN",
     globalLoading: false,
     appMode: loadPersistedAppMode(),
@@ -82,10 +80,6 @@ class UIState {
 
   get theme() {
     return this.state.theme;
-  }
-
-  get themeColor() {
-    return this.state.themeColor;
   }
 
   get language() {
@@ -140,10 +134,6 @@ class UIState {
 
   setThemeState(theme: Theme) {
     this.state.theme = theme;
-  }
-
-  setThemeColorState(color: ThemeColor) {
-    this.state.themeColor = color;
   }
 
   setLanguageState(language: Language) {
@@ -252,25 +242,6 @@ class UIState {
       } else {
         document.documentElement.setAttribute("data-theme", newTheme);
       }
-    }
-  }
-
-  /**
-   * 设置主题色
-   */
-  setThemeColor(color: ThemeColor): void {
-    this.state.themeColor = color;
-
-    if (typeof localStorage !== "undefined") {
-      const current = localStorage.getItem("themeColor");
-      if (current !== color) {
-        localStorage.setItem("themeColor", color);
-      }
-    }
-
-    // 更新 CSS 变量
-    if (typeof document !== "undefined") {
-      document.documentElement.style.setProperty("--theme-color", color);
     }
   }
 
