@@ -32,6 +32,7 @@ use std::sync::Arc;
 
 use crate::models::AppError;
 use crate::services::ArtifactService;
+use crate::storage::job_repository::DEFAULT_EXECUTION_HISTORY_LIMIT;
 use crate::storage::types::{
     ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution, JobTarget, Timestamp, Trigger,
 };
@@ -223,6 +224,15 @@ impl<R: Runtime> JobExecutor<R> {
         // scheduler owns cron recomputation, not the executor.
         self.jobs
             .update_after_run(&job.id, ended_at, outcome.status, job.next_run_at, ended_at)
+            .await?;
+
+        // FIFO-prune this job's execution history to the most recent N rows. Run
+        // AFTER finalize so the just-written row is terminal (never pruned as a
+        // running row) and the persisted count for this job stays <= N — no
+        // transient N+1 is exposed. `prune_to` is per-job and never deletes
+        // running rows, so a concurrent in-flight execution survives.
+        self.executions
+            .prune_to(&job.id, DEFAULT_EXECUTION_HISTORY_LIMIT)
             .await?;
 
         Ok(JobExecution {
@@ -1138,6 +1148,261 @@ mod tests {
             .await
             .expect("run-now succeeds once the slot is free");
         assert_eq!(exec.status, ExecutionStatus::Success);
+    }
+
+    // ---- History pruning wired into the execution write path (M2) ----
+
+    /// Seed `count` already-finalized executions for a job WITHOUT going through
+    /// a child process, with ascending `started_at` so FIFO order is well
+    /// defined. Returns their ids oldest-first. Used to position a job's history
+    /// right at the N boundary cheaply, then `execute` drives the wired prune.
+    async fn seed_finalized(env: &TestEnv, job_id: &str, count: i64, base: i64) -> Vec<String> {
+        let mut ids = Vec::new();
+        for i in 0..count {
+            let id = format!("{}_seed{}", job_id, i);
+            let started = base + i;
+            env.executor
+                .executions
+                .insert_running(&id, job_id, Trigger::Schedule, 1, started, started)
+                .await
+                .unwrap();
+            env.executor
+                .executions
+                .finalize(
+                    &id,
+                    ExecutionStatus::Success,
+                    None,
+                    None,
+                    Some(0),
+                    None,
+                    None,
+                    started + 1,
+                    1,
+                )
+                .await
+                .unwrap();
+            ids.push(id);
+        }
+        ids
+    }
+
+    // VAL-HISTORY-021: a job sitting at exactly N executions is NOT pruned —
+    // running `execute` once more would push it to N+1, but the wired prune
+    // (after finalize) trims back to N, and the row count stays at N. Here we
+    // seed N-1 then let `execute` write the Nth row through the real path; the
+    // count is exactly N with nothing dropped (the oldest seed survives).
+    #[tokio::test]
+    async fn execute_at_exactly_n_keeps_all_rows() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo run\nexit 0\n").await;
+        let job = make_job("job_exact", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        // Seed N-1 finalized rows in the past, then execute once to reach N.
+        let limit = DEFAULT_EXECUTION_HISTORY_LIMIT;
+        let oldest = seed_finalized(&env, "job_exact", limit - 1, 1).await;
+
+        env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        let rows = read_rows(&env, "job_exact").await;
+        assert_eq!(
+            rows.len() as i64,
+            limit,
+            "exactly N rows: the wired prune keeps all when count == N"
+        );
+        // The oldest seeded row is still present (nothing pruned at exactly N).
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(
+            ids.contains(&oldest[0].as_str()),
+            "the oldest row must remain when the job is exactly at N"
+        );
+    }
+
+    // VAL-HISTORY-022 / VAL-HISTORY-023: the (N+1)th execution drops exactly the
+    // oldest row (FIFO by started_at) and the persisted count stabilizes at N —
+    // no transient N+1 is left behind. We seed N rows, then execute once: the
+    // wired prune (after finalize) trims the oldest back to N.
+    #[tokio::test]
+    async fn execute_n_plus_one_drops_oldest_and_stays_at_n() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo run\nexit 0\n").await;
+        let job = make_job("job_fifo", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let limit = DEFAULT_EXECUTION_HISTORY_LIMIT;
+        // Seed exactly N rows in the past; the next execute is the (N+1)th.
+        let seeded = seed_finalized(&env, "job_fifo", limit, 1).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        let rows = read_rows(&env, "job_fifo").await;
+        assert_eq!(
+            rows.len() as i64,
+            limit,
+            "count stabilizes at N after the (N+1)th execution (no transient N+1)"
+        );
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        // The oldest seeded row (FIFO) is gone; the newest execution remains.
+        assert!(
+            !ids.contains(&seeded[0].as_str()),
+            "the oldest row (lowest started_at) must be pruned first (FIFO)"
+        );
+        assert!(
+            ids.contains(&exec.id.as_str()),
+            "the just-written newest execution must remain"
+        );
+    }
+
+    // VAL-HISTORY-023 (count guard): even across several executions past the
+    // limit, the persisted row count for the job never exceeds N at any point a
+    // caller could observe it — the prune runs inside each `execute`.
+    #[tokio::test]
+    async fn execute_repeatedly_never_exceeds_n() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo run\nexit 0\n").await;
+        let job = make_job("job_cap", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let limit = DEFAULT_EXECUTION_HISTORY_LIMIT;
+        // Start one short of the limit, then drive several real executions over it.
+        seed_finalized(&env, "job_cap", limit - 1, 1).await;
+
+        for _ in 0..5 {
+            env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+            let rows = read_rows(&env, "job_cap").await;
+            assert!(
+                rows.len() as i64 <= limit,
+                "persisted count must never exceed N (got {})",
+                rows.len()
+            );
+        }
+        // After settling, it sits exactly at the cap.
+        assert_eq!(read_rows(&env, "job_cap").await.len() as i64, limit);
+    }
+
+    // VAL-HISTORY-024: pruning is per-job — driving job A over the limit does not
+    // touch job B's history. We park B at N rows, push A past the limit via
+    // `execute`, and assert B is untouched.
+    #[tokio::test]
+    async fn execute_prune_is_per_job() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo run\nexit 0\n").await;
+        let job_a = make_job("job_a", artifact_target(&artifact_id)).await;
+        let job_b = make_job("job_b", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job_a).await;
+        seed_job(&env, &job_b).await;
+
+        let limit = DEFAULT_EXECUTION_HISTORY_LIMIT;
+        // A is at N; B is at N. Executing A once must prune only A.
+        seed_finalized(&env, "job_a", limit, 1).await;
+        let b_ids = seed_finalized(&env, "job_b", limit, 1).await;
+
+        env.executor
+            .execute(&job_a, Trigger::Schedule)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            read_rows(&env, "job_a").await.len() as i64,
+            limit,
+            "job A is pruned back to N"
+        );
+        let b_rows = read_rows(&env, "job_b").await;
+        assert_eq!(
+            b_rows.len() as i64,
+            limit,
+            "job B is untouched by job A's prune"
+        );
+        let b_remaining: Vec<&str> = b_rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(
+            b_remaining.contains(&b_ids[0].as_str()),
+            "job B's oldest row survives — prune is isolated per job"
+        );
+    }
+
+    // VAL-HISTORY-025: a still-running row for the same job is never pruned by an
+    // execute that overflows the finalized history. We inject an oldest running
+    // row directly, fill the finalized history to N, then execute once more; the
+    // running row must survive (prune only trims finalized rows).
+    #[tokio::test]
+    async fn execute_prune_never_drops_running_row() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo run\nexit 0\n").await;
+        let job = make_job("job_keep_running", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let limit = DEFAULT_EXECUTION_HISTORY_LIMIT;
+        // An in-flight (running) row with the OLDEST started_at — the prime
+        // candidate for FIFO removal, which must nonetheless survive.
+        env.executor
+            .executions
+            .insert_running(
+                "inflight_old",
+                "job_keep_running",
+                Trigger::Schedule,
+                1,
+                0,
+                0,
+            )
+            .await
+            .unwrap();
+        // Fill finalized history to the cap, then push one more through execute.
+        seed_finalized(&env, "job_keep_running", limit, 1).await;
+
+        env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        let rows = read_rows(&env, "job_keep_running").await;
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(
+            ids.contains(&"inflight_old"),
+            "the oldest still-running row must never be pruned"
+        );
+        // N finalized rows + 1 surviving running row.
+        assert_eq!(
+            rows.len() as i64,
+            limit + 1,
+            "running rows are not counted against the finalized cap"
+        );
+    }
+
+    // VAL-HISTORY-026: deleting a job cascades to its job_executions rows
+    // (FK ON DELETE CASCADE; sqlx keeps foreign_keys = ON). We run the job once
+    // through the real path, assert a row exists, delete the job, and assert the
+    // raw execution count is zero.
+    #[tokio::test]
+    async fn delete_job_cascades_executions() {
+        let env = setup().await;
+
+        // Confirm FK enforcement is ON for this connection (cascade depends on it).
+        let fk: i64 = sqlx::query("PRAGMA foreign_keys")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(fk, 1, "FK enforcement must be ON for cascade delete");
+
+        let artifact_id = install_shell_artifact(&env, "echo run\nexit 0\n").await;
+        let job = make_job("job_cascade", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        assert_eq!(
+            read_rows(&env, "job_cascade").await.len(),
+            1,
+            "the run wrote one execution row"
+        );
+
+        env.executor.jobs.delete("job_cascade").await.unwrap();
+
+        let count: i64 = sqlx::query("SELECT COUNT(*) FROM job_executions WHERE job_id = $1")
+            .bind("job_cascade")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(count, 0, "deleting the job cascades away its executions");
     }
 
     // The in-flight set is SHARED across every clone of an executor (it lives
