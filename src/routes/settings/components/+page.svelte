@@ -4,6 +4,7 @@
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
+  import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
   import TrafficLightsRedButton from "$lib/components/ui/TrafficLightsRedButton.svelte";
   import Input from "$lib/components/ui/Input.svelte";
@@ -56,6 +57,16 @@
   let tableText = $state("可编辑值");
 
   let activeMenuId = $state("profile");
+  let activeMenuButtonId = $state("active");
+
+  const menuButtonSamples = [
+    { id: "active", title: "当前选中项", icon: LayoutGrid },
+    {
+      id: "long",
+      title: "一个非常非常长的菜单标题用于演示文本截断的省略号显示效果",
+      icon: Box
+    }
+  ];
 
   const selectOptions = [
     { value: "alpha", label: "Alpha" },
@@ -117,6 +128,9 @@
           <Button variant="ghost">Ghost</Button>
           <Button variant="danger">Danger</Button>
           <Button variant="clear">Clear</Button>
+          <Button variant="primary" disabled onclick={() => triggerToast("error")}>
+            Disabled
+          </Button>
         </div>
       </div>
 
@@ -127,7 +141,22 @@
           <RoundButton label="加载中" loading />
           <CircleButton icon={Box} ariaLabel="Circle" />
           <IconButton icon={Settings} ariaLabel="Settings" />
+          <IconButton icon={Settings} ariaLabel="Settings 禁用" disabled />
           <TrafficLightsRedButton />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">MenuButton</div>
+        <div class="max-w-60 space-y-1">
+          {#each menuButtonSamples as item (item.id)}
+            <MenuButton
+              title={item.title}
+              icon={item.icon}
+              isActive={item.id === activeMenuButtonId}
+              onclick={() => (activeMenuButtonId = item.id)}
+            />
+          {/each}
         </div>
       </div>
 
