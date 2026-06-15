@@ -10,12 +10,18 @@
     Hand,
     Clock,
     Play,
+    ExternalLink,
+    MessageSquare,
+    Bot,
   } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
   import Modal from "$lib/components/ui/Modal.svelte";
   import StatusLabel from "$lib/components/ui/StatusLabel.svelte";
   import { cronToHuman } from "$lib/utils/cronReadable";
   import { formatDateTime, formatDuration } from "$lib/utils";
   import { listExecutions, listenJobExecuted, runNow } from "$lib/api/job";
+  import { getChat } from "$lib/api/chat";
+  import { getAgentSession } from "$lib/api/agentSession";
   import type { Job, JobExecution, ExecutionStatus, Trigger } from "$lib/types";
 
   interface Props {
@@ -75,6 +81,72 @@
     return formatDuration(exec.duration);
   }
 
+  // 目标 kind 决定历史行的渲染形态与跳转目标路由：
+  // - artifact → stdout/stderr/error 输出块（VAL-HISTORY-031 的 artifact 分支）
+  // - prompt   → 「跳转到结果」入口，跳到生成的 chat（/chat?id=<chatId>）
+  // - agent    → 「跳转到结果」入口，跳到生成的 agent 会话（/agent?id=<sessionId>）
+  // 同一 job 的所有执行共享 target.kind；执行行不单独携带 kind，故据此判定。
+  const targetKind = $derived(job?.target.kind ?? "artifact");
+  const isOutputTarget = $derived(targetKind === "artifact");
+
+  // result_ref 指向的会话当前是否可达。lazy 探测：行展开时对其 result_ref
+  // 调一次 getChat / getAgentSession，命中错误（如已删除）→ 标记 missing，
+  // 跳转入口禁用并提示「结果不可用」（VAL-TARGET-025）。以 execId 为键缓存，
+  // 避免重复探测；列表重载（loadHistory）时重置。
+  type ResultState = "checking" | "ok" | "missing";
+  let resultStates = $state<Record<string, ResultState>>({});
+
+  async function probeResult(exec: JobExecution): Promise<void> {
+    const ref = exec.resultRef;
+    if (!ref) return;
+    if (isOutputTarget) return;
+    if (resultStates[exec.id]) return; // 已探测 / 探测中
+    resultStates = { ...resultStates, [exec.id]: "checking" };
+    try {
+      if (targetKind === "prompt") {
+        await getChat(ref);
+      } else if (targetKind === "agent") {
+        await getAgentSession(ref);
+      }
+      resultStates = { ...resultStates, [exec.id]: "ok" };
+    } catch (e) {
+      // 会话已删除 / 不可达：标记缺失，禁用跳转。
+      console.error("Result target unreachable:", e);
+      resultStates = { ...resultStates, [exec.id]: "missing" };
+    }
+  }
+
+  // 对已展开的 prompt/agent 行补探测：行可能在 running 态（无 result_ref）被展开，
+  // 待 `job_executed` 静默刷新把它翻成终态、补上 result_ref 后，此 effect 让跳转
+  // 入口自动从「结果不可用」转为可探测，无需用户重新展开。已探测的 id 由
+  // probeResult 内部去重，不会重复请求。
+  $effect(() => {
+    if (isOutputTarget) return;
+    for (const exec of executions) {
+      if (expanded.has(exec.id) && exec.resultRef && !resultStates[exec.id]) {
+        void probeResult(exec);
+      }
+    }
+  });
+
+  /**
+   * 跳转到该次执行生成的会话：prompt → /chat?id=，agent → /agent?id=。
+   * 仅在 result_ref 存在且探测为 ok 时可用；跳转后关闭详情 modal。
+   */
+  function jumpToResult(exec: JobExecution): void {
+    const ref = exec.resultRef;
+    if (!ref) return;
+    if (resultStates[exec.id] === "missing") return;
+    const route =
+      targetKind === "agent"
+        ? `/agent?id=${encodeURIComponent(ref)}`
+        : `/chat?id=${encodeURIComponent(ref)}`;
+    onClose();
+    void goto(route);
+  }
+
+  // 展开 prompt/agent 行后，由下方 `$effect` 对其 result_ref 探测可达性
+  // （effect 也覆盖 running→终态后才出现 result_ref 的补探测）。
   function toggleExpand(id: string): void {
     const next = new Set(expanded);
     if (next.has(id)) {
@@ -141,10 +213,12 @@
   $effect(() => {
     if (open && job?.id) {
       expanded = new Set();
+      resultStates = {};
       void loadHistory(job.id);
     } else if (!open) {
       executions = [];
       loadError = null;
+      resultStates = {};
     }
   });
 
@@ -316,37 +390,84 @@
                   </span>
                 </button>
 
-                <!-- 展开区（行级扩展点）：stdout / stderr / error 各自分块。
-                     本期仅渲染 artifact 的输出字段；prompt/agent 的结果跳转是 M3。 -->
+                <!-- 展开区（行级扩展点）：按目标 kind 区分（VAL-HISTORY-031）。
+                     artifact → stdout / stderr / error 输出块；
+                     prompt/agent → 「跳转到结果」入口（而非输出块）。 -->
                 {#if isOpen}
                   <div class="px-3 pb-3 pt-1 space-y-3 border-t border-base-300">
-                    {#if exec.error != null}
+                    {#if isOutputTarget}
+                      {#if exec.error != null}
+                        <div>
+                          <p class="text-xs font-medium text-error/80 mb-1">
+                            error
+                          </p>
+                          <pre
+                            class="text-xs bg-base-100 text-error rounded-md p-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{exec.error}</pre>
+                        </div>
+                      {/if}
+
                       <div>
-                        <p
-                          class="text-xs font-medium text-error/80 mb-1"
-                        >
-                          error
+                        <p class="text-xs font-medium text-base-content/60 mb-1">
+                          stdout
                         </p>
                         <pre
-                          class="text-xs bg-base-100 text-error rounded-md p-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{exec.error}</pre>
+                          class="text-xs bg-base-100 text-base-content/80 rounded-md p-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{exec.stdout ??
+                            ""}</pre>
+                      </div>
+
+                      <div>
+                        <p class="text-xs font-medium text-base-content/60 mb-1">
+                          stderr
+                        </p>
+                        <pre
+                          class="text-xs bg-base-100 text-base-content/80 rounded-md p-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{exec.stderr ??
+                            ""}</pre>
+                      </div>
+                    {:else}
+                      <!-- prompt/agent：结果跳转入口。失败时仍可能有 error。 -->
+                      {#if exec.error != null}
+                        <div>
+                          <p class="text-xs font-medium text-error/80 mb-1">
+                            error
+                          </p>
+                          <pre
+                            class="text-xs bg-base-100 text-error rounded-md p-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{exec.error}</pre>
+                        </div>
+                      {/if}
+
+                      {@const resultState = resultStates[exec.id]}
+                      {@const unavailable =
+                        exec.resultRef == null || resultState === "missing"}
+                      <div class="pt-1">
+                        {#if unavailable}
+                          <div
+                            class="flex items-center gap-2 rounded-md border border-[var(--hairline)] bg-base-100 px-3 py-2 text-xs text-base-content/50"
+                          >
+                            <AlertCircle size={14} class="flex-shrink-0" />
+                            <span>结果不可用</span>
+                          </div>
+                        {:else}
+                          <button
+                            type="button"
+                            onclick={() => jumpToResult(exec)}
+                            disabled={resultState === "checking"}
+                            class="inline-flex items-center gap-1.5 rounded-md bg-base-100 px-3 py-2 text-xs font-medium text-primary hover:bg-base-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {#if targetKind === "agent"}
+                              <Bot size={14} class="flex-shrink-0" />
+                            {:else}
+                              <MessageSquare size={14} class="flex-shrink-0" />
+                            {/if}
+                            <span>
+                              {resultState === "checking"
+                                ? "检查结果…"
+                                : "跳转到结果"}
+                            </span>
+                            <ExternalLink size={13} class="flex-shrink-0" />
+                          </button>
+                        {/if}
                       </div>
                     {/if}
-
-                    <div>
-                      <p class="text-xs font-medium text-base-content/60 mb-1">
-                        stdout
-                      </p>
-                      <pre
-                        class="text-xs bg-base-100 text-base-content/80 rounded-md p-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{exec.stdout ?? ""}</pre>
-                    </div>
-
-                    <div>
-                      <p class="text-xs font-medium text-base-content/60 mb-1">
-                        stderr
-                      </p>
-                      <pre
-                        class="text-xs bg-base-100 text-base-content/80 rounded-md p-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{exec.stderr ?? ""}</pre>
-                    </div>
                   </div>
                 {/if}
               </li>
