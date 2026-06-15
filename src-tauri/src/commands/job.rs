@@ -1,11 +1,14 @@
 // Scheduled-job IPC commands.
 //
-// This file currently hosts only the schedule-preview command; later features
-// add the job CRUD / execution commands here.
+// Hosts the schedule-preview command plus the job CRUD commands. Execution /
+// manual-trigger (`job_run_now`) commands belong to later features.
 
 use crate::models::AppError;
-use crate::storage::types::Timestamp;
+use crate::services::{JobCreateRequest, JobService, JobUpdateRequest};
+use crate::storage::types::{Job, JobTarget, Timestamp, UUID};
 use crate::utils::cron;
+use serde::{Deserialize, Serialize};
+use tauri::State;
 
 /// Preview a cron schedule: return up to `n` upcoming occurrences (default 5),
 /// each strictly after "now" in the system local time zone, as millisecond
@@ -23,6 +26,103 @@ pub async fn job_preview_schedule(
     let count = n.unwrap_or(cron::DEFAULT_PREVIEW_COUNT);
     tracing::debug!("Previewing schedule for cron '{}' (n={})", cron_expr, count);
     cron::next_occurrences(&cron_expr, count)
+}
+
+/// IPC payload to create a job. Field names are camelCase on the wire to match
+/// the frontend; `target` is the internally-tagged `JobTarget`.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobCreatePayload {
+    pub name: String,
+    pub description: Option<String>,
+    pub target: JobTarget,
+    pub cron_expr: String,
+    pub timezone: String,
+    pub enabled: Option<bool>,
+}
+
+/// IPC payload to fully replace a job's definition.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobUpdatePayload {
+    pub name: String,
+    pub description: Option<String>,
+    pub target: JobTarget,
+    pub cron_expr: String,
+    pub timezone: String,
+    pub enabled: bool,
+}
+
+/// Create a new scheduled job.
+#[tauri::command]
+pub async fn job_create(
+    request: JobCreatePayload,
+    job_service: State<'_, JobService>,
+) -> Result<Job, AppError> {
+    job_service
+        .create(JobCreateRequest {
+            name: request.name,
+            description: request.description,
+            target: request.target,
+            cron_expr: request.cron_expr,
+            timezone: request.timezone,
+            enabled: request.enabled,
+        })
+        .await
+}
+
+/// List jobs (newest-first), paginated.
+#[tauri::command]
+pub async fn job_list(
+    limit: Option<i32>,
+    offset: Option<i32>,
+    job_service: State<'_, JobService>,
+) -> Result<Vec<Job>, AppError> {
+    job_service.list(limit, offset).await
+}
+
+/// Get a single job by id.
+#[tauri::command]
+pub async fn job_get(job_id: UUID, job_service: State<'_, JobService>) -> Result<Job, AppError> {
+    job_service.get(job_id).await
+}
+
+/// Replace a job's definition fields.
+#[tauri::command]
+pub async fn job_update(
+    job_id: UUID,
+    request: JobUpdatePayload,
+    job_service: State<'_, JobService>,
+) -> Result<Job, AppError> {
+    job_service
+        .update(
+            job_id,
+            JobUpdateRequest {
+                name: request.name,
+                description: request.description,
+                target: request.target,
+                cron_expr: request.cron_expr,
+                timezone: request.timezone,
+                enabled: request.enabled,
+            },
+        )
+        .await
+}
+
+/// Delete a job (its execution history cascades).
+#[tauri::command]
+pub async fn job_delete(job_id: UUID, job_service: State<'_, JobService>) -> Result<(), AppError> {
+    job_service.delete(job_id).await
+}
+
+/// Enable or disable a job.
+#[tauri::command]
+pub async fn job_set_enabled(
+    job_id: UUID,
+    enabled: bool,
+    job_service: State<'_, JobService>,
+) -> Result<Job, AppError> {
+    job_service.set_enabled(job_id, enabled).await
 }
 
 #[cfg(test)]
