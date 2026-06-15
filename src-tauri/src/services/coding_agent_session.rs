@@ -29,6 +29,7 @@ use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
 use crate::services::chat_engine::{self, ChatOptions};
+use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
 /// HandBox-side inputs needed to construct a coding-agent session.
 ///
@@ -112,6 +113,52 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
 
     AgentSession::new_with_skill_dirs(session_config, tools, None, None)
         .map_err(|e| AppError::internal_error(&format!("failed to construct agent session: {e}")))
+}
+
+/// Assemble a [`HandBoxAgentSessionConfig`] from the persisted HandBox session
+/// and provider rows plus the app's data directory.
+///
+/// This bridges HandBox's storage layer to [`build_agent_session`]: it reads the
+/// provider tag / base-url / plaintext key off the provider row and the model /
+/// working-dir / enabled-tools off the session row. It does NOT touch the
+/// network or construct anything — it only maps rows to the construction config,
+/// so the drive layer can build a session from a `session_id` it just loaded.
+///
+/// Sandbox discipline for `working_dir`: when the session has no working
+/// directory selected, the agent's cwd falls back to `app_data_dir`. The cwd
+/// must be an existing directory (the coding agent reads context files / skills
+/// and roots its tools there); `app_data_dir` always exists and stays inside the
+/// app sandbox, so the fallback never escapes it.
+///
+/// Returns `VALIDATION_ERROR` when the session has not selected a model.
+pub fn config_from_rows(
+    session: &HandBoxAgentSessionRow,
+    provider: &Provider,
+    app_data_dir: PathBuf,
+) -> Result<HandBoxAgentSessionConfig, AppError> {
+    let model_id = session
+        .model_id
+        .clone()
+        .ok_or_else(|| AppError::validation_error("agent session has no model_id selected"))?;
+
+    // No working dir selected → root the agent inside the app sandbox so the
+    // cwd is always an existing directory the agent can operate against.
+    let working_dir = session
+        .working_dir
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| app_data_dir.clone());
+
+    Ok(HandBoxAgentSessionConfig {
+        provider_id: provider.id.clone(),
+        provider_type: provider.provider_type.clone(),
+        model_id,
+        base_url: provider.base_url.clone(),
+        api_key: provider.api_key.clone(),
+        working_dir,
+        app_data_dir,
+        enabled_tools: session.enabled_tools.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -212,5 +259,86 @@ mod tests {
         let session = build_agent_session(&config).expect("construction succeeds");
         assert_eq!(session.model().id, "my-local-llm");
         assert_eq!(session.model().base_url, "http://localhost:1234/v1");
+    }
+
+    fn sample_session_row(
+        model_id: Option<&str>,
+        working_dir: Option<&str>,
+    ) -> HandBoxAgentSessionRow {
+        HandBoxAgentSessionRow {
+            id: "sess-1".to_string(),
+            name: "Run Session".to_string(),
+            project_id: None,
+            model_id: model_id.map(str::to_string),
+            provider_id: Some("prov-1".to_string()),
+            system_prompt: Some("You are helpful.".to_string()),
+            thinking_level: None,
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+            working_dir: working_dir.map(str::to_string),
+            enabled_tools: vec!["read_file".to_string()],
+            tool_execution_mode: None,
+            message_count: 0,
+            last_message_at: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn sample_provider_row() -> Provider {
+        Provider {
+            id: "prov-1".to_string(),
+            name: "Test OpenAI".to_string(),
+            provider_type: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-row-key".to_string(),
+            enabled: true,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn config_from_rows_maps_provider_and_session_fields() {
+        let data = TempDir::new().unwrap();
+        let session = sample_session_row(Some("gpt-4o"), Some("/tmp/project"));
+        let provider = sample_provider_row();
+
+        let config = config_from_rows(&session, &provider, data.path().to_path_buf())
+            .expect("rows assemble into a config");
+
+        assert_eq!(config.provider_id, "prov-1");
+        assert_eq!(config.provider_type, "openai");
+        assert_eq!(config.model_id, "gpt-4o");
+        assert_eq!(config.base_url, "https://api.openai.com/v1");
+        assert_eq!(config.api_key, "sk-row-key");
+        assert_eq!(config.working_dir, PathBuf::from("/tmp/project"));
+        assert_eq!(config.app_data_dir, data.path());
+        assert_eq!(config.enabled_tools, vec!["read_file".to_string()]);
+    }
+
+    #[test]
+    fn config_from_rows_falls_back_to_app_data_dir_when_no_working_dir() {
+        let data = TempDir::new().unwrap();
+        let session = sample_session_row(Some("gpt-4o"), None);
+        let provider = sample_provider_row();
+
+        let config = config_from_rows(&session, &provider, data.path().to_path_buf())
+            .expect("rows assemble into a config");
+
+        // No working_dir selected → cwd falls back to the app data dir (an
+        // existing directory inside the sandbox).
+        assert_eq!(config.working_dir, data.path());
+    }
+
+    #[test]
+    fn config_from_rows_errors_when_model_unset() {
+        let data = TempDir::new().unwrap();
+        let session = sample_session_row(None, Some("/tmp/project"));
+        let provider = sample_provider_row();
+
+        let err = config_from_rows(&session, &provider, data.path().to_path_buf())
+            .expect_err("a session with no model must error");
+        assert_eq!(err.code, "VALIDATION_ERROR");
     }
 }
