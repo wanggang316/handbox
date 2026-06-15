@@ -5,20 +5,21 @@
 **使用约定**
 - 组件样式以 Tailwind 为主，少量组件自带 `<style>`。
 - 使用 Svelte 5 runes 的组件支持 `bind:` 语法（如 `Toggle`、`Textarea`、`Slider`）。
-- 带有 `onclick` / `onChange` 等回调的组件，优先走对应 prop；`Button` 仍支持 `on:click` 事件。
+- 带有 `onclick` / `onChange` 等回调的组件，优先走对应 prop。按钮类组件已统一为 runes（`$props`），事件一律走 `onclick` prop，不再支持 `on:click` 事件转发。
+- 颜色一律通过语义化 `variant` prop 表达，已移除 `bgColor` / `hoverColor` / `textColor` 这类 color-as-prop API。
 
 ## 按钮类
-- `Button`：基础按钮。Props: `variant`, `size`, `disabled`, `type`, `customClass`。
-- `RoundButton`：圆角按钮。Props: `label`, `icon`, `loading`, `bgColor`, `hoverColor`, `textColor`, `size`, `rounded`, `onclick`。
-- `CircleButton`：圆形图标按钮。Props: `icon`, `iconSize`, `ariaLabel`, `bgColor`, `hoverColor`, `textColor`, `size`, `rounded`, `onclick`。
-- `IconButton`：方形图标按钮。Props: `icon`, `iconSize`, `ariaLabel`, `size`, `rounded`, `bgColor`, `hoverColor`, `textColor`, `onclick`。
+- `Button`：基础按钮。Props: `variant`（`primary` | `secondary` | `gray` | `danger` | `ghost` | `clear`）, `size`, `disabled`, `type`, `customClass`, `onclick`。
+- `RoundButton`：圆角按钮。Props: `label`, `icon`, `loading`, `variant`（`primary` | `accent` | `danger` | `secondary`）, `size`, `rounded`, `fontSize`, `customClass`, `onclick`。
+- `CircleButton`：圆形图标按钮。Props: `icon`, `iconSize`, `ariaLabel`, `variant`（`neutral`（默认）| `secondary`）, `size`, `rounded`, `customClass`, `onclick`。
+- `IconButton`：方形图标按钮。Props: `icon`, `iconSize`, `strokeWidth`, `ariaLabel`, `variant`（`ghost`，默认）, `size`, `rounded`, `customClass`, `onclick`。
 - `ArrowButton`：文本 + 下拉箭头。Props: `label`, `icon`, `iconSize`, `onclick`。
 - `TrafficLightsRedButton`：窗口关闭按钮样式。Props: `onClick`。
 
 示例：
 ```svelte
-<Button variant="primary" on:click={handleClick}>保存</Button>
-<RoundButton label="确认" onclick={handleConfirm} />
+<Button variant="primary" onclick={handleClick}>保存</Button>
+<RoundButton label="确认" variant="accent" onclick={handleConfirm} />
 <CircleButton icon={Box} ariaLabel="图标按钮" />
 ```
 
@@ -41,7 +42,7 @@
 ## 导航与布局
 - `Tabs`：标签切换。Props: `value`, `items`, `onChange`。
 - `Menu`：菜单列表。Props: `items`, `activeId`, `onItemClick`, `containerClass`。
-- `MenuButton`：菜单项按钮。Props: `title`, `isActive`, `icon`, `iconPosition`, `iconSize`, `onClick`。
+- `MenuButton`：菜单项按钮。Props: `title`, `isActive`, `icon`, `iconPosition`, `iconSize`, `onclick`, `buttonClass`, `activeClass`, `iconClass`, `icon_slot`（snippet）。
 - `ResizableSidebar`：可拖拽侧栏。Props: `initialWidth`, `minWidth`, `maxWidth`, `storageKey`, `width`。
 
 示例：
@@ -59,7 +60,7 @@
 
 示例：
 ```svelte
-<Button on:click={() => (open = true)}>打开</Button>
+<Button onclick={() => (open = true)}>打开</Button>
 <Modal open={open} title="标题" onClose={() => (open = false)} />
 ```
 
