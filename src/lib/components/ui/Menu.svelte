@@ -37,7 +37,7 @@
         icon={item.icon}
         iconPosition={item.iconPosition || "left"}
         iconSize={item.iconSize || 16}
-        onClick={() => onItemClick(item)}
+        onclick={() => onItemClick(item)}
         buttonClass={itemClass}
         activeClass={activeItemClass}
       />

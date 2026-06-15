@@ -241,7 +241,7 @@
         iconSize={16}
         isActive={currentRoute === "/favorites"}
         buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onClick={() => handleFavoriteClick()}
+        onclick={() => handleFavoriteClick()}
       />
       <MenuButton
         title="Artifacts"
@@ -249,7 +249,7 @@
         iconSize={16}
         isActive={currentRoute === "/artifacts"}
         buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onClick={() => handleArtifactClick()}
+        onclick={() => handleArtifactClick()}
       />
     </div>
 
@@ -294,7 +294,7 @@
             iconSize={16}
             isActive={currentRoute === "/agents"}
             buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-            onClick={() => handleAgentClick()}
+            onclick={() => handleAgentClick()}
           />
           <MenuButton
             title="单词本"
@@ -302,7 +302,7 @@
             iconSize={16}
             isActive={currentRoute === "/words"}
             buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-            onClick={() => handleWordsClick()}
+            onclick={() => handleWordsClick()}
           />
         </div>
 
