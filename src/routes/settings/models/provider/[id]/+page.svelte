@@ -349,9 +349,7 @@
       iconSize={22}
       ariaLabel="返回"
       size="w-8 h-8"
-      bgColor="bg-base-200"
-      hoverColor="hover:bg-base-300"
-      textColor="text-base-content"
+      variant="secondary"
       customClass="hover:text-base-content/80 z-10004 relative"
       onclick={handleBack}
     />

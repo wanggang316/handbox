@@ -1,18 +1,54 @@
 <script lang="ts">
   import type { Icon as IconType } from "@lucide/svelte";
 
-  export let icon: typeof IconType;
-  export let iconSize: number = 16;
-  export let ariaLabel: string;
-  export let bgColor: string = "bg-neutral";
-  export let hoverColor: string = "hover:bg-neutral/90";
-  export let textColor: string = "text-neutral-content";
-  export let size: string = "w-10 h-10";
-  export let rounded: string = "rounded-full";
-  export let disabled: boolean = false;
-  export let customClass: string = "";
+  type Variant = "neutral" | "secondary";
 
-  export let onclick: ((event: MouseEvent) => void) | undefined = undefined;
+  type VariantClasses = {
+    bg: string;
+    text: string;
+    hover: string;
+  };
+
+  // Authoritative variant → class map. Reproduces the exact rest + hover
+  // colors per variant (neutral = the former default).
+  const VARIANT_CLASSES: Record<Variant, VariantClasses> = {
+    neutral: {
+      bg: "bg-neutral",
+      text: "text-neutral-content",
+      hover: "hover:bg-neutral/90",
+    },
+    secondary: {
+      bg: "bg-base-200",
+      text: "text-base-content",
+      hover: "hover:bg-base-300",
+    },
+  };
+
+  interface Props {
+    icon: typeof IconType;
+    iconSize?: number;
+    ariaLabel: string;
+    variant?: Variant;
+    size?: string;
+    rounded?: string;
+    disabled?: boolean;
+    customClass?: string;
+    onclick?: (event: MouseEvent) => void;
+  }
+
+  let {
+    icon,
+    iconSize = 16,
+    ariaLabel,
+    variant = "neutral",
+    size = "w-10 h-10",
+    rounded = "rounded-full",
+    disabled = false,
+    customClass = "",
+    onclick = undefined,
+  }: Props = $props();
+
+  const colors = $derived(VARIANT_CLASSES[variant]);
 
   function handleClick(event: MouseEvent) {
     if (!disabled) {
@@ -22,11 +58,11 @@
 </script>
 
 <button
-  class="{size} {bgColor} {hoverColor} {textColor} {rounded} flex items-center justify-center transition-colors {customClass}"
+  class="{size} {colors.bg} {colors.hover} {colors.text} {rounded} flex items-center justify-center transition-colors {customClass}"
   class:opacity-50={disabled}
   class:cursor-not-allowed={disabled}
   aria-label={ariaLabel}
-  on:click={handleClick}
+  onclick={handleClick}
   {disabled}
 >
   {#if icon}
