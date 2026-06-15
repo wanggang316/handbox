@@ -246,6 +246,8 @@ pub fn run() {
             artifact_install,
             artifact_execute,
             artifact_init_builtin,
+            // 定时任务相关命令
+            job_preview_schedule,
             // 剪贴板相关命令
             clipboard_copy_image,
             // 图片相关命令

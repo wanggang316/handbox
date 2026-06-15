@@ -84,6 +84,7 @@ hand-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.3.0
 # for now (Approach A de-risk slice): not yet `use`d from src.
 hand-coding-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "hand-coding-agent" }
 tokio-util = "0.7"
+croner = "3.0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"
