@@ -7,8 +7,19 @@
   import ScheduleEditor from "$lib/components/jobs/ScheduleEditor.svelte";
   import TargetPicker from "$lib/components/jobs/TargetPicker.svelte";
   import { artifactState } from "$lib/states/artifact.svelte";
+  import {
+    providerState,
+    providerActions,
+  } from "$lib/states/provider.svelte";
+  import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { AppError } from "$lib/api";
-  import type { Artifact, Job, JobTarget } from "$lib/types";
+  import type {
+    Agent,
+    Artifact,
+    Job,
+    JobTarget,
+  } from "$lib/types";
+  import type { ProviderWithModels } from "$lib/types/provider";
 
   /** 父组件保存所需的表单出参（与 JobCreateInput / JobUpdateInput 对齐的子集）。 */
   export interface JobFormData {
@@ -133,7 +144,57 @@
   });
 
   // ──────────────────────────────────────────────────────────────────────
-  // 校验
+  // Prompt / Agent 候选：打开时加载已启用供应商（含模型）与 Agent 模板列表。
+  // providersWithModels 用于把目标里存的 (providerId, modelId) 解析为展示名；
+  // agents 用于 agent 目标的模板下拉。读自共享状态，TargetPicker 不直接触状态。
+  // ──────────────────────────────────────────────────────────────────────
+  let providersWithModels = $state<ProviderWithModels[]>([]);
+  let agents = $state<Agent[]>([]);
+  let agentsLoading = $state(false);
+
+  $effect(() => {
+    if (!open) return;
+    if (
+      providerState.providersWithModelsNeedRefresh ||
+      providerState.providersWithModels.length === 0
+    ) {
+      providerActions.loadProvidersWithModels().catch((e) => {
+        console.error("Failed to load providers for job target:", e);
+      });
+    }
+  });
+
+  // providersWithModels 只取已启用供应商 + 其已启用模型，与 chat 模型选择口径一致。
+  $effect(() => {
+    providersWithModels = providerState.providersWithModels
+      .filter((p) => p.enabled)
+      .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled) }));
+  });
+
+  $effect(() => {
+    if (!open) return;
+    agentsLoading = true;
+    agentActions
+      .loadAgents()
+      .then(() => {
+        agents = agentState.agents;
+      })
+      .catch((e) => {
+        console.error("Failed to load agents for job target:", e);
+        agents = [];
+      })
+      .finally(() => {
+        agentsLoading = false;
+      });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 校验。目标按 kind 分支校验（与 TargetPicker 的高亮提示同源）：
+  // - artifact：必须选中 artifact（VAL-TARGET-011）
+  // - prompt：必须同时选中 provider 与 model（VAL-TARGET-013），且 prompt
+  //   文本非空白（VAL-TARGET-012）
+  // - agent：必须选中 agent 模板（VAL-TARGET-014）
+  // 任一不满足都不调用 onSave（即不写库）。
   // ──────────────────────────────────────────────────────────────────────
   const nameError = $derived(
     showValidation && form.name.trim().length === 0
@@ -141,9 +202,21 @@
       : null,
   );
 
-  const targetValid = $derived(
-    form.target.kind === "artifact" && form.target.artifactId.length > 0,
-  );
+  const targetValid = $derived.by((): boolean => {
+    const t = form.target;
+    switch (t.kind) {
+      case "artifact":
+        return t.artifactId.length > 0;
+      case "prompt":
+        return (
+          t.providerId.length > 0 &&
+          t.modelId.length > 0 &&
+          t.prompt.trim().length > 0
+        );
+      case "agent":
+        return t.agentId.length > 0;
+    }
+  });
 
   function validate(): boolean {
     showValidation = true;
@@ -244,7 +317,10 @@
         <TargetPicker
           bind:target={form.target}
           {artifacts}
+          {providersWithModels}
+          {agents}
           loading={artifactsLoading}
+          {agentsLoading}
           showError={showValidation}
         />
       </div>
