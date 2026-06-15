@@ -12,7 +12,7 @@
  */
 
 import { apiCall } from "./index";
-import type { Job, JobTarget, UUID } from "../types";
+import type { Job, JobTarget, Timestamp, UUID } from "../types";
 
 /** 创建任务的入参（对应后端 `JobCreatePayload`，字段 camelCase）。 */
 export interface JobCreateInput {
@@ -32,6 +32,18 @@ export interface JobUpdateInput {
   cronExpr: string;
   timezone: string;
   enabled: boolean;
+}
+
+/**
+ * 预览 cron 调度：返回未来至多 `n`（默认 5）个本地时区毫秒时间戳，升序，
+ * 首项严格晚于当前时刻。稀疏调度返回真实条数（可能少于 n、甚至为空）。
+ * 非法 / 越界 / 空白 cron 由后端抛出结构化 `AppError`（`{code,message,hint}`）。
+ */
+export async function previewSchedule(
+  cron: string,
+  n?: number,
+): Promise<Timestamp[]> {
+  return apiCall<Timestamp[]>("job_preview_schedule", { cronExpr: cron, n });
 }
 
 /** 创建新的定时任务。 */
