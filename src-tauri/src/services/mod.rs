@@ -15,6 +15,7 @@ pub mod coding_agent_runtime;
 pub mod coding_agent_session;
 pub mod hand_ai_catalog;
 pub mod job;
+pub mod job_executor;
 pub mod mcp;
 pub mod message;
 pub mod model;
@@ -45,6 +46,7 @@ pub use coding_agent_runtime::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, CodingRunSink, RunDriveHandles,
 };
 pub use job::{JobCreateRequest, JobService, JobUpdateRequest};
+pub use job_executor::JobExecutor;
 pub use mcp::McpService;
 pub use message::MessageService;
 pub use model::ModelService;

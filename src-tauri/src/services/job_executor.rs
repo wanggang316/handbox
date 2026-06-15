@@ -1,0 +1,864 @@
+// Scheduled-job executor.
+//
+// Runs one job and persists the outcome. This M1 feature only dispatches the
+// `artifact` target (delegating to `ArtifactService::execute_artifact`); the
+// `agent` / `prompt` targets are explicit "unsupported in M1" branches that the
+// M3 features replace.
+//
+// One trigger produces exactly ONE `job_executions` row: a `running` row is
+// inserted up front, then the SAME row is finalized in place to its terminal
+// state (success / failed). Job-level run statistics (run_count / last_run_at /
+// last_status / failure_count) are updated afterwards.
+//
+// Out of scope here (left to other milestones): the scheduler loop (M1
+// scheduler feature drives this executor), manual run-now (M2), and job-level
+// timeout/retry overrides (M4). `next_run_at` is NOT recomputed here — that
+// belongs to the scheduler; this executor preserves the job's existing
+// `next_run_at` when writing run statistics.
+
+use std::sync::Arc;
+
+use crate::models::AppError;
+use crate::services::ArtifactService;
+use crate::storage::types::{
+    ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution, JobTarget, Timestamp, Trigger,
+};
+use crate::storage::{JobExecutionRepository, JobRepository};
+use tauri::{Runtime, Wry};
+
+/// The terminal outcome of dispatching a job's target, before it is persisted.
+///
+/// `status` is always a terminal state (success / failed / timeout). The other
+/// fields mirror the `job_executions` columns that `finalize` writes.
+struct DispatchOutcome {
+    status: ExecutionStatus,
+    stdout: Option<String>,
+    stderr: Option<String>,
+    exit_code: Option<i32>,
+    error: Option<String>,
+    /// Opaque reference to an external result (e.g. a session id). Unused by the
+    /// artifact target; reserved for the agent/prompt targets in M3.
+    result_ref: Option<String>,
+}
+
+/// Runs a single job and records the result.
+///
+/// Generic over the Tauri `Runtime` to match `ArtifactService`; the app wiring
+/// manages a `JobExecutor<Wry>` so the scheduler / run-now features can take it
+/// as Tauri `State`.
+pub struct JobExecutor<R: Runtime = Wry> {
+    artifact_service: Arc<ArtifactService<R>>,
+    jobs: JobRepository,
+    executions: JobExecutionRepository,
+}
+
+// Manual `Clone` so the bound is on the fields, not on `R: Clone`. Tauri
+// runtimes (`Wry` / `MockRuntime`) are not themselves `Clone`, and
+// `ArtifactService`'s derived `Clone` carries an `R: Clone` bound — so the
+// executor holds it behind an `Arc` and clones the `Arc`, never the service.
+impl<R: Runtime> Clone for JobExecutor<R> {
+    fn clone(&self) -> Self {
+        Self {
+            artifact_service: self.artifact_service.clone(),
+            jobs: self.jobs.clone(),
+            executions: self.executions.clone(),
+        }
+    }
+}
+
+impl<R: Runtime> JobExecutor<R> {
+    /// Build an executor from its collaborators. All inputs are cheap
+    /// (`Arc`-backed) handles.
+    pub fn new(
+        artifact_service: Arc<ArtifactService<R>>,
+        jobs: JobRepository,
+        executions: JobExecutionRepository,
+    ) -> Self {
+        Self {
+            artifact_service,
+            jobs,
+            executions,
+        }
+    }
+
+    /// Convenience constructor from a shared `Database` plus a shared
+    /// `ArtifactService`, mirroring `JobService::from_db`. Used by the app
+    /// wiring in `lib.rs`.
+    pub fn from_db(
+        db: Arc<crate::storage::Database>,
+        artifact_service: Arc<ArtifactService<R>>,
+    ) -> Self {
+        Self::new(
+            artifact_service,
+            JobRepository::new(db.clone()),
+            JobExecutionRepository::new(db),
+        )
+    }
+
+    /// Execute `job` and persist the outcome.
+    ///
+    /// Flow: insert a `running` row -> dispatch the target -> finalize the SAME
+    /// row to its terminal state -> update the job's run statistics. Returns the
+    /// finalized `JobExecution`.
+    ///
+    /// A dispatch failure (artifact missing / not installed, process that fails
+    /// to start, or an unsupported target in M1) is NOT propagated as `Err`: it
+    /// is recorded as a `failed` execution row with a non-empty `error`, and the
+    /// finalized row is returned. `Err` is reserved for persistence failures
+    /// where no consistent row could be written.
+    pub async fn execute(&self, job: &Job, trigger: Trigger) -> Result<JobExecution, AppError> {
+        let exec_id = uuid::Uuid::new_v4().to_string();
+        let started_at = current_timestamp();
+        const FIRST_ATTEMPT: i32 = 1;
+
+        self.executions
+            .insert_running(
+                &exec_id,
+                &job.id,
+                trigger,
+                FIRST_ATTEMPT,
+                started_at,
+                started_at,
+            )
+            .await?;
+
+        let outcome = self.dispatch(job).await;
+
+        let ended_at = current_timestamp();
+        let duration = (ended_at - started_at).max(0);
+
+        self.executions
+            .finalize(
+                &exec_id,
+                outcome.status,
+                outcome.stdout.as_deref(),
+                outcome.stderr.as_deref(),
+                outcome.exit_code,
+                outcome.error.as_deref(),
+                outcome.result_ref.as_deref(),
+                ended_at,
+                duration,
+            )
+            .await?;
+
+        // Update job-level run statistics. `next_run_at` is preserved as-is; the
+        // scheduler owns cron recomputation, not the executor.
+        self.jobs
+            .update_after_run(&job.id, ended_at, outcome.status, job.next_run_at, ended_at)
+            .await?;
+
+        Ok(JobExecution {
+            id: exec_id,
+            job_id: job.id.clone(),
+            status: outcome.status,
+            trigger,
+            attempt: FIRST_ATTEMPT,
+            stdout: outcome.stdout,
+            stderr: outcome.stderr,
+            exit_code: outcome.exit_code,
+            error: outcome.error,
+            result_ref: outcome.result_ref,
+            started_at,
+            ended_at: Some(ended_at),
+            duration: Some(duration),
+            created_at: started_at,
+        })
+    }
+
+    /// Dispatch a job's target to the matching backend and map the result onto a
+    /// terminal `DispatchOutcome`. Never returns `Err`: a failed dispatch is a
+    /// `failed` outcome with an `error` message so the caller can finalize one
+    /// consistent row.
+    async fn dispatch(&self, job: &Job) -> DispatchOutcome {
+        match &job.target {
+            JobTarget::Artifact {
+                artifact_id,
+                args,
+                env,
+            } => self.dispatch_artifact(artifact_id, args, env).await,
+            JobTarget::Agent { .. } => DispatchOutcome::failed(unsupported_target_message("agent")),
+            JobTarget::Prompt { .. } => {
+                DispatchOutcome::failed(unsupported_target_message("prompt"))
+            }
+        }
+    }
+
+    /// Run an artifact target through `ArtifactService::execute_artifact`.
+    ///
+    /// `args` / `env` come straight from the typed `JobTarget::Artifact` and are
+    /// passed as a single argv vector (no shell), so values with spaces or
+    /// quotes cannot inject extra commands. Empty `args` / `env` are sent as
+    /// `None` so the artifact's own `execution_config` defaults apply.
+    async fn dispatch_artifact(
+        &self,
+        artifact_id: &str,
+        args: &[String],
+        env: &std::collections::HashMap<String, String>,
+    ) -> DispatchOutcome {
+        let request = ExecuteArtifactRequest {
+            artifact_id: artifact_id.to_string(),
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(args.to_vec())
+            },
+            env: if env.is_empty() {
+                None
+            } else {
+                Some(env.clone())
+            },
+        };
+
+        match self.artifact_service.execute_artifact(request).await {
+            // `execute_artifact` returns `Ok` for both ran-and-exited and
+            // spawn-failure cases; the `success` flag encodes which.
+            Ok(result) => {
+                let status = if result.success {
+                    ExecutionStatus::Success
+                } else {
+                    ExecutionStatus::Failed
+                };
+                DispatchOutcome {
+                    status,
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    exit_code: result.exit_code,
+                    error: result.error,
+                    result_ref: None,
+                }
+            }
+            // `Err` here is a pre-flight failure (artifact missing, not
+            // installed, sandbox path errors): no process ran.
+            Err(e) => DispatchOutcome::failed(e.message),
+        }
+    }
+}
+
+impl DispatchOutcome {
+    /// A failed outcome carrying only an `error` message (no process output).
+    fn failed(error: String) -> Self {
+        Self {
+            status: ExecutionStatus::Failed,
+            stdout: None,
+            stderr: None,
+            exit_code: None,
+            error: Some(error),
+            result_ref: None,
+        }
+    }
+}
+
+/// Error message for a target kind that this M1 feature does not yet dispatch.
+/// M3 replaces these branches with real agent/prompt execution.
+fn unsupported_target_message(kind: &str) -> String {
+    format!(
+        "Job target '{}' is not supported in M1 (artifact only)",
+        kind
+    )
+}
+
+fn current_timestamp() -> Timestamp {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::types::{
+        ArtifactType, CreateArtifactRequest, ExecutionConfig, InstallArtifactRequest,
+        SessionStrategy,
+    };
+    use crate::storage::{ArtifactRepository, Database};
+    use sqlx::Row;
+    use std::collections::HashMap;
+    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+    use tempfile::tempdir;
+
+    /// A row read straight from `job_executions` for assertions, decoded with
+    /// `Option` for every nullable column so a NULL never panics.
+    struct ExecutionRow {
+        id: String,
+        status: String,
+        stdout: Option<String>,
+        stderr: Option<String>,
+        exit_code: Option<i32>,
+        error: Option<String>,
+        attempt: i32,
+        ended_at: Option<i64>,
+    }
+
+    struct TestEnv {
+        executor: JobExecutor<MockRuntime>,
+        db: Arc<Database>,
+        artifact_service: Arc<ArtifactService<MockRuntime>>,
+        // Keep the temp dirs alive for the duration of the test (the app data
+        // dir backs the artifact sandbox).
+        _temp_dir: tempfile::TempDir,
+    }
+
+    /// Build an executor wired to a fresh temp DB and a shared `MockRuntime`
+    /// `ArtifactService`. The DB runs all migrations (incl. 049/050). The
+    /// executor and the test share the SAME `ArtifactService` so artifacts the
+    /// test installs are visible to the executor.
+    async fn setup() -> TestEnv {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Arc::new(Database::new(&db_path).await.unwrap());
+
+        let artifact_repo = Arc::new(ArtifactRepository::new(db.clone()));
+        let context = mock_context::<MockRuntime, _>(noop_assets());
+        let app = mock_builder()
+            .build(context)
+            .expect("failed to build app for tests");
+        let artifact_service = Arc::new(ArtifactService::new(artifact_repo, app.handle().clone()));
+
+        let executor = JobExecutor::from_db(db.clone(), artifact_service.clone());
+
+        TestEnv {
+            executor,
+            db,
+            artifact_service,
+            _temp_dir: temp_dir,
+        }
+    }
+
+    /// Create + install a shell artifact whose `main.sh` is `script`. Returns the
+    /// installed artifact id. Installation copies the script into the sandbox
+    /// (`app_data_dir/artifacts/<id>/main.sh`) where `execute_artifact` runs it.
+    async fn install_shell_artifact(env: &TestEnv, script: &str) -> String {
+        let src_dir = tempdir().unwrap();
+        let entry = src_dir.path().join("main.sh");
+        tokio::fs::write(&entry, script).await.unwrap();
+
+        let artifact = env
+            .artifact_service
+            .create_artifact(CreateArtifactRequest {
+                name: format!("shell-{}", uuid::Uuid::new_v4()),
+                description: None,
+                artifact_type: ArtifactType::Shell,
+                entry_file: "main.sh".to_string(),
+                source_path: Some(src_dir.path().to_string_lossy().to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: Some(ExecutionConfig {
+                    args: vec![],
+                    env: HashMap::new(),
+                    permissions: vec![],
+                    timeout: 5000,
+                }),
+                tags: None,
+                icon: None,
+            })
+            .await
+            .expect("create artifact");
+
+        env.artifact_service
+            .install_artifact(InstallArtifactRequest {
+                artifact_id: artifact.id.clone(),
+                model_id: None,
+                provider_id: None,
+            })
+            .await
+            .expect("install artifact");
+
+        // Keep the source dir alive until after install copied the files.
+        drop(src_dir);
+        artifact.id
+    }
+
+    /// Build an enabled `Job` with the given target and a future `next_run_at`.
+    async fn make_job(id: &str, target: JobTarget) -> Job {
+        let now = current_timestamp();
+        Job {
+            id: id.to_string(),
+            name: format!("job-{}", id),
+            description: None,
+            target,
+            cron_expr: "0 9 * * *".to_string(),
+            timezone: "local".to_string(),
+            enabled: true,
+            last_run_at: None,
+            next_run_at: Some(now + 10_000),
+            last_status: None,
+            run_count: 0,
+            failure_count: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Seed a `jobs` row so foreign-key-backed execution rows can be inserted
+    /// and the post-run statistics update has a row to touch.
+    async fn seed_job(env: &TestEnv, job: &Job) {
+        env.executor.jobs.create(job).await.expect("seed job");
+    }
+
+    /// Read all `job_executions` rows for a job, newest-first.
+    async fn read_rows(env: &TestEnv, job_id: &str) -> Vec<ExecutionRow> {
+        let rows = sqlx::query(
+            "SELECT id, status, stdout, stderr, exit_code, error, attempt, ended_at \
+             FROM job_executions WHERE job_id = $1 ORDER BY started_at DESC, id DESC",
+        )
+        .bind(job_id)
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+
+        rows.into_iter()
+            .map(|r| ExecutionRow {
+                id: r.try_get("id").unwrap(),
+                status: r.try_get("status").unwrap(),
+                stdout: r.try_get("stdout").unwrap(),
+                stderr: r.try_get("stderr").unwrap(),
+                exit_code: r.try_get("exit_code").unwrap(),
+                error: r.try_get("error").unwrap(),
+                attempt: r.try_get("attempt").unwrap(),
+                ended_at: r.try_get("ended_at").unwrap(),
+            })
+            .collect()
+    }
+
+    fn artifact_target(artifact_id: &str) -> JobTarget {
+        JobTarget::Artifact {
+            artifact_id: artifact_id.to_string(),
+            args: vec![],
+            env: HashMap::new(),
+        }
+    }
+
+    // VAL-TARGET-001 / VAL-HISTORY-010: a successful artifact run records
+    // stdout/stderr/exit_code and produces exactly one row.
+    #[tokio::test]
+    async fn artifact_success_records_output_in_single_row() {
+        let env = setup().await;
+        let artifact_id =
+            install_shell_artifact(&env, "echo hello-out\necho oops-err 1>&2\nexit 0\n").await;
+        let job = make_job("job_ok", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let exec = env
+            .executor
+            .execute(&job, Trigger::Schedule)
+            .await
+            .expect("execute");
+
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        assert_eq!(exec.exit_code, Some(0));
+        assert!(exec.stdout.as_deref().unwrap().contains("hello-out"));
+        assert!(exec.stderr.as_deref().unwrap().contains("oops-err"));
+
+        let rows = read_rows(&env, "job_ok").await;
+        assert_eq!(rows.len(), 1, "one trigger => exactly one row");
+        assert_eq!(rows[0].id, exec.id);
+        assert_eq!(rows[0].status, "success");
+        assert_eq!(rows[0].exit_code, Some(0));
+        assert_eq!(rows[0].attempt, 1);
+        assert!(rows[0].stdout.as_deref().unwrap().contains("hello-out"));
+        assert!(rows[0].stderr.as_deref().unwrap().contains("oops-err"));
+        assert!(rows[0].ended_at.is_some());
+    }
+
+    // VAL-TARGET-002: exit 0 with non-empty stderr is still success.
+    #[tokio::test]
+    async fn exit_zero_with_stderr_is_success() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo to-stderr 1>&2\nexit 0\n").await;
+        let job = make_job("job_warn", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        assert_eq!(exec.exit_code, Some(0));
+        assert!(exec.stderr.as_deref().unwrap().contains("to-stderr"));
+    }
+
+    // VAL-TARGET-003: a non-zero exit is failed, with all three of
+    // stdout/stderr/exit_code visible.
+    #[tokio::test]
+    async fn non_zero_exit_is_failed_with_all_fields() {
+        let env = setup().await;
+        let artifact_id =
+            install_shell_artifact(&env, "echo partial-out\necho boom 1>&2\nexit 3\n").await;
+        let job = make_job("job_fail", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.exit_code, Some(3));
+
+        let rows = read_rows(&env, "job_fail").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+        assert_eq!(rows[0].exit_code, Some(3));
+        assert!(rows[0].stdout.as_deref().unwrap().contains("partial-out"));
+        assert!(rows[0].stderr.as_deref().unwrap().contains("boom"));
+    }
+
+    // VAL-TARGET-004: a process that cannot start (interpreter not found on the
+    // child's PATH) is failed, with exit_code NULL and a non-empty error. We
+    // install a Python artifact and override the child's PATH to a directory
+    // with no `python3`, so the exec of the interpreter itself fails (a genuine
+    // spawn failure, distinct from a script exiting non-zero).
+    #[tokio::test]
+    async fn spawn_failure_is_failed_with_null_exit_and_error() {
+        let env = setup().await;
+
+        let src_dir = tempdir().unwrap();
+        let entry = src_dir.path().join("main.py");
+        tokio::fs::write(&entry, "print('never runs')\n")
+            .await
+            .unwrap();
+
+        let artifact = env
+            .artifact_service
+            .create_artifact(CreateArtifactRequest {
+                name: format!("py-{}", uuid::Uuid::new_v4()),
+                description: None,
+                artifact_type: ArtifactType::Python,
+                entry_file: "main.py".to_string(),
+                source_path: Some(src_dir.path().to_string_lossy().to_string()),
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: Some(ExecutionConfig {
+                    args: vec![],
+                    env: HashMap::new(),
+                    permissions: vec![],
+                    timeout: 5000,
+                }),
+                tags: None,
+                icon: None,
+            })
+            .await
+            .unwrap();
+        env.artifact_service
+            .install_artifact(InstallArtifactRequest {
+                artifact_id: artifact.id.clone(),
+                model_id: None,
+                provider_id: None,
+            })
+            .await
+            .unwrap();
+
+        // Override the child's PATH to a guaranteed-empty location so `python3`
+        // cannot be resolved; the interpreter exec fails rather than the script
+        // exiting non-zero.
+        let mut bad_env = HashMap::new();
+        bad_env.insert("PATH".to_string(), "/nonexistent-handbox-path".to_string());
+        let target = JobTarget::Artifact {
+            artifact_id: artifact.id.clone(),
+            args: vec![],
+            env: bad_env,
+        };
+        let job = make_job("job_spawn", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.exit_code, None, "spawn failure => no exit code");
+        assert!(
+            exec.error
+                .as_deref()
+                .map(|e| !e.is_empty())
+                .unwrap_or(false),
+            "spawn failure must carry a non-empty error, got {:?}",
+            exec.error
+        );
+
+        let rows = read_rows(&env, "job_spawn").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+        assert_eq!(rows[0].exit_code, None);
+        assert!(rows[0].error.is_some());
+    }
+
+    // VAL-TARGET-016: a never-installed artifact target is failed with an
+    // "not installed" error.
+    #[tokio::test]
+    async fn never_installed_artifact_is_failed_with_error() {
+        let env = setup().await;
+        // Create but do NOT install.
+        let artifact = env
+            .artifact_service
+            .create_artifact(CreateArtifactRequest {
+                name: format!("uninstalled-{}", uuid::Uuid::new_v4()),
+                description: None,
+                artifact_type: ArtifactType::Shell,
+                entry_file: "main.sh".to_string(),
+                source_path: None,
+                model_id: None,
+                provider_id: None,
+                system_prompt: None,
+                model_parameters: None,
+                tools: None,
+                execution_config: Some(ExecutionConfig::default()),
+                tags: None,
+                icon: None,
+            })
+            .await
+            .unwrap();
+
+        let job = make_job("job_uninstalled", artifact_target(&artifact.id)).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.exit_code, None);
+        let err = exec.error.as_deref().unwrap_or_default();
+        assert!(
+            err.to_lowercase().contains("install"),
+            "error should mention installation, got: {}",
+            err
+        );
+
+        let rows = read_rows(&env, "job_uninstalled").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+        assert!(rows[0].error.is_some());
+    }
+
+    // VAL-TARGET-015: a target referencing a completely unknown artifact id is
+    // failed with a non-empty error.
+    #[tokio::test]
+    async fn missing_artifact_is_failed_with_error() {
+        let env = setup().await;
+        let job = make_job("job_missing", artifact_target("does-not-exist")).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert!(exec
+            .error
+            .as_deref()
+            .map(|e| !e.is_empty())
+            .unwrap_or(false));
+
+        let rows = read_rows(&env, "job_missing").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+        assert!(rows[0].error.is_some());
+    }
+
+    // VAL-TARGET-028: args containing spaces/quotes are passed as a single argv
+    // each (no shell), so they reach the program verbatim with no injection.
+    #[tokio::test]
+    async fn args_with_spaces_and_quotes_passed_as_single_argv() {
+        let env = setup().await;
+        // Echo each positional arg on its own line so we can count and inspect.
+        let artifact_id =
+            install_shell_artifact(&env, "for a in \"$@\"; do echo \"ARG:$a\"; done\nexit 0\n")
+                .await;
+
+        let injected = "; touch /tmp/handbox_pwned";
+        let target = JobTarget::Artifact {
+            artifact_id: artifact_id.clone(),
+            args: vec![
+                "hello world".to_string(),
+                "with \"quotes\"".to_string(),
+                injected.to_string(),
+            ],
+            env: HashMap::new(),
+        };
+        let job = make_job("job_args", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        let stdout = exec.stdout.as_deref().unwrap();
+        // Exactly three args arrived, each intact (spaces/quotes preserved).
+        assert!(stdout.contains("ARG:hello world"));
+        assert!(stdout.contains("ARG:with \"quotes\""));
+        assert!(stdout.contains(&format!("ARG:{}", injected)));
+        // The injection string was treated as data, not executed: it appears as
+        // a single argument, and the shell never created the marker file.
+        assert!(!std::path::Path::new("/tmp/handbox_pwned").exists());
+        let arg_lines = stdout.lines().filter(|l| l.starts_with("ARG:")).count();
+        assert_eq!(arg_lines, 3, "exactly three argv entries");
+    }
+
+    // VAL-TARGET-029: env with an empty value and (effectively) overlapping keys
+    // does not crash; execution still completes.
+    #[tokio::test]
+    async fn env_with_empty_value_does_not_crash() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(
+            &env,
+            "echo \"EMPTY=[$EMPTY_VAR]\"\necho \"SET=[$SET_VAR]\"\nexit 0\n",
+        )
+        .await;
+
+        // HashMap cannot hold duplicate keys, but an empty value is the boundary
+        // we can express through the typed target; assert it round-trips and the
+        // run still succeeds.
+        let mut env_map = HashMap::new();
+        env_map.insert("EMPTY_VAR".to_string(), String::new());
+        env_map.insert("SET_VAR".to_string(), "present".to_string());
+        let target = JobTarget::Artifact {
+            artifact_id: artifact_id.clone(),
+            args: vec![],
+            env: env_map,
+        };
+        let job = make_job("job_env", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(
+            exec.status,
+            ExecutionStatus::Success,
+            "error: {:?}",
+            exec.error
+        );
+        let stdout = exec.stdout.as_deref().unwrap();
+        assert!(stdout.contains("EMPTY=[]"));
+        assert!(stdout.contains("SET=[present]"));
+    }
+
+    // VAL-HISTORY-009 / VAL-HISTORY-010: the running row is inserted up front
+    // (ended_at NULL) and then the SAME row id flips to terminal in place — one
+    // row total. Verified by inspecting the row mid-flight via a slow script.
+    #[tokio::test]
+    async fn running_row_starts_then_updates_same_id() {
+        let env = setup().await;
+        // A script slow enough to observe the running row before it finalizes.
+        let artifact_id = install_shell_artifact(&env, "sleep 0.3\necho done\nexit 0\n").await;
+        let job = make_job("job_running", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        // Run the executor concurrently; poll the DB for the running row.
+        let job_clone = job.clone();
+        let executor = env.executor.clone();
+        let handle =
+            tokio::spawn(async move { executor.execute(&job_clone, Trigger::Schedule).await });
+
+        // Poll until a running row appears (ended_at NULL).
+        let mut running_id = None;
+        for _ in 0..50 {
+            let rows = read_rows(&env, "job_running").await;
+            if let Some(row) = rows.iter().find(|r| r.status == "running") {
+                assert_eq!(row.ended_at, None, "running row has NULL ended_at");
+                running_id = Some(row.id.clone());
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let running_id = running_id.expect("a running row should appear mid-flight");
+
+        let exec = handle.await.unwrap().expect("execute");
+
+        // The finalized execution reuses the SAME id, and exactly one row exists.
+        assert_eq!(exec.id, running_id, "finalize updates the same row id");
+        let rows = read_rows(&env, "job_running").await;
+        assert_eq!(rows.len(), 1, "start-then-update, never a second row");
+        assert_eq!(rows[0].id, running_id);
+        assert_eq!(rows[0].status, "success");
+        assert!(rows[0].ended_at.is_some());
+    }
+
+    // The agent target is an explicit "unsupported in M1" failure (placeholder
+    // until M3), recorded as a failed row rather than a panic.
+    #[tokio::test]
+    async fn agent_target_is_unsupported_in_m1() {
+        let env = setup().await;
+        let target = JobTarget::Agent {
+            agent_id: "agent_1".to_string(),
+            initial_message: "go".to_string(),
+            project_id: None,
+        };
+        let job = make_job("job_agent", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        let err = exec.error.as_deref().unwrap_or_default();
+        assert!(err.contains("agent"));
+        assert!(err.to_lowercase().contains("m1") || err.to_lowercase().contains("supported"));
+
+        let rows = read_rows(&env, "job_agent").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+    }
+
+    // The prompt target is likewise an explicit "unsupported in M1" failure.
+    #[tokio::test]
+    async fn prompt_target_is_unsupported_in_m1() {
+        let env = setup().await;
+        let target = JobTarget::Prompt {
+            provider_id: "openai".to_string(),
+            model_id: "gpt-4".to_string(),
+            prompt: "summarize".to_string(),
+            session_strategy: SessionStrategy::NewSession,
+        };
+        let job = make_job("job_prompt", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert!(exec.error.as_deref().unwrap_or_default().contains("prompt"));
+    }
+
+    // Job-level statistics are updated after a run: run_count increments,
+    // last_status/last_run_at are set, failure_count tracks failures, and
+    // next_run_at is preserved (the executor does NOT recompute cron).
+    #[tokio::test]
+    async fn updates_job_statistics_after_run() {
+        let env = setup().await;
+        let ok_id = install_shell_artifact(&env, "echo ok\nexit 0\n").await;
+        let fail_id = install_shell_artifact(&env, "exit 1\n").await;
+
+        // Success run.
+        let mut success_job = make_job("job_stats", artifact_target(&ok_id)).await;
+        success_job.next_run_at = Some(123_456);
+        seed_job(&env, &success_job).await;
+
+        env.executor
+            .execute(&success_job, Trigger::Schedule)
+            .await
+            .unwrap();
+
+        let after = env.executor.jobs.get("job_stats").await.unwrap().unwrap();
+        assert_eq!(after.run_count, 1);
+        assert_eq!(after.failure_count, 0);
+        assert_eq!(after.last_status, Some(ExecutionStatus::Success));
+        assert!(after.last_run_at.is_some());
+        assert_eq!(
+            after.next_run_at,
+            Some(123_456),
+            "executor preserves next_run_at; scheduler owns cron recompute"
+        );
+
+        // Failure run: failure_count increments.
+        let fail_job = make_job("job_stats_fail", artifact_target(&fail_id)).await;
+        seed_job(&env, &fail_job).await;
+        env.executor
+            .execute(&fail_job, Trigger::Schedule)
+            .await
+            .unwrap();
+        let after_fail = env
+            .executor
+            .jobs
+            .get("job_stats_fail")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after_fail.run_count, 1);
+        assert_eq!(after_fail.failure_count, 1);
+        assert_eq!(after_fail.last_status, Some(ExecutionStatus::Failed));
+    }
+}
