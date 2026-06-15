@@ -4,9 +4,20 @@
   import { jobStore } from "$lib/stores/jobStore.svelte";
   import JobCard from "$lib/components/jobs/JobCard.svelte";
   import Button from "$lib/components/ui/Button.svelte";
+  import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
+  import JobFormModal from "$lib/components/jobs/JobFormModal.svelte";
+  import type { JobFormData } from "$lib/components/jobs/JobFormModal.svelte";
   import type { Job } from "$lib/types";
 
   let searchQuery = $state("");
+
+  // Modal 状态：创建/编辑共用一个 JobFormModal（job 为 null → 创建）。
+  let showFormModal = $state(false);
+  let editingJob = $state<Job | null>(null);
+  let showDeleteConfirm = $state(false);
+  let deletingJob = $state<Job | null>(null);
+  let deleting = $state(false);
+  let deleteError = $state<string | null>(null);
 
   // 搜索按名称、大小写不敏感
   const filteredJobs = $derived.by(() => {
@@ -30,17 +41,87 @@
     }
   }
 
-  // 新建/编辑/删除 Modal 由 job-form-modal feature 接入；此处仅占位。
   function handleCreate() {
-    // TODO(job-form-modal): 打开 JobFormModal（创建模式）
+    editingJob = null;
+    showFormModal = true;
   }
 
-  function handleEdit(_job: Job) {
-    // TODO(job-form-modal): 打开 JobFormModal（编辑模式，预填 _job）
+  function handleEdit(job: Job) {
+    editingJob = job;
+    showFormModal = true;
   }
 
-  function handleDelete(_job: Job) {
-    // TODO(job-form-modal): 打开删除确认 Modal
+  function handleDelete(job: Job) {
+    deletingJob = job;
+    deleteError = null;
+    showDeleteConfirm = true;
+  }
+
+  function closeDeleteConfirm() {
+    showDeleteConfirm = false;
+    deletingJob = null;
+    deleteError = null;
+  }
+
+  // ConfirmModal 以 {@html message} 渲染；后端错误文案虽非用户输入，仍转义后再注入。
+  function escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  const deleteMessage = $derived(
+    deleteError
+      ? `<span class="text-error">${escapeHtml(deleteError)}</span>`
+      : "确定要删除这个任务吗？此操作无法撤销。",
+  );
+
+  function closeFormModal() {
+    showFormModal = false;
+    editingJob = null;
+  }
+
+  /**
+   * 保存桥接：落库成功后 store 自动 upsert 列表。失败时 throw 给 JobFormModal，
+   * 由其捕获并展示错误且保持表单打开——不在落库前乐观更新，避免 ghost 卡片。
+   */
+  async function handleSave(data: JobFormData): Promise<void> {
+    if (editingJob?.id) {
+      await jobStore.update(editingJob.id, {
+        name: data.name,
+        description: data.description,
+        target: data.target,
+        cronExpr: data.cronExpr,
+        timezone: data.timezone,
+        enabled: data.enabled,
+      });
+    } else {
+      await jobStore.create({
+        name: data.name,
+        description: data.description,
+        target: data.target,
+        cronExpr: data.cronExpr,
+        timezone: data.timezone,
+        enabled: data.enabled,
+      });
+    }
+  }
+
+  async function confirmDelete(): Promise<void> {
+    if (!deletingJob?.id) return;
+    deleting = true;
+    deleteError = null;
+    try {
+      await jobStore.delete(deletingJob.id);
+      closeDeleteConfirm();
+    } catch (e) {
+      // 删除失败：行保留（store 不移除），错误就地展示在确认框内，不关闭。
+      console.error("Failed to delete job:", e);
+      deleteError = jobStore.error ?? "删除失败，请重试";
+    } finally {
+      deleting = false;
+    }
   }
 
   onMount(() => {
@@ -137,3 +218,26 @@
     {/if}
   </div>
 </div>
+
+<!-- 任务表单 Modal（创建/编辑共用） -->
+<JobFormModal
+  open={showFormModal}
+  job={editingJob}
+  onClose={closeFormModal}
+  onSave={handleSave}
+/>
+
+<!-- 删除确认模态框 -->
+<ConfirmModal
+  title="删除任务"
+  message={deleteMessage}
+  confirmText="删除"
+  cancelText="取消"
+  confirmButtonStyle="danger"
+  isLoading={deleting}
+  autoCloseOnConfirm={false}
+  open={showDeleteConfirm}
+  onClose={closeDeleteConfirm}
+  onCancel={closeDeleteConfirm}
+  onConfirm={confirmDelete}
+/>

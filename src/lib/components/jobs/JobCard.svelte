@@ -64,6 +64,7 @@
       <button
         class="p-1.5 rounded-lg hover:bg-base-100 text-base-content/60 hover:text-base-content transition-colors"
         onclick={() => onEdit(job)}
+        aria-label={`编辑任务 ${job.name}`}
         title="编辑"
       >
         <Pencil size={14} />
@@ -71,6 +72,7 @@
       <button
         class="p-1.5 rounded-lg hover:bg-error/10 text-base-content/60 hover:text-error transition-colors"
         onclick={() => onDelete(job)}
+        aria-label={`删除任务 ${job.name}`}
         title="删除"
       >
         <Trash2 size={14} />
