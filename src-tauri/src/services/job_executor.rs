@@ -37,8 +37,31 @@ use crate::storage::types::{
     ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution, JobTarget, Timestamp, Trigger,
 };
 use crate::storage::{JobExecutionRepository, JobRepository};
-use tauri::{Runtime, Wry};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Runtime, Wry};
 use tokio::sync::Mutex;
+
+/// Frontend event channel: emitted when an execution's lifecycle state changes
+/// (a `running` row is written, then the SAME row reaches its terminal state).
+/// The app wires an `AppHandle` so the executor — which runs on the background
+/// scheduler / run-now paths, with no `Window` — can broadcast to every window.
+pub const JOB_EXECUTED_EVENT: &str = "job_executed";
+
+/// Payload of [`JOB_EXECUTED_EVENT`]. `jobId` lets the `/jobs` list refresh the
+/// matching card; `executionId` lets the open detail timeline flip the matching
+/// row in place (matched by id, so expansion / scroll are preserved). `status`
+/// is the row's current state (`running` on start, terminal on completion).
+///
+/// The frontend treats the `job_execution_list` command as the source of truth
+/// and uses this event only as a refresh trigger — a missed event cannot corrupt
+/// state (VAL-HISTORY-030).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobExecutedEvent {
+    pub job_id: String,
+    pub execution_id: String,
+    pub status: ExecutionStatus,
+}
 
 /// The terminal outcome of dispatching a job's target, before it is persisted.
 ///
@@ -70,6 +93,12 @@ pub struct JobExecutor<R: Runtime = Wry> {
     /// `Arc`), so a job already running cannot be re-dispatched by any path.
     /// Claimed via [`JobExecutor::try_claim`]; released by [`InFlightGuard`].
     in_flight: Arc<Mutex<HashSet<String>>>,
+    /// Optional handle used to broadcast [`JOB_EXECUTED_EVENT`] to all windows
+    /// when an execution starts and completes. `None` in unit tests (the
+    /// `MockRuntime` setup builds the executor without one) so emit is a clean
+    /// no-op and the existing executor tests are untouched; the app wiring
+    /// injects a real handle via [`JobExecutor::with_app_handle`].
+    app_handle: Option<AppHandle<R>>,
 }
 
 // Manual `Clone` so the bound is on the fields, not on `R: Clone`. Tauri
@@ -85,6 +114,7 @@ impl<R: Runtime> Clone for JobExecutor<R> {
             jobs: self.jobs.clone(),
             executions: self.executions.clone(),
             in_flight: self.in_flight.clone(),
+            app_handle: self.app_handle.clone(),
         }
     }
 }
@@ -102,6 +132,7 @@ impl<R: Runtime> JobExecutor<R> {
             jobs,
             executions,
             in_flight: Arc::new(Mutex::new(HashSet::new())),
+            app_handle: None,
         }
     }
 
@@ -117,6 +148,36 @@ impl<R: Runtime> JobExecutor<R> {
             JobRepository::new(db.clone()),
             JobExecutionRepository::new(db),
         )
+    }
+
+    /// Attach an `AppHandle` so each execution start / completion broadcasts a
+    /// [`JOB_EXECUTED_EVENT`] to all windows. Consuming builder used by the app
+    /// wiring; without it (unit tests) emit is a no-op.
+    pub fn with_app_handle(mut self, app_handle: AppHandle<R>) -> Self {
+        self.app_handle = Some(app_handle);
+        self
+    }
+
+    /// Broadcast a [`JOB_EXECUTED_EVENT`] when one is wired. A clean no-op when
+    /// no `AppHandle` is attached (unit tests) and best-effort otherwise: an
+    /// emit failure is logged and swallowed, never failing the execution — the
+    /// `job_execution_list` command stays the source of truth (VAL-HISTORY-030).
+    fn emit_executed(&self, job_id: &str, execution_id: &str, status: ExecutionStatus) {
+        let Some(handle) = self.app_handle.as_ref() else {
+            return;
+        };
+        let payload = JobExecutedEvent {
+            job_id: job_id.to_string(),
+            execution_id: execution_id.to_string(),
+            status,
+        };
+        if let Err(e) = handle.emit(JOB_EXECUTED_EVENT, payload) {
+            tracing::warn!(
+                "[job_executor] failed to emit {}: {}",
+                JOB_EXECUTED_EVENT,
+                e
+            );
+        }
     }
 
     /// Try to reserve `job_id`'s in-flight slot, returning an [`InFlightGuard`]
@@ -201,6 +262,10 @@ impl<R: Runtime> JobExecutor<R> {
             )
             .await?;
 
+        // Tell an open detail timeline a `running` row exists now, so it can be
+        // shown immediately and later flipped in place to its terminal state.
+        self.emit_executed(&job.id, &exec_id, ExecutionStatus::Running);
+
         let outcome = self.dispatch(job).await;
 
         let ended_at = current_timestamp();
@@ -234,6 +299,11 @@ impl<R: Runtime> JobExecutor<R> {
         self.executions
             .prune_to(&job.id, DEFAULT_EXECUTION_HISTORY_LIMIT)
             .await?;
+
+        // All writes are settled (row finalized + job stats updated + history
+        // pruned): tell an open timeline to flip the SAME row to its terminal
+        // state in place and the `/jobs` list to refresh the matching card.
+        self.emit_executed(&job.id, &exec_id, outcome.status);
 
         Ok(JobExecution {
             id: exec_id,
@@ -1403,6 +1473,63 @@ mod tests {
             .try_get(0)
             .unwrap();
         assert_eq!(count, 0, "deleting the job cascades away its executions");
+    }
+
+    // ---- Realtime `job_executed` event contract (M2) ----
+
+    // The event channel name and payload shape are the wire contract the
+    // frontend listens on; a typo or a casing drift silently breaks the
+    // realtime detail/list refresh. Pin both: channel name and the camelCase
+    // payload keys with a snake_case `status` value.
+    #[test]
+    fn job_executed_event_name_is_pinned() {
+        assert_eq!(JOB_EXECUTED_EVENT, "job_executed");
+    }
+
+    #[test]
+    fn job_executed_payload_serializes_camel_case_with_snake_status() {
+        let payload = JobExecutedEvent {
+            job_id: "job_1".to_string(),
+            execution_id: "exec_1".to_string(),
+            status: ExecutionStatus::Running,
+        };
+        let value = serde_json::to_value(&payload).unwrap();
+        assert_eq!(value["jobId"], "job_1");
+        assert_eq!(value["executionId"], "exec_1");
+        assert_eq!(value["status"], "running");
+
+        let terminal = JobExecutedEvent {
+            job_id: "job_1".to_string(),
+            execution_id: "exec_1".to_string(),
+            status: ExecutionStatus::Success,
+        };
+        assert_eq!(
+            serde_json::to_value(&terminal).unwrap()["status"],
+            "success"
+        );
+    }
+
+    // Without an `AppHandle` (the unit-test wiring), `execute` still runs and
+    // persists exactly one terminal row — emit is a clean no-op, so the existing
+    // executor tests are never destabilized by the new event path.
+    #[tokio::test]
+    async fn execute_without_app_handle_emits_nothing_and_still_records() {
+        let env = setup().await;
+        // `setup` builds the executor via `from_db` — no AppHandle attached.
+        assert!(
+            env.executor.app_handle.is_none(),
+            "the test executor has no AppHandle, so emit must be a no-op"
+        );
+        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
+        let job = make_job("job_noemit", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        let rows = read_rows(&env, "job_noemit").await;
+        assert_eq!(rows.len(), 1, "one terminal row even with emit as no-op");
+        assert_eq!(rows[0].status, "success");
     }
 
     // The in-flight set is SHARED across every clone of an executor (it lives

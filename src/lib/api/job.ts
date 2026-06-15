@@ -14,7 +14,15 @@
  */
 
 import { apiCall } from "./index";
-import type { Job, JobExecution, JobTarget, Timestamp, UUID } from "../types";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type {
+  ExecutionStatus,
+  Job,
+  JobExecution,
+  JobTarget,
+  Timestamp,
+  UUID,
+} from "../types";
 
 /** 创建任务的入参（对应后端 `JobCreatePayload`，字段 camelCase）。 */
 export interface JobCreateInput {
@@ -106,4 +114,31 @@ export async function listExecutions(
  */
 export async function runNow(jobId: UUID): Promise<JobExecution> {
   return apiCall<JobExecution>("job_run_now", { jobId });
+}
+
+/**
+ * `job_executed` 事件 payload（镜像后端 `JobExecutedEvent`）。
+ * 执行开始（写入 running 行）与完成（终态）时各 emit 一次：
+ * - `jobId`：让 /jobs 列表知道刷新哪张卡片；
+ * - `executionId`：让打开的详情时间线按 id 匹配并原地翻转该行；
+ * - `status`：该行当前状态（开始为 `running`，完成为终态）。
+ */
+export interface JobExecutedEvent {
+  jobId: UUID;
+  executionId: UUID;
+  status: ExecutionStatus;
+}
+
+/**
+ * 订阅 `job_executed` 事件。返回的 `UnlistenFn` 必须在组件卸载时调用以取消订阅。
+ *
+ * 该事件仅作为「实时刷新触发器」——事实来源始终是 `job_execution_list` /
+ * `job_get` 命令，错过一次事件不会导致状态错乱（VAL-HISTORY-030）。
+ */
+export async function listenJobExecuted(
+  handler: (payload: JobExecutedEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<JobExecutedEvent>("job_executed", (event) => {
+    handler(event.payload);
+  });
 }
