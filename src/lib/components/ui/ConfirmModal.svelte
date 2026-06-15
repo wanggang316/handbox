@@ -61,44 +61,6 @@
     onClose();
   }
 
-  // 根据按钮样式设置颜色
-  const getButtonColors = (style?: string) => {
-    switch (style) {
-      case "danger":
-        return {
-          bgColor: "bg-error",
-          textColor: "text-base-100",
-          hoverColor: "hover:bg-error/90",
-        };
-      case "accent":
-        return {
-          bgColor: "bg-accent",
-          textColor: "text-accent-content",
-          hoverColor: "hover:bg-accent/90",
-        };
-      case "primary":
-        return {
-          bgColor: "bg-primary",
-          textColor: "text-primary-content",
-          hoverColor: "hover:bg-primary/90",
-        };
-      case "secondary":
-        return {
-          bgColor: "bg-base-300",
-          textColor: "text-base-content/80",
-          hoverColor: "hover:bg-base-300/80",
-        };
-      default:
-        return {
-          bgColor: "bg-primary",
-          textColor: "text-primary-content",
-          hoverColor: "hover:bg-primary/90",
-        };
-    }
-  };
-
-  const confirmColors = getButtonColors(confirmButtonStyle);
-
   // 处理自定义操作按钮点击
   function handleActionClick(action: ActionButton) {
     action.onClick();
@@ -130,15 +92,12 @@
       <!-- 多个操作按钮：垂直排列 -->
       <div class="flex flex-col gap-2 px-6 pt-2 pb-4">
         {#each actions as action}
-          {@const colors = getButtonColors(action.style)}
           <RoundButton
             customClass="w-full"
             label={action.label}
             size="h-9"
             fontSize="text-sm"
-            bgColor={colors.bgColor}
-            textColor={colors.textColor}
-            hoverColor={colors.hoverColor}
+            variant={action.style ?? "primary"}
             disabled={isLoading}
             onclick={() => handleActionClick(action)}
           />
@@ -152,9 +111,7 @@
           label={cancelText}
           size="h-8"
           fontSize="text-sm"
-          bgColor="bg-base-300"
-          textColor="text-base-content/80"
-          hoverColor="hover:bg-base-300/80"
+          variant="secondary"
           onclick={handleCancel}
         />
         <RoundButton
@@ -162,9 +119,7 @@
           size="h-8"
           fontSize="text-sm"
           label={isLoading ? "处理中..." : confirmText}
-          bgColor={confirmColors.bgColor}
-          textColor={confirmColors.textColor}
-          hoverColor={confirmColors.hoverColor}
+          variant={confirmButtonStyle}
           disabled={isLoading}
           onclick={handleConfirm}
         />

@@ -2,19 +2,72 @@
   import type { Icon as IconType } from "@lucide/svelte";
   import { Loader } from "@lucide/svelte";
 
-  export let label: string;
-  export let icon: typeof IconType | undefined = undefined;
-  export let iconSize: number = 16;
-  export let bgColor: string = "bg-primary";
-  export let hoverColor: string = "hover:opacity-90";
-  export let textColor: string = "text-primary-content";
-  export let size: string = "h-10";
-  export let rounded: string = "rounded-full";
-  export let fontSize: string = "text-[16px]";
-  export let disabled: boolean = false;
-  export let loading: boolean = false;
-  export let customClass: string = "";
-  export let onclick: ((event: MouseEvent) => void) | undefined = undefined;
+  type Variant = "primary" | "accent" | "danger" | "secondary";
+
+  type VariantClasses = {
+    bg: string;
+    text: string;
+    hover: string;
+  };
+
+  // Authoritative variant → class map (lifted from ConfirmModal's former
+  // color helper). Reproduces the exact rest + hover colors per variant.
+  const VARIANT_CLASSES: Record<Variant, VariantClasses> = {
+    primary: {
+      bg: "bg-primary",
+      text: "text-primary-content",
+      hover: "hover:opacity-90",
+    },
+    accent: {
+      bg: "bg-accent",
+      text: "text-accent-content",
+      hover: "hover:bg-accent/90",
+    },
+    danger: {
+      bg: "bg-error",
+      text: "text-base-100",
+      hover: "hover:bg-error/90",
+    },
+    secondary: {
+      bg: "bg-base-300",
+      text: "text-base-content/80",
+      hover: "hover:bg-base-300/80",
+    },
+  };
+
+  interface Props {
+    label: string;
+    icon?: typeof IconType;
+    iconSize?: number;
+    variant?: Variant;
+    size?: string;
+    rounded?: string;
+    fontSize?: string;
+    disabled?: boolean;
+    loading?: boolean;
+    customClass?: string;
+    onclick?: (event: MouseEvent) => void;
+  }
+
+  let {
+    label,
+    icon = undefined,
+    iconSize = 16,
+    variant = "primary",
+    size = "h-10",
+    rounded = "rounded-full",
+    fontSize = "text-[16px]",
+    disabled = false,
+    loading = false,
+    customClass = "",
+    onclick = undefined,
+  }: Props = $props();
+
+  const colors = $derived(VARIANT_CLASSES[variant]);
+  const inactive = $derived(disabled || loading);
+  // Hover class only applies while interactive; reproduces the exact
+  // per-variant hover token (e.g. hover:bg-accent/90).
+  const hoverClass = $derived(inactive ? "" : colors.hover);
 
   function handleClick(event: MouseEvent) {
     if (!disabled && !loading) {
@@ -24,18 +77,12 @@
 </script>
 
 <button
-  class="{size} {bgColor} {textColor} {rounded} {fontSize} flex items-center justify-center gap-1.5 disabled:bg-base-300 {customClass}"
-  class:hover:opacity-90={!disabled &&
-    !loading &&
-    hoverColor === "hover:opacity-90"}
-  class:hover:bg-opacity-90={!disabled &&
-    !loading &&
-    hoverColor !== "hover:opacity-90"}
-  class:opacity-50={disabled || loading}
-  class:cursor-not-allowed={disabled || loading}
-  class:pointer-events-none={disabled || loading}
-  on:click={handleClick}
-  disabled={disabled || loading}
+  class="{size} {colors.bg} {colors.text} {rounded} {fontSize} {hoverClass} flex items-center justify-center gap-1.5 disabled:bg-base-300 {customClass}"
+  class:opacity-50={inactive}
+  class:cursor-not-allowed={inactive}
+  class:pointer-events-none={inactive}
+  onclick={handleClick}
+  disabled={inactive}
 >
   {#if loading}
     <Loader size={iconSize} class="animate-spin" />
