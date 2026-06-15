@@ -31,16 +31,19 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::models::{AppError, UserMessageSendRequest};
-use crate::services::{ArtifactService, MessageService, ProviderService, SessionService};
+use crate::services::{
+    AgentRuntime, AgentService, AgentSessionService, ArtifactService, MessageService,
+    ProviderService, RunSink, SessionService,
+};
 use crate::storage::job_repository::DEFAULT_EXECUTION_HISTORY_LIMIT;
 use crate::storage::types::{
-    ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution, JobTarget, Provider, Timestamp,
-    Trigger,
+    CreateAgentSessionRequest, ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution,
+    JobTarget, Provider, Timestamp, Trigger,
 };
 use crate::storage::{JobExecutionRepository, JobRepository};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, Wry};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 /// Frontend event channel: emitted when an execution's lifecycle state changes
 /// (a `running` row is written, then the SAME row reaches its terminal state).
@@ -107,6 +110,14 @@ pub struct JobExecutor<R: Runtime = Wry> {
     /// absent, a `prompt` dispatch fails with a stable "not configured" error
     /// rather than panicking — the same shape as any other prompt failure.
     prompt_services: Option<PromptServices>,
+    /// Collaborators for the `agent` target: resolve the agent template, mint a
+    /// fresh isolated agent session from it, and drive one run to completion.
+    /// `None` in the unit wiring (`from_db`) so the artifact-only tests keep
+    /// building; the app injects real handles via
+    /// [`JobExecutor::with_agent_services`]. When absent, an `agent` dispatch
+    /// fails with a stable "not configured" error rather than panicking — the
+    /// same shape as any other agent failure.
+    agent_services: Option<AgentServices>,
 }
 
 /// The three services the `prompt` target needs, bundled so the field stays a
@@ -116,6 +127,26 @@ pub struct JobExecutor<R: Runtime = Wry> {
 struct PromptServices {
     sessions: Arc<SessionService>,
     messages: Arc<MessageService>,
+    providers: Arc<ProviderService>,
+}
+
+/// The collaborators the `agent` target needs, bundled so the field stays a
+/// single `Option`. All are `Arc`-shared (cheap clones); none is generic over
+/// the Tauri `Runtime`.
+///
+/// `runtime` is a dedicated [`AgentRuntime`] for the executor (NOT the
+/// app-managed one): `AgentRuntime` is not `Clone`, and its per-session run
+/// registry need not be shared with the foreground agent UI — every job run
+/// mints a brand-new session, so there is never a registry collision. `agents`
+/// resolves the agent template referenced by the target; `sessions` mints the
+/// per-run session from that template and reads the persisted transcript back
+/// to classify the terminal outcome; `providers` resolves a usable provider for
+/// the template's model (the template stores only a model id).
+#[derive(Clone)]
+struct AgentServices {
+    runtime: Arc<AgentRuntime>,
+    agents: Arc<AgentService>,
+    sessions: Arc<AgentSessionService>,
     providers: Arc<ProviderService>,
 }
 
@@ -134,6 +165,7 @@ impl<R: Runtime> Clone for JobExecutor<R> {
             in_flight: self.in_flight.clone(),
             app_handle: self.app_handle.clone(),
             prompt_services: self.prompt_services.clone(),
+            agent_services: self.agent_services.clone(),
         }
     }
 }
@@ -153,6 +185,7 @@ impl<R: Runtime> JobExecutor<R> {
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             app_handle: None,
             prompt_services: None,
+            agent_services: None,
         }
     }
 
@@ -192,6 +225,27 @@ impl<R: Runtime> JobExecutor<R> {
         self.prompt_services = Some(PromptServices {
             sessions,
             messages,
+            providers,
+        });
+        self
+    }
+
+    /// Inject the collaborators the `agent` target needs (resolve the template,
+    /// mint a fresh session, drive one run to completion). Consuming builder used
+    /// by the app wiring; without it (artifact-only unit wiring) an `agent`
+    /// dispatch fails cleanly rather than running. `runtime` is a dedicated
+    /// [`AgentRuntime`] for the executor — see [`AgentServices`].
+    pub fn with_agent_services(
+        mut self,
+        runtime: Arc<AgentRuntime>,
+        agents: Arc<AgentService>,
+        sessions: Arc<AgentSessionService>,
+        providers: Arc<ProviderService>,
+    ) -> Self {
+        self.agent_services = Some(AgentServices {
+            runtime,
+            agents,
+            sessions,
             providers,
         });
         self
@@ -373,7 +427,14 @@ impl<R: Runtime> JobExecutor<R> {
                 args,
                 env,
             } => self.dispatch_artifact(artifact_id, args, env).await,
-            JobTarget::Agent { .. } => DispatchOutcome::failed(unsupported_target_message("agent")),
+            JobTarget::Agent {
+                agent_id,
+                initial_message,
+                project_id,
+            } => {
+                self.dispatch_agent(agent_id, initial_message, project_id.as_deref())
+                    .await
+            }
             JobTarget::Prompt {
                 provider_id,
                 model_id,
@@ -550,6 +611,241 @@ impl<R: Runtime> JobExecutor<R> {
         }
     }
 
+    /// Run an `agent` target: resolve the agent template, mint a fresh isolated
+    /// agent session from it, drive ONE run to completion, then classify the
+    /// terminal outcome from the persisted transcript.
+    ///
+    /// Flow (VAL-TARGET-006 / 020 / 021 / 024 / 031):
+    /// 1. resolve the template (`AgentService::get_agent`); a missing template is
+    ///    a distinct "template missing" failure with NO session created
+    ///    (VAL-TARGET-020);
+    /// 2. resolve a usable provider for the template's model — the template
+    ///    stores only a model id — failing pre-flight with a model/config-class
+    ///    error (distinct from "template missing") when the model is unset or no
+    ///    enabled provider serves it (VAL-TARGET-021), again with NO session
+    ///    created;
+    /// 3. mint a fresh isolated session carrying the template's model + the
+    ///    resolved provider + system prompt / sampling config — never reused, so
+    ///    two jobs in the same tick get distinct sessions and the
+    ///    one-run-per-session race is moot;
+    /// 4. build a oneshot-signalling [`RunSink`] (its `on_closed` fires the
+    ///    oneshot AFTER the transcript is fully persisted; `on_event` /
+    ///    `on_error` are captured), `start_run`, then await the oneshot to block
+    ///    until the turn ends;
+    /// 5. classify: a run-level error envelope (`on_error`, e.g. the provider /
+    ///    model was removed under the runtime) OR an in-band-error terminal
+    ///    assistant turn (`stopReason == "error"`, VAL-TARGET-024) is `failed`;
+    ///    otherwise `success`. In EVERY post-session outcome `result_ref` points
+    ///    at the minted session so its (possibly partial) transcript stays
+    ///    reachable.
+    ///
+    /// SECURITY: every persisted error is a sanitized, stable message. A
+    /// run-level envelope is already sanitized by the runtime
+    /// (`sanitize_agent_error`); a `start_run` / creation `AppError` is run
+    /// through [`sanitize_agent_dispatch_error`], so no raw upstream URL, header,
+    /// or key fragment can reach `job_executions.error` — raw detail goes to
+    /// `tracing` only.
+    async fn dispatch_agent(
+        &self,
+        agent_id: &str,
+        initial_message: &str,
+        project_id: Option<&str>,
+    ) -> DispatchOutcome {
+        let Some(services) = self.agent_services.as_ref() else {
+            // No agent collaborators wired (artifact-only unit harness): fail
+            // cleanly with a stable, non-leaking message rather than panic.
+            return DispatchOutcome::failed(AGENT_NOT_CONFIGURED.to_string());
+        };
+
+        // 1. Resolve the agent template. A missing template is a distinct
+        //    failure class (VAL-TARGET-020) — no session is created.
+        let agent = match services.agents.get_agent(agent_id.to_string()).await {
+            Ok(agent) => agent,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] agent template lookup failed (agent={}): {}",
+                    agent_id,
+                    e
+                );
+                return DispatchOutcome::failed(agent_failure_message(
+                    AgentFailure::TemplateMissing,
+                ));
+            }
+        };
+
+        // 2. Resolve a usable provider for the template's model. The template
+        //    stores only a model id, so we find an enabled provider whose model
+        //    catalog still serves it. An unset model or a removed provider/model
+        //    is a model/config-class failure (VAL-TARGET-021), distinct from a
+        //    missing template — and still no session is created.
+        let provider_id = match self.resolve_agent_provider(&agent.model).await {
+            Ok(provider_id) => provider_id,
+            Err(failure) => return DispatchOutcome::failed(agent_failure_message(failure)),
+        };
+        // `resolve_agent_provider` only returns `Ok` when `agent.model` is set.
+        let model_id = agent.model.clone().unwrap_or_default();
+
+        // 3. Mint a fresh, isolated session from the template (VAL-TARGET-006).
+        let request = CreateAgentSessionRequest {
+            name: agent_session_name(&agent.name),
+            project_id: project_id.map(str::to_string),
+            model_id: Some(model_id),
+            provider_id: Some(provider_id),
+            system_prompt: agent.system_prompt.clone(),
+            thinking_level: None,
+            temperature: agent.temperature,
+            max_tokens: agent.max_tokens,
+            working_dir: None,
+            enabled_tools: None,
+            tool_execution_mode: None,
+        };
+        let session = match services.sessions.create_session(request).await {
+            Ok(session) => session,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] agent session creation failed (agent={}): {}",
+                    agent_id,
+                    e
+                );
+                // No session exists, so there is nothing to reference.
+                return DispatchOutcome::failed(sanitize_agent_dispatch_error(&e));
+            }
+        };
+
+        // 4. Build a oneshot-signalling sink and drive ONE run to completion.
+        //    The sink's `on_closed` fires the oneshot AFTER the transcript is
+        //    fully persisted (the runtime guarantees closed-once, post-persist);
+        //    `on_error` captures a run-level envelope (sanitized by the runtime).
+        let (sink, signal) = oneshot_run_sink();
+        if let Err(e) = services
+            .runtime
+            .start_run(
+                session.id.clone(),
+                initial_message.to_string(),
+                Vec::new(),
+                Vec::new(),
+                sink,
+            )
+            .await
+        {
+            tracing::warn!(
+                "[job_executor] agent start_run failed (session={}, agent={}): {}",
+                session.id,
+                agent_id,
+                e
+            );
+            // The session exists; its (empty) transcript stays reachable.
+            return DispatchOutcome {
+                status: ExecutionStatus::Failed,
+                stdout: None,
+                stderr: None,
+                exit_code: None,
+                error: Some(sanitize_agent_dispatch_error(&e)),
+                result_ref: Some(session.id),
+            };
+        }
+
+        // Block until the turn ends. The oneshot resolves from `on_closed`,
+        // which the runtime fires exactly once after persistence. A `RecvError`
+        // means the sink was dropped without closing (should not happen given
+        // closed-once); treat it as a completed-but-unknown run and fall through
+        // to transcript classification.
+        let run_error = signal.await.unwrap_or(None);
+
+        // 5. Classify the terminal outcome. `result_ref` points at the session
+        //    in every post-creation outcome so its transcript stays reachable.
+        let result_ref = Some(session.id.clone());
+
+        if let Some(envelope_error) = run_error {
+            // Run-level error envelope (e.g. provider/model removed under the
+            // runtime). Already sanitized by the runtime.
+            return DispatchOutcome {
+                status: ExecutionStatus::Failed,
+                stdout: None,
+                stderr: None,
+                exit_code: None,
+                error: Some(envelope_error),
+                result_ref,
+            };
+        }
+
+        // Read the persisted transcript to detect an in-band error terminal turn
+        // (VAL-TARGET-024): the run returns `Ok` but the final assistant message
+        // carries `stopReason == "error"`.
+        let transcript = services.sessions.list_messages(session.id.clone()).await;
+        match classify_agent_transcript(transcript.as_ref()) {
+            AgentRunResult::Success => DispatchOutcome {
+                status: ExecutionStatus::Success,
+                stdout: None,
+                stderr: None,
+                exit_code: None,
+                error: None,
+                result_ref,
+            },
+            AgentRunResult::InBandError => DispatchOutcome {
+                status: ExecutionStatus::Failed,
+                stdout: None,
+                stderr: None,
+                exit_code: None,
+                error: Some(AGENT_IN_BAND_ERROR.to_string()),
+                result_ref,
+            },
+        }
+    }
+
+    /// Resolve a usable provider id for an agent template's `model`.
+    ///
+    /// The agent template stores only a model id (no provider). We find an
+    /// enabled provider whose model catalog still serves that exact id, matching
+    /// how an agent session is launched from the UI (a model is always picked
+    /// together with its provider). Resolution is offline (DB catalog only):
+    /// `Err` carries the precise failure class for VAL-TARGET-021 — `NoModel`
+    /// when the template has no model set, `ModelRemoved` when no provider serves
+    /// it. An enabled provider is preferred; a match found only under a disabled
+    /// provider still surfaces as a config failure (the run could not proceed).
+    async fn resolve_agent_provider(&self, model: &Option<String>) -> Result<String, AgentFailure> {
+        let Some(services) = self.agent_services.as_ref() else {
+            return Err(AgentFailure::ConfigError);
+        };
+        let Some(model_id) = model.as_deref().map(str::trim).filter(|m| !m.is_empty()) else {
+            return Err(AgentFailure::NoModel);
+        };
+
+        let providers = match services.providers.list_providers().await {
+            Ok(providers) => providers,
+            Err(e) => {
+                tracing::warn!("[job_executor] agent provider listing failed: {}", e);
+                return Err(AgentFailure::ConfigError);
+            }
+        };
+
+        // Prefer an enabled provider that serves the model; fall back to noting a
+        // disabled-only match so the failure stays a config class rather than a
+        // generic "model removed".
+        let mut disabled_match = false;
+        for provider in &providers {
+            match services.providers.get_model(&provider.id, model_id).await {
+                Ok(Some(_)) if provider.enabled => return Ok(provider.id.clone()),
+                Ok(Some(_)) => disabled_match = true,
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        "[job_executor] agent model lookup failed (provider={}, model={}): {}",
+                        provider.id,
+                        model_id,
+                        e
+                    );
+                }
+            }
+        }
+
+        if disabled_match {
+            Err(AgentFailure::ConfigError)
+        } else {
+            Err(AgentFailure::ModelRemoved)
+        }
+    }
+
     /// Test-only view of the shared in-flight set size, so the scheduler and
     /// run-now tests can assert a slot is reserved / released.
     #[cfg(test)]
@@ -570,16 +866,6 @@ impl DispatchOutcome {
             result_ref: None,
         }
     }
-}
-
-/// Error message for a target kind that this M1 feature does not yet dispatch.
-/// M3 replaces these branches with real agent/prompt execution. The `agent`
-/// target is still handled by a later M3 feature, so its branch keeps this.
-fn unsupported_target_message(kind: &str) -> String {
-    format!(
-        "Job target '{}' is not supported in M1 (artifact only)",
-        kind
-    )
 }
 
 /// Stable failure message when the executor was built without the prompt
@@ -678,6 +964,219 @@ fn is_model_resolution_error(message: &str) -> bool {
 /// suffix so concurrent runs of the same job stay visually distinct.
 fn prompt_chat_name(job_name: &str) -> String {
     format!("{} · {}", job_name, current_timestamp())
+}
+
+/// Stable failure message when the executor was built without the agent
+/// collaborators (the artifact-only unit harness). Never carries provider or
+/// template detail.
+const AGENT_NOT_CONFIGURED: &str =
+    "Agent execution is not available (agent services are not configured)";
+
+/// Stable message persisted when an agent run finishes with an in-band error
+/// (the terminal assistant turn has `stopReason == "error"`). The raw upstream
+/// `errorMessage` is NOT echoed — it can carry provider detail; the partial
+/// transcript (which the run already persisted) is reachable via `result_ref`.
+const AGENT_IN_BAND_ERROR: &str = "the agent run ended with an error";
+
+/// A pre-flight agent failure, raised before any run is started. Each variant is
+/// something we can name precisely from the template / catalog alone, with no
+/// network round-trip and no secret material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentFailure {
+    /// The agent template id no longer resolves (deleted, or not found).
+    TemplateMissing,
+    /// The template exists but has no model selected.
+    NoModel,
+    /// The template's model is no longer served by any provider (the model — or
+    /// every provider that served it — was removed).
+    ModelRemoved,
+    /// A provider/model configuration problem that is neither a clean
+    /// "no model" nor a clean "model removed" (e.g. the model survives only
+    /// under a disabled provider, or the provider catalog could not be read).
+    ConfigError,
+}
+
+/// Map an [`AgentFailure`] to a stable, user-facing message. Carries no secret
+/// material and no raw provider/template detail. The "template missing" message
+/// is deliberately distinct from the model/config-class ones so the two are
+/// distinguishable (VAL-TARGET-020 vs VAL-TARGET-021).
+fn agent_failure_message(failure: AgentFailure) -> String {
+    match failure {
+        AgentFailure::TemplateMissing => {
+            "the configured agent no longer exists (it may have been deleted)".to_string()
+        }
+        AgentFailure::NoModel => "the configured agent has no model selected".to_string(),
+        AgentFailure::ModelRemoved => {
+            "the agent's model is no longer available for any provider".to_string()
+        }
+        AgentFailure::ConfigError => {
+            "the agent could not be run (invalid provider or model configuration)".to_string()
+        }
+    }
+}
+
+/// Sanitize an `AppError` from agent session creation / `start_run` into a
+/// stable message safe to persist and surface. Mirrors [`sanitize_send_error`]:
+/// the raw `AppError.message` can carry an upstream URL, an `Authorization`
+/// header, or a raw provider payload, so it is NEVER echoed. We key off the
+/// stable `AppError.code` plus a narrow content sniff to keep a model-resolution
+/// failure distinct from a generic config failure. Raw detail is the caller's
+/// responsibility to `tracing` — it never flows through this output.
+fn sanitize_agent_dispatch_error(err: &AppError) -> String {
+    match err.code.as_str() {
+        "AUTH_ERROR" => "the provider rejected the request (authentication failed)".to_string(),
+        "NETWORK_ERROR" => "the request to the provider failed (network error)".to_string(),
+        "RATE_LIMIT" => "the provider rate-limited the request".to_string(),
+        "VALIDATION_ERROR" if is_model_resolution_error(&err.message) => {
+            "the selected model is not available for this provider".to_string()
+        }
+        "VALIDATION_ERROR" => {
+            "the agent could not be run (invalid provider or model configuration)".to_string()
+        }
+        _ => "the agent run failed to complete".to_string(),
+    }
+}
+
+/// Name for the fresh session minted per agent run: the template name plus a
+/// unix-ms suffix so concurrent runs of the same agent stay visually distinct.
+fn agent_session_name(agent_name: &str) -> String {
+    format!("{} · {}", agent_name, current_timestamp())
+}
+
+/// The terminal classification of an agent run, derived from its persisted
+/// transcript AFTER the run closed (no run-level error envelope was raised).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentRunResult {
+    /// The run completed without an in-band error terminal turn.
+    Success,
+    /// The final assistant turn carries `stopReason == "error"` — the run ended
+    /// with an in-band error but the transcript is persisted (VAL-TARGET-024).
+    InBandError,
+}
+
+/// Classify a run from its persisted transcript. The final assistant message's
+/// `stopReason` is the source of truth: `"error"` is an in-band error; anything
+/// else (including no assistant turn at all, or a transcript read failure) is
+/// treated as a non-error completion — a run-level failure would instead have
+/// surfaced through the sink's error envelope and never reached here.
+///
+/// Pure over the transcript so it is unit-testable without a runtime. Messages
+/// are persisted hand-agent `Message`s (tagged by `role`); the assistant
+/// payload carries a camelCase `stopReason` field.
+fn classify_agent_transcript(
+    transcript: Result<&Vec<crate::storage::types::AgentSessionMessage>, &AppError>,
+) -> AgentRunResult {
+    let messages = match transcript {
+        Ok(messages) => messages,
+        // A transcript read failure cannot prove an in-band error; default to a
+        // non-error completion (the run already closed without an envelope).
+        Err(_) => return AgentRunResult::Success,
+    };
+
+    let last_assistant = messages.iter().rev().find(|m| m.role == "assistant");
+
+    match last_assistant {
+        Some(message) => {
+            let is_error = message
+                .payload
+                .get("stopReason")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "error")
+                .unwrap_or(false);
+            if is_error {
+                AgentRunResult::InBandError
+            } else {
+                AgentRunResult::Success
+            }
+        }
+        None => AgentRunResult::Success,
+    }
+}
+
+/// Type alias for a sink callback (`Arc<dyn Fn(Value) + Send + Sync>`), matching
+/// [`RunSink`]'s constructor parameters.
+type SinkCallback = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
+
+/// The three sink callbacks plus the close receiver. Built by
+/// [`build_oneshot_signal`] and assembled into a [`RunSink`] by
+/// [`oneshot_run_sink`]; returned separately so the signal wiring can be driven
+/// directly in tests without reaching into `RunSink`'s private fields.
+struct OneshotSignal {
+    on_event: SinkCallback,
+    on_error: SinkCallback,
+    on_closed: SinkCallback,
+    rx: oneshot::Receiver<Option<String>>,
+}
+
+/// Build the oneshot-signal callbacks: `on_closed` fires the `oneshot` so a
+/// background dispatch can `.await` the turn's completion.
+///
+/// The oneshot carries `Option<String>`: a run-level error envelope (captured
+/// from `on_error`, already sanitized by the runtime) is forwarded as
+/// `Some(message)` when the run closes; a clean close sends `None`. `on_event`
+/// is dropped — the executor classifies the outcome from the persisted
+/// transcript, not the live event stream. The runtime fires `on_closed` exactly
+/// once, AFTER the transcript is fully persisted, so awaiting the oneshot blocks
+/// precisely until the turn has ended and is durable. `on_error` fires (at most
+/// once) BEFORE `on_closed` on the same runtime task, so the captured value is
+/// set before it is read on close.
+fn build_oneshot_signal() -> OneshotSignal {
+    let (tx, rx) = oneshot::channel::<Option<String>>();
+    // The last run-level error envelope message, captured for the close signal.
+    // A `std::sync::Mutex` is correct here: the callbacks are synchronous and
+    // never hold the lock across an await.
+    let captured_error: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let on_event: SinkCallback = Arc::new(|_event: serde_json::Value| {
+        // Dropped: outcome is read from the persisted transcript, not events.
+    });
+
+    let on_error_slot = captured_error.clone();
+    let on_error: SinkCallback = Arc::new(move |envelope: serde_json::Value| {
+        // The envelope is `{ sessionId, error: { code, message, hint } }` with
+        // `error.message` already sanitized by the runtime. Capture only the
+        // message; raw transport detail never reaches it.
+        let message = envelope
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .map(str::to_string);
+        if let Ok(mut slot) = on_error_slot.lock() {
+            *slot = message;
+        }
+    });
+
+    // The oneshot sender is single-use; wrap it so the `Fn` close callback can
+    // take it on first (and only) invocation.
+    let tx_slot: Arc<std::sync::Mutex<Option<oneshot::Sender<Option<String>>>>> =
+        Arc::new(std::sync::Mutex::new(Some(tx)));
+    let on_closed_error = captured_error;
+    let on_closed: SinkCallback = Arc::new(move |_payload: serde_json::Value| {
+        let captured = on_closed_error.lock().ok().and_then(|slot| slot.clone());
+        if let Some(sender) = tx_slot.lock().ok().and_then(|mut slot| slot.take()) {
+            // The receiver may have been dropped if the dispatch was cancelled;
+            // a send failure is then benign.
+            let _ = sender.send(captured);
+        }
+    });
+
+    OneshotSignal {
+        on_event,
+        on_error,
+        on_closed,
+        rx,
+    }
+}
+
+/// Build a [`RunSink`] whose `on_closed` fires a `oneshot` so a background
+/// dispatch can `.await` the turn's completion, paired with the receiver. See
+/// [`build_oneshot_signal`] for the signal semantics. Mirrors the runtime's own
+/// `CapturingSink` + `wait_for_closed` test harness, reduced to a single signal.
+fn oneshot_run_sink() -> (RunSink, oneshot::Receiver<Option<String>>) {
+    let signal = build_oneshot_signal();
+    let sink = RunSink::new(signal.on_event, signal.on_closed).with_error(signal.on_error);
+    (sink, signal.rx)
 }
 
 /// RAII release of an in-flight job slot.
@@ -1305,11 +1804,13 @@ mod tests {
         assert!(rows[0].ended_at.is_some());
     }
 
-    // The agent target is an explicit "unsupported in M1" failure (placeholder
-    // until M3), recorded as a failed row rather than a panic.
+    // Without the agent collaborators wired (the artifact-only unit harness),
+    // an agent target fails cleanly with a stable "not configured" message — it
+    // never panics and never leaks any template / provider detail.
     #[tokio::test]
-    async fn agent_target_is_unsupported_in_m1() {
+    async fn agent_target_without_services_fails_cleanly() {
         let env = setup().await;
+        // `setup` builds the executor via `from_db` — no agent services.
         let target = JobTarget::Agent {
             agent_id: "agent_1".to_string(),
             initial_message: "go".to_string(),
@@ -1321,9 +1822,11 @@ mod tests {
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
 
         assert_eq!(exec.status, ExecutionStatus::Failed);
-        let err = exec.error.as_deref().unwrap_or_default();
-        assert!(err.contains("agent"));
-        assert!(err.to_lowercase().contains("m1") || err.to_lowercase().contains("supported"));
+        assert_eq!(exec.error.as_deref(), Some(AGENT_NOT_CONFIGURED));
+        // No raw agent id leaks into the persisted error.
+        let err = exec.error.unwrap_or_default();
+        assert!(!err.contains("agent_1"));
+        assert!(exec.result_ref.is_none(), "no session created when unwired");
 
         let rows = read_rows(&env, "job_agent").await;
         assert_eq!(rows.len(), 1);
@@ -2176,5 +2679,434 @@ mod tests {
             clone.try_claim("job_shared").await.is_some(),
             "releasing on one handle frees the slot for the other"
         );
+    }
+
+    // ---- agent dispatch (VAL-TARGET-006 / 020 / 021 / 024 / 031) ----
+
+    use crate::services::{AgentRuntime, AgentService, AgentSessionService};
+    use crate::storage::types::AgentSessionMessage;
+
+    /// Wire REAL agent collaborators onto the env's executor, all sharing the
+    /// env's temp DB. The `AgentRuntime` is the inert (no-skills) one, fine for
+    /// the offline pre-flight + transcript-classification paths exercised here.
+    fn with_agent_services(env: TestEnv) -> TestEnv {
+        let provider_service = Arc::new(ProviderService::new(env.db.clone()));
+        let agent_service = Arc::new(AgentService::new(env.db.clone()));
+        let agent_session_service = Arc::new(AgentSessionService::new(env.db.clone()));
+        let runtime = Arc::new(AgentRuntime::new(env.db.clone()));
+
+        let executor = env.executor.clone().with_agent_services(
+            runtime,
+            agent_service,
+            agent_session_service,
+            provider_service,
+        );
+
+        TestEnv { executor, ..env }
+    }
+
+    /// Seed an `agents` template row (the thing `JobTarget::Agent.agent_id`
+    /// references). Returns the agent id.
+    async fn seed_agent(env: &TestEnv, model: Option<&str>) -> String {
+        let service = AgentService::new(env.db.clone());
+        let agent = service
+            .create_agent(
+                format!("agent-{}", uuid::Uuid::new_v4()),
+                model.map(str::to_string),
+                Some(0.5),
+                None,
+                None,
+                None,
+                Some(1024),
+                Some("You are a helpful agent.".to_string()),
+                None,
+                None,
+            )
+            .await
+            .expect("seed agent");
+        agent.id
+    }
+
+    /// Seed a `models` catalog row so the resolver can find a provider for a
+    /// model id. `seed_provider` already created the provider row.
+    async fn seed_model(env: &TestEnv, provider_id: &str, model_id: &str) {
+        let repo = crate::storage::ModelRepository::new(env.db.clone());
+        let model = crate::storage::types::Model {
+            id: model_id.to_string(),
+            provider_id: provider_id.to_string(),
+            name: model_id.to_string(),
+            context_length: Some(4096),
+            output_max_tokens: Some(2048),
+            supported_features: None,
+            description: None,
+            input_modalities: None,
+            output_modalities: None,
+            metadata: None,
+            pricing: None,
+            url: None,
+            supported_parameters: None,
+            default_parameters: None,
+            max_parameters: None,
+            supported_methods: Some(vec!["completions".to_string()]),
+            model_created_at: None,
+            enabled: true,
+            favorite: false,
+            created_at: current_timestamp(),
+            updated_at: current_timestamp(),
+        };
+        repo.create_models(&[model]).await.expect("seed model");
+    }
+
+    fn agent_target(agent_id: &str, initial_message: &str) -> JobTarget {
+        JobTarget::Agent {
+            agent_id: agent_id.to_string(),
+            initial_message: initial_message.to_string(),
+            project_id: None,
+        }
+    }
+
+    // VAL-TARGET-020 (end-to-end): an agent target whose template id does not
+    // resolve is failed with the distinct "template missing" message — and NO
+    // session is created (the pre-flight short-circuits), so no result_ref.
+    #[tokio::test]
+    async fn agent_missing_template_fails_before_session() {
+        let env = with_agent_services(setup().await);
+        let target = agent_target("ghost-agent", "go");
+        let job = make_job("job_a_missing", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(
+            exec.error.as_deref(),
+            Some(agent_failure_message(AgentFailure::TemplateMissing).as_str())
+        );
+        assert!(
+            exec.result_ref.is_none(),
+            "no session created on template-missing pre-flight fail"
+        );
+        // No agent session row leaked into the DB.
+        let sessions: i64 = sqlx::query("SELECT COUNT(*) FROM agent_sessions")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(sessions, 0);
+    }
+
+    // VAL-TARGET-021 (end-to-end): a template that exists but has no model
+    // selected is failed with a model-class message — distinct from the
+    // template-missing message — and no session is created.
+    #[tokio::test]
+    async fn agent_template_without_model_fails_with_model_class_error() {
+        let env = with_agent_services(setup().await);
+        let agent_id = seed_agent(&env, None).await;
+        let job = make_job("job_a_nomodel", agent_target(&agent_id, "go")).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(
+            exec.error.as_deref(),
+            Some(agent_failure_message(AgentFailure::NoModel).as_str())
+        );
+        // Distinct from the template-missing class (VAL-TARGET-020 vs 021).
+        assert_ne!(
+            exec.error.as_deref(),
+            Some(agent_failure_message(AgentFailure::TemplateMissing).as_str())
+        );
+        assert!(exec.result_ref.is_none());
+    }
+
+    // VAL-TARGET-021 (end-to-end): a template whose model is served by no
+    // provider (provider/model removed) is failed with the model-removed class
+    // — distinct from the template-missing class — and no session is created.
+    #[tokio::test]
+    async fn agent_model_served_by_no_provider_fails_with_model_class_error() {
+        let env = with_agent_services(setup().await);
+        // A model id that no provider in the (empty) catalog serves.
+        let agent_id = seed_agent(&env, Some("gone-model")).await;
+        let job = make_job("job_a_modelgone", agent_target(&agent_id, "go")).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(
+            exec.error.as_deref(),
+            Some(agent_failure_message(AgentFailure::ModelRemoved).as_str())
+        );
+        assert_ne!(
+            exec.error.as_deref(),
+            Some(agent_failure_message(AgentFailure::TemplateMissing).as_str())
+        );
+        assert!(exec.result_ref.is_none());
+    }
+
+    // VAL-TARGET-021 (resolution): a model that survives ONLY under a DISABLED
+    // provider is a config-class failure (the run could not proceed), distinct
+    // from a clean "model removed". No enabled provider serves the model.
+    #[tokio::test]
+    async fn agent_resolver_disabled_only_match_is_config_error() {
+        let env = with_agent_services(setup().await);
+        seed_provider(&env, "prov_off", "openai", false, "sk-live-abcd").await;
+        seed_model(&env, "prov_off", "shared-model").await;
+        let agent_id = seed_agent(&env, Some("shared-model")).await;
+        let job = make_job("job_a_off", agent_target(&agent_id, "go")).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(
+            exec.error.as_deref(),
+            Some(agent_failure_message(AgentFailure::ConfigError).as_str())
+        );
+        assert!(exec.result_ref.is_none());
+    }
+
+    // VAL-TARGET-006 (resolution): an enabled provider serving the template's
+    // model is resolved as the run's provider. Exercised directly through the
+    // pre-flight resolver (a real run needs an LLM).
+    #[tokio::test]
+    async fn agent_resolver_prefers_enabled_provider_serving_model() {
+        let env = with_agent_services(setup().await);
+        seed_provider(&env, "prov_on", "openai", true, "sk-live-abcd").await;
+        seed_model(&env, "prov_on", "live-model").await;
+
+        let resolved = env
+            .executor
+            .resolve_agent_provider(&Some("live-model".to_string()))
+            .await
+            .expect("an enabled provider serving the model resolves");
+        assert_eq!(resolved, "prov_on");
+    }
+
+    // Without the agent collaborators, the resolver reports a config error
+    // rather than panicking.
+    #[tokio::test]
+    async fn agent_resolver_unwired_is_config_error() {
+        let env = setup().await;
+        let err = env
+            .executor
+            .resolve_agent_provider(&Some("m".to_string()))
+            .await
+            .expect_err("unwired resolver fails");
+        assert_eq!(err, AgentFailure::ConfigError);
+    }
+
+    // VAL-TARGET-020 / 021: each agent failure class maps to a stable, distinct,
+    // secret-free message. Template-missing is distinguishable from every
+    // model/config class.
+    #[test]
+    fn agent_failure_messages_are_distinct_and_carry_no_secret() {
+        let classes = [
+            AgentFailure::TemplateMissing,
+            AgentFailure::NoModel,
+            AgentFailure::ModelRemoved,
+            AgentFailure::ConfigError,
+        ];
+        let messages: Vec<String> = classes.iter().map(|c| agent_failure_message(*c)).collect();
+        for msg in &messages {
+            assert!(!msg.is_empty());
+            assert!(!msg.contains("sk-"));
+        }
+        // Template-missing is distinct from each model/config class (020 vs 021).
+        let template_missing = agent_failure_message(AgentFailure::TemplateMissing);
+        for other in [
+            AgentFailure::NoModel,
+            AgentFailure::ModelRemoved,
+            AgentFailure::ConfigError,
+        ] {
+            assert_ne!(template_missing, agent_failure_message(other));
+        }
+    }
+
+    // VAL-TARGET-027 (agent path): each AppError code maps to a stable message
+    // that contains no raw URL, Bearer token, or key fragment.
+    #[test]
+    fn sanitize_agent_dispatch_error_drops_raw_detail() {
+        let leaky = AppError::auth_error(
+            "POST https://api.openai.com/v1 failed: Authorization: Bearer sk-live-SECRET",
+        );
+        let sanitized = sanitize_agent_dispatch_error(&leaky);
+        assert!(!sanitized.contains("sk-live-SECRET"));
+        assert!(!sanitized.contains("Bearer"));
+        assert!(!sanitized.contains("https://"));
+        assert!(sanitized.to_lowercase().contains("authentication"));
+    }
+
+    #[test]
+    fn sanitize_agent_dispatch_error_distinguishes_model_resolution() {
+        let model_err = AppError::validation_error(
+            "chat_engine: model 'gpt-4' not registered under provider 'openai'",
+        );
+        let model_msg = sanitize_agent_dispatch_error(&model_err);
+        assert!(model_msg.to_lowercase().contains("model"));
+
+        let generic = AppError::validation_error("agent session has no model_id selected");
+        assert_ne!(model_msg, sanitize_agent_dispatch_error(&generic));
+    }
+
+    // ---- transcript classification (VAL-TARGET-024 / 031) ----
+
+    /// Build a persisted assistant transcript row with the given `stopReason`.
+    fn assistant_row(seq: i64, stop_reason: &str) -> AgentSessionMessage {
+        AgentSessionMessage {
+            id: format!("m{}", seq),
+            session_id: "s".to_string(),
+            seq,
+            role: "assistant".to_string(),
+            payload: serde_json::json!({
+                "role": "assistant",
+                "content": [],
+                "stopReason": stop_reason,
+            }),
+            created_at: 0,
+        }
+    }
+
+    /// Build a persisted user transcript row carrying `content` verbatim.
+    fn user_row(seq: i64, content: &str) -> AgentSessionMessage {
+        AgentSessionMessage {
+            id: format!("m{}", seq),
+            session_id: "s".to_string(),
+            seq,
+            role: "user".to_string(),
+            payload: serde_json::json!({
+                "role": "user",
+                "content": content,
+            }),
+            created_at: 0,
+        }
+    }
+
+    // VAL-TARGET-024: a transcript whose terminal assistant turn carries
+    // `stopReason == "error"` classifies as an in-band error (failed), even
+    // though the run returned Ok and the transcript is persisted.
+    #[test]
+    fn classify_transcript_in_band_error_is_failed() {
+        let transcript = vec![user_row(0, "hi"), assistant_row(1, "error")];
+        assert_eq!(
+            classify_agent_transcript(Ok(&transcript)),
+            AgentRunResult::InBandError
+        );
+    }
+
+    // A normal terminal assistant turn (stopReason "stop") is a success.
+    #[test]
+    fn classify_transcript_normal_stop_is_success() {
+        let transcript = vec![user_row(0, "hi"), assistant_row(1, "stop")];
+        assert_eq!(
+            classify_agent_transcript(Ok(&transcript)),
+            AgentRunResult::Success
+        );
+    }
+
+    // A user-only partial transcript (no assistant turn) is NOT an in-band
+    // error: a run-level failure would have surfaced via the error envelope.
+    #[test]
+    fn classify_transcript_user_only_is_success() {
+        let transcript = vec![user_row(0, "hi")];
+        assert_eq!(
+            classify_agent_transcript(Ok(&transcript)),
+            AgentRunResult::Success
+        );
+    }
+
+    // The LAST assistant turn wins: an earlier error followed by a normal turn
+    // (e.g. a recovered multi-turn run) classifies on the terminal turn.
+    #[test]
+    fn classify_transcript_uses_last_assistant_turn() {
+        let transcript = vec![
+            user_row(0, "hi"),
+            assistant_row(1, "error"),
+            assistant_row(2, "stop"),
+        ];
+        assert_eq!(
+            classify_agent_transcript(Ok(&transcript)),
+            AgentRunResult::Success
+        );
+    }
+
+    // A transcript read failure cannot prove an in-band error; default to a
+    // non-error completion (the run already closed without an envelope).
+    #[test]
+    fn classify_transcript_read_error_defaults_to_success() {
+        let err = AppError::internal_error("db read failed");
+        assert_eq!(
+            classify_agent_transcript(Err::<&Vec<AgentSessionMessage>, _>(&err)),
+            AgentRunResult::Success
+        );
+    }
+
+    // VAL-TARGET-031: the unicode initial instruction is preserved byte-for-byte
+    // in a persisted user turn — classification reads stopReason, never mutating
+    // the user content. (The runtime persists the user turn verbatim; here we
+    // assert the transcript shape the executor reads back is unicode-safe.)
+    #[test]
+    fn classify_transcript_preserves_unicode_user_content() {
+        let unicode = "你好，请总结今日要点 🌟 — résumé";
+        let transcript = vec![user_row(0, unicode), assistant_row(1, "stop")];
+        // The first user turn carries the instruction verbatim.
+        assert_eq!(
+            transcript[0]
+                .payload
+                .get("content")
+                .and_then(|c| c.as_str()),
+            Some(unicode)
+        );
+        assert_eq!(
+            classify_agent_transcript(Ok(&transcript)),
+            AgentRunResult::Success
+        );
+    }
+
+    // ---- oneshot run sink (the executor-side RunSink) ----
+
+    // A clean close fires the oneshot with `None` (no run-level error). Drives
+    // the signal callbacks directly, exactly as the runtime invokes the sink.
+    #[tokio::test]
+    async fn oneshot_signal_closed_carries_none() {
+        let signal = build_oneshot_signal();
+        // Drive the callbacks as the runtime would: emit an event, then close.
+        (signal.on_event)(serde_json::json!({ "sessionId": "s", "event": {} }));
+        (signal.on_closed)(serde_json::json!({ "sessionId": "s" }));
+
+        let result = signal.rx.await.expect("oneshot resolves on close");
+        assert_eq!(result, None, "a clean close carries no error");
+    }
+
+    // A run-level error envelope (on_error) before close is forwarded as the
+    // close signal's payload (its sanitized message), so the dispatch can record
+    // a failed outcome from it.
+    #[tokio::test]
+    async fn oneshot_signal_forwards_error_envelope_on_close() {
+        let signal = build_oneshot_signal();
+        (signal.on_error)(serde_json::json!({
+            "sessionId": "s",
+            "error": { "code": "AUTH_ERROR", "message": "the provider rejected the request", "hint": null },
+        }));
+        (signal.on_closed)(serde_json::json!({ "sessionId": "s" }));
+
+        let result = signal.rx.await.expect("oneshot resolves on close");
+        assert_eq!(
+            result.as_deref(),
+            Some("the provider rejected the request"),
+            "the sanitized envelope message reaches the close signal"
+        );
+    }
+
+    // `oneshot_run_sink` assembles the same signal into a real `RunSink` (the
+    // shape `start_run` consumes) and still yields a usable receiver — proving
+    // the production builder wires the signal through unchanged.
+    #[tokio::test]
+    async fn oneshot_run_sink_produces_a_usable_runsink() {
+        let (_sink, _rx) = oneshot_run_sink();
+        // Constructing the production pair must not panic; the signal semantics
+        // are covered by the `build_oneshot_signal` tests above.
     }
 }

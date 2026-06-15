@@ -383,33 +383,11 @@ async fn initialize_services(
     // 初始化 Agent Project 服务（按工作目录分组 Agent 模式会话）
     let agent_project_service = AgentProjectService::new(database_service.clone());
 
-    // 初始化定时任务服务（Job CRUD + 校验）
-    let job_service = JobService::from_db(database_service.clone());
-
-    // 初始化任务执行器（执行一个任务并落库；M1 仅分派 artifact 目标）。
-    // 供后续 scheduler/run_now 以 State 取用。注入 AppHandle，使执行开始（写入
-    // running 行）与完成（终态）时各 emit 一次 `job_executed` 事件，前端据此实时
-    // 刷新「打开的详情时间线」与「/jobs 列表卡片」。
-    let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared)
-        .with_app_handle(app.clone())
-        // Inject the `prompt` target's collaborators (shared with the managed
-        // services): a fresh chat per run + a non-streaming send + provider
-        // pre-validation. Works headless (no Window needed).
-        .with_prompt_services(
-            session_service_shared,
-            message_service_shared,
-            provider_service_shared.clone(),
-        );
-
-    // 初始化定时任务调度器（后台 tick loop，驱动到点任务自动执行）。
-    // 复用执行器（clone 走 Arc 字段，不 clone 服务本体）。启动接线在
-    // initialize_services 末尾：reconcile 残留 running → 按 now 重算 next_run_at
-    // → 启动 tick loop。
-    let job_scheduler = JobScheduler::from_db(database_service.clone(), job_executor.clone());
-
     // 初始化 Skill 服务（解析三个 scope 根：app-data + user；project 按 run 解析）。
     // app-data: <app_data_dir>/skills；user: ~/.agents/skills（home_dir 解析失败时
     // 退回一个不存在的根，使 user scope 静默为空而非阻断启动）。
+    // 提前于执行器构造：执行器的 agent 目标需要一个 AgentRuntime，而 runtime
+    // 装配需要 skill_service。
     let skill_appdata_root = data_dir.join("skills");
     let skill_user_root = app
         .path()
@@ -453,6 +431,28 @@ async fn initialize_services(
             tracing::error!("SQLite→JSONL agent transcript migration failed: {:?}", e);
         }
     }
+
+    // 初始化定时任务服务（Job CRUD + 校验）
+    let job_service = JobService::from_db(database_service.clone());
+
+    // 初始化任务执行器（执行一个任务并落库）。注入 AppHandle，使执行开始/完成时各
+    // emit 一次 `job_executed` 事件供前端实时刷新；注入 prompt 目标协作者（headless：
+    // 每次新建 chat + 非流式发送 + provider 预校验）。
+    // NOTE(rebase onto main): agent 目标分派（原 with_agent_services）依赖已退役的
+    // native AgentRuntime，需重写到 coding-agent（coding_agent_runtime）后再接回。
+    let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared)
+        .with_app_handle(app.clone())
+        .with_prompt_services(
+            session_service_shared,
+            message_service_shared,
+            provider_service_shared.clone(),
+        );
+
+    // 初始化定时任务调度器（后台 tick loop，驱动到点任务自动执行）。
+    // 复用执行器（clone 走 Arc 字段，不 clone 服务本体）。启动接线在
+    // initialize_services 末尾：reconcile 残留 running → 按 now 重算 next_run_at
+    // → 启动 tick loop。
+    let job_scheduler = JobScheduler::from_db(database_service.clone(), job_executor.clone());
 
     // 将服务注册到应用状态
     app.manage(storage_service);
