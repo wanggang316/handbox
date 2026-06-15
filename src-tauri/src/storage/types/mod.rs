@@ -24,7 +24,10 @@ pub use artifact::{
 };
 pub use common::{Timestamp, UUID};
 pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag};
-pub use job::{ExecutionStatus, Job, JobExecution, JobTarget, SessionStrategy, Trigger};
+pub use job::{
+    ExecutionStatus, Job, JobExecution, JobTarget, SessionStrategy, Trigger,
+    DEFAULT_EXEC_TIMEOUT_SECS, DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY_SECS,
+};
 pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,
     McpServerStatus, McpTool,

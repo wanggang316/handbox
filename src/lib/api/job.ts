@@ -32,6 +32,12 @@ export interface JobCreateInput {
   cronExpr: string;
   timezone: string;
   enabled?: boolean;
+  /** 每次运行超时（秒），省略/undefined 由后端回填具名默认（0=不限）。 */
+  execTimeoutSecs?: number;
+  /** 最大重试次数，省略由后端回填具名默认（0=不重试）。 */
+  maxRetries?: number;
+  /** 重试间隔（秒），省略由后端回填具名默认（60）。 */
+  retryDelaySecs?: number;
 }
 
 /** 更新任务定义的入参（对应后端 `JobUpdatePayload`）。 */
@@ -42,6 +48,12 @@ export interface JobUpdateInput {
   cronExpr: string;
   timezone: string;
   enabled: boolean;
+  /** 每次运行超时（秒），省略由后端回填具名默认（0=不限）。 */
+  execTimeoutSecs?: number;
+  /** 最大重试次数，省略由后端回填具名默认（0=不重试）。 */
+  maxRetries?: number;
+  /** 重试间隔（秒），省略由后端回填具名默认（60）。 */
+  retryDelaySecs?: number;
 }
 
 /**

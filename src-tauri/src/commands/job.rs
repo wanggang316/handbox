@@ -39,6 +39,15 @@ pub struct JobCreatePayload {
     pub cron_expr: String,
     pub timezone: String,
     pub enabled: Option<bool>,
+    /// Per-run timeout in seconds; omit/null to use the named default.
+    #[serde(default)]
+    pub exec_timeout_secs: Option<i64>,
+    /// Max retry attempts; omit/null to use the named default.
+    #[serde(default)]
+    pub max_retries: Option<i64>,
+    /// Delay between retries in seconds; omit/null to use the named default.
+    #[serde(default)]
+    pub retry_delay_secs: Option<i64>,
 }
 
 /// IPC payload to fully replace a job's definition.
@@ -51,6 +60,15 @@ pub struct JobUpdatePayload {
     pub cron_expr: String,
     pub timezone: String,
     pub enabled: bool,
+    /// Per-run timeout in seconds; omit/null to use the named default.
+    #[serde(default)]
+    pub exec_timeout_secs: Option<i64>,
+    /// Max retry attempts; omit/null to use the named default.
+    #[serde(default)]
+    pub max_retries: Option<i64>,
+    /// Delay between retries in seconds; omit/null to use the named default.
+    #[serde(default)]
+    pub retry_delay_secs: Option<i64>,
 }
 
 /// Create a new scheduled job.
@@ -67,6 +85,9 @@ pub async fn job_create(
             cron_expr: request.cron_expr,
             timezone: request.timezone,
             enabled: request.enabled,
+            exec_timeout_secs: request.exec_timeout_secs,
+            max_retries: request.max_retries,
+            retry_delay_secs: request.retry_delay_secs,
         })
         .await
 }
@@ -104,6 +125,9 @@ pub async fn job_update(
                 cron_expr: request.cron_expr,
                 timezone: request.timezone,
                 enabled: request.enabled,
+                exec_timeout_secs: request.exec_timeout_secs,
+                max_retries: request.max_retries,
+                retry_delay_secs: request.retry_delay_secs,
             },
         )
         .await

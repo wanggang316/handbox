@@ -13,7 +13,10 @@
 use std::sync::Arc;
 
 use crate::models::AppError;
-use crate::storage::types::{Job, JobExecution, JobTarget, Timestamp, UUID};
+use crate::storage::types::{
+    Job, JobExecution, JobTarget, Timestamp, DEFAULT_EXEC_TIMEOUT_SECS, DEFAULT_MAX_RETRIES,
+    DEFAULT_RETRY_DELAY_SECS, UUID,
+};
 use crate::storage::{JobExecutionRepository, JobRepository};
 use crate::utils::cron;
 
@@ -35,6 +38,12 @@ pub struct JobCreateRequest {
     pub timezone: String,
     /// Defaults to `true` when omitted.
     pub enabled: Option<bool>,
+    /// Per-run timeout in seconds; `None` -> [`DEFAULT_EXEC_TIMEOUT_SECS`].
+    pub exec_timeout_secs: Option<i64>,
+    /// Max retry attempts; `None` -> [`DEFAULT_MAX_RETRIES`].
+    pub max_retries: Option<i64>,
+    /// Delay between retries in seconds; `None` -> [`DEFAULT_RETRY_DELAY_SECS`].
+    pub retry_delay_secs: Option<i64>,
 }
 
 /// Fields needed to fully replace a job's definition (run statistics are not
@@ -47,6 +56,12 @@ pub struct JobUpdateRequest {
     pub cron_expr: String,
     pub timezone: String,
     pub enabled: bool,
+    /// Per-run timeout in seconds; `None` -> [`DEFAULT_EXEC_TIMEOUT_SECS`].
+    pub exec_timeout_secs: Option<i64>,
+    /// Max retry attempts; `None` -> [`DEFAULT_MAX_RETRIES`].
+    pub max_retries: Option<i64>,
+    /// Delay between retries in seconds; `None` -> [`DEFAULT_RETRY_DELAY_SECS`].
+    pub retry_delay_secs: Option<i64>,
 }
 
 /// Scheduled-job service: validation + CRUD over `JobRepository`, plus
@@ -73,6 +88,11 @@ impl JobService {
         let name = validate_name(&request.name)?;
         validate_target(&request.target)?;
         cron::validate(&request.cron_expr)?;
+        let robustness = validate_robustness(
+            request.exec_timeout_secs,
+            request.max_retries,
+            request.retry_delay_secs,
+        )?;
 
         let now = current_timestamp();
         let next_run_at = first_occurrence(&request.cron_expr);
@@ -90,6 +110,9 @@ impl JobService {
             last_status: None,
             run_count: 0,
             failure_count: 0,
+            exec_timeout_secs: robustness.exec_timeout_secs,
+            max_retries: robustness.max_retries,
+            retry_delay_secs: robustness.retry_delay_secs,
             created_at: now,
             updated_at: now,
         };
@@ -123,6 +146,11 @@ impl JobService {
         let name = validate_name(&request.name)?;
         validate_target(&request.target)?;
         cron::validate(&request.cron_expr)?;
+        let robustness = validate_robustness(
+            request.exec_timeout_secs,
+            request.max_retries,
+            request.retry_delay_secs,
+        )?;
 
         // Load existing to preserve run statistics that the definition update
         // must not clobber.
@@ -134,6 +162,9 @@ impl JobService {
         job.cron_expr = request.cron_expr;
         job.timezone = request.timezone;
         job.enabled = request.enabled;
+        job.exec_timeout_secs = robustness.exec_timeout_secs;
+        job.max_retries = robustness.max_retries;
+        job.retry_delay_secs = robustness.retry_delay_secs;
         job.next_run_at = first_occurrence(&job.cron_expr);
         job.updated_at = current_timestamp();
 
@@ -231,6 +262,45 @@ fn validate_target(target: &JobTarget) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Resolved robustness fields after applying named defaults and rejecting
+/// negative values.
+struct Robustness {
+    exec_timeout_secs: i64,
+    max_retries: i64,
+    retry_delay_secs: i64,
+}
+
+/// Resolve the robustness fields: each `None` falls back to its named default,
+/// and any negative value is rejected with `VALIDATION_ERROR` (VAL-ROBUST-003).
+/// `0` is a valid, meaningful value (no timeout / no retries) and is preserved.
+fn validate_robustness(
+    exec_timeout_secs: Option<i64>,
+    max_retries: Option<i64>,
+    retry_delay_secs: Option<i64>,
+) -> Result<Robustness, AppError> {
+    let exec_timeout_secs = exec_timeout_secs.unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);
+    let max_retries = max_retries.unwrap_or(DEFAULT_MAX_RETRIES);
+    let retry_delay_secs = retry_delay_secs.unwrap_or(DEFAULT_RETRY_DELAY_SECS);
+
+    if exec_timeout_secs < 0 {
+        return Err(AppError::validation_error(
+            "Execution timeout cannot be negative",
+        ));
+    }
+    if max_retries < 0 {
+        return Err(AppError::validation_error("Max retries cannot be negative"));
+    }
+    if retry_delay_secs < 0 {
+        return Err(AppError::validation_error("Retry delay cannot be negative"));
+    }
+
+    Ok(Robustness {
+        exec_timeout_secs,
+        max_retries,
+        retry_delay_secs,
+    })
+}
+
 /// Best-effort first upcoming occurrence for a (already-validated) cron, or
 /// `None` when the schedule yields nothing in the visible future.
 fn first_occurrence(cron_expr: &str) -> Option<Timestamp> {
@@ -306,6 +376,9 @@ mod tests {
             cron_expr: "0 9 * * *".to_string(),
             timezone: "local".to_string(),
             enabled: None,
+            exec_timeout_secs: None,
+            max_retries: None,
+            retry_delay_secs: None,
         }
     }
 
@@ -500,6 +573,9 @@ mod tests {
                     cron_expr: "*/5 * * * *".to_string(),
                     timezone: "local".to_string(),
                     enabled: false,
+                    exec_timeout_secs: Some(120),
+                    max_retries: Some(3),
+                    retry_delay_secs: Some(45),
                 },
             )
             .await
@@ -509,6 +585,9 @@ mod tests {
         assert_eq!(updated.cron_expr, "*/5 * * * *");
         assert!(!updated.enabled);
         assert_eq!(updated.run_count, 0);
+        assert_eq!(updated.exec_timeout_secs, 120);
+        assert_eq!(updated.max_retries, 3);
+        assert_eq!(updated.retry_delay_secs, 45);
 
         // set_enabled toggles back on
         let toggled = service
@@ -643,10 +722,139 @@ mod tests {
                     cron_expr: "0 9 * * *".to_string(),
                     timezone: "local".to_string(),
                     enabled: true,
+                    exec_timeout_secs: None,
+                    max_retries: None,
+                    retry_delay_secs: None,
                 },
             )
             .await
             .expect_err("blank name on update must fail");
+        assert_eq!(err.code, "VALIDATION_ERROR");
+    }
+
+    #[tokio::test]
+    async fn create_applies_robustness_defaults_when_omitted() {
+        // Omitting the robustness fields yields the named defaults persisted to
+        // the row (VAL-ROBUST-002): 0/0/60, never an unexpected NULL.
+        let (service, _tmp) = create_service().await;
+        let job = service
+            .create(create_request("Job", artifact_target()))
+            .await
+            .expect("create");
+        assert_eq!(job.exec_timeout_secs, DEFAULT_EXEC_TIMEOUT_SECS);
+        assert_eq!(job.max_retries, DEFAULT_MAX_RETRIES);
+        assert_eq!(job.retry_delay_secs, DEFAULT_RETRY_DELAY_SECS);
+
+        // And the defaults survive a fetch (read back from the row, not just the
+        // returned struct).
+        let fetched = service.get(job.id).await.expect("get");
+        assert_eq!(fetched.exec_timeout_secs, 0);
+        assert_eq!(fetched.max_retries, 0);
+        assert_eq!(fetched.retry_delay_secs, 60);
+    }
+
+    #[tokio::test]
+    async fn create_persists_explicit_robustness_values() {
+        // VAL-ROBUST-001: supplied values are stored and read back verbatim.
+        let (service, _tmp) = create_service().await;
+        let mut req = create_request("Job", artifact_target());
+        req.exec_timeout_secs = Some(300);
+        req.max_retries = Some(4);
+        req.retry_delay_secs = Some(15);
+        let job = service.create(req).await.expect("create");
+
+        let fetched = service.get(job.id).await.expect("get");
+        assert_eq!(fetched.exec_timeout_secs, 300);
+        assert_eq!(fetched.max_retries, 4);
+        assert_eq!(fetched.retry_delay_secs, 15);
+    }
+
+    #[tokio::test]
+    async fn create_rejects_negative_robustness_values() {
+        // VAL-ROBUST-003: a negative timeout / retries / delay is rejected and
+        // no out-of-range row is written.
+        let (service, _tmp) = create_service().await;
+
+        let mut neg_timeout = create_request("Job", artifact_target());
+        neg_timeout.exec_timeout_secs = Some(-1);
+        assert_eq!(
+            service
+                .create(neg_timeout)
+                .await
+                .expect_err("negative timeout must fail")
+                .code,
+            "VALIDATION_ERROR"
+        );
+
+        let mut neg_retries = create_request("Job", artifact_target());
+        neg_retries.max_retries = Some(-1);
+        assert_eq!(
+            service
+                .create(neg_retries)
+                .await
+                .expect_err("negative retries must fail")
+                .code,
+            "VALIDATION_ERROR"
+        );
+
+        let mut neg_delay = create_request("Job", artifact_target());
+        neg_delay.retry_delay_secs = Some(-5);
+        assert_eq!(
+            service
+                .create(neg_delay)
+                .await
+                .expect_err("negative delay must fail")
+                .code,
+            "VALIDATION_ERROR"
+        );
+
+        // No row was written for any rejected request.
+        assert!(service
+            .list(Some(10), Some(0))
+            .await
+            .expect("list")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_allows_zero_robustness_values() {
+        // 0 is meaningful (no timeout / no retries) and must NOT be rejected.
+        let (service, _tmp) = create_service().await;
+        let mut req = create_request("Job", artifact_target());
+        req.exec_timeout_secs = Some(0);
+        req.max_retries = Some(0);
+        req.retry_delay_secs = Some(0);
+        let job = service.create(req).await.expect("create with zeros");
+        assert_eq!(job.exec_timeout_secs, 0);
+        assert_eq!(job.max_retries, 0);
+        assert_eq!(job.retry_delay_secs, 0);
+    }
+
+    #[tokio::test]
+    async fn update_rejects_negative_robustness_values() {
+        // VAL-ROBUST-003 on the update path.
+        let (service, _tmp) = create_service().await;
+        let created = service
+            .create(create_request("Job", artifact_target()))
+            .await
+            .expect("create");
+        let err = service
+            .update(
+                created.id,
+                JobUpdateRequest {
+                    name: "Job".to_string(),
+                    description: None,
+                    target: artifact_target(),
+                    cron_expr: "0 9 * * *".to_string(),
+                    timezone: "local".to_string(),
+                    enabled: true,
+                    exec_timeout_secs: Some(-1),
+                    max_retries: None,
+                    retry_delay_secs: None,
+                },
+            )
+            .await
+            .expect_err("negative timeout on update must fail");
         assert_eq!(err.code, "VALIDATION_ERROR");
     }
 }

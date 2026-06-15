@@ -44,6 +44,13 @@ export interface PromptTarget {
 // 任务目标：按 `kind` 判别的联合类型
 export type JobTarget = ArtifactTarget | AgentTarget | PromptTarget;
 
+// 健壮性配置的具名默认值（与 Rust 端 storage/types/job.rs 常量保持一致）。
+// execTimeoutSecs=0 表示不限超时；maxRetries=0 表示不重试；retryDelaySecs 默认 60s。
+// 实际的超时中断 / 重试退避行为由后续 feature 实现，本处仅用于表单留空回填。
+export const DEFAULT_EXEC_TIMEOUT_SECS = 0;
+export const DEFAULT_MAX_RETRIES = 0;
+export const DEFAULT_RETRY_DELAY_SECS = 60;
+
 // 定时任务定义（对应 jobs 表）
 export interface Job extends BaseEntity {
   name: string;
@@ -57,6 +64,12 @@ export interface Job extends BaseEntity {
   lastStatus?: ExecutionStatus;
   runCount: number;
   failureCount: number;
+  // 每次运行超时（秒），0 表示不限；执行语义见后续 exec-timeout feature
+  execTimeoutSecs: number;
+  // 失败后最大重试次数，0 表示不重试；执行语义见后续 retry-backoff feature
+  maxRetries: number;
+  // 重试间隔（秒）
+  retryDelaySecs: number;
 }
 
 // 单次执行记录（对应 job_executions 表）

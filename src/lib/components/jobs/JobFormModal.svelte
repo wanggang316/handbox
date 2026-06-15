@@ -19,6 +19,11 @@
     Job,
     JobTarget,
   } from "$lib/types";
+  import {
+    DEFAULT_EXEC_TIMEOUT_SECS,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_RETRY_DELAY_SECS,
+  } from "$lib/types/job";
   import type { ProviderWithModels } from "$lib/types/provider";
 
   /** 父组件保存所需的表单出参（与 JobCreateInput / JobUpdateInput 对齐的子集）。 */
@@ -29,6 +34,12 @@
     cronExpr: string;
     timezone: string;
     enabled: boolean;
+    /** 每次运行超时（秒）；undefined 表示留空、由后端回填具名默认。 */
+    execTimeoutSecs?: number;
+    /** 最大重试次数；undefined 表示留空、由后端回填具名默认。 */
+    maxRetries?: number;
+    /** 重试间隔（秒）；undefined 表示留空、由后端回填具名默认。 */
+    retryDelaySecs?: number;
   }
 
   interface Props {
@@ -62,6 +73,10 @@
     timezone: string;
     enabled: boolean;
     target: JobTarget;
+    // 健壮性字段以字符串持有，空串表示「留空」→ 保存时映射为 undefined（用后端默认）。
+    execTimeoutSecs: string;
+    maxRetries: string;
+    retryDelaySecs: string;
   }
 
   function blankForm(): FormState {
@@ -72,6 +87,9 @@
       timezone: localTimezone,
       enabled: true,
       target: emptyTarget(),
+      execTimeoutSecs: "",
+      maxRetries: "",
+      retryDelaySecs: "",
     };
   }
 
@@ -114,6 +132,10 @@
         enabled: job.enabled,
         // 深拷贝目标（$state.snapshot 返回非代理深拷贝），避免修改外部 job 引用。
         target: $state.snapshot(job.target) as JobTarget,
+        // 编辑模式回填已存值（包括 0，因为 0 是有意义的「不限/不重试」）。
+        execTimeoutSecs: String(job.execTimeoutSecs),
+        maxRetries: String(job.maxRetries),
+        retryDelaySecs: String(job.retryDelaySecs),
       };
     } else {
       form = blankForm();
@@ -202,6 +224,36 @@
       : null,
   );
 
+  // 健壮性字段：留空合法（保存映射为 undefined，由后端回填具名默认）；
+  // 非空必须是非负整数，否则即时报错（VAL-ROBUST-003 前端侧）。
+  function robustnessError(raw: string, label: string): string | null {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return null; // 留空 → 用默认
+    const n = Number(trimmed);
+    if (!Number.isInteger(n)) return `${label}必须是整数`;
+    if (n < 0) return `${label}不能为负数`;
+    return null;
+  }
+
+  const execTimeoutError = $derived(
+    showValidation
+      ? robustnessError(form.execTimeoutSecs, "超时时间")
+      : null,
+  );
+  const maxRetriesError = $derived(
+    showValidation ? robustnessError(form.maxRetries, "最大重试次数") : null,
+  );
+  const retryDelayError = $derived(
+    showValidation ? robustnessError(form.retryDelaySecs, "重试间隔") : null,
+  );
+
+  /** 把健壮性输入解析为保存值：空串 → undefined（用默认），否则解析为整数。 */
+  function parseRobustness(raw: string): number | undefined {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return undefined;
+    return Number(trimmed);
+  }
+
   const targetValid = $derived.by((): boolean => {
     const t = form.target;
     switch (t.kind) {
@@ -222,6 +274,9 @@
     showValidation = true;
     if (form.name.trim().length === 0) return false;
     if (!targetValid) return false;
+    if (robustnessError(form.execTimeoutSecs, "超时时间")) return false;
+    if (robustnessError(form.maxRetries, "最大重试次数")) return false;
+    if (robustnessError(form.retryDelaySecs, "重试间隔")) return false;
     return true;
   }
 
@@ -240,6 +295,9 @@
         cronExpr: form.cronExpr.trim(),
         timezone: form.timezone,
         enabled: form.enabled,
+        execTimeoutSecs: parseRobustness(form.execTimeoutSecs),
+        maxRetries: parseRobustness(form.maxRetries),
+        retryDelaySecs: parseRobustness(form.retryDelaySecs),
       });
       // 成功：触发关闭动画。
       localOpen = false;
@@ -323,6 +381,71 @@
           {agentsLoading}
           showError={showValidation}
         />
+      </div>
+    </TableGroup>
+
+    <!-- 高级（健壮性）：超时 / 重试。留空采用具名默认。 -->
+    <TableGroup title="高级">
+      <div class="flex flex-col gap-3 px-6 py-4">
+        <label class="flex flex-col gap-1 text-sm">
+          <span class="font-medium text-base-content/80">超时时间（秒）</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            bind:value={form.execTimeoutSecs}
+            placeholder={`留空使用默认 ${DEFAULT_EXEC_TIMEOUT_SECS}（0 表示不限超时）`}
+            aria-invalid={execTimeoutError != null}
+            class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {execTimeoutError
+              ? 'border-error ring-1 ring-error'
+              : 'border-[var(--hairline)]'}"
+          />
+          {#if execTimeoutError}
+            <span class="text-xs text-error">{execTimeoutError}</span>
+          {:else}
+            <span class="text-xs text-base-content/50">0 表示不限超时；留空使用默认。</span>
+          {/if}
+        </label>
+
+        <label class="flex flex-col gap-1 text-sm">
+          <span class="font-medium text-base-content/80">最大重试次数</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            bind:value={form.maxRetries}
+            placeholder={`留空使用默认 ${DEFAULT_MAX_RETRIES}（0 表示不重试）`}
+            aria-invalid={maxRetriesError != null}
+            class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {maxRetriesError
+              ? 'border-error ring-1 ring-error'
+              : 'border-[var(--hairline)]'}"
+          />
+          {#if maxRetriesError}
+            <span class="text-xs text-error">{maxRetriesError}</span>
+          {:else}
+            <span class="text-xs text-base-content/50">0 表示失败后不重试；留空使用默认。</span>
+          {/if}
+        </label>
+
+        <label class="flex flex-col gap-1 text-sm">
+          <span class="font-medium text-base-content/80">重试间隔（秒）</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            bind:value={form.retryDelaySecs}
+            placeholder={`留空使用默认 ${DEFAULT_RETRY_DELAY_SECS}`}
+            aria-invalid={retryDelayError != null}
+            class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {retryDelayError
+              ? 'border-error ring-1 ring-error'
+              : 'border-[var(--hairline)]'}"
+          />
+          {#if retryDelayError}
+            <span class="text-xs text-error">{retryDelayError}</span>
+          {:else}
+            <span class="text-xs text-base-content/50">留空使用默认 {DEFAULT_RETRY_DELAY_SECS} 秒。</span>
+          {/if}
+        </label>
       </div>
     </TableGroup>
 
