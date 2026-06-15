@@ -18,8 +18,9 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    ArtifactService, McpService, MessageService, ModelService, ProviderService, SearchService,
-    SessionService, SettingsService, StorageService, UserSessionService, WordService,
+    ArtifactService, JobService, McpService, MessageService, ModelService, ProviderService,
+    SearchService, SessionService, SettingsService, StorageService, UserSessionService,
+    WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
@@ -248,6 +249,12 @@ pub fn run() {
             artifact_init_builtin,
             // 定时任务相关命令
             job_preview_schedule,
+            job_create,
+            job_list,
+            job_get,
+            job_update,
+            job_delete,
+            job_set_enabled,
             // 剪贴板相关命令
             clipboard_copy_image,
             // 图片相关命令
@@ -366,6 +373,9 @@ async fn initialize_services(
     // 初始化 Agent Project 服务（按工作目录分组 Agent 模式会话）
     let agent_project_service = AgentProjectService::new(database_service.clone());
 
+    // 初始化定时任务服务（Job CRUD + 校验）
+    let job_service = JobService::from_db(database_service.clone());
+
     // 初始化 Skill 服务（解析三个 scope 根：app-data + user；project 按 run 解析）。
     // app-data: <app_data_dir>/skills；user: ~/.agents/skills（home_dir 解析失败时
     // 退回一个不存在的根，使 user scope 静默为空而非阻断启动）。
@@ -430,6 +440,7 @@ async fn initialize_services(
     app.manage(agent_session_service);
     app.manage(agent_project_service);
     app.manage(skill_service);
+    app.manage(job_service);
 
     // Services are registered — the foreground can now read DB-cached data.
     // Catalog sync runs ENTIRELY in the background from here: prime the
