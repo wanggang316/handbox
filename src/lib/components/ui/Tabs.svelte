@@ -1,7 +1,11 @@
 <script lang="ts">
-  export let value = '';
-  export let items: Array<{ value: string; label: string }>= [];
-  export let onChange: (val: string) => void = () => {};
+  interface Props {
+    value?: string;
+    items?: Array<{ value: string; label: string }>;
+    onChange?: (val: string) => void;
+  }
+
+  let { value = '', items = [], onChange = () => {} }: Props = $props();
 </script>
 
 <div class="tabs" role="tablist">

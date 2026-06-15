@@ -4,37 +4,50 @@
   import Avatar from "../ui/Avatar.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
 
-  export let open = false;
-  export let user: {
-    username: string;
-    email: string;
-    avatar: string;
-  };
-  export let onClose: () => void = () => {};
-  export let onSave: (userData: {
-    username: string;
-    email: string;
-    avatar?: string;
-  }) => void = () => {};
+  interface Props {
+    open?: boolean;
+    user: {
+      username: string;
+      email: string;
+      avatar: string;
+    };
+    onClose?: () => void;
+    onSave?: (userData: {
+      username: string;
+      email: string;
+      avatar?: string;
+    }) => void;
+  }
+
+  let {
+    open = false,
+    user,
+    onClose = () => {},
+    onSave = () => {},
+  }: Props = $props();
 
   // 本地编辑状态
-  let editedUsername = "";
-  let editedEmail = "";
-  let editedAvatar = "";
-  
+  let editedUsername = $state("");
+  let editedEmail = $state("");
+  let editedAvatar = $state("");
+
   // Modal 引用
   let modalRef: Modal;
 
   // 重置表单数据
-  $: if (open && user) {
-    console.log("EditProfileModal 打开，用户数据:", user);
-    editedUsername = user.username || "";
-    editedEmail = user.email || "";
-    editedAvatar = user.avatar || "";
-  }
+  $effect(() => {
+    if (open && user) {
+      console.log("EditProfileModal 打开，用户数据:", user);
+      editedUsername = user.username || "";
+      editedEmail = user.email || "";
+      editedAvatar = user.avatar || "";
+    }
+  });
 
   // 调试 open 状态变化
-  $: console.log("EditProfileModal open 状态:", open);
+  $effect(() => {
+    console.log("EditProfileModal open 状态:", open);
+  });
 
   function handleSave() {
     onSave({
