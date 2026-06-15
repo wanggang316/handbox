@@ -42,6 +42,23 @@ function parseStep(field: string): number | null {
 }
 
 /**
+ * 解析 day-of-week 字段为有序去重的 0-6 列表（支持逗号多选，如 `1,3,5`）。
+ * 任一段非 0-6 纯数字则返回 null（交由调用方回退原始表达式）。
+ */
+function parseWeekdays(field: string): number[] | null {
+  const parts = field.split(",");
+  const set = new Set<number>();
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const w = Number(part);
+    if (!Number.isInteger(w) || w < 0 || w > 6) return null;
+    set.add(w);
+  }
+  if (set.size === 0) return null;
+  return [...set].sort((a, b) => a - b);
+}
+
+/**
  * 将 cron 表达式转为可读中文文案。无法识别的表达式原样返回。
  *
  * @param cron 标准 5 段 cron 表达式
@@ -109,11 +126,12 @@ export function cronToHuman(cron: string): string {
       return `每天 ${time}`;
     }
 
-    // 每周某天 HH:MM：m h * * W
+    // 每周某天[可多选] HH:MM：m h * * W[,W...]
     if (dayOfMonth === "*" && dayOfWeek !== "*") {
-      const w = Number(dayOfWeek);
-      if (Number.isInteger(w) && w >= 0 && w <= 6) {
-        return `每${WEEKDAY_NAMES[w]} ${time}`;
+      const weekdays = parseWeekdays(dayOfWeek);
+      if (weekdays !== null) {
+        const names = weekdays.map((w) => WEEKDAY_NAMES[w]).join("、");
+        return `每${names} ${time}`;
       }
     }
 
