@@ -19,6 +19,7 @@
     Star,
     Box,
     Download,
+    Clock,
   } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
@@ -69,6 +70,10 @@
   function handleAgentClick() {
     console.log("Clicked agent menu");
     goto(`/agents`);
+  }
+
+  function handleJobsClick() {
+    goto(`/jobs`);
   }
 
   // 新建会话（Chat 模式专属操作，入口为 ChatList 标题右侧的加号）
@@ -252,6 +257,14 @@
         isActive={currentRoute === "/artifacts"}
         buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
         onclick={() => handleArtifactClick()}
+      />
+      <MenuButton
+        title="任务"
+        icon={Clock}
+        iconSize={16}
+        isActive={currentRoute === "/jobs"}
+        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+        onClick={() => handleJobsClick()}
       />
     </div>
 
