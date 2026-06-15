@@ -13,9 +13,11 @@
     onToggleEnabled: (next: boolean) => boolean | Promise<boolean>;
     onEdit: (job: Job) => void;
     onDelete: (job: Job) => void;
+    /** 查看任务详情（打开执行历史 Modal）。点卡片主体区触发。 */
+    onView: (job: Job) => void;
   }
 
-  let { job, onToggleEnabled, onEdit, onDelete }: Props = $props();
+  let { job, onToggleEnabled, onEdit, onDelete, onView }: Props = $props();
 
   // 目标类型 -> 展示标签 + 语义配色 chip 类（artifact→primary / agent→info / prompt→success）。
   // 类名写成完整字面量，确保 Tailwind 4 JIT 能静态扫描到（动态拼接 `bg-{x}` 会被 purge）。
@@ -47,7 +49,19 @@
   const lastStatusMeta = $derived(job.lastStatus ? STATUS_META[job.lastStatus] : null);
 </script>
 
-<div class="bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors flex flex-col">
+<div
+  class="bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors flex flex-col cursor-pointer"
+  role="button"
+  tabindex="0"
+  aria-label={`查看任务 ${job.name} 详情`}
+  onclick={() => onView(job)}
+  onkeydown={(e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onView(job);
+    }
+  }}
+>
   <div class="flex items-start justify-between mb-3 gap-2">
     <div class="min-w-0">
       <h3 class="font-medium text-base-content truncate">{job.name}</h3>
@@ -55,7 +69,13 @@
         {targetMeta.label}
       </span>
     </div>
-    <div class="flex items-center gap-1 flex-shrink-0">
+    <!-- 操作区：阻止冒泡，避免点开关/编辑/删除时也触发查看详情 -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="flex items-center gap-1 flex-shrink-0"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
+    >
       <Toggle
         checked={job.enabled}
         onChangeBefore={(next) => onToggleEnabled(next)}

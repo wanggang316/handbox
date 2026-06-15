@@ -6,6 +6,7 @@
   import Button from "$lib/components/ui/Button.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import JobFormModal from "$lib/components/jobs/JobFormModal.svelte";
+  import JobDetailModal from "$lib/components/jobs/JobDetailModal.svelte";
   import type { JobFormData } from "$lib/components/jobs/JobFormModal.svelte";
   import type { Job } from "$lib/types";
 
@@ -18,6 +19,10 @@
   let deletingJob = $state<Job | null>(null);
   let deleting = $state(false);
   let deleteError = $state<string | null>(null);
+
+  // 详情 Modal 状态：点卡片主体打开，展示执行历史时间线。
+  let showDetailModal = $state(false);
+  let detailJob = $state<Job | null>(null);
 
   // 搜索按名称、大小写不敏感
   const filteredJobs = $derived.by(() => {
@@ -55,6 +60,16 @@
     deletingJob = job;
     deleteError = null;
     showDeleteConfirm = true;
+  }
+
+  function handleView(job: Job) {
+    detailJob = job;
+    showDetailModal = true;
+  }
+
+  function closeDetailModal() {
+    showDetailModal = false;
+    detailJob = null;
   }
 
   function closeDeleteConfirm() {
@@ -212,6 +227,7 @@
             onToggleEnabled={(next) => handleToggleEnabled(job, next)}
             onEdit={handleEdit}
             onDelete={handleDelete}
+            onView={handleView}
           />
         {/each}
       </div>
@@ -225,6 +241,13 @@
   job={editingJob}
   onClose={closeFormModal}
   onSave={handleSave}
+/>
+
+<!-- 任务详情 Modal（执行历史时间线） -->
+<JobDetailModal
+  open={showDetailModal}
+  job={detailJob}
+  onClose={closeDetailModal}
 />
 
 <!-- 删除确认模态框 -->

@@ -5,7 +5,7 @@
 
 use crate::models::AppError;
 use crate::services::{JobCreateRequest, JobService, JobUpdateRequest};
-use crate::storage::types::{Job, JobTarget, Timestamp, UUID};
+use crate::storage::types::{Job, JobExecution, JobTarget, Timestamp, UUID};
 use crate::utils::cron;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -123,6 +123,19 @@ pub async fn job_set_enabled(
     job_service: State<'_, JobService>,
 ) -> Result<Job, AppError> {
     job_service.set_enabled(job_id, enabled).await
+}
+
+/// List a job's execution history (newest-first), paginated. Includes any
+/// in-progress (`running`) row so the detail timeline shows live runs. A job
+/// that has never run returns an empty array, not an error.
+#[tauri::command]
+pub async fn job_execution_list(
+    job_id: UUID,
+    limit: Option<i32>,
+    offset: Option<i32>,
+    job_service: State<'_, JobService>,
+) -> Result<Vec<JobExecution>, AppError> {
+    job_service.list_executions(job_id, limit, offset).await
 }
 
 #[cfg(test)]

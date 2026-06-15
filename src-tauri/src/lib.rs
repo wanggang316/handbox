@@ -255,6 +255,7 @@ pub fn run() {
             job_update,
             job_delete,
             job_set_enabled,
+            job_execution_list,
             // 剪贴板相关命令
             clipboard_copy_image,
             // 图片相关命令
