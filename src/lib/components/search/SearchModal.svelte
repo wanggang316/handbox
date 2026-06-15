@@ -155,7 +155,7 @@
         <input
           bind:this={searchInput}
           type="text"
-          class="w-full pl-10 pr-9 py-2.5 rounded-md border border-[var(--hairline)] bg-base-300 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary"
+          class="w-full pl-10 pr-9 py-2.5 rounded-md border border-[var(--hairline)] bg-base-300 text-base-content focus:border-primary"
           placeholder="搜索聊天记录..."
           bind:value={query}
         />

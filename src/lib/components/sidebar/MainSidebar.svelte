@@ -226,7 +226,7 @@
         <input
           type="text"
           placeholder="搜索..."
-          class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-[12px]"
+          class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 text-[12px]"
           onfocus={() => (showSearchModal = true)}
           readonly
         />

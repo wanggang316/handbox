@@ -153,7 +153,7 @@
             placeholder="输入系统提示词..."
             rows="6"
             class="w-full min-h-28 max-h-64 px-3 py-2 border border-base-300 rounded-md resize-y
-                   focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent
+                   focus:border-transparent
                    font-mono text-sm text-base-content bg-base-200"
           ></textarea>
 

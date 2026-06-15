@@ -107,7 +107,7 @@
           : 'pr-8'
         : size === 'sm'
           ? 'pr-2'
-          : 'pr-3'} rounded-md border border-[var(--hairline)] bg-base-300 text-base-content hover:bg-base-300/80 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          : 'pr-3'} rounded-md border border-[var(--hairline)] bg-base-300 text-base-content hover:bg-base-300/80 focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
     >
       {#if placeholder}
         <option value="" disabled selected>{placeholder}</option>

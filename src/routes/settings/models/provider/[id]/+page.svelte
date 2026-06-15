@@ -408,7 +408,7 @@
             if (e.key === "Enter") handleAddModel();
             if (e.key === "Escape") cancelAddModel();
           }}
-          class="flex-1 px-3 py-1.5 text-sm border border-[var(--hairline)] bg-base-100 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+          class="flex-1 px-3 py-1.5 text-sm border border-[var(--hairline)] bg-base-100 rounded-md"
         />
         <button
           onclick={handleAddModel}
@@ -474,7 +474,7 @@
                         (e.currentTarget as HTMLInputElement).checked
                       );
                     }}
-                    class="w-4 h-4 text-primary bg-base-100 border-base-300 rounded focus:ring-primary focus:ring-2"
+                    class="w-4 h-4 text-primary bg-base-100 border-base-300 rounded"
                   />
                 </div>
 

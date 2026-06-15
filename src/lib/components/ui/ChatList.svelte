@@ -259,7 +259,7 @@
         <div class="relative">
           <input
             data-chat-id={chat.id}
-            class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+            class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
             bind:value={renameValue}
             onkeydown={handleKeydown}
             onblur={confirmRename}
