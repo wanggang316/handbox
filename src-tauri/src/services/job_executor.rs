@@ -36,7 +36,7 @@ use crate::services::{
     AgentRuntime, AgentService, AgentSessionService, ArtifactService, MessageService,
     ProviderService, RunSink, SessionService,
 };
-use crate::storage::job_repository::DEFAULT_EXECUTION_HISTORY_LIMIT;
+use crate::storage::job_repository::{FailureCountUpdate, DEFAULT_EXECUTION_HISTORY_LIMIT};
 use crate::storage::types::{
     CreateAgentSessionRequest, ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution,
     JobTarget, Provider, Timestamp, Trigger,
@@ -323,27 +323,53 @@ impl<R: Runtime> JobExecutor<R> {
         self.execute(job, Trigger::Manual).await
     }
 
-    /// Execute `job` and persist the outcome.
+    /// Execute `job` and persist the outcome, retrying a failed/timed-out run
+    /// with exponential backoff up to the job's `max_retries`.
     ///
-    /// Flow: insert a `running` row -> dispatch the target -> finalize the SAME
-    /// row to its terminal state -> update the job's run statistics. Returns the
-    /// finalized `JobExecution`.
+    /// The whole retry envelope is ONE `job_executions` row (VAL-HISTORY-032):
+    /// a single `running` row is inserted up front, the target is dispatched up
+    /// to `max_retries + 1` times inside that row, and the SAME row is finalized
+    /// once to its terminal state carrying the FINAL `attempt`. Job statistics
+    /// are updated once per envelope: `run_count + 1` always (one trigger),
+    /// while `failure_count` (the continuous-failure counter) is reset on a
+    /// terminal success and incremented on a terminal failure — but only for a
+    /// scheduled trigger; a manual trigger leaves `failure_count` untouched
+    /// (VAL-ROBUST-024).
+    ///
+    /// Attempt numbering starts at 1; `max_retries = N` allows up to `N + 1`
+    /// attempts. Between attempt `k` and `k + 1` the task sleeps
+    /// `retry_delay_secs * 2^(k-1)` seconds (base, 2·base, 4·base, …); a
+    /// `retry_delay_secs = 0` collapses every backoff to zero so the envelope
+    /// still converges in a bounded number of attempts without busy-looping
+    /// forever (VAL-ROBUST-012). The sleep lives inside this task, so an app
+    /// shutdown that drops the task discards a pending backoff — a late retry is
+    /// never replayed on restart (VAL-ROBUST-014).
     ///
     /// Re-entrancy is the CALLER's responsibility: callers that need the
     /// at-most-one-concurrent-run guarantee must hold a slot from
     /// [`try_claim`] (or call [`run_now`], which does) for the duration of this
-    /// call. `execute` deliberately does not claim so the caller can act under
-    /// the reservation before dispatching.
+    /// call — which now spans the WHOLE envelope (every attempt and every
+    /// backoff sleep), so a tick that fires mid-backoff is skipped by the
+    /// in-flight guard rather than opening a second row (VAL-ROBUST-013/015).
     ///
     /// A dispatch failure (artifact missing / not installed, process that fails
-    /// to start, or an unsupported target in M1) is NOT propagated as `Err`: it
-    /// is recorded as a `failed` execution row with a non-empty `error`, and the
-    /// finalized row is returned. `Err` is reserved for persistence failures
-    /// where no consistent row could be written.
+    /// to start, a timeout, or an unsupported target) is NOT propagated as
+    /// `Err`: it is recorded as a terminal execution row with a non-empty
+    /// `error`, and the finalized row is returned. `Err` is reserved for
+    /// persistence failures where no consistent row could be written.
+    ///
+    /// If the job is deleted mid-envelope (between attempts), the envelope is
+    /// aborted cleanly: the `running` row was cascade-deleted with the job
+    /// (FK `ON DELETE CASCADE`), so there is nothing to finalize and no new
+    /// execution is started (VAL-ROBUST-025). The deletion is surfaced as an
+    /// `Err(not_found)`.
     pub async fn execute(&self, job: &Job, trigger: Trigger) -> Result<JobExecution, AppError> {
         let exec_id = uuid::Uuid::new_v4().to_string();
         let started_at = current_timestamp();
         const FIRST_ATTEMPT: i32 = 1;
+        // `max_retries = N` => up to N+1 attempts (the first run plus N retries).
+        // Clamp defensively so a negative value cannot underflow the loop bound.
+        let max_attempts: i32 = 1 + job.max_retries.max(0) as i32;
 
         self.executions
             .insert_running(
@@ -360,15 +386,67 @@ impl<R: Runtime> JobExecutor<R> {
         // shown immediately and later flipped in place to its terminal state.
         self.emit_executed(&job.id, &exec_id, ExecutionStatus::Running);
 
-        let outcome = self.dispatch_with_timeout(job).await;
+        // Dispatch up to `max_attempts` times inside the single row. A success
+        // (or running out of attempts) ends the loop; between attempts we back
+        // off exponentially and re-check the job still exists.
+        let mut attempt: i32 = FIRST_ATTEMPT;
+        let outcome = loop {
+            let outcome = self.dispatch_with_timeout(job).await;
+
+            // A success terminates the envelope immediately, keeping the attempt
+            // number it succeeded on (preserving the failure trail, ROBUST-016).
+            if matches!(outcome.status, ExecutionStatus::Success) {
+                break outcome;
+            }
+
+            // No attempts left: this failure/timeout is the terminal outcome.
+            if attempt >= max_attempts {
+                break outcome;
+            }
+
+            // Back off before the next attempt: base * 2^(attempt-1). A zero
+            // base yields zero delay (bounded, no busy-loop). The sleep is in
+            // this task, so a shutdown drops it (no late replay, ROBUST-014).
+            let delay = backoff_delay(job.retry_delay_secs, attempt);
+            tracing::info!(
+                "[job_executor] job {} attempt {} failed ({:?}); retrying in {:?}",
+                job.id,
+                attempt,
+                outcome.status,
+                delay
+            );
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+
+            // If the job was deleted during the backoff, the running row was
+            // cascade-deleted with it. Abort cleanly: do not start another
+            // attempt and do not try to finalize a row that no longer exists
+            // (VAL-ROBUST-025).
+            match self.jobs.get(&job.id).await {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Err(AppError::not_found(&format!(
+                        "Job '{}' was deleted during a retry; envelope aborted",
+                        job.id
+                    )));
+                }
+                Err(e) => return Err(e),
+            }
+
+            attempt += 1;
+        };
 
         let ended_at = current_timestamp();
         let duration = (ended_at - started_at).max(0);
 
+        // Finalize the SAME row to its terminal state, recording the FINAL
+        // attempt the envelope reached.
         self.executions
             .finalize(
                 &exec_id,
                 outcome.status,
+                attempt,
                 outcome.stdout.as_deref(),
                 outcome.stderr.as_deref(),
                 outcome.exit_code,
@@ -379,10 +457,21 @@ impl<R: Runtime> JobExecutor<R> {
             )
             .await?;
 
-        // Update job-level run statistics. `next_run_at` is preserved as-is; the
-        // scheduler owns cron recomputation, not the executor.
+        // Update job-level run statistics. `run_count` advances once per
+        // envelope. `failure_count` is the CONTINUOUS-failure counter: a
+        // scheduled success resets it, a scheduled failure increments it, and a
+        // manual run never touches it (VAL-ROBUST-017/018/024). `next_run_at` is
+        // preserved as-is; the scheduler owns cron recomputation.
+        let failure_update = failure_count_update(trigger, outcome.status);
         self.jobs
-            .update_after_run(&job.id, ended_at, outcome.status, job.next_run_at, ended_at)
+            .update_after_run(
+                &job.id,
+                ended_at,
+                outcome.status,
+                failure_update,
+                job.next_run_at,
+                ended_at,
+            )
             .await?;
 
         // FIFO-prune this job's execution history to the most recent N rows. Run
@@ -404,7 +493,7 @@ impl<R: Runtime> JobExecutor<R> {
             job_id: job.id.clone(),
             status: outcome.status,
             trigger,
-            attempt: FIRST_ATTEMPT,
+            attempt,
             stdout: outcome.stdout,
             stderr: outcome.stderr,
             exit_code: outcome.exit_code,
@@ -974,6 +1063,49 @@ fn timeout_duration(exec_timeout_secs: i64) -> Option<Duration> {
         Some(Duration::from_secs(exec_timeout_secs as u64))
     } else {
         None
+    }
+}
+
+/// Exponential backoff before the retry that follows `attempt`: the gap before
+/// attempt `k + 1` is `retry_delay_secs * 2^(k-1)` seconds (so base, 2·base,
+/// 4·base, … between successive attempts). `attempt` is the 1-based number of
+/// the attempt that just failed.
+///
+/// A `retry_delay_secs <= 0` yields a zero delay (no inter-attempt wait), so a
+/// `retry_delay_secs = 0` job still retries — back to back — and converges in a
+/// bounded number of attempts rather than busy-looping forever
+/// (VAL-ROBUST-012). The exponent is saturated so a large `attempt` cannot
+/// overflow the shift; the resulting seconds are saturated into the `Duration`.
+fn backoff_delay(retry_delay_secs: i64, attempt: i32) -> Duration {
+    if retry_delay_secs <= 0 || attempt < 1 {
+        return Duration::ZERO;
+    }
+    let base = retry_delay_secs as u64;
+    // 2^(attempt-1); clamp the exponent so the shift never overflows.
+    let exponent = (attempt - 1).clamp(0, 62) as u32;
+    let multiplier = 1u64 << exponent;
+    let secs = base.saturating_mul(multiplier);
+    Duration::from_secs(secs)
+}
+
+/// Decide how a finalized envelope should move the job's CONTINUOUS-failure
+/// counter (`failure_count`), which is distinct from the cumulative trigger
+/// counter (`run_count`):
+/// - a MANUAL trigger never participates — its outcome leaves `failure_count`
+///   untouched (VAL-ROBUST-024);
+/// - a SCHEDULED success resets the counter to 0 (the failure chain is broken,
+///   even though the row keeps its `attempt > 1` trail, VAL-ROBUST-016);
+/// - a SCHEDULED failure/timeout increments it (VAL-ROBUST-017/018).
+fn failure_count_update(trigger: Trigger, status: ExecutionStatus) -> FailureCountUpdate {
+    match trigger {
+        Trigger::Manual => FailureCountUpdate::Unchanged,
+        Trigger::Schedule => {
+            if matches!(status, ExecutionStatus::Success) {
+                FailureCountUpdate::Reset
+            } else {
+                FailureCountUpdate::Increment
+            }
+        }
     }
 }
 
@@ -2486,6 +2618,7 @@ mod tests {
                 .finalize(
                     &id,
                     ExecutionStatus::Success,
+                    1,
                     None,
                     None,
                     Some(0),
@@ -3577,5 +3710,602 @@ mod tests {
         let rows = read_rows(&env, "job_agent_timeout").await;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, "timeout");
+    }
+
+    // ---- retry backoff (VAL-ROBUST-009..018/023..025, VAL-HISTORY-032) ----
+
+    /// Install a shell artifact that fails its first `fail_count` invocations and
+    /// succeeds thereafter, using a counter file in a temp dir to persist the
+    /// invocation count ACROSS retries (each attempt is a fresh child process).
+    /// A huge `fail_count` makes it always fail. Returns the installed artifact
+    /// id; the counter file path is caller-chosen so distinct jobs never collide.
+    async fn install_fail_then_succeed_artifact(
+        env: &TestEnv,
+        counter_path: &std::path::Path,
+        fail_count: i64,
+    ) -> String {
+        // The script reads/increments a counter; while count <= fail_count it
+        // exits non-zero, otherwise it prints and exits 0. No locking is needed:
+        // the executor never runs two attempts of one envelope concurrently.
+        let script = format!(
+            r#"COUNTER="{}"
+n=0
+if [ -f "$COUNTER" ]; then n=$(cat "$COUNTER"); fi
+n=$((n + 1))
+echo "$n" > "$COUNTER"
+echo "attempt-$n"
+if [ "$n" -le {} ]; then
+  echo "fail-$n" 1>&2
+  exit 1
+fi
+exit 0
+"#,
+            counter_path.display(),
+            fail_count
+        );
+        install_shell_artifact(env, &script).await
+    }
+
+    /// Read the integer in a counter file, or 0 if it does not exist.
+    fn read_counter(path: &std::path::Path) -> i64 {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| s.trim().parse::<i64>().ok())
+            .unwrap_or(0)
+    }
+
+    // ---- backoff_delay pure law (exponential, base 2; ROBUST-009/012) ----
+
+    // The gap before the k-th retry is base * 2^(k-1): base, 2·base, 4·base, …
+    // (`attempt` is the 1-based number of the attempt that just failed).
+    #[test]
+    fn backoff_delay_is_exponential_base_two() {
+        let base = 4i64;
+        assert_eq!(backoff_delay(base, 1), Duration::from_secs(4)); // before retry 1
+        assert_eq!(backoff_delay(base, 2), Duration::from_secs(8)); // before retry 2
+        assert_eq!(backoff_delay(base, 3), Duration::from_secs(16)); // before retry 3
+        assert_eq!(backoff_delay(base, 4), Duration::from_secs(32));
+
+        // Adjacent backoffs grow by exactly a factor of 2.
+        let d1 = backoff_delay(base, 1).as_secs();
+        let d2 = backoff_delay(base, 2).as_secs();
+        let d3 = backoff_delay(base, 3).as_secs();
+        assert_eq!(d2, d1 * 2);
+        assert_eq!(d3, d2 * 2);
+    }
+
+    // A zero (or negative) base collapses every backoff to zero: retries run
+    // back-to-back, with no inter-attempt wait (VAL-ROBUST-012).
+    #[test]
+    fn backoff_delay_zero_base_is_zero() {
+        for attempt in 1..=5 {
+            assert_eq!(backoff_delay(0, attempt), Duration::ZERO);
+            assert_eq!(backoff_delay(-10, attempt), Duration::ZERO);
+        }
+    }
+
+    // A large attempt count cannot overflow the shift; the delay saturates
+    // rather than panicking.
+    #[test]
+    fn backoff_delay_saturates_on_large_attempt() {
+        let d = backoff_delay(i64::MAX, 100);
+        assert!(d.as_secs() > 0, "saturated delay is still positive");
+    }
+
+    // ---- failure_count_update mapping (ROBUST-016/017/018/024) ----
+
+    // Scheduled success resets the continuous-failure chain; scheduled
+    // failure/timeout increments it; a manual run never touches it.
+    #[test]
+    fn failure_count_update_maps_trigger_and_status() {
+        assert_eq!(
+            failure_count_update(Trigger::Schedule, ExecutionStatus::Success),
+            FailureCountUpdate::Reset
+        );
+        assert_eq!(
+            failure_count_update(Trigger::Schedule, ExecutionStatus::Failed),
+            FailureCountUpdate::Increment
+        );
+        assert_eq!(
+            failure_count_update(Trigger::Schedule, ExecutionStatus::Timeout),
+            FailureCountUpdate::Increment
+        );
+        // Manual never participates, whatever the outcome.
+        for status in [
+            ExecutionStatus::Success,
+            ExecutionStatus::Failed,
+            ExecutionStatus::Timeout,
+        ] {
+            assert_eq!(
+                failure_count_update(Trigger::Manual, status),
+                FailureCountUpdate::Unchanged
+            );
+        }
+    }
+
+    // VAL-ROBUST-009 + VAL-HISTORY-032: a job that fails every attempt is retried
+    // up to max_retries+1 times, the dispatch is invoked exactly that many times,
+    // and the WHOLE envelope is ONE row finalized to `failed` with the final
+    // attempt recorded — never one row per attempt.
+    #[tokio::test]
+    async fn always_failing_job_retries_to_max_then_one_failed_row() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_always_fail");
+        // fail_count huge => always fails.
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_retry_fail", artifact_target(&artifact_id)).await;
+        job.max_retries = 3; // up to 4 attempts
+        job.retry_delay_secs = 0; // no inter-attempt wait, keep the test fast
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.attempt, 4, "max_retries=3 => terminal attempt 4");
+        // The dispatch actually ran 4 times.
+        assert_eq!(read_counter(&counter), 4, "exactly 4 dispatches");
+
+        // ONE row for the whole envelope (HISTORY-032), recording attempt 4.
+        let rows = read_rows(&env, "job_retry_fail").await;
+        assert_eq!(rows.len(), 1, "attempt=4 envelope is still ONE history row");
+        assert_eq!(rows[0].status, "failed");
+        assert_eq!(rows[0].attempt, 4);
+
+        // run_count +1 (one trigger), failure_count +1 (terminal scheduled fail).
+        let after = env
+            .executor
+            .jobs
+            .get("job_retry_fail")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.run_count, 1, "one envelope => run_count +1");
+        assert_eq!(after.failure_count, 1, "terminal failure increments");
+    }
+
+    // VAL-ROBUST-010: max_retries=0 makes the first failure terminal — exactly
+    // one dispatch, one attempt=1 failed row, no retry.
+    #[tokio::test]
+    async fn zero_retries_fails_on_first_attempt() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_zero_retry");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_no_retry", artifact_target(&artifact_id)).await;
+        job.max_retries = 0;
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.attempt, 1, "no retries => terminal attempt 1");
+        assert_eq!(read_counter(&counter), 1, "exactly one dispatch, no retry");
+
+        let rows = read_rows(&env, "job_no_retry").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+        assert_eq!(rows[0].attempt, 1);
+    }
+
+    // VAL-ROBUST-016: a job that fails then succeeds on a retry finalizes to
+    // `success`, resets failure_count to 0, but keeps the attempt trail
+    // (attempt > 1) so the earlier failures remain visible.
+    #[tokio::test]
+    async fn fail_then_succeed_records_success_with_attempt_trail() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_fail_then_ok");
+        // Fail the first 2 attempts, succeed on the 3rd.
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 2).await;
+        let mut job = make_job("job_recover", artifact_target(&artifact_id)).await;
+        job.max_retries = 3; // up to 4 attempts; success arrives on attempt 3
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+        // Pre-load a non-zero failure_count to prove success RESETS it.
+        env.executor
+            .jobs
+            .update_after_run(
+                "job_recover",
+                current_timestamp(),
+                ExecutionStatus::Failed,
+                FailureCountUpdate::Increment,
+                job.next_run_at,
+                current_timestamp(),
+            )
+            .await
+            .unwrap();
+        let before = env.executor.jobs.get("job_recover").await.unwrap().unwrap();
+        assert_eq!(before.failure_count, 1, "seeded a prior failure");
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        assert_eq!(exec.attempt, 3, "succeeded on the 3rd attempt");
+        assert_eq!(
+            read_counter(&counter),
+            3,
+            "stopped dispatching once it succeeded"
+        );
+
+        let rows = read_rows(&env, "job_recover").await;
+        assert_eq!(rows.len(), 1, "one envelope => one row even after retries");
+        assert_eq!(rows[0].status, "success");
+        assert_eq!(rows[0].attempt, 3, "the failure trail (attempt>1) is preserved");
+
+        let after = env.executor.jobs.get("job_recover").await.unwrap().unwrap();
+        assert_eq!(after.failure_count, 0, "a terminal success resets the chain");
+    }
+
+    // VAL-ROBUST-017: all retries fail => terminal `failed` and failure_count +1.
+    #[tokio::test]
+    async fn all_retries_fail_increments_failure_count() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_all_fail");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_all_fail", artifact_target(&artifact_id)).await;
+        job.max_retries = 2;
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.attempt, 3);
+
+        let after = env.executor.jobs.get("job_all_fail").await.unwrap().unwrap();
+        assert_eq!(after.run_count, 1);
+        assert_eq!(after.failure_count, 1);
+    }
+
+    // VAL-ROBUST-018: a "fail -> fail -> success -> fail" SEQUENCE of four
+    // envelopes leaves run_count=4 (cumulative triggers) and failure_count=1
+    // (continuous failures, reset by the intervening success), and the count of
+    // persisted FAILED history rows does not shrink when the success resets the
+    // continuous counter — continuous vs cumulative semantics are distinct.
+    #[tokio::test]
+    async fn continuous_vs_cumulative_failure_semantics() {
+        let env = setup().await;
+        // Two targets: one that always fails, one that always succeeds, run in
+        // the order fail, fail, success, fail.
+        let fail_counter = env._temp_dir.path().join("c_seq_fail");
+        let fail_id = install_fail_then_succeed_artifact(&env, &fail_counter, 1_000).await;
+        let ok_id = install_shell_artifact(&env, "echo ok\nexit 0\n").await;
+
+        let mut fail_job = make_job("job_seq", artifact_target(&fail_id)).await;
+        fail_job.max_retries = 0; // each envelope is a single attempt, keep it fast
+        fail_job.retry_delay_secs = 0;
+        seed_job(&env, &fail_job).await;
+
+        // envelope 1: fail
+        env.executor
+            .execute(&fail_job, Trigger::Schedule)
+            .await
+            .unwrap();
+        // envelope 2: fail
+        env.executor
+            .execute(&fail_job, Trigger::Schedule)
+            .await
+            .unwrap();
+        // envelope 3: success (failure_count resets to 0)
+        let mut ok_job = fail_job.clone();
+        ok_job.target = artifact_target(&ok_id);
+        env.executor
+            .execute(&ok_job, Trigger::Schedule)
+            .await
+            .unwrap();
+        // envelope 4: fail
+        env.executor
+            .execute(&fail_job, Trigger::Schedule)
+            .await
+            .unwrap();
+
+        let after = env.executor.jobs.get("job_seq").await.unwrap().unwrap();
+        assert_eq!(
+            after.run_count, 4,
+            "four triggers => run_count 4 (cumulative)"
+        );
+        assert_eq!(
+            after.failure_count, 1,
+            "continuous failures: reset by the success, then the final fail"
+        );
+
+        // The persisted FAILED history rows are not reduced by the reset: three
+        // failed envelopes => three failed rows (plus one success row).
+        let rows = read_rows(&env, "job_seq").await;
+        let failed = rows.iter().filter(|r| r.status == "failed").count();
+        let succeeded = rows.iter().filter(|r| r.status == "success").count();
+        assert_eq!(
+            failed, 3,
+            "failed history rows survive the failure_count reset"
+        );
+        assert_eq!(succeeded, 1);
+        assert_eq!(rows.len(), 4, "four envelopes => four rows");
+    }
+
+    // VAL-ROBUST-023 + VAL-ROBUST-024: a manual run_now also retries on failure,
+    // but a terminal manual failure leaves failure_count untouched (manual runs
+    // do not participate in continuous-failure tracking).
+    #[tokio::test]
+    async fn manual_run_retries_but_does_not_touch_failure_count() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_manual");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_manual_retry", artifact_target(&artifact_id)).await;
+        job.max_retries = 2;
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+        // Seed a prior failure_count so we can prove the manual run leaves it.
+        env.executor
+            .jobs
+            .update_after_run(
+                "job_manual_retry",
+                current_timestamp(),
+                ExecutionStatus::Failed,
+                FailureCountUpdate::Increment,
+                job.next_run_at,
+                current_timestamp(),
+            )
+            .await
+            .unwrap();
+
+        let exec = env.executor.run_now(&job).await.expect("manual run");
+
+        assert_eq!(exec.trigger, Trigger::Manual);
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        // The manual run still RETRIED (ROBUST-023): 3 dispatches for 2 retries.
+        assert_eq!(exec.attempt, 3, "manual run retries up to max_retries+1");
+        assert_eq!(read_counter(&counter), 3);
+
+        let after = env
+            .executor
+            .jobs
+            .get("job_manual_retry")
+            .await
+            .unwrap()
+            .unwrap();
+        // failure_count is untouched by the manual failure (ROBUST-024).
+        assert_eq!(
+            after.failure_count, 1,
+            "manual failure does not bump the chain"
+        );
+    }
+
+    // VAL-ROBUST-011: a timeout-class failure also triggers retry, and an
+    // envelope whose every attempt times out finalizes to a `timeout` terminal
+    // state with the final attempt recorded. The bound is short (1s) and there
+    // is one retry, so the test runs in ~2s.
+    #[tokio::test]
+    async fn timeout_failure_triggers_retry_and_ends_as_timeout() {
+        let env = setup().await;
+        // Sleeps far past the 1s bound on every attempt => every attempt times
+        // out; kill_on_drop reaps the child so each attempt returns near 1s.
+        let artifact_id = install_shell_artifact(&env, "sleep 30\nexit 0\n").await;
+        let mut job = make_job("job_retry_timeout", artifact_target(&artifact_id)).await;
+        job.exec_timeout_secs = 1;
+        job.max_retries = 1; // 2 attempts, both time out
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+
+        let start = std::time::Instant::now();
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        let wall = start.elapsed();
+
+        assert_eq!(
+            exec.status,
+            ExecutionStatus::Timeout,
+            "terminal state is timeout"
+        );
+        assert_eq!(exec.attempt, 2, "the timed-out envelope retried once");
+        // Two ~1s attempts, no inter-attempt wait => well under the 30s sleep.
+        assert!(
+            wall < Duration::from_secs(15),
+            "both attempts were interrupted near the 1s bound, took {wall:?}"
+        );
+
+        let rows = read_rows(&env, "job_retry_timeout").await;
+        assert_eq!(rows.len(), 1, "one envelope => one row");
+        assert_eq!(rows[0].status, "timeout");
+        assert_eq!(rows[0].attempt, 2);
+
+        let after = env
+            .executor
+            .jobs
+            .get("job_retry_timeout")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.failure_count, 1,
+            "a terminal timeout is a continuous failure"
+        );
+    }
+
+    // VAL-ROBUST-012: retry_delay_secs=0 converges in a bounded number of
+    // attempts (no busy-loop / no infinite retries) and returns promptly. With
+    // max_retries=5 a back-to-back failing envelope must run exactly 6 attempts
+    // and finish far faster than any backoff would allow.
+    #[tokio::test]
+    async fn zero_delay_converges_without_busy_loop() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_zero_delay");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_zero_delay", artifact_target(&artifact_id)).await;
+        job.max_retries = 5;
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+
+        let start = std::time::Instant::now();
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        let wall = start.elapsed();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.attempt, 6, "max_retries=5 => bounded at 6 attempts");
+        assert_eq!(
+            read_counter(&counter),
+            6,
+            "exactly 6 dispatches, then it stops"
+        );
+        // Pure convergence proof: 6 fast shell runs with zero backoff complete
+        // quickly — if the loop were unbounded this would never return.
+        assert!(
+            wall < Duration::from_secs(20),
+            "zero-delay retries converge promptly, took {wall:?}"
+        );
+    }
+
+    // VAL-ROBUST-013/015 (in-flight, retry leg): the WHOLE retry envelope is held
+    // under one in-flight claim, so a concurrent run_now (the scheduler tick uses
+    // the same gate) fired WHILE the envelope is mid-backoff is rejected with a
+    // CONFLICT and opens NO second row. We use a non-zero base so the envelope
+    // dwells in a backoff sleep, fire a competing run_now during that window, and
+    // assert there is never more than one row and only one running row.
+    #[tokio::test]
+    async fn retry_envelope_holds_in_flight_across_backoff() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_inflight");
+        // Always fails; the first failure triggers a backoff sleep we can race.
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_inflight_retry", artifact_target(&artifact_id)).await;
+        job.max_retries = 1; // one retry: a single backoff window to race
+        job.retry_delay_secs = 1; // ~1s backoff before the retry — wide enough to race
+        seed_job(&env, &job).await;
+
+        // Drive the envelope under a held claim, exactly as run_now/scheduler do.
+        let executor = env.executor.clone();
+        let job_clone = job.clone();
+        let handle = tokio::spawn(async move {
+            let _guard = executor
+                .try_claim(&job_clone.id)
+                .await
+                .expect("first claim succeeds");
+            executor.execute(&job_clone, Trigger::Schedule).await
+        });
+
+        // Wait until the first attempt has run (counter == 1) — the envelope is
+        // now in its backoff window, still holding the slot.
+        let mut entered_backoff = false;
+        for _ in 0..200 {
+            if read_counter(&counter) >= 1 {
+                entered_backoff = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(entered_backoff, "the first attempt should have dispatched");
+
+        // A competing run_now during the backoff must be rejected (the envelope
+        // still owns the in-flight slot), writing NO second row.
+        let conflict = env.executor.run_now(&job).await;
+        assert!(
+            conflict.is_err(),
+            "a run fired mid-backoff must be rejected while the envelope holds the slot"
+        );
+        assert_eq!(conflict.unwrap_err().code, "CONFLICT");
+
+        // At most one running row exists during the envelope.
+        let mid = read_rows(&env, "job_inflight_retry").await;
+        let running = mid.iter().filter(|r| r.status == "running").count();
+        assert_eq!(running, 1, "exactly one running row during the envelope");
+        assert_eq!(mid.len(), 1, "no second row opened by the rejected run");
+
+        let exec = handle.await.unwrap().expect("envelope completes");
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.attempt, 2);
+
+        // After completion: still exactly one (now terminal) row.
+        let rows = read_rows(&env, "job_inflight_retry").await;
+        assert_eq!(rows.len(), 1, "the whole envelope is a single row");
+        assert_eq!(rows[0].status, "failed");
+    }
+
+    // VAL-ROBUST-025: deleting the job mid-envelope (during a backoff) aborts the
+    // retry cleanly — no further attempt runs, the cascade removes the running
+    // row (no leftover running row), and no new execution row appears after the
+    // delete. The envelope surfaces the deletion as a not_found Err.
+    #[tokio::test]
+    async fn delete_during_retry_aborts_cleanly() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_delete");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_del_retry", artifact_target(&artifact_id)).await;
+        job.max_retries = 3;
+        job.retry_delay_secs = 1; // a backoff window during which we delete the job
+        seed_job(&env, &job).await;
+
+        let executor = env.executor.clone();
+        let job_clone = job.clone();
+        let handle =
+            tokio::spawn(async move { executor.execute(&job_clone, Trigger::Schedule).await });
+
+        // Wait for the first attempt to have run, then delete the job while the
+        // envelope is backing off before attempt 2.
+        for _ in 0..200 {
+            if read_counter(&counter) >= 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        env.executor.jobs.delete("job_del_retry").await.unwrap();
+
+        let result = handle.await.unwrap();
+        assert!(
+            result.is_err(),
+            "a job deleted mid-envelope aborts with an error, not a finalized row"
+        );
+        assert_eq!(result.unwrap_err().code, "NOT_FOUND");
+
+        // Only the first attempt ran; no further attempts after the delete.
+        let dispatches = read_counter(&counter);
+        assert!(
+            (1..=2).contains(&dispatches),
+            "no new attempts after delete (got {dispatches} dispatches)"
+        );
+
+        // The cascade removed the running row; no execution rows linger.
+        let count: i64 = sqlx::query("SELECT COUNT(*) FROM job_executions WHERE job_id = $1")
+            .bind("job_del_retry")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(count, 0, "the deleted job leaves no running/terminal rows");
+
+        // The in-flight gate is free (execute does not itself claim).
+        assert!(env.executor.try_claim("job_del_retry").await.is_some());
+    }
+
+    // A real-timing anchor for the exponential law (small base): with base=1s and
+    // two retries, the two backoffs are ~1s then ~2s, so the failing envelope
+    // takes at least ~3s of cumulative backoff (plus three fast dispatches). This
+    // ties the wall-clock behaviour to `backoff_delay` without a multi-minute
+    // wait; the precise per-gap ratio is pinned by the pure `backoff_delay`
+    // tests above.
+    #[tokio::test]
+    async fn real_backoff_accumulates_exponential_gaps() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_real_backoff");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_real_backoff", artifact_target(&artifact_id)).await;
+        job.max_retries = 2; // 3 attempts, 2 backoffs: ~1s + ~2s
+        job.retry_delay_secs = 1; // base = 1s
+        seed_job(&env, &job).await;
+
+        let start = std::time::Instant::now();
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        let wall = start.elapsed();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(exec.attempt, 3);
+        assert_eq!(read_counter(&counter), 3);
+        // Cumulative backoff is 1s + 2s = 3s; allow the lower bound a small
+        // margin for timer granularity. Upper bound guards against accidental
+        // extra backoff (e.g. a wrong exponent producing 1+2+4).
+        assert!(
+            wall >= Duration::from_millis(2_800),
+            "two backoffs (~1s + ~2s) must accumulate, took {wall:?}"
+        );
+        assert!(
+            wall < Duration::from_secs(10),
+            "but only TWO backoffs, not more, took {wall:?}"
+        );
     }
 }

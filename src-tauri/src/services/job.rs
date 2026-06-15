@@ -662,6 +662,7 @@ mod tests {
             .finalize(
                 "exec_old",
                 ExecutionStatus::Success,
+                1,
                 Some("stdout text"),
                 Some(""),
                 Some(0),
