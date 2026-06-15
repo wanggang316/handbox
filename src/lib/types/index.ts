@@ -43,3 +43,4 @@ export * from "./user";
 export * from "./word";
 export * from "./agentSession";
 export * from "./agentProject";
+export * from "./job";

@@ -4,6 +4,7 @@ pub mod agent_session;
 pub mod artifact;
 pub mod common;
 pub mod favorite;
+pub mod job;
 pub mod mcp;
 pub mod message;
 pub mod model;
@@ -23,6 +24,7 @@ pub use artifact::{
 };
 pub use common::{Timestamp, UUID};
 pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag};
+pub use job::{ExecutionStatus, Job, JobExecution, JobTarget, SessionStrategy, Trigger};
 pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,
     McpServerStatus, McpTool,
