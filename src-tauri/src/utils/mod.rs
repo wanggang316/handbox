@@ -2,6 +2,7 @@
 
 pub mod accessibility;
 pub mod app_info;
+pub mod cron;
 pub mod crypto;
 pub mod frontmatter;
 pub mod logger;
