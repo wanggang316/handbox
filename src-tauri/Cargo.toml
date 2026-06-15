@@ -78,6 +78,11 @@ hand-ai-model = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.
 # above so Cargo unifies the transitive `model` dependency to a single copy
 # (hand-agent depends on model via path; same-source+same-tag => dedup).
 hand-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "hand-agent" }
+# Coding-agent runtime crate from hand-ai, same git source + tag as the model
+# and hand-agent crates above so Cargo unifies the transitive `model`/`hand-agent`
+# dependencies to a single copy (same-source+same-tag => dedup). Dependency-only
+# for now (Approach A de-risk slice): not yet `use`d from src.
+hand-coding-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "hand-coding-agent" }
 tokio-util = "0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
