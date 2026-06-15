@@ -523,6 +523,9 @@ mod tests {
             last_status: None,
             run_count: 0,
             failure_count: 0,
+            exec_timeout_secs: 0,
+            max_retries: 0,
+            retry_delay_secs: 60,
             created_at: now,
             updated_at: now,
         }

@@ -111,6 +111,9 @@
         cronExpr: data.cronExpr,
         timezone: data.timezone,
         enabled: data.enabled,
+        execTimeoutSecs: data.execTimeoutSecs,
+        maxRetries: data.maxRetries,
+        retryDelaySecs: data.retryDelaySecs,
       });
     } else {
       await jobStore.create({
@@ -120,6 +123,9 @@
         cronExpr: data.cronExpr,
         timezone: data.timezone,
         enabled: data.enabled,
+        execTimeoutSecs: data.execTimeoutSecs,
+        maxRetries: data.maxRetries,
+        retryDelaySecs: data.retryDelaySecs,
       });
     }
   }

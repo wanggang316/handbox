@@ -87,9 +87,10 @@ impl JobRepository {
             INSERT INTO jobs (
                 id, name, description, target_kind, target_config, cron_expr, timezone,
                 enabled, last_run_at, next_run_at, last_status, run_count, failure_count,
+                exec_timeout_secs, max_retries, retry_delay_secs,
                 created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
         sqlx::query(query)
@@ -106,6 +107,9 @@ impl JobRepository {
             .bind(job.last_status.map(execution_status_as_str))
             .bind(job.run_count)
             .bind(job.failure_count)
+            .bind(job.exec_timeout_secs)
+            .bind(job.max_retries)
+            .bind(job.retry_delay_secs)
             .bind(job.created_at)
             .bind(job.updated_at)
             .execute(self.db.pool())
@@ -154,8 +158,10 @@ impl JobRepository {
         let query = r#"
             UPDATE jobs SET
                 name = $1, description = $2, target_kind = $3, target_config = $4,
-                cron_expr = $5, timezone = $6, enabled = $7, next_run_at = $8, updated_at = $9
-            WHERE id = $10
+                cron_expr = $5, timezone = $6, enabled = $7, next_run_at = $8,
+                exec_timeout_secs = $9, max_retries = $10, retry_delay_secs = $11,
+                updated_at = $12
+            WHERE id = $13
         "#;
 
         let result = sqlx::query(query)
@@ -167,6 +173,9 @@ impl JobRepository {
             .bind(&job.timezone)
             .bind(job.enabled)
             .bind(job.next_run_at)
+            .bind(job.exec_timeout_secs)
+            .bind(job.max_retries)
+            .bind(job.retry_delay_secs)
             .bind(job.updated_at)
             .bind(&job.id)
             .execute(self.db.pool())
@@ -365,6 +374,15 @@ impl JobRepository {
             failure_count: row.try_get("failure_count").map_err(|e| {
                 AppError::internal_error(&format!("Failed to read failure_count: {}", e))
             })?,
+            exec_timeout_secs: row.try_get("exec_timeout_secs").map_err(|e| {
+                AppError::internal_error(&format!("Failed to read exec_timeout_secs: {}", e))
+            })?,
+            max_retries: row.try_get("max_retries").map_err(|e| {
+                AppError::internal_error(&format!("Failed to read max_retries: {}", e))
+            })?,
+            retry_delay_secs: row.try_get("retry_delay_secs").map_err(|e| {
+                AppError::internal_error(&format!("Failed to read retry_delay_secs: {}", e))
+            })?,
             created_at: row.try_get("created_at").map_err(|e| {
                 AppError::internal_error(&format!("Failed to read created_at: {}", e))
             })?,
@@ -379,6 +397,7 @@ impl JobRepository {
 const JOB_SELECT_COLUMNS: &str = r#"
     SELECT id, name, description, target_kind, target_config, cron_expr, timezone,
            enabled, last_run_at, next_run_at, last_status, run_count, failure_count,
+           exec_timeout_secs, max_retries, retry_delay_secs,
            created_at, updated_at
     FROM jobs
 "#;
@@ -387,6 +406,7 @@ const JOB_SELECT_COLUMNS: &str = r#"
 const JOB_SELECT_COLUMNS_WITH_WHERE_ID: &str = r#"
     SELECT id, name, description, target_kind, target_config, cron_expr, timezone,
            enabled, last_run_at, next_run_at, last_status, run_count, failure_count,
+           exec_timeout_secs, max_retries, retry_delay_secs,
            created_at, updated_at
     FROM jobs WHERE id = $1
 "#;
@@ -685,6 +705,9 @@ mod tests {
             last_status: None,
             run_count: 0,
             failure_count: 0,
+            exec_timeout_secs: 30,
+            max_retries: 2,
+            retry_delay_secs: 90,
             created_at: now,
             updated_at: now,
         }
@@ -710,6 +733,10 @@ mod tests {
         assert_eq!(fetched.next_run_at, Some(now + 1000));
         assert_eq!(fetched.last_status, None);
         assert_eq!(fetched.run_count, 0);
+        // Robustness columns round-trip with the values they were created with.
+        assert_eq!(fetched.exec_timeout_secs, 30);
+        assert_eq!(fetched.max_retries, 2);
+        assert_eq!(fetched.retry_delay_secs, 90);
 
         // missing id -> None.
         assert!(repo.get("nope").await.unwrap().is_none());
@@ -725,6 +752,9 @@ mod tests {
         };
         updated.cron_expr = "*/5 * * * *".to_string();
         updated.next_run_at = Some(now + 2000);
+        updated.exec_timeout_secs = 120;
+        updated.max_retries = 5;
+        updated.retry_delay_secs = 30;
         updated.updated_at = now + 50;
         repo.update(&updated).await.unwrap();
 
@@ -733,6 +763,10 @@ mod tests {
         assert_eq!(after.target, updated.target);
         assert_eq!(after.cron_expr, "*/5 * * * *");
         assert_eq!(after.next_run_at, Some(now + 2000));
+        // Robustness columns are part of the definition update.
+        assert_eq!(after.exec_timeout_secs, 120);
+        assert_eq!(after.max_retries, 5);
+        assert_eq!(after.retry_delay_secs, 30);
 
         // updating a missing job is not_found.
         let mut ghost = sample_job("ghost", now);
@@ -743,6 +777,47 @@ mod tests {
         repo.delete("job_1").await.unwrap();
         assert!(repo.get("job_1").await.unwrap().is_none());
         assert!(repo.delete("job_1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_robustness_columns_default_when_omitted() {
+        // Migration 051 adds the robustness columns as NOT NULL with DEFAULTs,
+        // so a raw INSERT that omits them (mirroring a pre-051 / partial write)
+        // reads back the named defaults — never an unexpected NULL.
+        let (db, _tmp) = create_test_db().await;
+        let repo = JobRepository::new(Arc::new(db));
+        let now = 1_000_000i64;
+
+        sqlx::query(
+            r#"
+            INSERT INTO jobs (
+                id, name, target_kind, target_config, cron_expr, timezone,
+                enabled, run_count, failure_count, created_at, updated_at
+            )
+            VALUES ($1, $2, 'artifact', '{"artifactId":"a1"}', '0 9 * * *', 'local',
+                    1, 0, 0, $3, $3)
+            "#,
+        )
+        .bind("job_defaults")
+        .bind("Defaults job")
+        .bind(now)
+        .execute(repo.db.pool())
+        .await
+        .unwrap();
+
+        let fetched = repo.get("job_defaults").await.unwrap().expect("job exists");
+        assert_eq!(
+            fetched.exec_timeout_secs, 0,
+            "exec_timeout_secs default is 0 (no timeout)"
+        );
+        assert_eq!(
+            fetched.max_retries, 0,
+            "max_retries default is 0 (no retries)"
+        );
+        assert_eq!(
+            fetched.retry_delay_secs, 60,
+            "retry_delay_secs default is 60"
+        );
     }
 
     #[tokio::test]

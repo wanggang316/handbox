@@ -10,6 +10,18 @@ use std::collections::HashMap;
 
 use super::{Timestamp, UUID};
 
+/// Default execution timeout in seconds. `0` means no timeout (unbounded run).
+/// The timeout-interrupt behaviour is implemented by the exec-timeout feature;
+/// this layer only stores/validates/defaults the value.
+pub const DEFAULT_EXEC_TIMEOUT_SECS: i64 = 0;
+
+/// Default maximum retry attempts. `0` means no retries.
+/// The retry-backoff behaviour is implemented by the retry-backoff feature.
+pub const DEFAULT_MAX_RETRIES: i64 = 0;
+
+/// Default delay between retries in seconds.
+pub const DEFAULT_RETRY_DELAY_SECS: i64 = 60;
+
 /// What a job runs when it fires.
 ///
 /// Internally tagged by `kind`; the tag values (`artifact` / `agent` /
@@ -110,6 +122,14 @@ pub struct Job {
     pub last_status: Option<ExecutionStatus>,
     pub run_count: i32,
     pub failure_count: i32,
+    /// Per-run timeout in seconds; `0` means no timeout (see
+    /// [`DEFAULT_EXEC_TIMEOUT_SECS`]). Enforcement is the exec-timeout feature's.
+    pub exec_timeout_secs: i64,
+    /// Maximum retry attempts after a failed run; `0` means no retries (see
+    /// [`DEFAULT_MAX_RETRIES`]). Enforcement is the retry-backoff feature's.
+    pub max_retries: i64,
+    /// Delay between retries in seconds (see [`DEFAULT_RETRY_DELAY_SECS`]).
+    pub retry_delay_secs: i64,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -303,6 +323,9 @@ mod tests {
             last_status: Some(ExecutionStatus::Success),
             run_count: 3,
             failure_count: 1,
+            exec_timeout_secs: 30,
+            max_retries: 2,
+            retry_delay_secs: 60,
             created_at: 100,
             updated_at: 200,
         };
@@ -312,6 +335,15 @@ mod tests {
         assert_eq!(restored.id, job.id);
         assert_eq!(restored.target, job.target);
         assert_eq!(restored.last_status, job.last_status);
+        assert_eq!(restored.exec_timeout_secs, job.exec_timeout_secs);
+        assert_eq!(restored.max_retries, job.max_retries);
+        assert_eq!(restored.retry_delay_secs, job.retry_delay_secs);
+
+        // Robustness fields use camelCase on the wire.
+        let value = serde_json::to_value(&job).expect("serialize value");
+        assert_eq!(value["execTimeoutSecs"], 30);
+        assert_eq!(value["maxRetries"], 2);
+        assert_eq!(value["retryDelaySecs"], 60);
     }
 
     #[test]
