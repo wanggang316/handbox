@@ -30,11 +30,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::models::AppError;
-use crate::services::ArtifactService;
+use crate::models::{AppError, UserMessageSendRequest};
+use crate::services::{ArtifactService, MessageService, ProviderService, SessionService};
 use crate::storage::job_repository::DEFAULT_EXECUTION_HISTORY_LIMIT;
 use crate::storage::types::{
-    ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution, JobTarget, Timestamp, Trigger,
+    ExecuteArtifactRequest, ExecutionStatus, Job, JobExecution, JobTarget, Provider, Timestamp,
+    Trigger,
 };
 use crate::storage::{JobExecutionRepository, JobRepository};
 use serde::Serialize;
@@ -99,6 +100,23 @@ pub struct JobExecutor<R: Runtime = Wry> {
     /// no-op and the existing executor tests are untouched; the app wiring
     /// injects a real handle via [`JobExecutor::with_app_handle`].
     app_handle: Option<AppHandle<R>>,
+    /// Collaborators for the `prompt` target: create a fresh chat, send the
+    /// prompt non-streaming, and pre-validate the provider. `None` in the unit
+    /// wiring (`from_db`) so the artifact-only tests keep building; the app
+    /// injects real handles via [`JobExecutor::with_prompt_services`]. When
+    /// absent, a `prompt` dispatch fails with a stable "not configured" error
+    /// rather than panicking — the same shape as any other prompt failure.
+    prompt_services: Option<PromptServices>,
+}
+
+/// The three services the `prompt` target needs, bundled so the field stays a
+/// single `Option`. All are `Arc`-shared with the app-managed instances (cheap
+/// clones); none is generic over the Tauri `Runtime`.
+#[derive(Clone)]
+struct PromptServices {
+    sessions: Arc<SessionService>,
+    messages: Arc<MessageService>,
+    providers: Arc<ProviderService>,
 }
 
 // Manual `Clone` so the bound is on the fields, not on `R: Clone`. Tauri
@@ -115,6 +133,7 @@ impl<R: Runtime> Clone for JobExecutor<R> {
             executions: self.executions.clone(),
             in_flight: self.in_flight.clone(),
             app_handle: self.app_handle.clone(),
+            prompt_services: self.prompt_services.clone(),
         }
     }
 }
@@ -133,6 +152,7 @@ impl<R: Runtime> JobExecutor<R> {
             executions,
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             app_handle: None,
+            prompt_services: None,
         }
     }
 
@@ -155,6 +175,25 @@ impl<R: Runtime> JobExecutor<R> {
     /// wiring; without it (unit tests) emit is a no-op.
     pub fn with_app_handle(mut self, app_handle: AppHandle<R>) -> Self {
         self.app_handle = Some(app_handle);
+        self
+    }
+
+    /// Inject the collaborators the `prompt` target needs (a fresh chat per run,
+    /// a non-streaming send, and provider pre-validation). Consuming builder used
+    /// by the app wiring with `Arc`s shared with the managed services; without it
+    /// (artifact-only unit wiring) a `prompt` dispatch fails cleanly rather than
+    /// running.
+    pub fn with_prompt_services(
+        mut self,
+        sessions: Arc<SessionService>,
+        messages: Arc<MessageService>,
+        providers: Arc<ProviderService>,
+    ) -> Self {
+        self.prompt_services = Some(PromptServices {
+            sessions,
+            messages,
+            providers,
+        });
         self
     }
 
@@ -335,8 +374,14 @@ impl<R: Runtime> JobExecutor<R> {
                 env,
             } => self.dispatch_artifact(artifact_id, args, env).await,
             JobTarget::Agent { .. } => DispatchOutcome::failed(unsupported_target_message("agent")),
-            JobTarget::Prompt { .. } => {
-                DispatchOutcome::failed(unsupported_target_message("prompt"))
+            JobTarget::Prompt {
+                provider_id,
+                model_id,
+                prompt,
+                ..
+            } => {
+                self.dispatch_prompt(&job.name, provider_id, model_id, prompt)
+                    .await
             }
         }
     }
@@ -391,6 +436,120 @@ impl<R: Runtime> JobExecutor<R> {
         }
     }
 
+    /// Run a `prompt` target: create a fresh chat, send the prompt text through
+    /// `MessageService::send_user_message` (non-streaming), and persist a user
+    /// message plus an assistant reply. On success the outcome's `result_ref`
+    /// points at the chat; on failure it still points at the chat IF one was
+    /// created, so a partial transcript stays reachable (VAL-TARGET-023).
+    ///
+    /// SECURITY: the provider is pre-validated (deleted / disabled / missing key)
+    /// and every error is run through [`sanitize_send_error`] /
+    /// [`provider_failure_message`] before it is persisted, so no raw upstream
+    /// URL, `Authorization` header, or API key fragment can reach the
+    /// `job_executions.error` column or any window — raw detail goes to
+    /// `tracing` only (VAL-TARGET-026 / VAL-TARGET-027).
+    async fn dispatch_prompt(
+        &self,
+        job_name: &str,
+        provider_id: &str,
+        model_id: &str,
+        prompt: &str,
+    ) -> DispatchOutcome {
+        let Some(services) = self.prompt_services.as_ref() else {
+            // No prompt collaborators wired (artifact-only unit harness): fail
+            // cleanly with a stable, non-leaking message rather than panic.
+            return DispatchOutcome::failed(PROMPT_NOT_CONFIGURED.to_string());
+        };
+
+        // 1. Pre-validate the provider: deleted / disabled / missing key are all
+        //    config failures we can name precisely without touching the network.
+        let provider_result = services
+            .providers
+            .get_provider(&provider_id.to_string())
+            .await;
+        if let Some(failure) = classify_provider(provider_result.as_ref()) {
+            if let Err(e) = &provider_result {
+                tracing::warn!(
+                    "[job_executor] prompt provider check failed (provider={}): {}",
+                    provider_id,
+                    e
+                );
+            }
+            return DispatchOutcome::failed(provider_failure_message(failure));
+        }
+
+        // 2. Create a fresh, isolated chat for this run (never reused — two jobs
+        //    in the same tick get distinct chats, VAL-TARGET-034). No `Window`
+        //    is required, so this works headless (VAL-TARGET-033).
+        let chat = match services
+            .sessions
+            .create_chat(
+                prompt_chat_name(job_name),
+                None,
+                None,
+                None,
+                None,
+                Some(false), // non-streaming: send_user_message returns the full reply
+                Some(model_id.to_string()),
+                Some(provider_id.to_string()),
+                None,
+                None,
+            )
+            .await
+        {
+            Ok(chat) => chat,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] prompt chat creation failed (provider={}): {}",
+                    provider_id,
+                    e
+                );
+                // No chat exists, so there is nothing to reference.
+                return DispatchOutcome::failed(sanitize_send_error(&e));
+            }
+        };
+
+        // 3. Send the prompt. `send_user_message` persists the `user` message
+        //    first, then the `assistant` reply; a failure after the user message
+        //    is saved leaves a partial chat (user, no assistant) that the outcome
+        //    still references (VAL-TARGET-023).
+        let request = UserMessageSendRequest {
+            chat_id: chat.id.clone(),
+            content: prompt.to_string(),
+            temp_user_message_id: String::new(),
+            attachments: None,
+        };
+
+        match services.messages.send_user_message(request).await {
+            Ok(response) => DispatchOutcome {
+                status: ExecutionStatus::Success,
+                stdout: Some(response.content),
+                stderr: None,
+                exit_code: None,
+                error: None,
+                // The run's result is the chat it produced.
+                result_ref: Some(chat.id),
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] prompt send failed (chat={}, provider={}): {}",
+                    chat.id,
+                    provider_id,
+                    e
+                );
+                DispatchOutcome {
+                    status: ExecutionStatus::Failed,
+                    stdout: None,
+                    stderr: None,
+                    exit_code: None,
+                    error: Some(sanitize_send_error(&e)),
+                    // The (possibly partial) chat is still reachable.
+                    result_ref: Some(chat.id),
+                }
+            }
+        }
+    }
+
     /// Test-only view of the shared in-flight set size, so the scheduler and
     /// run-now tests can assert a slot is reserved / released.
     #[cfg(test)]
@@ -414,12 +573,111 @@ impl DispatchOutcome {
 }
 
 /// Error message for a target kind that this M1 feature does not yet dispatch.
-/// M3 replaces these branches with real agent/prompt execution.
+/// M3 replaces these branches with real agent/prompt execution. The `agent`
+/// target is still handled by a later M3 feature, so its branch keeps this.
 fn unsupported_target_message(kind: &str) -> String {
     format!(
         "Job target '{}' is not supported in M1 (artifact only)",
         kind
     )
+}
+
+/// Stable failure message when the executor was built without the prompt
+/// collaborators (the artifact-only unit harness). Never carries provider
+/// detail.
+const PROMPT_NOT_CONFIGURED: &str =
+    "Prompt execution is not available (chat services are not configured)";
+
+/// A pre-flight provider check failure, before any prompt is sent. Each variant
+/// is something we can name precisely from the provider record alone, with no
+/// network round-trip and no secret material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderFailure {
+    /// `get_provider` returned `Err` — the provider id no longer resolves
+    /// (deleted, or otherwise not found).
+    Deleted,
+    /// The provider exists but is toggled off (`enabled = false`).
+    Disabled,
+    /// The provider exists and is enabled but has no API key configured.
+    MissingKey,
+}
+
+/// Classify the provider pre-flight: `None` means the provider is usable for a
+/// send (exists, enabled, non-empty key); `Some(_)` is a named failure.
+///
+/// Pure over the `get_provider` result so it is unit-testable without a DB:
+/// `Err` → [`ProviderFailure::Deleted`]; `!enabled` →
+/// [`ProviderFailure::Disabled`]; blank `api_key` → [`ProviderFailure::MissingKey`].
+/// The key is only checked for emptiness — its value is never read or logged.
+fn classify_provider(result: Result<&Provider, &AppError>) -> Option<ProviderFailure> {
+    match result {
+        Err(_) => Some(ProviderFailure::Deleted),
+        Ok(p) if !p.enabled => Some(ProviderFailure::Disabled),
+        Ok(p) if p.api_key.trim().is_empty() => Some(ProviderFailure::MissingKey),
+        Ok(_) => None,
+    }
+}
+
+/// Map a [`ProviderFailure`] to a stable, user-facing message. Contains no
+/// secret material and no raw provider/transport detail.
+fn provider_failure_message(failure: ProviderFailure) -> String {
+    match failure {
+        ProviderFailure::Deleted => {
+            "the configured provider no longer exists (it may have been deleted)".to_string()
+        }
+        ProviderFailure::Disabled => "the configured provider is disabled".to_string(),
+        ProviderFailure::MissingKey => "the configured provider has no API key set".to_string(),
+    }
+}
+
+/// Sanitize an `AppError` from chat creation / `send_user_message` into a stable
+/// message safe to persist in `job_executions.error` and surface in the UI.
+///
+/// SECURITY (mirrors `sanitize_agent_error`): the raw `AppError.message` can
+/// carry an upstream URL, an `Authorization: Bearer …` header, or a raw provider
+/// payload (chat_engine's `client_err_to_app_err` forwards `Display` verbatim),
+/// so it is NEVER echoed. We key off the stable `AppError.code` plus a narrow
+/// content sniff to tell a *model-resolution* failure (the model id is not
+/// registered under the provider) apart from a generic config failure
+/// (VAL-TARGET-035). The raw message is the caller's responsibility to `tracing`
+/// — it never flows through this function's output.
+fn sanitize_send_error(err: &AppError) -> String {
+    match err.code.as_str() {
+        "AUTH_ERROR" => "the provider rejected the request (authentication failed)".to_string(),
+        "NETWORK_ERROR" => "the request to the provider failed (network error)".to_string(),
+        "RATE_LIMIT" => "the provider rate-limited the request".to_string(),
+        // A post-provider-validation `VALIDATION_ERROR` is, in practice, a
+        // model-resolution failure: the model id is not registered under the
+        // provider (chat_engine's `resolve_model`). Sniff the known marker so
+        // the model class is distinct from the provider class (VAL-TARGET-035).
+        "VALIDATION_ERROR" if is_model_resolution_error(&err.message) => {
+            "the selected model is not available for this provider".to_string()
+        }
+        "VALIDATION_ERROR" => {
+            "the prompt could not be sent (invalid provider or model configuration)".to_string()
+        }
+        // INTERNAL_ERROR (incl. empty/aborted stream) and anything else.
+        _ => "the prompt run failed to complete".to_string(),
+    }
+}
+
+/// Whether a `VALIDATION_ERROR` message describes a model-resolution failure
+/// (model id not registered under the provider). Matches the markers emitted by
+/// `chat_engine::resolve_model_template` and hand-ai's `ProviderNotFound`. Only
+/// the *shape* is inspected; the message itself is never propagated.
+fn is_model_resolution_error(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    // `resolve_model_template`: "model '<id>' not registered under provider …".
+    // hand-ai `ProviderNotFound` via `client_err_to_app_err`: "… not found …".
+    lower.contains("not registered")
+        || (lower.contains("model") && lower.contains("not found"))
+        || lower.contains("no provider is configured for model")
+}
+
+/// Name for the fresh chat created per prompt run: the job name plus a unix-ms
+/// suffix so concurrent runs of the same job stay visually distinct.
+fn prompt_chat_name(job_name: &str) -> String {
+    format!("{} · {}", job_name, current_timestamp())
 }
 
 /// RAII release of an in-flight job slot.
@@ -528,6 +786,79 @@ mod tests {
             artifact_service,
             _temp_dir: temp_dir,
         }
+    }
+
+    /// Wire REAL prompt collaborators (SessionService / MessageService /
+    /// ProviderService) onto the env's executor, all sharing the env's temp DB.
+    /// `StorageService` is rooted at the env temp dir. Returns a NEW `TestEnv`
+    /// whose executor can dispatch `prompt` targets end-to-end (offline: a model
+    /// that does not resolve fails the send AFTER the user message is saved).
+    fn with_prompt_services(env: TestEnv) -> TestEnv {
+        use crate::services::{McpService, ProviderService, SessionService, StorageService};
+
+        let provider_service = Arc::new(ProviderService::new(env.db.clone()));
+        let session_service = Arc::new(SessionService::new(
+            env.db.clone(),
+            provider_service.clone(),
+        ));
+        let mcp_service = Arc::new(McpService::new(env.db.clone()));
+        let storage_service = Arc::new(
+            StorageService::new(env._temp_dir.path().to_path_buf()).expect("storage service"),
+        );
+        let message_service = Arc::new(crate::services::MessageService::new(
+            env.db.clone(),
+            provider_service.clone(),
+            session_service.clone(),
+            mcp_service,
+            storage_service,
+        ));
+
+        let executor = env.executor.clone().with_prompt_services(
+            session_service,
+            message_service,
+            provider_service,
+        );
+
+        TestEnv { executor, ..env }
+    }
+
+    /// Seed an enabled provider with a non-empty key directly into the DB so the
+    /// executor's pre-flight passes and the send reaches the model-resolution
+    /// step. `provider_type` controls catalog resolution.
+    async fn seed_provider(env: &TestEnv, id: &str, provider_type: &str, enabled: bool, key: &str) {
+        let repo = crate::storage::ProviderRepository::new(env.db.clone());
+        let provider = Provider {
+            id: id.to_string(),
+            name: format!("prov-{}", id),
+            provider_type: provider_type.to_string(),
+            base_url: "https://api.example.invalid".to_string(),
+            api_key: key.to_string(),
+            enabled,
+            created_at: current_timestamp(),
+            updated_at: current_timestamp(),
+        };
+        repo.create_provider(&provider)
+            .await
+            .expect("seed provider");
+    }
+
+    /// Read the (role, content) of every `messages` row for a chat, oldest-first.
+    async fn read_chat_messages(env: &TestEnv, chat_id: &str) -> Vec<(String, String)> {
+        let rows = sqlx::query(
+            "SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC",
+        )
+        .bind(chat_id)
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+        rows.into_iter()
+            .map(|r| {
+                (
+                    r.try_get::<String, _>("role").unwrap(),
+                    r.try_get::<String, _>("content").unwrap(),
+                )
+            })
+            .collect()
     }
 
     /// Create + install a shell artifact whose `main.sh` is `script`. Returns the
@@ -999,10 +1330,13 @@ mod tests {
         assert_eq!(rows[0].status, "failed");
     }
 
-    // The prompt target is likewise an explicit "unsupported in M1" failure.
+    // Without the prompt collaborators wired (the artifact-only unit harness),
+    // a prompt target fails cleanly with a stable "not configured" message —
+    // it never panics and never leaks any provider detail.
     #[tokio::test]
-    async fn prompt_target_is_unsupported_in_m1() {
+    async fn prompt_target_without_services_fails_cleanly() {
         let env = setup().await;
+        // `setup` builds the executor via `from_db` — no prompt services.
         let target = JobTarget::Prompt {
             provider_id: "openai".to_string(),
             model_id: "gpt-4".to_string(),
@@ -1015,7 +1349,286 @@ mod tests {
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
 
         assert_eq!(exec.status, ExecutionStatus::Failed);
-        assert!(exec.error.as_deref().unwrap_or_default().contains("prompt"));
+        assert_eq!(exec.error.as_deref(), Some(PROMPT_NOT_CONFIGURED));
+        // No raw provider id or model id leaks into the persisted error.
+        let err = exec.error.unwrap_or_default();
+        assert!(!err.contains("openai"));
+        assert!(!err.contains("gpt-4"));
+
+        let rows = read_rows(&env, "job_prompt").await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+    }
+
+    // VAL-TARGET-019 (end-to-end): a prompt whose provider does not exist in the
+    // DB is failed with the deleted-provider message — and NO chat is created
+    // (the pre-flight short-circuits before chat creation), so no result_ref.
+    #[tokio::test]
+    async fn prompt_missing_provider_fails_before_chat() {
+        let env = with_prompt_services(setup().await);
+        // No provider seeded → get_provider returns Err.
+        let target = JobTarget::Prompt {
+            provider_id: "ghost".to_string(),
+            model_id: "gpt-4o".to_string(),
+            prompt: "hi".to_string(),
+            session_strategy: SessionStrategy::NewSession,
+        };
+        let job = make_job("job_p_missing", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(
+            exec.error.as_deref(),
+            Some(provider_failure_message(ProviderFailure::Deleted).as_str())
+        );
+        assert!(
+            exec.result_ref.is_none(),
+            "no chat created on pre-flight fail"
+        );
+        // No chat row leaked into the DB (the `chats` table is named `sessions`).
+        let chats: i64 = sqlx::query("SELECT COUNT(*) FROM sessions")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(chats, 0);
+    }
+
+    // VAL-TARGET-018 (end-to-end): a disabled provider is failed before the send,
+    // with the disabled message and no chat.
+    #[tokio::test]
+    async fn prompt_disabled_provider_fails_before_chat() {
+        let env = with_prompt_services(setup().await);
+        seed_provider(&env, "prov_off", "openai", false, "sk-live-abcd").await;
+        let target = JobTarget::Prompt {
+            provider_id: "prov_off".to_string(),
+            model_id: "gpt-4o".to_string(),
+            prompt: "hi".to_string(),
+            session_strategy: SessionStrategy::NewSession,
+        };
+        let job = make_job("job_p_off", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(
+            exec.error.as_deref(),
+            Some(provider_failure_message(ProviderFailure::Disabled).as_str())
+        );
+        assert!(exec.result_ref.is_none());
+    }
+
+    // VAL-TARGET-017 (end-to-end): an enabled provider with a blank key is failed
+    // before the send with the missing-key message and no chat.
+    #[tokio::test]
+    async fn prompt_keyless_provider_fails_before_chat() {
+        let env = with_prompt_services(setup().await);
+        seed_provider(&env, "prov_nokey", "openai", true, "").await;
+        let target = JobTarget::Prompt {
+            provider_id: "prov_nokey".to_string(),
+            model_id: "gpt-4o".to_string(),
+            prompt: "hi".to_string(),
+            session_strategy: SessionStrategy::NewSession,
+        };
+        let job = make_job("job_p_nokey", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        assert_eq!(
+            exec.error.as_deref(),
+            Some(provider_failure_message(ProviderFailure::MissingKey).as_str())
+        );
+        assert!(exec.result_ref.is_none());
+    }
+
+    // VAL-TARGET-023 + VAL-TARGET-030 + VAL-TARGET-035 (end-to-end, offline): a
+    // provider that passes the pre-flight but whose model does NOT resolve under
+    // the catalog provider type fails the send AFTER the user message is saved.
+    // The outcome is `failed` with the model-class sanitized error, and
+    // `result_ref` points at the PARTIAL chat — which holds exactly the user
+    // message (unicode preserved) and NO assistant message.
+    #[tokio::test]
+    async fn prompt_model_unresolvable_leaves_partial_chat_with_user_message() {
+        let env = with_prompt_services(setup().await);
+        // Enabled, keyed, but `bogus-model` is not in the openai catalog → the
+        // model-resolution step fails offline, after save_user_message.
+        seed_provider(&env, "prov_ok", "openai", true, "sk-live-abcd").await;
+        let unicode_prompt = "你好，请总结今日要点 🌟 — résumé";
+        let target = JobTarget::Prompt {
+            provider_id: "prov_ok".to_string(),
+            model_id: "bogus-model-not-in-catalog".to_string(),
+            prompt: unicode_prompt.to_string(),
+            session_strategy: SessionStrategy::NewSession,
+        };
+        let job = make_job("job_p_model", target).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+
+        assert_eq!(exec.status, ExecutionStatus::Failed);
+        // Model-class sanitized error (distinct from provider pre-flight).
+        let err = exec.error.clone().unwrap_or_default();
+        assert!(
+            err.to_lowercase().contains("model"),
+            "model-class error: {}",
+            err
+        );
+        // No raw model id / provider id / key leaks into the persisted error.
+        assert!(!err.contains("bogus-model-not-in-catalog"));
+        assert!(!err.contains("prov_ok"));
+        assert!(!err.contains("sk-live"));
+
+        // result_ref points at the partial chat (VAL-TARGET-023).
+        let chat_id = exec
+            .result_ref
+            .expect("result_ref points at the partial chat");
+        let messages = read_chat_messages(&env, &chat_id).await;
+        // Exactly the user message, no assistant message.
+        assert_eq!(messages.len(), 1, "partial chat: user only, no assistant");
+        assert_eq!(messages[0].0, "user");
+        // VAL-TARGET-030: unicode preserved byte-for-byte.
+        assert_eq!(messages[0].1, unicode_prompt);
+    }
+
+    // ---- prompt dispatch pure helpers (VAL-TARGET-017/018/019/026/027/035) ----
+
+    fn sample_provider(enabled: bool, api_key: &str) -> Provider {
+        Provider {
+            id: "prov_1".to_string(),
+            name: "Test".to_string(),
+            provider_type: "openai".to_string(),
+            base_url: "https://api.example.com".to_string(),
+            api_key: api_key.to_string(),
+            enabled,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    // VAL-TARGET-019: a deleted provider (get_provider => Err) is classified as
+    // a deleted-provider failure.
+    #[test]
+    fn classify_provider_err_is_deleted() {
+        let err = AppError::validation_error("Provider not found");
+        assert_eq!(
+            classify_provider(Err::<&Provider, _>(&err)),
+            Some(ProviderFailure::Deleted)
+        );
+    }
+
+    // VAL-TARGET-018: an existing-but-disabled provider is classified as
+    // disabled (checked before the key, so a disabled keyless provider is still
+    // reported as disabled — the first actionable problem).
+    #[test]
+    fn classify_provider_disabled() {
+        let p = sample_provider(false, "sk-live-123");
+        assert_eq!(classify_provider(Ok(&p)), Some(ProviderFailure::Disabled));
+        // Disabled wins even with no key.
+        let p_no_key = sample_provider(false, "");
+        assert_eq!(
+            classify_provider(Ok(&p_no_key)),
+            Some(ProviderFailure::Disabled)
+        );
+    }
+
+    // VAL-TARGET-017: an enabled provider with a blank/whitespace key is a
+    // missing-key failure.
+    #[test]
+    fn classify_provider_missing_key() {
+        let p = sample_provider(true, "");
+        assert_eq!(classify_provider(Ok(&p)), Some(ProviderFailure::MissingKey));
+        let p_ws = sample_provider(true, "   ");
+        assert_eq!(
+            classify_provider(Ok(&p_ws)),
+            Some(ProviderFailure::MissingKey)
+        );
+    }
+
+    // A usable provider (enabled + non-empty key) passes the pre-flight.
+    #[test]
+    fn classify_provider_ok() {
+        let p = sample_provider(true, "sk-live-123");
+        assert_eq!(classify_provider(Ok(&p)), None);
+    }
+
+    // VAL-TARGET-026: classifying a provider never reads the key value — the
+    // three pre-flight failure messages carry no key material whatsoever.
+    #[test]
+    fn provider_failure_messages_carry_no_secret() {
+        for failure in [
+            ProviderFailure::Deleted,
+            ProviderFailure::Disabled,
+            ProviderFailure::MissingKey,
+        ] {
+            let msg = provider_failure_message(failure);
+            assert!(!msg.is_empty());
+            assert!(!msg.contains("sk-"));
+        }
+    }
+
+    // VAL-TARGET-027: each error code maps to a stable message that contains no
+    // raw URL, Bearer token, or key fragment from the underlying AppError.
+    #[test]
+    fn sanitize_send_error_drops_raw_detail() {
+        // An AUTH_ERROR whose raw message embeds a URL + Bearer header (exactly
+        // the kind of leak chat_engine's Display passthrough can produce).
+        let leaky = AppError::auth_error(
+            "POST https://api.openai.com/v1/chat failed: Authorization: Bearer sk-live-SECRET",
+        );
+        let sanitized = sanitize_send_error(&leaky);
+        assert!(!sanitized.contains("sk-live-SECRET"));
+        assert!(!sanitized.contains("Bearer"));
+        assert!(!sanitized.contains("https://"));
+        assert!(!sanitized.contains("api.openai.com"));
+        // It is still a meaningful auth message.
+        assert!(sanitized.to_lowercase().contains("authentication"));
+    }
+
+    #[test]
+    fn sanitize_send_error_maps_each_code() {
+        assert!(sanitize_send_error(&AppError::auth_error("x"))
+            .to_lowercase()
+            .contains("authentication"));
+        assert!(sanitize_send_error(&AppError::network_error("x"))
+            .to_lowercase()
+            .contains("network"));
+        assert!(sanitize_send_error(&AppError::rate_limit_error())
+            .to_lowercase()
+            .contains("rate"));
+        assert!(!sanitize_send_error(&AppError::internal_error("x")).is_empty());
+    }
+
+    // VAL-TARGET-035: a model-resolution VALIDATION_ERROR is mapped to a model
+    // class message, distinct from a generic config failure — and distinct from
+    // the provider pre-flight failures.
+    #[test]
+    fn sanitize_send_error_distinguishes_model_resolution() {
+        let model_err = AppError::validation_error(
+            "chat_engine: model 'gpt-4' not registered under provider 'openai'",
+        );
+        let model_msg = sanitize_send_error(&model_err);
+        assert!(model_msg.to_lowercase().contains("model"));
+
+        let generic = AppError::validation_error("Chat ID is required");
+        let generic_msg = sanitize_send_error(&generic);
+        // The two validation sub-cases yield different messages.
+        assert_ne!(model_msg, generic_msg);
+
+        // hand-ai ProviderNotFound shape also classifies as model.
+        let pnf = AppError::validation_error("no provider is configured for model \"claude-3\"");
+        assert!(sanitize_send_error(&pnf).to_lowercase().contains("model"));
+    }
+
+    // The per-run chat name embeds the job name so a human can spot which job a
+    // chat came from; it is regenerated each run so two runs are distinct.
+    #[test]
+    fn prompt_chat_name_includes_job_name() {
+        let name = prompt_chat_name("Daily digest");
+        assert!(name.starts_with("Daily digest"));
     }
 
     // Job-level statistics are updated after a run: run_count increments,
