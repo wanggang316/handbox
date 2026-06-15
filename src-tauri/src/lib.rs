@@ -48,7 +48,11 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        // Desktop notifications: the job executor raises a macOS banner when a
+        // job's continuous-failure count crosses the alert threshold. Registered
+        // here so the executor's `AppHandle` can resolve the notification state.
+        .plugin(tauri_plugin_notification::init());
 
     #[cfg(target_os = "macos")]
     {

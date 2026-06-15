@@ -44,6 +44,7 @@ use crate::storage::types::{
 use crate::storage::{JobExecutionRepository, JobRepository};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, Wry};
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{oneshot, Mutex};
 
 /// Frontend event channel: emitted when an execution's lifecycle state changes
@@ -274,6 +275,59 @@ impl<R: Runtime> JobExecutor<R> {
         }
     }
 
+    /// Raise the continuous-failure desktop banner for `job_name`, naming the
+    /// job and its consecutive-failure count.
+    ///
+    /// A clean no-op when no `AppHandle` is attached (unit tests build the
+    /// executor without one, and the test app has no notification plugin state
+    /// to resolve), so the failure-count / history logic stays fully testable
+    /// without a real desktop. With a handle it is BEST-EFFORT: the banner is
+    /// raised AFTER the row + job statistics are already persisted, so a missing
+    /// macOS permission (or any other send error) degrades gracefully — it is
+    /// logged and swallowed, never panicking and never blocking the execution
+    /// flow (VAL-ROBUST-021). The persisted failure_count / history are
+    /// unaffected by whether the banner reaches the screen.
+    fn notify_failure_threshold(&self, job_name: &str, failure_count: i32) {
+        let Some(handle) = self.app_handle.as_ref() else {
+            // Headless / unit wiring: the decision to notify was made, but there
+            // is no desktop to show it on. Log so the path is observable.
+            tracing::info!(
+                "[job_executor] failure-threshold notification suppressed (no AppHandle): job '{}' failed {} times",
+                job_name,
+                failure_count
+            );
+            return;
+        };
+
+        let result = handle
+            .notification()
+            .builder()
+            .title(FAILURE_NOTIFY_TITLE)
+            .body(failure_notify_body(job_name, failure_count))
+            .show();
+
+        match result {
+            Ok(()) => {
+                tracing::info!(
+                    "[job_executor] raised continuous-failure notification for job '{}' ({} consecutive failures)",
+                    job_name,
+                    failure_count
+                );
+            }
+            Err(e) => {
+                // Graceful degradation: no banner is shown (e.g. macOS
+                // notification permission not granted), but the failure was
+                // already recorded. Surface a hint on stdout/log; do NOT block
+                // or fail the run (VAL-ROBUST-021).
+                tracing::warn!(
+                    "[job_executor] failure-threshold notification not delivered for job '{}' (permission missing or notification error): {}",
+                    job_name,
+                    e
+                );
+            }
+        }
+    }
+
     /// Try to reserve `job_id`'s in-flight slot, returning an [`InFlightGuard`]
     /// that releases it on drop, or `None` when the job is already in flight.
     ///
@@ -473,6 +527,33 @@ impl<R: Runtime> JobExecutor<R> {
                 ended_at,
             )
             .await?;
+
+        // Continuous-failure desktop notification. Read the AUTHORITATIVE new
+        // `failure_count` back from the row just written, rather than deriving it
+        // from the in-memory `job` (whose snapshot can be stale across repeated
+        // calls): the persisted counter is the single source of truth, so the
+        // `== threshold` crossing is detected correctly however the caller holds
+        // the job. Fires once when the chain first hits the threshold, stays
+        // silent on further failures, and re-arms after a success resets the
+        // counter (VAL-ROBUST-019/020). A read failure here must not fail the
+        // run (the row is already finalized): log and skip the notification.
+        match self.jobs.get(&job.id).await {
+            Ok(Some(updated)) => {
+                if should_notify_failure(updated.failure_count, FAILURE_NOTIFY_THRESHOLD, trigger) {
+                    self.notify_failure_threshold(&updated.name, updated.failure_count);
+                }
+            }
+            Ok(None) => {
+                // The job was deleted between the stats write and this read — no
+                // notification target remains. Nothing to do.
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] could not re-read job '{}' to evaluate failure notification: {e:?}",
+                    job.id
+                );
+            }
+        }
 
         // FIFO-prune this job's execution history to the most recent N rows. Run
         // AFTER finalize so the just-written row is terminal (never pruned as a
@@ -1088,6 +1169,31 @@ fn backoff_delay(retry_delay_secs: i64, attempt: i32) -> Duration {
     Duration::from_secs(secs)
 }
 
+/// Number of CONSECUTIVE scheduled failures that arms a single desktop
+/// notification. A job's `failure_count` (the continuous-failure counter)
+/// crossing exactly this value raises one banner; subsequent failures in the
+/// same chain stay silent until a success resets the counter and the chain
+/// climbs back across the threshold (VAL-ROBUST-019/020).
+const FAILURE_NOTIFY_THRESHOLD: i32 = 3;
+
+/// Whether a finalized envelope should raise the continuous-failure desktop
+/// notification, given the job's NEW (post-update) `failure_count`.
+///
+/// Fires exactly once per failure chain: a scheduled failure increments
+/// `failure_count` by exactly 1, so the new value equals `threshold` on one and
+/// only one envelope — the moment the chain first crosses it. The 4th, 5th, …
+/// failures land on `threshold + 1`, `threshold + 2`, … and stay silent
+/// (VAL-ROBUST-019). A terminal success resets the counter to 0, so a fresh
+/// chain climbing back to `threshold` fires again — the throttle re-arms with
+/// the reset, no extra state required (VAL-ROBUST-020).
+///
+/// A MANUAL trigger never participates: it leaves `failure_count` untouched, so
+/// it can never produce the `== threshold` crossing. The explicit trigger guard
+/// makes that intent unmistakable rather than relying on the counter alone.
+fn should_notify_failure(new_failure_count: i32, threshold: i32, trigger: Trigger) -> bool {
+    matches!(trigger, Trigger::Schedule) && new_failure_count == threshold
+}
+
 /// Decide how a finalized envelope should move the job's CONTINUOUS-failure
 /// counter (`failure_count`), which is distinct from the cumulative trigger
 /// counter (`run_count`):
@@ -1107,6 +1213,17 @@ fn failure_count_update(trigger: Trigger, status: ExecutionStatus) -> FailureCou
             }
         }
     }
+}
+
+/// Title of the continuous-failure desktop notification. Generic (no job
+/// specifics) — the job is named in the body.
+const FAILURE_NOTIFY_TITLE: &str = "定时任务连续失败";
+
+/// Body of the continuous-failure desktop notification, naming the offending
+/// job and its consecutive-failure count. Carries no command output or secret
+/// material — just the job name and the count.
+fn failure_notify_body(job_name: &str, failure_count: i32) -> String {
+    format!("任务「{}」已连续失败 {} 次", job_name, failure_count)
 }
 
 /// The whole-seconds view of a `Duration`, for naming the threshold in a
@@ -3823,6 +3940,315 @@ exit 0
         }
     }
 
+    // ---- continuous-failure notification decision (ROBUST-019/020/021) ----
+
+    // The threshold constant is the documented value (3): the body / tests and
+    // the validator all key off this number.
+    #[test]
+    fn failure_notify_threshold_is_three() {
+        assert_eq!(FAILURE_NOTIFY_THRESHOLD, 3);
+    }
+
+    // VAL-ROBUST-019: a scheduled failure chain fires EXACTLY once — at the
+    // envelope whose new failure_count equals the threshold. Counts below the
+    // threshold are silent, and the 4th, 5th, … failures (count > threshold)
+    // stay silent too. Because each scheduled failure increments by exactly 1,
+    // `== threshold` is hit on one and only one envelope.
+    #[test]
+    fn should_notify_fires_once_exactly_at_threshold() {
+        let t = FAILURE_NOTIFY_THRESHOLD;
+        // Below the threshold: silent.
+        assert!(!should_notify_failure(1, t, Trigger::Schedule));
+        assert!(!should_notify_failure(2, t, Trigger::Schedule));
+        // The single crossing: fire.
+        assert!(should_notify_failure(3, t, Trigger::Schedule));
+        // Past the threshold (4th, 5th failure): silent.
+        assert!(!should_notify_failure(4, t, Trigger::Schedule));
+        assert!(!should_notify_failure(5, t, Trigger::Schedule));
+        assert!(!should_notify_failure(100, t, Trigger::Schedule));
+    }
+
+    // VAL-ROBUST-020: a success resets failure_count to 0, so the counter climbs
+    // from scratch and crosses the threshold again on a fresh chain — the
+    // throttle re-arms with the reset, with no extra state. Counting up 0,1,2,3
+    // a SECOND time still yields exactly one `== threshold` crossing.
+    #[test]
+    fn should_notify_re_arms_after_reset_to_zero() {
+        let t = FAILURE_NOTIFY_THRESHOLD;
+        // A reset lands the counter at 0 — never a crossing on its own.
+        assert!(!should_notify_failure(0, t, Trigger::Schedule));
+        // The fresh chain climbing back to the threshold fires once more.
+        assert!(should_notify_failure(t, t, Trigger::Schedule));
+    }
+
+    // A MANUAL trigger never raises the banner, whatever the count: manual runs
+    // do not touch failure_count, so they can never legitimately reach the
+    // crossing — and the explicit trigger guard makes that unmistakable even if
+    // a stale count were passed in.
+    #[test]
+    fn should_notify_never_fires_for_manual_trigger() {
+        let t = FAILURE_NOTIFY_THRESHOLD;
+        for count in 0..=10 {
+            assert!(
+                !should_notify_failure(count, t, Trigger::Manual),
+                "manual trigger must never notify (count {count})"
+            );
+        }
+    }
+
+    // The notification body names the offending job and its consecutive-failure
+    // count — and nothing else (no command output / secret material).
+    #[test]
+    fn failure_notify_body_names_job_and_count() {
+        let body = failure_notify_body("nightly-backup", 3);
+        assert!(body.contains("nightly-backup"), "body names the job");
+        assert!(body.contains('3'), "body carries the failure count");
+        assert!(
+            body.contains("连续失败"),
+            "body conveys the continuous-failure semantics"
+        );
+    }
+
+    // VAL-ROBUST-019 (end-to-end persisted view): driving an always-failing
+    // SCHEDULED job through three envelopes climbs failure_count 1 → 2 → 3, and
+    // the third envelope is the single one whose persisted count equals the
+    // threshold (the crossing). The 4th and 5th envelopes land on 4 and 5, past
+    // the threshold. The job is re-read each envelope so the persisted counter
+    // (the source of truth the executor reads back) drives the decision.
+    #[tokio::test]
+    async fn scheduled_failures_cross_threshold_once_in_persisted_count() {
+        let env = setup().await;
+        // No AppHandle in the unit wiring, so the banner is a no-op — but the
+        // failure_count / history accounting (and the crossing) is unaffected,
+        // which is exactly the graceful-degradation guarantee (ROBUST-021).
+        assert!(
+            env.executor.app_handle.is_none(),
+            "unit executor has no AppHandle; notifications are a clean no-op here"
+        );
+
+        let counter = env._temp_dir.path().join("c_notify_chain");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_notify", artifact_target(&artifact_id)).await;
+        job.max_retries = 0; // each envelope is a single attempt
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+
+        // Five scheduled failures; record the persisted count after each, and
+        // whether it would have armed the banner.
+        let mut counts = Vec::new();
+        let mut crossings = 0;
+        for _ in 0..5 {
+            // Re-read so the in-memory snapshot tracks the persisted chain (the
+            // real scheduler reloads via `list_due` every tick).
+            let current = env.executor.jobs.get("job_notify").await.unwrap().unwrap();
+            let exec = env
+                .executor
+                .execute(&current, Trigger::Schedule)
+                .await
+                .expect("scheduled execute should not fail the run");
+            assert_eq!(exec.status, ExecutionStatus::Failed);
+
+            let after = env.executor.jobs.get("job_notify").await.unwrap().unwrap();
+            counts.push(after.failure_count);
+            if should_notify_failure(
+                after.failure_count,
+                FAILURE_NOTIFY_THRESHOLD,
+                Trigger::Schedule,
+            ) {
+                crossings += 1;
+            }
+        }
+
+        // The chain climbs 1,2,3,4,5 — monotonic, never reset (no success).
+        assert_eq!(counts, vec![1, 2, 3, 4, 5], "continuous chain climbs by 1");
+        // Exactly ONE crossing across the whole chain (at == threshold).
+        assert_eq!(
+            crossings, 1,
+            "the banner arms exactly once per failure chain"
+        );
+        // History and accounting survived even though no banner was shown.
+        let rows = read_rows(&env, "job_notify").await;
+        assert_eq!(rows.len(), 5, "every failed envelope is still recorded");
+        assert!(rows.iter().all(|r| r.status == "failed"));
+    }
+
+    // VAL-ROBUST-020 (end-to-end persisted view): a success between two failure
+    // chains resets failure_count to 0, so the SECOND chain crosses the
+    // threshold again — two crossings across fail×3, success, fail×3.
+    #[tokio::test]
+    async fn success_reset_re_arms_threshold_crossing() {
+        let env = setup().await;
+        let fail_counter = env._temp_dir.path().join("c_notify_rearm");
+        let fail_id = install_fail_then_succeed_artifact(&env, &fail_counter, 1_000).await;
+        let ok_id = install_shell_artifact(&env, "echo ok\nexit 0\n").await;
+
+        let mut fail_job = make_job("job_rearm", artifact_target(&fail_id)).await;
+        fail_job.max_retries = 0;
+        fail_job.retry_delay_secs = 0;
+        seed_job(&env, &fail_job).await;
+
+        // Build the run sequence: fail, fail, fail, success, fail, fail, fail.
+        let ok_target = artifact_target(&ok_id);
+        let sequence = [
+            (false,),
+            (false,),
+            (false,),
+            (true,),
+            (false,),
+            (false,),
+            (false,),
+        ];
+
+        let mut crossings = 0;
+        let mut counts = Vec::new();
+        for (succeed,) in sequence {
+            let mut current = env.executor.jobs.get("job_rearm").await.unwrap().unwrap();
+            // Swap the target per step (success vs failure) without disturbing
+            // the persisted counter the executor reads back.
+            if succeed {
+                current.target = ok_target.clone();
+            } else {
+                current.target = artifact_target(&fail_id);
+            }
+            env.executor
+                .execute(&current, Trigger::Schedule)
+                .await
+                .unwrap();
+
+            let after = env.executor.jobs.get("job_rearm").await.unwrap().unwrap();
+            counts.push(after.failure_count);
+            if should_notify_failure(
+                after.failure_count,
+                FAILURE_NOTIFY_THRESHOLD,
+                Trigger::Schedule,
+            ) {
+                crossings += 1;
+            }
+        }
+
+        // Counter: 1,2,3 (first chain), 0 (success reset), 1,2,3 (second chain).
+        assert_eq!(counts, vec![1, 2, 3, 0, 1, 2, 3]);
+        // Two crossings: once per chain. The success between them re-armed the
+        // throttle without any extra state.
+        assert_eq!(crossings, 2, "the throttle re-arms after a success reset");
+    }
+
+    // VAL-ROBUST-021: the banner path is graceful-degradation by construction —
+    // `notify_failure_threshold` is a clean no-op without an AppHandle and never
+    // panics or blocks, so a scheduled failure chain crossing the threshold
+    // still finalizes the row and bumps failure_count exactly as it would with a
+    // working desktop. (A REAL macOS permission-denied banner is probed by the
+    // milestone validator with computer-use; here we prove the executor never
+    // depends on the banner reaching the screen.)
+    #[tokio::test]
+    async fn notification_degradation_never_blocks_execution() {
+        let env = setup().await;
+        assert!(
+            env.executor.app_handle.is_none(),
+            "no AppHandle => the banner is a no-op (the degraded path)"
+        );
+
+        let counter = env._temp_dir.path().join("c_notify_degrade");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_degrade", artifact_target(&artifact_id)).await;
+        job.max_retries = 0;
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+
+        // Drive failures right up to and past the threshold; calling
+        // `notify_failure_threshold` (a no-op here) must not panic or stall.
+        for _ in 0..FAILURE_NOTIFY_THRESHOLD + 1 {
+            let current = env.executor.jobs.get("job_degrade").await.unwrap().unwrap();
+            let exec = env
+                .executor
+                .execute(&current, Trigger::Schedule)
+                .await
+                .expect("execute completes even though no banner can be shown");
+            assert_eq!(exec.status, ExecutionStatus::Failed);
+        }
+
+        // The threshold-crossing did NOT depend on a banner: the row and the
+        // continuous-failure count are persisted exactly as expected.
+        let after = env.executor.jobs.get("job_degrade").await.unwrap().unwrap();
+        assert_eq!(
+            after.failure_count,
+            FAILURE_NOTIFY_THRESHOLD + 1,
+            "failure_count accrues normally despite no banner"
+        );
+        let rows = read_rows(&env, "job_degrade").await;
+        assert_eq!(
+            rows.len(),
+            (FAILURE_NOTIFY_THRESHOLD + 1) as usize,
+            "every failure is recorded despite the silent banner"
+        );
+        assert!(rows.iter().all(|r| r.status == "failed"));
+
+        // Calling the notifier directly with no handle is a safe no-op too.
+        env.executor
+            .notify_failure_threshold("job_degrade", FAILURE_NOTIFY_THRESHOLD);
+    }
+
+    // A MANUAL run never crosses the threshold: it leaves failure_count
+    // untouched, so even a job already AT the threshold via prior scheduled
+    // failures does not re-arm or re-fire on a manual failure (sticks at 3, and
+    // `should_notify_failure` is gated to Schedule anyway).
+    #[tokio::test]
+    async fn manual_failure_does_not_arm_notification() {
+        let env = setup().await;
+        let counter = env._temp_dir.path().join("c_notify_manual");
+        let artifact_id = install_fail_then_succeed_artifact(&env, &counter, 1_000).await;
+        let mut job = make_job("job_manual_notify", artifact_target(&artifact_id)).await;
+        job.max_retries = 0;
+        job.retry_delay_secs = 0;
+        seed_job(&env, &job).await;
+
+        // Seed the counter exactly AT the threshold via three scheduled failures.
+        for _ in 0..FAILURE_NOTIFY_THRESHOLD {
+            let current = env
+                .executor
+                .jobs
+                .get("job_manual_notify")
+                .await
+                .unwrap()
+                .unwrap();
+            env.executor
+                .execute(&current, Trigger::Schedule)
+                .await
+                .unwrap();
+        }
+        let at_threshold = env
+            .executor
+            .jobs
+            .get("job_manual_notify")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(at_threshold.failure_count, FAILURE_NOTIFY_THRESHOLD);
+
+        // A manual failure leaves the count untouched and never notifies.
+        let manual = env.executor.run_now(&at_threshold).await.unwrap();
+        assert_eq!(manual.status, ExecutionStatus::Failed);
+        let after = env
+            .executor
+            .jobs
+            .get("job_manual_notify")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.failure_count, FAILURE_NOTIFY_THRESHOLD,
+            "manual failure does not touch the continuous counter"
+        );
+        assert!(
+            !should_notify_failure(
+                after.failure_count,
+                FAILURE_NOTIFY_THRESHOLD,
+                Trigger::Manual
+            ),
+            "a manual trigger never arms the banner"
+        );
+    }
+
     // VAL-ROBUST-009 + VAL-HISTORY-032: a job that fails every attempt is retried
     // up to max_retries+1 times, the dispatch is invoked exactly that many times,
     // and the WHOLE envelope is ONE row finalized to `failed` with the final
@@ -3929,10 +4355,16 @@ exit 0
         let rows = read_rows(&env, "job_recover").await;
         assert_eq!(rows.len(), 1, "one envelope => one row even after retries");
         assert_eq!(rows[0].status, "success");
-        assert_eq!(rows[0].attempt, 3, "the failure trail (attempt>1) is preserved");
+        assert_eq!(
+            rows[0].attempt, 3,
+            "the failure trail (attempt>1) is preserved"
+        );
 
         let after = env.executor.jobs.get("job_recover").await.unwrap().unwrap();
-        assert_eq!(after.failure_count, 0, "a terminal success resets the chain");
+        assert_eq!(
+            after.failure_count, 0,
+            "a terminal success resets the chain"
+        );
     }
 
     // VAL-ROBUST-017: all retries fail => terminal `failed` and failure_count +1.
@@ -3950,7 +4382,13 @@ exit 0
         assert_eq!(exec.status, ExecutionStatus::Failed);
         assert_eq!(exec.attempt, 3);
 
-        let after = env.executor.jobs.get("job_all_fail").await.unwrap().unwrap();
+        let after = env
+            .executor
+            .jobs
+            .get("job_all_fail")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(after.run_count, 1);
         assert_eq!(after.failure_count, 1);
     }
