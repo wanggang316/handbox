@@ -15,25 +15,29 @@
 //   BEFORE execution is dispatched. A 30s tick against a 1-minute cron therefore
 //   selects each occurrence once; a forward clock jump advances straight to the
 //   next future occurrence rather than replaying every skipped slot.
-// - Re-entrancy guard. An in-memory `Arc<Mutex<HashSet<JobId>>>` records jobs
-//   with an execution in flight; a due job already in flight is skipped. The
-//   marker is released on BOTH the completion and panic paths (an RAII guard),
-//   so a crashing/​panicking job never wedges its slot.
+// - Re-entrancy guard. The SHARED in-flight set lives on the `JobExecutor`
+//   (`Arc<Mutex<HashSet<JobId>>>`); the scheduler claims a due job's slot via
+//   `executor.try_claim` BEFORE advancing/dispatching it, and a job already in
+//   flight (by ANY trigger — a tick OR a manual run-now) is skipped. The claim
+//   is released on BOTH the completion and panic paths (an RAII guard), so a
+//   crashing/​panicking job never wedges its slot. Because the manual
+//   `job_run_now` command claims against the same set on the same executor,
+//   scheduled and manual triggers cannot run the same job concurrently.
 // - The loop never blocks on a job. Each due job is dispatched on its own
 //   detached `tokio::spawn`; a slow or panicking job neither stalls nor kills
 //   the tick loop.
 //
-// Out of scope here: manual run-now (M2) and retry / timeout-override /
-// notifications (M4). This drives the existing `JobExecutor::execute`; it does
-// not modify the executor or the repository.
+// Out of scope here: retry / timeout-override / notifications (M4). This drives
+// the existing `JobExecutor::execute`; it does not modify the executor's
+// dispatch logic (the M2 run-now feature relocated the in-flight set onto the
+// executor so every trigger path shares one gate).
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::{Runtime, Wry};
-use tokio::sync::Mutex;
 
+use crate::services::job_executor::InFlightGuard;
 use crate::services::JobExecutor;
 use crate::storage::types::{ExecutionStatus, Job, Timestamp, Trigger};
 use crate::storage::{JobExecutionRepository, JobRepository};
@@ -61,22 +65,17 @@ pub struct JobScheduler<R: Runtime = Wry> {
     /// not expose that, and per the feature boundary we do not modify it).
     executions: JobExecutionRepository,
     executor: JobExecutor<R>,
-    /// Ids of jobs with an execution currently in flight. Guards against
-    /// re-entrancy (the same job being dispatched twice concurrently). Released
-    /// on both the success and panic paths via [`InFlightGuard`].
-    in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 // Manual `Clone`: the bound is on the fields, not on `R: Clone` (Tauri runtimes
-// are not `Clone`). The executor clones via its `Arc`-backed fields; the
-// in-flight set is shared by cloning the `Arc`.
+// are not `Clone`). The executor clones via its `Arc`-backed fields (including
+// the shared in-flight set it now owns).
 impl<R: Runtime> Clone for JobScheduler<R> {
     fn clone(&self) -> Self {
         Self {
             jobs: self.jobs.clone(),
             executions: self.executions.clone(),
             executor: self.executor.clone(),
-            in_flight: self.in_flight.clone(),
         }
     }
 }
@@ -92,7 +91,6 @@ impl<R: Runtime> JobScheduler<R> {
             jobs,
             executions,
             executor,
-            in_flight: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -188,21 +186,23 @@ impl<R: Runtime> JobScheduler<R> {
 
         let mut dispatched = 0u64;
         for mut job in due {
-            // Re-entrancy: skip jobs whose previous execution is still running.
-            // Reserve the slot under the lock BEFORE advancing/dispatching so a
-            // concurrent tick (should one overlap) cannot also claim it.
-            let claimed = {
-                let mut set = self.in_flight.lock().await;
-                set.insert(job.id.clone())
+            // Re-entrancy: skip jobs whose previous execution is still in flight
+            // by ANY trigger. The slot is reserved against the executor's shared
+            // set BEFORE advancing/dispatching, so a concurrent tick (should one
+            // overlap) or a manual run-now cannot also claim it. Holding the
+            // guard keeps the claim alive until it is moved into the dispatch
+            // task; dropping it on an early `continue` releases the slot.
+            let guard = match self.executor.try_claim(&job.id).await {
+                Some(guard) => guard,
+                None => {
+                    tracing::info!(
+                        job_id = %job.id,
+                        "[JobScheduler::tick] skipped {} — previous execution still in flight",
+                        job.id
+                    );
+                    continue;
+                }
             };
-            if !claimed {
-                tracing::info!(
-                    job_id = %job.id,
-                    "[JobScheduler::tick] skipped {} — previous execution still in flight",
-                    job.id
-                );
-                continue;
-            }
 
             // Advance next_run_at to the next occurrence strictly after now,
             // BEFORE dispatching. This is the at-most-once guarantee: the next
@@ -214,9 +214,9 @@ impl<R: Runtime> JobScheduler<R> {
                     job_id = %job.id,
                     "[JobScheduler::tick] failed to advance next_run_at, releasing slot: {e:?}"
                 );
-                // Could not advance — release the slot so a later tick can retry
-                // rather than wedging the job in flight forever.
-                self.in_flight.lock().await.remove(&job.id);
+                // Could not advance — drop the guard to release the slot so a
+                // later tick can retry rather than wedging the job in flight.
+                drop(guard);
                 continue;
             }
 
@@ -235,7 +235,7 @@ impl<R: Runtime> JobScheduler<R> {
                 job.id
             );
 
-            self.spawn_execution(job);
+            self.spawn_execution(job, guard);
             dispatched += 1;
         }
 
@@ -251,19 +251,19 @@ impl<R: Runtime> JobScheduler<R> {
     }
 
     /// Dispatch one job's execution on a detached task so the tick loop is never
-    /// blocked. The in-flight slot (already reserved by [`tick`]) is released on
-    /// BOTH the completion and panic paths via [`InFlightGuard`]'s `Drop`.
-    fn spawn_execution(&self, job: Job) {
+    /// blocked. Takes ownership of the in-flight `guard` already reserved by
+    /// [`tick`] (against the executor's shared set); dropping it on completion
+    /// OR panic-unwind releases the slot, so a panicking target never wedges it.
+    fn spawn_execution(&self, job: Job, guard: InFlightGuard) {
         let executor = self.executor.clone();
-        let in_flight = self.in_flight.clone();
         let job_id = job.id.clone();
 
         tokio::spawn(async move {
-            // RAII: dropping the guard (normal return OR panic-unwind) removes
-            // the job from the in-flight set, so a panicking target never wedges
-            // its slot. `next_run_at` was already advanced by the caller, so a
-            // failed/panicked run still has a future occurrence queued.
-            let _guard = InFlightGuard::new(in_flight, job_id.clone());
+            // RAII: the moved-in guard drops at the end of this task (normal
+            // return OR panic-unwind), removing the job from the shared
+            // in-flight set. `next_run_at` was already advanced by the caller,
+            // so a failed/panicked run still has a future occurrence queued.
+            let _guard = guard;
 
             match executor.execute(&job, Trigger::Schedule).await {
                 Ok(exec) => {
@@ -310,48 +310,11 @@ impl<R: Runtime> JobScheduler<R> {
         });
     }
 
-    /// Test-only view of the in-flight set size.
+    /// Test-only view of the executor's shared in-flight set size, for asserting
+    /// the slot is released after a run.
     #[cfg(test)]
     async fn in_flight_len(&self) -> usize {
-        self.in_flight.lock().await.len()
-    }
-}
-
-/// RAII release of an in-flight job slot.
-///
-/// Holds the shared in-flight set and the job id; on `Drop` (whether the run
-/// returns normally or unwinds from a panic) it removes the id, freeing the slot
-/// for a future tick. This is what makes re-entrancy protection survive a
-/// panicking / crashing target.
-struct InFlightGuard {
-    set: Arc<Mutex<HashSet<String>>>,
-    job_id: String,
-}
-
-impl InFlightGuard {
-    fn new(set: Arc<Mutex<HashSet<String>>>, job_id: String) -> Self {
-        Self { set, job_id }
-    }
-}
-
-impl Drop for InFlightGuard {
-    fn drop(&mut self) {
-        // `Drop` is sync but the set is an async `Mutex`; `blocking_lock` is the
-        // supported way to take a tokio mutex from sync code. Within a runtime
-        // worker this would panic, so use `try_lock` first and only fall back to
-        // a blocking acquire (uncontended in practice — the set is held only for
-        // the O(1) insert/remove around each dispatch).
-        let set = self.set.clone();
-        let job_id = self.job_id.clone();
-        if let Ok(mut guard) = set.try_lock() {
-            guard.remove(&job_id);
-            return;
-        }
-        // Contended: hand the removal to a detached task so `Drop` never blocks
-        // a runtime worker thread.
-        tauri::async_runtime::spawn(async move {
-            set.lock().await.remove(&job_id);
-        });
+        self.executor.in_flight_len().await
     }
 }
 
@@ -468,38 +431,6 @@ mod tests {
     #[test]
     fn next_run_after_invalid_cron_is_none() {
         assert_eq!(next_run_after("not-a-cron", current_timestamp()), None);
-    }
-
-    /// The in-flight set is a plain re-entrancy gate: first insert claims the
-    /// slot, a second insert for the same id is rejected, and removal frees it.
-    #[tokio::test]
-    async fn in_flight_set_claims_once_then_releases() {
-        let set: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-        let id = "job_x".to_string();
-
-        let first = set.lock().await.insert(id.clone());
-        assert!(first, "first claim succeeds");
-        let second = set.lock().await.insert(id.clone());
-        assert!(
-            !second,
-            "second claim for the same id is rejected (re-entrancy)"
-        );
-
-        // Release via the guard's Drop, then the slot is reusable.
-        {
-            let _guard = InFlightGuard::new(set.clone(), id.clone());
-        }
-        // Give a possibly-detached release task a moment (uncontended path is
-        // synchronous, but be robust).
-        for _ in 0..50 {
-            if !set.lock().await.contains(&id) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        assert!(!set.lock().await.contains(&id), "guard Drop frees the slot");
-        let reclaim = set.lock().await.insert(id);
-        assert!(reclaim, "slot is reusable after release");
     }
 
     // ---- DB-backed scheduler tests ----
@@ -715,12 +646,15 @@ mod tests {
         job.next_run_at = Some(now - 1000); // due
         env.jobs.create(&job).await.unwrap();
 
-        // Pretend an execution is already in flight for this job.
-        env.scheduler
-            .in_flight
-            .lock()
+        // Pretend an execution is already in flight for this job by claiming its
+        // slot on the SHARED executor set; hold the guard for the tick so the
+        // claim stays active.
+        let _claim = env
+            .scheduler
+            .executor
+            .try_claim("busy_job")
             .await
-            .insert("busy_job".to_string());
+            .expect("first claim succeeds");
 
         let dispatched = env.scheduler.tick().await;
         assert_eq!(dispatched, 0, "in-flight job is skipped");

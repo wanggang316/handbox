@@ -9,12 +9,13 @@
     History,
     Hand,
     Clock,
+    Play,
   } from "@lucide/svelte";
   import Modal from "$lib/components/ui/Modal.svelte";
   import StatusLabel from "$lib/components/ui/StatusLabel.svelte";
   import { cronToHuman } from "$lib/utils/cronReadable";
   import { formatDateTime, formatDuration } from "$lib/utils";
-  import { listExecutions } from "$lib/api/job";
+  import { listExecutions, runNow } from "$lib/api/job";
   import type { Job, JobExecution, ExecutionStatus, Trigger } from "$lib/types";
 
   interface Props {
@@ -31,8 +32,19 @@
   let loadError = $state<string | null>(null);
   // 展开行集合：行 id -> 是否展开 stdout/stderr/error。
   let expanded = $state<Set<string>>(new Set());
+  // 手动「立即运行」请求进行中（与后端共享的 in-flight 防重入对应：禁用按钮
+  // 是第一道防线，后端 CONFLICT 是第二道）。
+  let triggering = $state(false);
+  let runError = $state<string | null>(null);
 
   const schedule = $derived(job ? cronToHuman(job.cronExpr) : "");
+
+  // 该任务是否有执行进行中：历史里存在 running 行即视为在跑（历史已包含
+  // running 行，无需事件订阅）。运行中禁用「立即运行」以避免重复触发。
+  const hasRunningExecution = $derived(
+    executions.some((e) => e.status === "running"),
+  );
+  const runDisabled = $derived(triggering || hasRunningExecution);
 
   // 执行状态 -> StatusLabel 变体 + 文案。复用现有 StatusLabel 的 4 个语义变体，
   // 不新造 widget：成功→enabled、失败/超时→error、运行中→idle、未知→idle。
@@ -87,6 +99,26 @@
     }
   }
 
+  /**
+   * 手动「立即运行」：调用 `job_run_now`（trigger=manual），完成后重载历史，
+   * 时间线顶部即出现新的手动行。运行进行中（triggering 或已有 running 行）按钮
+   * 禁用，且 onclick 二次防御直接返回，杜绝并发触发。
+   */
+  async function handleRunNow(): Promise<void> {
+    if (!job?.id || runDisabled) return;
+    triggering = true;
+    runError = null;
+    try {
+      await runNow(job.id);
+      await loadHistory(job.id);
+    } catch (e) {
+      console.error("Failed to run job now:", e);
+      runError = e instanceof Error ? e.message : "立即运行失败，请重试";
+    } finally {
+      triggering = false;
+    }
+  }
+
   // 每次打开（或目标 job 切换）重置展开态并重新拉取历史。
   $effect(() => {
     if (open && job?.id) {
@@ -132,7 +164,7 @@
         </div>
       </div>
 
-      <!-- 顶部操作区：留作 run-now feature 的扩展点（本期不实现立即运行）。 -->
+      <!-- 顶部操作区：执行历史标题 + 立即运行（trigger=manual）。 -->
       <div
         class="px-6 py-3 border-b border-base-300 flex items-center justify-between"
       >
@@ -142,8 +174,26 @@
           <History size={15} class="text-base-content/50" />
           执行历史
         </h4>
-        <!-- run-now / refresh 操作按钮将在后续 feature 接入此处 -->
+        <!-- 立即运行：禁用任务也可手动运行（禁用仅停自动调度）；运行进行中
+             （triggering 或已有 running 行）按钮禁用，避免重复触发。 -->
+        <button
+          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-content text-xs font-medium cursor-pointer hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={runDisabled}
+          onclick={handleRunNow}
+        >
+          <Play size={13} class="flex-shrink-0" />
+          {triggering ? "运行中…" : "立即运行"}
+        </button>
       </div>
+
+      {#if runError}
+        <div
+          class="px-6 py-2 border-b border-base-300 flex items-center gap-2 text-xs text-error"
+        >
+          <AlertCircle size={13} class="flex-shrink-0" />
+          <span>{runError}</span>
+        </div>
+      {/if}
 
       <!-- 历史时间线：最新在上，可滚动，避免撑破 Modal -->
       <div class="flex-1 min-h-0 overflow-y-auto px-6 py-3">
