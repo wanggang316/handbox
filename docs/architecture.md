@@ -80,6 +80,7 @@ HandBox 架构设计
   - 请求-响应：前端 `invoke('command', payload)`，后端同步/异步返回。
   - 流式输出：后端在处理生成式对话时，以事件/分片流（Server-Sent Events 风格）推送，前端订阅并渲染；或使用 Tauri 事件总线进行分段消息 `emit`。
 - 错误协议：统一错误结构（错误码、可读消息、建议操作），区分网络/鉴权/速率/用户输入/内部错误。
+- **Settings 序列化约定**：配置经 IPC 以 serde JSON 跨界，前端 camelCase（`themeColor`）↔ 后端 Rust snake_case（`theme_color`）。前后端 struct 字段漂移被 serde **静默容忍**（多余字段忽略、缺失字段走 `#[serde(default)]`），故移除一个 settings 字段时**前端不报错也不会暴露后端遗留**——删除任一 settings 字段必须**两侧都 grep**（前端 camelCase + `src-tauri` snake_case），否则后端会留下死字段（如 ui-consistency 重构后遗留的 `theme_color`）。
 
 ### 3.4 Agent 模式（独立子系统，自 milestone M1 起）
 
