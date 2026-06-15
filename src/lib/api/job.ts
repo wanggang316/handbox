@@ -9,10 +9,11 @@
  * - `job_update(jobId, request: JobUpdatePayload)`
  * - `job_delete(jobId)`
  * - `job_set_enabled(jobId, enabled)`
+ * - `job_execution_list(jobId, limit?, offset?)`
  */
 
 import { apiCall } from "./index";
-import type { Job, JobTarget, Timestamp, UUID } from "../types";
+import type { Job, JobExecution, JobTarget, Timestamp, UUID } from "../types";
 
 /** 创建任务的入参（对应后端 `JobCreatePayload`，字段 camelCase）。 */
 export interface JobCreateInput {
@@ -83,4 +84,16 @@ export async function setJobEnabled(
   enabled: boolean,
 ): Promise<Job> {
   return apiCall<Job>("job_set_enabled", { jobId, enabled });
+}
+
+/**
+ * 获取任务的执行历史（最新优先），可分页。包含进行中（running）行，
+ * 因此时间线无需依赖事件订阅即可显示在跑的运行。从未执行的任务返回空数组。
+ */
+export async function listExecutions(
+  jobId: UUID,
+  limit?: number,
+  offset?: number,
+): Promise<JobExecution[]> {
+  return apiCall<JobExecution[]>("job_execution_list", { jobId, limit, offset });
 }

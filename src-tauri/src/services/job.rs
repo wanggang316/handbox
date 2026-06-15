@@ -13,12 +13,16 @@
 use std::sync::Arc;
 
 use crate::models::AppError;
-use crate::storage::types::{Job, JobTarget, Timestamp, UUID};
-use crate::storage::JobRepository;
+use crate::storage::types::{Job, JobExecution, JobTarget, Timestamp, UUID};
+use crate::storage::{JobExecutionRepository, JobRepository};
 use crate::utils::cron;
 
 /// Default page size for `list` when the caller omits `limit`.
 const DEFAULT_LIST_LIMIT: i32 = 50;
+
+/// Default page size for `list_executions` when the caller omits `limit`.
+/// Sized for the detail modal's history timeline.
+const DEFAULT_EXECUTION_LIST_LIMIT: i32 = 50;
 
 /// Fields needed to create a job. The `target` is already structured, so the
 /// command layer only has to deserialize it.
@@ -45,15 +49,20 @@ pub struct JobUpdateRequest {
     pub enabled: bool,
 }
 
-/// Scheduled-job service: validation + CRUD over `JobRepository`.
+/// Scheduled-job service: validation + CRUD over `JobRepository`, plus
+/// read access to execution history via `JobExecutionRepository`.
 #[derive(Clone)]
 pub struct JobService {
     repository: JobRepository,
+    execution_repository: JobExecutionRepository,
 }
 
 impl JobService {
-    pub fn new(repository: JobRepository) -> Self {
-        Self { repository }
+    pub fn new(repository: JobRepository, execution_repository: JobExecutionRepository) -> Self {
+        Self {
+            repository,
+            execution_repository,
+        }
     }
 
     /// Create a job. Validates name + target completeness, generates id and
@@ -143,6 +152,26 @@ impl JobService {
         self.repository.set_enabled(&id, enabled, now).await?;
         self.get(id).await
     }
+
+    /// List a job's execution history, newest-first (delegated to the
+    /// repository ordering). An empty history yields an empty vec, not an error,
+    /// so the detail modal can render its "no executions" empty state.
+    ///
+    /// Any in-progress (`running`) execution is returned alongside finalized
+    /// rows because the repository reads from `job_executions` directly, so the
+    /// timeline reflects live runs without depending on event subscriptions.
+    pub async fn list_executions(
+        &self,
+        job_id: UUID,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> Result<Vec<JobExecution>, AppError> {
+        let limit = limit.unwrap_or(DEFAULT_EXECUTION_LIST_LIMIT) as i64;
+        let offset = offset.unwrap_or(0) as i64;
+        self.execution_repository
+            .list_for_job(&job_id, limit, offset)
+            .await
+    }
 }
 
 /// Trim the name and reject an empty result. Returns the trimmed name on success.
@@ -217,11 +246,15 @@ fn current_timestamp() -> Timestamp {
         .as_millis() as i64
 }
 
-/// Wrap a raw repository in an `Arc<JobService>`-friendly constructor used by
-/// the app wiring (`JobRepository::new(db)` then `JobService::new`).
+/// Wrap a raw database handle in a `JobService`, used by the app wiring. Builds
+/// both the definition repository and the execution-history repository over the
+/// same pool.
 impl JobService {
     pub fn from_db(db: Arc<crate::storage::Database>) -> Self {
-        Self::new(JobRepository::new(db))
+        Self::new(
+            JobRepository::new(db.clone()),
+            JobExecutionRepository::new(db),
+        )
     }
 }
 
@@ -501,6 +534,96 @@ mod tests {
             .await
             .expect_err("missing job");
         assert_eq!(err.code, "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn list_executions_empty_for_job_without_runs() {
+        let (service, _tmp) = create_service().await;
+        let job = service
+            .create(create_request("Job", artifact_target()))
+            .await
+            .expect("create");
+
+        // A job that has never run yields an empty history (not an error), so the
+        // detail modal can render its "no executions" empty state.
+        let history = service
+            .list_executions(job.id, None, None)
+            .await
+            .expect("list_executions");
+        assert!(history.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_executions_returns_running_and_finalized_newest_first() {
+        use crate::storage::types::{ExecutionStatus, Trigger};
+        use crate::storage::JobExecutionRepository;
+        use crate::storage::JobRepository;
+
+        let temp_dir = tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let db = Arc::new(Database::new(&db_path).await.expect("db"));
+        let service = JobService::from_db(db.clone());
+
+        // Seed a job through the service, then drive the execution repository
+        // directly to mirror what the executor would produce.
+        let job = service
+            .create(create_request("Job", artifact_target()))
+            .await
+            .expect("create");
+        let execs = JobExecutionRepository::new(db.clone());
+        let _jobs = JobRepository::new(db);
+        let now = 1_000_000i64;
+
+        // Older finalized success run.
+        execs
+            .insert_running("exec_old", &job.id, Trigger::Schedule, 1, now, now)
+            .await
+            .unwrap();
+        execs
+            .finalize(
+                "exec_old",
+                ExecutionStatus::Success,
+                Some("stdout text"),
+                Some(""),
+                Some(0),
+                None,
+                None,
+                now + 123,
+                123,
+            )
+            .await
+            .unwrap();
+
+        // Newer still-running run (terminal fields NULL).
+        execs
+            .insert_running(
+                "exec_new",
+                &job.id,
+                Trigger::Manual,
+                1,
+                now + 500,
+                now + 500,
+            )
+            .await
+            .unwrap();
+
+        let history = service
+            .list_executions(job.id, None, None)
+            .await
+            .expect("list_executions");
+        assert_eq!(history.len(), 2);
+        // Newest-first: the running row comes before the finalized one.
+        assert_eq!(history[0].id, "exec_new");
+        assert_eq!(history[0].status, ExecutionStatus::Running);
+        assert_eq!(history[0].ended_at, None);
+        assert_eq!(history[0].duration, None);
+        assert_eq!(history[1].id, "exec_old");
+        assert_eq!(history[1].status, ExecutionStatus::Success);
+        // Sub-second duration is preserved as a non-zero value.
+        assert_eq!(history[1].duration, Some(123));
+        // Empty stdout/stderr survive as empty strings, not NULL.
+        assert_eq!(history[1].stdout.as_deref(), Some("stdout text"));
+        assert_eq!(history[1].stderr.as_deref(), Some(""));
     }
 
     #[tokio::test]
