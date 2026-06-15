@@ -106,6 +106,24 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 统一的键盘 :focus-visible 焦点环。
+   用 outline（而非 box-shadow）：layout-neutral 且不被 overflow 容器裁剪；
+   仅键盘聚焦显示（:focus-visible，鼠标点击不触发）；
+   var(--primary) 主题感知，自动适配 light/dark。 */
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+a[href]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-button, 0.375rem);
+}
+
 /* 浅色主题（默认） */
 :root {
   --base-100: var(--color-base-100);

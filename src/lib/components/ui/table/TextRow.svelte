@@ -54,7 +54,7 @@
         aria-required={required ? "true" : undefined}
         aria-invalid={error ? "true" : undefined}
         aria-describedby={error ? errorId : undefined}
-        class="w-full text-sm text-right text-base-content border-none outline-none p-1"
+        class="w-full text-sm text-right text-base-content border-none p-1"
         class:cursor-not-allowed={readonly || disabled}
         class:opacity-60={readonly || disabled}
         class:text-error={!!error}
@@ -82,7 +82,7 @@
         aria-required={required ? "true" : undefined}
         aria-invalid={error ? "true" : undefined}
         aria-describedby={error ? errorId : undefined}
-        class="w-full bg-base-100 text-base text-left text-base-content border-none outline-none px-2 py-1"
+        class="w-full bg-base-100 text-base text-left text-base-content border-none px-2 py-1"
         class:cursor-not-allowed={readonly || disabled}
         class:opacity-60={readonly || disabled}
       />
