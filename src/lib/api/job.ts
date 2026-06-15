@@ -10,6 +10,7 @@
  * - `job_delete(jobId)`
  * - `job_set_enabled(jobId, enabled)`
  * - `job_execution_list(jobId, limit?, offset?)`
+ * - `job_run_now(jobId)`
  */
 
 import { apiCall } from "./index";
@@ -96,4 +97,13 @@ export async function listExecutions(
   offset?: number,
 ): Promise<JobExecution[]> {
   return apiCall<JobExecution[]>("job_execution_list", { jobId, limit, offset });
+}
+
+/**
+ * 立即手动运行一个任务（`trigger = manual`），与调度无关。禁用任务也可运行
+ * （禁用仅停自动调度）。返回该次执行的终态记录；若该任务已有执行进行中
+ * （调度或先前的手动运行），后端返回 `CONFLICT` 错误且不写第二条记录。
+ */
+export async function runNow(jobId: UUID): Promise<JobExecution> {
+  return apiCall<JobExecution>("job_run_now", { jobId });
 }

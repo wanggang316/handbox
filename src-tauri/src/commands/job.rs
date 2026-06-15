@@ -4,7 +4,7 @@
 // manual-trigger (`job_run_now`) commands belong to later features.
 
 use crate::models::AppError;
-use crate::services::{JobCreateRequest, JobService, JobUpdateRequest};
+use crate::services::{JobCreateRequest, JobExecutor, JobService, JobUpdateRequest};
 use crate::storage::types::{Job, JobExecution, JobTarget, Timestamp, UUID};
 use crate::utils::cron;
 use serde::{Deserialize, Serialize};
@@ -136,6 +136,29 @@ pub async fn job_execution_list(
     job_service: State<'_, JobService>,
 ) -> Result<Vec<JobExecution>, AppError> {
     job_service.list_executions(job_id, limit, offset).await
+}
+
+/// Manually run a job NOW (`trigger = manual`), independent of its schedule.
+///
+/// Loads the job (NOT_FOUND if missing), then dispatches it through the
+/// `JobExecutor`, which shares ONE in-flight set with the background scheduler:
+/// - A disabled job (`enabled = 0`) still runs — disabling only stops automatic
+///   scheduling, never an explicit manual run.
+/// - If an execution is already in flight (scheduled OR a prior manual run), the
+///   executor returns a `CONFLICT` error and writes NO second row, so a job can
+///   never have two concurrent `running` rows.
+///
+/// Returns the finalized `JobExecution` (the detail timeline reloads its history
+/// to surface the new manual row).
+#[tauri::command]
+pub async fn job_run_now(
+    job_id: UUID,
+    job_service: State<'_, JobService>,
+    job_executor: State<'_, JobExecutor>,
+) -> Result<JobExecution, AppError> {
+    let job = job_service.get(job_id).await?;
+    tracing::info!(job_id = %job.id, "[job_run_now] manual run requested");
+    job_executor.run_now(&job).await
 }
 
 #[cfg(test)]

@@ -11,11 +11,23 @@
 // last_status / failure_count) are updated afterwards.
 //
 // Out of scope here (left to other milestones): the scheduler loop (M1
-// scheduler feature drives this executor), manual run-now (M2), and job-level
-// timeout/retry overrides (M4). `next_run_at` is NOT recomputed here — that
-// belongs to the scheduler; this executor preserves the job's existing
-// `next_run_at` when writing run statistics.
+// scheduler feature drives this executor) and job-level timeout/retry overrides
+// (M4). `next_run_at` is NOT recomputed here — that belongs to the scheduler;
+// this executor preserves the job's existing `next_run_at` when writing run
+// statistics.
+//
+// Re-entrancy ownership (M2 run-now): the executor owns the single in-flight set
+// (`Arc<Mutex<HashSet<JobId>>>`) shared by EVERY trigger path. A caller (the
+// scheduler tick or the `job_run_now` command) reserves a job's slot via
+// [`JobExecutor::try_claim`] BEFORE dispatching; the returned [`InFlightGuard`]
+// releases the slot on drop (normal return OR panic-unwind). Because both the
+// scheduler and run-now claim against the SAME set on the SAME executor
+// instance, a job whose execution is still in flight cannot be re-dispatched by
+// any path — the at-most-one-concurrent-run guarantee. `execute` itself does NOT
+// touch the set; claiming is the caller's responsibility so the scheduler can
+// decide (under the claim) whether to advance `next_run_at` before dispatching.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::models::AppError;
@@ -25,6 +37,7 @@ use crate::storage::types::{
 };
 use crate::storage::{JobExecutionRepository, JobRepository};
 use tauri::{Runtime, Wry};
+use tokio::sync::Mutex;
 
 /// The terminal outcome of dispatching a job's target, before it is persisted.
 ///
@@ -50,18 +63,27 @@ pub struct JobExecutor<R: Runtime = Wry> {
     artifact_service: Arc<ArtifactService<R>>,
     jobs: JobRepository,
     executions: JobExecutionRepository,
+    /// Ids of jobs with an execution currently in flight. The single shared
+    /// re-entrancy gate: the scheduler tick and the `job_run_now` command both
+    /// claim against this set on the SAME executor instance (cloned via its
+    /// `Arc`), so a job already running cannot be re-dispatched by any path.
+    /// Claimed via [`JobExecutor::try_claim`]; released by [`InFlightGuard`].
+    in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 // Manual `Clone` so the bound is on the fields, not on `R: Clone`. Tauri
 // runtimes (`Wry` / `MockRuntime`) are not themselves `Clone`, and
 // `ArtifactService`'s derived `Clone` carries an `R: Clone` bound — so the
 // executor holds it behind an `Arc` and clones the `Arc`, never the service.
+// The in-flight set is shared (not copied) by cloning its `Arc`, so every clone
+// of an executor guards the same jobs.
 impl<R: Runtime> Clone for JobExecutor<R> {
     fn clone(&self) -> Self {
         Self {
             artifact_service: self.artifact_service.clone(),
             jobs: self.jobs.clone(),
             executions: self.executions.clone(),
+            in_flight: self.in_flight.clone(),
         }
     }
 }
@@ -78,6 +100,7 @@ impl<R: Runtime> JobExecutor<R> {
             artifact_service,
             jobs,
             executions,
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -95,11 +118,66 @@ impl<R: Runtime> JobExecutor<R> {
         )
     }
 
+    /// Try to reserve `job_id`'s in-flight slot, returning an [`InFlightGuard`]
+    /// that releases it on drop, or `None` when the job is already in flight.
+    ///
+    /// This is the single re-entrancy primitive shared by every trigger path.
+    /// The caller holds the guard for the lifetime of the dispatch (the
+    /// scheduler moves it into the detached run task; `run_now` holds it across
+    /// the awaited `execute`). `execute` itself does NOT claim — the caller
+    /// reserves the slot first so it can act under the reservation (e.g. the
+    /// scheduler advances `next_run_at` only after a successful claim).
+    pub async fn try_claim(&self, job_id: &str) -> Option<InFlightGuard> {
+        let claimed = self.in_flight.lock().await.insert(job_id.to_string());
+        if claimed {
+            Some(InFlightGuard::new(
+                self.in_flight.clone(),
+                job_id.to_string(),
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Manually run `job` now (`Trigger::Manual`), honoring the shared
+    /// re-entrancy gate.
+    ///
+    /// Claims the job's in-flight slot first: if an execution is already in
+    /// flight (scheduled OR manual), this returns a `CONFLICT` `AppError`
+    /// WITHOUT writing a second row — the at-most-one-concurrent-run guarantee.
+    /// Otherwise it dispatches via [`execute`], holding the claim across the
+    /// awaited run so a concurrent tick or run-now cannot also fire it. Disabled
+    /// jobs are runnable here on purpose: `enabled = false` only stops automatic
+    /// scheduling, never an explicit manual run.
+    pub async fn run_now(&self, job: &Job) -> Result<JobExecution, AppError> {
+        let _guard = self.try_claim(&job.id).await.ok_or_else(|| {
+            // A `CONFLICT` rather than a failed execution row: nothing ran, so
+            // we must NOT write a second row (VAL-HISTORY-028). The frontend
+            // also disables the button while a run is in flight; this is the
+            // server-side backstop against a racing double-click.
+            AppError::with_hint(
+                "CONFLICT",
+                &format!("Job '{}' already has an execution in flight", job.id),
+                "请等待当前运行结束后再试",
+            )
+        })?;
+        // The guard is held until this scope ends — i.e. until `execute`
+        // resolves — so the slot stays reserved for the whole run and is
+        // released on both the success and error paths (including a panic).
+        self.execute(job, Trigger::Manual).await
+    }
+
     /// Execute `job` and persist the outcome.
     ///
     /// Flow: insert a `running` row -> dispatch the target -> finalize the SAME
     /// row to its terminal state -> update the job's run statistics. Returns the
     /// finalized `JobExecution`.
+    ///
+    /// Re-entrancy is the CALLER's responsibility: callers that need the
+    /// at-most-one-concurrent-run guarantee must hold a slot from
+    /// [`try_claim`] (or call [`run_now`], which does) for the duration of this
+    /// call. `execute` deliberately does not claim so the caller can act under
+    /// the reservation before dispatching.
     ///
     /// A dispatch failure (artifact missing / not installed, process that fails
     /// to start, or an unsupported target in M1) is NOT propagated as `Err`: it
@@ -232,6 +310,13 @@ impl<R: Runtime> JobExecutor<R> {
             Err(e) => DispatchOutcome::failed(e.message),
         }
     }
+
+    /// Test-only view of the shared in-flight set size, so the scheduler and
+    /// run-now tests can assert a slot is reserved / released.
+    #[cfg(test)]
+    pub(crate) async fn in_flight_len(&self) -> usize {
+        self.in_flight.lock().await.len()
+    }
 }
 
 impl DispatchOutcome {
@@ -255,6 +340,46 @@ fn unsupported_target_message(kind: &str) -> String {
         "Job target '{}' is not supported in M1 (artifact only)",
         kind
     )
+}
+
+/// RAII release of an in-flight job slot.
+///
+/// Holds the shared in-flight set and the job id; on `Drop` (whether the run
+/// returns normally or unwinds from a panic) it removes the id, freeing the slot
+/// for a later dispatch. This is what makes re-entrancy protection survive a
+/// panicking / crashing target, and what releases a manual run's claim once
+/// `run_now` returns (success OR error).
+///
+/// Owned by the executor (the single in-flight set lives here); the scheduler
+/// and `run_now` obtain a guard via [`JobExecutor::try_claim`].
+pub struct InFlightGuard {
+    set: Arc<Mutex<HashSet<String>>>,
+    job_id: String,
+}
+
+impl InFlightGuard {
+    fn new(set: Arc<Mutex<HashSet<String>>>, job_id: String) -> Self {
+        Self { set, job_id }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        // `Drop` is sync but the set is an async `Mutex`; take it without
+        // blocking a runtime worker. The uncontended path (the common case —
+        // the set is held only for the O(1) insert/remove around each dispatch)
+        // is synchronous via `try_lock`; a contended drop hands the removal to a
+        // detached task so `Drop` never blocks.
+        let set = self.set.clone();
+        let job_id = self.job_id.clone();
+        if let Ok(mut guard) = set.try_lock() {
+            guard.remove(&job_id);
+            return;
+        }
+        tauri::async_runtime::spawn(async move {
+            set.lock().await.remove(&job_id);
+        });
+    }
 }
 
 fn current_timestamp() -> Timestamp {
@@ -860,5 +985,191 @@ mod tests {
         assert_eq!(after_fail.run_count, 1);
         assert_eq!(after_fail.failure_count, 1);
         assert_eq!(after_fail.last_status, Some(ExecutionStatus::Failed));
+    }
+
+    // ---- Manual run-now + shared in-flight re-entrancy (M2) ----
+
+    /// `try_claim` is the single re-entrancy gate: the first claim succeeds, a
+    /// second for the same id while the first guard is held is rejected, and
+    /// dropping the guard frees the slot for re-claiming.
+    #[tokio::test]
+    async fn try_claim_claims_once_then_releases() {
+        let env = setup().await;
+
+        let first = env.executor.try_claim("job_x").await;
+        assert!(first.is_some(), "first claim succeeds");
+        assert_eq!(env.executor.in_flight_len().await, 1);
+
+        let second = env.executor.try_claim("job_x").await;
+        assert!(
+            second.is_none(),
+            "second claim for the same id is rejected while the first is held"
+        );
+
+        // A different id is independently claimable.
+        let other = env.executor.try_claim("job_y").await;
+        assert!(
+            other.is_some(),
+            "a different job is independently claimable"
+        );
+        drop(other);
+
+        // Drop the first guard; the slot frees and is reusable.
+        drop(first);
+        for _ in 0..50 {
+            if env.executor.in_flight_len().await == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            env.executor.in_flight_len().await,
+            0,
+            "guard drop frees the slot"
+        );
+        assert!(
+            env.executor.try_claim("job_x").await.is_some(),
+            "slot is reusable after release"
+        );
+    }
+
+    // VAL-HISTORY-004 / VAL-HISTORY-013: a manual run produces exactly one
+    // execution row with trigger = manual.
+    #[tokio::test]
+    async fn run_now_records_a_manual_execution_row() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo manual-ran\nexit 0\n").await;
+        let job = make_job("job_manual", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        let exec = env.executor.run_now(&job).await.expect("manual run");
+
+        assert_eq!(exec.trigger, Trigger::Manual, "trigger is manual");
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        assert!(exec.stdout.as_deref().unwrap().contains("manual-ran"));
+
+        // Exactly one row, stamped manual on the wire ('manual').
+        let rows =
+            sqlx::query("SELECT trigger, status FROM job_executions WHERE job_id = 'job_manual'")
+                .fetch_all(env.db.pool())
+                .await
+                .unwrap();
+        assert_eq!(rows.len(), 1, "one manual trigger => exactly one row");
+        let trigger: String = rows[0].try_get("trigger").unwrap();
+        let status: String = rows[0].try_get("status").unwrap();
+        assert_eq!(trigger, "manual");
+        assert_eq!(status, "success");
+
+        // The slot is released after the run.
+        for _ in 0..50 {
+            if env.executor.in_flight_len().await == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(env.executor.in_flight_len().await, 0);
+    }
+
+    // VAL-HISTORY-027: a disabled job (enabled = 0) still runs manually and
+    // writes a manual row — disabling only stops automatic scheduling.
+    #[tokio::test]
+    async fn run_now_runs_disabled_job() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo disabled-but-ran\nexit 0\n").await;
+        let mut job = make_job("job_disabled", artifact_target(&artifact_id)).await;
+        job.enabled = false;
+        seed_job(&env, &job).await;
+
+        let exec = env
+            .executor
+            .run_now(&job)
+            .await
+            .expect("disabled job still runs manually");
+
+        assert_eq!(exec.status, ExecutionStatus::Success);
+        assert_eq!(exec.trigger, Trigger::Manual);
+
+        let rows = read_rows(&env, "job_disabled").await;
+        assert_eq!(rows.len(), 1, "disabled job's manual run writes one row");
+        assert_eq!(rows[0].status, "success");
+    }
+
+    // VAL-HISTORY-028: while an execution is in flight, a second run-now is
+    // rejected with a CONFLICT and writes NO second row (no concurrent running
+    // rows). We hold the slot by claiming it directly (the guard simulates an
+    // active run), then assert the second run-now bounces without persisting.
+    #[tokio::test]
+    async fn run_now_rejected_while_in_flight_writes_no_second_row() {
+        let env = setup().await;
+        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
+        let job = make_job("job_busy", artifact_target(&artifact_id)).await;
+        seed_job(&env, &job).await;
+
+        // Simulate an execution already in flight by holding the job's slot.
+        let _claim = env
+            .executor
+            .try_claim("job_busy")
+            .await
+            .expect("first claim succeeds");
+
+        let err = env
+            .executor
+            .run_now(&job)
+            .await
+            .expect_err("run-now must be rejected while a run is in flight");
+        assert_eq!(err.code, "CONFLICT");
+
+        // No row was written by the rejected run (no concurrent running row).
+        let rows = read_rows(&env, "job_busy").await;
+        assert_eq!(rows.len(), 0, "a rejected run-now writes no execution row");
+
+        // Releasing the held slot lets a subsequent run-now succeed (the gate is
+        // not permanently stuck).
+        drop(_claim);
+        for _ in 0..50 {
+            if env.executor.in_flight_len().await == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let exec = env
+            .executor
+            .run_now(&job)
+            .await
+            .expect("run-now succeeds once the slot is free");
+        assert_eq!(exec.status, ExecutionStatus::Success);
+    }
+
+    // The in-flight set is SHARED across every clone of an executor (it lives
+    // behind an `Arc`): a slot claimed on one handle is seen as occupied by a
+    // clone. This is what makes the scheduler (which clones the executor) and
+    // the run-now command (a separate State handle, also a clone) share ONE
+    // gate — the core of VAL-HISTORY-028.
+    #[tokio::test]
+    async fn in_flight_set_is_shared_across_clones() {
+        let env = setup().await;
+        let clone = env.executor.clone();
+
+        let claim = env.executor.try_claim("job_shared").await;
+        assert!(claim.is_some(), "claimed on the original handle");
+
+        // The clone sees the same job as already in flight.
+        assert!(
+            clone.try_claim("job_shared").await.is_none(),
+            "a clone shares the same in-flight set (claim is visible across handles)"
+        );
+        assert_eq!(clone.in_flight_len().await, 1, "one shared set, one entry");
+
+        drop(claim);
+        for _ in 0..50 {
+            if clone.in_flight_len().await == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            clone.try_claim("job_shared").await.is_some(),
+            "releasing on one handle frees the slot for the other"
+        );
     }
 }
