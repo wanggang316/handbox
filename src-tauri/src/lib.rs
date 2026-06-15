@@ -339,10 +339,14 @@ async fn initialize_services(
     let message_service = MessageService::new(
         database_service.clone(),
         provider_service_shared.clone(),
-        session_service_shared,
+        session_service_shared.clone(),
         mcp_service_shared,
         storage_service.clone(),
     );
+    // Shared with the JobExecutor's `prompt` target (a fresh chat per run, sent
+    // non-streaming). Cloning the service is cheap (its repos / registries are
+    // `Arc`-backed), so the executor and the managed instance share state.
+    let message_service_shared = Arc::new(message_service.clone());
 
     let search_service = SearchService::new(database_service.clone(), storage_service.clone());
 
@@ -387,7 +391,15 @@ async fn initialize_services(
     // running 行）与完成（终态）时各 emit 一次 `job_executed` 事件，前端据此实时
     // 刷新「打开的详情时间线」与「/jobs 列表卡片」。
     let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared)
-        .with_app_handle(app.clone());
+        .with_app_handle(app.clone())
+        // Inject the `prompt` target's collaborators (shared with the managed
+        // services): a fresh chat per run + a non-streaming send + provider
+        // pre-validation. Works headless (no Window needed).
+        .with_prompt_services(
+            session_service_shared,
+            message_service_shared,
+            provider_service_shared.clone(),
+        );
 
     // 初始化定时任务调度器（后台 tick loop，驱动到点任务自动执行）。
     // 复用执行器（clone 走 Arc 字段，不 clone 服务本体）。启动接线在
