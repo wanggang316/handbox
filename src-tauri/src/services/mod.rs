@@ -8,6 +8,7 @@ pub mod artifact;
 pub mod auth;
 pub mod catalog_sync;
 pub mod chat_engine;
+pub mod coding_agent_session;
 pub mod hand_ai_catalog;
 pub mod mcp;
 pub mod message;
