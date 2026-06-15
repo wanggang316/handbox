@@ -15,7 +15,7 @@
   import StatusLabel from "$lib/components/ui/StatusLabel.svelte";
   import { cronToHuman } from "$lib/utils/cronReadable";
   import { formatDateTime, formatDuration } from "$lib/utils";
-  import { listExecutions, runNow } from "$lib/api/job";
+  import { listExecutions, listenJobExecuted, runNow } from "$lib/api/job";
   import type { Job, JobExecution, ExecutionStatus, Trigger } from "$lib/types";
 
   interface Props {
@@ -100,6 +100,24 @@
   }
 
   /**
+   * 实时静默刷新：`job_executed` 事件抵达时重新拉取历史，但**不**翻转 `loading`
+   * ——否则列表会被 spinner 替换，丢失滚动位置与已展开行的 DOM。
+   *
+   * `list` 命令是事实来源：整体重新赋值后，keyed `#each (exec.id)` 按 id diff，
+   * 已存在的行 DOM 被复用（运行中行原地翻转为终态并补耗时，VAL-HISTORY-014），
+   * 顺序稳定不重复（019）；`expanded` 以 id 为键，故展开态保留（017）；滚动容器
+   * DOM 未重建，滚动位置保留（018）。错过的事件不致错乱——下次事件或重开
+   * modal 都会以 list 重新对账（030）。失败仅记日志，保留当前时间线。
+   */
+  async function refreshHistoryQuietly(jobId: string): Promise<void> {
+    try {
+      executions = await listExecutions(jobId);
+    } catch (e) {
+      console.error("Failed to refresh job executions on job_executed:", e);
+    }
+  }
+
+  /**
    * 手动「立即运行」：调用 `job_run_now`（trigger=manual），完成后重载历史，
    * 时间线顶部即出现新的手动行。运行进行中（triggering 或已有 running 行）按钮
    * 禁用，且 onclick 二次防御直接返回，杜绝并发触发。
@@ -128,6 +146,37 @@
       executions = [];
       loadError = null;
     }
+  });
+
+  // 打开期间订阅 `job_executed`：仅对当前 job 的事件静默刷新时间线（运行中行
+  // 原地翻转为终态、补耗时；展开/滚动保留）。关闭或切换 job 时取消订阅，组件
+  // 卸载时由 effect cleanup 兜底——避免泄漏监听器。modal 关闭期间不订阅，错过的
+  // 执行在重开时由 `loadHistory`（list 命令，事实来源）补齐终态（VAL-HISTORY-030）。
+  $effect(() => {
+    if (!open || !job?.id) return;
+    const jobId = job.id;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listenJobExecuted((payload) => {
+      if (payload.jobId === jobId) {
+        void refreshHistoryQuietly(jobId);
+      }
+    })
+      .then((fn) => {
+        if (cancelled) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch((e) => {
+        console.error("Failed to subscribe to job_executed in detail:", e);
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   });
 
   // 占位以避免 onMount 未使用 lint；当前无挂载副作用。

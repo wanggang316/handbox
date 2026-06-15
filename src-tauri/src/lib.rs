@@ -383,8 +383,11 @@ async fn initialize_services(
     let job_service = JobService::from_db(database_service.clone());
 
     // 初始化任务执行器（执行一个任务并落库；M1 仅分派 artifact 目标）。
-    // 供后续 scheduler/run_now 以 State 取用。
-    let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared);
+    // 供后续 scheduler/run_now 以 State 取用。注入 AppHandle，使执行开始（写入
+    // running 行）与完成（终态）时各 emit 一次 `job_executed` 事件，前端据此实时
+    // 刷新「打开的详情时间线」与「/jobs 列表卡片」。
+    let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared)
+        .with_app_handle(app.clone());
 
     // 初始化定时任务调度器（后台 tick loop，驱动到点任务自动执行）。
     // 复用执行器（clone 走 Arc 字段，不 clone 服务本体）。启动接线在

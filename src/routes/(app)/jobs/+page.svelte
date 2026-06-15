@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Plus, Clock, Search, AlertCircle } from "@lucide/svelte";
+  import { listenJobExecuted } from "$lib/api/job";
   import { jobStore } from "$lib/stores/jobStore.svelte";
   import JobCard from "$lib/components/jobs/JobCard.svelte";
   import Button from "$lib/components/ui/Button.svelte";
@@ -144,6 +145,28 @@
     jobStore.load().catch((e) => {
       console.error("Failed to load jobs:", e);
     });
+
+    // 订阅执行事件：某任务执行开始/完成时，原地刷新对应卡片的上次状态/运行次数
+    // （VAL-HISTORY-015/016）。`refresh` 经 `job_get`（事实来源）拉最新值并按 id
+    // upsert——已在列表中的任务原地替换，顺序稳定不重排（VAL-HISTORY-019）；
+    // 错过的事件不致错乱，因为下次事件或重开 modal 都会重新对账（030）。
+    let unlisten: (() => void) | undefined;
+    listenJobExecuted(({ jobId }) => {
+      jobStore.refresh(jobId).catch((e) => {
+        console.error("Failed to refresh job card on job_executed:", e);
+      });
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((e) => {
+        console.error("Failed to subscribe to job_executed:", e);
+      });
+
+    // 组件卸载时取消订阅，避免离开 /jobs 后泄漏监听器。
+    return () => {
+      unlisten?.();
+    };
   });
 </script>
 
