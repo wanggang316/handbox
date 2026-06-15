@@ -24,7 +24,7 @@
 ```
 
 ## 表单类
-- `Input`：文本输入框。Props: `label`, `placeholder`, `type`, `value`, `onInput`。
+- `Input`：文本输入框。Props: `label`, `placeholder`, `type`, `value`（`$bindable`）, `onInput`, `disabled`, `required`, `error`。`error` 非空时显示行内错误文案并联动 `aria-invalid` / `aria-describedby`；`required` 渲染 `*` 标记并设 `aria-required`。
 - `Textarea`：多行输入。Props: `value`, `placeholder`, `rows`, `disabled`, `readonly`, `maxlength`, `minlength`, `required`, `showCharCount`。
 - `Select`：下拉框。Props: `options`, `value` / `selectedValue`, `placeholder`, `autoWidth`, `disabled`, `size`, `onChange` / `onSelect`。
 - `Toggle`：开关。Props: `checked`, `onChange`, `onChangeBefore`, `id`, `disabled`。
@@ -43,7 +43,7 @@
 - `Tabs`：标签切换。Props: `value`, `items`, `onChange`。
 - `Menu`：菜单列表。Props: `items`, `activeId`, `onItemClick`, `containerClass`。
 - `MenuButton`：菜单项按钮。Props: `title`, `isActive`, `icon`, `iconPosition`, `iconSize`, `onclick`, `buttonClass`, `activeClass`, `iconClass`, `icon_slot`（snippet）。
-- `ResizableSidebar`：可拖拽侧栏。Props: `initialWidth`, `minWidth`, `maxWidth`, `storageKey`, `width`。
+- `ResizableSidebar`：可拖拽侧栏（runes）。Props: `initialWidth`, `minWidth`, `maxWidth`, `storageKey`, `width`（`$bindable`，未传时回退 `initialWidth`）, `containerClass`, `children`（snippet）。回调 prop（已取代旧的 `on:resize*` 事件转发，payload 为原始宽度数字、非 `e.detail`）：`onResizeStart()`, `onResizing(width)`, `onResizeEnd(width)`。
 
 示例：
 ```svelte
@@ -71,13 +71,13 @@
 
 ## 表格行组件
 - `TableGroup`：分组容器。Props: `title`, `collapsible`, `defaultCollapsed`, `showDivider`。
-- `TableBaseRow`：行基础结构。Props: `label`, `layout`, `py`, `rightContent`, `helpText`。
+- `TableBaseRow`：行基础结构。Props: `label`, `layout`, `py`, `rightContent`, `helpText`, `error`（可选，非空时在控件下方行内显示字段级错误）。
 - `SwitchRow`：开关行。Props: `label`, `checked`, `description`, `helpText`, `disabled`, `onChange`。
 - `SelectRow`：下拉行。Props: `label`, `options`, `selectedValue`, `description`, `helpText`, `disabled`, `onSelect`。
 - `NumberStepperRow`：数字步进行。Props: `label`, `value`, `min`, `max`, `step`, `defaultValue`。
 - `LabeledSliderRow`：标签滑杆行。Props: `label`, `value`, `min`, `max`, `step`, `leftLabel`, `rightLabel`, `scaleMarks`。
 - `TextareaRow`：多行输入行。Props: `label`, `value`, `rows`, `maxlength`, `showCharCount`, `description`。
-- `TextRow`：单行输入行。Props: `label`, `value`, `placeholder`, `readonly`, `isPassword`。
+- `TextRow`：单行输入行（runes）。Props: `label`, `layout`, `value`（`$bindable`）, `placeholder`, `readonly`, `isPassword`, `disabled`, `required`, `error`。`isPassword` 仅在 `layout="vertical"` 生效（带眼睛切换）；`layout="horizontal"` 下恒为明文、右对齐、无切换（API-Key 等字段依赖此行为，刻意冻结）。
 - `StatusLabelRow`：状态行。Props: `label`, `status`, `statusText`, `icon`, `iconSrc`, `clickable`, `onclick`。
 - `DefaultRow`：默认跳转行。Props: `label`, `value`, `clickable`, `onclick`。
 

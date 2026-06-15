@@ -62,6 +62,11 @@ HandBox 架构设计
 - **Svelte stores**: 会话、设置、供应商/模型列表、MCP 选择
 - **响应式状态**: 使用Svelte 5的 `$state` 和 `$derived` 语法
 
+#### UI 组件约定（自 ui-consistency-fixes 计划起）
+- **Runes 优先**：`src/lib/components/ui` 下的组件统一迁至 Svelte 5 runes（`$props` / `$state` / `$derived` / `$effect`），事件经回调 prop（`onclick` / `onResizing(w)` 等）而非 `on:` 事件转发；`createEventDispatcher` 已退场。双向值用 `value = $bindable(...)`。唯一冻结的 Svelte 4 例外是无引用者的死文件 `McpServerTextEditModal.svelte`。
+- **表单状态约定**：`Input` / `TextRow` / `TableBaseRow` 提供 `disabled` / `required` / `error`（`error` 非空时行内显示错误文案并联动 `aria-invalid` / `aria-describedby`，`required` 设 `aria-required`）。`aria-*` 仅在有错误时输出，避免空属性。
+- **键盘焦点环**：全局 `:focus-visible` 规则（`src/app.css`）用 `outline: 2px solid var(--primary)` + `outline-offset`（layout-neutral、不被 overflow 裁剪、仅键盘聚焦），覆盖 `button` / `input` / `[role=tab]` 等。已自带 `focus:ring-*` 的输入框（如 `ChatList` 重命名框）用 `focus:outline-none` 抵消全局 outline 以避免双环——勿移除其 `focus:outline-none`。
+
 #### 前端服务封装
 - **IPC客户端**: `@tauri-apps/api` 的 `invoke`/事件流封装
 - **API层**: 统一的API调用封装，位于 `src/lib/api/`
