@@ -100,14 +100,46 @@ fn overlay_jsonl_activity(session: &mut AgentSession, app_data_dir: &std::path::
     }
 }
 
-/// 重命名 Agent Session
+/// 重命名 Agent Session（M3：SQLite name + JSONL label 双写）。
+///
+/// SQLite `name` 是 fallback 名字源；但 `agent_session_list` / `agent_session_get`
+/// 的 overlay 在 JSONL 携带 session 标签时用它覆盖 `name`（JSONL 为活动权威源）。
+/// 因此仅写 SQLite 的旧 rename 会被该会话已有的 JSONL 旧标签（agent 自动取的标题）
+/// 盖掉，重命名视觉上不生效。这里在 SQLite 写成功之后，对该会话的 JSONL **追加**
+/// 一条 label（最新 label 胜），使 overlay 反映用户输入的新名。
+///
+/// side-effect 诚实：JSONL 写入失败降级为 warn 日志、不让整个 rename 失败——
+/// SQLite 仍是 fallback 名字源，与 overlay「JSONL 读失败保留 SQLite 值」的容错
+/// 姿态一致。返回**经 overlay** 的 session（与 list/get 一致），使前端直接拿到新名。
+///
+/// `app_handle` 是 Tauri 注入参数（前端透明），用于解析 app_data_dir 与该会话的
+/// JSONL 路径。
 #[tauri::command]
 pub async fn agent_session_rename(
     session_id: UUID,
     name: String,
+    app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<AgentSession, AppError> {
-    agent_session_service.rename_session(session_id, name).await
+    // SQLite 权威写入（fallback 名字源）先行。
+    let mut session = agent_session_service
+        .rename_session(session_id, name.clone())
+        .await?;
+
+    // 把新名同时写进 JSONL label，使 overlay 反映新名而非旧 label。best-effort：
+    // 失败不阻断 rename（SQLite 已写成功），只记 warn。
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
+    if let Err(e) = agent_jsonl_store::append_label(&app_data_dir, &cwd, &session.id, &name) {
+        tracing::warn!(
+            session_id = %session.id,
+            "failed to write JSONL label on rename, keeping SQLite name: {e}"
+        );
+    }
+
+    // 返回经 overlay 的 session（与 list/get 一致）：刚写的 label 让 name 即新名。
+    overlay_jsonl_activity(&mut session, &app_data_dir);
+    Ok(session)
 }
 
 /// 更新 Agent Session 单个字段（镜像 `agent_update_field`）
@@ -200,17 +232,41 @@ fn parse_session_parameter(
     Ok(parameter)
 }
 
-/// 删除 Agent Session
+/// 删除 Agent Session（M3：同时清理其 JSONL transcript 文件）。
 ///
-/// 删除前先中止该会话可能存在的活跃 run（`runtime.abort` 对无活跃 run 是 no-op），
-/// 这样删除后不会再有 `agent_stream_event { sessionId: <deleted> }` 抵达前端。
+/// 顺序：先中止该会话可能存在的活跃 run（`runtime.abort` 对无活跃 run 是 no-op），
+/// 这样删除后不会再有 `agent_stream_event { sessionId: <deleted> }` 抵达前端；
+/// 再 best-effort 删除其 JSONL 文件（M3 后 transcript 落在 JSONL，仅删 SQLite 行
+/// 会在磁盘留下孤儿 `<id>.jsonl`）；最后删 SQLite 行（**权威**，决定列表是否还
+/// 显示该行）。即便 JSONL 删除失败（warn），SQLite 删除成功即保证「行消失」。
+///
+/// `app_handle` 是 Tauri 注入参数（前端透明），用于解析 app_data_dir 与该会话的
+/// JSONL 路径；为此需先取一次 session 拿 `working_dir` → cwd。会话不存在时
+/// `get_session` 返回 NOT_FOUND（与旧行为一致：删一个不存在的会话报错）。
 #[tauri::command]
 pub async fn agent_session_delete(
     session_id: UUID,
+    app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
     runtime: State<'_, AgentRuntime>,
 ) -> Result<(), AppError> {
+    // 先取 session 拿 working_dir 以解析 JSONL cwd（也借此对不存在的会话报 NOT_FOUND）。
+    let session = agent_session_service
+        .get_session(session_id.clone())
+        .await?;
+
     runtime.abort(&session_id).await;
+
+    // best-effort 清理 JSONL 文件，不阻断权威的 SQLite 删除。
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
+    if let Err(e) = agent_jsonl_store::delete_session_file(&app_data_dir, &cwd, &session_id) {
+        tracing::warn!(
+            session_id = %session_id,
+            "failed to delete JSONL transcript file on delete, removing SQLite row anyway: {e}"
+        );
+    }
+
     agent_session_service.delete_session(session_id).await
 }
 

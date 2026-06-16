@@ -493,6 +493,63 @@ mod tests {
         assert_eq!(created.working_dir, Some(project.path));
     }
 
+    /// VAL-CASESS-006 — two sessions whose working directories canonicalize to
+    /// the SAME path are grouped under one project: project get-or-create keys
+    /// off the canonical path, so a second create for the same directory (here
+    /// reached via a symlink alias) returns the same `project_id`, and both
+    /// sessions therefore carry the same `project_id` the sidebar groups by.
+    /// This is the data-layer geology under the frontend `groupSessions`
+    /// grouping; the grouping itself depends only on the SQLite `project_id` and
+    /// is unaffected by JSONL persistence.
+    #[tokio::test]
+    async fn sessions_in_same_canonical_dir_share_one_project_id() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db.clone());
+
+        // One real directory, reachable two ways: directly and via a symlink.
+        let target = TempDir::new().unwrap();
+        let link_parent = TempDir::new().unwrap();
+        let link = link_parent.path().join("alias");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target.path(), &link).unwrap();
+        #[cfg(not(unix))]
+        return; // symlink semantics differ; covered on unix CI
+
+        // get-or-create by canonical path: the direct path and the symlink alias
+        // both resolve to one project row.
+        let p_direct = projects
+            .create_project(target.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        let p_alias = projects
+            .create_project(link.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        assert_eq!(
+            p_alias.id, p_direct.id,
+            "the canonical-path get-or-create must collapse both aliases to one project"
+        );
+
+        // A session created against each project id lands in the same group.
+        let mut req1 = base_request("Via Direct");
+        req1.project_id = Some(p_direct.id.clone());
+        let s1 = service.create_session(req1).await.unwrap();
+
+        let mut req2 = base_request("Via Alias");
+        req2.project_id = Some(p_alias.id.clone());
+        let s2 = service.create_session(req2).await.unwrap();
+
+        assert_eq!(
+            s1.project_id, s2.project_id,
+            "two sessions in the same canonical dir must share one project_id (one group)"
+        );
+        assert_eq!(s1.project_id, Some(p_direct.id));
+        // Exactly one project row backs the group — no per-alias duplication.
+        assert_eq!(count_rows(&db, "agent_projects").await, 1);
+    }
+
     #[tokio::test]
     async fn create_session_with_unknown_project_returns_not_found_and_no_row() {
         let (db, _guard) = create_test_database().await;

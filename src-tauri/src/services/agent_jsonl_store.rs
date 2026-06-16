@@ -185,6 +185,53 @@ pub fn load_transcript(
     Ok(Some(messages_to_rows(session_id, &messages)?))
 }
 
+/// Append a session label (display name) to a session's JSONL, making the new
+/// name the authoritative source the activity overlay reads back.
+///
+/// Why this exists: M3 makes the JSONL session label the authoritative display
+/// name whenever present ([`session_activity`]'s `name` → the list/get overlay's
+/// `session.name`). A rename that only writes the SQLite `name` would be visually
+/// overwritten by a stale JSONL label (the title the agent auto-assigned). So a
+/// rename must also append a fresh label here; the most-recent label wins on
+/// read-back ([`SessionManager::label`] scans newest-first).
+///
+/// The file is ensured first so renaming a session that has never been resumed
+/// (no `<id>.jsonl` yet) still takes effect — the header is seeded, then the
+/// label appended. Appending a `Label` entry does NOT add a `Message`, so this
+/// leaves `session_activity`'s `message_count` and `last_message_at` untouched
+/// (a rename must never manufacture "activity").
+pub fn append_label(
+    base_dir: &Path,
+    cwd: &Path,
+    session_id: &str,
+    label: &str,
+) -> Result<(), AppError> {
+    let path = ensure_session_file(base_dir, cwd, session_id)?;
+    let mut manager = SessionManager::open(&path)
+        .map_err(|e| AppError::internal_error(&format!("failed to open session jsonl: {e}")))?;
+    manager
+        .append_label(label)
+        .map_err(|e| AppError::internal_error(&format!("failed to append session label: {e}")))?;
+    Ok(())
+}
+
+/// Remove the JSONL file backing `session_id` under `base_dir`/`cwd`, if it
+/// exists. A session with no JSONL file (pre-M3 / never-resumed) is a clean
+/// no-op — the absence is the desired post-state, so it is not an error.
+///
+/// Used on delete to keep the on-disk transcript store in step with the SQLite
+/// row: without this, deleting a session would leave an orphan `<id>.jsonl`
+/// behind. The caller treats failure as best-effort (the authoritative SQLite
+/// row delete is what removes the session from the list).
+pub fn delete_session_file(base_dir: &Path, cwd: &Path, session_id: &str) -> Result<(), AppError> {
+    let path = session_path(base_dir, cwd, session_id);
+    if !path.exists() {
+        return Ok(());
+    }
+    std::fs::remove_file(&path)
+        .map_err(|e| AppError::internal_error(&format!("failed to delete session jsonl: {e}")))
+}
+
 /// Read activity metadata (message count / last activity / label) for a
 /// JSONL-backed session, or `None` when no JSONL file exists yet.
 pub fn session_activity(
@@ -507,5 +554,106 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(rows.len(), 2, "both turns' messages persisted in one file");
+    }
+
+    /// VAL-CASESS-004 (write leg): renaming a session appends a label that
+    /// becomes the authoritative display name `session_activity` reads back —
+    /// even when the session already carried an (older) agent-assigned label.
+    /// The newest label wins, so the overlay reflects exactly the user's input.
+    #[test]
+    fn append_label_makes_new_name_authoritative_over_an_older_label() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-rename";
+
+        // The agent auto-titled the session at some earlier point.
+        {
+            let mut mgr = open_resumed(base.path(), cwd.path(), id);
+            mgr.append_message(user_msg("hi")).unwrap();
+            mgr.append_label("Old Agent Title").unwrap();
+        }
+        assert_eq!(
+            session_activity(base.path(), cwd.path(), id)
+                .unwrap()
+                .unwrap()
+                .name
+                .as_deref(),
+            Some("Old Agent Title"),
+        );
+
+        // User renames → the new label must take over.
+        append_label(base.path(), cwd.path(), id, "User Chosen Name").expect("rename label ok");
+        assert_eq!(
+            session_activity(base.path(), cwd.path(), id)
+                .unwrap()
+                .unwrap()
+                .name
+                .as_deref(),
+            Some("User Chosen Name"),
+            "the most recent label must win on read-back",
+        );
+    }
+
+    /// VAL-CASESS-004 (empty-session leg) + the "rename never manufactures
+    /// activity" invariant (the geological base for VAL-CASESS-008): renaming a
+    /// session that has never been resumed (no file yet) ensures the file,
+    /// appends the label, and the name reflects the input — while
+    /// `last_message_at` stays `None` and `message_count` stays 0 (a label is
+    /// not a message).
+    #[test]
+    fn append_label_on_empty_session_sets_name_without_creating_activity() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-empty-rename";
+
+        // No file exists yet: append_label must seed it then label it.
+        append_label(base.path(), cwd.path(), id, "Named Before Any Message")
+            .expect("rename of an empty session ensures the file and labels it");
+
+        let activity = session_activity(base.path(), cwd.path(), id)
+            .unwrap()
+            .expect("ensure-on-rename created the file");
+        assert_eq!(
+            activity.name.as_deref(),
+            Some("Named Before Any Message"),
+            "rename takes effect even on a never-resumed session",
+        );
+        assert_eq!(
+            activity.last_message_at, None,
+            "a rename must not manufacture a last-activity timestamp",
+        );
+        assert_eq!(
+            activity.message_count, 0,
+            "a label is not a message — message_count must stay 0",
+        );
+    }
+
+    /// VAL-CASESS-005 (file-cleanup leg): deleting a session removes its JSONL
+    /// file so no orphan transcript is left on disk.
+    #[test]
+    fn delete_session_file_removes_existing_jsonl() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-delete";
+
+        let path = ensure_session_file(base.path(), cwd.path(), id).unwrap();
+        assert!(path.exists(), "precondition: the file was created");
+
+        delete_session_file(base.path(), cwd.path(), id).expect("delete ok");
+        assert!(
+            !path.exists(),
+            "deleting a session must remove its JSONL file (no orphan)",
+        );
+    }
+
+    /// VAL-CASESS-005 (no-op leg): deleting a session that has no JSONL file
+    /// (pre-M3 / never resumed) is a clean no-op, not an error — the absence is
+    /// already the desired post-state.
+    #[test]
+    fn delete_session_file_absent_is_noop() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        delete_session_file(base.path(), cwd.path(), "never-created")
+            .expect("deleting a session with no JSONL file must be a clean no-op");
     }
 }
