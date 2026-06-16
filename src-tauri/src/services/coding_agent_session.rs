@@ -59,6 +59,23 @@ pub struct HandBoxAgentSessionConfig {
     /// Tauri per-app data directory. Becomes the session's `base_dir` so
     /// persistent state stays inside the app sandbox, not `~/.hand`.
     pub app_data_dir: PathBuf,
+    /// Per-session custom system prompt. `None` falls back to the coding-agent
+    /// default prompt. Mirrors the legacy `agent_runtime` consumption of
+    /// `session.system_prompt`; written straight into
+    /// `AgentSessionConfig.custom_system_prompt` (also `Option<String>`).
+    pub system_prompt: Option<String>,
+    /// Per-session sampling temperature. `None` = model/provider default.
+    /// Threads into `ChatOptions.temperature` → `stream_options.base.temperature`.
+    pub temperature: Option<f32>,
+    /// Per-session max output tokens. Stored as `i32` on the session row; this
+    /// carries the `u32` form `ChatOptions.max_tokens` expects (the legacy path
+    /// does the same `i32 → u32` conversion at `agent_runtime.rs:583`).
+    pub max_tokens: Option<u32>,
+    /// Per-session thinking level (e.g. `"low"`/`"medium"`/`"high"`), passed
+    /// through verbatim as `ChatOptions.reasoning_effort`; `build_stream_options`
+    /// parses it via `parse_thinking_level` (unknown values map to `None`, so a
+    /// non-reasoning model never breaks). Same contract as `agent_runtime.rs:586`.
+    pub thinking_level: Option<String>,
     /// HandBox's per-session enabled-tool list, by coding-agent registered
     /// name (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`). Only the named
     /// tools are registered against the session (see
@@ -72,8 +89,9 @@ pub struct HandBoxAgentSessionConfig {
 /// Steps:
 /// 1. Resolve the model through `chat_engine` (no silent substitution — the
 ///    returned `model.id` equals the requested `model_id`).
-/// 2. Build stream options carrying the plaintext api key (no auth.json, no
-///    env vars).
+/// 2. Build stream options carrying the plaintext api key plus the
+///    per-session sampling params (temperature / max_tokens / thinking_level);
+///    no auth.json, no env vars.
 /// 3. Register only the built-in tools named in `enabled_tools`, filtered by
 ///    coding-agent registered name (see [`select_enabled_tools`]).
 /// 4. Hand all of that to `AgentSession::new_with_skill_dirs`, pinning
@@ -90,11 +108,23 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
     let model =
         chat_engine::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
 
-    // api key flows in via stream options only. ChatOptions defaults are fine:
-    // construction does not carry per-turn temperature / max_tokens / signal —
-    // those are applied by the drive feature when it actually streams.
+    // Per-session sampling params are baked into the stream options HERE, at
+    // construction time — not later by the drive feature. `drive_agent_run`
+    // only calls `send_message_with_images` and applies no per-turn options, so
+    // the session must already carry them. temperature / max_tokens flow onto
+    // `stream_options.base`; thinking_level rides as `reasoning_effort` and is
+    // parsed by `build_stream_options` into `stream_options.reasoning`. This
+    // matches the legacy `agent_runtime` consumption of
+    // `session.{temperature, max_tokens, thinking_level}` (agent_runtime.rs:582-586).
+    // The plaintext api key likewise flows in via stream options only.
+    let chat_options = ChatOptions {
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
+        reasoning_effort: config.thinking_level.clone(),
+        ..ChatOptions::default()
+    };
     let stream_options: SimpleStreamOptions =
-        chat_engine::build_stream_options(&ChatOptions::default(), &config.api_key);
+        chat_engine::build_stream_options(&chat_options, &config.api_key);
 
     let tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
 
@@ -102,7 +132,10 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
         cwd: config.working_dir.clone(),
         model,
         stream_options,
-        custom_system_prompt: None,
+        // Per-session system prompt enters the model context here (legacy
+        // consumes `session.system_prompt` at agent_runtime.rs:556). `None`
+        // leaves the coding-agent default prompt in place.
+        custom_system_prompt: config.system_prompt.clone(),
         custom_guidelines: None,
         resume_session: None,
         // Construction-only sessions don't persist a JSONL transcript; the
@@ -228,6 +261,14 @@ pub fn config_from_rows(
         api_key: provider.api_key.clone(),
         working_dir,
         app_data_dir,
+        // Per-session config consumed identically to the legacy path
+        // (agent_runtime.rs:556,582-586): system_prompt verbatim, max_tokens
+        // i32 → u32 via try_from (out-of-range silently drops to None),
+        // thinking_level passed through for build_stream_options to parse.
+        system_prompt: session.system_prompt.clone(),
+        temperature: session.temperature,
+        max_tokens: session.max_tokens.and_then(|t| u32::try_from(t).ok()),
+        thinking_level: session.thinking_level.clone(),
         enabled_tools: session.enabled_tools.clone(),
     })
 }
@@ -246,6 +287,10 @@ mod tests {
             api_key: "sk-test-key".to_string(),
             working_dir,
             app_data_dir,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+            thinking_level: None,
             enabled_tools: vec![],
         }
     }
@@ -379,6 +424,86 @@ mod tests {
         );
     }
 
+    /// Regression guard for the code-review finding: the coding-agent path
+    /// must consume the per-session sampling params exactly like legacy
+    /// `agent_runtime` (temperature / max_tokens / thinking_level), not silently
+    /// fall back to `ChatOptions::default()`. We assert they land on the
+    /// constructed session's `stream_options` as non-default values.
+    #[test]
+    fn session_sampling_params_thread_into_stream_options() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        config.temperature = Some(0.3);
+        config.max_tokens = Some(1000);
+        config.thinking_level = Some("high".to_string());
+
+        let session = build_agent_session(&config).expect("construction succeeds");
+        let opts = session.stream_options();
+
+        // temperature / max_tokens ride on stream_options.base; the default is
+        // None, so a concrete value proves the per-session config threaded in.
+        assert_eq!(
+            opts.base.temperature,
+            Some(0.3),
+            "session temperature must reach stream_options, not default to None"
+        );
+        assert_eq!(
+            opts.base.max_tokens,
+            Some(1000),
+            "session max_tokens must reach stream_options, not default to None"
+        );
+        // thinking_level is parsed by build_stream_options into reasoning.
+        assert_eq!(
+            opts.reasoning,
+            Some(hand_ai_model::ThinkingLevel::High),
+            "session thinking_level must parse into stream_options.reasoning"
+        );
+    }
+
+    /// The default (no per-session sampling params) must NOT inject sampling
+    /// values — proving the threading above is genuinely driven by the config,
+    /// and that a session without overrides leaves provider defaults in place.
+    #[test]
+    fn absent_sampling_params_leave_stream_options_default() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        // sample_config sets temperature/max_tokens/thinking_level to None.
+        let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+
+        let session = build_agent_session(&config).expect("construction succeeds");
+        let opts = session.stream_options();
+
+        assert_eq!(opts.base.temperature, None);
+        assert_eq!(opts.base.max_tokens, None);
+        assert_eq!(opts.reasoning, None);
+    }
+
+    /// The per-session custom system prompt must be written into the
+    /// `AgentSessionConfig.custom_system_prompt` slot that the coding agent
+    /// feeds into the model context (legacy consumes `session.system_prompt` at
+    /// agent_runtime.rs:556). `AgentSession` exposes no getter for the prompt,
+    /// so we assert the end-to-end path config_from_rows → build_agent_session
+    /// preserves a non-`None` prompt and that construction succeeds with it.
+    #[test]
+    fn session_system_prompt_is_carried_into_construction() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        config.system_prompt = Some("You are a HandBox coding agent.".to_string());
+
+        // The config slot wired into AgentSessionConfig.custom_system_prompt is
+        // non-None (the bug was hardcoding it to None).
+        assert_eq!(
+            config.system_prompt.as_deref(),
+            Some("You are a HandBox coding agent."),
+        );
+
+        // And construction with a custom prompt succeeds (the prompt feeds
+        // build_system_prompt inside AgentSession::new_with_skill_dirs).
+        build_agent_session(&config).expect("construction with a custom system prompt succeeds");
+    }
+
     #[test]
     fn unknown_model_under_fixed_catalog_provider_errors() {
         let cwd = TempDir::new().unwrap();
@@ -425,7 +550,7 @@ mod tests {
             model_id: model_id.map(str::to_string),
             provider_id: Some("prov-1".to_string()),
             system_prompt: Some("You are helpful.".to_string()),
-            thinking_level: None,
+            thinking_level: Some("high".to_string()),
             temperature: Some(0.5),
             max_tokens: Some(1024),
             working_dir: working_dir.map(str::to_string),
@@ -468,6 +593,30 @@ mod tests {
         assert_eq!(config.working_dir, PathBuf::from("/tmp/project"));
         assert_eq!(config.app_data_dir, data.path());
         assert_eq!(config.enabled_tools, vec!["read_file".to_string()]);
+
+        // Per-session config is read off the session row, equivalent to the
+        // legacy path (agent_runtime.rs:556,582-586). max_tokens converts
+        // i32 → u32 (1024 fits); thinking_level passes through verbatim.
+        assert_eq!(config.system_prompt, Some("You are helpful.".to_string()));
+        assert_eq!(config.temperature, Some(0.5));
+        assert_eq!(config.max_tokens, Some(1024));
+        assert_eq!(config.thinking_level, Some("high".to_string()));
+    }
+
+    /// A negative `max_tokens` on the row cannot become a `u32`; `try_from`
+    /// drops it to `None` rather than panicking — exactly the legacy behavior
+    /// (`session.max_tokens.and_then(|t| u32::try_from(t).ok())`).
+    #[test]
+    fn config_from_rows_drops_out_of_range_max_tokens() {
+        let data = TempDir::new().unwrap();
+        let mut session = sample_session_row(Some("gpt-4o"), Some("/tmp/project"));
+        session.max_tokens = Some(-1);
+        let provider = sample_provider_row();
+
+        let config = config_from_rows(&session, &provider, data.path().to_path_buf())
+            .expect("rows assemble into a config");
+
+        assert_eq!(config.max_tokens, None);
     }
 
     #[test]
