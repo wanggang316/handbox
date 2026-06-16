@@ -34,7 +34,7 @@ pub use agent_session::{AgentSessionParameter, AgentSessionService};
 pub use artifact::ArtifactService;
 pub use auth::GoogleOAuthService;
 pub use coding_agent_runtime::{
-    abort_run, drive_agent_run, steer_run, CodingRunSink, RunDriveHandles,
+    abort_run, drive_agent_run, images_from_attachments, steer_run, CodingRunSink, RunDriveHandles,
 };
 pub use mcp::McpService;
 pub use message::MessageService;

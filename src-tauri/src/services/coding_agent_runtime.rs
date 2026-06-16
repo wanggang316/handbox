@@ -16,10 +16,17 @@
 //!   the very type the HandBox frontend already consumes (same git+tag dedup as
 //!   `hand-agent`), so `serde_json::to_value(event)` produces the identical
 //!   shape the legacy sink produced.
-//! - `CompactionStart` / `CompactionEnd` / `SessionInfoChanged` are
-//!   out-of-band lifecycle signals the current frontend contract does not yet
-//!   model; they are logged rather than synthesized into the agent-event stream
-//!   (introducing new event shapes is out of this feature's scope).
+//! - `CompactionStart` / `CompactionEnd` / `SessionInfoChanged` are out-of-band
+//!   *session lifecycle* signals — they are NOT run events and must never enter
+//!   the `agent_stream_event` reducer (doing so would risk the closed-once
+//!   invariant and pollute the `AgentEvent` union). They are surfaced on a
+//!   SEPARATE Tauri channel (`agent_session_lifecycle`) as a tagged
+//!   `{ sessionId, kind, .. }` payload so the frontend can render a
+//!   distinguishable "整理上下文中" compaction indicator and reflect a renamed
+//!   session in the sidebar without reopen. `CompactionEnd`'s `summary` is
+//!   carried on the wire but is DELIBERATELY NOT rendered into the timeline:
+//!   the indicator is the only visible artifact, the conversation continues
+//!   in-line, and the turn still closes exactly once.
 //! - `AgentSessionEvent::Error(_)` is rare — the error main-path is
 //!   `send_message` returning `Err` — so it is logged; the run still closes
 //!   exactly once below.
@@ -46,12 +53,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use hand_ai_model::{Message, UserMessage};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use hand_ai_model::{ImageContent, Message, UserMessage};
 use hand_coding_agent::{AgentSession, AgentSessionEvent, CodingAgentError};
 use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 
 use crate::models::AppError;
+use crate::services::agent_runtime::AgentRunAttachment;
 
 /// What a single [`AgentSessionEvent`] maps to on HandBox's event surface.
 ///
@@ -64,9 +73,62 @@ pub enum MappedEvent {
     /// Forward the inner `AgentEvent` JSON on `agent_stream_event` as the
     /// `event` field of `{ sessionId, event }`.
     Forward(Value),
-    /// An out-of-band lifecycle signal (compaction / session-info / session
-    /// error) the current frontend contract does not model; log and drop.
+    /// A session-lifecycle signal (compaction / session-info) emitted on the
+    /// SEPARATE `agent_session_lifecycle` channel as `{ sessionId, .. }` with
+    /// the carried fields merged in (the `kind` tag is set by the lifecycle
+    /// classifier below). Never enters the `agent_stream_event` reducer.
+    Lifecycle(Value),
+    /// An out-of-band signal with no frontend surface (a session `Error`):
+    /// logged for diagnostics and dropped.
     Logged,
+}
+
+/// Per-image byte cap enforced at the IPC boundary (CLAUDE.md「输入验证必须完备」).
+/// The frontend already limits attachments to 10 MiB, but the backend never
+/// trusts the frontend: an oversize image is defensively dropped so unbounded
+/// bytes never get base64'd into the model context. Mirrors
+/// `agent_runtime::ATTACHMENT_BYTE_CAP` so both engines enforce the same bound.
+const ATTACHMENT_BYTE_CAP: usize = 10 * 1024 * 1024;
+/// Per-turn attachment count cap. Attachments beyond this count are dropped so a
+/// pathological request cannot blow up the assembled message. Mirrors
+/// `agent_runtime::ATTACHMENT_MAX_COUNT`.
+const ATTACHMENT_MAX_COUNT: usize = 16;
+
+/// Validate `attachments` at the IPC boundary and convert the surviving images
+/// into `ImageContent` blocks for `send_message_with_images`.
+///
+/// The new coding-agent driver path consumed only the prompt text and dropped
+/// attachments entirely; this restores the legacy `agent_runtime` boundary
+/// discipline (VAL-CARUN-018) so the same images that reached the model under
+/// the old engine reach it under the new one, with the identical caps:
+///
+/// - non-`image/*` mimes are dropped (the frontend filters to `image/*`; this
+///   is belt-and-suspenders);
+/// - an image larger than [`ATTACHMENT_BYTE_CAP`] is dropped (no unbounded
+///   bytes base64'd into context);
+/// - only the first [`ATTACHMENT_MAX_COUNT`] attachments are considered; the
+///   tail is dropped.
+///
+/// Every drop is SILENT — the turn still runs (an all-dropped batch yields an
+/// empty `Vec`, and the caller falls back to the plain-text path). Each
+/// surviving image's bytes are base64 STANDARD encoded into an `ImageContent`,
+/// matching `agent_runtime::build_user_message`.
+pub fn images_from_attachments(attachments: &[AgentRunAttachment]) -> Vec<ImageContent> {
+    let mut images: Vec<ImageContent> =
+        Vec::with_capacity(attachments.len().min(ATTACHMENT_MAX_COUNT));
+    for att in attachments.iter().take(ATTACHMENT_MAX_COUNT) {
+        if !att.mime_type.starts_with("image/") {
+            // Non-image attachment: defensively dropped (frontend pre-filters).
+            continue;
+        }
+        if att.data.len() > ATTACHMENT_BYTE_CAP {
+            // Oversize image: dropped so unbounded bytes never enter context.
+            continue;
+        }
+        let data_b64 = BASE64_STANDARD.encode(&att.data);
+        images.push(ImageContent::new(data_b64, att.mime_type.clone()));
+    }
+    images
 }
 
 /// Generic, non-leaking replacement for an assistant message's in-band
@@ -128,9 +190,13 @@ fn redact_inband_error_messages(event_json: &mut Value) {
 ///   an in-band `errorMessage` (raw upstream body on a `stopReason == "error"`
 ///   message) is scrubbed before forwarding (see
 ///   [`redact_inband_error_messages`]), never echoing provider text to the UI.
-/// - everything else → `Logged`: compaction / session-info / session-error are
-///   not part of the current `agent_stream_event` contract; emitting new shapes
-///   is out of scope, so they are observed for diagnostics and dropped.
+/// - `CompactionStart` / `CompactionEnd` / `SessionInfoChanged` →
+///   `Lifecycle(payload)`: a tagged `{ kind, .. }` value routed to the SEPARATE
+///   `agent_session_lifecycle` channel (compaction indicator + sidebar rename),
+///   never into the `agent_stream_event` reducer.
+/// - `Error(_)` → `Logged`: a bare session error string has no frontend surface
+///   (the run-level error main-path is `send_message` returning `Err`), so it
+///   is observed for diagnostics and dropped.
 fn map_session_event(event: &AgentSessionEvent) -> MappedEvent {
     match event {
         AgentSessionEvent::Agent(agent_event) => {
@@ -146,12 +212,22 @@ fn map_session_event(event: &AgentSessionEvent) -> MappedEvent {
             redact_inband_error_messages(&mut value);
             MappedEvent::Forward(value)
         }
-        // Out-of-band lifecycle signals not modeled by the current frontend
-        // contract. Logged, not synthesized into the agent-event stream.
-        AgentSessionEvent::CompactionStart
-        | AgentSessionEvent::CompactionEnd { .. }
-        | AgentSessionEvent::SessionInfoChanged { .. }
-        | AgentSessionEvent::Error(_) => MappedEvent::Logged,
+        // Session-lifecycle signals → the dedicated `agent_session_lifecycle`
+        // channel. `kind` is the discriminator the frontend narrows on. The
+        // `summary` on `CompactionEnd` is carried for completeness but is NOT
+        // rendered into the timeline (the indicator is the only visible
+        // artifact — stable summary destination, VAL-CARUN-019).
+        AgentSessionEvent::CompactionStart => {
+            MappedEvent::Lifecycle(json!({ "kind": "compaction_start" }))
+        }
+        AgentSessionEvent::CompactionEnd { summary } => {
+            MappedEvent::Lifecycle(json!({ "kind": "compaction_end", "summary": summary }))
+        }
+        AgentSessionEvent::SessionInfoChanged { name } => {
+            MappedEvent::Lifecycle(json!({ "kind": "session_info_changed", "name": name }))
+        }
+        // A bare session error has no frontend surface. Logged, dropped.
+        AgentSessionEvent::Error(_) => MappedEvent::Logged,
     }
 }
 
@@ -219,13 +295,15 @@ pub struct CodingRunSink {
     on_event: Arc<dyn Fn(Value) + Send + Sync>,
     on_closed: Arc<dyn Fn(Value) + Send + Sync>,
     on_error: Option<Arc<dyn Fn(Value) + Send + Sync>>,
+    on_lifecycle: Option<Arc<dyn Fn(Value) + Send + Sync>>,
 }
 
 impl CodingRunSink {
     /// Construct a sink. `on_event` receives `{ sessionId, event }`; `on_closed`
     /// receives the terminal `{ sessionId }`. The error envelope falls back to
     /// `on_event` until [`CodingRunSink::with_error`] injects a dedicated
-    /// channel.
+    /// channel; lifecycle signals are dropped until
+    /// [`CodingRunSink::with_lifecycle`] injects a channel.
     pub fn new(
         on_event: Arc<dyn Fn(Value) + Send + Sync>,
         on_closed: Arc<dyn Fn(Value) + Send + Sync>,
@@ -234,6 +312,7 @@ impl CodingRunSink {
             on_event,
             on_closed,
             on_error: None,
+            on_lifecycle: None,
         }
     }
 
@@ -242,6 +321,15 @@ impl CodingRunSink {
     /// `on_event`.
     pub fn with_error(mut self, on_error: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
         self.on_error = Some(on_error);
+        self
+    }
+
+    /// Inject a dedicated channel for session-lifecycle signals (compaction /
+    /// session-info), routing the tagged `{ sessionId, kind, .. }` payload to
+    /// `on_lifecycle`. When absent, lifecycle signals are dropped (they never
+    /// fall back to `on_event` — they must not enter the run-event reducer).
+    pub fn with_lifecycle(mut self, on_lifecycle: Arc<dyn Fn(Value) + Send + Sync>) -> Self {
+        self.on_lifecycle = Some(on_lifecycle);
         self
     }
 }
@@ -369,13 +457,22 @@ fn deregister_run(session_id: &str) {
 /// Lifecycle guarantees (the sacred closed-once invariant):
 /// - every `AgentSessionEvent::Agent(e)` is forwarded on `on_event` as
 ///   `{ sessionId, event }` in emission order;
+/// - session-lifecycle signals (compaction / session-info) are routed to the
+///   sink's lifecycle channel, NEVER onto `on_event`, so the closed-once
+///   invariant and the `AgentEvent` reducer are untouched;
 /// - on `send_message` → `Err`, a sanitized `{ sessionId, error }` envelope is
 ///   emitted (via `on_error`, or `on_event` as fallback) BEFORE closing;
 /// - `on_closed` fires EXACTLY ONCE with `{ sessionId }`, regardless of Ok/Err.
+///
+/// `images` carries the IPC-validated image attachments for this turn (see
+/// [`images_from_attachments`]); an empty `Vec` drives the plain-text path
+/// (`send_message_with_images(text, None)` ≡ `send_message(text)`), so a turn
+/// whose attachments were all dropped at the boundary still runs normally.
 pub fn drive_agent_run(
     mut session: AgentSession,
     session_id: String,
     input: String,
+    images: Vec<ImageContent>,
     sink: CodingRunSink,
 ) -> RunDriveHandles {
     // Capture abort / steer handles BEFORE the session moves into the task —
@@ -391,6 +488,7 @@ pub fn drive_agent_run(
     // invoked synchronously by the session for each emitted event during
     // `send_message`.
     let event_sink = Arc::clone(&sink.on_event);
+    let lifecycle_sink = sink.on_lifecycle.clone();
     let event_session = session_id.clone();
     session.subscribe(
         move |event: AgentSessionEvent| match map_session_event(&event) {
@@ -399,6 +497,16 @@ pub fn drive_agent_run(
                     "sessionId": event_session,
                     "event": event_json,
                 }));
+            }
+            // Lifecycle signals go to their dedicated channel, with `sessionId`
+            // merged into the tagged payload. Never onto `on_event`.
+            MappedEvent::Lifecycle(mut payload) => {
+                if let Some(emit_lifecycle) = &lifecycle_sink {
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert("sessionId".to_string(), json!(event_session));
+                    }
+                    emit_lifecycle(payload);
+                }
             }
             MappedEvent::Logged => {
                 tracing::debug!(
@@ -421,8 +529,14 @@ pub fn drive_agent_run(
 
     let task = tokio::spawn(async move {
         // Drive exactly one turn. Streaming events have already been forwarded
-        // through the subscribe callback by the time this resolves.
-        let result = session.send_message(&input).await;
+        // through the subscribe callback by the time this resolves. An empty
+        // `images` collapses to the plain-text path (`None` ≡ `send_message`).
+        let images_arg = if images.is_empty() {
+            None
+        } else {
+            Some(images)
+        };
+        let result = session.send_message_with_images(&input, images_arg).await;
 
         // Run-level Err: emit the sanitized envelope BEFORE closing (no
         // assistant content on this path). An in-band stop_reason=error turn is
@@ -545,6 +659,7 @@ mod tests {
         events: Arc<StdMutex<Vec<Value>>>,
         closed: Arc<StdMutex<Vec<Value>>>,
         errors: Arc<StdMutex<Vec<Value>>>,
+        lifecycle: Arc<StdMutex<Vec<Value>>>,
     }
 
     impl CapturingSink {
@@ -552,11 +667,13 @@ mod tests {
             let events = Arc::clone(&self.events);
             let closed = Arc::clone(&self.closed);
             let errors = Arc::clone(&self.errors);
+            let lifecycle = Arc::clone(&self.lifecycle);
             CodingRunSink::new(
                 Arc::new(move |v| events.lock().unwrap().push(v)),
                 Arc::new(move |v| closed.lock().unwrap().push(v)),
             )
             .with_error(Arc::new(move |v| errors.lock().unwrap().push(v)))
+            .with_lifecycle(Arc::new(move |v| lifecycle.lock().unwrap().push(v)))
         }
     }
 
@@ -582,6 +699,14 @@ mod tests {
                     "sessionId": session_id,
                     "event": event_json,
                 })),
+                MappedEvent::Lifecycle(mut payload) => {
+                    if let Some(emit_lifecycle) = &sink.on_lifecycle {
+                        if let Some(obj) = payload.as_object_mut() {
+                            obj.insert("sessionId".to_string(), json!(session_id));
+                        }
+                        emit_lifecycle(payload);
+                    }
+                }
                 MappedEvent::Logged => {}
             }
         }
@@ -700,9 +825,11 @@ mod tests {
         assert_eq!(aborted_usage.get("totalTokens").unwrap(), 0);
     }
 
-    /// Out-of-band lifecycle events (compaction / session-info / session-error)
-    /// are NOT forwarded onto `agent_stream_event`, but the run still closes
-    /// exactly once.
+    /// Out-of-band session-lifecycle events (compaction / session-info) and a
+    /// bare session error are NOT forwarded onto `agent_stream_event`; lifecycle
+    /// signals land on the dedicated lifecycle channel instead, and the run
+    /// still closes exactly once (closed-once is independent of lifecycle —
+    /// VAL-CARUN-019).
     #[test]
     fn out_of_band_events_are_not_forwarded_but_run_still_closes_once() {
         let session_id = "sess-oob";
@@ -723,13 +850,65 @@ mod tests {
 
         replay_through_sink(session_id, &run_sink, events, None);
 
-        // Only the single Agent event was forwarded.
+        // Only the single Agent event was forwarded onto the run-event channel.
         assert_eq!(
             sink.events.lock().unwrap().len(),
             1,
             "only Agent events reach agent_stream_event"
         );
+        // The three lifecycle signals (compaction start/end + session-info)
+        // landed on the dedicated lifecycle channel; the bare Error did not.
+        assert_eq!(
+            sink.lifecycle.lock().unwrap().len(),
+            3,
+            "compaction start/end + session-info reach the lifecycle channel"
+        );
         assert_eq!(sink.closed.lock().unwrap().len(), 1, "closed exactly once");
+    }
+
+    /// Lifecycle signals reach the dedicated lifecycle channel as a tagged
+    /// `{ sessionId, kind, .. }` payload — the wire shape the frontend narrows
+    /// on to render the compaction indicator and update the sidebar title
+    /// (VAL-CARUN-019 / VAL-CARUN-020). Crucially they NEVER land on the run
+    /// event channel.
+    #[test]
+    fn lifecycle_signals_carry_session_id_and_kind_on_lifecycle_channel() {
+        let session_id = "sess-lifecycle";
+        let sink = CapturingSink::default();
+        let run_sink = sink.clone().into_run_sink();
+
+        let events = vec![
+            AgentSessionEvent::CompactionStart,
+            AgentSessionEvent::CompactionEnd {
+                summary: "summary text".into(),
+            },
+            AgentSessionEvent::SessionInfoChanged {
+                name: Some("new title".into()),
+            },
+        ];
+
+        replay_through_sink(session_id, &run_sink, events, None);
+
+        // Nothing leaked onto the run-event channel.
+        assert_eq!(
+            sink.events.lock().unwrap().len(),
+            0,
+            "lifecycle signals never reach agent_stream_event"
+        );
+
+        let lifecycle = sink.lifecycle.lock().unwrap();
+        assert_eq!(lifecycle.len(), 3, "all three lifecycle signals captured");
+
+        // Every payload carries the session id + a discriminating kind.
+        for payload in lifecycle.iter() {
+            assert_eq!(payload.get("sessionId").unwrap(), session_id);
+            assert!(payload.get("kind").and_then(Value::as_str).is_some());
+        }
+        assert_eq!(lifecycle[0].get("kind").unwrap(), "compaction_start");
+        assert_eq!(lifecycle[1].get("kind").unwrap(), "compaction_end");
+        assert_eq!(lifecycle[1].get("summary").unwrap(), "summary text");
+        assert_eq!(lifecycle[2].get("kind").unwrap(), "session_info_changed");
+        assert_eq!(lifecycle[2].get("name").unwrap(), "new title");
     }
 
     /// A run-level `Err` emits a sanitized `{ sessionId, error }` envelope on
@@ -825,30 +1004,144 @@ mod tests {
     }
 
     /// `map_session_event` classification is exhaustive and stable: Agent
-    /// forwards, everything else logs.
+    /// forwards, compaction / session-info become tagged lifecycle signals, a
+    /// bare session error logs.
     #[test]
     fn map_session_event_classifies_each_variant() {
         assert!(matches!(
             map_session_event(&AgentSessionEvent::Agent(Box::new(AgentEvent::AgentStart))),
             MappedEvent::Forward(_)
         ));
-        assert_eq!(
-            map_session_event(&AgentSessionEvent::CompactionStart),
-            MappedEvent::Logged
-        );
-        assert_eq!(
-            map_session_event(&AgentSessionEvent::CompactionEnd {
-                summary: String::new()
-            }),
-            MappedEvent::Logged
-        );
-        assert_eq!(
-            map_session_event(&AgentSessionEvent::SessionInfoChanged { name: None }),
-            MappedEvent::Logged
-        );
+
+        // CompactionStart → lifecycle { kind: "compaction_start" }.
+        let MappedEvent::Lifecycle(start) = map_session_event(&AgentSessionEvent::CompactionStart)
+        else {
+            panic!("CompactionStart must map to a lifecycle signal");
+        };
+        assert_eq!(start.get("kind").unwrap(), "compaction_start");
+
+        // CompactionEnd → lifecycle { kind: "compaction_end", summary }. The
+        // summary rides the wire but the frontend does not render it (it only
+        // toggles the indicator off) — stable summary destination.
+        let MappedEvent::Lifecycle(end) = map_session_event(&AgentSessionEvent::CompactionEnd {
+            summary: "compacted 12 messages".into(),
+        }) else {
+            panic!("CompactionEnd must map to a lifecycle signal");
+        };
+        assert_eq!(end.get("kind").unwrap(), "compaction_end");
+        assert_eq!(end.get("summary").unwrap(), "compacted 12 messages");
+
+        // SessionInfoChanged → lifecycle { kind: "session_info_changed", name }.
+        let MappedEvent::Lifecycle(info) =
+            map_session_event(&AgentSessionEvent::SessionInfoChanged {
+                name: Some("renamed session".into()),
+            })
+        else {
+            panic!("SessionInfoChanged must map to a lifecycle signal");
+        };
+        assert_eq!(info.get("kind").unwrap(), "session_info_changed");
+        assert_eq!(info.get("name").unwrap(), "renamed session");
+
+        // A bare session error has no frontend surface → Logged.
         assert_eq!(
             map_session_event(&AgentSessionEvent::Error("x".into())),
             MappedEvent::Logged
+        );
+    }
+
+    // --- attachment IPC-boundary validation (VAL-CARUN-018) ---
+    //
+    // The new coding-agent driver path now runs the SAME cap/count/non-image
+    // discipline the legacy `agent_runtime` enforced, so an oversize / overflow
+    // / non-image attachment is silently dropped and never reaches the model
+    // context. These tests pin `images_from_attachments` directly (no session,
+    // no network).
+
+    /// An `image/*` attachment in [`AgentRunAttachment`] shape.
+    fn image_attachment(name: &str, mime: &str, data: &[u8]) -> AgentRunAttachment {
+        AgentRunAttachment {
+            name: name.to_string(),
+            mime_type: mime.to_string(),
+            data: data.to_vec(),
+        }
+    }
+
+    /// A normal-size image survives validation and is base64 STANDARD encoded
+    /// into an `ImageContent` carrying its mime — the happy path the model sees.
+    #[test]
+    fn normal_image_survives_and_is_base64_encoded() {
+        let raw = b"\x89PNG\r\n\x1a\n fake png bytes";
+        let images = images_from_attachments(&[image_attachment("shot.png", "image/png", raw)]);
+        assert_eq!(images.len(), 1, "a normal image survives");
+        assert_eq!(images[0].mime_type, "image/png");
+        assert_eq!(images[0].data, BASE64_STANDARD.encode(raw));
+    }
+
+    /// A non-image attachment is silently dropped — never base64'd into context.
+    #[test]
+    fn non_image_attachment_is_dropped() {
+        let images =
+            images_from_attachments(&[image_attachment("notes.txt", "text/plain", b"hello")]);
+        assert!(images.is_empty(), "non-image attachments are dropped");
+    }
+
+    /// A mix of image + non-image keeps ONLY the image blocks (VAL-CARUN-018).
+    #[test]
+    fn mixed_attachments_keep_only_images() {
+        let images = images_from_attachments(&[
+            image_attachment("a.png", "image/png", b"img-a"),
+            image_attachment("b.txt", "text/plain", b"text-b"),
+            image_attachment("c.jpg", "image/jpeg", b"img-c"),
+        ]);
+        assert_eq!(images.len(), 2, "only the two images survive");
+        assert_eq!(images[0].mime_type, "image/png");
+        assert_eq!(images[1].mime_type, "image/jpeg");
+    }
+
+    /// An oversize image (> `ATTACHMENT_BYTE_CAP`) is dropped while a normal
+    /// image in the same batch survives — unbounded bytes never enter context.
+    #[test]
+    fn oversize_image_is_dropped_normal_kept() {
+        let small = vec![0u8; 32];
+        let oversize = vec![0u8; ATTACHMENT_BYTE_CAP + 1];
+        let images = images_from_attachments(&[
+            image_attachment("small.png", "image/png", &small),
+            image_attachment("huge.png", "image/png", &oversize),
+        ]);
+        assert_eq!(images.len(), 1, "only the in-cap image survives");
+        assert_eq!(images[0].data, BASE64_STANDARD.encode(&small));
+    }
+
+    /// Attachment count is bounded to `ATTACHMENT_MAX_COUNT`; the tail beyond
+    /// the cap is dropped (VAL-CARUN-018 over-count).
+    #[test]
+    fn overflow_attachment_count_is_truncated() {
+        let attachments: Vec<AgentRunAttachment> = (0..(ATTACHMENT_MAX_COUNT + 5))
+            .map(|i| image_attachment(&format!("img{i}.png"), "image/png", b"x"))
+            .collect();
+        let images = images_from_attachments(&attachments);
+        assert_eq!(
+            images.len(),
+            ATTACHMENT_MAX_COUNT,
+            "attachment count is bounded to ATTACHMENT_MAX_COUNT"
+        );
+    }
+
+    /// An empty batch (or one where every attachment was dropped) yields an
+    /// empty `Vec`, so the driver falls back to the plain-text path and the
+    /// turn still runs normally (VAL-CARUN-018: dropped, but the run still goes).
+    #[test]
+    fn all_dropped_attachments_yield_empty_so_turn_still_runs() {
+        let images = images_from_attachments(&[]);
+        assert!(images.is_empty(), "no attachments → empty image set");
+
+        let all_invalid = images_from_attachments(&[
+            image_attachment("a.txt", "text/plain", b"nope"),
+            image_attachment("huge.png", "image/png", &vec![0u8; ATTACHMENT_BYTE_CAP + 1]),
+        ]);
+        assert!(
+            all_invalid.is_empty(),
+            "an all-invalid batch collapses to the plain-text path"
         );
     }
 

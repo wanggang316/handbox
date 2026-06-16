@@ -17,6 +17,7 @@ import type {
   AgentStreamEventPayload,
   AgentStreamErrorPayload,
   AgentStreamClosedPayload,
+  AgentSessionLifecyclePayload,
 } from "../types";
 
 /**
@@ -161,15 +162,22 @@ export interface AgentStreamEventHandlers {
   onEvent?: (payload: AgentStreamEventPayload) => void;
   onError?: (payload: AgentStreamErrorPayload) => void;
   onClosed?: (payload: AgentStreamClosedPayload) => void;
+  /**
+   * 会话生命周期信号（compaction / session-info）。与 run 三通道并列、独立——
+   * 不进 run reducer，故不影响 closed-once。compaction 用于「整理上下文中」指示，
+   * session-info 用于侧栏标题即时更新。
+   */
+  onLifecycle?: (payload: AgentSessionLifecyclePayload) => void;
 }
 
 /**
  * 监听 Agent 流式事件。
  *
- * 订阅三个 Tauri 事件通道并分发到对应处理器；返回一个解除全部三个监听的函数。
- *  - `agent_stream_event`  -> `handlers.onEvent`
- *  - `agent_stream_error`  -> `handlers.onError`
- *  - `agent_stream_closed` -> `handlers.onClosed`
+ * 订阅四个 Tauri 事件通道并分发到对应处理器；返回一个解除全部监听的函数。
+ *  - `agent_stream_event`      -> `handlers.onEvent`
+ *  - `agent_stream_error`      -> `handlers.onError`
+ *  - `agent_stream_closed`     -> `handlers.onClosed`
+ *  - `agent_session_lifecycle` -> `handlers.onLifecycle`
  */
 export async function listenToAgentStreamEvents(
   handlers: AgentStreamEventHandlers,
@@ -183,6 +191,9 @@ export async function listenToAgentStreamEvents(
     }),
     listen<AgentStreamClosedPayload>("agent_stream_closed", (event) => {
       handlers.onClosed?.(event.payload);
+    }),
+    listen<AgentSessionLifecyclePayload>("agent_session_lifecycle", (event) => {
+      handlers.onLifecycle?.(event.payload);
     }),
   ];
 

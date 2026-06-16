@@ -25,8 +25,8 @@ use tauri::{Emitter, Manager, State, Window};
 use crate::models::AppError;
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::{
-    abort_run, drive_agent_run, steer_run, AgentRunRequest, AgentSessionService, CodingRunSink,
-    ProviderService,
+    abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest,
+    AgentSessionService, CodingRunSink, ProviderService,
 };
 use crate::storage::types::UUID;
 use hand_ai_model::Message;
@@ -38,6 +38,11 @@ const CLOSED_NAME: &str = "agent_stream_closed";
 /// 前端事件通道名：run-level 错误 envelope，payload 为
 /// `{ sessionId, error: { code, message, hint } }`（在 closed **之前**发出）。
 const ERROR_NAME: &str = "agent_stream_error";
+/// 前端事件通道名：会话生命周期信号（compaction / session-info），payload 为
+/// `{ sessionId, kind, .. }`。与三条 run 通道并列、独立 —— 这些不是 run 事件，
+/// 不进 `agent_stream_event` reducer，故不影响 closed-once 不变量。前端据 `kind`
+/// 渲染「整理上下文中」指示并即时更新侧栏会话标题。
+const LIFECYCLE_NAME: &str = "agent_session_lifecycle";
 
 /// 进程级 one-run-per-session 注册表（coding-agent 驱动路径）。
 ///
@@ -165,6 +170,7 @@ async fn assemble_and_drive(
     let event_window = window.clone();
     let error_window = window.clone();
     let closed_window = window.clone();
+    let lifecycle_window = window.clone();
 
     let sink = CodingRunSink::new(
         Arc::new(move |payload| {
@@ -184,9 +190,30 @@ async fn assemble_and_drive(
         if let Err(e) = error_window.emit(ERROR_NAME, payload) {
             tracing::warn!("[agent_run_stream] failed to emit {}: {}", ERROR_NAME, e);
         }
+    }))
+    // 会话生命周期信号（compaction / session-info）走独立通道
+    // `agent_session_lifecycle`，与 run 三通道并列、不进 run reducer。
+    .with_lifecycle(Arc::new(move |payload| {
+        if let Err(e) = lifecycle_window.emit(LIFECYCLE_NAME, payload) {
+            tracing::warn!(
+                "[agent_run_stream] failed to emit {}: {}",
+                LIFECYCLE_NAME,
+                e
+            );
+        }
     }));
 
-    Ok(drive_agent_run(session, session_id, request.input, sink))
+    // 在 IPC 边界校验图片附件（超大 / 超量 / 非图片静默丢弃），把存活图片
+    // 转成 ImageContent 块；空集合走纯文本路径（本轮仍正常起）。
+    let images = images_from_attachments(&request.attachments);
+
+    Ok(drive_agent_run(
+        session,
+        session_id,
+        request.input,
+        images,
+        sink,
+    ))
 }
 
 /// 中止某个 Agent 会话的活跃 run（若有）。

@@ -274,6 +274,20 @@
       </div>
     {/if}
 
+    <!-- 自动压缩指示（VAL-CARUN-019）：长会话触发上下文整理时展示可分辨的
+         「整理上下文中」指示。压缩发生在一轮内、不额外发终结信号，故与流式视图
+         并存；compaction_end 抵达即隐藏，对话续行。summary 有意不渲染（去向稳定）。 -->
+    {#if runState.isCompacting}
+      <div
+        class="flex items-center gap-2 px-3 py-2 text-xs text-base-content/60"
+      >
+        <div
+          class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+        ></div>
+        <span>整理上下文中…</span>
+      </div>
+    {/if}
+
     <!-- 错误态：run-level 错误可见，而非静默停止。 -->
     {#if runState.error}
       <div

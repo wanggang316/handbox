@@ -359,3 +359,20 @@ export interface AgentStreamErrorPayload {
 export interface AgentStreamClosedPayload {
   sessionId: UUID;
 }
+
+/**
+ * `agent_session_lifecycle` 的 payload：会话生命周期信号，与三条 run 通道并列、
+ * 独立——这些不是 run 事件，不进 `agent_stream_event` reducer，故不影响 closed-once。
+ * 后端 `map_session_event` 把 coding-agent 的 `AgentSessionEvent::CompactionStart`/
+ * `CompactionEnd`/`SessionInfoChanged` 映射到此判别联合（`kind` 判别）。
+ *
+ *  - `compaction_start`：自动压缩开始；前端据此展示「整理上下文中」指示。
+ *  - `compaction_end`：压缩结束；`summary` 为上下文摘要，**有意不渲染进时间线**
+ *    （仅用于关闭指示，去向稳定——VAL-CARUN-019），对话续行。
+ *  - `session_info_changed`：会话元数据（当前仅 name/label）变更；前端据此即时
+ *    更新侧栏该会话标题，无需重开（VAL-CARUN-020）。`name` 可为 null（清空标题）。
+ */
+export type AgentSessionLifecyclePayload =
+  | { sessionId: UUID; kind: "compaction_start" }
+  | { sessionId: UUID; kind: "compaction_end"; summary: string }
+  | { sessionId: UUID; kind: "session_info_changed"; name: string | null };

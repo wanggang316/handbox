@@ -26,6 +26,7 @@ import type {
   AgentStreamEventPayload,
   AgentStreamErrorPayload,
   AgentStreamClosedPayload,
+  AgentSessionLifecyclePayload,
   ToolResultContent,
 } from "$lib/types/agentSession";
 import {
@@ -72,6 +73,13 @@ export interface AgentRunState {
   isRunning: boolean;
   error: string | null;
   toolCalls: Record<string, ToolCallView>;
+  /**
+   * 自动压缩进行中（长会话触发上下文整理）。`compaction_start` 置 true、
+   * `compaction_end` 置 false；timeline 据此展示可分辨的「整理上下文中」指示。
+   * 压缩发生在一轮内、不额外发 closed，故本标志独立于 `isRunning`：压缩结束后
+   * 本轮对话续行、仍恰好一次终结（VAL-CARUN-019）。
+   */
+  isCompacting: boolean;
 }
 
 function createEmptyRunState(): AgentRunState {
@@ -82,6 +90,7 @@ function createEmptyRunState(): AgentRunState {
     isRunning: false,
     error: null,
     toolCalls: {},
+    isCompacting: false,
   };
 }
 
@@ -111,6 +120,13 @@ class AgentRunStore {
   // session 状态（保持单向：agentSession 不 import agentRun）。
   private onRunClosed: ((sessionId: string) => void) | null = null;
 
+  // 会话名变更回调（VAL-CARUN-020）：`session_info_changed` 生命周期信号抵达时
+  // 触发。由侧栏状态层注册，用于即时更新该会话的标题，而不让本 store 反向依赖
+  // session 状态（与 `onRunClosed` 同一单向接线约定）。
+  private onSessionInfoChanged:
+    | ((sessionId: string, name: string | null) => void)
+    | null = null;
+
   constructor() {
     // 单例构造即建立监听器：navigation-resilient，跨路由与模式切换持续 reduce。
     void this.initListener();
@@ -128,6 +144,7 @@ class AgentRunStore {
         onEvent: (payload) => this.handleStreamEvent(payload),
         onError: (payload) => this.handleStreamError(payload),
         onClosed: (payload) => this.handleStreamClosed(payload),
+        onLifecycle: (payload) => this.handleLifecycle(payload),
       });
     } catch (error) {
       console.error("Failed to init agent stream listener:", error);
@@ -206,7 +223,12 @@ class AgentRunStore {
 
       case "tool_execution_start":
         // 工具开始执行：创建/追踪一条 tool-call 条目（args 已知、result 待定）。
-        this.startToolCall(sessionId, event.toolCallId, event.toolName, event.args);
+        this.startToolCall(
+          sessionId,
+          event.toolCallId,
+          event.toolName,
+          event.args,
+        );
         break;
 
       case "tool_execution_update":
@@ -431,6 +453,51 @@ class AgentRunStore {
     }
   }
 
+  /**
+   * 分发 `agent_session_lifecycle`：会话生命周期信号（compaction / session-info）。
+   *
+   *  - `compaction_start` / `compaction_end`：翻转该会话的 `isCompacting` 标志，
+   *    timeline 据此展示 / 隐藏「整理上下文中」指示。压缩发生在一轮内、不额外发
+   *    closed，故此处不触碰 `isRunning`、不发终结信号（closed-once 不受影响——
+   *    VAL-CARUN-019）。`summary` **有意不消费**：不渲染进时间线、不入 transcript，
+   *    去向稳定。
+   *  - `session_info_changed`：通知已注册的会话名变更回调即时更新侧栏标题
+   *    （VAL-CARUN-020），不让本 store 反向依赖 session 状态（单向接线）。
+   *
+   * 已删会话的迟到信号直接丢弃，不重建条目（与 run 事件同样的 tombstone 守卫）。
+   * compaction 信号经 `ensureState`；session-info 不创建运行状态（它只驱动侧栏）。
+   */
+  private handleLifecycle(payload: AgentSessionLifecyclePayload): void {
+    if (this.deletedSessions.has(payload.sessionId)) {
+      return;
+    }
+    switch (payload.kind) {
+      case "compaction_start": {
+        const state = this.ensureState(payload.sessionId);
+        state.isCompacting = true;
+        break;
+      }
+      case "compaction_end": {
+        const state = this.ensureState(payload.sessionId);
+        state.isCompacting = false;
+        // summary 有意不消费——只关闭指示，对话续行（去向稳定）。
+        break;
+      }
+      case "session_info_changed": {
+        if (this.onSessionInfoChanged) {
+          try {
+            this.onSessionInfoChanged(payload.sessionId, payload.name);
+          } catch (error) {
+            console.error("Agent session-info callback failed:", error);
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
   // ============================================
   // Public API
   // ============================================
@@ -511,6 +578,17 @@ class AgentRunStore {
    */
   setOnRunClosed(callback: (sessionId: string) => void): void {
     this.onRunClosed = callback;
+  }
+
+  /**
+   * 注册会话名变更回调（VAL-CARUN-020）。每次 `session_info_changed` 生命周期信号
+   * 抵达后以该会话 id 与新名（可为 null）调用一次，供侧栏状态层即时更新该会话标题。
+   * 单例语义：仅保留最后一次注册。
+   */
+  setOnSessionInfoChanged(
+    callback: (sessionId: string, name: string | null) => void,
+  ): void {
+    this.onSessionInfoChanged = callback;
   }
 
   /**
@@ -622,4 +700,10 @@ export const agentRunStore = new AgentRunStore();
 // 依赖方向单向（agentRun -> agentSession），agentSession 不反向 import 本模块。
 agentRunStore.setOnRunClosed((sessionId) => {
   void agentSessionActions.refreshAfterRun(sessionId);
+});
+
+// 一次性 wiring：会话名经 `session_info_changed` 生命周期信号变更时，即时更新
+// 侧栏该会话标题（VAL-CARUN-020）。纯本地状态更新，不发网络请求；同样单向接线。
+agentRunStore.setOnSessionInfoChanged((sessionId, name) => {
+  agentSessionActions.applySessionName(sessionId, name);
 });
