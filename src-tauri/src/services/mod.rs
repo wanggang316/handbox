@@ -31,7 +31,10 @@ pub mod word;
 // 重新导出服务
 pub use crate::storage::Database;
 pub use agent::{AgentParameter, AgentService};
-pub use agent_migration::{migrate_sqlite_sessions_to_jsonl, MigrationReport};
+pub use agent_migration::{
+    migrate_and_drop_legacy_if_present, migrate_sqlite_sessions_to_jsonl, MigrateAndDropReport,
+    MigrationReport,
+};
 pub use agent_project::AgentProjectService;
 pub use agent_runtime::{AgentRunRequest, AgentRuntime, RunSink};
 pub use agent_session::{AgentSessionParameter, AgentSessionService};

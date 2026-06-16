@@ -10,10 +10,12 @@
 // 避免「空值放行」被误复用。
 
 use crate::models::AppError;
+use crate::services::agent_jsonl_store::{delete_session_file, session_cwd};
 use crate::services::{AgentRuntime, Database};
 use crate::storage::types::{AgentProject, CreateAgentProjectRequest, UUID};
 use crate::storage::AgentProjectRepository;
 use sqlx::Row;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Agent Project 服务
@@ -90,18 +92,23 @@ impl AgentProjectService {
         self.get_project(project_id).await
     }
 
-    /// 删除 Agent Project（先 abort 后级联）。
+    /// 删除 Agent Project（先 abort，再删每个会话的 JSONL 文件，最后 SQLite 级联）。
     ///
-    /// 先列出该项目全部 session id，逐个调用 `runtime.abort`（对无活跃 run
-    /// 的 session 是干净的 no-op，对齐 `agent_session_delete` 先 abort 再删
-    /// 的写法），再调仓储层在单事务内级联删除 messages / sessions / project。
-    /// 项目不存在时透传 `NOT_FOUND`。
+    /// 先列出该项目全部会话（id + working_dir），逐个调用 `runtime.abort`（对无
+    /// 活跃 run 的 session 是干净的 no-op，对齐 `agent_session_delete` 先 abort
+    /// 再删的写法），再 best-effort 删除每个会话的 `<id>.jsonl`（透传
+    /// `app_data_dir` 以解析 JSONL 的 cwd），最后调仓储层在单事务内级联删除
+    /// messages / sessions / project（VAL-CASESS-021）。项目不存在时透传 `NOT_FOUND`。
+    ///
+    /// `app_data_dir` 既是 JSONL base 也是无 working_dir 会话的 cwd 回退，必须与
+    /// 写入侧（`config_from_rows` / `session_cwd`）一致，否则会删错目录。
     pub async fn delete_project(
         &self,
         project_id: UUID,
         runtime: &AgentRuntime,
+        app_data_dir: &Path,
     ) -> Result<(), AppError> {
-        self.delete_project_with_abort(project_id, |session_id| async move {
+        self.delete_project_with_abort(project_id, app_data_dir, |session_id| async move {
             runtime.abort(&session_id).await;
         })
         .await
@@ -111,36 +118,62 @@ impl AgentProjectService {
     ///
     /// 拆出这一层是为了在单测中无需真实启动 run（AgentRuntime 的 run 注册表
     /// 对外不可见、测试 seed 设施私有于 agent_runtime 模块），即可断言
-    /// 「每个 session 先被 abort、且 abort 发生在级联删除之前」。
+    /// 「每个 session 先被 abort、其 JSONL 文件被删、且这些都发生在级联删除之前」。
     async fn delete_project_with_abort<F, Fut>(
         &self,
         project_id: UUID,
+        app_data_dir: &Path,
         abort: F,
     ) -> Result<(), AppError>
     where
         F: Fn(UUID) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
-        let session_ids = self.list_session_ids(&project_id).await?;
-        for session_id in session_ids {
-            abort(session_id).await;
+        let sessions = self.list_sessions_for_delete(&project_id).await?;
+        for (session_id, _working_dir) in &sessions {
+            abort(session_id.clone()).await;
         }
+
+        // best-effort 删除每个会话的 JSONL transcript 文件：单个文件删失败只
+        // 记录、不阻断整体——权威的 SQLite 级联删除（下一步）才是把会话从列表
+        // 移除的操作；尽量全删以免留下孤儿 `<id>.jsonl`。
+        for (session_id, working_dir) in &sessions {
+            let cwd = session_cwd(working_dir.as_deref(), app_data_dir);
+            if let Err(e) = delete_session_file(app_data_dir, &cwd, session_id) {
+                tracing::warn!(
+                    session_id = %session_id,
+                    "failed to delete JSONL transcript file on project delete, \
+                     continuing with the SQLite cascade: {e}"
+                );
+            }
+        }
+
         self.repository.delete_project(&project_id).await
     }
 
-    /// 列出某项目下全部 session id（项目不存在时为空集合，由后续仓储层
-    /// delete 报 `NOT_FOUND`）。
-    async fn list_session_ids(&self, project_id: &UUID) -> Result<Vec<UUID>, AppError> {
-        let rows = sqlx::query("SELECT id FROM agent_sessions WHERE project_id = $1")
+    /// 列出某项目下全部会话的 `(id, working_dir)`（项目不存在时为空集合，由后续
+    /// 仓储层 delete 报 `NOT_FOUND`）。working_dir 用于定位每个会话的 JSONL 文件。
+    async fn list_sessions_for_delete(
+        &self,
+        project_id: &UUID,
+    ) -> Result<Vec<(UUID, Option<String>)>, AppError> {
+        let rows = sqlx::query("SELECT id, working_dir FROM agent_sessions WHERE project_id = $1")
             .bind(project_id)
             .fetch_all(self.db.pool())
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to list project session ids: {}", e))
+                AppError::internal_error(&format!("Failed to list project sessions: {}", e))
             })?;
 
         rows.into_iter()
-            .map(|row| Ok(row.try_get::<String, _>("id")?))
+            .map(|row| {
+                let id = row.try_get::<String, _>("id")?;
+                // working_dir 可空：必须用 Option 显式解码（NULL → None），否则
+                // sqlx-sqlite 会把 NULL TEXT 静默解码成 Some("")（见
+                // agent_session_repository 的 NULL-decode footgun 探针）。
+                let working_dir = row.try_get::<Option<String>, _>("working_dir")?;
+                Ok((id, working_dir))
+            })
             .collect()
     }
 
@@ -245,17 +278,28 @@ mod tests {
 
     /// 直接插入一条 agent_sessions 行（可选挂到某个项目），返回 session id。
     async fn insert_session(db: &Database, project_id: Option<&str>, name: &str) -> String {
+        insert_session_with_dir(db, project_id, name, None).await
+    }
+
+    /// 同 `insert_session`，但可指定 `working_dir`（用于定位会话的 JSONL 文件）。
+    async fn insert_session_with_dir(
+        db: &Database,
+        project_id: Option<&str>,
+        name: &str,
+        working_dir: Option<&str>,
+    ) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
         sqlx::query(
             r#"
-            INSERT INTO agent_sessions (id, name, project_id, message_count, created_at, updated_at)
-            VALUES ($1, $2, $3, 0, $4, $5)
+            INSERT INTO agent_sessions (id, name, project_id, working_dir, message_count, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, 0, $5, $6)
         "#,
         )
         .bind(&id)
         .bind(name)
         .bind(project_id)
+        .bind(working_dir)
         .bind(now)
         .bind(now)
         .execute(db.pool())
@@ -501,18 +545,33 @@ mod tests {
         assert_eq!(err.code, "NOT_FOUND");
     }
 
-    // --- delete: abort each session BEFORE cascade, NOT_FOUND passthrough ---
+    /// Seed `<id>.jsonl` for a session under `base_dir` keyed by its working_dir,
+    /// returning the file path so the test can assert on its (later) absence.
+    fn seed_session_jsonl(
+        base_dir: &std::path::Path,
+        working_dir: Option<&str>,
+        session_id: &str,
+    ) -> std::path::PathBuf {
+        let cwd = session_cwd(working_dir, base_dir);
+        let path =
+            crate::services::agent_jsonl_store::ensure_session_file(base_dir, &cwd, session_id, 1)
+                .expect("seed jsonl");
+        assert!(path.exists(), "precondition: seeded JSONL exists");
+        path
+    }
+
+    // --- delete: abort each session BEFORE cascade, cascade JSONL files,
+    //     NOT_FOUND passthrough (VAL-CASESS-021) ---
 
     #[tokio::test]
     async fn delete_project_aborts_each_session_before_cascade() {
         let (db, _guard) = create_test_database().await;
         let service = AgentProjectService::new(db.clone());
+        let base = TempDir::new().unwrap();
 
         let work_dir = TempDir::new().unwrap();
-        let project = service
-            .create_project(work_dir.path().to_string_lossy().into_owned())
-            .await
-            .unwrap();
+        let work_dir_str = work_dir.path().to_string_lossy().into_owned();
+        let project = service.create_project(work_dir_str.clone()).await.unwrap();
 
         let s1 = insert_session(&db, Some(&project.id), "s1").await;
         let s2 = insert_session(&db, Some(&project.id), "s2").await;
@@ -543,7 +602,7 @@ mod tests {
         };
 
         service
-            .delete_project_with_abort(project.id.clone(), abort)
+            .delete_project_with_abort(project.id.clone(), base.path(), abort)
             .await
             .unwrap();
 
@@ -564,6 +623,59 @@ mod tests {
         assert_eq!(count_rows(&db, "agent_sessions").await, 1);
     }
 
+    /// VAL-CASESS-021: deleting a project with N sessions (each with a
+    /// `<id>.jsonl`) removes the project + its N sessions from SQLite AND deletes
+    /// every one of those sessions' JSONL files from disk — including a session
+    /// with no `working_dir` (rooted at the app-data dir). A session OUTSIDE the
+    /// project keeps both its SQLite row and its JSONL file.
+    #[tokio::test]
+    async fn delete_project_cascades_jsonl_files_for_every_session() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentProjectService::new(db.clone());
+        let runtime = AgentRuntime::new(db.clone());
+        let base = TempDir::new().unwrap();
+
+        let work_dir = TempDir::new().unwrap();
+        let work_dir_str = work_dir.path().to_string_lossy().into_owned();
+        let project = service.create_project(work_dir_str.clone()).await.unwrap();
+
+        // Two in-project sessions: one with a working_dir, one without (so the
+        // app-data-dir cwd fallback is exercised). Seed each one's JSONL file.
+        let s1 = insert_session_with_dir(&db, Some(&project.id), "s1", Some(&work_dir_str)).await;
+        let s2 = insert_session_with_dir(&db, Some(&project.id), "s2", None).await;
+        let s1_jsonl = seed_session_jsonl(base.path(), Some(&work_dir_str), &s1);
+        let s2_jsonl = seed_session_jsonl(base.path(), None, &s2);
+
+        // A bystander session OUTSIDE the project, with its own JSONL file.
+        let outsider = insert_session_with_dir(&db, None, "outsider", Some(&work_dir_str)).await;
+        let outsider_jsonl = seed_session_jsonl(base.path(), Some(&work_dir_str), &outsider);
+
+        service
+            .delete_project(project.id.clone(), &runtime, base.path())
+            .await
+            .unwrap();
+
+        // SQLite: project + its sessions gone; only the bystander remains.
+        let err = service.get_project(project.id).await.expect_err("gone");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 1);
+
+        // Disk: every in-project session's JSONL file is removed.
+        assert!(
+            !s1_jsonl.exists(),
+            "in-project session JSONL must be deleted"
+        );
+        assert!(
+            !s2_jsonl.exists(),
+            "no-working-dir session JSONL must be deleted"
+        );
+        // The bystander's JSONL survives untouched.
+        assert!(
+            outsider_jsonl.exists(),
+            "a session outside the project keeps its JSONL file"
+        );
+    }
+
     #[tokio::test]
     async fn delete_project_with_runtime_cascades_and_passes_through_not_found() {
         let (db, _guard) = create_test_database().await;
@@ -571,6 +683,7 @@ mod tests {
         // A real runtime: abort on sessions without an active run is a clean
         // no-op, so the full public path is exercised end to end.
         let runtime = AgentRuntime::new(db.clone());
+        let base = TempDir::new().unwrap();
 
         let work_dir = TempDir::new().unwrap();
         let project = service
@@ -581,7 +694,7 @@ mod tests {
         insert_message(&db, &session, 0).await;
 
         service
-            .delete_project(project.id.clone(), &runtime)
+            .delete_project(project.id.clone(), &runtime, base.path())
             .await
             .unwrap();
         let err = service.get_project(project.id).await.expect_err("gone");
@@ -591,9 +704,37 @@ mod tests {
 
         // Missing id -> NOT_FOUND passthrough (and no panic from abort phase).
         let err = service
-            .delete_project("missing".to_string(), &runtime)
+            .delete_project("missing".to_string(), &runtime, base.path())
             .await
             .expect_err("should reject");
         assert_eq!(err.code, "NOT_FOUND");
+    }
+
+    /// A JSONL file delete failure for one session is best-effort: it is logged
+    /// and the SQLite cascade still removes the project. Modelled here by a
+    /// session whose JSONL file simply does not exist (delete is a clean no-op),
+    /// proving the cascade does not depend on every file being present.
+    #[tokio::test]
+    async fn delete_project_tolerates_missing_jsonl_file() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentProjectService::new(db.clone());
+        let runtime = AgentRuntime::new(db.clone());
+        let base = TempDir::new().unwrap();
+
+        let work_dir = TempDir::new().unwrap();
+        let project = service
+            .create_project(work_dir.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        // Session with no JSONL file at all.
+        let _session = insert_session(&db, Some(&project.id), "s1").await;
+
+        service
+            .delete_project(project.id.clone(), &runtime, base.path())
+            .await
+            .expect("a missing JSONL file must not block the SQLite cascade");
+        let err = service.get_project(project.id).await.expect_err("gone");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 0);
     }
 }

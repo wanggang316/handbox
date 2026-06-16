@@ -388,24 +388,31 @@ async fn initialize_services(
         settings_service.clone(),
     );
 
-    // 一次性把 pre-M3 的 SQLite agent transcript 物化为 JSONL（增量、幂等、可重跑）。
+    // 一次性把 pre-M3 的 SQLite agent transcript 物化为 JSONL，迁移成功后 drop
+    // 已冗余的 `agent_session_messages` 表（VAL-CASESS-023）。门控在该表的存在性
+    // 上——表存在 ⇒ 迁移 + drop；表不存在 ⇒ 已完成、整体跳过（不再每次启动重扫、
+    // 也不读已 drop 的表）。**只 drop transcript 表**：`agent_sessions` /
+    // `agent_projects` 是 M3 dual-source 下的活配置 + 分组源，绝不 drop。
+    //
     // 必须在 agent_runtime 被 manage、任何 run 发生之前同步完成：否则老会话首次
     // run 只会落新 turn，丢失历史（m3-jsonl-persistence 标注的竞态）。data_dir 同时
     // 充当 JSONL base 与无 working_dir 会话的 cwd 回退（与写入侧 config_from_rows /
     // session_cwd 一致）。迁移整体失败只记录、不阻断启动——逐会话容错留给
-    // m3-migration-robustness。
-    match crate::services::migrate_sqlite_sessions_to_jsonl(database_service.clone(), &data_dir)
+    // m3-migration-robustness；迁移失败时**不会** drop（保住 transcript）。
+    match crate::services::migrate_and_drop_legacy_if_present(database_service.clone(), &data_dir)
         .await
     {
         Ok(report) => {
-            if report.migrated_sessions > 0 {
+            if let Some(migration) = report.migration {
                 tracing::info!(
-                    migrated = report.migrated_sessions,
-                    messages = report.messages_migrated,
-                    skipped_existing = report.skipped_existing,
-                    skipped_empty = report.skipped_empty,
-                    skipped_undeserializable = report.skipped_undeserializable,
-                    "migrated legacy SQLite agent transcripts to JSONL"
+                    migrated = migration.migrated_sessions,
+                    messages = migration.messages_migrated,
+                    rewritten = migration.rewritten_sessions,
+                    skipped_existing = migration.skipped_existing,
+                    skipped_empty = migration.skipped_empty,
+                    skipped_undeserializable = migration.skipped_undeserializable,
+                    dropped_legacy_table = report.dropped,
+                    "migrated legacy SQLite agent transcripts to JSONL and dropped the legacy table"
                 );
             }
         }

@@ -322,6 +322,15 @@ impl AgentSessionRepository {
     }
 
     /// 获取某个会话的全部 transcript（按 seq 升序）
+    ///
+    /// 这是 JSONL 读路径（`agent_session_messages` 命令）的 SQLite 回退分支：仅
+    /// 在会话**没有** JSONL 文件时被调用——M3 迁移**跳过空会话**，所以一个无消息
+    /// 的会话既无 JSONL 也（迁移+drop 之后）无 `agent_session_messages` 表。
+    /// `m3-project-delete-and-drop` 在迁移成功后会一次性 `DROP TABLE
+    /// agent_session_messages`，此后该回退会遇到「no such table」。这本身是正确
+    /// 后置态（transcript 已全量迁入 JSONL；空会话本就无消息），因此这里把
+    /// **表缺失**显式映射为空 transcript（`Ok(vec![])`），而非冒泡为 INTERNAL_ERROR
+    /// 白屏整条 timeline。其它 DB 故障照常冒泡。
     pub async fn list_messages(
         &self,
         session_id: &UUID,
@@ -331,13 +340,24 @@ impl AgentSessionRepository {
             FROM agent_session_messages WHERE session_id = $1 ORDER BY seq ASC
         "#;
 
-        let rows = sqlx::query(query)
+        let rows = match sqlx::query(query)
             .bind(session_id)
             .fetch_all(self.db.pool())
             .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to list agent session messages: {}", e))
-            })?;
+        {
+            Ok(rows) => rows,
+            // The legacy transcript table has been dropped post-migration: an
+            // empty (JSONL-less) session has no messages, so report none rather
+            // than erroring. Only a genuinely-missing `agent_session_messages`
+            // table is swallowed; any other DB error still bubbles up.
+            Err(e) if is_missing_legacy_table(&e) => return Ok(Vec::new()),
+            Err(e) => {
+                return Err(AppError::internal_error(&format!(
+                    "Failed to list agent session messages: {}",
+                    e
+                )))
+            }
+        };
 
         // 逐行隔离 payload 解析（VAL-PERSIST-012）：单条 payload 的存储 JSON 文本
         // 损坏（例如被外部写入非法 JSON）时记录并跳过该行，而非让整批 transcript
@@ -436,6 +456,22 @@ impl AgentSessionRepository {
             created_at,
         }))
     }
+}
+
+/// Whether a sqlx error is SQLite's "no such table: agent_session_messages",
+/// raised after `m3-project-delete-and-drop` drops the legacy transcript table.
+///
+/// Matched on the database error text rather than a code: sqlx-sqlite surfaces
+/// SQLITE_ERROR (code 1) for a missing table with the table name only in the
+/// message, so the table name is the discriminating signal. Scoped to the
+/// `agent_session_messages` table by name so an unrelated "no such table" (a
+/// real schema bug) still bubbles up rather than being silently swallowed.
+fn is_missing_legacy_table(err: &sqlx::Error) -> bool {
+    matches!(err, sqlx::Error::Database(db_err)
+    if {
+        let msg = db_err.message();
+        msg.contains("no such table") && msg.contains("agent_session_messages")
+    })
 }
 
 #[cfg(test)]
@@ -1234,6 +1270,55 @@ mod tests {
             .unwrap()
             .expect("a dangling-project session is still fetchable by id");
         assert_eq!(fetched.id, "dangling");
+    }
+
+    /// VAL-CASESS-023 (fallback-tolerance leg): after `m3-project-delete-and-drop`
+    /// drops the legacy `agent_session_messages` table, the SQLite transcript
+    /// fallback (`list_messages`, taken only when a session has no JSONL file —
+    /// e.g. an empty session the migration skipped) must return an empty Vec
+    /// rather than erroring with "no such table". The dropped table is the
+    /// correct post-migration state; an empty session genuinely has no messages.
+    #[tokio::test]
+    async fn test_list_messages_returns_empty_when_legacy_table_dropped() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentSessionRepository::new(db_arc.clone());
+
+        // Drop the legacy transcript table to model the post-migration state.
+        sqlx::query("DROP TABLE agent_session_messages")
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // Querying transcript for ANY session must now return empty, not error.
+        let messages = repo
+            .list_messages(&"any-session".to_string())
+            .await
+            .expect("a dropped legacy table maps to an empty transcript, not an error");
+        assert!(
+            messages.is_empty(),
+            "a session with no JSONL and no legacy table has no messages"
+        );
+    }
+
+    /// `is_missing_legacy_table` is scoped to the legacy transcript table by
+    /// name: a "no such table" for an UNRELATED table is a real schema bug and
+    /// must still surface as an error from `list_messages`, never be swallowed.
+    #[tokio::test]
+    async fn test_list_messages_surfaces_unrelated_missing_table_errors() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+
+        // A genuine missing-table error for a DIFFERENT table is not swallowed.
+        let err = sqlx::query("SELECT 1 FROM some_other_missing_table")
+            .fetch_all(db_arc.pool())
+            .await
+            .map(|_| ())
+            .expect_err("querying a missing table errors");
+        assert!(
+            !is_missing_legacy_table(&err),
+            "only the legacy agent_session_messages table is treated as droppable"
+        );
     }
 
     /// VAL-PERSIST-012: a row whose stored payload is malformed JSON is skipped

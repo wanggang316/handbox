@@ -46,6 +46,24 @@
 //!     listing or writing one session) is logged + counted and the loop moves
 //!     on, so one bad session never aborts the whole migration.
 //!
+//! Gated one-time drop of the legacy transcript table (`m3-project-delete-and-drop`,
+//! VAL-CASESS-023):
+//!   - M3 is dual-source: `agent_sessions` (per-session config + ordering) and
+//!     `agent_projects` (grouping) stay the LIVE authoritative source — the JSONL
+//!     `SessionHeader` cannot hold HandBox's per-session config — so those two
+//!     tables are NEVER dropped. Only `agent_session_messages` is now redundant:
+//!     its transcript is fully materialized into JSONL and the coding-agent run
+//!     path no longer writes it (no double-write).
+//!   - The drop is GATED on the table's own existence — "does
+//!     `agent_session_messages` exist?" IS the "has migration completed?" flag,
+//!     so no separate marker is needed. Existence ⇒ run the migration, then (only
+//!     on a successful pass) `DROP TABLE IF EXISTS agent_session_messages`.
+//!     Absence ⇒ skip both (already done), which also stops the every-startup
+//!     re-scan and avoids reading a dropped table.
+//!   - ORDERING IS LOAD-BEARING: migrate-then-drop. A failed migration leaves the
+//!     table in place (transcript preserved) — the drop is IRREVERSIBLE but safe
+//!     only because the data already lives in JSONL (VAL-CASESS-013 count parity).
+//!
 //! Unchanged design choices carried from `m3-migration-core`:
 //!   - An empty session (zero SQLite messages) builds NO JSONL file — it stays
 //!     correctly anchored to its SQLite `created_at` via the sidebar's
@@ -55,13 +73,12 @@
 //!     present, so writing one would only add an edge case (VAL-CASESS-012).
 //!   - The per-message entry timestamp is the SQLite row's `created_at`, NOT the
 //!     wall clock, so relative session ordering is preserved (VAL-CASESS-012).
-//!   - The legacy SQLite tables are NOT dropped — migration is additive and
-//!     re-runnable; dropping the legacy tables is a later milestone.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use hand_ai_model::Message;
+use sqlx::Row;
 
 use crate::models::AppError;
 use crate::services::agent_jsonl_store::{
@@ -167,6 +184,98 @@ pub async fn migrate_sqlite_sessions_to_jsonl(
     }
 
     Ok(report)
+}
+
+/// Outcome of the gated migrate-then-drop entry point (VAL-CASESS-023).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MigrateAndDropReport {
+    /// `true` when the legacy `agent_session_messages` table existed on entry, so
+    /// this pass ran the migration and (on success) dropped it. `false` when the
+    /// table was already absent and the whole pass was skipped (idempotent
+    /// second startup).
+    pub ran: bool,
+    /// The migration pass result, present only when `ran` is true.
+    pub migration: Option<MigrationReport>,
+    /// `true` when the legacy table was dropped this pass (migration succeeded).
+    pub dropped: bool,
+}
+
+/// Gated one-time migration + drop of the legacy transcript table (VAL-CASESS-023).
+///
+/// The presence of `agent_session_messages` IS the "migration not yet complete"
+/// flag, so no separate marker is needed:
+///   - table present → materialize every legacy transcript into JSONL, then (only
+///     if the migration pass returned `Ok`) `DROP TABLE IF EXISTS
+///     agent_session_messages`. `agent_sessions` / `agent_projects` are LEFT
+///     intact — they are the live config + grouping source under M3's dual-source
+///     model and dropping them would destroy the app.
+///   - table absent → skip both (already migrated + dropped on an earlier
+///     startup). This stops the every-startup re-scan and never reads a dropped
+///     table.
+///
+/// Ordering is load-bearing: migrate THEN drop. A migration error leaves the
+/// table in place (the transcript is preserved and the pass can be retried on the
+/// next startup) — the irreversible drop only runs after the data is safely in
+/// JSONL.
+pub async fn migrate_and_drop_legacy_if_present(
+    db: Arc<Database>,
+    base_dir: &Path,
+) -> Result<MigrateAndDropReport, AppError> {
+    if !legacy_transcript_table_exists(&db).await? {
+        // Already migrated + dropped on an earlier startup: skip entirely.
+        return Ok(MigrateAndDropReport::default());
+    }
+
+    // Migrate first; only drop if the whole pass succeeded.
+    let migration = migrate_sqlite_sessions_to_jsonl(Arc::clone(&db), base_dir).await?;
+    drop_legacy_transcript_table(&db).await?;
+
+    Ok(MigrateAndDropReport {
+        ran: true,
+        migration: Some(migration),
+        dropped: true,
+    })
+}
+
+/// Whether the legacy `agent_session_messages` transcript table still exists.
+///
+/// Queried via `sqlite_master` (the schema catalog) rather than a `PRAGMA`, so a
+/// single boolean answers "has the one-time migration + drop already run?".
+async fn legacy_transcript_table_exists(db: &Database) -> Result<bool, AppError> {
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS c FROM sqlite_master \
+         WHERE type = 'table' AND name = 'agent_session_messages'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .map_err(|e| {
+        AppError::internal_error(&format!(
+            "Failed to probe for legacy agent_session_messages table: {}",
+            e
+        ))
+    })?;
+    let count: i64 = row.try_get("c")?;
+    Ok(count > 0)
+}
+
+/// Drop the redundant legacy transcript table `agent_session_messages`.
+///
+/// IRREVERSIBLE — the caller MUST only invoke this after a SUCCESSFUL migration
+/// pass (the transcript already lives in JSONL). `agent_sessions` /
+/// `agent_projects` are deliberately untouched: they remain the live config +
+/// grouping source under M3's dual-source model. `IF EXISTS` keeps a double-run
+/// safe (a no-op when the table is already gone).
+async fn drop_legacy_transcript_table(db: &Database) -> Result<(), AppError> {
+    sqlx::query("DROP TABLE IF EXISTS agent_session_messages")
+        .execute(db.pool())
+        .await
+        .map_err(|e| {
+            AppError::internal_error(&format!(
+                "Failed to drop legacy agent_session_messages table: {}",
+                e
+            ))
+        })?;
+    Ok(())
 }
 
 /// Materialize a single session's transcript, updating `report` in place. Pulled
@@ -294,7 +403,7 @@ fn completeness(
 mod tests {
     use super::*;
     use crate::services::agent_jsonl_store::{load_transcript, session_activity};
-    use crate::storage::types::{AgentSession, Timestamp};
+    use crate::storage::types::{AgentSession, AgentSessionMessage, Timestamp};
     use hand_ai_model::{
         Api, AssistantContentBlock, AssistantMessage, StopReason, TextContent, ToolCall, Usage,
         UserMessage,
@@ -1186,6 +1295,265 @@ mod tests {
             sqlite_message_count(&db, &session.id).await,
             2,
             "the SQLite source transcript is untouched — no ghost rows, re-runnable"
+        );
+    }
+
+    /// Whether a table exists in the SQLite schema catalog — a direct probe the
+    /// gated-drop tests use to assert table presence/absence.
+    async fn table_exists(db: &Database, name: &str) -> bool {
+        let c: i64 = sqlx::query(
+            "SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'table' AND name = $1",
+        )
+        .bind(name)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+        .try_get("c")
+        .unwrap();
+        c > 0
+    }
+
+    /// VAL-CASESS-023: with the legacy `agent_session_messages` table present,
+    /// the gated entry migrates every transcript into JSONL (count parity per
+    /// session), then DROPS the legacy table — while LEAVING `agent_sessions` and
+    /// `agent_projects` intact (the live config + grouping source under M3's
+    /// dual-source model must never be dropped).
+    #[tokio::test]
+    async fn gated_migration_drops_only_the_legacy_transcript_table() {
+        let (db, base) = test_db().await;
+        let repo = AgentSessionRepository::new(db.clone());
+        let cwd = base.path().join("proj");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let cwd_str = cwd.to_string_lossy().into_owned();
+
+        // Seed an agent_projects row + a session attached to it, with messages.
+        let project_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO agent_projects (id, path, name, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(&project_id)
+        .bind(&cwd_str)
+        .bind("proj")
+        .bind(1_700_000_000_000_i64)
+        .bind(1_700_000_000_000_i64)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let session = session_row("sess-023", "Drop", Some(&cwd_str), 1_700_000_000_000);
+        repo.create_session(&session).await.unwrap();
+        for i in 0..5 {
+            repo.append_message(
+                &session.id,
+                "user",
+                &user_payload(&format!("m{i}")),
+                1_700_000_000_000 + i,
+            )
+            .await
+            .unwrap();
+        }
+        let sqlite_count = sqlite_message_count(&db, &session.id).await;
+        assert_eq!(sqlite_count, 5);
+
+        // Precondition: the legacy table exists.
+        assert!(
+            table_exists(&db, "agent_session_messages").await,
+            "precondition: legacy table present"
+        );
+
+        let report = migrate_and_drop_legacy_if_present(db.clone(), base.path())
+            .await
+            .unwrap();
+        assert!(report.ran, "the gated pass ran because the table existed");
+        assert!(
+            report.dropped,
+            "the legacy table was dropped after migrating"
+        );
+        assert_eq!(report.migration.as_ref().unwrap().migrated_sessions, 1);
+
+        // The legacy transcript table is gone; the config + grouping tables stay.
+        assert!(
+            !table_exists(&db, "agent_session_messages").await,
+            "VAL-CASESS-023: legacy transcript table must be dropped"
+        );
+        assert!(
+            table_exists(&db, "agent_sessions").await,
+            "agent_sessions (config) must NOT be dropped"
+        );
+        assert!(
+            table_exists(&db, "agent_projects").await,
+            "agent_projects (grouping) must NOT be dropped"
+        );
+
+        // The migrated JSONL message count equals the original SQLite count.
+        let jsonl_cwd = session_cwd(Some(&cwd_str), base.path());
+        let rows = load_transcript(base.path(), &jsonl_cwd, &session.id)
+            .unwrap()
+            .expect("a migrated session has a JSONL transcript");
+        assert_eq!(
+            rows.len() as i64,
+            sqlite_count,
+            "JSONL message rows equal the pre-drop SQLite count"
+        );
+
+        // The config row itself survived.
+        assert!(repo.get_session_by_id(&session.id).await.unwrap().is_some());
+    }
+
+    /// VAL-CASESS-023 (second-startup gate): once the legacy table is gone, a
+    /// second gated pass skips both migration and drop entirely (the table's
+    /// absence IS the "already done" flag) — no error, no re-scan, no re-read of
+    /// a dropped table.
+    #[tokio::test]
+    async fn gated_migration_second_run_skips_when_table_absent() {
+        let (db, base) = test_db().await;
+
+        // Drop the table up-front to model a post-migration second startup.
+        sqlx::query("DROP TABLE agent_session_messages")
+            .execute(db.pool())
+            .await
+            .unwrap();
+        assert!(!table_exists(&db, "agent_session_messages").await);
+
+        let report = migrate_and_drop_legacy_if_present(db.clone(), base.path())
+            .await
+            .expect("a second pass over an absent table is a clean no-op");
+        assert!(!report.ran, "nothing ran: the table was already absent");
+        assert!(!report.dropped);
+        assert!(report.migration.is_none());
+
+        // The config + grouping tables are still present and intact.
+        assert!(table_exists(&db, "agent_sessions").await);
+        assert!(table_exists(&db, "agent_projects").await);
+    }
+
+    /// VAL-CASESS-023 (migrate-then-drop ordering): if the migration pass returns
+    /// an error, the legacy table is NOT dropped — the transcript is preserved so
+    /// the irreversible drop only happens after the data is safely in JSONL.
+    /// A failing migration is injected by deleting the `agent_sessions` table so
+    /// the migration's first `list_sessions` query errors.
+    #[tokio::test]
+    async fn gated_migration_does_not_drop_when_migration_fails() {
+        let (db, base) = test_db().await;
+
+        // Sabotage the migration: drop the table it must read first, so the pass
+        // returns Err BEFORE any drop of the transcript table.
+        sqlx::query("DROP TABLE agent_sessions")
+            .execute(db.pool())
+            .await
+            .unwrap();
+        assert!(
+            table_exists(&db, "agent_session_messages").await,
+            "precondition: the transcript table is still present"
+        );
+
+        let err = migrate_and_drop_legacy_if_present(db.clone(), base.path())
+            .await
+            .expect_err("a failing migration must surface an error");
+        assert_eq!(err.code, "INTERNAL_ERROR");
+
+        // The transcript table was NOT dropped — the migration failed first.
+        assert!(
+            table_exists(&db, "agent_session_messages").await,
+            "VAL-CASESS-023: a failed migration must leave the transcript table intact (no drop)"
+        );
+    }
+
+    /// VAL-CASESS-022: two distinct HandBox session ids write to their OWN
+    /// `<id>.jsonl` files and never cross-contaminate. Each session's transcript
+    /// reads back exactly its own messages — proving the per-session-id JSONL
+    /// keying isolates concurrent runs (no shared mutable transcript state). The
+    /// GUI concurrency leg is left to user-test; this is the backend isolation
+    /// proof.
+    #[tokio::test]
+    async fn concurrent_sessions_write_isolated_transcripts() {
+        use crate::services::agent_jsonl_store::append_message_at;
+        use hand_ai_model::UserMessage;
+
+        let base = TempDir::new().unwrap();
+        let cwd = base.path().join("proj");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let id_a = "session-aaaa";
+        let id_b = "session-bbbb";
+        let created = 1_700_000_000_000_i64;
+
+        // Interleave appends to the two sessions, as concurrent runs would.
+        for i in 0..3 {
+            append_message_at(
+                base.path(),
+                &cwd,
+                id_a,
+                created,
+                &Message::User(UserMessage::new_text(format!("a-{i}"))),
+                created + i,
+            )
+            .unwrap();
+            append_message_at(
+                base.path(),
+                &cwd,
+                id_b,
+                created,
+                &Message::User(UserMessage::new_text(format!("b-{i}"))),
+                created + 100 + i,
+            )
+            .unwrap();
+        }
+        // One extra message to A only — counts must stay independent.
+        append_message_at(
+            base.path(),
+            &cwd,
+            id_a,
+            created,
+            &Message::User(UserMessage::new_text("a-extra".to_string())),
+            created + 50,
+        )
+        .unwrap();
+
+        // Each session reads back ONLY its own messages — no crossover.
+        let rows_a = load_transcript(base.path(), &cwd, id_a).unwrap().unwrap();
+        let rows_b = load_transcript(base.path(), &cwd, id_b).unwrap().unwrap();
+        assert_eq!(rows_a.len(), 4, "A has its own 4 messages");
+        assert_eq!(rows_b.len(), 3, "B has its own 3 messages, unpolluted by A");
+
+        // `new_text` serializes `content` as a bare JSON string (untagged
+        // UserContent::Text); pull it out robustly for the crossover assertion.
+        let text_of = |row: &AgentSessionMessage| -> String {
+            row.payload
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        let a_texts: Vec<String> = rows_a.iter().map(text_of).collect();
+        assert!(
+            a_texts.iter().all(|t| t.starts_with("a-")),
+            "every A row is an A message, none from B: {a_texts:?}"
+        );
+        let b_texts: Vec<String> = rows_b.iter().map(text_of).collect();
+        assert!(
+            b_texts.iter().all(|t| t.starts_with("b-")),
+            "every B row is a B message, none from A: {b_texts:?}"
+        );
+
+        // Activity counts are independent (A=4, B=3).
+        let act_a = session_activity(base.path(), &cwd, id_a).unwrap().unwrap();
+        let act_b = session_activity(base.path(), &cwd, id_b).unwrap().unwrap();
+        assert_eq!(act_a.message_count, 4);
+        assert_eq!(act_b.message_count, 3);
+
+        // Two distinct files on disk, one per session id.
+        let dir = crate::services::agent_jsonl_store::session_dir(base.path(), &cwd);
+        let jsonl: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".jsonl"))
+            .collect();
+        assert_eq!(
+            jsonl.len(),
+            2,
+            "exactly one JSONL per session id: {jsonl:?}"
         );
     }
 }
