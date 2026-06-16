@@ -33,7 +33,7 @@
 //! canonical root. The `Cancel` reason is GENERIC — it never echoes the
 //! out-of-sandbox absolute path — matching the resolver's leak-free contract.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -308,8 +308,42 @@ const PERMISSION_EXTENSION_NAME: &str = "handbox-permission";
 /// -modal) renders the prompt and answers via the `agent_approval_respond` IPC.
 pub const APPROVAL_REQUEST_EVENT: &str = "agent_approval_request";
 
-/// Process-level `request_id → oneshot::Sender<bool>` registry of approval
-/// decisions still awaiting a user answer.
+/// The user's decision for one dangerous-tool approval request, with its SCOPE.
+///
+/// Replaces the earlier `allow: bool` so the wire carries the scope explicitly
+/// rather than encoding it ambiguously:
+/// - [`ApprovalDecision::Deny`] — refuse this call (the tool is `Cancel`led).
+/// - [`ApprovalDecision::AllowOnce`] — allow THIS call only; the next call to the
+///   same tool prompts again (no memory).
+/// - [`ApprovalDecision::AllowAlways`] — allow this call AND remember the tool
+///   for the REST OF THIS SESSION: subsequent calls to the same tool in the same
+///   session run without prompting. The memory is session-scoped and in-memory
+///   only (see [`session_allow_always`]).
+///
+/// `#[serde(rename_all = "snake_case")]` so the wire values are
+/// `"deny" | "allow_once" | "allow_always"` — the exact strings the frontend
+/// sends as the `decision` argument of `agent_approval_respond`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecision {
+    Deny,
+    AllowOnce,
+    AllowAlways,
+}
+
+/// One pending approval awaiting a user answer: the wake channel plus the
+/// `(session_id, tool_name)` it is for. The scope target is stored ALONGSIDE the
+/// sender so [`respond_to_approval`] — which only receives a `request_id` from
+/// the stateless IPC command — can record an `AllowAlways` against the right
+/// session+tool without the command knowing either.
+struct PendingApproval {
+    session_id: String,
+    tool_name: String,
+    sender: oneshot::Sender<ApprovalDecision>,
+}
+
+/// Process-level `request_id → PendingApproval` registry of approval decisions
+/// still awaiting a user answer.
 ///
 /// WHY PROCESS-LEVEL (mirrors `coding_agent_runtime::run_controls`):
 /// the `PermissionExtension` is owned by the `AgentSession`, which the driver
@@ -318,34 +352,85 @@ pub const APPROVAL_REQUEST_EVENT: &str = "agent_approval_request";
 /// `OnceLock<Mutex<HashMap<..>>>` gives both the extension (insert + await) and
 /// the command (remove + send) a shared rendezvous keyed by `request_id`.
 ///
-/// LIFECYCLE: `on_before_tool_call` inserts a sender then awaits the matching
-/// receiver; [`respond_to_approval`] removes the sender and `send`s the
-/// decision, waking the await. A `request_id` is a fresh uuid, so entries never
-/// collide. If the receiver is dropped before a response arrives (e.g. the run
-/// is aborted), `respond` finds no entry — a clean no-op.
-fn pending_approvals() -> &'static Mutex<HashMap<String, oneshot::Sender<bool>>> {
-    static PENDING: OnceLock<Mutex<HashMap<String, oneshot::Sender<bool>>>> = OnceLock::new();
+/// LIFECYCLE: `on_before_tool_call` inserts an entry then awaits the matching
+/// receiver; [`respond_to_approval`] removes the entry and `send`s the decision,
+/// waking the await. A `request_id` is a fresh uuid, so entries never collide.
+/// If the receiver is dropped before a response arrives (e.g. the run is
+/// aborted), `respond` finds no entry — a clean no-op.
+fn pending_approvals() -> &'static Mutex<HashMap<String, PendingApproval>> {
+    static PENDING: OnceLock<Mutex<HashMap<String, PendingApproval>>> = OnceLock::new();
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Resolve a pending approval: wake the awaiting `on_before_tool_call` with the
-/// user's `allow` decision.
+/// Process-level `session_id → Set<tool_name>` registry of tools the user chose
+/// to ALWAYS allow for that session ("始终允许该工具（本会话）").
 ///
-/// IDEMPOTENT / leak-free: the sender is REMOVED from the registry before being
+/// SCOPE — deliberately three properties, each a security/UX decision:
+/// - PER-SESSION: keyed by `session_id`, so allowing a tool in session A does
+///   NOT allow it in session B (session B still prompts) — VAL-CAPERM-009.
+/// - IN-MEMORY ONLY: a `OnceLock<Mutex<HashMap<..>>>`, NEVER written to the DB or
+///   any file. A process restart starts empty, so "always allow" does NOT
+///   survive a restart — the user re-consents in the new process. This is a
+///   safety decision: a persisted blanket allow is exactly what we must not have
+///   (VAL-CAPERM-010).
+/// - PROCESS-WIDE STRUCTURE (mirrors `run_controls`): the `PermissionExtension`
+///   instance is owned by the driver task, but `respond_to_approval` runs in the
+///   stateless IPC command; both reach the same set through this registry.
+fn session_allow_always() -> &'static Mutex<HashMap<String, HashSet<String>>> {
+    static ALLOW: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
+    ALLOW.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Whether `tool_name` is on the session's always-allow set (the user previously
+/// chose "始终允许" for it in THIS session). Read by `on_before_tool_call` to
+/// skip the prompt+await entirely for a remembered tool.
+fn is_session_allow_always(session_id: &str, tool_name: &str) -> bool {
+    session_allow_always()
+        .lock()
+        .unwrap()
+        .get(session_id)
+        .is_some_and(|tools| tools.contains(tool_name))
+}
+
+/// Record that `tool_name` is ALWAYS allowed for `session_id` for the rest of
+/// this session (in-memory only). Called by [`respond_to_approval`] on an
+/// `AllowAlways` decision.
+fn remember_session_allow_always(session_id: &str, tool_name: &str) {
+    session_allow_always()
+        .lock()
+        .unwrap()
+        .entry(session_id.to_string())
+        .or_default()
+        .insert(tool_name.to_string());
+}
+
+/// Resolve a pending approval: wake the awaiting `on_before_tool_call` with the
+/// user's `decision`, and — for [`ApprovalDecision::AllowAlways`] — first record
+/// the tool on the request's session always-allow set so future calls to the
+/// same tool in the same session skip the prompt.
+///
+/// IDEMPOTENT / leak-free: the entry is REMOVED from the registry before being
 /// used, so the FIRST response for a `request_id` wins and a duplicate or
 /// unknown `request_id` is a clean no-op (nothing to remove, nothing to send).
 /// A send failure (the receiver was already dropped — the awaiting tool call
-/// was abandoned) is likewise ignored: there is no live awaiter to wake.
+/// was abandoned) is likewise ignored: there is no live awaiter to wake — but
+/// the `AllowAlways` memory is still recorded, since the user's standing consent
+/// for the session is independent of whether this particular await is alive.
 ///
 /// This is the body the `agent_approval_respond` IPC command delegates to; it is
 /// `pub` so the command (and unit tests) can drive the rendezvous without a live
 /// session.
-pub fn respond_to_approval(request_id: &str, allow: bool) {
-    let sender = pending_approvals().lock().unwrap().remove(request_id);
-    if let Some(sender) = sender {
+pub fn respond_to_approval(request_id: &str, decision: ApprovalDecision) {
+    let pending = pending_approvals().lock().unwrap().remove(request_id);
+    if let Some(pending) = pending {
+        // Record the session-scoped standing consent BEFORE waking the awaiter,
+        // so a racing second call to the same tool sees the memory immediately.
+        if decision == ApprovalDecision::AllowAlways {
+            remember_session_allow_always(&pending.session_id, &pending.tool_name);
+        }
         // The receiver may already be gone (run aborted); a failed send means
         // there is no awaiter to wake, which is fine.
-        let _ = sender.send(allow);
+        let _ = pending.sender.send(decision);
     }
 }
 
@@ -412,10 +497,16 @@ impl PermissionExtension {
 
     /// Request approval for one dangerous tool call and await the decision.
     ///
-    /// Returns the resolved [`HookDecision`]: `Continue` on allow, `Cancel` on
-    /// deny / fail-closed. Factored out of the trait method so the rendezvous is
-    /// directly unit-testable. A non-dangerous tool never reaches here — the
-    /// caller short-circuits it to `Continue`.
+    /// SCOPE SHORT-CIRCUIT: if the user previously chose "始终允许" for this
+    /// `(session_id, tool_name)` (it is on the session always-allow set), the
+    /// call is allowed WITHOUT emitting a request or awaiting — it
+    /// [`HookDecision::Continue`]s straight away (VAL-CAPERM-008). Only a tool
+    /// NOT remembered for the session reaches the prompt+await below.
+    ///
+    /// Otherwise returns the resolved [`HookDecision`]: `Continue` on allow
+    /// (once or always), `Cancel` on deny / fail-closed. Factored out of the
+    /// trait method so the rendezvous is directly unit-testable. A non-dangerous
+    /// tool never reaches here — the caller short-circuits it to `Continue`.
     async fn request_approval(
         &self,
         session_id: &str,
@@ -423,6 +514,13 @@ impl PermissionExtension {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> HookDecision {
+        // SCOPE: a tool the user chose to always allow for THIS session runs
+        // without prompting — no event emitted, no await. Checked first so a
+        // remembered tool never re-surfaces an approval request.
+        if is_session_allow_always(session_id, tool_name) {
+            return HookDecision::Continue;
+        }
+
         // No approval surface → fail closed (M1 safety posture). Never await,
         // never run the tool.
         let Some(emitter) = &self.emitter else {
@@ -431,13 +529,18 @@ impl PermissionExtension {
 
         // Mint a fresh request id and register the wake channel BEFORE emitting,
         // so a response that races back the instant the event is delivered
-        // always finds a live entry to resolve.
+        // always finds a live entry to resolve. The session+tool ride along so
+        // `respond_to_approval` can record an `AllowAlways` against them.
         let request_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel::<bool>();
-        pending_approvals()
-            .lock()
-            .unwrap()
-            .insert(request_id.clone(), tx);
+        let (tx, rx) = oneshot::channel::<ApprovalDecision>();
+        pending_approvals().lock().unwrap().insert(
+            request_id.clone(),
+            PendingApproval {
+                session_id: session_id.to_string(),
+                tool_name: tool_name.to_string(),
+                sender: tx,
+            },
+        );
 
         emitter(serde_json::json!({
             "sessionId": session_id,
@@ -447,14 +550,17 @@ impl PermissionExtension {
             "requestId": request_id,
         }));
 
-        // Await the user's decision. `Ok(true)` → allow; `Ok(false)` → deny;
-        // `Err` (sender dropped without sending) → deny. On any deny path the
-        // registry entry is already gone (removed by `respond_to_approval`), or
-        // we remove it here to avoid leaking an orphaned sender if the receiver
-        // resolved via `Err`.
+        // Await the user's decision. `AllowOnce`/`AllowAlways` → allow (the
+        // always-allow memory was already recorded by `respond_to_approval`);
+        // `Deny` → deny; `Err` (sender dropped without sending) → deny. On the
+        // `Err` path the registry entry is already gone (removed by
+        // `respond_to_approval`), or we remove it here to avoid leaking an
+        // orphaned entry if the receiver resolved via `Err`.
         match rx.await {
-            Ok(true) => HookDecision::Continue,
-            Ok(false) => HookDecision::Cancel(deny_reason(tool_name)),
+            Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowAlways) => {
+                HookDecision::Continue
+            }
+            Ok(ApprovalDecision::Deny) => HookDecision::Cancel(deny_reason(tool_name)),
             Err(_) => {
                 // Sender dropped before answering (e.g. run aborted): clean up
                 // any lingering entry and deny.
@@ -558,6 +664,19 @@ mod tests {
         ExtensionContext {
             cwd: root.to_path_buf(),
             session_id: "test-session".to_string(),
+            data_dir: root.join(".hand").join("data"),
+        }
+    }
+
+    /// An [`ExtensionContext`] bound to a SPECIFIC `session_id`, for the scope
+    /// tests: the always-allow set is process-global and keyed by session id, so
+    /// each scope test mints a fresh uuid session to stay isolated from the
+    /// others (and from the default `"test-session"`).
+    fn cx_for_session(session_id: &str) -> ExtensionContext {
+        let root = Path::new("/tmp");
+        ExtensionContext {
+            cwd: root.to_path_buf(),
+            session_id: session_id.to_string(),
             data_dir: root.join(".hand").join("data"),
         }
     }
@@ -1008,11 +1127,11 @@ mod tests {
     }
 
     /// Drive a dangerous `write` call through the real hook on a background task
-    /// (it awaits the decision), resolve it via `respond_to_approval(.., allow)`
+    /// (it awaits the decision), resolve it via `respond_to_approval(.., decision)`
     /// once the request lands, and return the resolved decision. Mirrors the
     /// frontend round-trip: emit request → user answers → IPC responds → await
     /// resolves.
-    async fn approve_via_respond(allow: bool) -> (HookDecision, serde_json::Value) {
+    async fn approve_via_respond(decision: ApprovalDecision) -> (HookDecision, serde_json::Value) {
         let (emitter, recorded) = recording_emitter();
         let ext = Arc::new(PermissionExtension::new(Some(emitter)));
 
@@ -1028,7 +1147,7 @@ mod tests {
         });
 
         let request_id = await_request_id(&recorded).await;
-        respond_to_approval(&request_id, allow);
+        respond_to_approval(&request_id, decision);
 
         let decision = task.await.expect("hook task joins");
         let request = recorded.lock().unwrap()[0].clone();
@@ -1040,7 +1159,7 @@ mod tests {
     /// the awaited hook to `Continue` (the tool runs).
     #[tokio::test]
     async fn dangerous_tool_emits_request_and_allow_resolves_to_continue() {
-        let (decision, request) = approve_via_respond(true).await;
+        let (decision, request) = approve_via_respond(ApprovalDecision::AllowOnce).await;
 
         // The emitted request is the `agent_approval_request` shape the frontend
         // consumes: { sessionId, callId, toolName, args, requestId }.
@@ -1064,7 +1183,7 @@ mod tests {
     /// run), with a reason carrying the denied / 被拒 semantics for the model.
     #[tokio::test]
     async fn deny_response_resolves_to_cancel_with_denied_reason() {
-        let (decision, _request) = approve_via_respond(false).await;
+        let (decision, _request) = approve_via_respond(ApprovalDecision::Deny).await;
 
         match decision {
             HookDecision::Cancel(reason) => {
@@ -1203,22 +1322,30 @@ mod tests {
     #[tokio::test]
     async fn respond_is_idempotent_for_duplicate_and_unknown_ids() {
         let request_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel::<bool>();
-        pending_approvals()
-            .lock()
-            .unwrap()
-            .insert(request_id.clone(), tx);
+        let (tx, rx) = oneshot::channel::<ApprovalDecision>();
+        pending_approvals().lock().unwrap().insert(
+            request_id.clone(),
+            PendingApproval {
+                session_id: "idempotent-session".to_string(),
+                tool_name: "write".to_string(),
+                sender: tx,
+            },
+        );
 
-        // First response wins (delivers `true`).
-        respond_to_approval(&request_id, true);
-        assert_eq!(rx.await, Ok(true), "the first response is delivered");
+        // First response wins (delivers `AllowOnce`).
+        respond_to_approval(&request_id, ApprovalDecision::AllowOnce);
+        assert_eq!(
+            rx.await,
+            Ok(ApprovalDecision::AllowOnce),
+            "the first response is delivered"
+        );
 
         // Duplicate response for the same id: the entry is already gone — a
         // clean no-op (no panic, nothing to deliver).
-        respond_to_approval(&request_id, false);
+        respond_to_approval(&request_id, ApprovalDecision::Deny);
 
         // Unknown id: likewise a clean no-op.
-        respond_to_approval("no-such-request-id", true);
+        respond_to_approval("no-such-request-id", ApprovalDecision::AllowOnce);
 
         // The registry holds no entry for this id afterwards.
         assert!(
@@ -1227,6 +1354,270 @@ mod tests {
                 .unwrap()
                 .contains_key(&request_id),
             "a resolved request leaves no lingering registry entry"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // VAL-CAPERM-008..011 — approval SCOPE ("本次允许 / 始终允许（本会话）").
+    //
+    // "始终允许 <tool>" for a session records the tool on a process-global,
+    // session-keyed, in-memory always-allow set. Subsequent calls to the same
+    // tool in the SAME session skip the prompt entirely (no emit, no await);
+    // a DIFFERENT session still prompts (the set is session-isolated); and the
+    // set is never persisted, so a process restart starts empty. "本次允许"
+    // (`AllowOnce`) records nothing, so the next call prompts again.
+    //
+    // The always-allow set is process-global, so each test mints a fresh uuid
+    // session to stay isolated from the others.
+    // -----------------------------------------------------------------------
+
+    /// Spin until the recording emitter has captured AT LEAST `expected_count`
+    /// requests, then return the `requestId` of the `expected_count`-th one (1-
+    /// based). Used by the scope tests that emit MORE than one request across
+    /// successive calls — `await_request_id` only ever returns the FIRST, which
+    /// would make a later call resolve a stale (already-answered) id and hang.
+    async fn await_nth_request_id(
+        recorded: &Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+        expected_count: usize,
+    ) -> String {
+        for _ in 0..1000 {
+            {
+                let guard = recorded.lock().unwrap();
+                if guard.len() >= expected_count {
+                    return guard[expected_count - 1]
+                        .get("requestId")
+                        .and_then(|v| v.as_str())
+                        .expect("approval request must carry a requestId")
+                        .to_string();
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("fewer than {expected_count} approval requests were emitted within the bound");
+    }
+
+    /// Drive a dangerous `write` call through the real permission hook for
+    /// `session_id` on a background task, resolve the request with `decision`,
+    /// and return the resolved `HookDecision`. `expected_count` is the running
+    /// total of requests the shared `recorded` sink should hold once THIS call's
+    /// request has landed (1 for the first call, 2 for the second, …), so the
+    /// helper resolves THIS call's request rather than a stale earlier one.
+    /// Mirrors the frontend round-trip for a SPECIFIC session.
+    async fn drive_write_for_session(
+        ext: &Arc<PermissionExtension>,
+        session_id: &str,
+        decision: ApprovalDecision,
+        recorded: &Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+        expected_count: usize,
+    ) -> HookDecision {
+        let hook_ext = Arc::clone(ext);
+        let owned_session = session_id.to_string();
+        let task = tokio::spawn(async move {
+            hook_ext
+                .on_before_tool_call(
+                    &cx_for_session(&owned_session),
+                    &call_event("write", json!({ "path": "out.txt", "content": "data" })),
+                )
+                .await
+                .expect("permission hook never returns Err")
+        });
+
+        let request_id = await_nth_request_id(recorded, expected_count).await;
+        respond_to_approval(&request_id, decision);
+        task.await.expect("hook task joins")
+    }
+
+    /// Drive a dangerous `write` call through the hook for `session_id`,
+    /// EXPECTING the always-allow short-circuit: the call must resolve WITHOUT
+    /// emitting a request (no prompt, no await). Returns the resolved decision.
+    async fn drive_write_expecting_no_prompt(
+        ext: &Arc<PermissionExtension>,
+        session_id: &str,
+        recorded: &Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) -> HookDecision {
+        let before = recorded.lock().unwrap().len();
+        let decision = ext
+            .on_before_tool_call(
+                &cx_for_session(session_id),
+                &call_event("write", json!({ "path": "out.txt", "content": "data" })),
+            )
+            .await
+            .expect("permission hook never returns Err");
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            before,
+            "a session-always-allowed tool must NOT emit another approval request"
+        );
+        decision
+    }
+
+    /// VAL-CAPERM-008 — after "始终允许 <tool>" in a session, the SAME tool in
+    /// the SAME session runs without prompting: the second call emits NO request
+    /// and resolves straight to `Continue`.
+    #[tokio::test]
+    async fn allow_always_skips_prompt_for_same_session_same_tool() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        // First call prompts and the user picks "始终允许" → allowed, remembered.
+        let first = drive_write_for_session(
+            &ext,
+            &session_id,
+            ApprovalDecision::AllowAlways,
+            &recorded,
+            1,
+        )
+        .await;
+        assert!(
+            matches!(first, HookDecision::Continue),
+            "allow_always must resolve the first call to Continue"
+        );
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            1,
+            "the first call emits exactly one approval request"
+        );
+
+        // Second call to the same tool in the same session: NO new request, and
+        // it Continues directly off the remembered consent.
+        let second = drive_write_expecting_no_prompt(&ext, &session_id, &recorded).await;
+        assert!(
+            matches!(second, HookDecision::Continue),
+            "a remembered tool must Continue without prompting"
+        );
+    }
+
+    /// VAL-CAPERM-009 — "始终允许" does NOT cross sessions: allowing the tool in
+    /// session A leaves session B prompting (and awaiting) for the same tool.
+    #[tokio::test]
+    async fn allow_always_does_not_cross_sessions() {
+        let session_a = uuid::Uuid::new_v4().to_string();
+        let session_b = uuid::Uuid::new_v4().to_string();
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        // Session A: always-allow `write`.
+        let a = drive_write_for_session(
+            &ext,
+            &session_a,
+            ApprovalDecision::AllowAlways,
+            &recorded,
+            1,
+        )
+        .await;
+        assert!(matches!(a, HookDecision::Continue));
+        assert_eq!(recorded.lock().unwrap().len(), 1);
+
+        // Session B: the SAME tool still prompts (a second request is emitted)
+        // and awaits — A's standing consent does not leak into B.
+        let b =
+            drive_write_for_session(&ext, &session_b, ApprovalDecision::AllowOnce, &recorded, 2)
+                .await;
+        assert!(matches!(b, HookDecision::Continue));
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            2,
+            "session B must emit its OWN approval request — always-allow is per-session"
+        );
+        // The two requests carry the two distinct session ids.
+        let recorded_sessions: Vec<String> = recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r.get("sessionId").unwrap().as_str().unwrap().to_string())
+            .collect();
+        assert!(recorded_sessions.contains(&session_a));
+        assert!(recorded_sessions.contains(&session_b));
+    }
+
+    /// VAL-CAPERM-011 — "本次允许" (`AllowOnce`) records nothing: the next call
+    /// to the same tool in the same session prompts (and awaits) again.
+    #[tokio::test]
+    async fn allow_once_does_not_remember_for_next_call() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        // First call: allow once.
+        let first =
+            drive_write_for_session(&ext, &session_id, ApprovalDecision::AllowOnce, &recorded, 1)
+                .await;
+        assert!(matches!(first, HookDecision::Continue));
+        assert_eq!(recorded.lock().unwrap().len(), 1);
+
+        // Second call to the same tool: it prompts AGAIN (a second request is
+        // emitted) — allow_once left no memory.
+        let second =
+            drive_write_for_session(&ext, &session_id, ApprovalDecision::AllowOnce, &recorded, 2)
+                .await;
+        assert!(matches!(second, HookDecision::Continue));
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            2,
+            "allow_once must NOT remember the tool — the next call prompts again"
+        );
+    }
+
+    /// VAL-CAPERM-010 — the always-allow set is in-memory only: recording a tool
+    /// mutates the process-global `session_allow_always` map (no DB/file write),
+    /// so a fresh process (an empty map — what a restart yields) does not know
+    /// it. We assert the SCOPE PRIMITIVE directly: a session unknown to the set
+    /// is not always-allowed, and a recorded session is — proving the gate's
+    /// only source of truth is this in-memory map, which a restart resets.
+    #[tokio::test]
+    async fn allow_always_set_is_in_memory_and_session_scoped() {
+        let recorded_session = uuid::Uuid::new_v4().to_string();
+        let fresh_session = uuid::Uuid::new_v4().to_string();
+
+        // A never-recorded session (the state a process restart yields) is NOT
+        // always-allowed for the tool.
+        assert!(
+            !is_session_allow_always(&fresh_session, "write"),
+            "a session unknown to the in-memory set must not be always-allowed \
+             (a restart starts from exactly this empty state)"
+        );
+
+        // Recording is a pure in-memory mutation of the process-global map.
+        remember_session_allow_always(&recorded_session, "write");
+        assert!(
+            is_session_allow_always(&recorded_session, "write"),
+            "a recorded session is always-allowed for that tool"
+        );
+
+        // The membership is keyed by session id AND tool name: a different tool
+        // in the recorded session, and the recorded tool in a different session,
+        // are both absent — no blanket allow leaks across either axis.
+        assert!(
+            !is_session_allow_always(&recorded_session, "bash"),
+            "always-allow is per-tool: an unrelated tool is not allowed"
+        );
+        assert!(
+            !is_session_allow_always(&fresh_session, "write"),
+            "always-allow is per-session: another session is not allowed"
+        );
+    }
+
+    #[test]
+    fn approval_decision_serde_wire_values_match_the_frontend() {
+        // The wire strings are the exact `decision` values the frontend sends as
+        // the `agent_approval_respond` argument — pin them so a rename here is a
+        // deliberate, reviewed break of the IPC contract.
+        assert_eq!(
+            serde_json::to_value(ApprovalDecision::Deny).unwrap(),
+            json!("deny")
+        );
+        assert_eq!(
+            serde_json::to_value(ApprovalDecision::AllowOnce).unwrap(),
+            json!("allow_once")
+        );
+        assert_eq!(
+            serde_json::to_value(ApprovalDecision::AllowAlways).unwrap(),
+            json!("allow_always")
+        );
+        assert_eq!(
+            serde_json::from_value::<ApprovalDecision>(json!("allow_always")).unwrap(),
+            ApprovalDecision::AllowAlways
         );
     }
 

@@ -24,7 +24,7 @@ use tauri::{Emitter, Manager, State, Window};
 
 use crate::models::AppError;
 use crate::services::agent_permission::{
-    respond_to_approval, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
+    respond_to_approval, ApprovalDecision, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
 };
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::{
@@ -267,20 +267,26 @@ pub async fn agent_run_steer(session_id: UUID, text: String) -> Result<(), AppEr
     Ok(())
 }
 
-/// 回灌一次工具审批决策，唤醒正在 await 的 `PermissionExtension` 钩子。
+/// 回灌一次工具审批决策（含作用域），唤醒正在 await 的 `PermissionExtension` 钩子。
 ///
 /// 危险工具（write/edit/bash）调用时，`PermissionExtension` 发出
 /// `agent_approval_request` 并 await 一个以 `request_id` 为键的 oneshot；前端
-/// 弹窗（m2-approval-modal）回答后经本命令把决策回灌：在进程级 pending 注册表里
-/// 取出对应 sender 并 `send(allow)`，使 await 解为 `Continue`（allow）/`Cancel`
-/// （deny）。
+/// 弹窗（m2-approval-modal）回答后经本命令把决策回灌。`decision` 三态（作用域显式）：
+///  - `deny` → 工具被 `Cancel`（模型收被拒结果）。
+///  - `allow_once` → 本次允许（`Continue`），不记忆；同工具下次仍弹窗。
+///  - `allow_always` → 本次允许且**本会话**记住该工具（按 session_id 键控的进程内
+///    始终允许集），同会话同工具后续调用不再弹窗、直接 `Continue`。该集仅内存、不落
+///    DB/文件 → 不跨会话、不跨重启。
 ///
 /// 幂等：首个 response 生效；重复 / 未知 `request_id` 是**干净的 no-op**
 /// （注册表里已无该条目，什么都不做、不报错）—— 前端可能因竞态重复回答，或回答
 /// 一个已随 run 中止而消失的请求。
 #[tauri::command]
-pub async fn agent_approval_respond(request_id: String, allow: bool) -> Result<(), AppError> {
-    respond_to_approval(&request_id, allow);
+pub async fn agent_approval_respond(
+    request_id: String,
+    decision: ApprovalDecision,
+) -> Result<(), AppError> {
+    respond_to_approval(&request_id, decision);
     Ok(())
 }
 

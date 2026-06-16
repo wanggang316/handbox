@@ -3,13 +3,19 @@
   import Modal from "$lib/components/ui/Modal.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import { renderCodeBlock } from "$lib/utils/code";
-  import type { AgentApprovalRequest } from "$lib/types/agentSession";
+  import type {
+    AgentApprovalRequest,
+    ApprovalDecision,
+  } from "$lib/types/agentSession";
 
   interface Props {
     // 当前待审批请求（非空即弹窗打开、对话暂停）。args 即将执行的参数，须完整呈现。
     request: AgentApprovalRequest;
-    // 用户决策回调：true=允许（工具执行、对话继续）/ false=拒绝（工具被 Cancel）。
-    onRespond: (allow: boolean) => void;
+    // 用户决策回调（含作用域）：
+    //  - "allow_once"   本次允许（工具执行、对话继续；同工具下次仍弹窗）；
+    //  - "allow_always" 始终允许该工具（本会话）—— 同会话同工具后续不再弹窗、直接执行；
+    //  - "deny"         拒绝（工具被 Cancel、模型收被拒结果、对话继续不中断）。
+    onRespond: (decision: ApprovalDecision) => void;
   }
 
   let { request, onRespond }: Props = $props();
@@ -148,29 +154,43 @@
       {/if}
     </div>
 
-    <!-- 底部：拒绝 / 允许。 -->
+    <!--
+      底部：拒绝 / 本次允许 / 始终允许（本会话）。允许拆成两个可见选项——「本次允许」
+      一次性（同工具下次仍弹窗）、「始终允许」本会话记住该工具（同会话同工具后续不再
+      弹窗、直接执行；后端进程内存集、不跨会话/重启）。
+    -->
     <div
       class="flex items-center justify-end gap-3 px-6 pt-3 pb-4 border-t border-[var(--hairline)]"
     >
       <RoundButton
-        customClass="w-24"
+        customClass="w-20"
         label="拒绝"
         size="h-8"
         fontSize="text-sm"
         bgColor="bg-base-300"
         textColor="text-base-content/80"
         hoverColor="hover:bg-base-300/80"
-        onclick={() => onRespond(false)}
+        onclick={() => onRespond("deny")}
       />
       <RoundButton
         customClass="w-24"
-        label="允许"
+        label="本次允许"
+        size="h-8"
+        fontSize="text-sm"
+        bgColor="bg-base-300"
+        textColor="text-base-content/80"
+        hoverColor="hover:bg-base-300/80"
+        onclick={() => onRespond("allow_once")}
+      />
+      <RoundButton
+        customClass="w-28"
+        label="始终允许"
         size="h-8"
         fontSize="text-sm"
         bgColor="bg-primary"
         textColor="text-primary-content"
         hoverColor="hover:bg-primary/90"
-        onclick={() => onRespond(true)}
+        onclick={() => onRespond("allow_always")}
       />
     </div>
   </div>

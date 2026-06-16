@@ -19,6 +19,7 @@ import type {
   AgentStreamClosedPayload,
   AgentSessionLifecyclePayload,
   AgentApprovalRequest,
+  ApprovalDecision,
 } from "../types";
 
 /**
@@ -157,19 +158,24 @@ export async function abortAgentRun(sessionId: UUID): Promise<void> {
 }
 
 /**
- * 回灌一次工具审批决策，唤醒后端正在 await 的 `PermissionExtension` 钩子。
+ * 回灌一次工具审批决策（含作用域），唤醒后端正在 await 的 `PermissionExtension` 钩子。
  *
  * 危险工具（write/edit/bash）调用时后端 emit `agent_approval_request` 并 await 一个
- * 以 `requestId` 为键的 oneshot；弹窗回答后经本封装调 `agent_approval_respond`：
- * allow=true → 工具执行（Continue）、对话继续；false → 工具被 Cancel、模型收被拒
- * 结果、对话继续不中断。重复 / 未知 `requestId` 在后端是幂等 no-op，故前端竞态
- * 重复回答安全。
+ * 以 `requestId` 为键的 oneshot；弹窗回答后经本封装调 `agent_approval_respond`，
+ * `decision` 三态（作用域显式）：
+ *  - `"deny"` → 工具被 Cancel、模型收被拒结果、对话继续不中断。
+ *  - `"allow_once"` → 本次允许（Continue），不记忆；同工具下次仍弹窗。
+ *  - `"allow_always"` → 本次允许且**本会话**始终允许该工具，同会话同工具后续调用
+ *    不再弹窗、直接执行（后端进程内存集，按 sessionId 键控、不落 DB/文件 →
+ *    不跨会话、不跨重启）。
+ *
+ * 重复 / 未知 `requestId` 在后端是幂等 no-op，故前端竞态重复回答安全。
  */
 export async function respondAgentApproval(
   requestId: string,
-  allow: boolean,
+  decision: ApprovalDecision,
 ): Promise<void> {
-  await apiCall<void>("agent_approval_respond", { requestId, allow });
+  await apiCall<void>("agent_approval_respond", { requestId, decision });
 }
 
 /**

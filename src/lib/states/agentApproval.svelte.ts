@@ -17,11 +17,15 @@
  * 执行进度，审批 state 只反映「是否有待决策的危险调用」。AgentInput / 页面据
  * `pendingFor(sessionId)` 暂停输入并挂载弹窗。
  *
- * 本 feature 范围：基本 allow/deny 弹窗 + 暂停 + 执行/继续。作用域（本次 / 始终
- * 允许）、边界 / 可达性 / 隔离留给后续 feature（m2-approval-scope / edge-cases）。
+ * 作用域（本次允许 / 始终允许本会话）经 `decision` 三态回灌（m2-approval-scope）：
+ * `allow_once` 一次性、`allow_always` 本会话记住该工具（后端进程内存集、不跨会话/
+ * 重启）、`deny` 拒绝。边界 / 可达性 / 隔离留给后续 feature（m2-approval-edge-cases）。
  */
 
-import type { AgentApprovalRequest } from "$lib/types/agentSession";
+import type {
+  AgentApprovalRequest,
+  ApprovalDecision,
+} from "$lib/types/agentSession";
 import {
   listenToAgentStreamEvents,
   respondAgentApproval,
@@ -86,21 +90,26 @@ class AgentApprovalStore {
   }
 
   /**
-   * 回应一次待审批请求：先本地清键（弹窗即时关闭、对话立刻不再显示暂停态），再把
-   * 决策回灌后端。`requestId` 取自当前 pending 条目，故只回应当前展示的请求。
+   * 回应一次待审批请求（含作用域）：先本地清键（弹窗即时关闭、对话立刻不再显示
+   * 暂停态），再把 `decision` 回灌后端。`requestId` 取自当前 pending 条目，故只回应
+   * 当前展示的请求。
+   *
+   * `decision` 三态：`allow_once` 本次允许（不记忆）、`allow_always` 本会话始终允许
+   * 该工具（后端按 sessionId 键控的进程内存集，同会话同工具后续不再弹窗）、`deny`
+   * 拒绝。`allow_always` 的作用域记忆在后端，前端只透传 decision。
    *
    * 先清键再回灌：UI 反馈即时；回灌失败仅记录，不回滚清键——后端对未知 / 重复
    * `requestId` 幂等 no-op，重新弹出反而会让用户对着一个后端可能已放弃的请求二次
    * 决策。无待审批请求时为干净 no-op。
    */
-  async respond(sessionId: string, allow: boolean): Promise<void> {
+  async respond(sessionId: string, decision: ApprovalDecision): Promise<void> {
     const request = this.pending[sessionId];
     if (!request) {
       return;
     }
     this.clear(sessionId);
     try {
-      await respondAgentApproval(request.requestId, allow);
+      await respondAgentApproval(request.requestId, decision);
     } catch (error) {
       console.error("Failed to respond to agent approval:", error);
     }

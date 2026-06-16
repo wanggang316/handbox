@@ -385,6 +385,18 @@ export interface AgentApprovalRequest {
 }
 
 /**
+ * 工具审批决策（含作用域）—— 镜像后端 `ApprovalDecision`
+ * （services/agent_permission.rs，`#[serde(rename_all = "snake_case")]`）。
+ * 经 `agent_approval_respond(requestId, decision)` 回灌；wire 值逐字一致：
+ *  - `"deny"`：拒绝本次调用，工具被 Cancel（模型收被拒结果）。
+ *  - `"allow_once"`：本次允许（Continue），不记忆；同工具下次仍弹窗。
+ *  - `"allow_always"`：本次允许且**本会话**始终允许该工具（按 sessionId 键控的
+ *    进程内存集），同会话同工具后续调用不再弹窗、直接执行。仅内存、不落 DB/文件
+ *    → 不跨会话、不跨重启。
+ */
+export type ApprovalDecision = "deny" | "allow_once" | "allow_always";
+
+/**
  * `agent_session_lifecycle` 的 payload：会话生命周期信号，与三条 run 通道并列、
  * 独立——这些不是 run 事件，不进 `agent_stream_event` reducer，故不影响 closed-once。
  * 后端 `map_session_event` 把 coding-agent 的 `AgentSessionEvent::CompactionStart`/
