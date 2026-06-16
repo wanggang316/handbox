@@ -610,3 +610,10 @@ pre.code-block--compact {
 [data-theme="dark"] .favorite-highlight {
   background-color: color-mix(in oklch, var(--color-warning) 30%, transparent);
 }
+
+/* Provider logos (models.dev) ship as monochrome black SVGs loaded via <img>,
+   so their `currentColor` can't inherit our theme. In dark mode they'd render
+   black-on-black; flip them to white so they stay legible. */
+[data-theme="dark"] img[src*="models.dev/logos"] {
+  filter: brightness(0) invert(1);
+}
