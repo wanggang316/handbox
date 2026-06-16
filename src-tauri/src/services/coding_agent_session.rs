@@ -998,4 +998,358 @@ mod tests {
             "grep without `pattern` must feed back the missing-parameter error"
         );
     }
+
+    // -----------------------------------------------------------------
+    // Dangerous-tool OBSERVABLE behavior (M2, post-allow) — VAL-CATOOLS-018..024,
+    // 026.
+    //
+    // Once the approval gate Continues a dangerous tool (write/edit/bash), the
+    // host invokes the genuine coding-agent tool body. These tests LOCK that
+    // observable behavior — the exact response text, on-disk effect, atomicity,
+    // truncation, sanitization, and exit-code/timeout markers — against the
+    // built-in tools `create_default_tools` registers, so a HandBox embedding
+    // (or an upstream bump) that quietly changed any of these contracts fails
+    // here. We never re-implement the tools; we pin what the registered body
+    // does. The invoke pattern is the same `builtin_tool` + `invoke_tool` used
+    // by the read-only and approval-effect tests above.
+    //
+    // bash tests use only harmless commands (echo / exit N / seq / printf /
+    // sleep+small timeout) against a tempdir cwd — never rm, never a system
+    // path, never the network.
+    //
+    // NOTE on "error vs completed" (VAL-CATOOLS-021): at THIS layer a tool body
+    // returns `hand_agent::types::ToolResult`, which carries NO `is_error`
+    // flag — `ToolResult::text` and `ToolResult::error` are shape-identical
+    // here, and the agent loop decides the error marker downstream. The bash
+    // body routes a non-zero EXIT into `ToolResult::text` (the success-shaped
+    // "completed" result) and only an executor FAILURE (spawn/wait error) into
+    // `ToolResult::error` ("Bash execution failed: .."). So we lock the
+    // completed state by asserting the result carries the `[Exit code: N]`
+    // marker AND is NOT the `Bash execution failed` error-shaped text.
+
+    /// VAL-CATOOLS-018 (single edit) — a single-edit `edit` returns a unified
+    /// diff (the `--- a/`, `+++ b/`, and `-old`/`+new` lines) and lands the
+    /// change on disk.
+    #[tokio::test]
+    async fn edit_single_edit_returns_unified_diff() {
+        let cwd = TempDir::new().unwrap();
+        let file = cwd.path().join("single.txt");
+        std::fs::write(&file, "hello world\n").unwrap();
+
+        let tool = builtin_tool(cwd.path(), "edit");
+        let result = invoke_tool(
+            &tool,
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "old_string": "world",
+                "new_string": "rust"
+            }),
+        )
+        .await;
+        let text = result_text(&result);
+
+        // Unified-diff structure: file headers plus the -/+ hunk lines.
+        assert!(
+            text.contains("--- a/") && text.contains("+++ b/"),
+            "single edit must return a unified diff with file headers, got: {text}"
+        );
+        assert!(
+            text.contains("-hello world") && text.contains("+hello rust"),
+            "diff must show the removed and added lines, got: {text}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello rust\n");
+    }
+
+    /// VAL-CATOOLS-018 (multi edit) — a multi-edit `edits: [..]` batch returns
+    /// the unified diff PLUS a `Successfully replaced N block(s)` count summary.
+    #[tokio::test]
+    async fn edit_multi_edit_returns_diff_and_block_count() {
+        let cwd = TempDir::new().unwrap();
+        let file = cwd.path().join("multi.txt");
+        std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
+
+        let tool = builtin_tool(cwd.path(), "edit");
+        let result = invoke_tool(
+            &tool,
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "edits": [
+                    { "oldText": "alpha", "newText": "ALPHA" },
+                    { "oldText": "gamma", "newText": "GAMMA" }
+                ]
+            }),
+        )
+        .await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("Successfully replaced 2 block(s)"),
+            "multi edit must report the block count, got: {text}"
+        );
+        // Still a unified diff covering every change.
+        assert!(
+            text.contains("--- a/") && text.contains("+++ b/"),
+            "multi edit must include the unified diff, got: {text}"
+        );
+        assert!(text.contains("-alpha") && text.contains("+ALPHA"));
+        assert!(text.contains("-gamma") && text.contains("+GAMMA"));
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "ALPHA\nbeta\nGAMMA\n"
+        );
+    }
+
+    /// VAL-CATOOLS-019 — multi-edit is ATOMIC: when one entry's `oldText` is
+    /// absent, the whole batch fails and the file is byte-for-byte unchanged
+    /// (no partial application of the entries that WOULD have matched).
+    #[tokio::test]
+    async fn edit_multi_edit_atomic_rolls_back_on_missing_entry() {
+        let cwd = TempDir::new().unwrap();
+        let file = cwd.path().join("rollback.txt");
+        let original = "alpha\nbeta\n";
+        std::fs::write(&file, original).unwrap();
+
+        let tool = builtin_tool(cwd.path(), "edit");
+        let result = invoke_tool(
+            &tool,
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "edits": [
+                    { "oldText": "alpha", "newText": "ALPHA" },
+                    { "oldText": "NEVER-EXISTS-zzz", "newText": "X" }
+                ]
+            }),
+        )
+        .await;
+        let text = result_text(&result);
+
+        // The card fails: a per-entry miss error, NOT a success summary.
+        assert!(
+            text.contains("Could not find the exact text"),
+            "a missing entry must surface a per-edit miss error, got: {text}"
+        );
+        assert!(
+            !text.contains("Successfully replaced"),
+            "a failed atomic batch must not report any replacement, got: {text}"
+        );
+        // File byte-for-byte unchanged — the first (matching) entry must NOT
+        // have landed.
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            original,
+            "atomic rollback: file content must equal the pre-call snapshot"
+        );
+    }
+
+    /// VAL-CATOOLS-020 — a single-edit `old_string` that matches MORE than once
+    /// without `replace_all` is ambiguous: the edit errors and the file is
+    /// unchanged (it never silently picks one occurrence).
+    #[tokio::test]
+    async fn edit_ambiguous_old_string_errors_without_changing_file() {
+        let cwd = TempDir::new().unwrap();
+        let file = cwd.path().join("ambiguous.txt");
+        let original = "dup\nmiddle\ndup\n";
+        std::fs::write(&file, original).unwrap();
+
+        let tool = builtin_tool(cwd.path(), "edit");
+        let result = invoke_tool(
+            &tool,
+            json!({
+                "file_path": file.to_str().unwrap(),
+                "old_string": "dup",
+                "new_string": "CHANGED"
+            }),
+        )
+        .await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("found 2 times"),
+            "an ambiguous old_string must surface a multi-match error, got: {text}"
+        );
+        // File untouched — neither occurrence was replaced.
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            original,
+            "an ambiguous edit must leave the file unchanged"
+        );
+    }
+
+    /// VAL-CATOOLS-021 — `bash` with a non-zero exit code is a COMPLETED card,
+    /// not an errored one: the response carries the `[Exit code: N]` marker and
+    /// rides the success-shaped text result (NOT the `Bash execution failed`
+    /// executor-error path — see the module NOTE above).
+    #[tokio::test]
+    async fn bash_nonzero_exit_marks_exit_code_and_completes() {
+        let cwd = TempDir::new().unwrap();
+        let tool = builtin_tool(cwd.path(), "bash");
+        let result = invoke_tool(&tool, json!({ "command": "exit 3" })).await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("[Exit code: 3]"),
+            "a non-zero exit must surface the exit-code marker, got: {text}"
+        );
+        // Completed, not errored: the executor-failure wording must be absent.
+        assert!(
+            !text.contains("Bash execution failed"),
+            "a non-zero exit is a completed card, not an executor error, got: {text}"
+        );
+    }
+
+    /// VAL-CATOOLS-022 — `bash` output over the 64 KB cap is truncated in the
+    /// response (`[Output truncated]`) and the full pre-truncation payload is
+    /// persisted to a tempfile on disk (`hand-bash-output-<pid>-*.txt` in the
+    /// system tempdir) that holds BOTH the head and the tail (the complete
+    /// output). The truncated in-result text is strictly shorter than the
+    /// persisted full payload.
+    #[tokio::test]
+    async fn bash_large_output_truncates_and_persists_full_to_tempfile() {
+        let cwd = TempDir::new().unwrap();
+        let tool = builtin_tool(cwd.path(), "bash");
+        // ~100 KB of numbered, padded lines — comfortably over the 64 KB cap.
+        let command = "for i in $(seq 1 2000); do \
+                       printf 'line %04d %s\\n' \"$i\" \
+                       'padding-padding-padding-padding'; done";
+        let result = invoke_tool(&tool, json!({ "command": command })).await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("[Output truncated]"),
+            "over-cap output must carry the truncation marker, got tail: {}",
+            &text[text.len().saturating_sub(120)..]
+        );
+
+        // The executor persists the full (cleaned, untruncated) payload to a
+        // tempfile named `hand-bash-output-<pid>-<nanos>.txt` in the system
+        // tempdir before clipping the in-result string. Find the newest such
+        // file produced by THIS process and assert it holds the complete output
+        // — both the HEAD (which fell off the tail-first truncation window) and
+        // the TAIL. Locating by our own pid keeps the scan from colliding with
+        // any unrelated leftover file.
+        let prefix = format!("hand-bash-output-{}-", std::process::id());
+        let persisted_path = std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".txt"))
+            })
+            .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+            .expect("a truncated bash run must persist a full-output tempfile");
+
+        let persisted = std::fs::read_to_string(&persisted_path)
+            .expect("the persisted full-output tempfile must be readable");
+        assert!(
+            persisted.contains("line 0001 "),
+            "persisted file must contain the HEAD of the output (proves it is the full payload)"
+        );
+        assert!(
+            persisted.contains("line 2000 "),
+            "persisted file must contain the TAIL of the output"
+        );
+        assert!(
+            persisted.len() > text.len(),
+            "the persisted full output must be longer than the truncated in-result text"
+        );
+
+        // The tempfile is never auto-deleted by the executor; clean up ours so
+        // the test leaves no residue in the shared system tempdir.
+        let _ = std::fs::remove_file(&persisted_path);
+    }
+
+    /// VAL-CATOOLS-023 — `bash` output containing ANSI escapes and C0 control
+    /// bytes is SANITIZED before it reaches the model: no escape residue
+    /// survives, only the visible characters remain.
+    #[tokio::test]
+    async fn bash_output_is_sanitized_of_ansi_and_control_chars() {
+        let cwd = TempDir::new().unwrap();
+        let tool = builtin_tool(cwd.path(), "bash");
+        // Emit ANSI red + BEL (0x07) + visible text + ANSI reset.
+        let result = invoke_tool(
+            &tool,
+            json!({ "command": r"printf 'pre\x1b[31m\x07mid\x1b[0mpost'" }),
+        )
+        .await;
+        let text = result_text(&result);
+
+        assert_eq!(
+            text, "premidpost",
+            "bash output must be sanitized of ANSI escapes and control bytes, got: {text:?}"
+        );
+        // No ESC (0x1B) or BEL (0x07) residue.
+        assert!(
+            !text.contains('\u{1b}') && !text.contains('\u{07}'),
+            "no escape/control residue may survive sanitization, got: {text:?}"
+        );
+    }
+
+    /// VAL-CATOOLS-024 — a `bash` command that exceeds its timeout is reported
+    /// with the `[Timed out after Ns]` marker (and is not left hanging).
+    #[tokio::test]
+    async fn bash_timeout_reports_timed_out_marker() {
+        let cwd = TempDir::new().unwrap();
+        let tool = builtin_tool(cwd.path(), "bash");
+        // `sleep 10` against a 1s timeout — harmless, and the executor kills the
+        // child on drop, so nothing lingers.
+        let result = invoke_tool(&tool, json!({ "command": "sleep 10", "timeout": 1 })).await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("[Timed out after 1s]"),
+            "a timed-out command must carry the timeout marker, got: {text}"
+        );
+    }
+
+    /// VAL-CATOOLS-026 — `write` reports `Created <path> (N lines)` for a new
+    /// file and `Updated <path> (N lines)` when overwriting, and the file holds
+    /// exactly the requested content in both cases.
+    #[tokio::test]
+    async fn write_reports_created_then_updated_and_persists_content() {
+        let cwd = TempDir::new().unwrap();
+        let target = cwd.path().join("doc.txt");
+        let tool = builtin_tool(cwd.path(), "write");
+
+        // New file → Created, with the line count.
+        let body = "line one\nline two\nline three\n";
+        let created = invoke_tool(
+            &tool,
+            json!({ "path": target.to_str().unwrap(), "content": body }),
+        )
+        .await;
+        let created_text = result_text(&created);
+        assert!(
+            created_text.contains("Created") && created_text.contains("(3 lines)"),
+            "a new write must report `Created ... (N lines)`, got: {created_text}"
+        );
+        assert!(
+            created_text.contains(&target.display().to_string()),
+            "the write report must name the target path, got: {created_text}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            body,
+            "a new write must persist the exact requested content"
+        );
+
+        // Overwriting the same path → Updated, with the NEW line count.
+        let body2 = "only one line\n";
+        let updated = invoke_tool(
+            &tool,
+            json!({ "path": target.to_str().unwrap(), "content": body2 }),
+        )
+        .await;
+        let updated_text = result_text(&updated);
+        assert!(
+            updated_text.contains("Updated") && updated_text.contains("(1 lines)"),
+            "overwriting an existing file must report `Updated ... (N lines)`, got: {updated_text}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            body2,
+            "an overwrite must replace the file with the new content"
+        );
+    }
 }

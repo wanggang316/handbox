@@ -16,14 +16,25 @@
 //!
 //! SCOPE OF THIS FEATURE
 //! ----------------------
-//! This feature enforces the boundary for ALL of the READ-ONLY path tools:
-//! `read`, `ls`, `grep`, and `find`. They share one `path` argument and one
-//! containment rule, so they ride a single sandbox table. `write`/`edit` get
-//! the same path boundary in a later milestone (M2), and `bash` is
-//! intentionally NOT path-sandboxed here (it is gated by the approval flow,
-//! not by path containment). The deny/approval surface
+//! This feature enforces the boundary for the READ-ONLY path tools
+//! (`read`, `ls`, `grep`, `find`) AND the write-side path tools
+//! (`write`, `edit`). All six are path-confined to the working directory: a
+//! mutating `write`/`edit` aimed outside the cwd is just as dangerous as an
+//! out-of-cwd read, so the sandbox is extended symmetrically to them (M2).
+//! `bash` is intentionally NOT path-sandboxed: an arbitrary shell command has
+//! no single path argument to confine (it can name any path inside the command
+//! string, pipe, redirect, or `cd` away), so containment is meaningless there —
+//! it is gated by the approval flow instead. The deny/approval surface
 //! (m1-dangerous-deny-stub, M2 approval) layers ON TOP of this extension —
 //! see [`SandboxExtension`] for the extension points designed for that reuse.
+//!
+//! PATH-ARGUMENT KEYS
+//! ------------------
+//! The confined tools do NOT all name their path argument the same way:
+//! `read`/`ls`/`grep`/`find`/`write` use `path`, but `edit` uses `file_path`
+//! (verified against the coding-agent tool schemas). The sandbox therefore
+//! probes a tool-specific set of candidate keys (see [`path_arg_keys`]) rather
+//! than a single hard-coded `"path"`.
 //!
 //! HOW THE BOUNDARY IS JUDGED
 //! --------------------------
@@ -70,21 +81,43 @@ const DANGEROUS_DENY_EXTENSION_NAME: &str = "handbox-dangerous-deny";
 /// for the tool-result message, and we mirror it here for the hook reason.
 const OUT_OF_SANDBOX_REASON: &str = "blocked: path is outside the working directory";
 
-/// The read-only tools whose `path` argument this feature confines to the
-/// working directory. `write`/`edit` are added by the M2 boundary; `bash` is
-/// never path-sandboxed (it is approval-gated instead).
+/// The tools whose path argument this feature confines to the working
+/// directory: the read-only set (`read`/`ls`/`grep`/`find`) plus the write-side
+/// mutating tools (`write`/`edit`). `bash` is never path-sandboxed (it is
+/// approval-gated instead — an arbitrary shell command has no single path
+/// argument to confine; see the module-level SCOPE note).
 ///
-/// All four declare the SAME string `path` parameter resolved relative to the
-/// cwd (verified against the coding-agent tool schemas: read/ls, and
-/// grep/find's `path` arg — "Directory or file to search in (default: cwd)").
-/// `ls`/`grep`/`find` may omit `path` (they then operate on the cwd itself,
-/// which is in bounds), so a missing/non-string `path` is treated as in-bounds
-/// rather than a violation. `grep`/`find` are confined here because the
-/// upstream tools apply NO containment of their own: an absolute `path` is used
-/// as-is and a leading `~` would expand to `$HOME`, letting an unsandboxed
-/// `grep`/`find` read file contents / list filenames anywhere on disk — the
-/// exact escape this boundary forbids for `read`/`ls`.
-const PATH_SANDBOXED_TOOLS: &[&str] = &["read", "ls", "grep", "find"];
+/// The path-argument KEY is not uniform across these tools: most use `path`,
+/// but `edit` uses `file_path` (verified against the coding-agent tool schemas;
+/// see [`path_arg_keys`]). The containment rule is otherwise identical for all
+/// of them — resolve the path through [`resolve_in_sandbox`] and `Cancel` an
+/// escape. A confined tool that legitimately omits its path (`ls`/`grep`/`find`
+/// over the cwd) is treated as in-bounds rather than a violation; a `write`
+/// without `path` or an `edit` without `file_path` is a parameter error the
+/// tool reports itself. `grep`/`find` are confined because the upstream tools
+/// apply NO containment of their own: an absolute path is used as-is and a
+/// leading `~` would expand to `$HOME`, letting an unsandboxed call read file
+/// contents / list filenames anywhere on disk; `write`/`edit` are confined for
+/// the symmetric reason on the WRITE side — an out-of-cwd `write`/`edit` would
+/// mutate files anywhere on disk.
+const PATH_SANDBOXED_TOOLS: &[&str] = &["read", "ls", "grep", "find", "write", "edit"];
+
+/// The candidate path-argument key(s) to inspect for a confined `tool_name`.
+///
+/// Most confined tools name their target `path`; `edit` names it `file_path`.
+/// Returned as a slice so the resolver can try each key in turn (the first key
+/// that is present as a string is the one judged). Centralising the
+/// tool→key(s) mapping here keeps [`SandboxExtension::decide`] uniform: it never
+/// hard-codes a key name, so adding a tool with a differently-named path arg is
+/// a one-line change here.
+fn path_arg_keys(tool_name: &str) -> &'static [&'static str] {
+    match tool_name {
+        // `edit`'s schema names the target `file_path` (not `path`).
+        "edit" => &["file_path"],
+        // read/ls/grep/find/write all name it `path`.
+        _ => &["path"],
+    }
+}
 
 /// The dangerous, side-effecting tools the M1 deny stub blocks outright:
 /// `write`/`edit` mutate the filesystem and `bash` runs arbitrary subprocesses.
@@ -97,15 +130,17 @@ const PATH_SANDBOXED_TOOLS: &[&str] = &["read", "ls", "grep", "find"];
 const DANGEROUS_TOOLS: &[&str] = &["write", "edit", "bash"];
 
 /// Tier-1 extension that re-imposes the `working_dir` sandbox boundary on the
-/// coding agent's read-only file tools via the `before_tool_call` hook.
+/// coding agent's path-bearing file tools (read/ls/grep/find/write/edit) via
+/// the `before_tool_call` hook.
 ///
 /// EXTENSIBILITY (the M1 deny-stub / M2 approval hand-off point):
 /// - The extension captures the session's `working_dir` at construction, so
 ///   every hook invocation judges against a stable, known root rather than
 ///   trusting per-event context.
 /// - The "which tools are path-confined" decision is a single table
-///   ([`PATH_SANDBOXED_TOOLS`]); widening it to `write`/`edit` for M2 is a
-///   one-line change plus their (identical) path-argument extraction.
+///   ([`PATH_SANDBOXED_TOOLS`]); the per-tool path-argument key(s) live in
+///   [`path_arg_keys`], so adding a tool (or one with a differently-named path
+///   argument, as `edit`'s `file_path`) is a localized change.
 /// - The per-call decision is factored into [`SandboxExtension::decide`], a
 ///   pure-ish function over `(tool_name, arguments)` returning a
 ///   [`HookDecision`]. A deny-stub or approval extension can be registered as
@@ -128,7 +163,7 @@ impl SandboxExtension {
                 name: EXTENSION_NAME.to_string(),
                 version: "0.1.0".to_string(),
                 description: Some(
-                    "Confines read-only file tools (read/ls/grep/find) to the session working directory."
+                    "Confines path-bearing file tools (read/ls/grep/find/write/edit) to the session working directory."
                         .to_string(),
                 ),
                 capabilities: ExtensionCapabilities {
@@ -149,20 +184,26 @@ impl SandboxExtension {
     /// Pure over `(tool_name, arguments)` + the captured `working_dir`, so it
     /// is unit-testable without a live session. Tools not in
     /// [`PATH_SANDBOXED_TOOLS`] always [`HookDecision::Continue`]. For a
-    /// confined tool, the `path` argument (when present and a string) is run
-    /// through [`resolve_in_sandbox`]: an `Err` (escape / invalid / unresolved)
-    /// becomes a generic [`HookDecision::Cancel`]; an in-bounds path or an
-    /// absent/non-string `path` (e.g. `ls`/`grep`/`find` over the cwd) is
-    /// allowed.
+    /// confined tool, its path argument — looked up under the tool-specific
+    /// key(s) from [`path_arg_keys`] (`file_path` for `edit`, `path` for the
+    /// rest), first present string wins — is run through [`resolve_in_sandbox`]:
+    /// an `Err` (escape / invalid / unresolved) becomes a generic
+    /// [`HookDecision::Cancel`]; an in-bounds path or an absent/non-string path
+    /// (e.g. `ls`/`grep`/`find` over the cwd) is allowed.
     fn decide(&self, tool_name: &str, arguments: &serde_json::Value) -> HookDecision {
         if !PATH_SANDBOXED_TOOLS.contains(&tool_name) {
             return HookDecision::Continue;
         }
 
-        // Extract the `path` argument. A missing / non-string `path` is not a
-        // boundary violation: `ls` legitimately omits it (lists the cwd), and
-        // `read` without `path` is a parameter error the tool reports itself.
-        let path = match arguments.get("path").and_then(|v| v.as_str()) {
+        // Extract the path argument under the tool's candidate key(s). A
+        // missing / non-string path is not a boundary violation: `ls`
+        // legitimately omits it (lists the cwd), and a `read`/`write` without
+        // `path` (or an `edit` without `file_path`) is a parameter error the
+        // tool reports itself.
+        let path = match path_arg_keys(tool_name)
+            .iter()
+            .find_map(|key| arguments.get(*key).and_then(|v| v.as_str()))
+        {
             Some(p) => p,
             None => return HookDecision::Continue,
         };
@@ -860,11 +901,12 @@ mod tests {
     #[tokio::test]
     async fn non_sandboxed_tool_is_always_continued() {
         let fx = fixture();
-        // `bash`/`write`/`edit` are NOT path-sandboxed here even with a
-        // path-shaped arg (the deny stub gates them instead); an unrelated
-        // tool likewise passes through untouched. `grep`/`find` are deliberately
-        // ABSENT — they ARE path-confined now, see the grep/find tests below.
-        for tool in ["bash", "write", "edit"] {
+        // `bash` is NOT path-sandboxed even with a path-shaped arg (an arbitrary
+        // shell command has no single path to confine — it is approval-gated
+        // instead); an unrelated tool likewise passes through untouched.
+        // `write`/`edit` are deliberately ABSENT here — they ARE path-confined
+        // now (M2), see the write/edit boundary tests below.
+        for tool in ["bash", "some_unrelated_tool"] {
             let decision = decide_via_hook(
                 &ext(&fx.root),
                 &fx.root,
@@ -874,7 +916,7 @@ mod tests {
             .await;
             assert!(
                 matches!(decision, HookDecision::Continue),
-                "{tool} must pass through the read/ls/grep/find path sandbox"
+                "{tool} must pass through the path sandbox"
             );
         }
     }
@@ -1021,12 +1063,200 @@ mod tests {
         assert!(matches!(decision, HookDecision::Continue));
     }
 
+    // -----------------------------------------------------------------------
+    // VAL-CATOOLS-025 — the write-side path tools (`write`/`edit`) are
+    // path-confined to the working directory, symmetric to the read-only set.
+    // An out-of-cwd target (absolute outside, `~`, or `..` traversal) is
+    // Cancelled so the tool never runs (no bytes mutated outside the sandbox);
+    // an in-bounds target Continues (it still has to clear the approval gate
+    // separately, downstream). `edit` names its target `file_path`, `write`
+    // names it `path` — both are exercised. `bash` is NOT path-sandboxed (it
+    // is approval-gated; covered by `non_sandboxed_tool_is_always_continued`).
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn write_absolute_outside_path_is_cancelled() {
+        let fx = fixture();
+        // An out-of-cwd absolute write target must be refused so the tool never
+        // mutates a file outside the sandbox.
+        let abs = fx.outside_secret.to_string_lossy().into_owned();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "write",
+            json!({ "path": abs, "content": "overwrite" }),
+        )
+        .await;
+        assert_cancel_no_leak(&decision, &fx.outside_secret);
+    }
+
+    #[tokio::test]
+    async fn write_tilde_path_is_cancelled_not_expanded() {
+        let fx = fixture();
+        // `~/...` must be REFUSED at the boundary, never expanded to $HOME —
+        // upstream `write` would expand it; the sandbox stops it first.
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "write",
+            json!({ "path": "~/clobbered.txt", "content": "x" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Cancel(_)));
+    }
+
+    #[tokio::test]
+    async fn write_dotdot_traversal_is_cancelled() {
+        let fx = fixture();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "write",
+            json!({ "path": "../secret.txt", "content": "x" }),
+        )
+        .await;
+        assert_cancel_no_leak(&decision, &fx.outside_secret);
+    }
+
+    #[tokio::test]
+    async fn write_inside_path_continues() {
+        let fx = fixture();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "write",
+            json!({ "path": "new_inside.txt", "content": "ok" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Continue));
+    }
+
+    #[tokio::test]
+    async fn edit_absolute_outside_file_path_is_cancelled() {
+        let fx = fixture();
+        // `edit` names its target `file_path` (not `path`). An out-of-cwd
+        // absolute target must be refused so the tool never edits a file
+        // outside the sandbox.
+        let abs = fx.outside_secret.to_string_lossy().into_owned();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "edit",
+            json!({ "file_path": abs, "old_string": "a", "new_string": "b" }),
+        )
+        .await;
+        assert_cancel_no_leak(&decision, &fx.outside_secret);
+    }
+
+    #[tokio::test]
+    async fn edit_tilde_file_path_is_cancelled_not_expanded() {
+        let fx = fixture();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "edit",
+            json!({ "file_path": "~/clobbered.txt", "old_string": "a", "new_string": "b" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Cancel(_)));
+    }
+
+    #[tokio::test]
+    async fn edit_dotdot_traversal_file_path_is_cancelled() {
+        let fx = fixture();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "edit",
+            json!({ "file_path": "../secret.txt", "old_string": "a", "new_string": "b" }),
+        )
+        .await;
+        assert_cancel_no_leak(&decision, &fx.outside_secret);
+    }
+
+    #[tokio::test]
+    async fn edit_inside_file_path_continues() {
+        let fx = fixture();
+        // In-bounds `edit` clears the sandbox (it still faces the approval gate
+        // downstream). Uses `file_path`, the edit-specific key.
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "edit",
+            json!({ "file_path": "inside.txt", "old_string": "a", "new_string": "b" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Continue));
+    }
+
+    /// The sandbox keys `edit` off `file_path`, NOT `path`. A would-be escape
+    /// that puts the out-of-cwd target under a `path` key (the wrong key for
+    /// `edit`) while leaving `file_path` in-bounds must NOT smuggle the escape
+    /// through — the resolver judges the `file_path` value, so this Continues;
+    /// and conversely an out-of-cwd `file_path` is caught even if a benign
+    /// `path` is also present. This pins that `edit` reads the right key.
+    #[tokio::test]
+    async fn edit_judges_file_path_key_not_path_key() {
+        let fx = fixture();
+        let outside_abs = fx.outside_secret.to_string_lossy().into_owned();
+
+        // In-bounds file_path + out-of-cwd `path` (wrong key): judged on
+        // file_path → Continue. A regression that read `path` would Cancel here.
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "edit",
+            json!({ "file_path": "inside.txt", "path": outside_abs.clone() }),
+        )
+        .await;
+        assert!(
+            matches!(decision, HookDecision::Continue),
+            "edit must judge `file_path`, ignoring a stray `path` key"
+        );
+
+        // Out-of-cwd file_path is caught regardless of a benign `path`.
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "edit",
+            json!({ "file_path": outside_abs, "path": "inside.txt" }),
+        )
+        .await;
+        assert!(
+            matches!(decision, HookDecision::Cancel(_)),
+            "edit must Cancel an out-of-cwd `file_path` even with a benign `path` present"
+        );
+    }
+
     #[test]
-    fn path_sandboxed_tools_cover_all_read_only_tools() {
-        // The four read-only path tools share one containment rule and ride one
+    fn path_sandboxed_tools_cover_all_path_bearing_tools() {
+        // The six path-bearing tools share one containment rule and ride one
         // table — pin the exact set so a regression (e.g. dropping grep/find,
-        // the original Critical escape) fails loudly here.
-        assert_eq!(PATH_SANDBOXED_TOOLS, &["read", "ls", "grep", "find"]);
+        // the original Critical escape, or dropping the M2 write/edit boundary)
+        // fails loudly here. `bash` is intentionally NOT in the set.
+        assert_eq!(
+            PATH_SANDBOXED_TOOLS,
+            &["read", "ls", "grep", "find", "write", "edit"]
+        );
+        assert!(
+            !PATH_SANDBOXED_TOOLS.contains(&"bash"),
+            "bash must NOT be path-sandboxed — it is approval-gated, not path-confined"
+        );
+    }
+
+    #[test]
+    fn path_arg_keys_map_each_confined_tool_to_its_schema_key() {
+        // `edit`'s schema names the target `file_path`; the others use `path`.
+        // Pin the mapping so a sandbox that only checked `"path"` (and so let an
+        // out-of-cwd `edit` through under `file_path`) fails loudly here.
+        assert_eq!(path_arg_keys("edit"), &["file_path"]);
+        for tool in ["read", "ls", "grep", "find", "write"] {
+            assert_eq!(
+                path_arg_keys(tool),
+                &["path"],
+                "{tool} names its path argument `path`"
+            );
+        }
     }
 
     #[test]
@@ -1705,7 +1935,22 @@ mod tests {
         let (emitter, recorded) = recording_emitter();
         let ext = PermissionExtension::new(Some(emitter));
 
-        for tool in PATH_SANDBOXED_TOOLS {
+        // The read-only subset of the path-sandboxed tools — i.e. the ones that
+        // are NOT in DANGEROUS_TOOLS. (Since M2 widened PATH_SANDBOXED_TOOLS to
+        // include write/edit, iterating the whole table here would hit the
+        // dangerous tools and park on an approval await; the approval contract
+        // for THOSE is covered by the dangerous-tool tests, not this one.)
+        let read_only: Vec<&&str> = PATH_SANDBOXED_TOOLS
+            .iter()
+            .filter(|t| !DANGEROUS_TOOLS.contains(t))
+            .collect();
+        assert_eq!(
+            read_only,
+            vec![&"read", &"ls", &"grep", &"find"],
+            "the read-only subset must be exactly read/ls/grep/find"
+        );
+
+        for tool in read_only {
             let decision = ext
                 .on_before_tool_call(
                     &cx(Path::new("/tmp")),
