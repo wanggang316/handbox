@@ -1081,6 +1081,68 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // VAL-CAPERM-006 — the denial reason fed back to the model must explicitly
+    // read as "被拒/denied" (the USER refused), distinct from "execution
+    // failed / errored". This is a CONTENT contract on the exact string that
+    // rides the deny chain all the way to the model:
+    //   deny_reason(tool)
+    //     -> HookDecision::Cancel(reason)                (request_approval)
+    //     -> dispatch_before_tool_call propagates the first Cancel verbatim
+    //     -> BeforeToolCallResult { block: true, reason: Some(reason) }
+    //                                                   (make_before_tool_call_hook)
+    //     -> ToolResult::error(reason)                  (agent_loop prepare)
+    // Nothing on that chain rewrites or truncates `reason`, so pinning the
+    // text here pins what the model actually receives. The deny vocabulary is
+    // deliberately NOT generic-failure wording ("failed"/"error"/"出错") so the
+    // model words its reply as a refusal, not a malfunction.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn deny_reason_speaks_refusal_not_failure() {
+        for tool in DANGEROUS_TOOLS {
+            let reason = deny_reason(tool);
+
+            // Carries BOTH the Chinese "被拒" semantics ("拒绝") and the English
+            // "denied" marker, and names the offending tool — the contract the
+            // model leans on to say "the action was refused".
+            assert!(
+                reason.contains("拒绝"),
+                "{tool} deny reason must carry the Chinese refusal semantics, got: {reason:?}"
+            );
+            assert!(
+                reason.contains("denied"),
+                "{tool} deny reason must carry the English denied marker, got: {reason:?}"
+            );
+            assert!(
+                reason.contains(tool),
+                "{tool} deny reason must name the refused tool, got: {reason:?}"
+            );
+
+            // Distinct from generic execution-failure wording: a refusal is not
+            // an error/crash. If this ever regresses to "failed to run {tool}"
+            // the model would mis-report a malfunction instead of a refusal.
+            for failure_word in ["failed", "error", "出错", "失败"] {
+                assert!(
+                    !reason.contains(failure_word),
+                    "{tool} deny reason must read as a refusal, not a failure \
+                     (contained {failure_word:?}): {reason:?}"
+                );
+            }
+        }
+    }
+
+    /// The exact `deny_reason` text is the verbatim contract the deny chain
+    /// carries to the model (see VAL-CAPERM-006 block above). Pin it so a change
+    /// to the user-facing wording is a deliberate, reviewed edit — and document
+    /// the precise string the GUI validator should expect in the model's
+    /// fed-back tool result.
+    #[test]
+    fn deny_reason_exact_text_is_the_model_facing_contract() {
+        assert_eq!(deny_reason("write"), "用户拒绝了 write（denied）");
+        assert_eq!(deny_reason("bash"), "用户拒绝了 bash（denied）");
+    }
+
     /// With NO emitter wired (no approval UI — a unit test / headless build) a
     /// dangerous tool is denied outright: the extension fails CLOSED, never
     /// awaits, never runs the tool (the M1 safety posture preserved). No request
