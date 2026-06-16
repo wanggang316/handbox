@@ -118,6 +118,12 @@ pub fn session_path(base_dir: &Path, cwd: &Path, session_id: &str) -> PathBuf {
 ///
 /// Idempotent: an already-existing file is left untouched (so a second turn
 /// appends to the first turn's transcript rather than clobbering it).
+///
+/// The header write is ATOMIC (temp-file + rename, see [`write_file_atomic`]):
+/// a crash or write failure mid-seed never leaves a half-written `<id>.jsonl`
+/// behind — the file either exists complete (with its one header line) or does
+/// not exist at all, never as a truncated / header-less ghost
+/// (VAL-CASESS-020 / VAL-CASESS-025).
 pub fn ensure_session_file(
     base_dir: &Path,
     cwd: &Path,
@@ -132,6 +138,15 @@ pub fn ensure_session_file(
     std::fs::create_dir_all(&dir)
         .map_err(|e| AppError::internal_error(&format!("failed to create session dir: {e}")))?;
 
+    let line = header_line(session_id, cwd, created_at)?;
+    write_file_atomic(&path, &format!("{line}\n"))?;
+    Ok(path)
+}
+
+/// Serialize the one-line `{"type":"session","data":<SessionHeader>}` header for
+/// a session. The on-disk shape is the `SessionEntry::Session` envelope; we
+/// build it via the same serde path SessionManager uses.
+fn header_line(session_id: &str, cwd: &Path, created_at: i64) -> Result<String, AppError> {
     let header = SessionHeader {
         version: CURRENT_SESSION_VERSION,
         id: session_id.to_string(),
@@ -139,16 +154,110 @@ pub fn ensure_session_file(
         cwd: cwd.to_string_lossy().to_string(),
         parent_session: None,
     };
-    // The on-disk shape is the `{"type":"session","data":{..}}` envelope the
-    // SessionEntry::Session variant serializes to. We build that one line via
-    // the same serde path SessionManager uses, then write it as the file's
-    // first (and only) line.
-    let line = serde_json::to_string(&SessionEntryHeader::from(header)).map_err(|e| {
-        AppError::internal_error(&format!("failed to serialize session header: {e}"))
+    serde_json::to_string(&SessionEntryHeader::from(header))
+        .map_err(|e| AppError::internal_error(&format!("failed to serialize session header: {e}")))
+}
+
+/// Write `content` to `path` ATOMICALLY: serialize into a sibling temp file in
+/// the SAME directory, flush+sync it, then `rename` it onto the final path. The
+/// rename is atomic within a filesystem, so a reader (and a crash / power loss)
+/// only ever sees the OLD complete file or the NEW complete file — never a
+/// half-written one.
+///
+/// Why this matters here (VAL-CASESS-020 / VAL-CASESS-025): every producer of a
+/// `<id>.jsonl`'s contents (header seed, full-transcript migration rewrite) goes
+/// through this, so a write that fails partway — a full disk, a read-only dir,
+/// a kill mid-flush — leaves the disk in one of exactly two states: the prior
+/// complete file (if any) or no temp leftover. On ANY failure the temp file is
+/// removed before returning, so a crashed run never strands a `.tmp` ghost the
+/// next pass would have to reason about.
+///
+/// The temp file lives in the same directory as the target (not `/tmp`) so the
+/// `rename` stays within one filesystem (cross-device rename is not atomic and
+/// would fall back to copy+delete).
+fn write_file_atomic(path: &Path, content: &str) -> Result<(), AppError> {
+    use std::io::Write;
+
+    let dir = path.parent().ok_or_else(|| {
+        AppError::internal_error(&format!(
+            "session jsonl path has no parent directory: {}",
+            path.display()
+        ))
     })?;
-    std::fs::write(&path, format!("{line}\n"))
-        .map_err(|e| AppError::internal_error(&format!("failed to write session header: {e}")))?;
-    Ok(path)
+    // A unique sibling temp name keeps concurrent writers of DIFFERENT sessions
+    // from colliding on one temp path; the final `rename` is the only step that
+    // touches the real file name.
+    let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+
+    // Scope the file handle so it is closed before the rename; on every error
+    // path below we remove the temp file so no partial ghost is left behind.
+    let write_result = (|| -> std::io::Result<()> {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(AppError::internal_error(&format!(
+            "failed to write session jsonl atomically: {e}"
+        )));
+    }
+
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(AppError::internal_error(&format!(
+            "failed to commit session jsonl atomically: {e}"
+        )));
+    }
+    Ok(())
+}
+
+/// Write a session's COMPLETE transcript (header + every message line) to its
+/// `<id>.jsonl` in one ATOMIC step, overwriting any existing file.
+///
+/// This is the migration's full-file writer. Unlike [`append_message_at`] (which
+/// appends one line at a time and so can only ever GROW a file), this rebuilds
+/// the whole file from a known-good message set and commits it via
+/// [`write_file_atomic`]. That is what makes the migration crash-convergent
+/// (VAL-CASESS-025): a session whose `<id>.jsonl` is half-written, header-less,
+/// or has the wrong message count can be REWRITTEN to a complete file in a
+/// single rename, with no window in which a truncated official file is visible.
+///
+/// Each entry stamps the message's own historical `timestamp` (the SQLite
+/// per-row `created_at`), NOT the wall clock — preserving the cross-session
+/// activity ordering exactly as [`append_message_at`] does (VAL-CASESS-012).
+/// The header stamps `created_at` (the session's SQLite creation time), keeping
+/// `SessionInfo.timestamp == createdAt`.
+pub fn write_transcript_atomic(
+    base_dir: &Path,
+    cwd: &Path,
+    session_id: &str,
+    created_at: i64,
+    messages: &[(Message, i64)],
+) -> Result<(), AppError> {
+    let dir = session_dir(base_dir, cwd);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::internal_error(&format!("failed to create session dir: {e}")))?;
+    let path = dir.join(format!("{session_id}.jsonl"));
+
+    let mut content = String::new();
+    content.push_str(&header_line(session_id, cwd, created_at)?);
+    content.push('\n');
+    for (message, timestamp) in messages {
+        let entry = MessageEntryLine::Message(MessageEntryData {
+            id: uuid::Uuid::new_v4().to_string(),
+            message,
+            timestamp: *timestamp,
+        });
+        let line = serde_json::to_string(&entry).map_err(|e| {
+            AppError::internal_error(&format!("failed to serialize migrated message entry: {e}"))
+        })?;
+        content.push_str(&line);
+        content.push('\n');
+    }
+
+    write_file_atomic(&path, &content)
 }
 
 /// A `{"type":"session","data":<SessionHeader>}` envelope, matching the
@@ -860,5 +969,285 @@ mod tests {
         let cwd = TempDir::new().unwrap();
         delete_session_file(base.path(), cwd.path(), "never-created")
             .expect("deleting a session with no JSONL file must be a clean no-op");
+    }
+
+    /// VAL-CASESS-016: a `<id>.jsonl` whose body interleaves a line of garbage
+    /// between valid message lines reads back as the valid messages ONLY — the
+    /// malformed line is silently skipped by the upstream `parse_session_entries`
+    /// (it is not parsed as a message and not surfaced). `load_transcript` returns
+    /// the surviving messages in order; `session_activity` reports the surviving
+    /// count and the MAX of the surviving message timestamps as the activity key —
+    /// the bad line counts neither as 0 nor as "newest".
+    #[test]
+    fn malformed_jsonl_line_is_skipped_on_read_without_polluting_activity() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-garbage-line";
+
+        // Seed a real header, then build the body by hand so we can inject a
+        // garbage line between two valid messages with KNOWN timestamps. The
+        // valid messages carry historical timestamps; the bad line, if it leaked
+        // into the activity key, would either zero it out or (as junk) be ignored
+        // — we assert the key equals exactly the MAX of the two valid timestamps.
+        let early_ts: i64 = 1_600_000_000_000;
+        let late_ts: i64 = 1_650_000_000_000;
+        append_message_at(
+            base.path(),
+            cwd.path(),
+            id,
+            TEST_CREATED_AT,
+            &user_msg("first valid"),
+            early_ts,
+        )
+        .unwrap();
+
+        // Inject a line of pure garbage directly after the first message.
+        {
+            use std::io::Write;
+            let path = session_path(base.path(), cwd.path(), id);
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            writeln!(f, "this is not json at all {{").unwrap();
+        }
+
+        append_message_at(
+            base.path(),
+            cwd.path(),
+            id,
+            TEST_CREATED_AT,
+            &user_msg("second valid"),
+            late_ts,
+        )
+        .unwrap();
+
+        // The transcript reads back as the two VALID messages only — the garbage
+        // line never materializes as a row.
+        let rows = load_transcript(base.path(), cwd.path(), id)
+            .unwrap()
+            .expect("a seeded session has a transcript");
+        assert_eq!(
+            rows.len(),
+            2,
+            "malformed line must be skipped, leaving exactly the two valid messages"
+        );
+        assert!(rows.iter().all(|r| r.role == "user"));
+
+        // The activity key is the MAX of the surviving message timestamps — the
+        // bad line is neither treated as 0 (would zero the key) nor as latest.
+        let activity = session_activity(base.path(), cwd.path(), id)
+            .unwrap()
+            .expect("file exists");
+        assert_eq!(
+            activity.message_count, 2,
+            "count reflects only the valid messages"
+        );
+        assert_eq!(
+            activity.last_message_at,
+            Some(late_ts),
+            "activity key must equal the max VALID message timestamp, not the bad line"
+        );
+    }
+
+    /// VAL-CASESS-018: a `<id>.jsonl` whose FIRST line is not a valid session
+    /// header (a corrupt / header-less file) reports `session_activity == None` —
+    /// the upstream `build_session_info` returns `Ok(None)` for a header-less
+    /// file, which this maps to "no JSONL activity". The overlay then keeps the
+    /// SQLite values rather than rendering a blank/empty activity row.
+    #[test]
+    fn bad_header_jsonl_reports_no_activity_not_a_blank_row() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-bad-header";
+
+        // Hand-write a file whose first line is junk (not a session header),
+        // followed by what would otherwise be a valid-looking line.
+        let dir = session_dir(base.path(), cwd.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{id}.jsonl"));
+        std::fs::write(&path, "not a header line\n{\"type\":\"label\"}\n").unwrap();
+        assert!(path.exists(), "precondition: the bad-header file exists");
+
+        assert!(
+            session_activity(base.path(), cwd.path(), id)
+                .unwrap()
+                .is_none(),
+            "a header-less / corrupt JSONL must report no activity (not a blank row)"
+        );
+    }
+
+    /// VAL-CASESS-020 / VAL-CASESS-025 (atomic-write leg): `write_transcript_atomic`
+    /// writes a session's full transcript as ONE complete file, and reading it
+    /// back through the upstream parser restores exactly the messages written, in
+    /// order, with the activity key equal to the max stamped timestamp. This is
+    /// the all-or-nothing rewrite the migration relies on — there is no
+    /// observable half-written state.
+    #[test]
+    fn write_transcript_atomic_writes_a_complete_readable_file() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-atomic";
+
+        let messages = vec![
+            (user_msg("one"), 1_600_000_000_000_i64),
+            (user_msg("two"), 1_600_000_001_000_i64),
+            (user_msg("three"), 1_600_000_002_000_i64),
+        ];
+        write_transcript_atomic(base.path(), cwd.path(), id, TEST_CREATED_AT, &messages)
+            .expect("atomic transcript write");
+
+        let rows = load_transcript(base.path(), cwd.path(), id)
+            .unwrap()
+            .expect("the atomically-written file is a valid transcript");
+        assert_eq!(rows.len(), 3, "all three messages present");
+
+        let activity = session_activity(base.path(), cwd.path(), id)
+            .unwrap()
+            .expect("file exists");
+        assert_eq!(activity.message_count, 3);
+        assert_eq!(
+            activity.last_message_at,
+            Some(1_600_000_002_000),
+            "activity key is the max stamped timestamp"
+        );
+
+        // The header carries created_at, not the wall clock.
+        let info = build_session_info(&session_path(base.path(), cwd.path(), id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(info.timestamp, TEST_CREATED_AT);
+
+        // Exactly one official file on disk, no stray .tmp leftover.
+        let dir = session_dir(base.path(), cwd.path());
+        let stray: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(stray.is_empty(), "no temp ghost must remain: {stray:?}");
+    }
+
+    /// VAL-CASESS-025 (rewrite leg): `write_transcript_atomic` OVERWRITES an
+    /// existing (here: half-written / wrong-count) file with the complete one,
+    /// rather than appending to it — so a re-run that detects an incomplete file
+    /// converges to exactly one complete transcript.
+    #[test]
+    fn write_transcript_atomic_overwrites_a_half_written_file() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-rewrite";
+
+        // Plant a half-written file: a valid header but only ONE message, as if a
+        // prior migration was killed after the first append.
+        let dir = session_dir(base.path(), cwd.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{id}.jsonl"));
+        let half = format!(
+            "{}\n{}\n",
+            header_line(id, cwd.path(), TEST_CREATED_AT).unwrap(),
+            serde_json::to_string(&MessageEntryLine::Message(MessageEntryData {
+                id: "x".into(),
+                message: &user_msg("only the first"),
+                timestamp: 1_600_000_000_000,
+            }))
+            .unwrap(),
+        );
+        std::fs::write(&path, half).unwrap();
+        assert_eq!(
+            load_transcript(base.path(), cwd.path(), id)
+                .unwrap()
+                .unwrap()
+                .len(),
+            1,
+            "precondition: the planted file has one message"
+        );
+
+        // Rewrite with the COMPLETE three-message transcript.
+        let messages = vec![
+            (user_msg("a"), 1_600_000_000_000_i64),
+            (user_msg("b"), 1_600_000_001_000_i64),
+            (user_msg("c"), 1_600_000_002_000_i64),
+        ];
+        write_transcript_atomic(base.path(), cwd.path(), id, TEST_CREATED_AT, &messages)
+            .expect("rewrite ok");
+
+        let rows = load_transcript(base.path(), cwd.path(), id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            3,
+            "the half-written file must be replaced, not appended to"
+        );
+    }
+
+    /// VAL-CASESS-020: when the session directory is read-only so the JSONL write
+    /// genuinely cannot complete, `write_transcript_atomic` returns a structured
+    /// `AppError` AND leaves NO file behind — neither a half-written official
+    /// `<id>.jsonl` nor a stray `.tmp` ghost. The atomic temp-file + rename design
+    /// means the failure happens on the temp file (which is then removed) before
+    /// any rename onto the real path could occur.
+    ///
+    /// `#[cfg(unix)]` + a non-root guard: removing the write bit has no effect for
+    /// root, so the test self-skips when it cannot actually make the dir
+    /// read-only (CI may run as root).
+    #[cfg(unix)]
+    #[test]
+    fn write_transcript_atomic_on_readonly_dir_errors_and_leaves_no_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-readonly";
+
+        // Pre-create the session dir so the write target's PARENT exists, then
+        // strip its write permission so creating the temp file inside it fails.
+        let dir = session_dir(base.path(), cwd.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut perms = std::fs::metadata(&dir).unwrap().permissions();
+        perms.set_mode(0o555); // r-xr-xr-x: readable + traversable, NOT writable
+        std::fs::set_permissions(&dir, perms).unwrap();
+
+        // Self-skip when not actually read-only (running as root).
+        if std::fs::File::create(dir.join(".writable-probe")).is_ok() {
+            let _ = std::fs::remove_file(dir.join(".writable-probe"));
+            // Restore perms so the TempDir can be cleaned up, then skip.
+            let mut restore = std::fs::metadata(&dir).unwrap().permissions();
+            restore.set_mode(0o755);
+            std::fs::set_permissions(&dir, restore).unwrap();
+            eprintln!("skipping read-only test: directory is still writable (running as root?)");
+            return;
+        }
+
+        let messages = vec![(user_msg("never lands"), 1_600_000_000_000_i64)];
+        let result =
+            write_transcript_atomic(base.path(), cwd.path(), id, TEST_CREATED_AT, &messages);
+
+        // ① A structured AppError is returned (not a panic, not a silent Ok).
+        let err = result.expect_err("a write into a read-only dir must fail");
+        assert_eq!(err.code, "INTERNAL_ERROR");
+        assert!(err.hint.is_some(), "AppError carries a hint");
+
+        // ② No official file and no temp ghost were left behind. Restore write
+        // permission first so we can read the directory listing.
+        let mut restore = std::fs::metadata(&dir).unwrap().permissions();
+        restore.set_mode(0o755);
+        std::fs::set_permissions(&dir, restore).unwrap();
+
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !leftovers.iter().any(|n| n.ends_with(".jsonl")),
+            "no half-written official .jsonl must remain: {leftovers:?}"
+        );
+        assert!(
+            !leftovers.iter().any(|n| n.ends_with(".tmp")),
+            "no .tmp ghost must remain: {leftovers:?}"
+        );
     }
 }

@@ -1175,6 +1175,67 @@ mod tests {
         assert_eq!(seqs, expected);
     }
 
+    /// VAL-CASESS-019 (backend leg): a session whose `project_id` points at a
+    /// project that no longer exists (a DANGLING reference) still appears in
+    /// `list_sessions`. The list query is a plain `SELECT ... FROM agent_sessions`
+    /// with NO join onto `agent_projects`, so a dangling project_id can never
+    /// filter the session row out — the row survives and the frontend
+    /// `groupSessions` buckets it under "ungrouped". Losing the row here would
+    /// make the session vanish entirely instead of falling into the ungrouped
+    /// bucket.
+    #[tokio::test]
+    async fn test_list_sessions_keeps_session_with_dangling_project_id() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentSessionRepository::new(db_arc.clone());
+        let now = now_ms();
+
+        // Insert a session referencing a project id that has no agent_projects
+        // row. FK enforcement is turned OFF for this connection so the dangling
+        // reference can be planted directly — modelling the state left after a
+        // project row was removed out from under its sessions.
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_sessions
+                (id, name, project_id, message_count, created_at, updated_at)
+            VALUES ('dangling', 'Orphaned Session', 'project-that-was-deleted', 0, $1, $1)
+        "#,
+        )
+        .bind(now)
+        .execute(db_arc.pool())
+        .await
+        .unwrap();
+
+        // A normally-attached session alongside it, to prove the dangling one is
+        // not the only row and ordering/listing is otherwise intact.
+        let attached = sample_session(&uuid::Uuid::new_v4().to_string(), "Attached", now);
+        repo.create_session(&attached).await.unwrap();
+
+        let listed = repo.list_sessions(100, 0).await.unwrap();
+        assert_eq!(listed.len(), 2, "both sessions must be listed");
+        let dangling = listed
+            .iter()
+            .find(|s| s.id == "dangling")
+            .expect("the session with a dangling project_id must still appear in the list");
+        assert_eq!(
+            dangling.project_id,
+            Some("project-that-was-deleted".to_string()),
+            "the dangling project_id is preserved verbatim (not nulled / not filtered)"
+        );
+
+        // And get_session_by_id also returns it (no join filter there either).
+        let fetched = repo
+            .get_session_by_id(&"dangling".to_string())
+            .await
+            .unwrap()
+            .expect("a dangling-project session is still fetchable by id");
+        assert_eq!(fetched.id, "dangling");
+    }
+
     /// VAL-PERSIST-012: a row whose stored payload is malformed JSON is skipped
     /// on load; the rest of the transcript still returns (graceful degrade, no
     /// whole-batch failure / white screen).
