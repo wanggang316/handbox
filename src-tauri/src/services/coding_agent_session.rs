@@ -22,6 +22,7 @@
 //! sandboxed desktop app that state must stay inside the app's own data root.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use hand_agent::AgentTool;
 use hand_ai_model::SimpleStreamOptions;
@@ -29,6 +30,7 @@ use hand_coding_agent::tools::create_default_tools;
 use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
+use crate::services::agent_permission::SandboxExtension;
 use crate::services::chat_engine::{self, ChatOptions};
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
@@ -115,8 +117,21 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
         base_dir: Some(config.app_data_dir.clone()),
     };
 
-    AgentSession::new_with_skill_dirs(session_config, tools, None, None)
-        .map_err(|e| AppError::internal_error(&format!("failed to construct agent session: {e}")))
+    let mut session = AgentSession::new_with_skill_dirs(session_config, tools, None, None)
+        .map_err(|e| {
+            AppError::internal_error(&format!("failed to construct agent session: {e}"))
+        })?;
+
+    // Re-impose the working_dir sandbox boundary on the read-only file tools.
+    // The vendored coding agent does not confine `read`/`ls` to the cwd (it
+    // honors absolute paths and expands `~`); HandBox enforces containment from
+    // the outside via this before_tool_call extension, which Cancels any
+    // out-of-sandbox path so cwd-external content is never read out. Later
+    // milestones layer write/edit boundaries and approval gating onto the same
+    // extension chain (the host calls every registered extension in order).
+    session.register_extension(Arc::new(SandboxExtension::new(config.working_dir.clone())));
+
+    Ok(session)
 }
 
 /// Filter the full coding-agent built-in tool set down to the per-session
