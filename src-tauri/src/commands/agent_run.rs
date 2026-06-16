@@ -8,11 +8,10 @@
 // 恰好一次）、`agent_stream_error`（`{ sessionId, error }`，在 closed 之前）。
 // 前端契约（事件名 / payload 形状 / closed-once / 错误分型）保持不变。
 //
-// 旧的 `AgentRuntime` 驱动路径仍保留（`agent_run_abort` / `agent_run_steer`
-// 暂仍委托它），将在后续 milestone 退役。steer / abort 接到 coding-agent
-// session 的完整实现是下一个 feature（m1-steer-abort）：本命令在驱动一轮时已
-// 拿到 `RunDriveHandles`（cancel / steering handle），为那个 feature 预留了
-// 接线点。
+// `agent_run_abort` / `agent_run_steer` 现已切到 coding-agent 驱动路径：经
+// `coding_agent_runtime` 的进程级运行句柄注册表（`drive_agent_run` 在驱动一轮时
+// 注册、closed 时注销）翻转 cancel token / push steering 消息，对新驱动的 run 生效。
+// 旧的 `AgentRuntime` 仍保留（chat/其它路径），将在后续 milestone（M4）退役。
 //
 // 本 feature 走**纯内存**会话（`no_session = true`）：既有 HandBox transcript
 // 被 seed 进 context 以保证续聊上下文正确，但本轮新消息的 HandBox DB 持久化是
@@ -26,7 +25,7 @@ use tauri::{Emitter, Manager, State, Window};
 use crate::models::AppError;
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::{
-    drive_agent_run, AgentRunRequest, AgentRuntime, AgentSessionService, CodingRunSink,
+    abort_run, drive_agent_run, steer_run, AgentRunRequest, AgentSessionService, CodingRunSink,
     ProviderService,
 };
 use crate::storage::types::UUID;
@@ -192,33 +191,31 @@ async fn assemble_and_drive(
 
 /// 中止某个 Agent 会话的活跃 run（若有）。
 ///
-/// 目前仍委托旧的 `AgentRuntime`。把 abort 接到 coding-agent session 的
-/// cancel handle（`RunDriveHandles.cancel`）是下一个 feature（m1-steer-abort）。
+/// 经 `coding_agent_runtime` 的进程级注册表取出该会话 run 的 cancel handle
+/// （`RunDriveHandles.cancel`）并翻转 token —— 与传给 coding-agent `send_message`
+/// 的是**同一个** token，故 agent loop 在下一个 await 边界解开、合成一条
+/// `stopReason=aborted` 的终结回合，随后驱动任务在唯一的 closed emit site 发出
+/// `agent_stream_closed`（closed-once 不变量在 abort 路径同样成立）。
 ///
 /// 对未知 / 已结束的会话是**干净的 no-op**（返回 `Ok(())`，不报错）—— 前端可能
 /// 在 run 刚自然结束时竞态地调用本命令。
 #[tauri::command]
-pub async fn agent_run_abort(
-    session_id: UUID,
-    runtime: State<'_, AgentRuntime>,
-) -> Result<(), AppError> {
-    runtime.abort(&session_id).await;
+pub async fn agent_run_abort(session_id: UUID) -> Result<(), AppError> {
+    abort_run(&session_id);
     Ok(())
 }
 
 /// 把一条 steering 消息并入某个 Agent 会话**正在进行**的 run。
 ///
-/// 目前仍委托旧的 `AgentRuntime`。把 steer 接到 coding-agent session 的
-/// steering handle（`RunDriveHandles.steering`）是下一个 feature（m1-steer-abort）。
+/// 经 `coding_agent_runtime` 的进程级注册表取出该会话 run 的 steering handle
+/// （`RunDriveHandles.steering`），把 `text` 作为一条 user `Message` push 进队列；
+/// agent loop 在下一个 turn 边界经 `get_steering_messages` drain 它，使消息并入
+/// **当前轮**（不另起并发 run，也不进 follow-up 队列在本轮后自动续跑）。
 ///
 /// 空 / 纯空白 `text` 是 no-op；该会话无活跃 run 时也是**干净的 no-op**
 /// （返回 `Ok(())`，不报错）。
 #[tauri::command]
-pub async fn agent_run_steer(
-    session_id: UUID,
-    text: String,
-    runtime: State<'_, AgentRuntime>,
-) -> Result<(), AppError> {
-    runtime.steer(&session_id, text).await;
+pub async fn agent_run_steer(session_id: UUID, text: String) -> Result<(), AppError> {
+    steer_run(&session_id, text);
     Ok(())
 }

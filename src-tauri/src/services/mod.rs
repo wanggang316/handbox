@@ -33,7 +33,9 @@ pub use agent_runtime::{AgentRunRequest, AgentRuntime, RunSink};
 pub use agent_session::{AgentSessionParameter, AgentSessionService};
 pub use artifact::ArtifactService;
 pub use auth::GoogleOAuthService;
-pub use coding_agent_runtime::{drive_agent_run, CodingRunSink, RunDriveHandles};
+pub use coding_agent_runtime::{
+    abort_run, drive_agent_run, steer_run, CodingRunSink, RunDriveHandles,
+};
 pub use mcp::McpService;
 pub use message::MessageService;
 pub use model::ModelService;

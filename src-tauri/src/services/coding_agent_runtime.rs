@@ -32,15 +32,21 @@
 //! the session for the turn. The abort / steer handles
 //! ([`AgentSession::cancel_handle`] / [`AgentSession::steering_queue_handle`])
 //! are cloned out BEFORE the session is moved into the task and returned to the
-//! caller — once the session moves, it is unreachable. The full steer/abort
-//! wiring is the next feature (`m1-steer-abort`); this feature only hands those
-//! handles back so that feature has its attachment point.
+//! caller — once the session moves, it is unreachable. `drive_agent_run`
+//! registers those handles in a process-level [`run_controls`] registry keyed
+//! by `session_id` and removes the entry at the single closed emit site (so the
+//! registration lifetime exactly brackets the run). [`abort_run`] flips the
+//! cancel token through that registry; [`steer_run`] pushes a user [`Message`]
+//! onto the steering queue, which the agent loop drains at the next mid-turn
+//! boundary (so a mid-run send joins the CURRENT turn, never a follow-up).
 //!
 //! Session persistence stays in-memory for this feature (the session is built
 //! with `no_session = true`; JSONL persistence is M3).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
+use hand_ai_model::{Message, UserMessage};
 use hand_coding_agent::{AgentSession, AgentSessionEvent, CodingAgentError};
 use serde_json::{json, Value};
 use tokio::task::JoinHandle;
@@ -187,10 +193,11 @@ impl CodingRunSink {
 /// moved into the background task.
 ///
 /// `send_message` borrows the session `&mut`, so once the task owns the session
-/// it is unreachable. The next feature (`m1-steer-abort`) flips the cancel
-/// token (`abort`) and pushes onto the steering queue (`steer`) through these
-/// handles while the turn is in flight. This feature only hands them back; it
-/// does not yet wire abort / steer commands to them.
+/// it is unreachable. [`abort_run`] flips the cancel token and [`steer_run`]
+/// pushes onto the steering queue through these handles while the turn is in
+/// flight, reaching the live run via the process-level [`run_controls`]
+/// registry (`drive_agent_run` registers them on entry and removes the entry at
+/// the closed emit site).
 pub struct RunDriveHandles {
     /// Shared cancellation token — `cancel()` it to abort the in-flight turn
     /// (identical semantics to `AgentSession::abort`).
@@ -200,6 +207,100 @@ pub struct RunDriveHandles {
     pub steering: Arc<std::sync::Mutex<Vec<hand_ai_model::Message>>>,
     /// The spawned driver task. Awaiting it joins the run; dropping it detaches.
     pub task: JoinHandle<()>,
+}
+
+/// Live steer / abort controls for one driven run.
+///
+/// Holds the two shared handles cloned out of the `AgentSession` before it
+/// moved into the driver task (see [`RunDriveHandles`]). Both are
+/// `Arc<std::sync::Mutex<..>>` — the SAME `Arc`s the in-flight `send_message`
+/// wired into its cancel token and `get_steering_messages` closure — so flipping
+/// `cancel` or pushing onto `steering` here reaches the running turn directly.
+struct RunControl {
+    cancel: Arc<Mutex<hand_agent::CancellationToken>>,
+    steering: Arc<Mutex<Vec<Message>>>,
+}
+
+/// Process-level `session_id → RunControl` registry for coding-agent driven
+/// runs.
+///
+/// Companion to `commands::agent_run::active_coding_runs` (the one-run-per-
+/// session set): that set gates concurrency, this map carries the live steer /
+/// abort handles. A process-level `OnceLock<Mutex<HashMap<..>>>` is used for the
+/// same reason — the `AgentSession` is owned by the background driver task for
+/// the turn, so there is no instance-level place to hang per-run state that the
+/// stateless command handlers can reach. `drive_agent_run` inserts on entry and
+/// removes the entry at the single closed emit site, so an entry exists for
+/// exactly the run's lifetime. [`steer_run`] / [`abort_run`] look the run up
+/// here; an absent entry (no active run) is a clean no-op.
+fn run_controls() -> &'static Mutex<HashMap<String, RunControl>> {
+    static CONTROLS: OnceLock<Mutex<HashMap<String, RunControl>>> = OnceLock::new();
+    CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Inject `text` as a user [`Message`] into the session's IN-FLIGHT turn.
+///
+/// Mirrors the legacy `AgentRuntime::steer` contract:
+/// - empty / whitespace-only `text` is a no-op — nothing is enqueued;
+/// - a session with no active run in the registry is a CLEAN no-op (the front
+///   end may race a steer against a run that just ended naturally; returning an
+///   error would turn that benign race into noise);
+/// - otherwise the message is pushed onto the run's steering queue, which the
+///   agent loop drains at the next mid-turn boundary via `get_steering_messages`
+///   — so it joins the CURRENT turn as a user message and never spawns a second
+///   concurrent run. The follow-up queue is deliberately NOT touched, so a
+///   mid-run send is never auto-continued after the turn ends (VAL-CARUN-021).
+pub fn steer_run(session_id: &str, text: String) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let controls = run_controls().lock().unwrap();
+    if let Some(control) = controls.get(session_id) {
+        let message = Message::User(UserMessage::new_text(text));
+        control.steering.lock().unwrap().push(message);
+    }
+}
+
+/// Abort the session's in-flight turn by flipping its cancellation token.
+///
+/// Mirrors the legacy `AgentRuntime::abort` contract: an unknown / already-
+/// finished session is a CLEAN no-op (the front end may race an abort against a
+/// run that just ended). The token reached here is the SAME one the in-flight
+/// `send_message` is driving on, so cancelling it makes the agent loop unwind at
+/// its next await point and synthesize a `stopReason=aborted` terminal turn; the
+/// driver task's `send_message` then resolves and the sink emits
+/// `agent_stream_closed` EXACTLY ONCE (the closed-once invariant holds on the
+/// abort path too). The registry entry is NOT removed here — removal stays owned
+/// by the driver task's closed emit site, so a stale abort can't drop a live
+/// entry out from under a still-running turn.
+pub fn abort_run(session_id: &str) {
+    let controls = run_controls().lock().unwrap();
+    if let Some(control) = controls.get(session_id) {
+        control.cancel.lock().unwrap().cancel();
+    }
+}
+
+/// Register a run's steer / abort controls under `session_id`.
+///
+/// Called by `drive_agent_run` immediately after the handles are cloned out of
+/// the session and before the driver task is spawned, so a steer / abort issued
+/// the instant the command returns already reaches the run.
+fn register_run(
+    session_id: &str,
+    cancel: Arc<Mutex<hand_agent::CancellationToken>>,
+    steering: Arc<Mutex<Vec<Message>>>,
+) {
+    run_controls()
+        .lock()
+        .unwrap()
+        .insert(session_id.to_string(), RunControl { cancel, steering });
+}
+
+/// Remove a run's steer / abort controls. Called from the driver task at the
+/// single closed emit site, so the registration lifetime exactly brackets the
+/// run and a subsequent run for the same session can register cleanly.
+fn deregister_run(session_id: &str) {
+    run_controls().lock().unwrap().remove(session_id);
 }
 
 /// Drive one prompt turn through `session`, mapping its events onto `sink`.
@@ -222,9 +323,11 @@ pub fn drive_agent_run(
 ) -> RunDriveHandles {
     // Capture abort / steer handles BEFORE the session moves into the task —
     // afterwards the `&mut self` borrow inside `send_message` makes the session
-    // itself unreachable. Handed back for the next feature (m1-steer-abort).
+    // itself unreachable. Register them so `steer_run` / `abort_run` reach this
+    // run; the entry is removed at the closed emit site below.
     let cancel = session.cancel_handle();
     let steering = session.steering_queue_handle();
+    register_run(&session_id, Arc::clone(&cancel), Arc::clone(&steering));
 
     // Subscribe the event forwarder. The callback is `Fn + Send + Sync +
     // 'static`; it captures the sink's event channel and the session id, and is
@@ -254,6 +357,9 @@ pub fn drive_agent_run(
     let on_event_for_err = Arc::clone(&sink.on_event);
     let on_closed = Arc::clone(&sink.on_closed);
     let error_session = session_id.clone();
+    // One clone drives the closed payload, the other deregisters the run's
+    // steer / abort controls at that same terminal site.
+    let deregister_session = session_id.clone();
     let closed_session = session_id;
 
     let task = tokio::spawn(async move {
@@ -281,6 +387,13 @@ pub fn drive_agent_run(
         // Terminal close — the single closed emit site. Fires exactly once for
         // both Ok and Err.
         on_closed(json!({ "sessionId": closed_session }));
+
+        // Run is over: drop its steer / abort controls so the registration
+        // lifetime exactly brackets the run and the next run for this session
+        // can register cleanly. Sequenced after the closed emit so a steer /
+        // abort observing the run as still-registered always targets a live
+        // turn.
+        deregister_run(&deregister_session);
     });
 
     RunDriveHandles {
@@ -551,5 +664,160 @@ mod tests {
             sanitize_coding_agent_error(&session_err).code,
             "INTERNAL_ERROR"
         );
+    }
+
+    // --- run-control registry (m1-steer-abort) ---
+    //
+    // The registry is process-global, so each test uses a FRESH random
+    // `session_id` (uuid) to stay isolated from every other test in the binary.
+
+    /// A fresh, registry-unique session id.
+    fn fresh_session_id() -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+
+    /// Register a run with empty (but shared) cancel + steering handles, mirroring
+    /// what `drive_agent_run` registers. Returns clones of both handles so the
+    /// test can inspect them the way the live `send_message` turn would observe
+    /// them (same `Arc`).
+    fn register_test_run(
+        session_id: &str,
+    ) -> (
+        Arc<Mutex<hand_agent::CancellationToken>>,
+        Arc<Mutex<Vec<Message>>>,
+    ) {
+        let cancel = Arc::new(Mutex::new(hand_agent::CancellationToken::new()));
+        let steering = Arc::new(Mutex::new(Vec::new()));
+        register_run(session_id, Arc::clone(&cancel), Arc::clone(&steering));
+        (cancel, steering)
+    }
+
+    /// True if the registry currently holds an entry for `session_id`.
+    fn is_registered(session_id: &str) -> bool {
+        run_controls().lock().unwrap().contains_key(session_id)
+    }
+
+    /// `register_run` makes the run reachable; `deregister_run` removes exactly
+    /// that entry. This is the lifetime contract `drive_agent_run` relies on:
+    /// register on entry, deregister at the closed emit site.
+    #[test]
+    fn register_then_deregister_brackets_the_run() {
+        let session_id = fresh_session_id();
+        assert!(!is_registered(&session_id), "absent before register");
+
+        let _handles = register_test_run(&session_id);
+        assert!(is_registered(&session_id), "present after register");
+
+        deregister_run(&session_id);
+        assert!(!is_registered(&session_id), "absent after deregister");
+    }
+
+    /// `steer_run` pushes a user `Message` onto the SAME steering queue the live
+    /// turn drains — so a mid-run steer joins the current turn as a user message.
+    #[test]
+    fn steer_enqueues_user_message_onto_active_runs_queue() {
+        let session_id = fresh_session_id();
+        let (_cancel, steering) = register_test_run(&session_id);
+        assert_eq!(steering.lock().unwrap().len(), 0);
+
+        steer_run(&session_id, "look at foo.rs".to_string());
+
+        let queue = steering.lock().unwrap();
+        assert_eq!(queue.len(), 1, "steer enqueues exactly one message");
+        assert!(
+            matches!(&queue[0], Message::User(_)),
+            "steered message is a user message"
+        );
+        drop(queue);
+        deregister_run(&session_id);
+    }
+
+    /// Empty / whitespace-only steer text is a clean no-op: nothing is enqueued,
+    /// the active run is left undisturbed (VAL-CARUN-017).
+    #[test]
+    fn steer_with_blank_text_is_noop() {
+        let session_id = fresh_session_id();
+        let (_cancel, steering) = register_test_run(&session_id);
+
+        steer_run(&session_id, String::new());
+        steer_run(&session_id, "   \n\t ".to_string());
+
+        assert_eq!(
+            steering.lock().unwrap().len(),
+            0,
+            "blank steer text enqueues nothing"
+        );
+        deregister_run(&session_id);
+    }
+
+    /// Steering a session with no active run is a clean no-op — no panic, no
+    /// error, nothing enqueued anywhere (VAL-CARUN-017). The front end may race
+    /// a steer against a run that just ended.
+    #[test]
+    fn steer_with_no_active_run_is_noop() {
+        let session_id = fresh_session_id();
+        assert!(!is_registered(&session_id));
+        // Must not panic and must not create a registry entry.
+        steer_run(&session_id, "hello".to_string());
+        assert!(
+            !is_registered(&session_id),
+            "steer never registers a run on its own"
+        );
+    }
+
+    /// `abort_run` flips the SAME cancellation token the live turn drives on, so
+    /// the agent loop unwinds at its next await point and the run finishes
+    /// "aborted" (VAL-CARUN-005's mechanism). The registry entry is NOT removed
+    /// by abort — removal stays owned by the closed emit site.
+    #[test]
+    fn abort_cancels_the_runs_token_without_deregistering() {
+        let session_id = fresh_session_id();
+        let (cancel, _steering) = register_test_run(&session_id);
+        assert!(
+            !cancel.lock().unwrap().is_cancelled(),
+            "token starts uncancelled"
+        );
+
+        abort_run(&session_id);
+
+        assert!(
+            cancel.lock().unwrap().is_cancelled(),
+            "abort flips the run's cancel token"
+        );
+        assert!(
+            is_registered(&session_id),
+            "abort does not deregister — the closed emit site owns removal"
+        );
+        deregister_run(&session_id);
+    }
+
+    /// Aborting a session with no active run is a clean no-op (no panic, no
+    /// error) — same benign-race tolerance as the blank-steer path.
+    #[test]
+    fn abort_with_no_active_run_is_noop() {
+        let session_id = fresh_session_id();
+        assert!(!is_registered(&session_id));
+        abort_run(&session_id);
+        assert!(!is_registered(&session_id));
+    }
+
+    /// After a run deregisters (its closed emit site fired), a steer / abort for
+    /// that session is again a clean no-op — no residue leaks into the next run.
+    /// This underpins VAL-CARUN-006 (abort-then-resend starts a clean new turn).
+    #[test]
+    fn steer_after_deregister_does_not_resurrect_the_run() {
+        let session_id = fresh_session_id();
+        let (_cancel, steering) = register_test_run(&session_id);
+        deregister_run(&session_id);
+
+        steer_run(&session_id, "late".to_string());
+        abort_run(&session_id);
+
+        assert_eq!(
+            steering.lock().unwrap().len(),
+            0,
+            "the deregistered queue receives nothing"
+        );
+        assert!(!is_registered(&session_id), "no entry resurrected");
     }
 }
