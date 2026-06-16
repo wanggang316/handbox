@@ -85,6 +85,11 @@ export interface QuickToolsSettings {
   selectionBlacklist: SelectionBlacklist;
 }
 
+// Agent 设置
+export interface AgentSettings {
+  defaultEnabledTools: string[]; // 新建 Agent 会话默认启用的内置工具(coding-agent 注册名)
+}
+
 // 应用设置
 export interface AppSettings {
   general: GeneralSettings;
@@ -92,6 +97,7 @@ export interface AppSettings {
   account: AccountSettings;
   translation: TranslationSettings;
   quickTools: QuickToolsSettings;
+  agent: AgentSettings;
 }
 
 // 设置更新请求

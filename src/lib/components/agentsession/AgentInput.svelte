@@ -1,23 +1,13 @@
 <script lang="ts">
-  import {
-    ArrowUp,
-    Square,
-    Plus,
-    X,
-    FileText,
-    FilePlus,
-    FilePen,
-    Terminal,
-    Search,
-    FileSearch,
-    FolderTree,
-  } from "@lucide/svelte";
+  import { ArrowUp, Square, Plus, X, SlidersHorizontal } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
+  import { BUILTIN_TOOLS, type BuiltinTool } from "$lib/constants/agentTools";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
@@ -79,36 +69,25 @@
 
   // 内置工具开关（per-session）：勾选写入 session.enabledTools 并持久化；
   // 开关 id == coding-agent 注册名（read/write/edit/bash/grep/find/ls），
-  // 后端 build_agent_session 按这些名做实际 gating。
+  // 后端 build_agent_session 按这些名做实际 gating。工具列表/标签来自共享常量
+  // BUILTIN_TOOLS（与设置页同一真源）。
   // 这 7 个工具都在工作目录内操作（含 bash），故全部 `requiresWorkingDir`：
   // 会话无 working_dir 时开关置灰禁用、点击无效、hover 给说明 title。
-  const builtinTools: {
-    id: string;
-    label: string;
-    icon: typeof FileText;
-    requiresWorkingDir: boolean;
-  }[] = [
-    { id: "read", label: "读取文件", icon: FileText, requiresWorkingDir: true },
-    { id: "write", label: "写入文件", icon: FilePlus, requiresWorkingDir: true },
-    { id: "edit", label: "编辑文件", icon: FilePen, requiresWorkingDir: true },
-    { id: "bash", label: "执行命令", icon: Terminal, requiresWorkingDir: true },
-    { id: "grep", label: "搜索内容", icon: Search, requiresWorkingDir: true },
-    { id: "find", label: "查找文件", icon: FileSearch, requiresWorkingDir: true },
-    { id: "ls", label: "列目录", icon: FolderTree, requiresWorkingDir: true },
-  ];
-
   const hasWorkingDir = $derived(!!session.workingDir);
   const enabledTools = $derived(session.enabledTools ?? []);
+
+  // 工具收成弹窗（per-component 本地 UI 态）：图标按钮点击切换，点击外部关闭。
+  let toolsMenuOpen = $state(false);
 
   function isToolEnabled(toolId: string): boolean {
     return enabledTools.includes(toolId);
   }
 
-  function isToolDisabled(tool: (typeof builtinTools)[number]): boolean {
+  function isToolDisabled(tool: BuiltinTool): boolean {
     return tool.requiresWorkingDir && !hasWorkingDir;
   }
 
-  function toggleTool(tool: (typeof builtinTools)[number]) {
+  function toggleTool(tool: BuiltinTool) {
     if (isToolDisabled(tool)) return;
     const current = enabledTools;
     const next = current.includes(tool.id)
@@ -119,6 +98,20 @@
       .catch((error) => {
         console.error("Failed to update agent session enabled tools:", error);
       });
+  }
+
+  // 点击外部关闭弹窗：镜像 ChatInput 的 attachment 菜单关闭模式。触发按钮自身
+  // 的点击通过 stopPropagation 不冒泡到 window，故不会刚开就被这里关掉。
+  $effect(() => {
+    if (!toolsMenuOpen) return;
+    const handler = () => (toolsMenuOpen = false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  });
+
+  function toggleToolsMenu(event: MouseEvent) {
+    event.stopPropagation();
+    toolsMenuOpen = !toolsMenuOpen;
   }
 
 
@@ -596,34 +589,67 @@
         onclick={handleAddAttachment}
       />
 
-      <!-- 内置工具开关（per-session enabledTools；FS 工具无 working_dir 时置灰）。 -->
-      {#each builtinTools as tool (tool.id)}
-        {@const ToolIcon = tool.icon}
-        {@const active = isToolEnabled(tool.id)}
-        {@const disabled = isToolDisabled(tool)}
+      <!-- 内置工具收成图标 + 向上弹出菜单（per-session enabledTools；FS 工具无
+           working_dir 时置灰）。relative 容器锚定向上弹的 popover。 -->
+      <div class="relative">
         <button
           type="button"
-          class={`flex items-center gap-1 px-2 py-1 rounded-md border text-xs transition-colors ${
-            disabled
-              ? "border-[var(--hairline)] text-base-content/30 cursor-not-allowed"
-              : active
-                ? "border-info/50 bg-info/10 text-info"
-                : "border-[var(--hairline)] text-base-content/60 hover:bg-base-200"
+          class={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+            toolsMenuOpen
+              ? "bg-base-300 text-base-content"
+              : "text-base-content hover:bg-base-300"
           }`}
-          aria-pressed={active}
-          {disabled}
-          title={disabled
-            ? `${tool.label}（需设置工作目录）`
-            : active
-              ? `${tool.label}：已启用`
-              : `${tool.label}：已禁用`}
-          onclick={() => toggleTool(tool)}
+          aria-label="工具"
+          aria-haspopup="menu"
+          aria-expanded={toolsMenuOpen}
+          title="工具"
+          onclick={toggleToolsMenu}
         >
-          <ToolIcon size={14} />
-          <span>{tool.label}</span>
+          <SlidersHorizontal size={18} />
         </button>
-      {/each}
 
+        {#if toolsMenuOpen}
+          <!-- 向上展开（bottom-full）：输入框在底部，菜单浮于图标上方以免落屏外。
+               stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
+          <div
+            class="absolute bottom-full left-0 z-40 mb-2 w-56 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            role="menu"
+            tabindex="-1"
+            onclick={(event) => event.stopPropagation()}
+            onkeydown={() => {}}
+          >
+            {#if !hasWorkingDir}
+              <div
+                class="px-2 py-1.5 text-xs text-base-content/50"
+              >
+                需设置工作目录后才能启用工具
+              </div>
+            {/if}
+            {#each BUILTIN_TOOLS as tool (tool.id)}
+              {@const ToolIcon = tool.icon}
+              {@const disabled = isToolDisabled(tool)}
+              <div
+                class={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 ${
+                  disabled ? "opacity-50" : ""
+                }`}
+                title={disabled ? `${tool.label}（需设置工作目录）` : tool.label}
+              >
+                <span
+                  class="flex min-w-0 items-center gap-2 text-sm text-base-content"
+                >
+                  <ToolIcon size={16} class="shrink-0 text-base-content/70" />
+                  <span class="truncate">{tool.label}</span>
+                </span>
+                <Toggle
+                  checked={isToolEnabled(tool.id)}
+                  {disabled}
+                  onChange={() => toggleTool(tool)}
+                />
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
     <div class="flex flex-row items-center gap-3">
       <Select
