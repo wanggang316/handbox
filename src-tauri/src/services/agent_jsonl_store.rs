@@ -107,12 +107,22 @@ pub fn session_path(base_dir: &Path, cwd: &Path, session_id: &str) -> PathBuf {
 /// (version `CURRENT_SESSION_VERSION`, the session id, a creation timestamp, the
 /// cwd), so `SessionManager::open` accepts it as a valid session.
 ///
+/// `created_at` (millis) is stamped as the header `timestamp` — it MUST be the
+/// session's SQLite `created_at`, NOT the current wall clock. The sidebar's
+/// activity key coalesces `lastMessageAt ?? createdAt`, where `createdAt` comes
+/// from the SQLite row; pinning the header timestamp to that same value keeps
+/// the JSONL header's reported creation time (`SessionInfo.timestamp`) equal to
+/// the session's real creation time rather than its first-run time, which is the
+/// invariant VAL-CASESS-007 relies on (and the correct comparison key for the
+/// later migration's `coalesce(last_message_at, created_at)`).
+///
 /// Idempotent: an already-existing file is left untouched (so a second turn
 /// appends to the first turn's transcript rather than clobbering it).
 pub fn ensure_session_file(
     base_dir: &Path,
     cwd: &Path,
     session_id: &str,
+    created_at: i64,
 ) -> Result<PathBuf, AppError> {
     let dir = session_dir(base_dir, cwd);
     let path = dir.join(format!("{session_id}.jsonl"));
@@ -125,7 +135,7 @@ pub fn ensure_session_file(
     let header = SessionHeader {
         version: CURRENT_SESSION_VERSION,
         id: session_id.to_string(),
-        timestamp: now_ms(),
+        timestamp: created_at,
         cwd: cwd.to_string_lossy().to_string(),
         parent_session: None,
     };
@@ -196,17 +206,25 @@ pub fn load_transcript(
 /// read-back ([`SessionManager::label`] scans newest-first).
 ///
 /// The file is ensured first so renaming a session that has never been resumed
-/// (no `<id>.jsonl` yet) still takes effect — the header is seeded, then the
-/// label appended. Appending a `Label` entry does NOT add a `Message`, so this
-/// leaves `session_activity`'s `message_count` and `last_message_at` untouched
-/// (a rename must never manufacture "activity").
+/// (no `<id>.jsonl` yet) still takes effect — the header is seeded (stamping
+/// `created_at` as its timestamp, see [`ensure_session_file`]), then the label
+/// appended. Appending a `Label` entry does NOT add a `Message`, so this leaves
+/// `session_activity`'s `message_count` and `last_message_at` untouched (a
+/// rename must never manufacture "activity").
+///
+/// `created_at` is threaded through to [`ensure_session_file`] so that renaming
+/// a never-resumed session seeds its header with the session's real creation
+/// time, keeping `SessionInfo.timestamp == createdAt` even for a first-ever
+/// rename (VAL-CASESS-007 / VAL-CASESS-008). For an already-existing file the
+/// value is unused (the seed is idempotent).
 pub fn append_label(
     base_dir: &Path,
     cwd: &Path,
     session_id: &str,
     label: &str,
+    created_at: i64,
 ) -> Result<(), AppError> {
-    let path = ensure_session_file(base_dir, cwd, session_id)?;
+    let path = ensure_session_file(base_dir, cwd, session_id, created_at)?;
     let mut manager = SessionManager::open(&path)
         .map_err(|e| AppError::internal_error(&format!("failed to open session jsonl: {e}")))?;
     manager
@@ -315,13 +333,6 @@ fn message_timestamp(message: &Message) -> Timestamp {
     Timestamp::try_from(ts).unwrap_or(Timestamp::MAX)
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
-
 /// Alias for the SQLite session UUID this module treats as the JSONL session id.
 /// Kept as a doc anchor so call sites reading `UUID` see the intent.
 #[allow(dead_code)]
@@ -336,12 +347,17 @@ mod tests {
     };
     use tempfile::TempDir;
 
+    /// A fixed, recognizable `created_at` (millis) the tests stamp into the
+    /// header so they can assert `SessionInfo.timestamp == created_at` without
+    /// racing the wall clock. Picked to be obviously NOT a "now" value.
+    const TEST_CREATED_AT: i64 = 1_700_000_000_000;
+
     /// Build a session under `base`/`cwd` via the REAL coding-agent
     /// `SessionManager` resume path (the same path production drives), seeded
     /// with our header, then append messages — so the test exercises the actual
     /// JSONL writer, not a hand-rolled file.
     fn open_resumed(base: &Path, cwd: &Path, session_id: &str) -> SessionManager {
-        ensure_session_file(base, cwd, session_id).expect("header seeded");
+        ensure_session_file(base, cwd, session_id, TEST_CREATED_AT).expect("header seeded");
         let path = session_path(base, cwd, session_id);
         SessionManager::open(&path).expect("resume opens the seeded file")
     }
@@ -386,7 +402,8 @@ mod tests {
         let cwd = TempDir::new().unwrap();
         let id = "11111111-2222-3333-4444-555555555555";
 
-        let path = ensure_session_file(base.path(), cwd.path(), id).expect("seeds header");
+        let path = ensure_session_file(base.path(), cwd.path(), id, TEST_CREATED_AT)
+            .expect("seeds header");
         assert_eq!(
             path.file_name().unwrap().to_string_lossy(),
             format!("{id}.jsonl"),
@@ -396,6 +413,33 @@ mod tests {
         // The upstream reader accepts it and reports our id as the header id.
         let manager = SessionManager::open(&path).expect("opens as a valid session");
         assert_eq!(manager.id(), id, "header id must equal the HandBox id");
+    }
+
+    /// VAL-CASESS-007 (header-stamp leg): the header `timestamp` `ensure_session_file`
+    /// writes is the `created_at` the caller passed — the session's real SQLite
+    /// creation time — NOT the current wall clock. `SessionInfo.timestamp` (the
+    /// header timestamp the activity overlay would surface as the session's
+    /// createdAt) therefore equals `created_at`, so the sidebar's
+    /// `lastMessageAt ?? createdAt` coalescing keeps an empty session anchored to
+    /// its creation time rather than its first-run time.
+    #[test]
+    fn ensure_session_file_stamps_header_timestamp_from_created_at_not_now() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-created-at";
+
+        let path = ensure_session_file(base.path(), cwd.path(), id, TEST_CREATED_AT)
+            .expect("seeds header");
+
+        // Read the header timestamp back through the upstream parser (the same
+        // value the activity overlay surfaces as the session's createdAt).
+        let info = build_session_info(&path)
+            .expect("info reads")
+            .expect("a seeded session has a header");
+        assert_eq!(
+            info.timestamp, TEST_CREATED_AT,
+            "header timestamp must equal the created_at we stamped, not now()"
+        );
     }
 
     /// Re-seeding an existing session is idempotent: the second call neither
@@ -410,7 +454,8 @@ mod tests {
         mgr.append_message(user_msg("hello")).unwrap();
 
         // Second "ensure" (e.g. the start of turn 2) must not clobber turn 1.
-        let path = ensure_session_file(base.path(), cwd.path(), id).expect("idempotent");
+        let path =
+            ensure_session_file(base.path(), cwd.path(), id, TEST_CREATED_AT).expect("idempotent");
         let reopened = SessionManager::open(&path).unwrap();
         assert_eq!(
             reopened.message_count(),
@@ -488,7 +533,7 @@ mod tests {
         let id = "sess-activity";
 
         // Empty session: count 0, last_message_at None.
-        ensure_session_file(base.path(), cwd.path(), id).unwrap();
+        ensure_session_file(base.path(), cwd.path(), id, TEST_CREATED_AT).unwrap();
         let empty = session_activity(base.path(), cwd.path(), id)
             .unwrap()
             .expect("file exists");
@@ -531,7 +576,7 @@ mod tests {
         }
         // Turn 2: ensure (idempotent) then resume + append again.
         {
-            ensure_session_file(base.path(), cwd.path(), id).unwrap();
+            ensure_session_file(base.path(), cwd.path(), id, TEST_CREATED_AT).unwrap();
             let mut mgr = SessionManager::open(&session_path(base.path(), cwd.path(), id)).unwrap();
             mgr.append_message(user_msg("turn two")).unwrap();
         }
@@ -582,7 +627,14 @@ mod tests {
         );
 
         // User renames → the new label must take over.
-        append_label(base.path(), cwd.path(), id, "User Chosen Name").expect("rename label ok");
+        append_label(
+            base.path(),
+            cwd.path(),
+            id,
+            "User Chosen Name",
+            TEST_CREATED_AT,
+        )
+        .expect("rename label ok");
         assert_eq!(
             session_activity(base.path(), cwd.path(), id)
                 .unwrap()
@@ -600,15 +652,35 @@ mod tests {
     /// appends the label, and the name reflects the input — while
     /// `last_message_at` stays `None` and `message_count` stays 0 (a label is
     /// not a message).
+    ///
+    /// Also covers VAL-CASESS-007 (rename-seed leg): the header `ensure_session_file`
+    /// seeds on a first-ever rename carries the `created_at` we passed, NOT the
+    /// rename moment — so an empty session's createdAt (`SessionInfo.timestamp`)
+    /// stays its real creation time even when its first on-disk write is a rename.
     #[test]
     fn append_label_on_empty_session_sets_name_without_creating_activity() {
         let base = TempDir::new().unwrap();
         let cwd = TempDir::new().unwrap();
         let id = "sess-empty-rename";
 
-        // No file exists yet: append_label must seed it then label it.
-        append_label(base.path(), cwd.path(), id, "Named Before Any Message")
-            .expect("rename of an empty session ensures the file and labels it");
+        // No file exists yet: append_label must seed it then label it, stamping
+        // the seeded header with the created_at we pass (not "now").
+        append_label(
+            base.path(),
+            cwd.path(),
+            id,
+            "Named Before Any Message",
+            TEST_CREATED_AT,
+        )
+        .expect("rename of an empty session ensures the file and labels it");
+
+        let info = build_session_info(&session_path(base.path(), cwd.path(), id))
+            .unwrap()
+            .expect("ensure-on-rename created the file with a header");
+        assert_eq!(
+            info.timestamp, TEST_CREATED_AT,
+            "a first-ever rename must seed the header with created_at, not the rename moment",
+        );
 
         let activity = session_activity(base.path(), cwd.path(), id)
             .unwrap()
@@ -636,7 +708,7 @@ mod tests {
         let cwd = TempDir::new().unwrap();
         let id = "sess-delete";
 
-        let path = ensure_session_file(base.path(), cwd.path(), id).unwrap();
+        let path = ensure_session_file(base.path(), cwd.path(), id, TEST_CREATED_AT).unwrap();
         assert!(path.exists(), "precondition: the file was created");
 
         delete_session_file(base.path(), cwd.path(), id).expect("delete ok");

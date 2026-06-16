@@ -67,6 +67,13 @@ pub struct HandBoxAgentSessionConfig {
     /// Tauri per-app data directory. Becomes the session's `base_dir` so
     /// persistent state stays inside the app sandbox, not `~/.hand`.
     pub app_data_dir: PathBuf,
+    /// Session creation time (millis since epoch), straight off the SQLite
+    /// `agent_sessions.created_at` column. Stamped as the JSONL header
+    /// `timestamp` by [`agent_jsonl_store::ensure_session_file`] so the header's
+    /// reported creation time equals the session's real creation time (the
+    /// sidebar coalesces `lastMessageAt ?? createdAt` and `createdAt` comes from
+    /// this same SQLite value — VAL-CASESS-007). NOT the first-run wall clock.
+    pub created_at: i64,
     /// Per-session custom system prompt. `None` falls back to the coding-agent
     /// default prompt. Mirrors the legacy `agent_runtime` consumption of
     /// `session.system_prompt`; written straight into
@@ -155,6 +162,7 @@ pub fn build_agent_session(
         &config.app_data_dir,
         &config.working_dir,
         &config.session_id,
+        config.created_at,
     )?;
 
     let session_config = AgentSessionConfig {
@@ -312,6 +320,9 @@ pub fn config_from_rows(
         api_key: provider.api_key.clone(),
         working_dir,
         app_data_dir,
+        // The session's real creation time, lifted from the SQLite row so the
+        // JSONL header timestamp equals createdAt (VAL-CASESS-007).
+        created_at: session.created_at,
         // Per-session config consumed identically to the legacy path
         // (agent_runtime.rs:556,582-586): system_prompt verbatim, max_tokens
         // i32 → u32 via try_from (out-of-range silently drops to None),
@@ -329,6 +340,11 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// A fixed, recognizable `created_at` (millis) the construction tests stamp
+    /// so they can assert the seeded JSONL header timestamp equals it without
+    /// racing the wall clock. Obviously NOT a "now" value.
+    const TEST_CREATED_AT: i64 = 1_700_000_000_000;
+
     fn sample_config(working_dir: PathBuf, app_data_dir: PathBuf) -> HandBoxAgentSessionConfig {
         HandBoxAgentSessionConfig {
             session_id: "sess-row-uuid".to_string(),
@@ -339,6 +355,7 @@ mod tests {
             api_key: "sk-test-key".to_string(),
             working_dir,
             app_data_dir,
+            created_at: TEST_CREATED_AT,
             system_prompt: None,
             temperature: None,
             max_tokens: None,
@@ -404,6 +421,39 @@ mod tests {
         assert_eq!(
             jsonl_count, 1,
             "two builds of the same HandBox session must reuse one JSONL file"
+        );
+    }
+
+    /// VAL-CASESS-007 (end-to-end seed leg): a session built through the real
+    /// `build_agent_session` seam stamps its JSONL header `timestamp` with the
+    /// config's `created_at` (the session's SQLite creation time), NOT the
+    /// build/first-run moment. Read back through the upstream parser, the
+    /// header's `timestamp` (== the createdAt the sidebar surfaces) equals the
+    /// `created_at` we wired in — so an empty session's activity key coalesces
+    /// to its true creation time.
+    #[test]
+    fn build_agent_session_seeds_jsonl_header_timestamp_from_created_at() {
+        use hand_coding_agent::core::session_manager::build_session_info;
+
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+
+        // Construct (turn 1) — this is the single place the JSONL is seeded.
+        let _session = build_agent_session(&config, None).expect("construction succeeds");
+
+        let path = crate::services::agent_jsonl_store::session_path(
+            data.path(),
+            cwd.path(),
+            &config.session_id,
+        );
+        let info = build_session_info(&path)
+            .expect("info reads")
+            .expect("a built session has a seeded header");
+        assert_eq!(
+            info.timestamp, TEST_CREATED_AT,
+            "the seeded header timestamp must equal config.created_at (the session's \
+             real creation time), not the build/first-run moment"
         );
     }
 
@@ -656,7 +706,9 @@ mod tests {
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
-            created_at: 0,
+            // Distinctive non-zero creation time so the config-mapping test can
+            // prove created_at is lifted off the row (not defaulted).
+            created_at: 1_700_000_000_000,
             updated_at: 0,
         }
     }
@@ -695,6 +747,9 @@ mod tests {
         assert_eq!(config.working_dir, PathBuf::from("/tmp/project"));
         assert_eq!(config.app_data_dir, data.path());
         assert_eq!(config.enabled_tools, vec!["read_file".to_string()]);
+        // created_at is lifted straight off the session row so the JSONL header
+        // timestamp later equals the session's real creation time (VAL-CASESS-007).
+        assert_eq!(config.created_at, 1_700_000_000_000);
 
         // Per-session config is read off the session row, equivalent to the
         // legacy path (agent_runtime.rs:556,582-586). max_tokens converts

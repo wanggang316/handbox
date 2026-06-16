@@ -130,7 +130,13 @@ pub async fn agent_session_rename(
     // 失败不阻断 rename（SQLite 已写成功），只记 warn。
     let app_data_dir = resolve_app_data_dir(&app_handle)?;
     let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
-    if let Err(e) = agent_jsonl_store::append_label(&app_data_dir, &cwd, &session.id, &name) {
+    // Pass the session's real created_at so a first-ever rename (which may be the
+    // session's first on-disk write) seeds the JSONL header with the creation
+    // time rather than the rename moment, keeping createdAt == header.timestamp
+    // (VAL-CASESS-007 / VAL-CASESS-008).
+    if let Err(e) =
+        agent_jsonl_store::append_label(&app_data_dir, &cwd, &session.id, &name, session.created_at)
+    {
         tracing::warn!(
             session_id = %session.id,
             "failed to write JSONL label on rename, keeping SQLite name: {e}"
