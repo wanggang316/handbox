@@ -1976,6 +1976,197 @@ mod tests {
         deny_pending_for_session(&session_b);
     }
 
+    // -----------------------------------------------------------------------
+    // VAL-CAPERM-022 — an out-of-sandbox read takes the SILENT Cancel path: the
+    // sandbox (registered BEFORE the permission gate) Cancels it, and the
+    // permission extension's emitter is NEVER invoked — no `agent_approval_request`
+    // is emitted, so no modal pops for a sandbox escape. The chain ordering is
+    // what guarantees this (the first Cancel wins), so the test drives the SAME
+    // ordering the host dispatch uses: sandbox first, then permission, stopping
+    // at the first Cancel.
+    // -----------------------------------------------------------------------
+
+    /// Walk a tool call through the HandBox extension chain in registration order
+    /// (sandbox → permission), short-circuiting at the first `Cancel` exactly as
+    /// the host dispatch does. Returns the deciding `HookDecision` so a test can
+    /// assert WHICH extension stopped the call — and, paired with a recording
+    /// emitter, that a `Cancel` upstream of the permission gate left it un-emitted.
+    async fn decide_via_chain(
+        sandbox: &SandboxExtension,
+        permission: &PermissionExtension,
+        cx: &ExtensionContext,
+        event: &ToolCallEvent,
+    ) -> HookDecision {
+        // Sandbox runs first; only a `Continue` lets the call fall through to the
+        // permission gate. Any other decision (a `Cancel` for a sandbox escape, or
+        // a `Replace`) is the chain's verdict and short-circuits — the permission
+        // gate is never consulted (mirrors the host's first-decision-wins dispatch).
+        let sandbox_decision = sandbox
+            .on_before_tool_call(cx, event)
+            .await
+            .expect("sandbox hook never returns Err");
+        if !matches!(sandbox_decision, HookDecision::Continue) {
+            return sandbox_decision;
+        }
+        permission
+            .on_before_tool_call(cx, event)
+            .await
+            .expect("permission hook never returns Err")
+    }
+
+    /// VAL-CAPERM-022 — an out-of-sandbox `read` is silently Cancelled by the
+    /// sandbox and NEVER reaches the approval gate: the permission extension's
+    /// emitter is not invoked, so no `agent_approval_request` is emitted (no modal
+    /// for a sandbox escape). Pins the chain ordering — sandbox BEFORE permission,
+    /// first Cancel wins — that makes the escape silent rather than prompted.
+    #[tokio::test]
+    async fn out_of_sandbox_read_is_silently_cancelled_without_emitting_approval() {
+        let fx = fixture();
+        let sandbox = ext(&fx.root);
+        let (emitter, recorded) = recording_emitter();
+        let permission = PermissionExtension::new(Some(emitter));
+
+        let abs = fx.outside_secret.to_string_lossy().into_owned();
+        let event = call_event("read", json!({ "path": abs }));
+
+        let decision = decide_via_chain(&sandbox, &permission, &cx(&fx.root), &event).await;
+
+        // The sandbox stops it (generic, leak-free reason) …
+        assert_cancel_no_leak(&decision, &fx.outside_secret);
+        // … and crucially the approval emitter was NEVER invoked: a sandbox escape
+        // takes the silent Cancel path, it does NOT surface an approval modal.
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "an out-of-sandbox read must NOT emit an approval request — the sandbox \
+             Cancels it before the permission gate is reached (VAL-CAPERM-022)"
+        );
+    }
+
+    /// VAL-CAPERM-022 (ls coverage) — same silent-Cancel guarantee for an
+    /// out-of-sandbox `ls`: the directory listing escape is Cancelled by the
+    /// sandbox first; no approval request is emitted.
+    #[tokio::test]
+    async fn out_of_sandbox_ls_is_silently_cancelled_without_emitting_approval() {
+        let fx = fixture();
+        let sandbox = ext(&fx.root);
+        let (emitter, recorded) = recording_emitter();
+        let permission = PermissionExtension::new(Some(emitter));
+
+        let outside_dir = fx.outside_secret.parent().unwrap().to_path_buf();
+        let abs = outside_dir.to_string_lossy().into_owned();
+        let event = call_event("ls", json!({ "path": abs }));
+
+        let decision = decide_via_chain(&sandbox, &permission, &cx(&fx.root), &event).await;
+
+        assert_cancel_no_leak(&decision, &outside_dir);
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "an out-of-sandbox ls must NOT emit an approval request (VAL-CAPERM-022)"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // VAL-CAPERM-023 — concurrent runs hold ISOLATED pending approvals: with
+    // session A and session B both parked on a pending approval, responding to A
+    // resolves ONLY A's await; B stays pending until B is answered in its own
+    // right. This is the positive isolation contract (distinct from the abort
+    // isolation pinned by `deny_pending_for_session_is_session_scoped_*`): a real
+    // user decision for one session must never resolve another's.
+    // -----------------------------------------------------------------------
+
+    /// VAL-CAPERM-023 — two sessions each have a pending approval; `respond_to_approval`
+    /// for session A resolves ONLY A's await (to its decision), and session B's
+    /// request remains pending and awaiting until answered separately. Drives the
+    /// REAL hook for both sessions concurrently, resolving A's request by its own
+    /// `requestId` (the per-call nth-resolve avoids waking — or deadlocking on —
+    /// the wrong session's await).
+    #[tokio::test]
+    async fn responding_to_one_session_does_not_resolve_another_pending() {
+        let session_a = uuid::Uuid::new_v4().to_string();
+        let session_b = uuid::Uuid::new_v4().to_string();
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        // Park BOTH sessions on a pending `write` approval (each on its own task).
+        let ext_a = Arc::clone(&ext);
+        let sess_a = session_a.clone();
+        let task_a = tokio::spawn(async move {
+            ext_a
+                .on_before_tool_call(
+                    &cx_for_session(&sess_a),
+                    &call_event("write", json!({ "path": "a.txt", "content": "A" })),
+                )
+                .await
+                .expect("permission hook never returns Err")
+        });
+        let ext_b = Arc::clone(&ext);
+        let sess_b = session_b.clone();
+        let task_b = tokio::spawn(async move {
+            ext_b
+                .on_before_tool_call(
+                    &cx_for_session(&sess_b),
+                    &call_event("write", json!({ "path": "b.txt", "content": "B" })),
+                )
+                .await
+                .expect("permission hook never returns Err")
+        });
+
+        // Wait until BOTH requests have landed, then look up A's requestId by its
+        // sessionId (order of arrival across the two tasks is non-deterministic, so
+        // we cannot rely on index 0 being A).
+        for _ in 0..1000 {
+            if recorded.lock().unwrap().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let request_id_a = {
+            let guard = recorded.lock().unwrap();
+            assert_eq!(guard.len(), 2, "both sessions must each emit one request");
+            guard
+                .iter()
+                .find(|r| r.get("sessionId").and_then(|v| v.as_str()) == Some(session_a.as_str()))
+                .and_then(|r| r.get("requestId").and_then(|v| v.as_str()))
+                .expect("session A's request must carry a requestId")
+                .to_string()
+        };
+
+        // Respond to A ONLY. A's await must resolve; B's must stay parked.
+        respond_to_approval(&request_id_a, ApprovalDecision::AllowOnce);
+
+        let decision_a = task_a.await.expect("session A's hook task joins");
+        assert!(
+            matches!(decision_a, HookDecision::Continue),
+            "responding allow to A resolves A's await to Continue"
+        );
+
+        // B is still pending: its task has NOT finished, and a registry entry for
+        // B's session still exists. (We can't `.await` task_b without answering it
+        // — it would hang — so we assert it is unresolved, then clean it up.)
+        assert!(
+            !task_b.is_finished(),
+            "session B's await must remain parked — responding to A must not resolve B"
+        );
+        assert!(
+            pending_approvals()
+                .lock()
+                .unwrap()
+                .values()
+                .any(|p| p.session_id == session_b),
+            "session B's pending entry must survive A's response (VAL-CAPERM-023)"
+        );
+
+        // Clean up B's parked await so the test task does not leak.
+        deny_pending_for_session(&session_b);
+        let decision_b = task_b
+            .await
+            .expect("session B's hook task joins after cleanup");
+        assert!(
+            matches!(decision_b, HookDecision::Cancel(_)),
+            "B was never answered; cleaning it up fail-closes to Cancel"
+        );
+    }
+
     /// VAL-CAPERM-020 — a DENIED tool is not remembered: `Deny` records nothing on
     /// the always-allow set, so a model re-sending the SAME tool in the SAME
     /// session prompts AGAIN (a second request is emitted and awaited). Contrast
