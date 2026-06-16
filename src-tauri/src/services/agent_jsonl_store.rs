@@ -523,8 +523,8 @@ pub type JsonlSessionId = UUID;
 mod tests {
     use super::*;
     use hand_ai_model::{
-        Api, AssistantContentBlock, AssistantMessage, StopReason, TextContent, ToolCall, Usage,
-        UserMessage,
+        Api, AssistantContentBlock, AssistantMessage, StopReason, TextContent, ToolCall,
+        ToolResultMessage, Usage, UserMessage,
     };
     use tempfile::TempDir;
 
@@ -571,6 +571,68 @@ mod tests {
             response_id: None,
             diagnostics: None,
         })
+    }
+
+    /// An assistant message carrying a single tool call (no thinking/text),
+    /// parameterised by tool name + call id + arguments — the shape the model
+    /// emits when it wants to run a dangerous tool (e.g. `bash`). The three
+    /// audit-trail tests reuse this so a transcript's assistant turn names the
+    /// exact tool whose result (success / is_error / absent) they then assert on.
+    fn assistant_with_tool_call(
+        call_id: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> Message {
+        Message::Assistant(AssistantMessage {
+            role: "assistant".into(),
+            content: vec![AssistantContentBlock::ToolCall(ToolCall {
+                content_type: "toolCall".into(),
+                id: call_id.into(),
+                name: tool.into(),
+                arguments,
+                thought_signature: None,
+            })],
+            api: Api::OpenAICompletions,
+            provider: hand_ai_model::types::Provider::OpenAI,
+            model: "gpt-4o".into(),
+            usage: Usage::default(),
+            stop_reason: StopReason::ToolUse,
+            error_message: None,
+            timestamp: 1234,
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+        })
+    }
+
+    /// A SUCCESS tool result (`is_error == false`) — what an APPROVED dangerous
+    /// execution appends after the tool ran (the allow-leg audit shape).
+    fn tool_result_success(call_id: &str, tool: &str, output: &str) -> Message {
+        Message::ToolResult(ToolResultMessage::new(
+            call_id,
+            tool,
+            vec![hand_ai_model::ToolResultContent::Text(TextContent::new(
+                output.to_string(),
+            ))],
+        ))
+    }
+
+    /// An ERROR / "被拒" tool result (`is_error == true`) carrying the deny
+    /// reason — what a DENIED (or aborted) dangerous call appends instead of a
+    /// success result (the deny-leg audit shape). Mirrors the coding-agent event
+    /// listener turning a blocked tool's `ToolExecutionEnd{ is_error: true, .. }`
+    /// into an is_error `ToolResult` message in the session.
+    fn tool_result_error(call_id: &str, tool: &str, reason: &str) -> Message {
+        Message::ToolResult(ToolResultMessage::new_error(call_id, tool, reason))
+    }
+
+    /// Pull the `isError` flag out of a transcript row's serialized `toolResult`
+    /// payload. `messages_to_rows` serializes each `Message` verbatim, so a
+    /// `ToolResultMessage`'s `#[serde(rename = "isError")]` field rides through
+    /// as the payload key `isError` — the field that distinguishes a success
+    /// result from a 被拒/errored one on read-back.
+    fn row_is_error(row: &AgentSessionMessage) -> Option<bool> {
+        row.payload.get("isError").and_then(|v| v.as_bool())
     }
 
     /// VAL-CASESS-001 (write leg): a freshly-seeded session lands a real
@@ -680,6 +742,244 @@ mod tests {
                 .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("toolcall")),
             "assistant transcript row must carry the tool call content block, got: {:?}",
             rows[1].payload
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // VAL-CACROSS-001 — approval × persistence AUDIT TRAIL. The后端 geology for
+    // "restart-then-audit": after a restart `load_transcript` must restore each
+    // of the three approval outcomes in a DISTINGUISHABLE shape —
+    //   allow  → a SUCCESS ToolResult (`isError: false`)            visible执行+结果
+    //   deny   → an ERROR ToolResult (`isError: true`, carries reason) 可审计「被拒」
+    //   abort  → NO success ToolResult (an assistant ToolCall, optionally with an
+    //            is_error refusal result, but never a success result)  无「已执行成功」痕迹
+    //
+    // These exercise the SAME real writer (`SessionManager::append_message`) +
+    // reader (`load_transcript` → `build_context`) production drives, with the
+    // ToolResult shapes the coding-agent event listener actually appends (a
+    // success result for an allowed tool; an is_error result carrying the deny
+    // reason for a blocked/denied one — see the agent_loop `before_tool_call`
+    // block→ToolExecutionEnd{is_error:true}→ToolResult path). The LIVE
+    // allow/deny/abort × restart chain (model → bash → approval → disk) is GUI
+    // user-tested at the M3 milestone (HandBox has no LLM-stream injection seam to
+    // drive a real model turn in a unit test); what is provable here — and is the
+    // backend foundation that GUI test stands on — is that the three on-disk
+    // shapes restore correctly and remain mutually distinguishable.
+    // -----------------------------------------------------------------------
+
+    /// VAL-CACROSS-001 (allow leg): an APPROVED dangerous execution lands a
+    /// ToolCall + a SUCCESS ToolResult in JSONL; after "restart" (a fresh
+    /// `load_transcript` off the on-disk file) the tool call AND its success
+    /// result are restored — the executed action and its output are visible, and
+    /// the result is a success (`isError == false`), not an error.
+    #[test]
+    fn load_transcript_restores_allowed_execution_as_success_result() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-allow-leg";
+
+        // Write the transcript through the REAL coding-agent writer, exactly as a
+        // turn that ran an approved `bash` would: user → assistant(bash call) →
+        // success tool result.
+        {
+            let mut mgr = open_resumed(base.path(), cwd.path(), id);
+            mgr.append_message(user_msg("run `echo hi`")).unwrap();
+            mgr.append_message(assistant_with_tool_call(
+                "call-bash-1",
+                "bash",
+                serde_json::json!({ "command": "echo hi" }),
+            ))
+            .unwrap();
+            mgr.append_message(tool_result_success("call-bash-1", "bash", "hi\n"))
+                .unwrap();
+        }
+
+        // "Restart": a fresh read off the file the previous process left behind.
+        let rows = load_transcript(base.path(), cwd.path(), id)
+            .expect("read ok")
+            .expect("an executed session has a transcript on disk");
+
+        assert_eq!(rows.len(), 3, "user + assistant tool call + tool result");
+
+        // The assistant turn carries the bash tool call (the executed action is
+        // visible).
+        let assistant = &rows[1];
+        assert_eq!(assistant.role, "assistant");
+        let blocks = assistant
+            .payload
+            .get("content")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(
+            blocks.iter().any(|b| {
+                b.get("type").and_then(|t| t.as_str()) == Some("toolcall")
+                    && b.get("name").and_then(|n| n.as_str()) == Some("bash")
+            }),
+            "the restored assistant turn must show the executed bash tool call, got: {:?}",
+            assistant.payload
+        );
+
+        // The tool RESULT is restored as a SUCCESS (isError == false) — the
+        // executed action's output is visible and reads as "ran", not "errored".
+        let result = &rows[2];
+        assert_eq!(result.role, "toolResult");
+        assert_eq!(
+            row_is_error(result),
+            Some(false),
+            "an approved execution's result must restore as a SUCCESS (isError=false), got: {:?}",
+            result.payload
+        );
+    }
+
+    /// VAL-CACROSS-001 (deny leg): a DENIED dangerous call lands a ToolCall + an
+    /// is_error ToolResult (carrying the deny reason) in JSONL; after "restart"
+    /// `load_transcript` restores a result that is DISTINGUISHABLE as a 被拒/error
+    /// (`isError == true`) — NOT a success — and the deny reason survives so an
+    /// auditor can see what the model tried to run and that it was refused.
+    #[test]
+    fn load_transcript_restores_denied_call_as_auditable_error_not_success() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-deny-leg";
+
+        let deny_reason = "用户拒绝了 bash（denied）";
+        {
+            let mut mgr = open_resumed(base.path(), cwd.path(), id);
+            mgr.append_message(user_msg("rm everything")).unwrap();
+            mgr.append_message(assistant_with_tool_call(
+                "call-bash-2",
+                "bash",
+                serde_json::json!({ "command": "rm -rf /" }),
+            ))
+            .unwrap();
+            // Deny → coding-agent appends an is_error ToolResult carrying the
+            // reason (the block→is_error path), NOT a success result.
+            mgr.append_message(tool_result_error("call-bash-2", "bash", deny_reason))
+                .unwrap();
+        }
+
+        let rows = load_transcript(base.path(), cwd.path(), id)
+            .expect("read ok")
+            .expect("a denied session still has a transcript on disk");
+
+        assert_eq!(
+            rows.len(),
+            3,
+            "the attempt is on the record: user + call + denied result"
+        );
+
+        // The model's ATTEMPT is auditable: the assistant turn still shows the
+        // bash call it tried to run.
+        let blocks = rows[1].payload.get("content").unwrap().as_array().unwrap();
+        assert!(
+            blocks.iter().any(|b| {
+                b.get("type").and_then(|t| t.as_str()) == Some("toolcall")
+                    && b.get("name").and_then(|n| n.as_str()) == Some("bash")
+            }),
+            "a denied call's attempt must remain visible (the model tried to run bash)"
+        );
+
+        // The RESULT is distinguishable as a 被拒/error, NOT a success.
+        let result = &rows[2];
+        assert_eq!(result.role, "toolResult");
+        assert_eq!(
+            row_is_error(result),
+            Some(true),
+            "a denied call's result must restore as an ERROR (isError=true), not a success, got: {:?}",
+            result.payload
+        );
+
+        // The deny reason survives to the read-back, so the audit shows WHY (a
+        // refusal, not a malfunction).
+        let payload_str = serde_json::to_string(&result.payload).unwrap();
+        assert!(
+            payload_str.contains(deny_reason),
+            "the deny reason must survive into the restored result, got: {payload_str}"
+        );
+    }
+
+    /// VAL-CACROSS-001 (abort leg): an ABORTED pending approval leaves NO success
+    /// ToolResult — at most an assistant ToolCall (the model asked) and, if the
+    /// fail-closed deny landed before teardown, an is_error refusal result. After
+    /// "restart" `load_transcript` produces ZERO success tool results, so an
+    /// aborted call never reads back as "已执行成功".
+    #[test]
+    fn load_transcript_aborted_pending_leaves_no_success_result() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+
+        // Shape A — run torn down before any ToolResult was appended: only the
+        // assistant's ToolCall is on disk (no result at all).
+        let id_no_result = "sess-abort-no-result";
+        {
+            let mut mgr = open_resumed(base.path(), cwd.path(), id_no_result);
+            mgr.append_message(user_msg("write a file")).unwrap();
+            mgr.append_message(assistant_with_tool_call(
+                "call-write-1",
+                "write",
+                serde_json::json!({ "path": "x.txt", "content": "data" }),
+            ))
+            .unwrap();
+            // No ToolResult: the turn was aborted while parked on the approval
+            // await, before any result could be appended.
+        }
+
+        let rows = load_transcript(base.path(), cwd.path(), id_no_result)
+            .expect("read ok")
+            .expect("the session has a transcript");
+        assert_eq!(
+            rows.len(),
+            2,
+            "only user + the un-executed assistant tool call"
+        );
+        assert!(
+            !rows.iter().any(|r| r.role == "toolResult"),
+            "an aborted-before-result turn must leave NO tool result at all, got: {rows:?}"
+        );
+        assert!(
+            rows.iter().all(|r| row_is_error(r) != Some(false)),
+            "an aborted turn must produce no SUCCESS tool result (isError=false)"
+        );
+
+        // Shape B — fail-closed deny landed before teardown: a ToolCall plus an
+        // is_error refusal result, but still NO success result.
+        let id_failclosed = "sess-abort-failclosed";
+        {
+            let mut mgr = open_resumed(base.path(), cwd.path(), id_failclosed);
+            mgr.append_message(user_msg("write a file")).unwrap();
+            mgr.append_message(assistant_with_tool_call(
+                "call-write-2",
+                "write",
+                serde_json::json!({ "path": "y.txt", "content": "data" }),
+            ))
+            .unwrap();
+            mgr.append_message(tool_result_error(
+                "call-write-2",
+                "write",
+                "用户拒绝了 write（denied）",
+            ))
+            .unwrap();
+        }
+
+        let rows = load_transcript(base.path(), cwd.path(), id_failclosed)
+            .expect("read ok")
+            .expect("the session has a transcript");
+        let success_results = rows
+            .iter()
+            .filter(|r| r.role == "toolResult" && row_is_error(r) == Some(false))
+            .count();
+        assert_eq!(
+            success_results, 0,
+            "a fail-closed aborted call must leave NO success tool result — only an is_error \
+             refusal, which never reads back as 已执行成功, got: {rows:?}"
+        );
+        // The one result present is the is_error refusal (distinguishable from a
+        // success), so the abort is auditable as "not executed".
+        assert!(
+            rows.iter()
+                .any(|r| r.role == "toolResult" && row_is_error(r) == Some(true)),
+            "the fail-closed refusal result must restore as an is_error record"
         );
     }
 
