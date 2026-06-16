@@ -231,15 +231,51 @@ pub fn build_agent_session(
     Ok(session)
 }
 
+/// Translate a single persisted `enabled_tools` entry to its coding-agent
+/// registered name, accounting for sessions MIGRATED from the pre-M4 SQLite
+/// store (M3 migration kept their `enabled_tools` verbatim, by the OLD native
+/// tool names).
+///
+/// The old read-only native tools map onto coding-agent built-ins:
+/// - `read_file`      → `read`
+/// - `list_directory` → `ls`
+///
+/// Old tools with no coding-agent counterpart (`web_fetch`, retired in M4; the
+/// old auto-injected `skill` tool, now owned by the coding-agent's own skill
+/// pipeline) have NO mapping: they are returned unchanged so the downstream
+/// built-in filter drops them — never matching, never failing, never opening
+/// the full set. A NEW name (already a coding-agent name like `read`/`ls`) or
+/// any unknown string passes through unchanged: new sessions are unaffected and
+/// genuinely unknown names still fall through to the existing `warn`.
+///
+/// Pure, non-destructive, applied at construction time only — the SQLite
+/// `enabled_tools` column is never rewritten, so the mapping is fully
+/// reversible and the migration path stays untouched.
+fn remap_legacy_tool_name(name: &str) -> &str {
+    match name {
+        // Old native read-only tools → coding-agent built-ins (VAL-CACLEAN-005).
+        "read_file" => "read",
+        "list_directory" => "ls",
+        // No mapping (`web_fetch` retired, `skill` now coding-agent-owned) or
+        // already a coding-agent / unknown name — leave it for the built-in
+        // filter to match-or-drop unchanged.
+        other => other,
+    }
+}
+
 /// Filter the full coding-agent built-in tool set down to the per-session
 /// `enabled` names, gating tool availability by registered name.
 ///
 /// `create_default_tools(cwd)` builds all 7 built-ins
 /// (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`); this keeps only the ones
-/// whose registered `name` appears in `enabled`. Names not present in the
-/// built-in set (e.g. a stale legacy id like `read_file`, or a typo) are
-/// ignored with a `warn` log rather than failing construction — an unknown
-/// name simply contributes no tool.
+/// whose registered `name` appears in `enabled`. Each `enabled` entry is first
+/// passed through [`remap_legacy_tool_name`], so a session migrated from the
+/// pre-M4 SQLite store (whose `enabled_tools` carry OLD native names like
+/// `read_file` / `list_directory`) enables the expected coding-agent built-ins
+/// (`read` / `ls`) instead of silently losing all its tools. Old names with no
+/// counterpart (`web_fetch` / `skill`) and genuinely unknown names contribute
+/// no tool — they are ignored with a `warn` log rather than failing
+/// construction.
 ///
 /// Empty-list semantics follow HandBox's legacy `agent_tools::build_tools`
 /// convention: an empty `enabled` registers NO tools ("not listed = not
@@ -248,7 +284,10 @@ pub fn build_agent_session(
 /// Output order follows `create_default_tools` (the canonical built-in order),
 /// independent of the order names appear in `enabled`.
 pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
-    let mut wanted: Vec<&str> = enabled.iter().map(String::as_str).collect();
+    let mut wanted: Vec<&str> = enabled
+        .iter()
+        .map(|name| remap_legacy_tool_name(name.as_str()))
+        .collect();
 
     let selected: Vec<AgentTool> = create_default_tools(cwd)
         .into_iter()
@@ -553,6 +592,105 @@ mod tests {
                 .map(|t| t.name)
                 .collect();
         assert_eq!(names, vec!["read", "bash", "ls"]);
+    }
+
+    /// Collect the registered names of the tools `select_enabled_tools` returns,
+    /// for order-independent membership assertions in the remap tests.
+    fn tool_names(cwd: &Path, enabled: &[&str]) -> Vec<String> {
+        let owned: Vec<String> = enabled.iter().map(|s| s.to_string()).collect();
+        select_enabled_tools(cwd, &owned)
+            .into_iter()
+            .map(|t| t.name)
+            .collect()
+    }
+
+    // VAL-CACLEAN-005: a session migrated from the pre-M4 SQLite store carries
+    // its OLD native read-only tool names (`read_file` / `list_directory`).
+    // After the runtime remap they must enable the expected coding-agent
+    // built-ins (`read` / `ls`) — NOT silently lose all tools (the 005 root
+    // cause: old names matched no built-in and the session ran tool-less).
+    #[test]
+    fn remap_old_read_only_names_enable_coding_agent_builtins() {
+        let cwd = TempDir::new().unwrap();
+        let names = tool_names(cwd.path(), &["read_file", "list_directory"]);
+        assert_eq!(
+            names,
+            vec!["read", "ls"],
+            "old read_file/list_directory must remap to the read/ls built-ins"
+        );
+    }
+
+    // VAL-CACLEAN-005: old names with NO coding-agent counterpart are dropped
+    // SAFELY — `web_fetch` (retired in M4) and the old auto-injected `skill`
+    // tool (now owned by the coding-agent skill pipeline) contribute no tool,
+    // never error, and never open the full set. The mappable sibling still
+    // enables its built-in.
+    #[test]
+    fn remap_drops_unmapped_old_names_without_error() {
+        let cwd = TempDir::new().unwrap();
+        let names = tool_names(cwd.path(), &["read_file", "web_fetch", "skill"]);
+        assert_eq!(
+            names,
+            vec!["read"],
+            "web_fetch/skill have no counterpart and must be dropped, read survives"
+        );
+    }
+
+    // VAL-CACLEAN-005: NEW names (already coding-agent registered names) are
+    // unaffected by the remap — new sessions (M1 onward) keep enabling exactly
+    // their built-ins, in canonical order.
+    #[test]
+    fn remap_leaves_new_names_unchanged() {
+        let cwd = TempDir::new().unwrap();
+        let names = tool_names(cwd.path(), &["read", "grep"]);
+        assert_eq!(
+            names,
+            vec!["read", "grep"],
+            "new coding-agent names pass through the remap unchanged"
+        );
+    }
+
+    // VAL-CACLEAN-005: a genuinely unknown name (neither an old native name nor
+    // a coding-agent built-in) is still ignored — it contributes no tool, and a
+    // mappable sibling still resolves. The existing `warn` for unknown names is
+    // preserved (a warn is not an error; the call still succeeds).
+    #[test]
+    fn remap_ignores_genuinely_unknown_names() {
+        let cwd = TempDir::new().unwrap();
+        let names = tool_names(cwd.path(), &["read_file", "totally_unknown_tool"]);
+        assert_eq!(
+            names,
+            vec!["read"],
+            "an unknown name is ignored; the mappable sibling still resolves"
+        );
+    }
+
+    // VAL-CACLEAN-005: the empty-list semantics are unchanged by the remap — an
+    // empty `enabled` still registers NO tools ("not listed = not enabled"),
+    // never the full set.
+    #[test]
+    fn remap_preserves_empty_list_semantics() {
+        let cwd = TempDir::new().unwrap();
+        let names = tool_names(cwd.path(), &[]);
+        assert!(
+            names.is_empty(),
+            "an empty enabled_tools list still registers no tools: {names:?}"
+        );
+    }
+
+    // Unit-level guard on the pure mapping itself, independent of the built-in
+    // filter: old read-only names map, unmapped/new/unknown names pass through.
+    #[test]
+    fn remap_legacy_tool_name_maps_only_known_old_names() {
+        assert_eq!(remap_legacy_tool_name("read_file"), "read");
+        assert_eq!(remap_legacy_tool_name("list_directory"), "ls");
+        // No mapping: returned unchanged for the filter to drop.
+        assert_eq!(remap_legacy_tool_name("web_fetch"), "web_fetch");
+        assert_eq!(remap_legacy_tool_name("skill"), "skill");
+        // New / unknown names pass through unchanged.
+        assert_eq!(remap_legacy_tool_name("read"), "read");
+        assert_eq!(remap_legacy_tool_name("ls"), "ls");
+        assert_eq!(remap_legacy_tool_name("totally_unknown"), "totally_unknown");
     }
 
     #[test]

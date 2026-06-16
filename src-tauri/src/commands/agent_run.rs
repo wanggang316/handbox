@@ -29,9 +29,10 @@ use crate::services::agent_permission::{
     respond_to_approval, ApprovalDecision, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
 };
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
+use crate::services::skills::Skill;
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest,
-    AgentSessionService, CodingRunSink, ProviderService,
+    AgentSessionService, CodingRunSink, ProviderService, SettingsService, SkillService,
 };
 use crate::storage::types::UUID;
 use hand_ai_model::Message;
@@ -61,6 +62,67 @@ fn active_coding_runs() -> &'static Mutex<HashSet<UUID>> {
     RUNS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// 包裹每个 forced-skill body 的标记。命名该 skill，与系统提示词里的
+/// `<available_skills>` 索引视觉/结构上区分（索引用 `<skill>`/`<name>`/
+/// `<description>` 元素），故即便 body 自身嵌了 `</available_skills>` 也不破坏索引
+/// 边界。`<forced_skill name="...">` 不对 `name` 做转义：skill body 是 TRUSTED
+/// LOCAL CONTENT（同一 `SKILL.md` 文本经 coding-agent 的 skill 工具已对模型完全
+/// 可达，强制注入只是省去模型主动调用一步），且 skill 仅来自本地根（app-data /
+/// `~/.agents/skills` / `<workingDir>/.handbox/skills`），无安装/市场路径，故不视为
+/// 注入向量。与退役前原生 runtime 的 `<forced_skill>` 标记保持一致。
+fn open_forced_marker(name: &str) -> String {
+    format!("<forced_skill name=\"{name}\">")
+}
+const FORCED_MARKER_CLOSE: &str = "</forced_skill>";
+
+/// 把已解析的 forced-skill body 追加进 `system_prompt`（原地）。
+///
+/// `forced` 里的每个名字针对本轮 EFFECTIVE skill 集（discovered-and-validated ∖
+/// 全局 `skills.disabled`）解析：
+/// - 未知 / 未发现 / 校验失败 / 被全局禁用 / 空串 → 静默跳过（disabled 优先于 forced，
+///   因被禁用者已不在 `effective` 中）；
+/// - 重复名字只注入 body 一次（取 forced 列表中首次出现）；
+/// - 一个本来 opt-in（`disable_model_invocation`）但仍存活进 `effective` 的 skill 仍
+///   会被注入（显式用户意图覆盖 opt-in 的自动调用抑制）。
+///
+/// 存活的 body 按 forced 列表顺序追加，每个用 `<forced_skill name="...">` …
+/// `</forced_skill>` 标记包裹，body 原样复制（不转义、不截断、不限大小）。当
+/// `system_prompt` 非空时，forced 块以一个空行与其分隔；为空时无前导分隔。整体无可
+/// 注入 body 时不改动 `system_prompt`。
+fn append_forced_skill_bodies(system_prompt: &mut String, forced: &[String], effective: &[Skill]) {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut block = String::new();
+    for name in forced {
+        if name.is_empty() || !seen.insert(name.as_str()) {
+            // 空名字永不匹配；重复名字只注入一次。
+            continue;
+        }
+        let Some(skill) = effective.iter().find(|s| &s.name == name) else {
+            // 未知 / 未发现 / 校验失败 / 被禁用 → 静默跳过。
+            continue;
+        };
+        if !block.is_empty() {
+            block.push('\n');
+        }
+        block.push_str(&open_forced_marker(&skill.name));
+        block.push('\n');
+        // VERBATIM body —— 不转义、不截断，完整大 body 也照样。
+        block.push_str(&skill.body);
+        block.push('\n');
+        block.push_str(FORCED_MARKER_CLOSE);
+    }
+
+    if block.is_empty() {
+        return;
+    }
+    if system_prompt.is_empty() {
+        *system_prompt = block;
+    } else {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&block);
+    }
+}
+
 /// 启动一次 Agent run（流式）—— 经 coding-agent `AgentSession` 驱动。
 ///
 /// 步骤：
@@ -84,6 +146,8 @@ pub async fn agent_run_stream(
     window: Window,
     sessions: State<'_, AgentSessionService>,
     providers: State<'_, ProviderService>,
+    skills: State<'_, Arc<SkillService>>,
+    settings: State<'_, SettingsService>,
 ) -> Result<(), AppError> {
     let session_id = request.session_id.clone();
 
@@ -101,7 +165,7 @@ pub async fn agent_run_stream(
     }
 
     // 从此处起，任何提前返回都必须先把占位移除。
-    match assemble_and_drive(request, &window, &sessions, &providers).await {
+    match assemble_and_drive(request, &window, &sessions, &providers, &skills, &settings).await {
         Ok(handles) => {
             // 看护任务：驱动任务结束（即 closed 已发出）后把会话从注册表移除。
             // 与 closed 同步 —— 移除发生在终结信号之后，使下一轮可以发起。
@@ -132,6 +196,8 @@ async fn assemble_and_drive(
     window: &Window,
     sessions: &AgentSessionService,
     providers: &ProviderService,
+    skills: &SkillService,
+    settings: &SettingsService,
 ) -> Result<crate::services::RunDriveHandles, AppError> {
     let session_id = request.session_id.clone();
 
@@ -150,7 +216,45 @@ async fn assemble_and_drive(
             AppError::internal_error(&format!("failed to resolve app data dir: {e}"))
         })?;
 
-    let config = config_from_rows(&session_row, &provider, app_data_dir)?;
+    let mut config = config_from_rows(&session_row, &provider, app_data_dir)?;
+
+    // --- (2b) Forced-skill injection for THIS turn (VAL-CACLEAN-007).
+    //
+    // `request.forced_skills` (wire `forcedSkills`) carries the skills the user
+    // explicitly forced for this turn. The coding-agent owns ambient skill
+    // discovery (it indexes `<available_skills>` and exposes a `skill` tool from
+    // its own roots), but it has NO forced-skill API. So HandBox resolves the
+    // forced names against ITS effective skill set — discovered-and-validated
+    // (across app-data / user / project scopes) MINUS the global `skills.disabled`
+    // opt-out — and appends each surviving body VERBATIM, bracketed in a
+    // `<forced_skill name="…">` marker, onto this session's system prompt before
+    // construction. This mirrors the retired native runtime's semantics exactly
+    // (disabled wins over forced; unknown/empty/duplicate names are silently
+    // skipped) and is purely additive: an empty / all-unresolved forced list
+    // leaves the prompt untouched. No second discovery IO is shared with the
+    // coding-agent — this only affects the system prompt seen by the model.
+    if !request.forced_skills.is_empty() {
+        let working_dir = session_row.working_dir.as_deref().map(std::path::Path::new);
+        let (discovered, skill_errs) = skills.discover(working_dir);
+        if !skill_errs.is_empty() {
+            tracing::warn!(
+                "[agent_run_stream] skill discovery produced {} non-fatal diagnostic(s)",
+                skill_errs.len()
+            );
+        }
+        let disabled = settings.get_settings()?.skills.disabled;
+        let effective: Vec<Skill> = discovered
+            .into_iter()
+            .filter(|s| !disabled.contains(&s.name))
+            .collect();
+
+        let mut system_prompt = config.system_prompt.take().unwrap_or_default();
+        append_forced_skill_bodies(&mut system_prompt, &request.forced_skills, &effective);
+        // Keep `None` (default prompt) when nothing was forced AND there was no
+        // base prompt, so a session without a custom prompt still falls back to
+        // the coding-agent default rather than an empty override.
+        config.system_prompt = (!system_prompt.is_empty()).then_some(system_prompt);
+    }
 
     // Approval emitter for the M2 PermissionExtension: a dangerous tool call
     // (write/edit/bash) pushes an `agent_approval_request`
@@ -363,5 +467,127 @@ mod tests {
 
         // Cleanup so the process-global registry is left empty for other tests.
         release(&session_id);
+    }
+
+    use crate::services::skills::{SourceInfo, SourceScope};
+    use std::path::PathBuf;
+
+    /// Build a discovered [`Skill`] fixture (name + body) for the forced-skill
+    /// injection tests. Scope/path are immaterial to `append_forced_skill_bodies`,
+    /// which only reads `name`/`body`.
+    fn skill(name: &str, body: &str) -> Skill {
+        Skill {
+            name: name.to_string(),
+            description: format!("desc for {name}"),
+            body: body.to_string(),
+            disable_model_invocation: false,
+            source: SourceInfo {
+                scope: SourceScope::AppData,
+                path: PathBuf::from(format!("/skills/{name}/SKILL.md")),
+            },
+        }
+    }
+
+    fn forced(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    // VAL-CACLEAN-007: a forced skill whose name resolves in the effective set
+    // has its body appended VERBATIM, bracketed by a `<forced_skill>` marker
+    // naming the skill, after the base prompt (separated by a blank line).
+    #[test]
+    fn forced_skill_body_is_appended_verbatim_with_marker() {
+        let effective = vec![skill("deploy", "Run `make deploy`.\nThen verify.")];
+        let mut prompt = "Base system prompt.".to_string();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["deploy"]), &effective);
+
+        assert_eq!(
+            prompt,
+            "Base system prompt.\n\n<forced_skill name=\"deploy\">\n\
+             Run `make deploy`.\nThen verify.\n</forced_skill>",
+        );
+    }
+
+    // VAL-CACLEAN-007: with an empty base prompt, the forced block stands alone
+    // (no leading separator).
+    #[test]
+    fn forced_skill_into_empty_prompt_has_no_leading_separator() {
+        let effective = vec![skill("alpha", "alpha body")];
+        let mut prompt = String::new();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["alpha"]), &effective);
+
+        assert_eq!(
+            prompt,
+            "<forced_skill name=\"alpha\">\nalpha body\n</forced_skill>",
+        );
+    }
+
+    // VAL-CACLEAN-007: an empty forced list (the default for a legacy payload)
+    // leaves the prompt completely untouched — injection is purely additive.
+    #[test]
+    fn empty_forced_list_leaves_prompt_untouched() {
+        let effective = vec![skill("alpha", "alpha body")];
+        let mut prompt = "Base.".to_string();
+
+        append_forced_skill_bodies(&mut prompt, &[], &effective);
+        assert_eq!(prompt, "Base.", "no forced names → prompt unchanged");
+    }
+
+    // VAL-CACLEAN-007: a forced name absent from the effective set is silently
+    // skipped — this is exactly how the global `skills.disabled` opt-out "wins
+    // over forced" (the caller filters disabled skills out of `effective`
+    // before calling), and how unknown / undiscovered names are handled. The
+    // prompt is left untouched when NOTHING resolves.
+    #[test]
+    fn unresolved_forced_names_are_silently_skipped() {
+        let effective = vec![skill("present", "present body")];
+        let mut prompt = "Base.".to_string();
+
+        // `disabled` (filtered out by the caller) + `ghost` (never discovered).
+        append_forced_skill_bodies(&mut prompt, &forced(&["disabled", "ghost"]), &effective);
+        assert_eq!(
+            prompt, "Base.",
+            "no resolvable forced skill → prompt unchanged"
+        );
+
+        // Mixed: only the resolvable one is injected.
+        append_forced_skill_bodies(&mut prompt, &forced(&["ghost", "present"]), &effective);
+        assert_eq!(
+            prompt,
+            "Base.\n\n<forced_skill name=\"present\">\npresent body\n</forced_skill>",
+        );
+    }
+
+    // VAL-CACLEAN-007: multiple forced skills inject in forced-list order, and a
+    // repeated name injects its body only ONCE (first occurrence).
+    #[test]
+    fn forced_skills_inject_in_order_and_dedup_by_name() {
+        let effective = vec![skill("alpha", "A"), skill("beta", "B")];
+        let mut prompt = String::new();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["beta", "alpha", "beta"]), &effective);
+
+        assert_eq!(
+            prompt,
+            "<forced_skill name=\"beta\">\nB\n</forced_skill>\n\
+             <forced_skill name=\"alpha\">\nA\n</forced_skill>",
+            "forced-list order, beta deduped to a single block"
+        );
+    }
+
+    // VAL-CACLEAN-007: an empty forced name never matches and is skipped (it
+    // would otherwise spuriously short-circuit dedup).
+    #[test]
+    fn empty_forced_name_is_skipped() {
+        let effective = vec![skill("alpha", "A")];
+        let mut prompt = String::new();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["", "alpha"]), &effective);
+        assert_eq!(
+            prompt, "<forced_skill name=\"alpha\">\nA\n</forced_skill>",
+            "the empty name is skipped; alpha still injects",
+        );
     }
 }
