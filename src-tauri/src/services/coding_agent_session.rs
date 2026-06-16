@@ -21,8 +21,9 @@
 //! would otherwise persist session state under the user's `~/.hand`; for a
 //! sandboxed desktop app that state must stay inside the app's own data root.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use hand_agent::AgentTool;
 use hand_ai_model::SimpleStreamOptions;
 use hand_coding_agent::tools::create_default_tools;
 use hand_coding_agent::{AgentSession, AgentSessionConfig};
@@ -56,9 +57,11 @@ pub struct HandBoxAgentSessionConfig {
     /// Tauri per-app data directory. Becomes the session's `base_dir` so
     /// persistent state stays inside the app sandbox, not `~/.hand`.
     pub app_data_dir: PathBuf,
-    /// HandBox's per-session enabled-tool list. Carried for forward
-    /// compatibility with the tool-registration feature; this construction
-    /// feature registers the full built-in set (see [`build_agent_session`]).
+    /// HandBox's per-session enabled-tool list, by coding-agent registered
+    /// name (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`). Only the named
+    /// tools are registered against the session (see
+    /// [`select_enabled_tools`]). Following the legacy `agent_tools::build_tools`
+    /// convention, an empty list means "no tool enabled" (not "all enabled").
     pub enabled_tools: Vec<String>,
 }
 
@@ -69,7 +72,8 @@ pub struct HandBoxAgentSessionConfig {
 ///    returned `model.id` equals the requested `model_id`).
 /// 2. Build stream options carrying the plaintext api key (no auth.json, no
 ///    env vars).
-/// 3. Register the full built-in tool set against `working_dir`.
+/// 3. Register only the built-in tools named in `enabled_tools`, filtered by
+///    coding-agent registered name (see [`select_enabled_tools`]).
 /// 4. Hand all of that to `AgentSession::new_with_skill_dirs`, pinning
 ///    skill-discovery roots to `None` so construction does not read the host's
 ///    real `~/.hand/skills/` (keeps construction deterministic and hermetic;
@@ -90,7 +94,7 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
     let stream_options: SimpleStreamOptions =
         chat_engine::build_stream_options(&ChatOptions::default(), &config.api_key);
 
-    let tools = create_default_tools(&config.working_dir);
+    let tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
 
     let session_config = AgentSessionConfig {
         cwd: config.working_dir.clone(),
@@ -113,6 +117,49 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
 
     AgentSession::new_with_skill_dirs(session_config, tools, None, None)
         .map_err(|e| AppError::internal_error(&format!("failed to construct agent session: {e}")))
+}
+
+/// Filter the full coding-agent built-in tool set down to the per-session
+/// `enabled` names, gating tool availability by registered name.
+///
+/// `create_default_tools(cwd)` builds all 7 built-ins
+/// (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`); this keeps only the ones
+/// whose registered `name` appears in `enabled`. Names not present in the
+/// built-in set (e.g. a stale legacy id like `read_file`, or a typo) are
+/// ignored with a `warn` log rather than failing construction — an unknown
+/// name simply contributes no tool.
+///
+/// Empty-list semantics follow HandBox's legacy `agent_tools::build_tools`
+/// convention: an empty `enabled` registers NO tools ("not listed = not
+/// enabled"), never the full set.
+///
+/// Output order follows `create_default_tools` (the canonical built-in order),
+/// independent of the order names appear in `enabled`.
+pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
+    let mut wanted: Vec<&str> = enabled.iter().map(String::as_str).collect();
+
+    let selected: Vec<AgentTool> = create_default_tools(cwd)
+        .into_iter()
+        .filter(|tool| {
+            if let Some(pos) = wanted.iter().position(|name| *name == tool.name) {
+                // Mark this requested name as matched so anything left in
+                // `wanted` afterwards is provably unknown.
+                wanted.swap_remove(pos);
+                true
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    for unknown in &wanted {
+        tracing::warn!(
+            tool = unknown,
+            "ignoring unknown enabled tool name; not in the built-in set"
+        );
+    }
+
+    selected
 }
 
 /// Assemble a [`HandBoxAgentSessionConfig`] from the persisted HandBox session
@@ -194,20 +241,102 @@ mod tests {
         assert_eq!(session.model().id, config.model_id);
     }
 
+    /// Helper: the registered tool-name set a config produces, sorted for
+    /// order-independent comparison.
+    fn registered_tool_names(config: &HandBoxAgentSessionConfig) -> Vec<String> {
+        let session = build_agent_session(config).expect("construction succeeds");
+        let mut names: Vec<String> = session.tools().iter().map(|t| t.name.clone()).collect();
+        names.sort();
+        names
+    }
+
+    /// VAL-CATOOLS-006 — enabling all 7 registered names registers exactly the
+    /// 7 built-in tools, making each visible to the model.
     #[test]
-    fn registers_full_builtin_tool_set() {
+    fn enabling_all_seven_names_registers_full_builtin_set() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        config.enabled_tools = vec![
+            "read".into(),
+            "write".into(),
+            "edit".into(),
+            "bash".into(),
+            "grep".into(),
+            "find".into(),
+            "ls".into(),
+        ];
+
+        assert_eq!(
+            registered_tool_names(&config),
+            vec!["bash", "edit", "find", "grep", "ls", "read", "write"],
+            "all 7 enabled names must register the full built-in set"
+        );
+    }
+
+    /// VAL-CATOOLS-007 — a tool toggled OFF (absent from enabled_tools) is not
+    /// registered, so the model cannot call it. Here only read+grep are on.
+    #[test]
+    fn only_enabled_names_are_registered() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        config.enabled_tools = vec!["read".into(), "grep".into()];
+
+        assert_eq!(
+            registered_tool_names(&config),
+            vec!["grep", "read"],
+            "the registered set must be exactly the enabled names"
+        );
+    }
+
+    /// VAL-CATOOLS-008 — an enabled name that matches a registered tool is
+    /// present with no `unknown tool` drop; an unknown name is ignored without
+    /// failing construction or polluting the set.
+    #[test]
+    fn unknown_enabled_names_are_ignored() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        // `read` is valid; `read_file` (stale legacy id) and `nope` are not.
+        config.enabled_tools = vec!["read".into(), "read_file".into(), "nope".into()];
+
+        assert_eq!(
+            registered_tool_names(&config),
+            vec!["read"],
+            "unknown names are dropped; only the valid `read` survives"
+        );
+    }
+
+    /// Empty enabled_tools registers NO tools (legacy "not listed = not
+    /// enabled" semantics), never the full set.
+    #[test]
+    fn empty_enabled_tools_registers_nothing() {
         let cwd = TempDir::new().unwrap();
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        // sample_config already sets enabled_tools = vec![].
 
         let session = build_agent_session(&config).expect("construction succeeds");
-
-        // create_default_tools registers the 7 built-in tools.
-        assert_eq!(
-            session.tools().len(),
-            7,
-            "full built-in tool set must be registered"
+        assert!(
+            session.tools().is_empty(),
+            "an empty enabled_tools list must register no tools"
         );
+    }
+
+    /// `select_enabled_tools` is order-independent: it emits tools in the
+    /// canonical built-in order regardless of the order names appear in
+    /// `enabled`, and dedups gracefully.
+    #[test]
+    fn select_enabled_tools_uses_canonical_order() {
+        let cwd = TempDir::new().unwrap();
+        // Request in scrambled order; output must follow create_default_tools.
+        let names: Vec<String> =
+            select_enabled_tools(cwd.path(), &["ls".into(), "read".into(), "bash".into()])
+                .into_iter()
+                .map(|t| t.name)
+                .collect();
+        assert_eq!(names, vec!["read", "bash", "ls"]);
     }
 
     #[test]

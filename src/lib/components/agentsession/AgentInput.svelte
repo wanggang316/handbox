@@ -5,8 +5,12 @@
     Plus,
     X,
     FileText,
+    FilePlus,
+    FilePen,
+    Terminal,
+    Search,
+    FileSearch,
     FolderTree,
-    Globe,
   } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
@@ -72,23 +76,24 @@
 
   const thinkingLevel = $derived(session.thinkingLevel ?? "off");
 
-  // 内置工具开关（per-session）：勾选写入 session.enabledTools 并持久化
-  // （VAL-TOOLS-005 UI half；后端按 enabledTools 做实际 gating）。
-  // `requiresWorkingDir` 的 FS 工具在会话无 working_dir 时置灰禁用。
+  // 内置工具开关（per-session）：勾选写入 session.enabledTools 并持久化；
+  // 开关 id == coding-agent 注册名（read/write/edit/bash/grep/find/ls），
+  // 后端 build_agent_session 按这些名做实际 gating。
+  // 这 7 个工具都在工作目录内操作（含 bash），故全部 `requiresWorkingDir`：
+  // 会话无 working_dir 时开关置灰禁用、点击无效、hover 给说明 title。
   const builtinTools: {
     id: string;
     label: string;
     icon: typeof FileText;
     requiresWorkingDir: boolean;
   }[] = [
-    { id: "read_file", label: "读取文件", icon: FileText, requiresWorkingDir: true },
-    {
-      id: "list_directory",
-      label: "列目录",
-      icon: FolderTree,
-      requiresWorkingDir: true,
-    },
-    { id: "web_fetch", label: "网页抓取", icon: Globe, requiresWorkingDir: false },
+    { id: "read", label: "读取文件", icon: FileText, requiresWorkingDir: true },
+    { id: "write", label: "写入文件", icon: FilePlus, requiresWorkingDir: true },
+    { id: "edit", label: "编辑文件", icon: FilePen, requiresWorkingDir: true },
+    { id: "bash", label: "执行命令", icon: Terminal, requiresWorkingDir: true },
+    { id: "grep", label: "搜索内容", icon: Search, requiresWorkingDir: true },
+    { id: "find", label: "查找文件", icon: FileSearch, requiresWorkingDir: true },
+    { id: "ls", label: "列目录", icon: FolderTree, requiresWorkingDir: true },
   ];
 
   const hasWorkingDir = $derived(!!session.workingDir);
