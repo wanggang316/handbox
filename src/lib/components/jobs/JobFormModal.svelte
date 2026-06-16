@@ -459,10 +459,10 @@
 
     <!-- 底部按钮 -->
     <div class="flex items-center justify-end gap-3 pt-4 border-t border-base-300">
-      <Button variant="ghost" on:click={handleClose} disabled={saving}>
+      <Button variant="ghost" onclick={handleClose} disabled={saving}>
         取消
       </Button>
-      <Button variant="primary" on:click={handleSave} disabled={saving}>
+      <Button variant="primary" onclick={handleSave} disabled={saving}>
         {saving ? "保存中…" : job ? "保存" : "创建"}
       </Button>
     </div>

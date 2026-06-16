@@ -264,7 +264,7 @@
         iconSize={16}
         isActive={currentRoute === "/jobs"}
         buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onClick={() => handleJobsClick()}
+        onclick={() => handleJobsClick()}
       />
     </div>
 

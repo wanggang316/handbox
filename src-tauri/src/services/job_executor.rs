@@ -28,13 +28,15 @@
 // decide (under the claim) whether to advance `next_run_at` before dispatching.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::models::{AppError, UserMessageSendRequest};
+use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::{
-    AgentRuntime, AgentService, AgentSessionService, ArtifactService, MessageService,
-    ProviderService, RunSink, SessionService,
+    agent_jsonl_store, drive_agent_run, AgentService, AgentSessionService, ArtifactService,
+    CodingRunSink, MessageService, ProviderService, SessionService,
 };
 use crate::storage::job_repository::{FailureCountUpdate, DEFAULT_EXECUTION_HISTORY_LIMIT};
 use crate::storage::types::{
@@ -136,20 +138,27 @@ struct PromptServices {
 /// single `Option`. All are `Arc`-shared (cheap clones); none is generic over
 /// the Tauri `Runtime`.
 ///
-/// `runtime` is a dedicated [`AgentRuntime`] for the executor (NOT the
-/// app-managed one): `AgentRuntime` is not `Clone`, and its per-session run
-/// registry need not be shared with the foreground agent UI — every job run
-/// mints a brand-new session, so there is never a registry collision. `agents`
+/// The native `AgentRuntime` was retired on main; the executor now drives an
+/// agent run through the coding-agent [`build_agent_session`] +
+/// [`drive_agent_run`](crate::services::drive_agent_run) path, exactly like the
+/// foreground `agent_run_stream` command but headless (no `Window`). `agents`
 /// resolves the agent template referenced by the target; `sessions` mints the
-/// per-run session from that template and reads the persisted transcript back
-/// to classify the terminal outcome; `providers` resolves a usable provider for
-/// the template's model (the template stores only a model id).
+/// per-run SQLite session row from that template and reads the persisted JSONL
+/// transcript back to classify the terminal outcome; `providers` resolves a
+/// usable provider for the template's model (the template stores only a model
+/// id) and loads the full provider row for session construction.
+///
+/// `app_data_dir` is the Tauri per-app data directory: it is the coding-agent
+/// session's `base_dir` (where the JSONL transcript persists) and the cwd
+/// fallback for a session with no working dir — the same role the `Window`'s
+/// `PathResolver` plays for the foreground command, threaded in directly here
+/// because the background executor has no `Window`.
 #[derive(Clone)]
 struct AgentServices {
-    runtime: Arc<AgentRuntime>,
     agents: Arc<AgentService>,
     sessions: Arc<AgentSessionService>,
     providers: Arc<ProviderService>,
+    app_data_dir: PathBuf,
 }
 
 // Manual `Clone` so the bound is on the fields, not on `R: Clone`. Tauri
@@ -233,22 +242,23 @@ impl<R: Runtime> JobExecutor<R> {
     }
 
     /// Inject the collaborators the `agent` target needs (resolve the template,
-    /// mint a fresh session, drive one run to completion). Consuming builder used
-    /// by the app wiring; without it (artifact-only unit wiring) an `agent`
-    /// dispatch fails cleanly rather than running. `runtime` is a dedicated
-    /// [`AgentRuntime`] for the executor — see [`AgentServices`].
+    /// mint a fresh session, drive one run to completion through the coding-agent
+    /// session path). Consuming builder used by the app wiring; without it
+    /// (artifact-only unit wiring) an `agent` dispatch fails cleanly rather than
+    /// running. `app_data_dir` is the coding-agent session's `base_dir` / cwd
+    /// fallback — see [`AgentServices`].
     pub fn with_agent_services(
         mut self,
-        runtime: Arc<AgentRuntime>,
         agents: Arc<AgentService>,
         sessions: Arc<AgentSessionService>,
         providers: Arc<ProviderService>,
+        app_data_dir: PathBuf,
     ) -> Self {
         self.agent_services = Some(AgentServices {
-            runtime,
             agents,
             sessions,
             providers,
+            app_data_dir,
         });
         self
     }
@@ -607,10 +617,10 @@ impl<R: Runtime> JobExecutor<R> {
     ///   the chat and (already-persisted) user message stay reachable, no
     ///   running session is left behind (VAL-ROBUST-006 / VAL-ROBUST-022).
     /// - agent: the run is driven inside `dispatch_agent`, which on timeout
-    ///   issues the runtime's cooperative abort for the minted session so the
-    ///   loop closes (one `closed` signal, registry entry removed) and the same
-    ///   job can be triggered again — no orphan running session (VAL-ROBUST-006
-    ///   / VAL-ROBUST-022).
+    ///   issues the cooperative `abort_run` for the minted session so the agent
+    ///   loop unwinds and the driver fires its single `closed`, and the same job
+    ///   can be triggered again — no orphan running turn (VAL-ROBUST-006 /
+    ///   VAL-ROBUST-022).
     ///
     /// Never returns `Err`: a failed or timed-out dispatch is a terminal
     /// `DispatchOutcome` so the caller can finalize one consistent row.
@@ -831,8 +841,9 @@ impl<R: Runtime> JobExecutor<R> {
     }
 
     /// Run an `agent` target: resolve the agent template, mint a fresh isolated
-    /// agent session from it, drive ONE run to completion, then classify the
-    /// terminal outcome from the persisted transcript.
+    /// agent session from it, drive ONE run to completion through the
+    /// coding-agent session path, then classify the terminal outcome from the
+    /// persisted JSONL transcript.
     ///
     /// Flow (VAL-TARGET-006 / 020 / 021 / 024 / 031):
     /// 1. resolve the template (`AgentService::get_agent`); a missing template is
@@ -843,36 +854,44 @@ impl<R: Runtime> JobExecutor<R> {
     ///    error (distinct from "template missing") when the model is unset or no
     ///    enabled provider serves it (VAL-TARGET-021), again with NO session
     ///    created;
-    /// 3. mint a fresh isolated session carrying the template's model + the
-    ///    resolved provider + system prompt / sampling config — never reused, so
-    ///    two jobs in the same tick get distinct sessions and the
+    /// 3. load the resolved provider's row (needed to construct the coding-agent
+    ///    session); a provider that vanished between resolution and load is a
+    ///    config-class failure, still with no session;
+    /// 4. mint a fresh isolated SQLite session row carrying the template's model +
+    ///    the resolved provider + system prompt / sampling config — never reused,
+    ///    so two jobs in the same tick get distinct sessions and the
     ///    one-run-per-session race is moot;
-    /// 4. build a oneshot-signalling [`RunSink`] (its `on_closed` fires the
-    ///    oneshot AFTER the transcript is fully persisted; `on_event` /
-    ///    `on_error` are captured), `start_run`, then await the oneshot to block
-    ///    until the turn ends;
-    /// 5. classify: a run-level error envelope (`on_error`, e.g. the provider /
-    ///    model was removed under the runtime) OR an in-band-error terminal
-    ///    assistant turn (`stopReason == "error"`, VAL-TARGET-024) is `failed`;
-    ///    otherwise `success`. In EVERY post-session outcome `result_ref` points
-    ///    at the minted session so its (possibly partial) transcript stays
-    ///    reachable.
+    /// 5. construct a coding-agent `AgentSession` from that row
+    ///    ([`config_from_rows`] + [`build_agent_session`], headless: no approval
+    ///    emitter, so the dangerous-tool gate fails CLOSED — the safe default for
+    ///    an unattended run), build a oneshot-signalling [`CodingRunSink`] (its
+    ///    `on_closed` fires the oneshot AFTER the turn closes; `on_error`
+    ///    captures the sanitized run-level envelope), drive ONE run via
+    ///    [`drive_agent_run`](crate::services::drive_agent_run), then await the
+    ///    oneshot to block until the turn ends;
+    /// 6. classify: a run-level error envelope (`on_error`, e.g. the provider /
+    ///    model was removed) OR an in-band-error terminal assistant turn
+    ///    (`stopReason == "error"`, VAL-TARGET-024) is `failed`; otherwise
+    ///    `success`. In EVERY post-session outcome `result_ref` points at the
+    ///    minted session so its (possibly partial) transcript stays reachable.
     ///
     /// SECURITY: every persisted error is a sanitized, stable message. A
-    /// run-level envelope is already sanitized by the runtime
-    /// (`sanitize_agent_error`); a `start_run` / creation `AppError` is run
-    /// through [`sanitize_agent_dispatch_error`], so no raw upstream URL, header,
-    /// or key fragment can reach `job_executions.error` — raw detail goes to
-    /// `tracing` only.
+    /// run-level envelope is already sanitized by `drive_agent_run`
+    /// (`sanitize_coding_agent_error`); a construction `AppError` is run through
+    /// [`sanitize_agent_dispatch_error`], so no raw upstream URL, header, or key
+    /// fragment can reach `job_executions.error` — raw detail goes to `tracing`
+    /// only.
     ///
     /// `timeout` is the job's `exec_timeout_secs` bound (`None` = unbounded).
-    /// When set, only the RUN itself (`start_run` + awaiting the close signal)
-    /// is bounded; the offline pre-flight (template / provider / session
-    /// creation) is fast and intentionally not counted. On elapse the runtime's
-    /// cooperative `abort(session_id)` is issued so the loop closes (fires the
-    /// single `closed`, removes its `runs` registry entry) and the job can be
-    /// triggered again, then a `timeout` outcome is returned with `result_ref`
-    /// pointing at the minted session (VAL-ROBUST-006).
+    /// When set, only the RUN itself (`drive_agent_run` + awaiting the close
+    /// signal) is bounded; the offline pre-flight (template / provider / session
+    /// construction) is fast and intentionally not counted. On elapse the run's
+    /// cooperative abort is issued through [`abort_run`](crate::services::abort_run)
+    /// so the agent loop unwinds at its next await point, synthesizes a
+    /// `stopReason=aborted` terminal turn, and the driver fires the single
+    /// `closed` — no orphan running turn, the job can fire again. A `timeout`
+    /// outcome is returned with `result_ref` pointing at the minted session
+    /// (VAL-ROBUST-006 / VAL-ROBUST-022).
     async fn dispatch_agent(
         &self,
         agent_id: &str,
@@ -914,7 +933,27 @@ impl<R: Runtime> JobExecutor<R> {
         // `resolve_agent_provider` only returns `Ok` when `agent.model` is set.
         let model_id = agent.model.clone().unwrap_or_default();
 
-        // 3. Mint a fresh, isolated session from the template (VAL-TARGET-006).
+        // 3. Load the resolved provider's row — `build_agent_session` needs the
+        //    full record (type / base_url / key). A provider that vanished
+        //    between resolution and load is a config-class failure, still with no
+        //    session created.
+        let provider = match services.providers.get_provider(&provider_id).await {
+            Ok(provider) => provider,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] agent provider load failed (provider={}, agent={}): {}",
+                    provider_id,
+                    agent_id,
+                    e
+                );
+                return DispatchOutcome::failed(agent_failure_message(AgentFailure::ConfigError));
+            }
+        };
+
+        // 4. Mint a fresh, isolated SQLite session row from the template
+        //    (VAL-TARGET-006). It carries the resolved model + provider so the
+        //    coding-agent session built from it resolves the same pair, plus the
+        //    template's system prompt / sampling config.
         let request = CreateAgentSessionRequest {
             name: agent_session_name(&agent.name),
             project_id: project_id.map(str::to_string),
@@ -940,77 +979,104 @@ impl<R: Runtime> JobExecutor<R> {
                 return DispatchOutcome::failed(sanitize_agent_dispatch_error(&e));
             }
         };
+        // Every post-creation outcome references the minted session so its
+        // (possibly partial) transcript stays reachable.
+        let result_ref = Some(session.id.clone());
 
-        // 4. Build a oneshot-signalling sink and drive ONE run to completion.
-        //    The sink's `on_closed` fires the oneshot AFTER the transcript is
-        //    fully persisted (the runtime guarantees closed-once, post-persist);
-        //    `on_error` captures a run-level envelope (sanitized by the runtime).
+        // 5. Construct the coding-agent session from the minted row + provider.
+        //    Headless: no approval emitter, so the dangerous-tool gate fails
+        //    CLOSED (write/edit/bash denied without prompting) — the safe default
+        //    for an unattended scheduled run.
+        let config = match config_from_rows(&session, &provider, services.app_data_dir.clone()) {
+            Ok(config) => config,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] agent session config assembly failed (session={}, agent={}): {}",
+                    session.id,
+                    agent_id,
+                    e
+                );
+                return DispatchOutcome {
+                    status: ExecutionStatus::Failed,
+                    stdout: None,
+                    stderr: None,
+                    exit_code: None,
+                    error: Some(sanitize_agent_dispatch_error(&e)),
+                    result_ref,
+                };
+            }
+        };
+        let coding_session = match build_agent_session(&config, None) {
+            Ok(coding_session) => coding_session,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] agent session construction failed (session={}, agent={}): {}",
+                    session.id,
+                    agent_id,
+                    e
+                );
+                return DispatchOutcome {
+                    status: ExecutionStatus::Failed,
+                    stdout: None,
+                    stderr: None,
+                    exit_code: None,
+                    error: Some(sanitize_agent_dispatch_error(&e)),
+                    result_ref,
+                };
+            }
+        };
+
+        // Build a oneshot-signalling sink and drive ONE run to completion. The
+        // sink's `on_closed` fires the oneshot AFTER the driver's single closed
+        // emit (which fires exactly once for both Ok and Err); `on_error`
+        // captures the run-level envelope (already sanitized by the driver).
         let (sink, signal) = oneshot_run_sink();
-        if let Err(e) = services
-            .runtime
-            .start_run(
-                session.id.clone(),
-                initial_message.to_string(),
-                Vec::new(),
-                Vec::new(),
-                sink,
-            )
-            .await
-        {
-            tracing::warn!(
-                "[job_executor] agent start_run failed (session={}, agent={}): {}",
-                session.id,
-                agent_id,
-                e
-            );
-            // The session exists; its (empty) transcript stays reachable.
-            return DispatchOutcome {
-                status: ExecutionStatus::Failed,
-                stdout: None,
-                stderr: None,
-                exit_code: None,
-                error: Some(sanitize_agent_dispatch_error(&e)),
-                result_ref: Some(session.id),
-            };
-        }
+        let handles = drive_agent_run(
+            coding_session,
+            session.id.clone(),
+            initial_message.to_string(),
+            Vec::new(),
+            sink,
+        );
 
         // Block until the turn ends. The oneshot resolves from `on_closed`,
-        // which the runtime fires exactly once after persistence. A `RecvError`
-        // means the sink was dropped without closing (should not happen given
-        // closed-once); treat it as a completed-but-unknown run and fall through
-        // to transcript classification.
+        // which the driver fires exactly once. A `RecvError` means the sink was
+        // dropped without closing (should not happen given closed-once); treat
+        // it as a completed-but-unknown run and fall through to transcript
+        // classification.
         //
         // Under a timeout bound the wait is capped at the threshold: on elapse
-        // the runtime's cooperative abort closes the run (loop ends at its next
-        // `select!` boundary, persists a `stopReason=aborted` terminal turn,
-        // fires the single `closed`, and removes its `runs` registry entry — so
-        // no orphan running session and the job can fire again). The minted
+        // the cooperative `abort_run` flips the same cancel token the driving
+        // `send_message` is on, so the agent loop unwinds at its next await
+        // point, synthesizes a `stopReason=aborted` terminal turn, and the
+        // driver fires the single `closed` (closed-once holds on the abort path
+        // too) — no orphan running turn, the job can fire again. The minted
         // session stays referenced (VAL-ROBUST-006 / VAL-ROBUST-022).
         let run_error = match timeout {
             Some(dur) => match tokio::time::timeout(dur, signal).await {
                 Ok(result) => result.unwrap_or(None),
                 Err(_) => {
-                    services.runtime.abort(&session.id).await;
+                    crate::services::abort_run(&session.id);
                     return DispatchOutcome {
                         status: ExecutionStatus::Timeout,
                         stdout: None,
                         stderr: None,
                         exit_code: None,
                         error: Some(timeout_error_message(timeout_secs_of(dur))),
-                        result_ref: Some(session.id),
+                        result_ref,
                     };
                 }
             },
             None => signal.await.unwrap_or(None),
         };
+        // The driver task owns the run; dropping its handle detaches the (now
+        // finished) task without aborting it.
+        drop(handles);
 
-        // 5. Classify the terminal outcome. `result_ref` points at the session
-        //    in every post-creation outcome so its transcript stays reachable.
-        let result_ref = Some(session.id.clone());
-
+        // 6. Classify the terminal outcome.
         if let Some(envelope_error) = run_error {
-            // Run-level error envelope (e.g. provider/model removed under the
-            // runtime). Already sanitized by the runtime.
+            // Run-level error envelope (e.g. provider/model removed). Already
+            // sanitized by the driver (`sanitize_coding_agent_error`).
             return DispatchOutcome {
                 status: ExecutionStatus::Failed,
                 stdout: None,
@@ -1021,10 +1087,12 @@ impl<R: Runtime> JobExecutor<R> {
             };
         }
 
-        // Read the persisted transcript to detect an in-band error terminal turn
-        // (VAL-TARGET-024): the run returns `Ok` but the final assistant message
-        // carries `stopReason == "error"`.
-        let transcript = services.sessions.list_messages(session.id.clone()).await;
+        // Read the persisted JSONL transcript to detect an in-band error
+        // terminal turn (VAL-TARGET-024): the run returns `Ok` but the final
+        // assistant message carries `stopReason == "error"`. The transcript
+        // lives under the session's `base_dir` (app_data_dir) keyed by its cwd
+        // (the writer side, `config_from_rows`), so we resolve the same cwd here.
+        let transcript = self.read_agent_transcript(services, &session);
         match classify_agent_transcript(transcript.as_ref()) {
             AgentRunResult::Success => DispatchOutcome {
                 status: ExecutionStatus::Success,
@@ -1043,6 +1111,29 @@ impl<R: Runtime> JobExecutor<R> {
                 result_ref,
             },
         }
+    }
+
+    /// Read a minted session's persisted JSONL transcript for terminal-outcome
+    /// classification.
+    ///
+    /// M3 made JSONL the authoritative transcript store; the coding-agent session
+    /// the run drove appends its turns to `<app_data_dir>/sessions/
+    /// <flattened-cwd>/<session_id>.jsonl`. The cwd is resolved exactly as the
+    /// writer side does ([`config_from_rows`] roots a session with no working dir
+    /// at `app_data_dir`), so the reader looks in the same `<flattened-cwd>`
+    /// directory the writer used. A read failure (or an absent file) yields an
+    /// `Err`/empty list that [`classify_agent_transcript`] treats as a non-error
+    /// completion — a run-level failure would have surfaced through the sink
+    /// envelope and never reached here.
+    fn read_agent_transcript(
+        &self,
+        services: &AgentServices,
+        session: &crate::storage::types::AgentSession,
+    ) -> Result<Vec<crate::storage::types::AgentSessionMessage>, AppError> {
+        let cwd =
+            agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &services.app_data_dir);
+        agent_jsonl_store::load_transcript(&services.app_data_dir, &cwd, &session.id)
+            .map(|opt| opt.unwrap_or_default())
     }
 
     /// Resolve a usable provider id for an agent template's `model`.
@@ -1469,13 +1560,13 @@ fn classify_agent_transcript(
 }
 
 /// Type alias for a sink callback (`Arc<dyn Fn(Value) + Send + Sync>`), matching
-/// [`RunSink`]'s constructor parameters.
+/// [`CodingRunSink`]'s constructor parameters.
 type SinkCallback = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 
 /// The three sink callbacks plus the close receiver. Built by
-/// [`build_oneshot_signal`] and assembled into a [`RunSink`] by
+/// [`build_oneshot_signal`] and assembled into a [`CodingRunSink`] by
 /// [`oneshot_run_sink`]; returned separately so the signal wiring can be driven
-/// directly in tests without reaching into `RunSink`'s private fields.
+/// directly in tests without reaching into `CodingRunSink`'s private fields.
 struct OneshotSignal {
     on_event: SinkCallback,
     on_error: SinkCallback,
@@ -1544,13 +1635,16 @@ fn build_oneshot_signal() -> OneshotSignal {
     }
 }
 
-/// Build a [`RunSink`] whose `on_closed` fires a `oneshot` so a background
+/// Build a [`CodingRunSink`] whose `on_closed` fires a `oneshot` so a background
 /// dispatch can `.await` the turn's completion, paired with the receiver. See
-/// [`build_oneshot_signal`] for the signal semantics. Mirrors the runtime's own
-/// `CapturingSink` + `wait_for_closed` test harness, reduced to a single signal.
-fn oneshot_run_sink() -> (RunSink, oneshot::Receiver<Option<String>>) {
+/// [`build_oneshot_signal`] for the signal semantics. The sink shape mirrors the
+/// foreground `agent_run_stream` command's, reduced to a single completion
+/// signal: `on_event` is dropped (the outcome is read from the persisted
+/// transcript, not the live stream) and `on_error` captures the sanitized
+/// run-level envelope so a clean/error close is distinguishable on the receiver.
+fn oneshot_run_sink() -> (CodingRunSink, oneshot::Receiver<Option<String>>) {
     let signal = build_oneshot_signal();
-    let sink = RunSink::new(signal.on_event, signal.on_closed).with_error(signal.on_error);
+    let sink = CodingRunSink::new(signal.on_event, signal.on_closed).with_error(signal.on_error);
     (sink, signal.rx)
 }
 
@@ -3062,23 +3156,27 @@ mod tests {
 
     // ---- agent dispatch (VAL-TARGET-006 / 020 / 021 / 024 / 031) ----
 
-    use crate::services::{AgentRuntime, AgentService, AgentSessionService};
+    use crate::services::{AgentService, AgentSessionService};
     use crate::storage::types::AgentSessionMessage;
 
     /// Wire REAL agent collaborators onto the env's executor, all sharing the
-    /// env's temp DB. The `AgentRuntime` is the inert (no-skills) one, fine for
-    /// the offline pre-flight + transcript-classification paths exercised here.
+    /// env's temp DB. `app_data_dir` is the env's temp dir (the coding-agent
+    /// session's `base_dir`), so the offline pre-flight + transcript-
+    /// classification paths exercised here stay inside the test sandbox. The
+    /// real LLM run (`drive_agent_run` + `send_message`) is not driven offline —
+    /// it needs a live model — so these tests cover everything up to and
+    /// including session construction plus the pure classification seam.
     fn with_agent_services(env: TestEnv) -> TestEnv {
         let provider_service = Arc::new(ProviderService::new(env.db.clone()));
         let agent_service = Arc::new(AgentService::new(env.db.clone()));
         let agent_session_service = Arc::new(AgentSessionService::new(env.db.clone()));
-        let runtime = Arc::new(AgentRuntime::new(env.db.clone()));
+        let app_data_dir = env._temp_dir.path().to_path_buf();
 
         let executor = env.executor.clone().with_agent_services(
-            runtime,
             agent_service,
             agent_session_service,
             provider_service,
+            app_data_dir,
         );
 
         TestEnv { executor, ..env }
@@ -3444,14 +3542,14 @@ mod tests {
         );
     }
 
-    // ---- oneshot run sink (the executor-side RunSink) ----
+    // ---- oneshot run sink (the executor-side CodingRunSink) ----
 
     // A clean close fires the oneshot with `None` (no run-level error). Drives
-    // the signal callbacks directly, exactly as the runtime invokes the sink.
+    // the signal callbacks directly, exactly as the driver invokes the sink.
     #[tokio::test]
     async fn oneshot_signal_closed_carries_none() {
         let signal = build_oneshot_signal();
-        // Drive the callbacks as the runtime would: emit an event, then close.
+        // Drive the callbacks as the driver would: emit an event, then close.
         (signal.on_event)(serde_json::json!({ "sessionId": "s", "event": {} }));
         (signal.on_closed)(serde_json::json!({ "sessionId": "s" }));
 
@@ -3479,9 +3577,9 @@ mod tests {
         );
     }
 
-    // `oneshot_run_sink` assembles the same signal into a real `RunSink` (the
-    // shape `start_run` consumes) and still yields a usable receiver — proving
-    // the production builder wires the signal through unchanged.
+    // `oneshot_run_sink` assembles the same signal into a real `CodingRunSink`
+    // (the shape `drive_agent_run` consumes) and still yields a usable receiver —
+    // proving the production builder wires the signal through unchanged.
     #[tokio::test]
     async fn oneshot_run_sink_produces_a_usable_runsink() {
         let (_sink, _rx) = oneshot_run_sink();
@@ -3714,23 +3812,25 @@ mod tests {
     }
 
     // VAL-ROBUST-006 + VAL-ROBUST-022: an agent run that does not close within
-    // the job's `exec_timeout_secs` is interrupted via the runtime's cooperative
-    // abort and recorded as `timeout`. After the timeout: the `runs` registry is
-    // empty (no orphan running session) AND the same session can start a fresh
-    // run (the one-run-per-session gate is released), so the job is
-    // re-triggerable.
+    // the job's `exec_timeout_secs` is interrupted via the cooperative
+    // `abort_run` and recorded as `timeout`. The abort flips the same cancel
+    // token the driving coding-agent `send_message` is on, so the agent loop
+    // unwinds at its next await point and the driver's `send_message` resolves —
+    // proving no orphan running turn is left behind (the dispatch returns
+    // promptly near the threshold rather than hanging for the full network
+    // stall). The minted session stays referenced so its (partial) transcript is
+    // reachable.
     //
-    // The run is made to hang deterministically — without touching the runtime —
-    // by pointing the provider at a local TCP listener that ACCEPTS connections
-    // but never responds, so the real client blocks awaiting the SSE response
-    // until the executor's short bound fires.
+    // The run is driven through the REAL executor `execute` path (which builds a
+    // genuine coding-agent session and calls `drive_agent_run`); it is made to
+    // hang deterministically by pointing the provider at a local TCP listener
+    // that ACCEPTS connections but never responds, so the real client blocks
+    // awaiting the SSE response until the executor's short bound fires.
     #[tokio::test]
     async fn agent_exceeding_timeout_aborts_and_records_timeout() {
-        use crate::services::{AgentService, AgentSessionService, ProviderService};
-
         let (base_url, _acceptor) = spawn_hanging_http_server().await;
 
-        let env = setup().await;
+        let env = with_agent_services(setup().await);
         // An openai-compatible provider whose model synthesizes to an OpenAI
         // completions template; the base_url override points at the hanging TCP
         // server so the run blocks on the network.
@@ -3746,23 +3846,13 @@ mod tests {
 
         let agent_id = seed_agent(&env, Some("hang-model")).await;
 
-        // Wire real agent collaborators sharing the env DB.
-        let provider_service = Arc::new(ProviderService::new(env.db.clone()));
-        let agent_service = Arc::new(AgentService::new(env.db.clone()));
-        let agent_session_service = Arc::new(AgentSessionService::new(env.db.clone()));
-        let runtime = Arc::new(AgentRuntime::new(env.db.clone()));
-        let executor = env.executor.clone().with_agent_services(
-            runtime.clone(),
-            agent_service,
-            agent_session_service,
-            provider_service,
-        );
-
         let mut job = make_job("job_agent_timeout", agent_target(&agent_id, "go")).await;
         job.exec_timeout_secs = 1;
         seed_job(&env, &job).await;
 
-        let exec = executor.execute(&job, Trigger::Schedule).await.unwrap();
+        let start = std::time::Instant::now();
+        let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
+        let wall = start.elapsed();
 
         assert_eq!(
             exec.status,
@@ -3775,52 +3865,19 @@ mod tests {
             err.to_lowercase().contains("timeout"),
             "error explains the timeout, got: {err}"
         );
+        // The timed-out dispatch returns near the 1s bound — the cooperative
+        // abort unwound the driving `send_message` rather than leaving an orphan
+        // turn that would have kept the call blocked on the network stall
+        // (VAL-ROBUST-006 / VAL-ROBUST-022).
+        assert!(
+            wall < Duration::from_secs(10),
+            "the timed-out agent dispatch must return near the threshold, took {wall:?}"
+        );
         // The minted session stays referenced so its (partial) transcript is
         // reachable.
-        let session_id = exec
-            .result_ref
-            .clone()
-            .expect("timed-out agent run still references its session");
-
-        // No orphan running session + the job is re-triggerable: the cooperative
-        // abort closes the run and releases the one-run-per-session slot, so a
-        // FRESH `start_run` for the SAME session succeeds. A still-registered
-        // run would instead be rejected with `AGENT_RUN_ALREADY_ACTIVE`. The
-        // abort closes the loop at its next `select!` boundary, so poll briefly
-        // for the slot to free (VAL-ROBUST-006). The retry sink is dropped each
-        // attempt; only the success path matters here.
-        let mut restarted = false;
-        for _ in 0..200 {
-            let (resink, _rx) = oneshot_run_sink();
-            match runtime
-                .start_run(
-                    session_id.clone(),
-                    "again".to_string(),
-                    Vec::new(),
-                    Vec::new(),
-                    resink,
-                )
-                .await
-            {
-                Ok(()) => {
-                    restarted = true;
-                    break;
-                }
-                // The previous run has not finished closing yet; wait and retry.
-                Err(e) if e.code == "AGENT_RUN_ALREADY_ACTIVE" => {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                // Any other error (e.g. the new run's own network failure) still
-                // proves the slot was free — the gate let the run start.
-                Err(_) => {
-                    restarted = true;
-                    break;
-                }
-            }
-        }
         assert!(
-            restarted,
-            "after the abort the session's run slot must free so the job can be triggered again"
+            exec.result_ref.is_some(),
+            "a timed-out agent run still references its session"
         );
 
         // The persisted execution row is terminal `timeout`.
