@@ -191,7 +191,7 @@
       <Button
         variant="primary"
         size="sm"
-        on:click={handleCreate}
+        onclick={handleCreate}
         customClass="flex items-center gap-2"
       >
         <Plus size={16} />

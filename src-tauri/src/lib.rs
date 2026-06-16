@@ -441,15 +441,23 @@ async fn initialize_services(
 
     // 初始化任务执行器（执行一个任务并落库）。注入 AppHandle，使执行开始/完成时各
     // emit 一次 `job_executed` 事件供前端实时刷新；注入 prompt 目标协作者（headless：
-    // 每次新建 chat + 非流式发送 + provider 预校验）。
-    // NOTE(rebase onto main): agent 目标分派（原 with_agent_services）依赖已退役的
-    // native AgentRuntime，需重写到 coding-agent（coding_agent_runtime）后再接回。
+    // 每次新建 chat + 非流式发送 + provider 预校验）；注入 agent 目标协作者（headless：
+    // 每次新建独立 agent session、经 coding-agent 驱动一轮、从 JSONL transcript 分类）。
+    // agent 协作者复用与前台命令同源的服务，并把 data_dir 作为 coding-agent session 的
+    // base_dir / 无 working_dir 会话的 cwd 回退（与前台命令经 Window PathResolver 解析
+    // app_data_dir 等价；后台执行器无 Window，故直接传入）。
     let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared)
         .with_app_handle(app.clone())
         .with_prompt_services(
             session_service_shared,
             message_service_shared,
             provider_service_shared.clone(),
+        )
+        .with_agent_services(
+            Arc::new(agent_service.clone()),
+            Arc::new(agent_session_service.clone()),
+            provider_service_shared.clone(),
+            data_dir.clone(),
         );
 
     // 初始化定时任务调度器（后台 tick loop，驱动到点任务自动执行）。
