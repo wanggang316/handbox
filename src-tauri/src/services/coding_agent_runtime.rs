@@ -433,6 +433,54 @@ mod tests {
         })
     }
 
+    /// A finished assistant `Message` carrying real (non-zero) token usage — the
+    /// shape of a NORMAL turn the frontend renders a usage row for.
+    fn assistant_message_with_usage(input: u64, output: u64) -> Message {
+        let usage = Usage {
+            input,
+            output,
+            total_tokens: input + output,
+            ..Usage::default()
+        };
+        Message::Assistant(AssistantMessage {
+            role: "assistant".into(),
+            content: vec![AssistantContentBlock::Text(TextContent::new(
+                "done".to_string(),
+            ))],
+            api: Api::OpenAICompletions,
+            provider: hand_ai_model::types::Provider::OpenAI,
+            model: "gpt-4o".to_string(),
+            usage,
+            stop_reason: StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+        })
+    }
+
+    /// An ABORTED-turn assistant `Message`, byte-for-byte the shape hand-agent's
+    /// `synthesize_aborted_message` produces: empty content, `Usage::default()`
+    /// (all zeros), `stop_reason = Aborted`. The frontend keys its
+    /// usage-suppression off exactly this shape (VAL-CARUN-008).
+    fn aborted_assistant_message() -> Message {
+        Message::Assistant(AssistantMessage {
+            role: "assistant".into(),
+            content: vec![],
+            api: Api::OpenAICompletions,
+            provider: hand_ai_model::types::Provider::OpenAI,
+            model: "gpt-4o".to_string(),
+            usage: Usage::default(),
+            stop_reason: StopReason::Aborted,
+            error_message: Some("Aborted by caller".to_string()),
+            timestamp: 0,
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+        })
+    }
+
     /// A capturing sink that records every event / closed / error payload, so a
     /// test can assert the mapped shapes and the closed-once invariant.
     #[derive(Clone, Default)]
@@ -540,6 +588,59 @@ mod tests {
             sink.closed.lock().unwrap()[0].get("sessionId").unwrap(),
             session_id
         );
+    }
+
+    /// VAL-CARUN-008 (per-turn usage; aborted/error turns don't carry
+    /// misleading non-zero usage). The driver forwards `AgentEvent`s verbatim,
+    /// so the usage the frontend renders is exactly the `AssistantMessage.usage`
+    /// hand-agent put on the finalized turn. This pins the wire contract the
+    /// frontend's usage-suppression predicate (`AgentTimeline.hasUsage`) keys off:
+    ///   - a NORMAL finalized turn forwards its real, non-zero usage and
+    ///     `stopReason: "stop"`;
+    ///   - an ABORTED turn forwards `usage` all-zeros (input/output/totalTokens
+    ///     == 0) with `stopReason: "aborted"` — never the previous turn's
+    ///     numbers. So an aborted turn can NEVER surface a stale / misleading
+    ///     non-zero usage downstream.
+    #[test]
+    fn forwarded_message_end_usage_is_real_for_normal_turn_and_zero_for_aborted() {
+        let session_id = "sess-usage";
+        let sink = CapturingSink::default();
+        let run_sink = sink.clone().into_run_sink();
+
+        // Turn 1: a normal turn that consumed real tokens. Turn 2: an aborted
+        // turn (synthesized aborted message). The aborted turn must NOT inherit
+        // turn 1's usage — hand-agent zeroes it at the source; we assert the
+        // forwarded shape reflects that.
+        let events = vec![
+            AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd {
+                message: assistant_message_with_usage(123, 45),
+            })),
+            AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd {
+                message: aborted_assistant_message(),
+            })),
+        ];
+
+        replay_through_sink(session_id, &run_sink, events, None);
+
+        let captured = sink.events.lock().unwrap();
+        assert_eq!(captured.len(), 2, "both message_end events forwarded");
+
+        // Normal turn: real non-zero usage + stopReason "stop".
+        let normal = captured[0].get("event").unwrap().get("message").unwrap();
+        assert_eq!(normal.get("stopReason").unwrap(), "stop");
+        let normal_usage = normal.get("usage").unwrap();
+        assert_eq!(normal_usage.get("input").unwrap(), 123);
+        assert_eq!(normal_usage.get("output").unwrap(), 45);
+        assert_eq!(normal_usage.get("totalTokens").unwrap(), 168);
+
+        // Aborted turn: zeros across the board + stopReason "aborted". Crucially
+        // NOT turn 1's 123/45 — no carry-over, no misleading non-zero usage.
+        let aborted = captured[1].get("event").unwrap().get("message").unwrap();
+        assert_eq!(aborted.get("stopReason").unwrap(), "aborted");
+        let aborted_usage = aborted.get("usage").unwrap();
+        assert_eq!(aborted_usage.get("input").unwrap(), 0);
+        assert_eq!(aborted_usage.get("output").unwrap(), 0);
+        assert_eq!(aborted_usage.get("totalTokens").unwrap(), 0);
     }
 
     /// Out-of-band lifecycle events (compaction / session-info / session-error)
