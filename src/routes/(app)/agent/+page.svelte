@@ -16,7 +16,10 @@
   import AgentInput from "$lib/components/agentsession/AgentInput.svelte";
   import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
   import AgentApprovalModal from "$lib/components/agentsession/AgentApprovalModal.svelte";
-  import type { ApprovalDecision } from "$lib/types/agentSession";
+  import type {
+    AgentApprovalRequest,
+    ApprovalDecision,
+  } from "$lib/types/agentSession";
 
   // 当前选中的 Agent 会话 ID（来自 ?id= 查询参数）
   let sessionId = $derived(
@@ -129,10 +132,13 @@
 
   // 用户决策（含作用域）：allow_once 本次允许 / allow_always 本会话始终允许该工具
   // → 工具执行、对话继续（VAL-CAPERM-003/008）；deny → 工具被 Cancel、模型收被拒
-  // 结果、对话继续不中断（VAL-CAPERM-005）。store 先清键关弹窗再回灌。
-  function handleApprovalRespond(decision: ApprovalDecision) {
-    if (!sessionId) return;
-    void agentApprovalStore.respond(sessionId, decision);
+  // 结果、对话继续不中断（VAL-CAPERM-005）。透传**弹窗当前展示的 request**，store 据
+  // 其 requestId 精确回灌（展示==回灌，无 sessionId 重取竞态）后清键关弹窗。
+  function handleApprovalRespond(
+    request: AgentApprovalRequest,
+    decision: ApprovalDecision,
+  ) {
+    void agentApprovalStore.respondTo(request, decision);
   }
 </script>
 

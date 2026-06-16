@@ -90,9 +90,14 @@ class AgentApprovalStore {
   }
 
   /**
-   * 回应一次待审批请求（含作用域）：先本地清键（弹窗即时关闭、对话立刻不再显示
-   * 暂停态），再把 `decision` 回灌后端。`requestId` 取自当前 pending 条目，故只回应
-   * 当前展示的请求。
+   * 回应**弹窗当前展示的那个请求**（含作用域）：以 `request.requestId` 回灌后端，
+   * 故展示的请求 == 回灌的目标，绝不因 sessionId 重取而误中一个已覆盖旧键的新请求。
+   *
+   * 入参取**弹窗持有的 request 引用**（而非 sessionId 重查 store）：本 store 按
+   * sessionId 单值存储，若在用户决策窗口内同会话又来一个新请求覆盖了该键，按
+   * sessionId 重取会读到新请求的 requestId —— 弹窗仍显示旧请求，却把决策回灌到新
+   * 请求上（展示≠回灌）。直接用弹窗持有的 request 消除这一结构竞态；后端按
+   * requestId 精确路由 + first-wins 仍是兜底，但前端不应主动选错目标。
    *
    * `decision` 三态：`allow_once` 本次允许（不记忆）、`allow_always` 本会话始终允许
    * 该工具（后端按 sessionId 键控的进程内存集，同会话同工具后续不再弹窗）、`deny`
@@ -100,14 +105,13 @@ class AgentApprovalStore {
    *
    * 先清键再回灌：UI 反馈即时；回灌失败仅记录，不回滚清键——后端对未知 / 重复
    * `requestId` 幂等 no-op，重新弹出反而会让用户对着一个后端可能已放弃的请求二次
-   * 决策。无待审批请求时为干净 no-op。
+   * 决策。
    */
-  async respond(sessionId: string, decision: ApprovalDecision): Promise<void> {
-    const request = this.pending[sessionId];
-    if (!request) {
-      return;
-    }
-    this.clear(sessionId);
+  async respondTo(
+    request: AgentApprovalRequest,
+    decision: ApprovalDecision,
+  ): Promise<void> {
+    this.clearRequest(request);
     try {
       await respondAgentApproval(request.requestId, decision);
     } catch (error) {
@@ -116,14 +120,17 @@ class AgentApprovalStore {
   }
 
   /**
-   * 清除某会话的待审批请求（关闭弹窗 / 解除暂停）。非响应式安全：仅在写路径调用。
+   * 清除某个具体请求（关闭弹窗 / 解除暂停）。**仅当该 sessionId 当前键持有的正是这个
+   * 请求时才清**（按 requestId 比对）：若决策窗口内同会话已来新请求覆盖该键，清键会
+   * 误关一个尚未决策的新请求 —— 此处的相等守卫避免该误清。非响应式安全：仅在写路径
+   * 调用。
    */
-  private clear(sessionId: string): void {
-    if (!this.pending[sessionId]) {
+  private clearRequest(request: AgentApprovalRequest): void {
+    if (this.pending[request.sessionId]?.requestId !== request.requestId) {
       return;
     }
     const next = { ...this.pending };
-    delete next[sessionId];
+    delete next[request.sessionId];
     this.pending = next;
   }
 }

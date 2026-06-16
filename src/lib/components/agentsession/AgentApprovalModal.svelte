@@ -11,11 +11,15 @@
   interface Props {
     // 当前待审批请求（非空即弹窗打开、对话暂停）。args 即将执行的参数，须完整呈现。
     request: AgentApprovalRequest;
-    // 用户决策回调（含作用域）：
+    // 用户决策回调（含作用域）：回调透传**本弹窗当前展示的 request**，使调用方据其
+    // requestId 精确回灌（展示==回灌，无 sessionId 重取竞态）：
     //  - "allow_once"   本次允许（工具执行、对话继续；同工具下次仍弹窗）；
     //  - "allow_always" 始终允许该工具（本会话）—— 同会话同工具后续不再弹窗、直接执行；
     //  - "deny"         拒绝（工具被 Cancel、模型收被拒结果、对话继续不中断）。
-    onRespond: (decision: ApprovalDecision) => void;
+    onRespond: (
+      request: AgentApprovalRequest,
+      decision: ApprovalDecision,
+    ) => void;
   }
 
   let { request, onRespond }: Props = $props();
@@ -47,21 +51,42 @@
   const command = $derived(
     request.toolName === "bash" ? argString("command") : null,
   );
-  // write/edit 的目标路径（安全关键：必须完整可见）。
-  const targetPath = $derived(
-    request.toolName === "write" || request.toolName === "edit"
-      ? argString("path")
-      : null,
-  );
-  // write/edit 的内容预览（content / new_string 等；长内容可滚动）。
+  // write/edit 的目标路径（安全关键：必须完整可见）。后端 schema 键各异：
+  // write → `path`，edit → `file_path`（见 coding-agent tools/{write,edit}.rs）。
+  const targetPath = $derived.by(() => {
+    if (request.toolName === "write") return argString("path");
+    if (request.toolName === "edit") return argString("file_path");
+    return null;
+  });
+  // write/edit 的内容预览（长内容可滚动）。各工具真实键：
+  //  - write → `content`；
+  //  - edit 单编辑 → `new_string`；
+  //  - edit 多编辑 → `edits: [{oldText, newText}]`，拼接各 `newText`（顺序即应用序）。
   const contentPreview = $derived.by(() => {
     if (request.toolName === "write") return argString("content");
     if (request.toolName === "edit") {
-      // edit 的写入参数命名可能为 new_string / new；两者皆取，优先 new_string。
-      return argString("new_string") ?? argString("new");
+      const multi = editNewTextJoined();
+      if (multi !== null) return multi;
+      return argString("new_string");
     }
     return null;
   });
+
+  // edit 多编辑 shape：从 `args.edits[].newText` 拼出待写入内容（无 edits 数组返回
+  // null，回落到单编辑 new_string）。防御性读取：仅取字符串 newText，跳过畸形项。
+  function editNewTextJoined(): string | null {
+    if (!request.args || typeof request.args !== "object") return null;
+    const edits = (request.args as Record<string, unknown>).edits;
+    if (!Array.isArray(edits)) return null;
+    const parts = edits
+      .map((entry) =>
+        entry && typeof entry === "object"
+          ? (entry as Record<string, unknown>).newText
+          : undefined,
+      )
+      .filter((v): v is string => typeof v === "string");
+    return parts.length > 0 ? parts.join("\n") : null;
+  }
 
   // 把完整 args（任意结构）渲染为格式化 JSON 代码块，作为「展示值==执行值」的兜底
   // 全量视图——即便上面的结构化字段未覆盖某工具的某参数，完整参数仍在此可见
@@ -81,6 +106,11 @@
     return renderCodeBlock(formatted, { language: "json", variant: "compact" });
   });
 
+  // 安全前提（VAL-CAPERM-002 知情同意）：args 是 LLM 控制的不可信文本，经 `{@html}`
+  // 注入 DOM。`renderCodeBlock`/`renderText` 经 highlight.js（`highlightAuto` 或显式
+  // 语言）对源文本做 HTML 转义后再返回 token 标记，highlight 异常时也走 `escapeHtml`
+  // 兜底（见 $lib/utils/code）——故模型在 args 注入的 `<img onerror=...>` 等被渲染为
+  // 可见文本而非可执行节点，弹窗不会执行注入脚本。切勿改为未经转义的 innerHTML 拼接。
   function renderText(text: string): string {
     return renderCodeBlock(text, { variant: "compact" });
   }
@@ -91,7 +121,7 @@
   // 收被拒结果、对话继续不中断（与点「拒绝」按钮同义）。store 对重复/未知 requestId
   // 幂等，故即便和按钮点击竞合也只首处置生效。
   function handleClose(): void {
-    onRespond("deny");
+    onRespond(request, "deny");
   }
 
   // 焦点陷阱（VAL-CAPERM-021）：审批是安全关键的强制决策点，待决期间键盘焦点必须
@@ -238,7 +268,7 @@
         bgColor="bg-base-300"
         textColor="text-base-content/80"
         hoverColor="hover:bg-base-300/80"
-        onclick={() => onRespond("deny")}
+        onclick={() => onRespond(request, "deny")}
       />
       <RoundButton
         customClass="w-24"
@@ -248,7 +278,7 @@
         bgColor="bg-base-300"
         textColor="text-base-content/80"
         hoverColor="hover:bg-base-300/80"
-        onclick={() => onRespond("allow_once")}
+        onclick={() => onRespond(request, "allow_once")}
       />
       <RoundButton
         customClass="w-28"
@@ -258,7 +288,7 @@
         bgColor="bg-primary"
         textColor="text-primary-content"
         hoverColor="hover:bg-primary/90"
-        onclick={() => onRespond("allow_always")}
+        onclick={() => onRespond(request, "allow_always")}
       />
     </div>
   </div>
