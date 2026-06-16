@@ -18,6 +18,7 @@ import type {
   AgentStreamErrorPayload,
   AgentStreamClosedPayload,
   AgentSessionLifecyclePayload,
+  AgentApprovalRequest,
 } from "../types";
 
 /**
@@ -156,6 +157,22 @@ export async function abortAgentRun(sessionId: UUID): Promise<void> {
 }
 
 /**
+ * 回灌一次工具审批决策，唤醒后端正在 await 的 `PermissionExtension` 钩子。
+ *
+ * 危险工具（write/edit/bash）调用时后端 emit `agent_approval_request` 并 await 一个
+ * 以 `requestId` 为键的 oneshot；弹窗回答后经本封装调 `agent_approval_respond`：
+ * allow=true → 工具执行（Continue）、对话继续；false → 工具被 Cancel、模型收被拒
+ * 结果、对话继续不中断。重复 / 未知 `requestId` 在后端是幂等 no-op，故前端竞态
+ * 重复回答安全。
+ */
+export async function respondAgentApproval(
+  requestId: string,
+  allow: boolean,
+): Promise<void> {
+  await apiCall<void>("agent_approval_respond", { requestId, allow });
+}
+
+/**
  * Agent 流式事件处理器集合。
  */
 export interface AgentStreamEventHandlers {
@@ -168,6 +185,12 @@ export interface AgentStreamEventHandlers {
    * session-info 用于侧栏标题即时更新。
    */
   onLifecycle?: (payload: AgentSessionLifecyclePayload) => void;
+  /**
+   * 工具审批请求（危险工具 write/edit/bash 调用时后端 emit 并 await 决策）。与
+   * lifecycle 同属并列、独立通道——不进 run reducer，不影响 closed-once；驱动审批
+   * 弹窗弹出、对话暂停，决策经 `respondAgentApproval` 回灌。
+   */
+  onApprovalRequest?: (payload: AgentApprovalRequest) => void;
 }
 
 /**
@@ -178,6 +201,7 @@ export interface AgentStreamEventHandlers {
  *  - `agent_stream_error`      -> `handlers.onError`
  *  - `agent_stream_closed`     -> `handlers.onClosed`
  *  - `agent_session_lifecycle` -> `handlers.onLifecycle`
+ *  - `agent_approval_request`  -> `handlers.onApprovalRequest`
  */
 export async function listenToAgentStreamEvents(
   handlers: AgentStreamEventHandlers,
@@ -194,6 +218,9 @@ export async function listenToAgentStreamEvents(
     }),
     listen<AgentSessionLifecyclePayload>("agent_session_lifecycle", (event) => {
       handlers.onLifecycle?.(event.payload);
+    }),
+    listen<AgentApprovalRequest>("agent_approval_request", (event) => {
+      handlers.onApprovalRequest?.(event.payload);
     }),
   ];
 

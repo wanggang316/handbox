@@ -20,6 +20,7 @@
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import { listSkills } from "$lib/api/skill";
@@ -123,6 +124,11 @@
 
   // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
   const running = $derived(agentRunStore.isRunning(session.id));
+
+  // 该会话是否有待审批的危险工具调用（write/edit/bash）。待决期间对话暂停：
+  // 输入框禁用、发送被拦截、提示「等待审批」，直到用户在弹窗里允许 / 拒绝
+  // （VAL-CAPERM-001）。审批本身在页面级 AgentApprovalModal 里完成。
+  const awaitingApproval = $derived(agentApprovalStore.hasPending(session.id));
 
   // ── Slash skill 自动补全浮层 ──────────────────────────────────────────
   // 触发条件：空输入框（整段 textarea 为空）首字符**键入** `/`（非粘贴、非词中、
@@ -362,6 +368,10 @@
   });
 
   async function sendAgentRun() {
+    // 待审批暂停：对话挂起在一次危险工具调用上，既不起新 run 也不入 steering 队列，
+    // 直到用户在审批弹窗里允许 / 拒绝（VAL-CAPERM-001）。干净 no-op，不清空输入。
+    if (awaitingApproval) return;
+
     // run 进行中：消息走 steering 队列，不起第二个 run。后端 agent_run_steer 把
     // 文本压入活跃 run 的 steering 队列、在 turn 边界 drain；纯空白为干净 no-op。
     // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）；forced
@@ -502,13 +512,16 @@
     <textarea
       bind:this={textareaRef}
       bind:value={input}
-      placeholder="在这里输入消息，按 Enter 发送"
+      placeholder={awaitingApproval
+        ? "等待审批中，请在弹窗中允许或拒绝"
+        : "在这里输入消息，按 Enter 发送"}
       onkeydown={handleKeydown}
       oninput={handleInput}
       oncompositionstart={handleCompositionStart}
       oncompositionend={handleCompositionEnd}
       rows="1"
-      class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
+      disabled={awaitingApproval}
+      class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
     ></textarea>
   </div>
 
@@ -554,6 +567,17 @@
           </button>
         </div>
       {/each}
+    </div>
+  {/if}
+
+  {#if awaitingApproval}
+    <!-- 待审批暂停指示：对话挂起在一次危险工具调用上，等待弹窗中的允许 / 拒绝
+         （VAL-CAPERM-001）。 -->
+    <div class="px-4 pb-1 flex items-center gap-2 text-xs text-warning">
+      <span
+        class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+      ></span>
+      <span>等待工具审批，对话已暂停</span>
     </div>
   {/if}
 
@@ -627,6 +651,7 @@
           iconSize={18}
           size="w-8 h-8"
           ariaLabel="发送"
+          disabled={awaitingApproval}
           onclick={sendAgentRun}
         />
       {/if}
