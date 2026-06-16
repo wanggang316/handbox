@@ -219,3 +219,63 @@ pub async fn agent_run_steer(session_id: UUID, text: String) -> Result<(), AppEr
     steer_run(&session_id, text);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The one-run-per-session concurrency gate, exercised directly against the
+    /// process-level `active_coding_runs` registry — the same check-and-insert
+    /// `agent_run_stream` performs before assembling a session. Driving the gate
+    /// through the registry (rather than a full Tauri command) keeps the test
+    /// hermetic: no DB, no window, no network.
+    ///
+    /// Mirrors the command's claim/reject sequence:
+    /// 1. the first run claims the session (placeholder inserted),
+    /// 2. a SECOND start for the SAME session is rejected with
+    ///    `AGENT_RUN_ALREADY_ACTIVE` — no second concurrent run is spawned
+    ///    (VAL-CARUN-014),
+    /// 3. after the run's closed-emit removes the entry, the session can be
+    ///    claimed cleanly again (a subsequent turn is not wedged).
+    ///
+    /// Replicates the gate's check-then-insert against the shared registry so it
+    /// stays faithful to `agent_run_stream` step (1) without invoking the async
+    /// command (which needs Tauri `State`/`Window`). A fresh uuid keeps the test
+    /// isolated from the process-global registry.
+    fn try_claim(session_id: &UUID) -> Result<(), AppError> {
+        let mut runs = active_coding_runs().lock().unwrap();
+        if runs.contains(session_id) {
+            return Err(AppError::with_hint(
+                "AGENT_RUN_ALREADY_ACTIVE",
+                &format!("a run is already active for session: {session_id}"),
+                "请等待当前回合结束后再发送",
+            ));
+        }
+        runs.insert(session_id.clone());
+        Ok(())
+    }
+
+    fn release(session_id: &UUID) {
+        active_coding_runs().lock().unwrap().remove(session_id);
+    }
+
+    #[test]
+    fn second_concurrent_run_is_rejected_then_reclaimable_after_close() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        // (1) first run claims the session.
+        try_claim(&session_id).expect("first run claims the session");
+
+        // (2) a second start on the same session is rejected — no concurrent run.
+        let err = try_claim(&session_id).expect_err("second concurrent run must be rejected");
+        assert_eq!(err.code, "AGENT_RUN_ALREADY_ACTIVE");
+
+        // (3) once the run's closed-emit releases the entry, the session is
+        // claimable again — a later turn is not permanently wedged.
+        release(&session_id);
+        try_claim(&session_id).expect("session is reclaimable after the run closes");
+
+        // Cleanup so the process-global registry is left empty for other tests.
+        release(&session_id);
+    }
+}

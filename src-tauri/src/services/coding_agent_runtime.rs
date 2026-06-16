@@ -69,12 +69,65 @@ pub enum MappedEvent {
     Logged,
 }
 
+/// Generic, non-leaking replacement for an assistant message's in-band
+/// `errorMessage` (`stopReason == "error"`). The upstream transport puts the
+/// raw provider response body's `error` string here (proxy.rs phase 2), which
+/// can echo a key fragment (e.g. an OpenAI 401 body repeats the offending
+/// `sk-...`) — so it MUST NOT reach the UI / timeline / logs verbatim.
+const INBAND_ERROR_REDACTION: &str = "the model returned an error";
+
+/// Scrub the in-band `errorMessage` from any assistant message inside a
+/// serialized `AgentEvent` value, in place.
+///
+/// SECURITY (the in-band leg of the never-echo-raw-provider-text contract): an
+/// `AssistantMessage` finalized with `stopReason == "error"` carries an
+/// `errorMessage` set by the upstream transport from the raw provider response
+/// body. That message rides an `Ok` stream (it is NOT a run-level `Err`, so it
+/// never passes through [`sanitize_coding_agent_error`]) and would otherwise be
+/// forwarded VERBATIM to the frontend. We replace only the `errorMessage` field
+/// with a generic constant, leaving every other field — crucially the message's
+/// text `content` — untouched, so already-streamed assistant text is preserved
+/// (VAL-CARUN-010) while the raw upstream body never leaks (VAL-CARUN-013).
+///
+/// The scrub walks every `message` / `messages` an `AgentEvent` variant can
+/// carry (`MessageEnd` / `MessageStart` / `MessageUpdate` / `TurnEnd` /
+/// `AgentEnd`), redacting only objects whose `stopReason == "error"` — a normal
+/// finished turn (`stopReason == "stop"`) never has an `errorMessage` and is
+/// left byte-for-byte unchanged.
+fn redact_inband_error_messages(event_json: &mut Value) {
+    /// Redact one message object if it is an error-stopped assistant message.
+    fn redact_message(message: &mut Value) {
+        if message.get("stopReason").and_then(Value::as_str) == Some("error")
+            && message.get("errorMessage").is_some()
+        {
+            message["errorMessage"] = Value::String(INBAND_ERROR_REDACTION.to_string());
+        }
+    }
+
+    let Some(obj) = event_json.as_object_mut() else {
+        return;
+    };
+    // Single-message variants: MessageStart / MessageUpdate / MessageEnd / TurnEnd.
+    if let Some(message) = obj.get_mut("message") {
+        redact_message(message);
+    }
+    // AgentEnd carries the whole turn's messages.
+    if let Some(messages) = obj.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages.iter_mut() {
+            redact_message(message);
+        }
+    }
+}
+
 /// Map an [`AgentSessionEvent`] to its HandBox event-surface action.
 ///
 /// - `Agent(e)` → `Forward(serde_json::to_value(e))`: the inner `AgentEvent`
 ///   serializes to exactly the shape the legacy sink produced (same
 ///   `#[serde(tag = "type", rename_all = "snake_case", rename_all_fields =
-///   "camelCase")]` type), so the frontend contract is unchanged.
+///   "camelCase")]` type), so the frontend contract is unchanged — EXCEPT that
+///   an in-band `errorMessage` (raw upstream body on a `stopReason == "error"`
+///   message) is scrubbed before forwarding (see
+///   [`redact_inband_error_messages`]), never echoing provider text to the UI.
 /// - everything else → `Logged`: compaction / session-info / session-error are
 ///   not part of the current `agent_stream_event` contract; emitting new shapes
 ///   is out of scope, so they are observed for diagnostics and dropped.
@@ -85,8 +138,12 @@ fn map_session_event(event: &AgentSessionEvent) -> MappedEvent {
             // consumes; a serialize failure is structural and must never break
             // the stream — fall back to a diagnostic object (mirrors the legacy
             // sink's serializeError fallback).
-            let value = serde_json::to_value(agent_event.as_ref())
+            let mut value = serde_json::to_value(agent_event.as_ref())
                 .unwrap_or_else(|e| json!({ "type": "serializeError", "message": e.to_string() }));
+            // SECURITY: scrub any in-band raw-provider `errorMessage` before it
+            // reaches the frontend (the in-band leg never passes through the
+            // run-level sanitizer). Text content is preserved.
+            redact_inband_error_messages(&mut value);
             MappedEvent::Forward(value)
         }
         // Out-of-band lifecycle signals not modeled by the current frontend
@@ -707,6 +764,66 @@ mod tests {
         assert_eq!(sink.closed.lock().unwrap().len(), 1, "closed exactly once");
     }
 
+    /// VAL-CARUN-010 (driver leg): a mid-run disconnect that surfaces as a
+    /// run-level `Err` (e.g. a proxy 502 / connection reset → NETWORK_ERROR) does
+    /// NOT retract the assistant text already forwarded before the break. The
+    /// previously emitted events stay on `agent_stream_event`; the sanitized
+    /// envelope is ADDITIVE and lands before the single closed signal. (The
+    /// frontend likewise never clears `streamingText` on error/closed, so the
+    /// partial answer remains visible.)
+    #[test]
+    fn mid_run_error_does_not_retract_already_forwarded_text() {
+        let session_id = "sess-disconnect";
+        let sink = CapturingSink::default();
+        let run_sink = sink.clone().into_run_sink();
+
+        // Streamed text arrives, THEN the connection drops mid-stream and the
+        // run resolves to a run-level NETWORK error (no terminal MessageEnd).
+        let streamed = vec![
+            AgentSessionEvent::Agent(Box::new(AgentEvent::AgentStart)),
+            AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd {
+                message: assistant_message("answer streamed before the drop"),
+            })),
+        ];
+        let disconnect = CodingAgentError::Agent(AgentError::Proxy {
+            status: 502,
+            message: "connection reset by peer".to_string(),
+        });
+
+        replay_through_sink(session_id, &run_sink, streamed, Some(disconnect));
+
+        // The two streamed events were forwarded and remain — nothing retracted.
+        let events = sink.events.lock().unwrap();
+        assert_eq!(
+            events.len(),
+            2,
+            "already-forwarded events are not retracted"
+        );
+        let text = events[1]
+            .get("event")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array)
+            .and_then(|b| b.first())
+            .and_then(|b| b.get("text"))
+            .and_then(Value::as_str)
+            .unwrap();
+        assert_eq!(text, "answer streamed before the drop");
+        drop(events);
+
+        // The envelope is additive and carries the normalized NETWORK code.
+        let errors = sink.errors.lock().unwrap();
+        assert_eq!(errors.len(), 1, "exactly one error envelope");
+        assert_eq!(
+            errors[0].get("error").unwrap().get("code").unwrap(),
+            "NETWORK_ERROR"
+        );
+        drop(errors);
+
+        // closed-once holds on this path too (VAL-CARUN-009).
+        assert_eq!(sink.closed.lock().unwrap().len(), 1, "closed exactly once");
+    }
+
     /// `map_session_event` classification is exhaustive and stable: Agent
     /// forwards, everything else logs.
     #[test]
@@ -735,35 +852,216 @@ mod tests {
         );
     }
 
-    /// The sanitizer maps every error family to a stable code and never echoes
-    /// raw transport text (security: no API key / credentialed URL leakage).
+    /// Assert a sanitized `AppError` never echoes any of `secrets` in either its
+    /// `message` or its `hint` — the never-leak contract applied to every case.
+    fn assert_no_leak(err: &AppError, secrets: &[&str]) {
+        for secret in secrets {
+            assert!(
+                !err.message.contains(secret),
+                "sanitized message leaked {secret:?}: {}",
+                err.message
+            );
+            if let Some(hint) = &err.hint {
+                assert!(
+                    !hint.contains(secret),
+                    "sanitized hint leaked {secret:?}: {hint}"
+                );
+            }
+        }
+    }
+
+    /// The sanitizer maps EVERY error family to a stable code (AUTH / NETWORK /
+    /// RATE_LIMIT / INTERNAL) and never echoes raw transport text (security: no
+    /// API key / credentialed URL / upstream body leakage). Covers the full
+    /// classification table the frontend's error rendering keys off
+    /// (VAL-CARUN-011/012/013).
     #[test]
     fn sanitizer_maps_codes_without_leaking_raw_text() {
-        // Proxy 401 → AUTH_ERROR; the raw `message` would carry transport
-        // details, but the sanitized message must be the generic constant.
-        let proxy = CodingAgentError::Agent(AgentError::Proxy {
+        // A credentialed URL + key fragment + upstream body the raw transport
+        // text could carry; none of these may appear in any sanitized output.
+        let secrets = [
+            "sk-secret",
+            "sk-proj-LEAK",
+            "https://api.example.com/v1?key=sk-secret",
+            "Incorrect API key provided",
+        ];
+
+        // --- Proxy transport: status → AUTH / RATE_LIMIT / NETWORK ---
+        // 401 → AUTH_ERROR.
+        let proxy_401 = CodingAgentError::Agent(AgentError::Proxy {
             status: 401,
             message: "https://api.example.com/v1?key=sk-secret rejected".to_string(),
         });
-        let app_err = sanitize_coding_agent_error(&proxy);
-        assert_eq!(app_err.code, "AUTH_ERROR");
-        assert!(
-            !app_err.message.contains("sk-secret"),
-            "sanitized message must not echo raw provider text"
-        );
+        let e = sanitize_coding_agent_error(&proxy_401);
+        assert_eq!(e.code, "AUTH_ERROR");
+        assert_no_leak(&e, &secrets);
+
+        // 403 → AUTH_ERROR (authorization failure shares the auth code).
+        let proxy_403 = CodingAgentError::Agent(AgentError::Proxy {
+            status: 403,
+            message: "Incorrect API key provided: sk-proj-LEAK".to_string(),
+        });
+        let e = sanitize_coding_agent_error(&proxy_403);
+        assert_eq!(e.code, "AUTH_ERROR");
+        assert_no_leak(&e, &secrets);
 
         // 429 → RATE_LIMIT.
-        let rate = CodingAgentError::Agent(AgentError::Proxy {
+        let proxy_429 = CodingAgentError::Agent(AgentError::Proxy {
             status: 429,
-            message: "too many".to_string(),
+            message: "too many requests, key sk-secret".to_string(),
         });
-        assert_eq!(sanitize_coding_agent_error(&rate).code, "RATE_LIMIT");
+        let e = sanitize_coding_agent_error(&proxy_429);
+        assert_eq!(e.code, "RATE_LIMIT");
+        assert_no_leak(&e, &secrets);
 
-        // A non-Agent lifecycle error → INTERNAL_ERROR.
-        let session_err = CodingAgentError::Session("no session found".to_string());
+        // Any other status (500 / timeout / connection drop arrive here) →
+        // NETWORK_ERROR. This is the mid-disconnect run-level error code.
+        let proxy_500 = CodingAgentError::Agent(AgentError::Proxy {
+            status: 502,
+            message: "upstream connection reset to https://api.example.com/v1?key=sk-secret"
+                .to_string(),
+        });
+        let e = sanitize_coding_agent_error(&proxy_500);
+        assert_eq!(e.code, "NETWORK_ERROR");
+        assert_no_leak(&e, &secrets);
+
+        // --- Client errors: provider/auth/stream-empty ---
+        // ProviderNotFound → AUTH_ERROR; only the (non-secret) model id is
+        // referenced, never a key.
+        let provider_not_found = CodingAgentError::Agent(AgentError::Client(
+            hand_ai_model::ClientError::ProviderNotFound {
+                api: Api::OpenAICompletions,
+                model_id: "gpt-4o".to_string(),
+            },
+        ));
+        let e = sanitize_coding_agent_error(&provider_not_found);
+        assert_eq!(e.code, "AUTH_ERROR");
+        assert!(
+            e.message.contains("gpt-4o"),
+            "provider-not-found may reference the non-secret model id for locatability"
+        );
+        assert_no_leak(&e, &secrets);
+
+        // StreamEndedWithoutResult → NETWORK_ERROR (premature stream end).
+        let stream_ended = CodingAgentError::Agent(AgentError::Client(
+            hand_ai_model::ClientError::StreamEndedWithoutResult,
+        ));
+        let e = sanitize_coding_agent_error(&stream_ended);
+        assert_eq!(e.code, "NETWORK_ERROR");
+        assert_no_leak(&e, &secrets);
+
+        // --- Aborted-as-Err → INTERNAL_ERROR (the normal abort path is an Ok
+        // aborted turn; an Err-shaped abort still gets a non-leaking code). ---
+        let aborted = CodingAgentError::Agent(AgentError::Aborted);
+        let e = sanitize_coding_agent_error(&aborted);
+        assert_eq!(e.code, "INTERNAL_ERROR");
+        assert_no_leak(&e, &secrets);
+
+        // --- AgentError catch-all (SchemaValidation / InvalidState / Other):
+        // text originates from our own code, but still takes a generic code. ---
+        let other_agent = CodingAgentError::Agent(AgentError::Other(
+            "lifecycle failure mentioning sk-secret".to_string(),
+        ));
+        let e = sanitize_coding_agent_error(&other_agent);
+        assert_eq!(e.code, "INTERNAL_ERROR");
+        assert_no_leak(&e, &secrets);
+
+        // --- Non-Agent coding-agent lifecycle variants all → INTERNAL_ERROR. ---
+        for err in [
+            CodingAgentError::Session("no session found, key sk-secret".to_string()),
+            CodingAgentError::Settings("bad settings sk-secret".to_string()),
+            CodingAgentError::Tool("tool blew up sk-secret".to_string()),
+            CodingAgentError::Model("model assembly sk-secret".to_string()),
+            CodingAgentError::Other("misc sk-secret".to_string()),
+        ] {
+            let e = sanitize_coding_agent_error(&err);
+            assert_eq!(e.code, "INTERNAL_ERROR", "lifecycle variant code");
+            assert_no_leak(&e, &secrets);
+        }
+    }
+
+    /// VAL-CARUN-013 (in-band leg): an `Ok`-stream assistant message finalized
+    /// with `stopReason == "error"` carries the raw upstream response body in its
+    /// `errorMessage` (set by the proxy transport). The driver forwards it via
+    /// `MessageEnd`, NOT through the run-level sanitizer — so it must be scrubbed
+    /// at the mapping layer. This pins: (a) the `errorMessage` is replaced with a
+    /// generic constant (no raw upstream body / key fragment leaks), and (b) the
+    /// already-streamed text `content` is preserved verbatim (VAL-CARUN-010 —
+    /// mid-disconnect text is never erased, whether the break lands before or
+    /// after MessageEnd).
+    #[test]
+    fn inband_error_message_is_scrubbed_but_text_is_preserved() {
+        // The raw upstream body a 401 proxy phase-2 read could carry: it echoes
+        // the offending key fragment, exactly what must not reach the UI.
+        let raw_upstream = "Incorrect API key provided: sk-proj-LEAK-1234";
+        let mut error_msg = assistant_message("partial answer before the drop");
+        if let Message::Assistant(m) = &mut error_msg {
+            m.stop_reason = StopReason::Error;
+            m.error_message = Some(raw_upstream.to_string());
+        }
+
+        let event =
+            AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd { message: error_msg }));
+
+        let mapped = map_session_event(&event);
+        let MappedEvent::Forward(value) = mapped else {
+            panic!("an Agent MessageEnd must be Forward");
+        };
+
+        let message = value.get("message").expect("MessageEnd carries a message");
+        // (a) errorMessage scrubbed — no raw body / key fragment leaks.
+        let forwarded_err = message
+            .get("errorMessage")
+            .and_then(Value::as_str)
+            .expect("error turn keeps an errorMessage field (now generic)");
+        assert!(
+            !forwarded_err.contains("sk-proj-LEAK"),
+            "in-band errorMessage must not echo the upstream key fragment: {forwarded_err}"
+        );
+        assert!(
+            !forwarded_err.contains("Incorrect API key"),
+            "in-band errorMessage must not echo the raw upstream body: {forwarded_err}"
+        );
+        assert_eq!(forwarded_err, INBAND_ERROR_REDACTION);
+        // The error signal itself is preserved so the frontend still renders the
+        // turn as errored.
         assert_eq!(
-            sanitize_coding_agent_error(&session_err).code,
-            "INTERNAL_ERROR"
+            message.get("stopReason").and_then(Value::as_str),
+            Some("error")
+        );
+
+        // (b) Already-streamed text is preserved verbatim — the disconnect does
+        // not erase visible content.
+        let text = message
+            .get("content")
+            .and_then(Value::as_array)
+            .and_then(|blocks| blocks.first())
+            .and_then(|b| b.get("text"))
+            .and_then(Value::as_str)
+            .expect("the streamed text block survives the scrub");
+        assert_eq!(text, "partial answer before the drop");
+    }
+
+    /// A NORMAL finished turn (`stopReason == "stop"`, no `errorMessage`) is left
+    /// byte-for-byte unchanged by the in-band scrub — the redaction only touches
+    /// error-stopped messages and never disturbs a healthy turn's payload.
+    #[test]
+    fn inband_scrub_leaves_normal_turn_untouched() {
+        let event = AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd {
+            message: assistant_message("all good"),
+        }));
+        let MappedEvent::Forward(value) = map_session_event(&event) else {
+            panic!("Agent event must Forward");
+        };
+        let message = value.get("message").unwrap();
+        assert_eq!(
+            message.get("stopReason").and_then(Value::as_str),
+            Some("stop")
+        );
+        // A healthy turn never serialized an errorMessage (skip_serializing_if).
+        assert!(
+            message.get("errorMessage").is_none(),
+            "a normal turn must not gain an errorMessage from the scrub"
         );
     }
 
