@@ -196,19 +196,35 @@ impl AgentSessionRepository {
     /// `agent_sessions` 行。显式级联是一种防御性写法，与连接的
     /// `PRAGMA foreign_keys` 状态无关：无论 FK 强制开启与否（sqlx 默认 FK=ON），
     /// transcript 行都会被原子地清除，保证不会留下孤儿 transcript 行。
+    ///
+    /// # 为什么 transcript 删除要容忍表缺失？
+    ///
+    /// `m3-project-delete-and-drop` 在迁移成功后会一次性 `DROP TABLE
+    /// agent_session_messages`（transcript 此后由 JSONL 权威保存，命令层另行删除
+    /// `<id>.jsonl`）。表被 drop 之后，这条遗留 transcript DELETE 已无目标，必须是
+    /// 安全 no-op——否则「no such table」会让整个会话删除以 INTERNAL_ERROR 失败。
+    /// 这里先探测表是否存在（`sqlite_master`，在事务内读以与后续 DELETE 看到一致
+    /// 的 schema），存在才发 DELETE；表缺失时直接跳过，绝不触发缺表错误、也不影响
+    /// 后续删除会话行与 commit。
     pub async fn delete_session(&self, session_id: &UUID) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {
             AppError::internal_error(&format!("Failed to begin transaction: {}", e))
         })?;
 
-        // 1. 先删除该会话的全部 transcript 行（显式级联）
-        sqlx::query("DELETE FROM agent_session_messages WHERE session_id = $1")
-            .bind(session_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to delete agent session messages: {}", e))
-            })?;
+        // 1. 先删除该会话的全部 transcript 行（显式级联），但仅在遗留 transcript
+        //    表仍存在时执行：迁移后该表被 drop，DELETE 应是安全 no-op。
+        if legacy_transcript_table_exists(&mut tx).await? {
+            sqlx::query("DELETE FROM agent_session_messages WHERE session_id = $1")
+                .bind(session_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!(
+                        "Failed to delete agent session messages: {}",
+                        e
+                    ))
+                })?;
+        }
 
         // 2. 再删除会话行本身
         let result = sqlx::query("DELETE FROM agent_sessions WHERE id = $1")
@@ -456,6 +472,38 @@ impl AgentSessionRepository {
             created_at,
         }))
     }
+}
+
+/// Whether the legacy `agent_session_messages` transcript table still exists in
+/// the given transaction's connection.
+///
+/// `m3-project-delete-and-drop` drops this table once, after the one-time
+/// migration moves every transcript into JSONL. Cascading transcript DELETEs in
+/// `delete_session` / `delete_project` therefore probe first — issuing the DELETE
+/// only when the table is present — so a post-drop delete is a safe no-op rather
+/// than a "no such table" error that fails the whole delete. Queried via
+/// `sqlite_master` (the schema catalog) inside the same transaction so it sees
+/// the exact schema the subsequent DELETE would.
+///
+/// `pub(crate)` so `agent_project_repository::delete_project` reuses the same
+/// probe rather than duplicating the gating logic.
+pub(crate) async fn legacy_transcript_table_exists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> Result<bool, AppError> {
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS c FROM sqlite_master \
+         WHERE type = 'table' AND name = 'agent_session_messages'",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| {
+        AppError::internal_error(&format!(
+            "Failed to probe for legacy agent_session_messages table: {}",
+            e
+        ))
+    })?;
+    let count: i64 = row.try_get("c")?;
+    Ok(count > 0)
 }
 
 /// Whether a sqlx error is SQLite's "no such table: agent_session_messages",
@@ -1136,6 +1184,53 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err2.code, "NOT_FOUND");
+    }
+
+    /// Drop-then-delete regression (the gap 691292d missed): after the legacy
+    /// `agent_session_messages` table is dropped post-migration, `delete_session`
+    /// must still succeed — removing the `agent_sessions` row and returning
+    /// `Ok(())` rather than failing with "no such table" → INTERNAL_ERROR. The
+    /// transcript's authoritative copy lives in JSONL by then; the stale table
+    /// DELETE must be a safe no-op.
+    #[tokio::test]
+    async fn test_delete_session_succeeds_after_legacy_table_dropped() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentSessionRepository::new(db_arc.clone());
+        let now = now_ms();
+
+        // Seed a session WITH several transcript rows while the table still exists.
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Doomed Post-Drop", now);
+        repo.create_session(&session).await.unwrap();
+        for i in 0..3 {
+            repo.append_message(&session.id, "user", &serde_json::json!({ "i": i }), now + i)
+                .await
+                .unwrap();
+        }
+        assert_eq!(count_messages(db_arc.as_ref(), &session.id).await, 3);
+
+        // Model the post-migration state: drop the legacy transcript table.
+        sqlx::query("DROP TABLE agent_session_messages")
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // Delete must succeed — not error on the missing table — and remove the row.
+        repo.delete_session(&session.id)
+            .await
+            .expect("delete_session must tolerate a dropped legacy transcript table");
+        assert!(
+            repo.get_session_by_id(&session.id).await.unwrap().is_none(),
+            "the agent_sessions row must be deleted even after the table was dropped"
+        );
+
+        // Deleting a non-existent id post-drop is still a clean NotFound
+        // (NotFound semantics preserved, not masked by the missing table).
+        let err = repo
+            .delete_session(&"never-existed".to_string())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "NOT_FOUND");
     }
 
     /// append_message assigns gap-free monotonic seq per session, persisting
