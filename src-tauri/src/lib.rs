@@ -388,6 +388,32 @@ async fn initialize_services(
         settings_service.clone(),
     );
 
+    // 一次性把 pre-M3 的 SQLite agent transcript 物化为 JSONL（增量、幂等、可重跑）。
+    // 必须在 agent_runtime 被 manage、任何 run 发生之前同步完成：否则老会话首次
+    // run 只会落新 turn，丢失历史（m3-jsonl-persistence 标注的竞态）。data_dir 同时
+    // 充当 JSONL base 与无 working_dir 会话的 cwd 回退（与写入侧 config_from_rows /
+    // session_cwd 一致）。迁移整体失败只记录、不阻断启动——逐会话容错留给
+    // m3-migration-robustness。
+    match crate::services::migrate_sqlite_sessions_to_jsonl(database_service.clone(), &data_dir)
+        .await
+    {
+        Ok(report) => {
+            if report.migrated_sessions > 0 {
+                tracing::info!(
+                    migrated = report.migrated_sessions,
+                    messages = report.messages_migrated,
+                    skipped_existing = report.skipped_existing,
+                    skipped_empty = report.skipped_empty,
+                    skipped_undeserializable = report.skipped_undeserializable,
+                    "migrated legacy SQLite agent transcripts to JSONL"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::error!("SQLite→JSONL agent transcript migration failed: {:?}", e);
+        }
+    }
+
     // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(session_service);

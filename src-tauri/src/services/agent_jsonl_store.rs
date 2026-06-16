@@ -169,6 +169,78 @@ impl From<SessionHeader> for SessionEntryHeader {
     }
 }
 
+/// The `data` payload of a `{"type":"message","data":{..}}` JSONL line, mirroring
+/// the `SessionEntry::Message` variant's serde shape. We write this directly (not
+/// via [`SessionManager::append_message`]) ONLY on the migration path, because we
+/// must control the entry-level `timestamp`: `SessionManager::append_message`
+/// stamps `Utc::now()`, which would make every replayed legacy message look like
+/// it was sent at migration time and so destroy the cross-session activity
+/// ordering (`build_session_info` derives `SessionInfo.modified` from the max
+/// entry timestamp — VAL-CASESS-012). Stamping the SQLite per-message
+/// `created_at` instead keeps each session's last-activity key equal to its
+/// pre-migration `last_message_at`.
+#[derive(serde::Serialize)]
+struct MessageEntryData<'a> {
+    id: String,
+    message: &'a Message,
+    timestamp: i64,
+}
+
+/// A `{"type":"message","data":<MessageEntryData>}` envelope, matching the
+/// `SessionEntry::Message` on-disk shape (same tag/content/snake_case as the
+/// header). `parent_id` is omitted (the variant skips it when `None`), matching a
+/// flat-list session with no parentage — which is exactly what a migrated legacy
+/// transcript is.
+#[derive(serde::Serialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+enum MessageEntryLine<'a> {
+    Message(MessageEntryData<'a>),
+}
+
+/// Append a single `Message` to a session's JSONL with an EXPLICIT entry-level
+/// `timestamp`, ensuring the file (header seeded with `created_at`) first.
+///
+/// This is the migration-only writer (see [`MessageEntryData`] for why it cannot
+/// go through [`SessionManager::append_message`]): the entry timestamp must be
+/// the message's real send time (the SQLite `created_at`) so the migrated
+/// session's last-activity key matches its pre-migration value and relative
+/// session ordering is preserved (VAL-CASESS-012). The entry id is a fresh UUID —
+/// the format is opaque (the upstream reader only matches ids for compaction,
+/// which migrated transcripts never carry), so uniqueness is all that matters.
+///
+/// The append is plain line-appending (the same `\n`-terminated, one-entry-per-
+/// line shape `ensure_session_file` writes the header in), reusing the upstream
+/// `SessionEntry` envelope shape via [`MessageEntryLine`] rather than re-parsing.
+pub fn append_message_at(
+    base_dir: &Path,
+    cwd: &Path,
+    session_id: &str,
+    created_at: i64,
+    message: &Message,
+    timestamp: i64,
+) -> Result<(), AppError> {
+    let path = ensure_session_file(base_dir, cwd, session_id, created_at)?;
+    let entry = MessageEntryLine::Message(MessageEntryData {
+        id: uuid::Uuid::new_v4().to_string(),
+        message,
+        timestamp,
+    });
+    let line = serde_json::to_string(&entry).map_err(|e| {
+        AppError::internal_error(&format!("failed to serialize migrated message entry: {e}"))
+    })?;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .map_err(|e| {
+            AppError::internal_error(&format!("failed to open session jsonl for append: {e}"))
+        })?;
+    use std::io::Write;
+    writeln!(file, "{line}").map_err(|e| {
+        AppError::internal_error(&format!("failed to append migrated message entry: {e}"))
+    })?;
+    Ok(())
+}
+
 /// Load a session's transcript from JSONL as the frontend-shaped
 /// [`AgentSessionMessage`] list, or `None` when no JSONL file exists yet (the
 /// caller then falls back to the legacy SQLite transcript for pre-M3 sessions).
@@ -559,6 +631,67 @@ mod tests {
             "a session with messages must report a real last-activity timestamp"
         );
         assert_eq!(active.name.as_deref(), Some("My Renamed Session"));
+    }
+
+    /// `append_message_at` (the migration-only writer) stamps the entry-level
+    /// timestamp it is given — NOT the wall clock — and that timestamp is the
+    /// activity key the reader surfaces. This is the linchpin of VAL-CASESS-012's
+    /// ordering: a replayed legacy message must report its real send time, not
+    /// the migration moment, or every migrated session would collapse to the same
+    /// "now" and lose relative order. The message round-trips back through the
+    /// upstream reader, proving the hand-written line is a valid Message entry.
+    #[test]
+    fn append_message_at_stamps_given_timestamp_as_activity_key() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-append-at";
+        // A clearly-historical timestamp, unmistakably not a "now" value.
+        let entry_ts: i64 = 1_600_000_000_000;
+
+        append_message_at(
+            base.path(),
+            cwd.path(),
+            id,
+            TEST_CREATED_AT,
+            &user_msg("replayed from sqlite"),
+            entry_ts,
+        )
+        .expect("append a migrated message");
+
+        // The activity key (max entry timestamp) is exactly what we stamped.
+        let activity = session_activity(base.path(), cwd.path(), id)
+            .unwrap()
+            .expect("file exists");
+        assert_eq!(activity.message_count, 1);
+        assert_eq!(
+            activity.last_message_at,
+            Some(entry_ts),
+            "the entry timestamp must equal the value passed, not the wall clock"
+        );
+
+        // The message itself round-trips through the upstream reader intact.
+        let rows = load_transcript(base.path(), cwd.path(), id)
+            .unwrap()
+            .expect("a transcript");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].role, "user");
+
+        // A second append lands in the same file and the activity key advances to
+        // the newer entry timestamp.
+        append_message_at(
+            base.path(),
+            cwd.path(),
+            id,
+            TEST_CREATED_AT,
+            &user_msg("second"),
+            entry_ts + 5_000,
+        )
+        .expect("append a second migrated message");
+        let activity2 = session_activity(base.path(), cwd.path(), id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(activity2.message_count, 2);
+        assert_eq!(activity2.last_message_at, Some(entry_ts + 5_000));
     }
 
     /// Two turns against the SAME HandBox id append to the SAME file rather than

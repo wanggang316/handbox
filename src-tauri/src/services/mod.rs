@@ -1,6 +1,7 @@
 // 服务层模块
 pub mod agent;
 pub mod agent_jsonl_store;
+pub mod agent_migration;
 pub mod agent_permission;
 pub mod agent_project;
 pub mod agent_runtime;
@@ -30,6 +31,7 @@ pub mod word;
 // 重新导出服务
 pub use crate::storage::Database;
 pub use agent::{AgentParameter, AgentService};
+pub use agent_migration::{migrate_sqlite_sessions_to_jsonl, MigrationReport};
 pub use agent_project::AgentProjectService;
 pub use agent_runtime::{AgentRunRequest, AgentRuntime, RunSink};
 pub use agent_session::{AgentSessionParameter, AgentSessionService};

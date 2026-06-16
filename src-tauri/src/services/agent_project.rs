@@ -45,7 +45,7 @@ impl AgentProjectService {
     /// 存在的路径一律 `VALIDATION_ERROR`，且不写入任何行。
     pub async fn create_project(&self, path: String) -> Result<AgentProject, AppError> {
         let canonical = Self::validate_project_path(&path)?;
-        let name = Self::default_project_name(&canonical);
+        let name = default_project_name(&canonical);
         self.repository
             .create_project(&CreateAgentProjectRequest {
                 path: canonical,
@@ -190,16 +190,23 @@ impl AgentProjectService {
 
         Ok(canonical.to_string_lossy().into_owned())
     }
+}
 
-    /// 默认项目名：canonical path 的 basename；basename 为空（如根路径 `/`）
-    /// 时回退为完整 canonical path。
-    fn default_project_name(canonical: &str) -> String {
-        std::path::Path::new(canonical)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| canonical.to_string())
-    }
+/// 默认项目名：canonical path 的 basename；basename 为空（如根路径 `/`）
+/// 时回退为完整 canonical path。
+///
+/// Hoisted out of `AgentProjectService` to a free `pub fn` so the SQLite→JSONL
+/// migration can derive a JSONL session's project group name (from its
+/// `header.cwd`, canonicalized first) with the SAME algorithm `create_project`
+/// uses for `agent_projects.name` — guaranteeing a session keeps its project
+/// group across the new (JSONL) and legacy (SQLite) sources (VAL-CASESS-024).
+/// The algorithm is unchanged from the previous private method.
+pub fn default_project_name(canonical: &str) -> String {
+    std::path::Path::new(canonical)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| canonical.to_string())
 }
 
 #[cfg(test)]
