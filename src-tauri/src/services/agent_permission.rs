@@ -33,7 +33,9 @@
 //! canonical root. The `Cancel` reason is GENERIC — it never echoes the
 //! out-of-sandbox absolute path — matching the resolver's leak-free contract.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use hand_coding_agent::core::extensions::api::{
@@ -42,8 +44,17 @@ use hand_coding_agent::core::extensions::api::{
 use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
 };
+use tokio::sync::oneshot;
 
 use crate::services::agent_tools::resolve_in_sandbox;
+
+/// Emitter handle the [`PermissionExtension`] uses to push an approval request
+/// to the frontend. Constructed by the IPC layer to wrap `window.emit(
+/// "agent_approval_request", ..)`; a unit test injects a recording fake. When
+/// absent (no UI to consult — e.g. a test or a headless construction) the
+/// extension fails CLOSED: every dangerous tool is denied (the M1 safety
+/// posture), never silently allowed.
+pub type ApprovalEmitter = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 
 /// Stable extension name, used in diagnostics and the manifest.
 const EXTENSION_NAME: &str = "handbox-sandbox";
@@ -276,6 +287,216 @@ impl Extension for DangerousDenyExtension {
         event: &ToolCallEvent,
     ) -> Result<HookDecision, ExtensionError> {
         Ok(self.decide(&event.tool_name))
+    }
+
+    async fn on_after_tool_call(
+        &self,
+        _cx: &ExtensionContext,
+        _event: &ToolResultEvent,
+    ) -> Result<(), ExtensionError> {
+        Ok(())
+    }
+}
+
+/// Stable name of the M2 permission extension, used in diagnostics and the
+/// manifest. Distinct from [`EXTENSION_NAME`] / [`DANGEROUS_DENY_EXTENSION_NAME`]
+/// so it coexists in the hook chain.
+const PERMISSION_EXTENSION_NAME: &str = "handbox-permission";
+
+/// Tauri event name the frontend listens on for an approval request. Carries
+/// `{ sessionId, callId, toolName, args, requestId }`. The frontend (m2-approval
+/// -modal) renders the prompt and answers via the `agent_approval_respond` IPC.
+pub const APPROVAL_REQUEST_EVENT: &str = "agent_approval_request";
+
+/// Process-level `request_id → oneshot::Sender<bool>` registry of approval
+/// decisions still awaiting a user answer.
+///
+/// WHY PROCESS-LEVEL (mirrors `coding_agent_runtime::run_controls`):
+/// the `PermissionExtension` is owned by the `AgentSession`, which the driver
+/// task owns for the turn — there is no instance-level place to hang per-request
+/// state the stateless `agent_approval_respond` command can reach. A
+/// `OnceLock<Mutex<HashMap<..>>>` gives both the extension (insert + await) and
+/// the command (remove + send) a shared rendezvous keyed by `request_id`.
+///
+/// LIFECYCLE: `on_before_tool_call` inserts a sender then awaits the matching
+/// receiver; [`respond_to_approval`] removes the sender and `send`s the
+/// decision, waking the await. A `request_id` is a fresh uuid, so entries never
+/// collide. If the receiver is dropped before a response arrives (e.g. the run
+/// is aborted), `respond` finds no entry — a clean no-op.
+fn pending_approvals() -> &'static Mutex<HashMap<String, oneshot::Sender<bool>>> {
+    static PENDING: OnceLock<Mutex<HashMap<String, oneshot::Sender<bool>>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Resolve a pending approval: wake the awaiting `on_before_tool_call` with the
+/// user's `allow` decision.
+///
+/// IDEMPOTENT / leak-free: the sender is REMOVED from the registry before being
+/// used, so the FIRST response for a `request_id` wins and a duplicate or
+/// unknown `request_id` is a clean no-op (nothing to remove, nothing to send).
+/// A send failure (the receiver was already dropped — the awaiting tool call
+/// was abandoned) is likewise ignored: there is no live awaiter to wake.
+///
+/// This is the body the `agent_approval_respond` IPC command delegates to; it is
+/// `pub` so the command (and unit tests) can drive the rendezvous without a live
+/// session.
+pub fn respond_to_approval(request_id: &str, allow: bool) {
+    let sender = pending_approvals().lock().unwrap().remove(request_id);
+    if let Some(sender) = sender {
+        // The receiver may already be gone (run aborted); a failed send means
+        // there is no awaiter to wake, which is fine.
+        let _ = sender.send(allow);
+    }
+}
+
+/// Tier-1 extension that gates the dangerous, side-effecting tools
+/// (`write`/`edit`/`bash`) behind an ASYNCHRONOUS user approval — the M2
+/// replacement for the M1 [`DangerousDenyExtension`] unconditional deny.
+///
+/// FLOW (`on_before_tool_call` for a dangerous tool):
+/// 1. mint a fresh `request_id` (uuid v4);
+/// 2. register a `oneshot::Sender<bool>` under it in [`pending_approvals`];
+/// 3. emit `agent_approval_request` `{ sessionId, callId, toolName, args,
+///    requestId }` through the injected [`ApprovalEmitter`] so the frontend can
+///    prompt the user;
+/// 4. `await` the matching receiver. `Ok(true)` → [`HookDecision::Continue`]
+///    (the tool runs); `Ok(false)` (the user denied) or `Err` (the sender was
+///    dropped) → [`HookDecision::Cancel`] with a reason that speaks the
+///    "denied / 被拒" semantics so the model can word its reply.
+///
+/// FAIL-CLOSED: when no emitter is wired (no approval UI — e.g. a unit test or a
+/// headless construction) the extension does NOT await; it denies outright,
+/// preserving the M1 safety posture that a dangerous tool never runs without an
+/// explicit consent surface.
+///
+/// COMPOSITION & ORDERING: registered ALONGSIDE [`SandboxExtension`], AFTER it,
+/// in [`crate::services::coding_agent_session::build_agent_session`]. The host
+/// dispatches every registered extension in order and the FIRST `Cancel` wins,
+/// so a sandbox escape (an out-of-cwd read/ls/grep/find) is `Cancel`led by the
+/// sandbox FIRST and never reaches — never prompts — this approval gate. Only a
+/// dangerous tool that clears the sandbox surfaces an approval request.
+pub struct PermissionExtension {
+    manifest: ExtensionManifest,
+    /// Emitter pushing `agent_approval_request` to the frontend. `None` →
+    /// fail-closed (deny every dangerous tool); see the type-level doc.
+    emitter: Option<ApprovalEmitter>,
+}
+
+impl PermissionExtension {
+    /// Construct a permission extension.
+    ///
+    /// `emitter` is the approval-request channel: `Some` wires the frontend
+    /// prompt + await; `None` makes the extension fail closed (deny dangerous
+    /// tools), the safe default when there is no UI to consult.
+    pub fn new(emitter: Option<ApprovalEmitter>) -> Self {
+        Self {
+            manifest: ExtensionManifest {
+                name: PERMISSION_EXTENSION_NAME.to_string(),
+                version: "0.1.0".to_string(),
+                description: Some(
+                    "Gates dangerous tools (write/edit/bash) behind an async user approval."
+                        .to_string(),
+                ),
+                capabilities: ExtensionCapabilities {
+                    before_tool_call: true,
+                    ..Default::default()
+                },
+                exec: None,
+                env: Default::default(),
+                slash_commands: Vec::new(),
+                custom_tools: Vec::new(),
+            },
+            emitter,
+        }
+    }
+
+    /// Request approval for one dangerous tool call and await the decision.
+    ///
+    /// Returns the resolved [`HookDecision`]: `Continue` on allow, `Cancel` on
+    /// deny / fail-closed. Factored out of the trait method so the rendezvous is
+    /// directly unit-testable. A non-dangerous tool never reaches here — the
+    /// caller short-circuits it to `Continue`.
+    async fn request_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+    ) -> HookDecision {
+        // No approval surface → fail closed (M1 safety posture). Never await,
+        // never run the tool.
+        let Some(emitter) = &self.emitter else {
+            return HookDecision::Cancel(deny_reason(tool_name));
+        };
+
+        // Mint a fresh request id and register the wake channel BEFORE emitting,
+        // so a response that races back the instant the event is delivered
+        // always finds a live entry to resolve.
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel::<bool>();
+        pending_approvals()
+            .lock()
+            .unwrap()
+            .insert(request_id.clone(), tx);
+
+        emitter(serde_json::json!({
+            "sessionId": session_id,
+            "callId": call_id,
+            "toolName": tool_name,
+            "args": arguments,
+            "requestId": request_id,
+        }));
+
+        // Await the user's decision. `Ok(true)` → allow; `Ok(false)` → deny;
+        // `Err` (sender dropped without sending) → deny. On any deny path the
+        // registry entry is already gone (removed by `respond_to_approval`), or
+        // we remove it here to avoid leaking an orphaned sender if the receiver
+        // resolved via `Err`.
+        match rx.await {
+            Ok(true) => HookDecision::Continue,
+            Ok(false) => HookDecision::Cancel(deny_reason(tool_name)),
+            Err(_) => {
+                // Sender dropped before answering (e.g. run aborted): clean up
+                // any lingering entry and deny.
+                pending_approvals().lock().unwrap().remove(&request_id);
+                HookDecision::Cancel(deny_reason(tool_name))
+            }
+        }
+    }
+}
+
+/// The denial reason returned to the model when a dangerous tool is rejected or
+/// runs without an approval surface. Carries the "denied / 被拒" semantics so
+/// the model can word its reply (e.g. tell the user the action was refused).
+fn deny_reason(tool_name: &str) -> String {
+    format!("用户拒绝了 {tool_name}（denied）")
+}
+
+#[async_trait]
+impl Extension for PermissionExtension {
+    fn manifest(&self) -> &ExtensionManifest {
+        &self.manifest
+    }
+
+    async fn on_before_tool_call(
+        &self,
+        cx: &ExtensionContext,
+        event: &ToolCallEvent,
+    ) -> Result<HookDecision, ExtensionError> {
+        // Only the dangerous, side-effecting tools are approval-gated; read-only
+        // / non-dangerous tools pass straight through (the sandbox judges their
+        // paths separately, earlier in the chain).
+        if !DANGEROUS_TOOLS.contains(&event.tool_name.as_str()) {
+            return Ok(HookDecision::Continue);
+        }
+        Ok(self
+            .request_approval(
+                &cx.session_id,
+                &event.call_id,
+                &event.tool_name,
+                &event.arguments,
+            )
+            .await)
     }
 
     async fn on_after_tool_call(
@@ -742,6 +963,227 @@ mod tests {
         assert!(
             m.capabilities.before_tool_call,
             "the deny stub must declare the before_tool_call capability"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // M2 PermissionExtension — async approval await + respond rendezvous.
+    //
+    // A dangerous tool call emits `agent_approval_request`, registers a oneshot,
+    // and awaits the user's decision delivered via `respond_to_approval`
+    // (`agent_approval_respond` IPC). The pending registry is process-global, so
+    // each test mints its own tool/request and resolves it by the requestId the
+    // fake emitter captured — never touching another test's entries.
+    // -----------------------------------------------------------------------
+
+    /// A fake [`ApprovalEmitter`] that records every emitted approval request
+    /// into a shared `Vec`, so a test can read back the `agent_approval_request`
+    /// payload (and its `requestId`) without a live Tauri window.
+    fn recording_emitter() -> (
+        ApprovalEmitter,
+        Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) {
+        let recorded: Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&recorded);
+        let emitter: ApprovalEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+        (emitter, recorded)
+    }
+
+    /// Spin until the recording emitter has captured exactly one approval
+    /// request, then return its `requestId`. Bounded so a wiring regression
+    /// (no request ever emitted) fails loudly instead of hanging.
+    async fn await_request_id(recorded: &Arc<std::sync::Mutex<Vec<serde_json::Value>>>) -> String {
+        for _ in 0..1000 {
+            if let Some(req) = recorded.lock().unwrap().first() {
+                return req
+                    .get("requestId")
+                    .and_then(|v| v.as_str())
+                    .expect("approval request must carry a requestId")
+                    .to_string();
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("no agent_approval_request was emitted within the bound");
+    }
+
+    /// Drive a dangerous `write` call through the real hook on a background task
+    /// (it awaits the decision), resolve it via `respond_to_approval(.., allow)`
+    /// once the request lands, and return the resolved decision. Mirrors the
+    /// frontend round-trip: emit request → user answers → IPC responds → await
+    /// resolves.
+    async fn approve_via_respond(allow: bool) -> (HookDecision, serde_json::Value) {
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        let hook_ext = Arc::clone(&ext);
+        let task = tokio::spawn(async move {
+            hook_ext
+                .on_before_tool_call(
+                    &cx(Path::new("/tmp")),
+                    &call_event("write", json!({ "path": "out.txt", "content": "data" })),
+                )
+                .await
+                .expect("permission hook never returns Err")
+        });
+
+        let request_id = await_request_id(&recorded).await;
+        respond_to_approval(&request_id, allow);
+
+        let decision = task.await.expect("hook task joins");
+        let request = recorded.lock().unwrap()[0].clone();
+        (decision, request)
+    }
+
+    /// A dangerous tool emits an `agent_approval_request` carrying the tool name,
+    /// call id, session id, args, and a request id; an allow response resolves
+    /// the awaited hook to `Continue` (the tool runs).
+    #[tokio::test]
+    async fn dangerous_tool_emits_request_and_allow_resolves_to_continue() {
+        let (decision, request) = approve_via_respond(true).await;
+
+        // The emitted request is the `agent_approval_request` shape the frontend
+        // consumes: { sessionId, callId, toolName, args, requestId }.
+        assert_eq!(request.get("toolName").unwrap(), "write");
+        assert_eq!(request.get("callId").unwrap(), "call-1");
+        assert_eq!(request.get("sessionId").unwrap(), "test-session");
+        assert_eq!(request.get("args").unwrap().get("path").unwrap(), "out.txt");
+        assert!(
+            request.get("requestId").and_then(|v| v.as_str()).is_some(),
+            "request must carry a requestId"
+        );
+
+        // Allow → the awaited hook resolves to Continue (the tool executes).
+        assert!(
+            matches!(decision, HookDecision::Continue),
+            "an allowed approval must resolve to Continue"
+        );
+    }
+
+    /// A deny response resolves the awaited hook to `Cancel` (the tool does NOT
+    /// run), with a reason carrying the denied / 被拒 semantics for the model.
+    #[tokio::test]
+    async fn deny_response_resolves_to_cancel_with_denied_reason() {
+        let (decision, _request) = approve_via_respond(false).await;
+
+        match decision {
+            HookDecision::Cancel(reason) => {
+                assert!(
+                    reason.contains("denied"),
+                    "deny reason must carry the denied semantics, got: {reason:?}"
+                );
+                assert!(
+                    reason.contains("write"),
+                    "deny reason should name the rejected tool, got: {reason:?}"
+                );
+            }
+            other => panic!("a denied approval must Cancel, got {other:?}"),
+        }
+    }
+
+    /// With NO emitter wired (no approval UI — a unit test / headless build) a
+    /// dangerous tool is denied outright: the extension fails CLOSED, never
+    /// awaits, never runs the tool (the M1 safety posture preserved). No request
+    /// is emitted (there is no emitter to emit through).
+    #[tokio::test]
+    async fn no_emitter_fails_closed_to_cancel() {
+        let ext = PermissionExtension::new(None);
+        let decision = ext
+            .on_before_tool_call(
+                &cx(Path::new("/tmp")),
+                &call_event("bash", json!({ "command": "rm -rf /" })),
+            )
+            .await
+            .expect("permission hook never returns Err");
+
+        match decision {
+            HookDecision::Cancel(reason) => assert!(
+                reason.contains("denied"),
+                "fail-closed deny must carry the denied semantics, got: {reason:?}"
+            ),
+            other => panic!("no emitter must fail closed to Cancel, got {other:?}"),
+        }
+    }
+
+    /// Read-only / non-dangerous tools are NOT approval-gated: the permission
+    /// extension Continues them WITHOUT emitting an approval request (the
+    /// sandbox judges their paths separately, earlier in the chain).
+    #[tokio::test]
+    async fn read_only_tool_continues_without_requesting_approval() {
+        let (emitter, recorded) = recording_emitter();
+        let ext = PermissionExtension::new(Some(emitter));
+
+        for tool in ["read", "ls", "grep", "find"] {
+            let decision = ext
+                .on_before_tool_call(
+                    &cx(Path::new("/tmp")),
+                    &call_event(tool, json!({ "path": "inside.txt" })),
+                )
+                .await
+                .expect("permission hook never returns Err");
+            assert!(
+                matches!(decision, HookDecision::Continue),
+                "{tool} must pass through the approval gate untouched"
+            );
+        }
+
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "read-only tools must NOT emit an approval request"
+        );
+    }
+
+    /// `respond_to_approval` is idempotent: the FIRST response for a request_id
+    /// wins and a duplicate (or an unknown id) is a clean no-op. We register a
+    /// real oneshot, respond twice, and assert only the first decision is
+    /// delivered; the second respond — and a respond for an unknown id — do
+    /// nothing and do not panic.
+    #[tokio::test]
+    async fn respond_is_idempotent_for_duplicate_and_unknown_ids() {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel::<bool>();
+        pending_approvals()
+            .lock()
+            .unwrap()
+            .insert(request_id.clone(), tx);
+
+        // First response wins (delivers `true`).
+        respond_to_approval(&request_id, true);
+        assert_eq!(rx.await, Ok(true), "the first response is delivered");
+
+        // Duplicate response for the same id: the entry is already gone — a
+        // clean no-op (no panic, nothing to deliver).
+        respond_to_approval(&request_id, false);
+
+        // Unknown id: likewise a clean no-op.
+        respond_to_approval("no-such-request-id", true);
+
+        // The registry holds no entry for this id afterwards.
+        assert!(
+            !pending_approvals()
+                .lock()
+                .unwrap()
+                .contains_key(&request_id),
+            "a resolved request leaves no lingering registry entry"
+        );
+    }
+
+    #[test]
+    fn permission_manifest_declares_before_tool_call_capability_and_distinct_name() {
+        let ext = PermissionExtension::new(None);
+        let m = ext.manifest();
+        assert_eq!(m.name, PERMISSION_EXTENSION_NAME);
+        assert_ne!(
+            m.name, EXTENSION_NAME,
+            "permission ext name must differ from the sandbox so both coexist"
+        );
+        assert_ne!(
+            m.name, DANGEROUS_DENY_EXTENSION_NAME,
+            "permission ext name must differ from the M1 deny stub"
+        );
+        assert!(
+            m.capabilities.before_tool_call,
+            "the permission extension must declare the before_tool_call capability"
         );
     }
 }

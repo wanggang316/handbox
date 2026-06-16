@@ -166,6 +166,7 @@ pub fn run() {
             agent_run_stream,
             agent_run_abort,
             agent_run_steer,
+            agent_approval_respond,
             // 消息相关命令
             message_user_send,
             message_user_send_stream,

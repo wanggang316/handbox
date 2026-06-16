@@ -23,6 +23,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, Manager, State, Window};
 
 use crate::models::AppError;
+use crate::services::agent_permission::{
+    respond_to_approval, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
+};
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest,
@@ -146,7 +149,24 @@ async fn assemble_and_drive(
         })?;
 
     let config = config_from_rows(&session_row, &provider, app_data_dir)?;
-    let mut session = build_agent_session(&config)?;
+
+    // Approval emitter for the M2 PermissionExtension: a dangerous tool call
+    // (write/edit/bash) pushes an `agent_approval_request`
+    // `{ sessionId, callId, toolName, args, requestId }` to the frontend and
+    // awaits the user's decision (answered via the `agent_approval_respond` IPC).
+    // Wrap `window.emit` so the extension stays decoupled from Tauri.
+    let approval_window = window.clone();
+    let approval_emitter: ApprovalEmitter = Arc::new(move |payload| {
+        if let Err(e) = approval_window.emit(APPROVAL_REQUEST_EVENT, payload) {
+            tracing::warn!(
+                "[agent_run_stream] failed to emit {}: {}",
+                APPROVAL_REQUEST_EVENT,
+                e
+            );
+        }
+    });
+
+    let mut session = build_agent_session(&config, Some(approval_emitter))?;
 
     // --- (3) seed 既有 HandBox transcript 进 context（续聊上下文）。
     // 每条 payload 反序列化为 hand-agent `Message`；与旧路径的 seeding 一致。
@@ -244,6 +264,23 @@ pub async fn agent_run_abort(session_id: UUID) -> Result<(), AppError> {
 #[tauri::command]
 pub async fn agent_run_steer(session_id: UUID, text: String) -> Result<(), AppError> {
     steer_run(&session_id, text);
+    Ok(())
+}
+
+/// 回灌一次工具审批决策，唤醒正在 await 的 `PermissionExtension` 钩子。
+///
+/// 危险工具（write/edit/bash）调用时，`PermissionExtension` 发出
+/// `agent_approval_request` 并 await 一个以 `request_id` 为键的 oneshot；前端
+/// 弹窗（m2-approval-modal）回答后经本命令把决策回灌：在进程级 pending 注册表里
+/// 取出对应 sender 并 `send(allow)`，使 await 解为 `Continue`（allow）/`Cancel`
+/// （deny）。
+///
+/// 幂等：首个 response 生效；重复 / 未知 `request_id` 是**干净的 no-op**
+/// （注册表里已无该条目，什么都不做、不报错）—— 前端可能因竞态重复回答，或回答
+/// 一个已随 run 中止而消失的请求。
+#[tauri::command]
+pub async fn agent_approval_respond(request_id: String, allow: bool) -> Result<(), AppError> {
+    respond_to_approval(&request_id, allow);
     Ok(())
 }
 

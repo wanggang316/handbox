@@ -30,7 +30,7 @@ use hand_coding_agent::tools::create_default_tools;
 use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
-use crate::services::agent_permission::{DangerousDenyExtension, SandboxExtension};
+use crate::services::agent_permission::{ApprovalEmitter, PermissionExtension, SandboxExtension};
 use crate::services::chat_engine::{self, ChatOptions};
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
@@ -102,9 +102,18 @@ pub struct HandBoxAgentSessionConfig {
 /// `base_dir` is set to `app_data_dir` so session persistence lands inside the
 /// Tauri app sandbox.
 ///
+/// `approval_emitter` wires the M2 [`PermissionExtension`]'s approval-request
+/// channel (the IPC layer passes a `window.emit("agent_approval_request", ..)`
+/// wrapper). `None` makes the permission extension fail CLOSED — every dangerous
+/// tool (write/edit/bash) is denied without prompting — which is the safe
+/// default for headless construction and unit tests (no approval UI to consult).
+///
 /// Returns `AppError` when model resolution fails (unknown provider/model) or
 /// the coding-agent session cannot be initialized.
-pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSession, AppError> {
+pub fn build_agent_session(
+    config: &HandBoxAgentSessionConfig,
+    approval_emitter: Option<ApprovalEmitter>,
+) -> Result<AgentSession, AppError> {
     let model =
         chat_engine::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
 
@@ -164,14 +173,16 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
     // extension chain (the host calls every registered extension in order).
     session.register_extension(Arc::new(SandboxExtension::new(config.working_dir.clone())));
 
-    // M1 deny stub: the dangerous, side-effecting tools (write/edit/bash) have
-    // no approval surface yet, so this second before_tool_call extension Cancels
-    // every call to them — the tool never runs (no file mutation, no subprocess)
-    // and the model gets an error result instead. It composes alongside the
-    // sandbox above: the host calls each registered extension in order and the
-    // first Cancel wins. M2 REPLACES this stub with an approval extension that
-    // awaits a user decision rather than denying unconditionally.
-    session.register_extension(Arc::new(DangerousDenyExtension::new()));
+    // M2 approval gate: the dangerous, side-effecting tools (write/edit/bash)
+    // are gated behind an asynchronous user approval. This second
+    // before_tool_call extension emits an `agent_approval_request` and AWAITS the
+    // user's decision (allow → Continue, deny → Cancel); with no emitter it fails
+    // CLOSED (denies), preserving the M1 safety posture. It is registered AFTER
+    // the sandbox on purpose: the host calls each registered extension in order
+    // and the FIRST Cancel wins, so a sandbox escape (out-of-cwd
+    // read/ls/grep/find) is silently Cancelled by the sandbox FIRST and never
+    // reaches — never prompts — this approval gate.
+    session.register_extension(Arc::new(PermissionExtension::new(approval_emitter)));
 
     Ok(session)
 }
@@ -301,7 +312,7 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config).expect("construction succeeds");
+        let session = build_agent_session(&config, None).expect("construction succeeds");
 
         // cwd is the working_dir we passed.
         assert_eq!(session.cwd(), cwd.path());
@@ -313,7 +324,7 @@ mod tests {
     /// Helper: the registered tool-name set a config produces, sorted for
     /// order-independent comparison.
     fn registered_tool_names(config: &HandBoxAgentSessionConfig) -> Vec<String> {
-        let session = build_agent_session(config).expect("construction succeeds");
+        let session = build_agent_session(config, None).expect("construction succeeds");
         let mut names: Vec<String> = session.tools().iter().map(|t| t.name.clone()).collect();
         names.sort();
         names
@@ -386,7 +397,7 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
         // sample_config already sets enabled_tools = vec![].
 
-        let session = build_agent_session(&config).expect("construction succeeds");
+        let session = build_agent_session(&config, None).expect("construction succeeds");
         assert!(
             session.tools().is_empty(),
             "an empty enabled_tools list must register no tools"
@@ -414,7 +425,7 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config).expect("construction succeeds");
+        let session = build_agent_session(&config, None).expect("construction succeeds");
 
         // The plaintext key rides inside stream options' base.api_key — the
         // only place this construction path puts it.
@@ -438,7 +449,7 @@ mod tests {
         config.max_tokens = Some(1000);
         config.thinking_level = Some("high".to_string());
 
-        let session = build_agent_session(&config).expect("construction succeeds");
+        let session = build_agent_session(&config, None).expect("construction succeeds");
         let opts = session.stream_options();
 
         // temperature / max_tokens ride on stream_options.base; the default is
@@ -471,7 +482,7 @@ mod tests {
         // sample_config sets temperature/max_tokens/thinking_level to None.
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config).expect("construction succeeds");
+        let session = build_agent_session(&config, None).expect("construction succeeds");
         let opts = session.stream_options();
 
         assert_eq!(opts.base.temperature, None);
@@ -501,7 +512,8 @@ mod tests {
 
         // And construction with a custom prompt succeeds (the prompt feeds
         // build_system_prompt inside AgentSession::new_with_skill_dirs).
-        build_agent_session(&config).expect("construction with a custom system prompt succeeds");
+        build_agent_session(&config, None)
+            .expect("construction with a custom system prompt succeeds");
     }
 
     #[test]
@@ -513,7 +525,7 @@ mod tests {
 
         // `AgentSession` does not implement `Debug`, so `expect_err` (which
         // requires `T: Debug`) is unavailable — match on the Result instead.
-        match build_agent_session(&config) {
+        match build_agent_session(&config, None) {
             Ok(_) => panic!("unknown model under a fixed-catalog provider must error"),
             Err(err) => assert!(
                 format!("{err}").contains("not registered under provider"),
@@ -534,7 +546,7 @@ mod tests {
         config.model_id = "my-local-llm".to_string();
         config.base_url = "http://localhost:1234/v1".to_string();
 
-        let session = build_agent_session(&config).expect("construction succeeds");
+        let session = build_agent_session(&config, None).expect("construction succeeds");
         assert_eq!(session.model().id, "my-local-llm");
         assert_eq!(session.model().base_url, "http://localhost:1234/v1");
     }
