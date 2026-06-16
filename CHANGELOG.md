@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.2.1] - 2026-06-16
+
+### Added
+- The agent can now create and edit files and run shell commands, in addition
+  to reading, listing, and searching — a full coding toolset.
+- Tool approval: before the agent writes a file or runs a command, HandBox pauses
+  and asks you to allow it once, always allow it for the session, or deny it.
+- Settings → Agent Tools: choose which tools new agent sessions start with.
+
+### Changed
+- The agent's file and command tools are now confined to each session's working
+  directory.
+- The agent composer's per-tool toggles are collapsed into a single tools icon
+  with a popover.
+
+### Removed
+- The agent's web-page fetch tool.
+
+
 ## [0.2.0] - 2026-06-12
 
 ### Added
