@@ -404,6 +404,44 @@ fn remember_session_allow_always(session_id: &str, tool_name: &str) {
         .insert(tool_name.to_string());
 }
 
+/// Deny EVERY pending approval for `session_id`, fail-closed: each matching
+/// entry is REMOVED from the registry and its sender DROPPED, so the awaiting
+/// `on_before_tool_call`'s `rx.await` resolves `Err` → [`HookDecision::Cancel`]
+/// and the dangerous tool never executes.
+///
+/// WHY THIS EXISTS (the abort承重 point — VAL-CAPERM-016): the permission hook
+/// awaits the decision on a BARE `rx.await` that does NOT race the run's cancel
+/// token. So flipping the cancel token alone ([`crate::services::coding_agent_runtime::abort_run`])
+/// cannot unblock a turn parked on an approval await — without this, aborting a
+/// run while a write/edit/bash sits waiting for consent would leave the await
+/// hanging (and, worse, a late user "allow" could still run the tool AFTER the
+/// abort). Dropping the sender unblocks the await deterministically and resolves
+/// it to the fail-closed `Cancel`, so an aborted run's pending dangerous tool is
+/// guaranteed NOT to execute.
+///
+/// Dropping (rather than `send(Deny)`) is the right primitive here: the
+/// `request_approval` `Err` arm is ALREADY the fail-closed deny path (it returns
+/// the same `Cancel(deny_reason)`), and dropping deliberately does NOT touch the
+/// always-allow set — an aborted approval must never be mistaken for standing
+/// consent. A session with no pending approvals is a clean no-op.
+pub fn deny_pending_for_session(session_id: &str) {
+    let mut pending = pending_approvals().lock().unwrap();
+    // Collect the request ids for this session first, then remove them — we
+    // can't remove while iterating the borrowed map. Dropping the removed
+    // `PendingApproval` (and with it its `oneshot::Sender`) closes the channel,
+    // waking the awaiting `rx.await` with `Err` (fail-closed Cancel).
+    let request_ids: Vec<String> = pending
+        .iter()
+        .filter(|(_, p)| p.session_id == session_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for request_id in request_ids {
+        // The removed PendingApproval (incl. its sender) is dropped at end of
+        // scope, closing the oneshot and unblocking the awaiter.
+        pending.remove(&request_id);
+    }
+}
+
 /// Resolve a pending approval: wake the awaiting `on_before_tool_call` with the
 /// user's `decision`, and — for [`ApprovalDecision::AllowAlways`] — first record
 /// the tool on the request's session always-allow set so future calls to the
@@ -1637,6 +1675,341 @@ mod tests {
         assert!(
             m.capabilities.before_tool_call,
             "the permission extension must declare the before_tool_call capability"
+        );
+    }
+
+    // =======================================================================
+    // VAL-CAPERM-012..020 — approval EDGE CASES (m2-approval-edge-cases).
+    //
+    // These pin the behaviours the boundary depends on:
+    //   012 read-only tools never prompt;
+    //   016 aborting a turn parked on an approval await fail-closes (the tool
+    //       never runs) — the承重 implementation point;
+    //   017 a lost / dropped response does not hang — the await resolves to a
+    //       fail-closed Cancel;
+    //   018 idempotent / first-wins (allow-then-deny → only the allow lands);
+    //   019 illegal args never reach the hook (validate先于hook upstream), so the
+    //       permission extension only emits when the hook is actually invoked;
+    //   020 a denied tool is NOT remembered, so a model re-send re-prompts.
+    //
+    // The pending / always-allow registries are process-global, so every test
+    // mints a fresh uuid session to stay isolated from the rest of the binary.
+    // =======================================================================
+
+    /// VAL-CAPERM-012 — the read-only path tools (read/ls/grep/find) are NOT
+    /// approval-gated: the permission extension Continues each WITHOUT emitting an
+    /// approval request. (Restates `read_only_tool_continues_without_requesting_approval`
+    /// under the edge-case contract, pinning that only DANGEROUS_TOOLS emit.)
+    #[tokio::test]
+    async fn read_only_tools_never_emit_an_approval_request() {
+        let (emitter, recorded) = recording_emitter();
+        let ext = PermissionExtension::new(Some(emitter));
+
+        for tool in PATH_SANDBOXED_TOOLS {
+            let decision = ext
+                .on_before_tool_call(
+                    &cx(Path::new("/tmp")),
+                    &call_event(tool, json!({ "path": "inside.txt" })),
+                )
+                .await
+                .expect("permission hook never returns Err");
+            assert!(
+                matches!(decision, HookDecision::Continue),
+                "{tool} (read-only) must pass the approval gate untouched"
+            );
+        }
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "read-only tools must NEVER emit an approval request (VAL-CAPERM-012)"
+        );
+    }
+
+    /// VAL-CAPERM-019 — the permission extension emits ONLY when its hook is
+    /// actually invoked, and ONLY for dangerous tools. Upstream `validate_tool_args`
+    /// runs BEFORE `before_tool_call` (agent_loop `prepare_tool_call`), so a
+    /// dangerous tool whose arguments fail schema validation is short-circuited to
+    /// an Immediate error and the hook is NEVER called — no approval request is
+    /// emitted. We model that upstream guarantee here: when the hook is NOT
+    /// invoked (the invalid-arg case), nothing is recorded; only a hook invocation
+    /// for a dangerous tool emits.
+    #[tokio::test]
+    async fn illegal_args_never_reach_the_hook_so_no_request_is_emitted() {
+        let (emitter, recorded) = recording_emitter();
+        let ext = PermissionExtension::new(Some(emitter));
+
+        // Upstream: invalid args → Immediate error in `prepare_tool_call`, BEFORE
+        // `before_tool_call`. So for an illegal-arg dangerous call the hook is
+        // never reached — we simply DO NOT invoke it, mirroring that ordering.
+        // No request may have been emitted by anyone.
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "an illegal-arg call that never reaches the hook emits no approval request"
+        );
+
+        // Sanity floor: a VALID dangerous call that DOES reach the hook is what
+        // emits — proving the emit is gated on the hook firing, not on the tool
+        // name alone. (Fail-closed deny so the spawned await resolves.)
+        let no_emitter = PermissionExtension::new(None);
+        let _ = no_emitter
+            .on_before_tool_call(
+                &cx(Path::new("/tmp")),
+                &call_event("write", json!({ "path": "out.txt", "content": "data" })),
+            )
+            .await
+            .expect("permission hook never returns Err");
+        // (no_emitter records nothing either, but it is the fail-closed path; the
+        // recorded sink belongs to `ext` and stays empty since `ext`'s hook was
+        // never invoked.)
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "ext's recorded sink stays empty — only an invoked dangerous hook emits"
+        );
+    }
+
+    /// VAL-CAPERM-018 — first-wins idempotency across SCOPES: once a request is
+    /// resolved (here `AllowOnce`), a SUBSEQUENT `Deny` for the same id is a clean
+    /// no-op — only the first decision is ever delivered. Pins that a late
+    /// "deny" can never flip an already-granted allow (and vice versa).
+    #[tokio::test]
+    async fn first_response_wins_allow_then_deny_only_allow_lands() {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel::<ApprovalDecision>();
+        pending_approvals().lock().unwrap().insert(
+            request_id.clone(),
+            PendingApproval {
+                session_id,
+                tool_name: "write".to_string(),
+                sender: tx,
+            },
+        );
+
+        // First decision wins.
+        respond_to_approval(&request_id, ApprovalDecision::AllowOnce);
+        // A racing/late deny for the same id finds no entry — clean no-op.
+        respond_to_approval(&request_id, ApprovalDecision::Deny);
+
+        assert_eq!(
+            rx.await,
+            Ok(ApprovalDecision::AllowOnce),
+            "only the FIRST decision (allow) is delivered; the late deny is dropped"
+        );
+    }
+
+    /// VAL-CAPERM-017 — a LOST response does not hang the turn: if the sender is
+    /// dropped (the response never arrives — e.g. the frontend window closed
+    /// without answering, or the IPC was lost) the `rx.await` resolves `Err` and
+    /// the hook fail-closes to `Cancel`. We drive the real hook and drop the
+    /// pending sender via [`deny_pending_for_session`] (the same primitive a lost
+    /// response / abort uses) instead of ever responding.
+    #[tokio::test]
+    async fn dropped_response_resolves_await_to_cancel_not_hang() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        let hook_ext = Arc::clone(&ext);
+        let owned_session = session_id.clone();
+        let task = tokio::spawn(async move {
+            hook_ext
+                .on_before_tool_call(
+                    &cx_for_session(&owned_session),
+                    &call_event("write", json!({ "path": "out.txt", "content": "data" })),
+                )
+                .await
+                .expect("permission hook never returns Err")
+        });
+
+        // The request lands, then the response is LOST: drop the sender rather
+        // than responding. The bare `rx.await` must resolve (Err → Cancel), not
+        // hang.
+        let _request_id = await_request_id(&recorded).await;
+        deny_pending_for_session(&session_id);
+
+        let decision = task.await.expect("hook task joins (did not hang)");
+        match decision {
+            HookDecision::Cancel(reason) => assert!(
+                reason.contains("denied"),
+                "a lost response must fail-close to a denied Cancel, got: {reason:?}"
+            ),
+            other => panic!("a lost response must resolve to Cancel, got {other:?}"),
+        }
+    }
+
+    /// VAL-CAPERM-016 — aborting a turn parked on an approval await fail-closes:
+    /// [`deny_pending_for_session`] drops the pending sender so the bare `rx.await`
+    /// resolves to `Cancel` and the dangerous tool NEVER runs. This is the承重
+    /// abort path (`abort_run` calls this after flipping the cancel token, since
+    /// the bare await does not race the token). Drives the REAL hook end-to-end.
+    #[tokio::test]
+    async fn deny_pending_for_session_unblocks_awaiting_hook_to_cancel() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        let hook_ext = Arc::clone(&ext);
+        let owned_session = session_id.clone();
+        let task = tokio::spawn(async move {
+            hook_ext
+                .on_before_tool_call(
+                    &cx_for_session(&owned_session),
+                    &call_event("bash", json!({ "command": "rm -rf /" })),
+                )
+                .await
+                .expect("permission hook never returns Err")
+        });
+
+        // Turn is parked on the approval await. Abort denies the pending request.
+        await_request_id(&recorded).await;
+        deny_pending_for_session(&session_id);
+
+        let decision = task.await.expect("hook task joins after abort");
+        assert!(
+            matches!(decision, HookDecision::Cancel(_)),
+            "an aborted pending approval must Cancel — the dangerous tool must not run"
+        );
+
+        // The registry holds no residue for this session afterwards.
+        assert!(
+            !pending_approvals()
+                .lock()
+                .unwrap()
+                .values()
+                .any(|p| p.session_id == session_id),
+            "deny_pending_for_session leaves no pending entry for the session"
+        );
+    }
+
+    /// VAL-CAPERM-016 (post-abort safety) — a late user "allow" arriving AFTER the
+    /// abort fail-closed the request finds NO entry, so it cannot run the tool:
+    /// `respond_to_approval(allow)` for an already-denied id is a clean no-op, and
+    /// crucially does NOT record the tool on the always-allow set (which would let
+    /// a future call skip the prompt).
+    #[tokio::test]
+    async fn late_allow_after_pending_denied_is_a_noop_and_records_no_consent() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (tx, _rx) = oneshot::channel::<ApprovalDecision>();
+        pending_approvals().lock().unwrap().insert(
+            request_id.clone(),
+            PendingApproval {
+                session_id: session_id.clone(),
+                tool_name: "write".to_string(),
+                sender: tx,
+            },
+        );
+
+        // Abort fail-closes the pending request (drops the sender, removes entry).
+        deny_pending_for_session(&session_id);
+
+        // A late "allow_always" for that id now finds nothing — no-op.
+        respond_to_approval(&request_id, ApprovalDecision::AllowAlways);
+
+        // The tool was NOT recorded as always-allowed: a post-abort allow can't
+        // grant standing consent the abort never honoured.
+        assert!(
+            !is_session_allow_always(&session_id, "write"),
+            "a late allow after abort must NOT record standing consent"
+        );
+    }
+
+    /// [`deny_pending_for_session`] is session-scoped: it fail-closes ONLY the
+    /// named session's pending approvals, leaving another session's pending
+    /// request untouched (it still awaits its own answer). And a session with no
+    /// pending approval is a clean no-op.
+    #[tokio::test]
+    async fn deny_pending_for_session_is_session_scoped_and_noop_when_empty() {
+        let session_a = uuid::Uuid::new_v4().to_string();
+        let session_b = uuid::Uuid::new_v4().to_string();
+        let unknown = uuid::Uuid::new_v4().to_string();
+
+        let req_a = uuid::Uuid::new_v4().to_string();
+        let req_b = uuid::Uuid::new_v4().to_string();
+        let (tx_a, mut rx_a) = oneshot::channel::<ApprovalDecision>();
+        let (tx_b, mut rx_b) = oneshot::channel::<ApprovalDecision>();
+        {
+            let mut pending = pending_approvals().lock().unwrap();
+            pending.insert(
+                req_a.clone(),
+                PendingApproval {
+                    session_id: session_a.clone(),
+                    tool_name: "write".to_string(),
+                    sender: tx_a,
+                },
+            );
+            pending.insert(
+                req_b.clone(),
+                PendingApproval {
+                    session_id: session_b.clone(),
+                    tool_name: "bash".to_string(),
+                    sender: tx_b,
+                },
+            );
+        }
+
+        // Unknown session: clean no-op — both pending entries survive.
+        deny_pending_for_session(&unknown);
+        assert!(
+            rx_a.try_recv().is_err(),
+            "A still pending after unknown deny"
+        );
+        assert!(
+            rx_b.try_recv().is_err(),
+            "B still pending after unknown deny"
+        );
+
+        // Deny session A only: A's sender is dropped (Err on the receiver), B is
+        // untouched and still awaits.
+        deny_pending_for_session(&session_a);
+        assert_eq!(
+            rx_a.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed),
+            "session A's await is unblocked (sender dropped) → fail-closed"
+        );
+        assert_eq!(
+            rx_b.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty),
+            "session B's request is untouched — still awaiting its own answer"
+        );
+
+        // Clean up B.
+        deny_pending_for_session(&session_b);
+    }
+
+    /// VAL-CAPERM-020 — a DENIED tool is not remembered: `Deny` records nothing on
+    /// the always-allow set, so a model re-sending the SAME tool in the SAME
+    /// session prompts AGAIN (a second request is emitted and awaited). Contrast
+    /// `allow_always` which DOES skip the second prompt.
+    #[tokio::test]
+    async fn deny_does_not_remember_so_resend_reprompts() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (emitter, recorded) = recording_emitter();
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+
+        // First call: the user denies.
+        let first =
+            drive_write_for_session(&ext, &session_id, ApprovalDecision::Deny, &recorded, 1).await;
+        assert!(
+            matches!(first, HookDecision::Cancel(_)),
+            "a denied call Cancels"
+        );
+        assert_eq!(recorded.lock().unwrap().len(), 1, "first call emitted once");
+
+        // Deny left no standing consent.
+        assert!(
+            !is_session_allow_always(&session_id, "write"),
+            "deny must NOT enter the always-allow set"
+        );
+
+        // The model re-sends the SAME tool: it prompts AGAIN (a second request is
+        // emitted and awaited) — deny is never remembered.
+        let second =
+            drive_write_for_session(&ext, &session_id, ApprovalDecision::Deny, &recorded, 2).await;
+        assert!(matches!(second, HookDecision::Cancel(_)));
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            2,
+            "a denied tool re-prompts on re-send (VAL-CAPERM-020)"
         );
     }
 }

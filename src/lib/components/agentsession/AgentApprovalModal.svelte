@@ -84,9 +84,18 @@
   function renderText(text: string): string {
     return renderCodeBlock(text, { variant: "compact" });
   }
+
+  // 关闭路径 == 拒绝（fail-closed，VAL-CAPERM-015）：`Modal` 把 Escape 键接到
+  // `onClose`。审批弹窗绝不能被「无决策地关掉」——那样后端 oneshot 仍在 await、对话
+  // 卡在暂停态。任何关闭路径（这里是 Escape）都按 `deny` 处理：工具被 Cancel、模型
+  // 收被拒结果、对话继续不中断（与点「拒绝」按钮同义）。store 对重复/未知 requestId
+  // 幂等，故即便和按钮点击竞合也只首处置生效。
+  function handleClose(): void {
+    onRespond("deny");
+  }
 </script>
 
-<Modal open={true} showCloseButton={false}>
+<Modal open={true} showCloseButton={false} onClose={handleClose}>
   <div class="w-[560px] max-w-[90vw] flex flex-col">
     <!-- 头部：危险图标 + 标题。 -->
     <div

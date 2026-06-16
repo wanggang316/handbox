@@ -406,7 +406,8 @@ pub fn steer_run(session_id: &str, text: String) {
     }
 }
 
-/// Abort the session's in-flight turn by flipping its cancellation token.
+/// Abort the session's in-flight turn by flipping its cancellation token AND
+/// fail-closing any approval the turn is parked on.
 ///
 /// Mirrors the legacy `AgentRuntime::abort` contract: an unknown / already-
 /// finished session is a CLEAN no-op (the front end may race an abort against a
@@ -418,11 +419,28 @@ pub fn steer_run(session_id: &str, text: String) {
 /// abort path too). The registry entry is NOT removed here — removal stays owned
 /// by the driver task's closed emit site, so a stale abort can't drop a live
 /// entry out from under a still-running turn.
+///
+/// PENDING-APPROVAL FAIL-CLOSE (VAL-CAPERM-016): the permission hook awaits the
+/// user's decision on a BARE `rx.await` that does NOT race the cancel token, so
+/// flipping the token alone cannot unblock a turn parked waiting for consent on a
+/// write/edit/bash call. We therefore ALSO
+/// [`deny_pending_for_session`](crate::services::agent_permission::deny_pending_for_session):
+/// it drops the pending sender(s) for this session, resolving the await to a
+/// fail-closed `Cancel` so the pending dangerous tool is guaranteed NOT to
+/// execute — and a late user "allow" arriving after the abort finds no entry (a
+/// clean no-op), so it can never run the tool post-abort either. A session with
+/// no pending approval is a clean no-op on that leg.
 pub fn abort_run(session_id: &str) {
     let controls = run_controls().lock().unwrap();
     if let Some(control) = controls.get(session_id) {
         control.cancel.lock().unwrap().cancel();
     }
+    // Drop the run-controls lock before touching the approval registry to avoid
+    // ordering two unrelated process-global locks under one critical section.
+    drop(controls);
+    // Fail-close any approval the (now-cancelled) turn is parked on, so the bare
+    // approval await unblocks and the dangerous tool never runs (VAL-CAPERM-016).
+    crate::services::agent_permission::deny_pending_for_session(session_id);
 }
 
 /// Register a run's steer / abort controls under `session_id`.
@@ -1491,6 +1509,80 @@ mod tests {
         assert!(!is_registered(&session_id));
         abort_run(&session_id);
         assert!(!is_registered(&session_id));
+    }
+
+    /// VAL-CAPERM-016 (abort承重, end-to-end) — `abort_run` not only flips the
+    /// cancel token but ALSO fail-closes any approval the turn is parked on. The
+    /// permission hook awaits on a BARE `rx.await` that does not race the cancel
+    /// token, so without the second leg the awaiting tool call would hang and a
+    /// late "allow" could still run the tool. Here a real permission hook is
+    /// parked on a `bash` approval for a registered session; `abort_run` must
+    /// unblock it to `Cancel` (the dangerous tool never runs).
+    #[tokio::test]
+    async fn abort_run_unblocks_a_pending_approval_to_cancel() {
+        use crate::services::agent_permission::{PermissionExtension, APPROVAL_REQUEST_EVENT};
+        use hand_coding_agent::core::extensions::api::ToolCallEvent;
+        use hand_coding_agent::{Extension, ExtensionContext, HookDecision};
+        use std::path::Path;
+
+        let session_id = fresh_session_id();
+        // Register the run's controls (as `drive_agent_run` would), so `abort_run`
+        // finds the session and flips its token. The pending-approval fail-close
+        // is keyed off the SAME session_id.
+        let (_cancel, _steering) = register_test_run(&session_id);
+
+        // A recording emitter so we can wait for the approval request to land
+        // before aborting (otherwise we'd race the await registration).
+        let recorded: Arc<StdMutex<Vec<Value>>> = Arc::new(StdMutex::new(Vec::new()));
+        let sink = Arc::clone(&recorded);
+        let emitter: Arc<dyn Fn(Value) + Send + Sync> =
+            Arc::new(move |payload| sink.lock().unwrap().push(payload));
+        assert_eq!(APPROVAL_REQUEST_EVENT, "agent_approval_request");
+
+        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        let hook_ext = Arc::clone(&ext);
+        let hook_session = session_id.clone();
+        let task = tokio::spawn(async move {
+            let cx = ExtensionContext {
+                cwd: Path::new("/tmp").to_path_buf(),
+                session_id: hook_session,
+                data_dir: Path::new("/tmp").join(".hand").join("data"),
+            };
+            let event = ToolCallEvent {
+                tool_name: "bash".to_string(),
+                arguments: json!({ "command": "rm -rf /" }),
+                call_id: "call-1".to_string(),
+            };
+            hook_ext
+                .on_before_tool_call(&cx, &event)
+                .await
+                .expect("permission hook never returns Err")
+        });
+
+        // Wait until the turn is parked on the approval await (request emitted).
+        for _ in 0..1000 {
+            if !recorded.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !recorded.lock().unwrap().is_empty(),
+            "the dangerous tool must have emitted an approval request before abort"
+        );
+
+        // Abort: flips the token AND fail-closes the pending approval.
+        abort_run(&session_id);
+
+        let decision = task
+            .await
+            .expect("hook task joins after abort (did not hang)");
+        assert!(
+            matches!(decision, HookDecision::Cancel(_)),
+            "abort_run must fail-close the pending approval to Cancel — the bash tool must not run"
+        );
+
+        deregister_run(&session_id);
     }
 
     /// After a run deregisters (its closed emit site fired), a steer / abort for
