@@ -13,9 +13,11 @@
 // 注册、closed 时注销）翻转 cancel token / push steering 消息，对新驱动的 run 生效。
 // 旧的 `AgentRuntime` 仍保留（chat/其它路径），将在后续 milestone（M4）退役。
 //
-// 本 feature 走**纯内存**会话（`no_session = true`）：既有 HandBox transcript
-// 被 seed 进 context 以保证续聊上下文正确，但本轮新消息的 HandBox DB 持久化是
-// M3，不在此实现。
+// M3 起会话走 **JSONL 持久化**：经 `resume_session = <session_id>` 构造，
+// transcript 落 `<app_data_dir>/sessions/<flattened-cwd>/<session_id>.jsonl`，
+// 每轮 append 到同一文件（同一 HandBox 会话 → 同一 JSONL）。续聊上下文由该 JSONL
+// 的 `build_context()` 还原；仅当 JSONL 尚无消息时回退 SQLite seed（覆盖 pre-M3
+// 老会话首次续聊，老数据迁移是 m3-migration-core）。
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -168,22 +170,36 @@ async fn assemble_and_drive(
 
     let mut session = build_agent_session(&config, Some(approval_emitter))?;
 
-    // --- (3) seed 既有 HandBox transcript 进 context（续聊上下文）。
-    // 每条 payload 反序列化为 hand-agent `Message`；与旧路径的 seeding 一致。
-    // 本 feature 纯内存：seeding 只填 in-memory context，不落 HandBox DB（M3）。
-    let history = sessions.list_messages(session_id.clone()).await?;
-    if !history.is_empty() {
-        let mut seeded: Vec<Message> = Vec::with_capacity(history.len());
-        for row in history {
-            let msg: Message = serde_json::from_value(row.payload).map_err(|e| {
-                AppError::internal_error(&format!(
-                    "agent transcript payload (seq {}) is not a valid hand-agent Message: {}",
-                    row.seq, e
-                ))
-            })?;
-            seeded.push(msg);
+    // --- (3) 续聊上下文（M3: JSONL 为权威源）。
+    //
+    // `build_agent_session` 以 `resume_session = <session_id>` 构造会话，coding-agent
+    // 在构造时已用该 JSONL 的 `build_context()` 还原历史进 in-memory context；本轮
+    // `send_message` 产生的新消息会经 SessionManager APPEND 回同一 JSONL。因此对
+    // **JSONL 已有历史**的会话，无需也不应再 seed（再 seed 会用 SQLite 覆盖掉 JSONL
+    // 已还原的 context）。
+    //
+    // 仅当 JSONL **尚无消息**（message_count == 0）时，才回退到既有 SQLite transcript
+    // seed 进 context —— 覆盖「老会话（pre-M3，只有 SQLite transcript、还没 JSONL）」
+    // 首次在新引擎下续聊的场景，使其上下文不丢。这只填 in-memory context、不落 JSONL
+    // （`set_messages` 不触碰 SessionManager 的文件），也不写 SQLite；老数据真正迁移
+    // 到 JSONL 是后续 feature（m3-migration-core）。新会话（JSONL 有历史、SQLite 空）
+    // 走 message_count > 0 分支，原样使用 JSONL 还原的 context。
+    let jsonl_message_count = session.messages().len();
+    if jsonl_message_count == 0 {
+        let history = sessions.list_messages(session_id.clone()).await?;
+        if !history.is_empty() {
+            let mut seeded: Vec<Message> = Vec::with_capacity(history.len());
+            for row in history {
+                let msg: Message = serde_json::from_value(row.payload).map_err(|e| {
+                    AppError::internal_error(&format!(
+                        "agent transcript payload (seq {}) is not a valid hand-agent Message: {}",
+                        row.seq, e
+                    ))
+                })?;
+                seeded.push(msg);
+            }
+            session.set_messages(seeded);
         }
-        session.set_messages(seeded);
     }
 
     // --- (4) 装配一个 Window-emitting 的 sink 并驱动一轮 ---

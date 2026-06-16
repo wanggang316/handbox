@@ -2,11 +2,21 @@
 //
 // Agent 模式会话的 CRUD 命令层，委托给 `AgentSessionService`。仅会话 CRUD 与
 // transcript 读取；runtime / run / streaming / tools 属于后续 feature。
+//
+// M3 数据来源（双源并存，前端透明）：
+//  - 会话**配置**（model/provider/tools/project 挂靠 等）权威源仍是 SQLite
+//    （`agent_sessions` 行）—— grouping 依赖的 projectId 等只在此。
+//  - 会话**活动**（messageCount / lastMessageAt / 标题）与 **transcript** 的
+//    权威源是 JSONL（coding-agent SessionManager 落盘）。`agent_session_list`
+//    用 JSONL 活动元数据覆盖 SQLite 行对应字段；`agent_session_messages` 直接
+//    读 JSONL，无 JSONL 文件（pre-M3 老会话）时回退 SQLite transcript。
 
 use crate::models::AppError;
-use crate::services::{AgentRuntime, AgentSessionParameter, AgentSessionService};
+use crate::services::{
+    agent_jsonl_store, AgentRuntime, AgentSessionParameter, AgentSessionService,
+};
 use crate::storage::types::{AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UUID};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 /// 创建新的 Agent Session
 #[tauri::command]
@@ -18,22 +28,76 @@ pub async fn agent_session_create(
 }
 
 /// 获取 Agent Session 列表
+///
+/// SQLite 提供配置行（含顺序：updated_at DESC）；JSONL 提供活动元数据
+/// （messageCount / lastMessageAt / 标题），逐行 overlay 到对应会话上，使侧栏的
+/// 计数与最近活动时间反映真实 transcript（JSONL 为权威）。无 JSONL 文件的老会话
+/// 保留其 SQLite 字段不变。
 #[tauri::command]
 pub async fn agent_session_list(
     limit: Option<i32>,
     offset: Option<i32>,
+    app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<Vec<AgentSession>, AppError> {
-    agent_session_service.list_sessions(limit, offset).await
+    let mut sessions = agent_session_service.list_sessions(limit, offset).await?;
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    for session in sessions.iter_mut() {
+        overlay_jsonl_activity(session, &app_data_dir);
+    }
+    Ok(sessions)
 }
 
 /// 获取 Agent Session 详情
+///
+/// 同 `agent_session_list`：在 SQLite 行上 overlay JSONL 活动元数据，使
+/// `refreshAfterRun`（前端 `getAgentSession`）在 run 结束后拿到真实的 messageCount
+/// / lastMessageAt（不再依赖已不更新这两列的 SQLite append 路径）。
 #[tauri::command]
 pub async fn agent_session_get(
     session_id: UUID,
+    app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<AgentSession, AppError> {
-    agent_session_service.get_session(session_id).await
+    let mut session = agent_session_service.get_session(session_id).await?;
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    overlay_jsonl_activity(&mut session, &app_data_dir);
+    Ok(session)
+}
+
+/// 解析 Tauri 应用数据目录（JSONL 持久化根 `base_dir`）。
+fn resolve_app_data_dir(app_handle: &AppHandle) -> Result<std::path::PathBuf, AppError> {
+    app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::internal_error(&format!("failed to resolve app data dir: {e}")))
+}
+
+/// 用 JSONL 活动元数据 overlay 一个 SQLite 会话行（就地）。
+///
+/// JSONL 有该会话文件时：messageCount / lastMessageAt 取 JSONL（权威活动源），
+/// 若 JSONL 携带 session 标签（agent 重命名）则覆盖 name。无 JSONL 文件（pre-M3
+/// 老会话）或读取失败时：保持 SQLite 字段不变（优雅回退，绝不让一个坏文件
+/// 拖垮整个列表）。
+fn overlay_jsonl_activity(session: &mut AgentSession, app_data_dir: &std::path::Path) {
+    let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), app_data_dir);
+    match agent_jsonl_store::session_activity(app_data_dir, &cwd, &session.id) {
+        Ok(Some(activity)) => {
+            session.message_count = activity.message_count;
+            session.last_message_at = activity.last_message_at;
+            if let Some(name) = activity.name {
+                session.name = name;
+            }
+        }
+        // 无 JSONL（老会话）或读取错误：保留 SQLite 值，不阻断列表。
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(
+                session_id = %session.id,
+                "failed to read JSONL activity, keeping SQLite values: {e}"
+            );
+        }
+    }
 }
 
 /// 重命名 Agent Session
@@ -150,13 +214,38 @@ pub async fn agent_session_delete(
     agent_session_service.delete_session(session_id).await
 }
 
-/// 获取 Agent Session 的 transcript
+/// 获取 Agent Session 的 transcript（M3: JSONL 为权威源）。
+///
+/// 优先读该会话的 JSONL transcript（`<app_data_dir>/sessions/<flattened-cwd>/
+/// <id>.jsonl`，经 SessionManager `build_context` 还原，含工具调用与思考块——它们
+/// 内嵌在 assistant 消息的 content blocks 内）。该会话尚无 JSONL 文件（pre-M3 老
+/// 会话，只有 SQLite transcript）时，回退到 SQLite。JSONL 读取硬失败（罕见，如文件
+/// 损坏到 open 报错）时同样回退 SQLite，避免单个坏文件白屏整条 timeline。
 #[tauri::command]
 pub async fn agent_session_messages(
     session_id: UUID,
+    app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<Vec<AgentSessionMessage>, AppError> {
-    agent_session_service.list_messages(session_id).await
+    let session = agent_session_service
+        .get_session(session_id.clone())
+        .await?;
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
+
+    match agent_jsonl_store::load_transcript(&app_data_dir, &cwd, &session_id) {
+        Ok(Some(rows)) => Ok(rows),
+        // 无 JSONL 文件：pre-M3 老会话 → 回退 SQLite transcript。
+        Ok(None) => agent_session_service.list_messages(session_id).await,
+        // JSONL 存在但读取硬失败：记录并回退 SQLite，避免白屏。
+        Err(e) => {
+            tracing::warn!(
+                session_id = %session_id,
+                "failed to read JSONL transcript, falling back to SQLite: {e}"
+            );
+            agent_session_service.list_messages(session_id).await
+        }
+    }
 }
 
 /// 将 JSON 值解析为 `Option<String>`：null -> None，字符串 -> Some，其它 -> 校验错误。

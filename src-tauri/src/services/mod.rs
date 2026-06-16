@@ -1,5 +1,6 @@
 // 服务层模块
 pub mod agent;
+pub mod agent_jsonl_store;
 pub mod agent_permission;
 pub mod agent_project;
 pub mod agent_runtime;

@@ -145,6 +145,18 @@ pub fn build_agent_session(
 
     let tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
 
+    // M3: guarantee the JSONL file the `resume_session` branch will open exists,
+    // named after the HandBox session UUID (header id == UUID). Idempotent — a
+    // second turn finds the first turn's file and resumes it, so the transcript
+    // accretes across turns instead of being re-minted. This is the single place
+    // the persistence file is created, keeping "file exists before resume" an
+    // invariant of construction rather than a precondition callers must remember.
+    crate::services::agent_jsonl_store::ensure_session_file(
+        &config.app_data_dir,
+        &config.working_dir,
+        &config.session_id,
+    )?;
+
     let session_config = AgentSessionConfig {
         cwd: config.working_dir.clone(),
         model,
@@ -154,16 +166,24 @@ pub fn build_agent_session(
         // leaves the coding-agent default prompt in place.
         custom_system_prompt: config.system_prompt.clone(),
         custom_guidelines: None,
-        resume_session: None,
-        // Construction-only sessions don't persist a JSONL transcript; the
-        // drive feature owns persistence semantics. In-memory keeps this path
-        // side-effect-free on disk.
-        no_session: true,
+        // M3 JSONL persistence: resume the JSONL file named after the HandBox
+        // session UUID so the transcript persists to `<base>/sessions/
+        // <flattened-cwd>/<session_id>.jsonl` and every turn APPENDS to that one
+        // file (same HandBox session → same JSONL → multi-turn append, no id
+        // map). The coding-agent `create_in` path would mint its own `s_…` id
+        // and ignore ours, so the caller pre-seeds the header via
+        // `agent_jsonl_store::ensure_session_file` and we resume it here. With
+        // `resume_session` set, `no_session` is irrelevant (the resume branch is
+        // taken first); we leave it `false` to document the persisting intent.
+        resume_session: Some(config.session_id.clone()),
+        no_session: false,
         no_context_files: false,
         session_dir: None,
         no_skills: false,
         extra_skill_dirs: Vec::new(),
-        // Sandbox: persist under the Tauri app data dir, never ~/.hand.
+        // Sandbox: persist under the Tauri app data dir, never ~/.hand. The
+        // resume path resolves `<base_dir>/sessions/<flattened-cwd>/<id>.jsonl`,
+        // matching the writer side (`agent_jsonl_store::session_path`).
         base_dir: Some(config.app_data_dir.clone()),
     };
 
@@ -340,6 +360,51 @@ mod tests {
         // Model id is not silently substituted — what we asked for is what the
         // session carries.
         assert_eq!(session.model().id, config.model_id);
+    }
+
+    /// M3 (VAL-CASESS-001 / VAL-CASESS-003 — construction seam): a built session
+    /// now PERSISTS to a JSONL named after the HandBox session id, under
+    /// `<app_data_dir>/sessions/<flattened-cwd>/<id>.jsonl`, and its on-disk
+    /// session id equals the HandBox session id (resume path, not in-memory). A
+    /// second build for the SAME id RESUMES that same file rather than minting a
+    /// new one — the multi-turn append contract at the production seam.
+    #[test]
+    fn build_agent_session_persists_jsonl_keyed_by_handbox_id_and_resumes() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+
+        // Turn 1: construction creates the JSONL at the path the reader expects.
+        let session = build_agent_session(&config, None).expect("turn 1 constructs");
+        // Not an in-memory session: it has a real on-disk file.
+        let file = session
+            .session_file()
+            .expect("a persisting session has an on-disk JSONL file");
+        let expected = crate::services::agent_jsonl_store::session_path(
+            data.path(),
+            cwd.path(),
+            &config.session_id,
+        );
+        assert_eq!(file, expected, "JSONL must land where the reader looks");
+        // The on-disk session id IS the HandBox session id (no mapping).
+        assert_eq!(session.session_id(), config.session_id);
+        drop(session);
+
+        // Turn 2: a fresh build for the same id resumes the SAME file (idempotent
+        // ensure → resume), so there is exactly one JSONL for this session.
+        let session2 = build_agent_session(&config, None).expect("turn 2 resumes");
+        assert_eq!(session2.session_file().unwrap(), expected);
+
+        let dir = crate::services::agent_jsonl_store::session_dir(data.path(), cwd.path());
+        let jsonl_count = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("jsonl"))
+            .count();
+        assert_eq!(
+            jsonl_count, 1,
+            "two builds of the same HandBox session must reuse one JSONL file"
+        );
     }
 
     /// Helper: the registered tool-name set a config produces, sorted for
