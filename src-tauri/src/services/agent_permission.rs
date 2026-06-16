@@ -46,6 +46,11 @@ use crate::services::agent_tools::resolve_in_sandbox;
 /// Stable extension name, used in diagnostics and the manifest.
 const EXTENSION_NAME: &str = "handbox-sandbox";
 
+/// Stable name of the M1 dangerous-tool deny stub, used in diagnostics and the
+/// manifest. Kept distinct from [`EXTENSION_NAME`] so both extensions coexist
+/// in the same hook chain (see [`DangerousDenyExtension`]).
+const DANGEROUS_DENY_EXTENSION_NAME: &str = "handbox-dangerous-deny";
+
 /// Generic, leak-free reason returned to the model when a tool call's path
 /// argument resolves outside the working directory. MUST NOT echo the
 /// offending absolute path (D14) — the resolver enforces the same discipline
@@ -61,6 +66,13 @@ const OUT_OF_SANDBOX_REASON: &str = "blocked: path is outside the working direct
 /// bounds), so a missing/non-string `path` is treated as in-bounds rather than
 /// a violation.
 const PATH_SANDBOXED_TOOLS: &[&str] = &["read", "ls"];
+
+/// The dangerous, side-effecting tools the M1 deny stub blocks outright:
+/// `write`/`edit` mutate the filesystem and `bash` runs arbitrary subprocesses.
+/// Until the M2 approval UI exists there is no safe way to consent to these, so
+/// every call is denied. Read-only tools (`read`/`ls`/`grep`/`find`) are absent
+/// and pass straight through (the sandbox boundary still confines `read`/`ls`).
+const DANGEROUS_TOOLS: &[&str] = &["write", "edit", "bash"];
 
 /// Tier-1 extension that re-imposes the `working_dir` sandbox boundary on the
 /// coding agent's read-only file tools via the `before_tool_call` hook.
@@ -152,6 +164,106 @@ impl Extension for SandboxExtension {
         event: &ToolCallEvent,
     ) -> Result<HookDecision, ExtensionError> {
         Ok(self.decide(&event.tool_name, &event.arguments))
+    }
+
+    async fn on_after_tool_call(
+        &self,
+        _cx: &ExtensionContext,
+        _event: &ToolResultEvent,
+    ) -> Result<(), ExtensionError> {
+        Ok(())
+    }
+}
+
+/// Tier-1 extension that denies the dangerous, side-effecting tools
+/// (`write`/`edit`/`bash`) for the M1 milestone via the `before_tool_call` hook.
+///
+/// WHY DENY OUTRIGHT (the M1 stub):
+/// M1 ships no approval surface, so there is no safe way for the user to consent
+/// to a filesystem mutation or a subprocess. Rather than let these run
+/// unguarded, every call is [`HookDecision::Cancel`]ed — the only gate that
+/// actually stops a tool: the tool never executes (no file written/edited, no
+/// subprocess spawned) and the model receives an error result instead. This is
+/// the deny half of D14 / VAL-CATOOLS-013.
+///
+/// COMPOSITION:
+/// This extension is registered ALONGSIDE [`SandboxExtension`] in
+/// [`crate::services::coding_agent_session::build_agent_session`], not in place
+/// of it. The host dispatches every registered extension in registration order
+/// and the FIRST `Cancel` wins, so the two compose without either knowing about
+/// the other: the sandbox confines read-only paths, this stub blocks the
+/// dangerous tools.
+///
+/// M2 HAND-OFF:
+/// M2 REPLACES this stub with an approval extension that, instead of an
+/// unconditional `Cancel`, prompts the user and awaits a decision (deny → the
+/// same `Cancel`; allow → `Continue`). The reason wording here already speaks
+/// the "requires approval / not yet available" language so the M1 → M2
+/// transition is a behavioral swap (await a decision) rather than a vocabulary
+/// change. The decision is factored into [`DangerousDenyExtension::decide`], the
+/// single point M2 grows an `await` against.
+pub struct DangerousDenyExtension {
+    manifest: ExtensionManifest,
+}
+
+impl DangerousDenyExtension {
+    /// Construct the M1 dangerous-tool deny stub. It holds no per-session state:
+    /// the deny is unconditional, judged purely from the tool name.
+    pub fn new() -> Self {
+        Self {
+            manifest: ExtensionManifest {
+                name: DANGEROUS_DENY_EXTENSION_NAME.to_string(),
+                version: "0.1.0".to_string(),
+                description: Some(
+                    "Denies dangerous tools (write/edit/bash) until the M2 approval flow exists."
+                        .to_string(),
+                ),
+                capabilities: ExtensionCapabilities {
+                    before_tool_call: true,
+                    ..Default::default()
+                },
+                exec: None,
+                env: Default::default(),
+                slash_commands: Vec::new(),
+                custom_tools: Vec::new(),
+            },
+        }
+    }
+
+    /// Decide whether a tool call may proceed under the M1 deny stub.
+    ///
+    /// Pure over `tool_name`, so it is unit-testable without a live session.
+    /// A tool in [`DANGEROUS_TOOLS`] is [`HookDecision::Cancel`]ed with a reason
+    /// that carries the "requires approval (not yet available)" semantics M2
+    /// builds on; every other tool [`HookDecision::Continue`]s untouched (the
+    /// sandbox extension still judges read-only paths separately).
+    fn decide(&self, tool_name: &str) -> HookDecision {
+        if DANGEROUS_TOOLS.contains(&tool_name) {
+            HookDecision::Cancel(format!("{tool_name} requires approval (not yet available)"))
+        } else {
+            HookDecision::Continue
+        }
+    }
+}
+
+impl Default for DangerousDenyExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Extension for DangerousDenyExtension {
+    fn manifest(&self) -> &ExtensionManifest {
+        &self.manifest
+    }
+
+    async fn on_before_tool_call(
+        &self,
+        _cx: &ExtensionContext,
+        event: &ToolCallEvent,
+    ) -> Result<HookDecision, ExtensionError> {
+        Ok(self.decide(&event.tool_name))
     }
 
     async fn on_after_tool_call(
@@ -383,6 +495,89 @@ mod tests {
         assert!(
             m.capabilities.before_tool_call,
             "the sandbox must declare the before_tool_call capability"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // VAL-CATOOLS-013 — under M1 the dangerous tools (write/edit/bash) are
+    // denied at the before_tool_call hook (no file written/edited, no
+    // subprocess), while read-only tools (read/ls/grep/find) pass through.
+    // -----------------------------------------------------------------------
+
+    /// Drive the real async hook for the deny stub, mirroring the host dispatch
+    /// entry point rather than calling `decide` directly.
+    async fn deny_decision(
+        ext: &DangerousDenyExtension,
+        tool: &str,
+        args: serde_json::Value,
+    ) -> HookDecision {
+        let root = Path::new("/tmp");
+        ext.on_before_tool_call(&cx(root), &call_event(tool, args))
+            .await
+            .expect("deny hook never returns Err")
+    }
+
+    #[tokio::test]
+    async fn dangerous_tools_are_cancelled_with_approval_reason() {
+        let ext = DangerousDenyExtension::new();
+        // Realistic side-effecting arguments: the hook must Cancel BEFORE any
+        // of these can take effect (no file write/edit, no subprocess).
+        let cases = [
+            ("write", json!({ "path": "out.txt", "content": "data" })),
+            ("edit", json!({ "path": "out.txt", "old": "a", "new": "b" })),
+            ("bash", json!({ "command": "rm -rf /" })),
+        ];
+        for (tool, args) in cases {
+            let decision = deny_decision(&ext, tool, args).await;
+            match decision {
+                HookDecision::Cancel(reason) => {
+                    // Reason must carry the "requires approval / not yet
+                    // available" semantics the M2 approval flow builds on, and
+                    // name the offending tool.
+                    assert!(
+                        reason.contains("approval"),
+                        "{tool} cancel reason must speak the approval semantics, got: {reason:?}"
+                    );
+                    assert!(
+                        reason.contains("not yet available"),
+                        "{tool} cancel reason must mark approval as unavailable in M1, got: {reason:?}"
+                    );
+                    assert!(
+                        reason.contains(tool),
+                        "{tool} cancel reason should name the denied tool, got: {reason:?}"
+                    );
+                }
+                other => panic!("{tool} must be Cancelled under the M1 deny stub, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_tools_pass_through_the_deny_stub() {
+        let ext = DangerousDenyExtension::new();
+        // read/ls/grep/find are not dangerous: the deny stub Continues them
+        // (the sandbox extension still judges read/ls paths separately).
+        for tool in ["read", "ls", "grep", "find"] {
+            let decision = deny_decision(&ext, tool, json!({ "path": "inside.txt" })).await;
+            assert!(
+                matches!(decision, HookDecision::Continue),
+                "{tool} must pass through the dangerous-tool deny stub"
+            );
+        }
+    }
+
+    #[test]
+    fn deny_stub_manifest_declares_before_tool_call_capability() {
+        let ext = DangerousDenyExtension::new();
+        let m = ext.manifest();
+        assert_eq!(m.name, DANGEROUS_DENY_EXTENSION_NAME);
+        assert_ne!(
+            m.name, EXTENSION_NAME,
+            "the deny stub must have a name distinct from the sandbox so both coexist"
+        );
+        assert!(
+            m.capabilities.before_tool_call,
+            "the deny stub must declare the before_tool_call capability"
         );
     }
 }

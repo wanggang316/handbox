@@ -30,7 +30,7 @@ use hand_coding_agent::tools::create_default_tools;
 use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
-use crate::services::agent_permission::SandboxExtension;
+use crate::services::agent_permission::{DangerousDenyExtension, SandboxExtension};
 use crate::services::chat_engine::{self, ChatOptions};
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
@@ -130,6 +130,15 @@ pub fn build_agent_session(config: &HandBoxAgentSessionConfig) -> Result<AgentSe
     // milestones layer write/edit boundaries and approval gating onto the same
     // extension chain (the host calls every registered extension in order).
     session.register_extension(Arc::new(SandboxExtension::new(config.working_dir.clone())));
+
+    // M1 deny stub: the dangerous, side-effecting tools (write/edit/bash) have
+    // no approval surface yet, so this second before_tool_call extension Cancels
+    // every call to them — the tool never runs (no file mutation, no subprocess)
+    // and the model gets an error result instead. It composes alongside the
+    // sandbox above: the host calls each registered extension in order and the
+    // first Cancel wins. M2 REPLACES this stub with an approval extension that
+    // awaits a user decision rather than denying unconditionally.
+    session.register_extension(Arc::new(DangerousDenyExtension::new()));
 
     Ok(session)
 }
