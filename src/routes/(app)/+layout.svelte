@@ -6,6 +6,8 @@
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
   import { uiState } from "$lib/states/ui.svelte";
   import { chatActions } from "$lib/states/chat.svelte";
+  import { updateState } from "$lib/states/update.svelte";
+  import UpdateDialog from "$lib/components/update/UpdateDialog.svelte";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
   // 侧边栏配置常量
@@ -97,6 +99,18 @@
       sidebarWidth = parseInt(savedWidth);
     }
 
+    // 应用更新：加载当前版本与偏好，建立跨窗口监听并按需自动检查（仅主窗口）
+    let updateUnlisten: (() => void) | null = null;
+    updateState
+      .load()
+      .then(() => updateState.startAutoCheck())
+      .then((unlisten) => {
+        updateUnlisten = unlisten;
+      })
+      .catch((error) => {
+        console.error("Failed to init update checker:", error);
+      });
+
     if (browser) {
       windowWidth = window.innerWidth;
       handleResize();
@@ -105,6 +119,7 @@
       return () => {
         window.removeEventListener("keydown", handleKeydown);
         window.removeEventListener("resize", handleResize);
+        updateUnlisten?.();
       };
     }
   });
@@ -154,6 +169,9 @@
   >
     {@render children()}
   </main>
+
+  <!-- 应用更新弹框（由侧边栏入口或自动检查触发） -->
+  <UpdateDialog />
 </div>
 
 <style>

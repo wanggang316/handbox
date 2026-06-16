@@ -18,9 +18,11 @@
     LogOut,
     Star,
     Box,
+    Download,
   } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
+  import { updateState } from "$lib/states/update.svelte";
   import SearchModal from "$lib/components/search/SearchModal.svelte";
 
   // 获取当前选中的聊天 ID
@@ -322,6 +324,25 @@
       </div>
     {/if}
   </div>
+
+  <!-- 检测到更新：底部更新入口 -->
+  {#if updateState.hasUpdate}
+    <div class="flex-shrink-0 px-2 pt-1">
+      <button
+        type="button"
+        class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/15 transition-colors text-[12px] font-medium"
+        onclick={() => updateState.openDialog()}
+      >
+        <Download size={14} />
+        <span>有新版本可更新</span>
+        {#if updateState.info?.version}
+          <span class="ml-auto text-[11px] text-primary/70"
+            >v{updateState.info.version}</span
+          >
+        {/if}
+      </button>
+    </div>
+  {/if}
 
   <!-- 用户信息 -->
   <div
