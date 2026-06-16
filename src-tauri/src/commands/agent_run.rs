@@ -1,19 +1,41 @@
 // Agent 模式 run 相关 IPC 命令。
 //
-// `agent_run_stream` 启动一次 Agent 会话回合：装配一个把事件 `window.emit`
-// 出去的 sink，委托给 `AgentRuntime::start_run`。run loop 在后台任务里驱动，
-// 事件经 `agent_stream_event` 抵达前端，回合结束时经 `agent_stream_closed`
-// 终结（每个 run 恰好一次）。
+// `agent_run_stream` 启动一次 Agent 会话回合，现在经 **coding-agent
+// `AgentSession`** 驱动（重平台化的核心证明路径）：从 session_id 装配一个
+// coding-agent session、订阅其事件、在后台任务里 `send_message` 跑一轮，并把
+// `AgentSessionEvent` 映射到现有三个 Tauri 通道 —— `agent_stream_event`
+// （`{ sessionId, event }`）、`agent_stream_closed`（`{ sessionId }`，每个 run
+// 恰好一次）、`agent_stream_error`（`{ sessionId, error }`，在 closed 之前）。
+// 前端契约（事件名 / payload 形状 / closed-once / 错误分型）保持不变。
 //
-// 持久化 / abort / 错误分型 / tools 属于后续 feature，不在此命令层实现。
+// `agent_run_abort` / `agent_run_steer` 现已切到 coding-agent 驱动路径：经
+// `coding_agent_runtime` 的进程级运行句柄注册表（`drive_agent_run` 在驱动一轮时
+// 注册、closed 时注销）翻转 cancel token / push steering 消息，对新驱动的 run 生效。
+// 旧的原生 `AgentRuntime` 运行驱动已于 M4 退役，coding-agent 驱动是唯一的 run 路径。
+//
+// M3 起会话走 **JSONL 持久化**：经 `resume_session = <session_id>` 构造，
+// transcript 落 `<app_data_dir>/sessions/<flattened-cwd>/<session_id>.jsonl`，
+// 每轮 append 到同一文件（同一 HandBox 会话 → 同一 JSONL）。续聊上下文由该 JSONL
+// 的 `build_context()` 还原；仅当 JSONL 尚无消息时回退 SQLite seed（覆盖 pre-M3
+// 老会话首次续聊，老数据迁移是 m3-migration-core）。
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use tauri::{Emitter, State, Window};
+use tauri::{Emitter, Manager, State, Window};
 
 use crate::models::AppError;
-use crate::services::{AgentRunRequest, AgentRuntime, RunSink};
+use crate::services::agent_permission::{
+    respond_to_approval, ApprovalDecision, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
+};
+use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
+use crate::services::skills::Skill;
+use crate::services::{
+    abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest,
+    AgentSessionService, CodingRunSink, ProviderService, SettingsService, SkillService,
+};
 use crate::storage::types::UUID;
+use hand_ai_model::Message;
 
 /// 前端事件通道名：每条 AgentEvent 经此发出，payload 为 `{ sessionId, event }`。
 const EVENT_NAME: &str = "agent_stream_event";
@@ -22,26 +44,275 @@ const CLOSED_NAME: &str = "agent_stream_closed";
 /// 前端事件通道名：run-level 错误 envelope，payload 为
 /// `{ sessionId, error: { code, message, hint } }`（在 closed **之前**发出）。
 const ERROR_NAME: &str = "agent_stream_error";
+/// 前端事件通道名：会话生命周期信号（compaction / session-info），payload 为
+/// `{ sessionId, kind, .. }`。与三条 run 通道并列、独立 —— 这些不是 run 事件，
+/// 不进 `agent_stream_event` reducer，故不影响 closed-once 不变量。前端据 `kind`
+/// 渲染「整理上下文中」指示并即时更新侧栏会话标题。
+const LIFECYCLE_NAME: &str = "agent_session_lifecycle";
 
-/// 启动一次 Agent run（流式）。
+/// 进程级 one-run-per-session 注册表（coding-agent 驱动路径）。
 ///
-/// 装配一个 Window-emitting 的 `RunSink` 后委托给 `AgentRuntime::start_run`。
-/// `start_run` 在 spawn 后台 loop 后立即返回 —— 因此本命令也立即返回 `Ok(())`，
-/// 真实输出经事件异步抵达。
+/// coding-agent 的 `AgentSession` 在 `send_message` 期间独占 `&mut self`，被后台
+/// 任务拥有，无处挂载实例级注册表（命令层每次调用拿到的是新的 `State` 引用）。
+/// 用一个进程级 `HashSet<session_id>` 做并发去重：同一会话已有活跃 coding-agent
+/// run 时，第二个 `agent_run_stream` 以 `AGENT_RUN_ALREADY_ACTIVE` 拒绝，不启动
+/// 并发 run。条目在 run 终结（closed）时由发起任务移除 —— 与 closed 同一时点。
+fn active_coding_runs() -> &'static Mutex<HashSet<UUID>> {
+    static RUNS: OnceLock<Mutex<HashSet<UUID>>> = OnceLock::new();
+    RUNS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// 包裹每个 forced-skill body 的标记。命名该 skill，与系统提示词里的
+/// `<available_skills>` 索引视觉/结构上区分（索引用 `<skill>`/`<name>`/
+/// `<description>` 元素），故即便 body 自身嵌了 `</available_skills>` 也不破坏索引
+/// 边界。`<forced_skill name="...">` 不对 `name` 做转义：skill body 是 TRUSTED
+/// LOCAL CONTENT（同一 `SKILL.md` 文本经 coding-agent 的 skill 工具已对模型完全
+/// 可达，强制注入只是省去模型主动调用一步），且 skill 仅来自本地根（app-data /
+/// `~/.agents/skills` / `<workingDir>/.handbox/skills`），无安装/市场路径，故不视为
+/// 注入向量。与退役前原生 runtime 的 `<forced_skill>` 标记保持一致。
+fn open_forced_marker(name: &str) -> String {
+    format!("<forced_skill name=\"{name}\">")
+}
+const FORCED_MARKER_CLOSE: &str = "</forced_skill>";
+
+/// 把已解析的 forced-skill body 追加进 `system_prompt`（原地）。
 ///
-/// 当该会话已有活跃 run 时（one-run-per-session），`start_run` 返回
-/// `AGENT_RUN_ALREADY_ACTIVE` 错误，本命令将其透传给调用方。
+/// `forced` 里的每个名字针对本轮 EFFECTIVE skill 集（discovered-and-validated ∖
+/// 全局 `skills.disabled`）解析：
+/// - 未知 / 未发现 / 校验失败 / 被全局禁用 / 空串 → 静默跳过（disabled 优先于 forced，
+///   因被禁用者已不在 `effective` 中）；
+/// - 重复名字只注入 body 一次（取 forced 列表中首次出现）；
+/// - 一个本来 opt-in（`disable_model_invocation`）但仍存活进 `effective` 的 skill 仍
+///   会被注入（显式用户意图覆盖 opt-in 的自动调用抑制）。
+///
+/// 存活的 body 按 forced 列表顺序追加，每个用 `<forced_skill name="...">` …
+/// `</forced_skill>` 标记包裹，body 原样复制（不转义、不截断、不限大小）。当
+/// `system_prompt` 非空时，forced 块以一个空行与其分隔；为空时无前导分隔。整体无可
+/// 注入 body 时不改动 `system_prompt`。
+fn append_forced_skill_bodies(system_prompt: &mut String, forced: &[String], effective: &[Skill]) {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut block = String::new();
+    for name in forced {
+        if name.is_empty() || !seen.insert(name.as_str()) {
+            // 空名字永不匹配；重复名字只注入一次。
+            continue;
+        }
+        let Some(skill) = effective.iter().find(|s| &s.name == name) else {
+            // 未知 / 未发现 / 校验失败 / 被禁用 → 静默跳过。
+            continue;
+        };
+        if !block.is_empty() {
+            block.push('\n');
+        }
+        block.push_str(&open_forced_marker(&skill.name));
+        block.push('\n');
+        // VERBATIM body —— 不转义、不截断，完整大 body 也照样。
+        block.push_str(&skill.body);
+        block.push('\n');
+        block.push_str(FORCED_MARKER_CLOSE);
+    }
+
+    if block.is_empty() {
+        return;
+    }
+    if system_prompt.is_empty() {
+        *system_prompt = block;
+    } else {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&block);
+    }
+}
+
+/// 启动一次 Agent run（流式）—— 经 coding-agent `AgentSession` 驱动。
+///
+/// 步骤：
+/// 1. one-run-per-session：进程级注册表已含该会话时以 `AGENT_RUN_ALREADY_ACTIVE`
+///    拒绝；否则占位插入。
+/// 2. 加载 session 行 + provider 行，装配 `HandBoxAgentSessionConfig`，构造一个
+///    coding-agent `AgentSession`（纯内存）。
+/// 3. seed 既有 HandBox transcript 进 session 的 context（续聊上下文）。
+/// 4. 装配一个把事件 `window.emit` 出去的 `CodingRunSink`，委托给 `drive_agent_run`
+///    —— 它 spawn 后台任务驱动一轮、把事件映射到三通道、保证 closed 恰好一次。
+/// 5. spawn 一个看护任务：在驱动任务结束后把会话从注册表移除（与 closed 同步）。
+///
+/// `drive_agent_run` 是非阻塞的 —— spawn 后台任务后即返回，因此本命令也立即返回
+/// `Ok(())`，真实输出经事件异步抵达。
+///
+/// 装配阶段（步骤 2/3）的任何错误都会先把注册表占位移除再向上抛出，避免会话被
+/// 永久“卡住”。
 #[tauri::command]
 pub async fn agent_run_stream(
     request: AgentRunRequest,
     window: Window,
-    runtime: State<'_, AgentRuntime>,
+    sessions: State<'_, AgentSessionService>,
+    providers: State<'_, ProviderService>,
+    skills: State<'_, Arc<SkillService>>,
+    settings: State<'_, SettingsService>,
 ) -> Result<(), AppError> {
+    let session_id = request.session_id.clone();
+
+    // --- (1) one-run-per-session：检查 + 占位插入 ---
+    {
+        let mut runs = active_coding_runs().lock().unwrap();
+        if runs.contains(&session_id) {
+            return Err(AppError::with_hint(
+                "AGENT_RUN_ALREADY_ACTIVE",
+                &format!("a run is already active for session: {}", session_id),
+                "请等待当前回合结束后再发送",
+            ));
+        }
+        runs.insert(session_id.clone());
+    }
+
+    // 从此处起，任何提前返回都必须先把占位移除。
+    match assemble_and_drive(request, &window, &sessions, &providers, &skills, &settings).await {
+        Ok(handles) => {
+            // 看护任务：驱动任务结束（即 closed 已发出）后把会话从注册表移除。
+            // 与 closed 同步 —— 移除发生在终结信号之后，使下一轮可以发起。
+            let cleanup_session = session_id;
+            tokio::spawn(async move {
+                let _ = handles.task.await;
+                active_coding_runs()
+                    .lock()
+                    .unwrap()
+                    .remove(&cleanup_session);
+            });
+            Ok(())
+        }
+        Err(e) => {
+            active_coding_runs().lock().unwrap().remove(&session_id);
+            Err(e)
+        }
+    }
+}
+
+/// 装配 coding-agent session 并驱动一轮（不含注册表占位/清理 —— 由调用方管理）。
+///
+/// 拆出独立函数让 `agent_run_stream` 的占位清理（失败回滚）保持简单：装配阶段
+/// 失败时调用方统一移除占位。返回 `RunDriveHandles`（含驱动任务 + 为下个 feature
+/// 预留的 cancel / steering handle）。
+async fn assemble_and_drive(
+    request: AgentRunRequest,
+    window: &Window,
+    sessions: &AgentSessionService,
+    providers: &ProviderService,
+    skills: &SkillService,
+    settings: &SettingsService,
+) -> Result<crate::services::RunDriveHandles, AppError> {
+    let session_id = request.session_id.clone();
+
+    // --- (2) 加载 session 行 + provider 行 ---
+    let session_row = sessions.get_session(session_id.clone()).await?;
+    let provider_id = session_row
+        .provider_id
+        .clone()
+        .ok_or_else(|| AppError::validation_error("agent session has no provider_id selected"))?;
+    let provider = providers.get_provider(&provider_id).await?;
+
+    // app_data_dir 作为 session 的 base_dir（sandbox 持久化根）与 working_dir
+    // 缺省时的 cwd 后备。经 Tauri PathResolver 解析。
+    let app_data_dir =
+        window.app_handle().path().app_data_dir().map_err(|e| {
+            AppError::internal_error(&format!("failed to resolve app data dir: {e}"))
+        })?;
+
+    let mut config = config_from_rows(&session_row, &provider, app_data_dir)?;
+
+    // --- (2b) Forced-skill injection for THIS turn (VAL-CACLEAN-007).
+    //
+    // `request.forced_skills` (wire `forcedSkills`) carries the skills the user
+    // explicitly forced for this turn. The coding-agent owns ambient skill
+    // discovery (it indexes `<available_skills>` and exposes a `skill` tool from
+    // its own roots), but it has NO forced-skill API. So HandBox resolves the
+    // forced names against ITS effective skill set — discovered-and-validated
+    // (across app-data / user / project scopes) MINUS the global `skills.disabled`
+    // opt-out — and appends each surviving body VERBATIM, bracketed in a
+    // `<forced_skill name="…">` marker, onto this session's system prompt before
+    // construction. This mirrors the retired native runtime's semantics exactly
+    // (disabled wins over forced; unknown/empty/duplicate names are silently
+    // skipped) and is purely additive: an empty / all-unresolved forced list
+    // leaves the prompt untouched. No second discovery IO is shared with the
+    // coding-agent — this only affects the system prompt seen by the model.
+    if !request.forced_skills.is_empty() {
+        let working_dir = session_row.working_dir.as_deref().map(std::path::Path::new);
+        let (discovered, skill_errs) = skills.discover(working_dir);
+        if !skill_errs.is_empty() {
+            tracing::warn!(
+                "[agent_run_stream] skill discovery produced {} non-fatal diagnostic(s)",
+                skill_errs.len()
+            );
+        }
+        let disabled = settings.get_settings()?.skills.disabled;
+        let effective: Vec<Skill> = discovered
+            .into_iter()
+            .filter(|s| !disabled.contains(&s.name))
+            .collect();
+
+        let mut system_prompt = config.system_prompt.take().unwrap_or_default();
+        append_forced_skill_bodies(&mut system_prompt, &request.forced_skills, &effective);
+        // Keep `None` (default prompt) when nothing was forced AND there was no
+        // base prompt, so a session without a custom prompt still falls back to
+        // the coding-agent default rather than an empty override.
+        config.system_prompt = (!system_prompt.is_empty()).then_some(system_prompt);
+    }
+
+    // Approval emitter for the M2 PermissionExtension: a dangerous tool call
+    // (write/edit/bash) pushes an `agent_approval_request`
+    // `{ sessionId, callId, toolName, args, requestId }` to the frontend and
+    // awaits the user's decision (answered via the `agent_approval_respond` IPC).
+    // Wrap `window.emit` so the extension stays decoupled from Tauri.
+    let approval_window = window.clone();
+    let approval_emitter: ApprovalEmitter = Arc::new(move |payload| {
+        if let Err(e) = approval_window.emit(APPROVAL_REQUEST_EVENT, payload) {
+            tracing::warn!(
+                "[agent_run_stream] failed to emit {}: {}",
+                APPROVAL_REQUEST_EVENT,
+                e
+            );
+        }
+    });
+
+    let mut session = build_agent_session(&config, Some(approval_emitter))?;
+
+    // --- (3) 续聊上下文（M3: JSONL 为权威源）。
+    //
+    // `build_agent_session` 以 `resume_session = <session_id>` 构造会话，coding-agent
+    // 在构造时已用该 JSONL 的 `build_context()` 还原历史进 in-memory context；本轮
+    // `send_message` 产生的新消息会经 SessionManager APPEND 回同一 JSONL。因此对
+    // **JSONL 已有历史**的会话，无需也不应再 seed（再 seed 会用 SQLite 覆盖掉 JSONL
+    // 已还原的 context）。
+    //
+    // 仅当 JSONL **尚无消息**（message_count == 0）时，才回退到既有 SQLite transcript
+    // seed 进 context —— 覆盖「老会话（pre-M3，只有 SQLite transcript、还没 JSONL）」
+    // 首次在新引擎下续聊的场景，使其上下文不丢。这只填 in-memory context、不落 JSONL
+    // （`set_messages` 不触碰 SessionManager 的文件），也不写 SQLite；老数据真正迁移
+    // 到 JSONL 是后续 feature（m3-migration-core）。新会话（JSONL 有历史、SQLite 空）
+    // 走 message_count > 0 分支，原样使用 JSONL 还原的 context。
+    let jsonl_message_count = session.messages().len();
+    if jsonl_message_count == 0 {
+        let history = sessions.list_messages(session_id.clone()).await?;
+        if !history.is_empty() {
+            let mut seeded: Vec<Message> = Vec::with_capacity(history.len());
+            for row in history {
+                let msg: Message = serde_json::from_value(row.payload).map_err(|e| {
+                    AppError::internal_error(&format!(
+                        "agent transcript payload (seq {}) is not a valid hand-agent Message: {}",
+                        row.seq, e
+                    ))
+                })?;
+                seeded.push(msg);
+            }
+            session.set_messages(seeded);
+        }
+    }
+
+    // --- (4) 装配一个 Window-emitting 的 sink 并驱动一轮 ---
     let event_window = window.clone();
     let error_window = window.clone();
-    let closed_window = window;
+    let closed_window = window.clone();
+    let lifecycle_window = window.clone();
 
-    let sink = RunSink::new(
+    let sink = CodingRunSink::new(
         Arc::new(move |payload| {
             if let Err(e) = event_window.emit(EVENT_NAME, payload) {
                 tracing::warn!("[agent_run_stream] failed to emit {}: {}", EVENT_NAME, e);
@@ -54,57 +325,269 @@ pub async fn agent_run_stream(
         }),
     )
     // run-level `Err` envelope 走专用通道，作为一个 DISTINCT 的窗口事件
-    // `agent_stream_error` 发出（在 closed 之前）。未注入时它会退回 `on_event`，
-    // 因此这一步是让 VAL-RUN-012 在运行时可观测的关键接线。
+    // `agent_stream_error` 发出（在 closed 之前）。
     .with_error(Arc::new(move |payload| {
         if let Err(e) = error_window.emit(ERROR_NAME, payload) {
             tracing::warn!("[agent_run_stream] failed to emit {}: {}", ERROR_NAME, e);
         }
+    }))
+    // 会话生命周期信号（compaction / session-info）走独立通道
+    // `agent_session_lifecycle`，与 run 三通道并列、不进 run reducer。
+    .with_lifecycle(Arc::new(move |payload| {
+        if let Err(e) = lifecycle_window.emit(LIFECYCLE_NAME, payload) {
+            tracing::warn!(
+                "[agent_run_stream] failed to emit {}: {}",
+                LIFECYCLE_NAME,
+                e
+            );
+        }
     }));
 
-    runtime
-        .start_run(
-            request.session_id,
-            request.input,
-            request.attachments,
-            request.forced_skills,
-            sink,
-        )
-        .await
+    // 在 IPC 边界校验图片附件（超大 / 超量 / 非图片静默丢弃），把存活图片
+    // 转成 ImageContent 块；空集合走纯文本路径（本轮仍正常起）。
+    let images = images_from_attachments(&request.attachments);
+
+    Ok(drive_agent_run(
+        session,
+        session_id,
+        request.input,
+        images,
+        sink,
+    ))
 }
 
-/// 中止某个 Agent 会话的活跃 run（流式回合）。
+/// 中止某个 Agent 会话的活跃 run（若有）。
 ///
-/// 从运行时注册表取出该会话的取消 token 并触发取消；hand-agent 的 loop 随之
-/// 终止、合成一条 `stopReason=aborted` 的终结 assistant 消息（既有的 MessageEnd
-/// 持久化路径会把它落库），并照常发出**恰好一次** `agent_stream_closed`。
+/// 经 `coding_agent_runtime` 的进程级注册表取出该会话 run 的 cancel handle
+/// （`RunDriveHandles.cancel`）并翻转 token —— 与传给 coding-agent `send_message`
+/// 的是**同一个** token，故 agent loop 在下一个 await 边界解开、合成一条
+/// `stopReason=aborted` 的终结回合，随后驱动任务在唯一的 closed emit site 发出
+/// `agent_stream_closed`（closed-once 不变量在 abort 路径同样成立）。
 ///
 /// 对未知 / 已结束的会话是**干净的 no-op**（返回 `Ok(())`，不报错）—— 前端可能
 /// 在 run 刚自然结束时竞态地调用本命令。
 #[tauri::command]
-pub async fn agent_run_abort(
-    session_id: UUID,
-    runtime: State<'_, AgentRuntime>,
-) -> Result<(), AppError> {
-    runtime.abort(&session_id).await;
+pub async fn agent_run_abort(session_id: UUID) -> Result<(), AppError> {
+    abort_run(&session_id);
     Ok(())
 }
 
 /// 把一条 steering 消息并入某个 Agent 会话**正在进行**的 run。
 ///
-/// 委托给 `AgentRuntime::steer`：从运行时注册表取出该会话进行中 run 的 steering
-/// 队列并把这条 user 消息压入；hand-agent 的 loop 在下一个 turn 边界 drain 该队列
-/// 并把消息注入 context（照常发出 `agent_stream_event` 并落库）。这保持
-/// one-run-per-session —— steering 喂给既有 run，不启动并发 run。
+/// 经 `coding_agent_runtime` 的进程级注册表取出该会话 run 的 steering handle
+/// （`RunDriveHandles.steering`），把 `text` 作为一条 user `Message` push 进队列；
+/// agent loop 在下一个 turn 边界经 `get_steering_messages` drain 它，使消息并入
+/// **当前轮**（不另起并发 run，也不进 follow-up 队列在本轮后自动续跑）。
 ///
 /// 空 / 纯空白 `text` 是 no-op；该会话无活跃 run 时也是**干净的 no-op**
-/// （返回 `Ok(())`，不报错）—— 前端可能在 run 刚自然结束时竞态地调用本命令。
+/// （返回 `Ok(())`，不报错）。
 #[tauri::command]
-pub async fn agent_run_steer(
-    session_id: UUID,
-    text: String,
-    runtime: State<'_, AgentRuntime>,
-) -> Result<(), AppError> {
-    runtime.steer(&session_id, text).await;
+pub async fn agent_run_steer(session_id: UUID, text: String) -> Result<(), AppError> {
+    steer_run(&session_id, text);
     Ok(())
+}
+
+/// 回灌一次工具审批决策（含作用域），唤醒正在 await 的 `PermissionExtension` 钩子。
+///
+/// 危险工具（write/edit/bash）调用时，`PermissionExtension` 发出
+/// `agent_approval_request` 并 await 一个以 `request_id` 为键的 oneshot；前端
+/// 弹窗（m2-approval-modal）回答后经本命令把决策回灌。`decision` 三态（作用域显式）：
+///  - `deny` → 工具被 `Cancel`（模型收被拒结果）。
+///  - `allow_once` → 本次允许（`Continue`），不记忆；同工具下次仍弹窗。
+///  - `allow_always` → 本次允许且**本会话**记住该工具（按 session_id 键控的进程内
+///    始终允许集），同会话同工具后续调用不再弹窗、直接 `Continue`。该集仅内存、不落
+///    DB/文件 → 不跨会话、不跨重启。
+///
+/// 幂等：首个 response 生效；重复 / 未知 `request_id` 是**干净的 no-op**
+/// （注册表里已无该条目，什么都不做、不报错）—— 前端可能因竞态重复回答，或回答
+/// 一个已随 run 中止而消失的请求。
+#[tauri::command]
+pub async fn agent_approval_respond(
+    request_id: String,
+    decision: ApprovalDecision,
+) -> Result<(), AppError> {
+    respond_to_approval(&request_id, decision);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The one-run-per-session concurrency gate, exercised directly against the
+    /// process-level `active_coding_runs` registry — the same check-and-insert
+    /// `agent_run_stream` performs before assembling a session. Driving the gate
+    /// through the registry (rather than a full Tauri command) keeps the test
+    /// hermetic: no DB, no window, no network.
+    ///
+    /// Mirrors the command's claim/reject sequence:
+    /// 1. the first run claims the session (placeholder inserted),
+    /// 2. a SECOND start for the SAME session is rejected with
+    ///    `AGENT_RUN_ALREADY_ACTIVE` — no second concurrent run is spawned
+    ///    (VAL-CARUN-014),
+    /// 3. after the run's closed-emit removes the entry, the session can be
+    ///    claimed cleanly again (a subsequent turn is not wedged).
+    ///
+    /// Replicates the gate's check-then-insert against the shared registry so it
+    /// stays faithful to `agent_run_stream` step (1) without invoking the async
+    /// command (which needs Tauri `State`/`Window`). A fresh uuid keeps the test
+    /// isolated from the process-global registry.
+    fn try_claim(session_id: &UUID) -> Result<(), AppError> {
+        let mut runs = active_coding_runs().lock().unwrap();
+        if runs.contains(session_id) {
+            return Err(AppError::with_hint(
+                "AGENT_RUN_ALREADY_ACTIVE",
+                &format!("a run is already active for session: {session_id}"),
+                "请等待当前回合结束后再发送",
+            ));
+        }
+        runs.insert(session_id.clone());
+        Ok(())
+    }
+
+    fn release(session_id: &UUID) {
+        active_coding_runs().lock().unwrap().remove(session_id);
+    }
+
+    #[test]
+    fn second_concurrent_run_is_rejected_then_reclaimable_after_close() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        // (1) first run claims the session.
+        try_claim(&session_id).expect("first run claims the session");
+
+        // (2) a second start on the same session is rejected — no concurrent run.
+        let err = try_claim(&session_id).expect_err("second concurrent run must be rejected");
+        assert_eq!(err.code, "AGENT_RUN_ALREADY_ACTIVE");
+
+        // (3) once the run's closed-emit releases the entry, the session is
+        // claimable again — a later turn is not permanently wedged.
+        release(&session_id);
+        try_claim(&session_id).expect("session is reclaimable after the run closes");
+
+        // Cleanup so the process-global registry is left empty for other tests.
+        release(&session_id);
+    }
+
+    use crate::services::skills::{SourceInfo, SourceScope};
+    use std::path::PathBuf;
+
+    /// Build a discovered [`Skill`] fixture (name + body) for the forced-skill
+    /// injection tests. Scope/path are immaterial to `append_forced_skill_bodies`,
+    /// which only reads `name`/`body`.
+    fn skill(name: &str, body: &str) -> Skill {
+        Skill {
+            name: name.to_string(),
+            description: format!("desc for {name}"),
+            body: body.to_string(),
+            disable_model_invocation: false,
+            source: SourceInfo {
+                scope: SourceScope::AppData,
+                path: PathBuf::from(format!("/skills/{name}/SKILL.md")),
+            },
+        }
+    }
+
+    fn forced(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    // VAL-CACLEAN-007: a forced skill whose name resolves in the effective set
+    // has its body appended VERBATIM, bracketed by a `<forced_skill>` marker
+    // naming the skill, after the base prompt (separated by a blank line).
+    #[test]
+    fn forced_skill_body_is_appended_verbatim_with_marker() {
+        let effective = vec![skill("deploy", "Run `make deploy`.\nThen verify.")];
+        let mut prompt = "Base system prompt.".to_string();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["deploy"]), &effective);
+
+        assert_eq!(
+            prompt,
+            "Base system prompt.\n\n<forced_skill name=\"deploy\">\n\
+             Run `make deploy`.\nThen verify.\n</forced_skill>",
+        );
+    }
+
+    // VAL-CACLEAN-007: with an empty base prompt, the forced block stands alone
+    // (no leading separator).
+    #[test]
+    fn forced_skill_into_empty_prompt_has_no_leading_separator() {
+        let effective = vec![skill("alpha", "alpha body")];
+        let mut prompt = String::new();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["alpha"]), &effective);
+
+        assert_eq!(
+            prompt,
+            "<forced_skill name=\"alpha\">\nalpha body\n</forced_skill>",
+        );
+    }
+
+    // VAL-CACLEAN-007: an empty forced list (the default for a legacy payload)
+    // leaves the prompt completely untouched — injection is purely additive.
+    #[test]
+    fn empty_forced_list_leaves_prompt_untouched() {
+        let effective = vec![skill("alpha", "alpha body")];
+        let mut prompt = "Base.".to_string();
+
+        append_forced_skill_bodies(&mut prompt, &[], &effective);
+        assert_eq!(prompt, "Base.", "no forced names → prompt unchanged");
+    }
+
+    // VAL-CACLEAN-007: a forced name absent from the effective set is silently
+    // skipped — this is exactly how the global `skills.disabled` opt-out "wins
+    // over forced" (the caller filters disabled skills out of `effective`
+    // before calling), and how unknown / undiscovered names are handled. The
+    // prompt is left untouched when NOTHING resolves.
+    #[test]
+    fn unresolved_forced_names_are_silently_skipped() {
+        let effective = vec![skill("present", "present body")];
+        let mut prompt = "Base.".to_string();
+
+        // `disabled` (filtered out by the caller) + `ghost` (never discovered).
+        append_forced_skill_bodies(&mut prompt, &forced(&["disabled", "ghost"]), &effective);
+        assert_eq!(
+            prompt, "Base.",
+            "no resolvable forced skill → prompt unchanged"
+        );
+
+        // Mixed: only the resolvable one is injected.
+        append_forced_skill_bodies(&mut prompt, &forced(&["ghost", "present"]), &effective);
+        assert_eq!(
+            prompt,
+            "Base.\n\n<forced_skill name=\"present\">\npresent body\n</forced_skill>",
+        );
+    }
+
+    // VAL-CACLEAN-007: multiple forced skills inject in forced-list order, and a
+    // repeated name injects its body only ONCE (first occurrence).
+    #[test]
+    fn forced_skills_inject_in_order_and_dedup_by_name() {
+        let effective = vec![skill("alpha", "A"), skill("beta", "B")];
+        let mut prompt = String::new();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["beta", "alpha", "beta"]), &effective);
+
+        assert_eq!(
+            prompt,
+            "<forced_skill name=\"beta\">\nB\n</forced_skill>\n\
+             <forced_skill name=\"alpha\">\nA\n</forced_skill>",
+            "forced-list order, beta deduped to a single block"
+        );
+    }
+
+    // VAL-CACLEAN-007: an empty forced name never matches and is skipped (it
+    // would otherwise spuriously short-circuit dedup).
+    #[test]
+    fn empty_forced_name_is_skipped() {
+        let effective = vec![skill("alpha", "A")];
+        let mut prompt = String::new();
+
+        append_forced_skill_bodies(&mut prompt, &forced(&["", "alpha"]), &effective);
+        assert_eq!(
+            prompt, "<forced_skill name=\"alpha\">\nA\n</forced_skill>",
+            "the empty name is skipped; alpha still injects",
+        );
+    }
 }

@@ -1,21 +1,16 @@
 <script lang="ts">
-  import {
-    ArrowUp,
-    Square,
-    Plus,
-    X,
-    FileText,
-    FolderTree,
-    Globe,
-  } from "@lucide/svelte";
+  import { ArrowUp, Square, Plus, X, SlidersHorizontal } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
+  import { BUILTIN_TOOLS, type BuiltinTool } from "$lib/constants/agentTools";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import { listSkills } from "$lib/api/skill";
@@ -72,37 +67,27 @@
 
   const thinkingLevel = $derived(session.thinkingLevel ?? "off");
 
-  // 内置工具开关（per-session）：勾选写入 session.enabledTools 并持久化
-  // （VAL-TOOLS-005 UI half；后端按 enabledTools 做实际 gating）。
-  // `requiresWorkingDir` 的 FS 工具在会话无 working_dir 时置灰禁用。
-  const builtinTools: {
-    id: string;
-    label: string;
-    icon: typeof FileText;
-    requiresWorkingDir: boolean;
-  }[] = [
-    { id: "read_file", label: "读取文件", icon: FileText, requiresWorkingDir: true },
-    {
-      id: "list_directory",
-      label: "列目录",
-      icon: FolderTree,
-      requiresWorkingDir: true,
-    },
-    { id: "web_fetch", label: "网页抓取", icon: Globe, requiresWorkingDir: false },
-  ];
-
+  // 内置工具开关（per-session）：勾选写入 session.enabledTools 并持久化；
+  // 开关 id == coding-agent 注册名（read/write/edit/bash/grep/find/ls），
+  // 后端 build_agent_session 按这些名做实际 gating。工具列表/标签来自共享常量
+  // BUILTIN_TOOLS（与设置页同一真源）。
+  // 这 7 个工具都在工作目录内操作（含 bash），故全部 `requiresWorkingDir`：
+  // 会话无 working_dir 时开关置灰禁用、点击无效、hover 给说明 title。
   const hasWorkingDir = $derived(!!session.workingDir);
   const enabledTools = $derived(session.enabledTools ?? []);
+
+  // 工具收成弹窗（per-component 本地 UI 态）：图标按钮点击切换，点击外部关闭。
+  let toolsMenuOpen = $state(false);
 
   function isToolEnabled(toolId: string): boolean {
     return enabledTools.includes(toolId);
   }
 
-  function isToolDisabled(tool: (typeof builtinTools)[number]): boolean {
+  function isToolDisabled(tool: BuiltinTool): boolean {
     return tool.requiresWorkingDir && !hasWorkingDir;
   }
 
-  function toggleTool(tool: (typeof builtinTools)[number]) {
+  function toggleTool(tool: BuiltinTool) {
     if (isToolDisabled(tool)) return;
     const current = enabledTools;
     const next = current.includes(tool.id)
@@ -115,9 +100,28 @@
       });
   }
 
+  // 点击外部关闭弹窗：镜像 ChatInput 的 attachment 菜单关闭模式。触发按钮自身
+  // 的点击通过 stopPropagation 不冒泡到 window，故不会刚开就被这里关掉。
+  $effect(() => {
+    if (!toolsMenuOpen) return;
+    const handler = () => (toolsMenuOpen = false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  });
+
+  function toggleToolsMenu(event: MouseEvent) {
+    event.stopPropagation();
+    toolsMenuOpen = !toolsMenuOpen;
+  }
+
 
   // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
   const running = $derived(agentRunStore.isRunning(session.id));
+
+  // 该会话是否有待审批的危险工具调用（write/edit/bash）。待决期间对话暂停：
+  // 输入框禁用、发送被拦截、提示「等待审批」，直到用户在弹窗里允许 / 拒绝
+  // （VAL-CAPERM-001）。审批本身在页面级 AgentApprovalModal 里完成。
+  const awaitingApproval = $derived(agentApprovalStore.hasPending(session.id));
 
   // ── Slash skill 自动补全浮层 ──────────────────────────────────────────
   // 触发条件：空输入框（整段 textarea 为空）首字符**键入** `/`（非粘贴、非词中、
@@ -357,6 +361,10 @@
   });
 
   async function sendAgentRun() {
+    // 待审批暂停：对话挂起在一次危险工具调用上，既不起新 run 也不入 steering 队列，
+    // 直到用户在审批弹窗里允许 / 拒绝（VAL-CAPERM-001）。干净 no-op，不清空输入。
+    if (awaitingApproval) return;
+
     // run 进行中：消息走 steering 队列，不起第二个 run。后端 agent_run_steer 把
     // 文本压入活跃 run 的 steering 队列、在 turn 边界 drain；纯空白为干净 no-op。
     // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）；forced
@@ -497,13 +505,16 @@
     <textarea
       bind:this={textareaRef}
       bind:value={input}
-      placeholder="在这里输入消息，按 Enter 发送"
+      placeholder={awaitingApproval
+        ? "等待审批中，请在弹窗中允许或拒绝"
+        : "在这里输入消息，按 Enter 发送"}
       onkeydown={handleKeydown}
       oninput={handleInput}
       oncompositionstart={handleCompositionStart}
       oncompositionend={handleCompositionEnd}
       rows="1"
-      class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
+      disabled={awaitingApproval}
+      class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
     ></textarea>
   </div>
 
@@ -552,6 +563,17 @@
     </div>
   {/if}
 
+  {#if awaitingApproval}
+    <!-- 待审批暂停指示：对话挂起在一次危险工具调用上，等待弹窗中的允许 / 拒绝
+         （VAL-CAPERM-001）。 -->
+    <div class="px-4 pb-1 flex items-center gap-2 text-xs text-warning">
+      <span
+        class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+      ></span>
+      <span>等待工具审批，对话已暂停</span>
+    </div>
+  {/if}
+
   {#if modelPrompt}
     <div class="px-4 pb-1 text-xs text-warning">
       {modelPrompt}
@@ -567,34 +589,67 @@
         onclick={handleAddAttachment}
       />
 
-      <!-- 内置工具开关（per-session enabledTools；FS 工具无 working_dir 时置灰）。 -->
-      {#each builtinTools as tool (tool.id)}
-        {@const ToolIcon = tool.icon}
-        {@const active = isToolEnabled(tool.id)}
-        {@const disabled = isToolDisabled(tool)}
+      <!-- 内置工具收成图标 + 向上弹出菜单（per-session enabledTools；FS 工具无
+           working_dir 时置灰）。relative 容器锚定向上弹的 popover。 -->
+      <div class="relative">
         <button
           type="button"
-          class={`flex items-center gap-1 px-2 py-1 rounded-md border text-xs transition-colors ${
-            disabled
-              ? "border-[var(--hairline)] text-base-content/30 cursor-not-allowed"
-              : active
-                ? "border-info/50 bg-info/10 text-info"
-                : "border-[var(--hairline)] text-base-content/60 hover:bg-base-200"
+          class={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+            toolsMenuOpen
+              ? "bg-base-300 text-base-content"
+              : "text-base-content hover:bg-base-300"
           }`}
-          aria-pressed={active}
-          {disabled}
-          title={disabled
-            ? `${tool.label}（需设置工作目录）`
-            : active
-              ? `${tool.label}：已启用`
-              : `${tool.label}：已禁用`}
-          onclick={() => toggleTool(tool)}
+          aria-label="工具"
+          aria-haspopup="menu"
+          aria-expanded={toolsMenuOpen}
+          title="工具"
+          onclick={toggleToolsMenu}
         >
-          <ToolIcon size={14} />
-          <span>{tool.label}</span>
+          <SlidersHorizontal size={18} />
         </button>
-      {/each}
 
+        {#if toolsMenuOpen}
+          <!-- 向上展开（bottom-full）：输入框在底部，菜单浮于图标上方以免落屏外。
+               stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
+          <div
+            class="absolute bottom-full left-0 z-40 mb-2 w-56 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            role="menu"
+            tabindex="-1"
+            onclick={(event) => event.stopPropagation()}
+            onkeydown={() => {}}
+          >
+            {#if !hasWorkingDir}
+              <div
+                class="px-2 py-1.5 text-xs text-base-content/50"
+              >
+                需设置工作目录后才能启用工具
+              </div>
+            {/if}
+            {#each BUILTIN_TOOLS as tool (tool.id)}
+              {@const ToolIcon = tool.icon}
+              {@const disabled = isToolDisabled(tool)}
+              <div
+                class={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 ${
+                  disabled ? "opacity-50" : ""
+                }`}
+                title={disabled ? `${tool.label}（需设置工作目录）` : tool.label}
+              >
+                <span
+                  class="flex min-w-0 items-center gap-2 text-sm text-base-content"
+                >
+                  <ToolIcon size={16} class="shrink-0 text-base-content/70" />
+                  <span class="truncate">{tool.label}</span>
+                </span>
+                <Toggle
+                  checked={isToolEnabled(tool.id)}
+                  {disabled}
+                  onChange={() => toggleTool(tool)}
+                />
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
     <div class="flex flex-row items-center gap-3">
       <Select
@@ -622,6 +677,7 @@
           iconSize={18}
           size="w-8 h-8"
           ariaLabel="发送"
+          disabled={awaitingApproval}
           onclick={sendAgentRun}
         />
       {/if}

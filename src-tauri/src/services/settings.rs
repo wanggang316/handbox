@@ -1,7 +1,7 @@
 // 设置服务实现
 
 use crate::models::{
-    AccountSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
+    AccountSettings, AgentSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
     QuickToolsSettings, ShortcutConfig, SkillSettings, Theme, ThemeColor, TranslationSettings,
     UpdateSettingsRequest,
 };
@@ -69,6 +69,9 @@ impl SettingsService {
             "skills" => {
                 settings.skills = self.merge_section(settings.skills, request.data, "skills")?;
             }
+            "agent" => {
+                settings.agent = self.merge_section(settings.agent, request.data, "agent")?;
+            }
             _ => {
                 return Err(AppError::validation_error("未知设置分组"));
             }
@@ -115,6 +118,7 @@ impl SettingsService {
                         "translation" => current.translation = default_settings.translation.clone(),
                         "quickTools" => current.quick_tools = default_settings.quick_tools.clone(),
                         "skills" => current.skills = default_settings.skills.clone(),
+                        "agent" => current.agent = default_settings.agent.clone(),
                         _ => return Err(AppError::validation_error("未知设置分组")),
                     }
                 }
@@ -241,6 +245,7 @@ fn default_settings() -> AppSettings {
             selection_blacklist: Default::default(),
         },
         skills: SkillSettings::default(),
+        agent: AgentSettings::default(),
     }
 }
 
@@ -687,6 +692,84 @@ mod tests {
             vec!["skill1", "skill2", "skill3"],
             "all three back-to-back saves must succeed without collision"
         );
+    }
+
+    // Fresh environment: agent.defaultEnabledTools defaults to all 7 builtin
+    // tools, in registration order.
+    #[test]
+    fn fresh_env_defaults_to_all_agent_tools() {
+        let dir = TempDir::new().unwrap();
+        let settings = service(&dir).get_settings().unwrap();
+        assert_eq!(
+            settings.agent.default_enabled_tools,
+            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+        );
+    }
+
+    // A valid config.json missing the `agent` section parses without error via
+    // serde(default) → defaults back to all 7 tools (old configs upgrade
+    // cleanly, no agent section means "everything on").
+    #[test]
+    fn missing_agent_section_parses_with_all_tools() {
+        let dir = TempDir::new().unwrap();
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value.as_object_mut().unwrap().remove("agent");
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let settings = service(&dir).get_settings().unwrap();
+        assert_eq!(
+            settings.agent.default_enabled_tools,
+            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+        );
+    }
+
+    // The closed section enum recognizes "agent" in both update and reset, and
+    // updating replaces the tool list wholesale (merge_json overwrites the
+    // whole `defaultEnabledTools` array, not a deep merge).
+    #[test]
+    fn update_and_reset_recognize_agent_section() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "agent".to_string(),
+                data: serde_json::json!({ "defaultEnabledTools": ["read", "grep"] }),
+            })
+            .unwrap();
+        assert_eq!(updated.agent.default_enabled_tools, vec!["read", "grep"]);
+
+        let reread = svc.get_settings().unwrap();
+        assert_eq!(reread.agent.default_enabled_tools, vec!["read", "grep"]);
+
+        let reset = svc.reset_settings(Some(vec!["agent".to_string()])).unwrap();
+        assert_eq!(
+            reset.agent.default_enabled_tools,
+            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+        );
+    }
+
+    // An empty tool list is a legitimate user choice (all tools off) and must
+    // round-trip verbatim, not silently snap back to the default 7.
+    #[test]
+    fn empty_agent_tool_list_persists_verbatim() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "agent".to_string(),
+                data: serde_json::json!({ "defaultEnabledTools": [] }),
+            })
+            .unwrap();
+        assert!(updated.agent.default_enabled_tools.is_empty());
+
+        let reread = service(&dir).get_settings().unwrap();
+        assert!(reread.agent.default_enabled_tools.is_empty());
     }
 
     // Test that successful saves leave no temp files behind (this also

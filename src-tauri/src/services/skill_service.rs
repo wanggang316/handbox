@@ -5,7 +5,7 @@
 //! exist and in what priority order, and resolves the project root per run from
 //! the session's `working_dir`. It is constructed once at startup with the two
 //! fixed (app-data + user) roots already resolved to absolute [`PathBuf`]s and
-//! injected into [`AgentRuntime`](crate::services::AgentRuntime).
+//! managed in app state as a shared service.
 //!
 //! Priority is **lowest → highest**: `[(appdata, AppData), (user, User),
 //! (project, Project)]`, matching [`discover_skills`]'s documented contract so a

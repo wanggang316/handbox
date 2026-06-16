@@ -10,10 +10,16 @@
     agentSessionActions,
   } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { agentProjectState } from "$lib/states/agentProject.svelte";
   import AgentSessionHeader from "$lib/components/agentsession/AgentSessionHeader.svelte";
   import AgentInput from "$lib/components/agentsession/AgentInput.svelte";
   import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
+  import AgentApprovalModal from "$lib/components/agentsession/AgentApprovalModal.svelte";
+  import type {
+    AgentApprovalRequest,
+    ApprovalDecision,
+  } from "$lib/types/agentSession";
 
   // 当前选中的 Agent 会话 ID（来自 ?id= 查询参数）
   let sessionId = $derived(
@@ -118,6 +124,22 @@
         !runState.error &&
         !runState.isRunning),
   );
+
+  // 当前会话的待审批请求（危险工具调用 → 弹审批弹窗、对话暂停，VAL-CAPERM-001）。
+  const pendingApproval = $derived(
+    sessionId ? agentApprovalStore.pendingFor(sessionId) : null,
+  );
+
+  // 用户决策（含作用域）：allow_once 本次允许 / allow_always 本会话始终允许该工具
+  // → 工具执行、对话继续（VAL-CAPERM-003/008）；deny → 工具被 Cancel、模型收被拒
+  // 结果、对话继续不中断（VAL-CAPERM-005）。透传**弹窗当前展示的 request**，store 据
+  // 其 requestId 精确回灌（展示==回灌，无 sessionId 重取竞态）后清键关弹窗。
+  function handleApprovalRespond(
+    request: AgentApprovalRequest,
+    decision: ApprovalDecision,
+  ) {
+    void agentApprovalStore.respondTo(request, decision);
+  }
 </script>
 
 <!-- Agent 模式落地页（将被 (app) 分组布局包裹） -->
@@ -156,6 +178,15 @@
         {/key}
       {/if}
     </div>
+
+    <!-- 工具审批弹窗：危险工具调用待决期间弹出、对话暂停；允许 / 拒绝后关闭、
+         决策经 store 回灌后端（VAL-CAPERM-001/003/005）。按当前会话分键。 -->
+    {#if pendingApproval}
+      <AgentApprovalModal
+        request={pendingApproval}
+        onRespond={handleApprovalRespond}
+      />
+    {/if}
   {:else}
     <!-- 空落地页：无任何新建动作，引导走侧栏常驻入口（VAL-CREATE-005） -->
     <div class="flex-1 flex flex-col items-center justify-center text-base-content/50">

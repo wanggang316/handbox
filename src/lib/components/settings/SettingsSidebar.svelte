@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { User, Palette, Brain, BookOpen, Zap, Sparkles, Keyboard, Info, MousePointerClick, LayoutGrid } from '@lucide/svelte';
+  import { User, Palette, Brain, BookOpen, Zap, Sparkles, Keyboard, Info, MousePointerClick, LayoutGrid, Wrench } from '@lucide/svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Menu from '$lib/components/ui/Menu.svelte';
@@ -11,6 +11,7 @@
     { id: 'general', title: '通用', icon: Palette, url: '/settings/general' },
     { id: 'quicktools', title: '快捷工具', icon: MousePointerClick, url: '/settings/quicktools' },
     { id: 'models', title: '模型', icon: Brain, url: '/settings/models' },
+    { id: 'agent-tools', title: 'Agent 工具', icon: Wrench, url: '/settings/agent-tools' },
     { id: 'words', title: '单词本', icon: BookOpen, url: '/settings/words' },
     { id: 'mcp', title: 'MCP', icon: Zap, url: '/settings/mcp' },
     { id: 'skills', title: '技能', icon: Sparkles, url: '/settings/skills' },

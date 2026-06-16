@@ -45,6 +45,25 @@
       .join("");
   }
 
+  // 该回合是否应显示 token 用量。
+  //
+  // hand-agent 在中止 / 出错时合成一条 `usage: Usage::default()`（全零）、
+  // `stopReason = aborted | error` 的助手消息（agent_loop.rs::synthesize_aborted_message
+  // 与 agent.rs 的失败路径），故被中止 / 出错的那一轮其 `usage` 已是结构性的零、
+  // 绝不携带上一轮数值（VAL-CARUN-008 的「不串上轮」由数据层保证）。
+  // 此处在 view 层再加一道闸：中止 / 出错轮，或一个 token 都没产生的空轮，一律
+  // 不渲染用量行——避免在错误信息旁出现误导性的「输入 0 · 输出 0」。正常定稿轮
+  // （有真实 token）照常显示。
+  function hasUsage(
+    message: Extract<AgentMessage, { role: "assistant" }>,
+  ): boolean {
+    if (message.stopReason === "aborted" || message.stopReason === "error") {
+      return false;
+    }
+    const u = message.usage;
+    return !!u && (u.input > 0 || u.output > 0 || u.totalTokens > 0);
+  }
+
   // 助手消息中的工具调用块，按助手内容的**源顺序**保留（多个并行工具调用据此
   // 渲染为顺序排列的卡片，而非按完成顺序——VAL-TOOLS-004）。
   function assistantToolCalls(
@@ -210,8 +229,9 @@
               </div>
             {/if}
 
-            <!-- Token 用量（输入/输出）。 -->
-            {#if message.usage}
+            <!-- Token 用量（输入/输出）：仅正常定稿轮显示；中止 / 出错 / 空轮不显示
+                 （避免误导性的零用量、绝不串上一轮数值——VAL-CARUN-008）。 -->
+            {#if hasUsage(message)}
               <div class="mt-2 flex flex-row gap-2 text-xs text-base-content/50">
                 <span>输入 {message.usage.input}</span>
                 <span>·</span>
@@ -251,6 +271,20 @@
             </div>
           {/if}
         </div>
+      </div>
+    {/if}
+
+    <!-- 自动压缩指示（VAL-CARUN-019）：长会话触发上下文整理时展示可分辨的
+         「整理上下文中」指示。压缩发生在一轮内、不额外发终结信号，故与流式视图
+         并存；compaction_end 抵达即隐藏，对话续行。summary 有意不渲染（去向稳定）。 -->
+    {#if runState.isCompacting}
+      <div
+        class="flex items-center gap-2 px-3 py-2 text-xs text-base-content/60"
+      >
+        <div
+          class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+        ></div>
+        <span>整理上下文中…</span>
       </div>
     {/if}
 

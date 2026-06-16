@@ -134,6 +134,28 @@ export const agentSessionActions = {
   },
 
   /**
+   * 即时应用会话名变更（VAL-CARUN-020）：会话名经后端 `SessionInfoChanged{name}`
+   * 生命周期信号变更时，由 `agentRunStore` 的会话名变更回调以该会话 id + 新名调用，
+   * 就地更新侧栏列表对应项与当前会话的标题，无需重开 / 手动刷新。
+   *
+   * 纯本地状态更新（不发网络请求，不重排顺序——只换标题）。该会话不在列表内
+   * （例如已删除）则为干净 no-op。`name` 为 null（清空标题）时回退为空串，使
+   * 侧栏渲染不出现 `undefined`/破裂的占位。
+   */
+  applySessionName(id: UUID, name: string | null): void {
+    const nextName = name ?? "";
+    const index = sessions.findIndex((session) => session.id === id);
+    if (index === -1) {
+      // 不在列表内：干净 no-op（不创建幽灵条目）。
+      return;
+    }
+    sessions[index] = { ...sessions[index], name: nextName };
+    if (currentSession?.id === id) {
+      currentSession = { ...currentSession, name: nextName };
+    }
+  },
+
+  /**
    * 将列表中已存在的某个会话设为当前（不触发网络请求）。
    */
   setCurrentById(id: UUID): AgentSession | null {

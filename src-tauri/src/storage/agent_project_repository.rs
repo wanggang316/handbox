@@ -142,27 +142,42 @@ impl AgentProjectRepository {
     ///
     /// 两条删除均以 `project_id = $1` 为界：`project_id IS NULL` 的未分组
     /// 会话与兄弟项目的会话天然不在删除范围内。
+    ///
+    /// # 为什么 transcript 删除要容忍表缺失？
+    ///
+    /// `m3-project-delete-and-drop` 在迁移成功后会一次性 `DROP TABLE
+    /// agent_session_messages`（transcript 此后由 JSONL 权威保存，命令层另行逐会话
+    /// 删除 `<id>.jsonl`）。表被 drop 之后，这条遗留 transcript DELETE 已无目标，必须
+    /// 是安全 no-op——否则「no such table」会让整个项目级联删除以 INTERNAL_ERROR
+    /// 失败。这里先探测表是否存在（在事务内读以与后续 DELETE 看到一致的 schema），
+    /// 存在才发 DELETE；表缺失时直接跳过，绝不触发缺表错误。
     pub async fn delete_project(&self, project_id: &UUID) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {
             AppError::internal_error(&format!("Failed to begin transaction: {}", e))
         })?;
 
-        // 1. 先删除该项目全部会话的 transcript 行（以项目的会话集合为界）
-        sqlx::query(
-            r#"
-            DELETE FROM agent_session_messages
-            WHERE session_id IN (SELECT id FROM agent_sessions WHERE project_id = $1)
-        "#,
-        )
-        .bind(project_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| {
-            AppError::internal_error(&format!(
-                "Failed to delete agent project session messages: {}",
-                e
-            ))
-        })?;
+        // 1. 先删除该项目全部会话的 transcript 行（以项目的会话集合为界），但仅在
+        //    遗留 transcript 表仍存在时执行：迁移后该表被 drop，DELETE 应是安全 no-op。
+        let legacy_table_exists =
+            crate::storage::agent_session_repository::legacy_transcript_table_exists(&mut tx)
+                .await?;
+        if legacy_table_exists {
+            sqlx::query(
+                r#"
+                DELETE FROM agent_session_messages
+                WHERE session_id IN (SELECT id FROM agent_sessions WHERE project_id = $1)
+            "#,
+            )
+            .bind(project_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!(
+                    "Failed to delete agent project session messages: {}",
+                    e
+                ))
+            })?;
+        }
 
         // 2. 再删除该项目的全部会话行
         sqlx::query("DELETE FROM agent_sessions WHERE project_id = $1")
@@ -498,6 +513,70 @@ mod tests {
                 .unwrap();
         assert_eq!(ungrouped_count, 1);
         assert_eq!(count_messages(db_arc.as_ref(), &ungrouped_s).await, 1);
+    }
+
+    /// Drop-then-delete regression (the gap 691292d missed): after the legacy
+    /// `agent_session_messages` table is dropped post-migration, `delete_project`
+    /// must still cascade successfully — removing its N sessions and the project
+    /// row, returning `Ok(())` rather than failing with "no such table" →
+    /// INTERNAL_ERROR. Transcripts live in JSONL by then; the stale table DELETE
+    /// must be a safe no-op.
+    #[tokio::test]
+    async fn test_delete_project_succeeds_after_legacy_table_dropped() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db_arc = Arc::new(db);
+        let repo = AgentProjectRepository::new(db_arc.clone());
+
+        // Seed a project with N sessions, each carrying transcript rows, while
+        // the legacy table still exists.
+        let doomed = repo
+            .create_project(&sample_request("/tmp/workspace/doomed-post-drop", "doomed"))
+            .await
+            .unwrap();
+        let s1 = insert_session(db_arc.as_ref(), Some(&doomed.id), "d1").await;
+        let s2 = insert_session(db_arc.as_ref(), Some(&doomed.id), "d2").await;
+        let s3 = insert_session(db_arc.as_ref(), Some(&doomed.id), "d3").await;
+        for sid in [&s1, &s2, &s3] {
+            insert_message(db_arc.as_ref(), sid, 0).await;
+            insert_message(db_arc.as_ref(), sid, 1).await;
+        }
+        assert_eq!(count_sessions(db_arc.as_ref(), &doomed.id).await, 3);
+
+        // A sibling project must remain untouched after the doomed one is deleted.
+        let sibling = repo
+            .create_project(&sample_request(
+                "/tmp/workspace/sibling-post-drop",
+                "sibling",
+            ))
+            .await
+            .unwrap();
+        insert_session(db_arc.as_ref(), Some(&sibling.id), "sib").await;
+
+        // Model the post-migration state: drop the legacy transcript table.
+        sqlx::query("DROP TABLE agent_session_messages")
+            .execute(db_arc.pool())
+            .await
+            .unwrap();
+
+        // Cascade delete must succeed — not error on the missing table.
+        repo.delete_project(&doomed.id)
+            .await
+            .expect("delete_project must tolerate a dropped legacy transcript table");
+
+        // Project row and all N sessions are gone.
+        assert!(repo.get_project_by_id(&doomed.id).await.unwrap().is_none());
+        assert_eq!(count_sessions(db_arc.as_ref(), &doomed.id).await, 0);
+
+        // Sibling project and its session survive untouched.
+        assert!(repo.get_project_by_id(&sibling.id).await.unwrap().is_some());
+        assert_eq!(count_sessions(db_arc.as_ref(), &sibling.id).await, 1);
+
+        // Deleting a non-existent id post-drop is still a clean NotFound.
+        let err = repo
+            .delete_project(&"never-existed".to_string())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "NOT_FOUND");
     }
 
     /// VAL-PROJ-014: delete / rename on a missing id is a clean NOT_FOUND with

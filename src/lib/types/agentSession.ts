@@ -359,3 +359,56 @@ export interface AgentStreamErrorPayload {
 export interface AgentStreamClosedPayload {
   sessionId: UUID;
 }
+
+/**
+ * `agent_approval_request` 的 payload：危险工具（write/edit/bash）调用时后端
+ * `PermissionExtension` emit 的审批请求（services/agent_permission.rs，键逐字一致）。
+ *
+ * 后端在 emit 后 await 一个以 `requestId` 为键的 oneshot；前端弹窗据此渲染工具名 +
+ * 完整参数，用户决策经 `agent_approval_respond(requestId, allow)` 回灌：allow=true →
+ * 工具执行（Continue）、false → 工具被 Cancel（模型收被拒结果）。重复 / 未知
+ * `requestId` 在后端是幂等 no-op。
+ *
+ *  - `sessionId`：发起调用的会话（弹窗按此分键，使待审批只暂停对应会话的对话）。
+ *  - `callId`：本次工具调用 id（与 transcript 的 toolCallId 同源；当前弹窗仅作幂等键）。
+ *  - `toolName`：coding-agent 注册名（`write` / `edit` / `bash`），弹窗映射为中文 label。
+ *  - `args`：将执行的**完整**参数（bash 的 command 串、write/edit 的 path + content），
+ *    弹窗据此完整呈现——展示值即执行值，不得截断到看不出危险性（VAL-CAPERM-002）。
+ *  - `requestId`：决策回灌的幂等键（uuid v4）。
+ */
+export interface AgentApprovalRequest {
+  sessionId: UUID;
+  callId: string;
+  toolName: string;
+  args: unknown;
+  requestId: string;
+}
+
+/**
+ * 工具审批决策（含作用域）—— 镜像后端 `ApprovalDecision`
+ * （services/agent_permission.rs，`#[serde(rename_all = "snake_case")]`）。
+ * 经 `agent_approval_respond(requestId, decision)` 回灌；wire 值逐字一致：
+ *  - `"deny"`：拒绝本次调用，工具被 Cancel（模型收被拒结果）。
+ *  - `"allow_once"`：本次允许（Continue），不记忆；同工具下次仍弹窗。
+ *  - `"allow_always"`：本次允许且**本会话**始终允许该工具（按 sessionId 键控的
+ *    进程内存集），同会话同工具后续调用不再弹窗、直接执行。仅内存、不落 DB/文件
+ *    → 不跨会话、不跨重启。
+ */
+export type ApprovalDecision = "deny" | "allow_once" | "allow_always";
+
+/**
+ * `agent_session_lifecycle` 的 payload：会话生命周期信号，与三条 run 通道并列、
+ * 独立——这些不是 run 事件，不进 `agent_stream_event` reducer，故不影响 closed-once。
+ * 后端 `map_session_event` 把 coding-agent 的 `AgentSessionEvent::CompactionStart`/
+ * `CompactionEnd`/`SessionInfoChanged` 映射到此判别联合（`kind` 判别）。
+ *
+ *  - `compaction_start`：自动压缩开始；前端据此展示「整理上下文中」指示。
+ *  - `compaction_end`：压缩结束；`summary` 为上下文摘要，**有意不渲染进时间线**
+ *    （仅用于关闭指示，去向稳定——VAL-CARUN-019），对话续行。
+ *  - `session_info_changed`：会话元数据（当前仅 name/label）变更；前端据此即时
+ *    更新侧栏该会话标题，无需重开（VAL-CARUN-020）。`name` 可为 null（清空标题）。
+ */
+export type AgentSessionLifecyclePayload =
+  | { sessionId: UUID; kind: "compaction_start" }
+  | { sessionId: UUID; kind: "compaction_end"; summary: string }
+  | { sessionId: UUID; kind: "session_info_changed"; name: string | null };

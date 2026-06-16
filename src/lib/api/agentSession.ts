@@ -17,6 +17,9 @@ import type {
   AgentStreamEventPayload,
   AgentStreamErrorPayload,
   AgentStreamClosedPayload,
+  AgentSessionLifecyclePayload,
+  AgentApprovalRequest,
+  ApprovalDecision,
 } from "../types";
 
 /**
@@ -155,21 +158,56 @@ export async function abortAgentRun(sessionId: UUID): Promise<void> {
 }
 
 /**
+ * 回灌一次工具审批决策（含作用域），唤醒后端正在 await 的 `PermissionExtension` 钩子。
+ *
+ * 危险工具（write/edit/bash）调用时后端 emit `agent_approval_request` 并 await 一个
+ * 以 `requestId` 为键的 oneshot；弹窗回答后经本封装调 `agent_approval_respond`，
+ * `decision` 三态（作用域显式）：
+ *  - `"deny"` → 工具被 Cancel、模型收被拒结果、对话继续不中断。
+ *  - `"allow_once"` → 本次允许（Continue），不记忆；同工具下次仍弹窗。
+ *  - `"allow_always"` → 本次允许且**本会话**始终允许该工具，同会话同工具后续调用
+ *    不再弹窗、直接执行（后端进程内存集，按 sessionId 键控、不落 DB/文件 →
+ *    不跨会话、不跨重启）。
+ *
+ * 重复 / 未知 `requestId` 在后端是幂等 no-op，故前端竞态重复回答安全。
+ */
+export async function respondAgentApproval(
+  requestId: string,
+  decision: ApprovalDecision,
+): Promise<void> {
+  await apiCall<void>("agent_approval_respond", { requestId, decision });
+}
+
+/**
  * Agent 流式事件处理器集合。
  */
 export interface AgentStreamEventHandlers {
   onEvent?: (payload: AgentStreamEventPayload) => void;
   onError?: (payload: AgentStreamErrorPayload) => void;
   onClosed?: (payload: AgentStreamClosedPayload) => void;
+  /**
+   * 会话生命周期信号（compaction / session-info）。与 run 三通道并列、独立——
+   * 不进 run reducer，故不影响 closed-once。compaction 用于「整理上下文中」指示，
+   * session-info 用于侧栏标题即时更新。
+   */
+  onLifecycle?: (payload: AgentSessionLifecyclePayload) => void;
+  /**
+   * 工具审批请求（危险工具 write/edit/bash 调用时后端 emit 并 await 决策）。与
+   * lifecycle 同属并列、独立通道——不进 run reducer，不影响 closed-once；驱动审批
+   * 弹窗弹出、对话暂停，决策经 `respondAgentApproval` 回灌。
+   */
+  onApprovalRequest?: (payload: AgentApprovalRequest) => void;
 }
 
 /**
  * 监听 Agent 流式事件。
  *
- * 订阅三个 Tauri 事件通道并分发到对应处理器；返回一个解除全部三个监听的函数。
- *  - `agent_stream_event`  -> `handlers.onEvent`
- *  - `agent_stream_error`  -> `handlers.onError`
- *  - `agent_stream_closed` -> `handlers.onClosed`
+ * 订阅四个 Tauri 事件通道并分发到对应处理器；返回一个解除全部监听的函数。
+ *  - `agent_stream_event`      -> `handlers.onEvent`
+ *  - `agent_stream_error`      -> `handlers.onError`
+ *  - `agent_stream_closed`     -> `handlers.onClosed`
+ *  - `agent_session_lifecycle` -> `handlers.onLifecycle`
+ *  - `agent_approval_request`  -> `handlers.onApprovalRequest`
  */
 export async function listenToAgentStreamEvents(
   handlers: AgentStreamEventHandlers,
@@ -183,6 +221,12 @@ export async function listenToAgentStreamEvents(
     }),
     listen<AgentStreamClosedPayload>("agent_stream_closed", (event) => {
       handlers.onClosed?.(event.payload);
+    }),
+    listen<AgentSessionLifecyclePayload>("agent_session_lifecycle", (event) => {
+      handlers.onLifecycle?.(event.payload);
+    }),
+    listen<AgentApprovalRequest>("agent_approval_request", (event) => {
+      handlers.onApprovalRequest?.(event.payload);
     }),
   ];
 

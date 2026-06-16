@@ -493,6 +493,126 @@ mod tests {
         assert_eq!(created.working_dir, Some(project.path));
     }
 
+    /// VAL-CASESS-006 — two sessions whose working directories canonicalize to
+    /// the SAME path are grouped under one project: project get-or-create keys
+    /// off the canonical path, so a second create for the same directory (here
+    /// reached via a symlink alias) returns the same `project_id`, and both
+    /// sessions therefore carry the same `project_id` the sidebar groups by.
+    /// This is the data-layer geology under the frontend `groupSessions`
+    /// grouping; the grouping itself depends only on the SQLite `project_id` and
+    /// is unaffected by JSONL persistence.
+    #[tokio::test]
+    async fn sessions_in_same_canonical_dir_share_one_project_id() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db.clone());
+
+        // One real directory, reachable two ways: directly and via a symlink.
+        let target = TempDir::new().unwrap();
+        let link_parent = TempDir::new().unwrap();
+        let link = link_parent.path().join("alias");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target.path(), &link).unwrap();
+        #[cfg(not(unix))]
+        return; // symlink semantics differ; covered on unix CI
+
+        // get-or-create by canonical path: the direct path and the symlink alias
+        // both resolve to one project row.
+        let p_direct = projects
+            .create_project(target.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        let p_alias = projects
+            .create_project(link.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        assert_eq!(
+            p_alias.id, p_direct.id,
+            "the canonical-path get-or-create must collapse both aliases to one project"
+        );
+
+        // A session created against each project id lands in the same group.
+        let mut req1 = base_request("Via Direct");
+        req1.project_id = Some(p_direct.id.clone());
+        let s1 = service.create_session(req1).await.unwrap();
+
+        let mut req2 = base_request("Via Alias");
+        req2.project_id = Some(p_alias.id.clone());
+        let s2 = service.create_session(req2).await.unwrap();
+
+        assert_eq!(
+            s1.project_id, s2.project_id,
+            "two sessions in the same canonical dir must share one project_id (one group)"
+        );
+        assert_eq!(s1.project_id, Some(p_direct.id));
+        // Exactly one project row backs the group — no per-alias duplication.
+        assert_eq!(count_rows(&db, "agent_projects").await, 1);
+    }
+
+    /// VAL-CASESS-010 — three user-equivalent but byte-different cwd forms for
+    /// the SAME directory all collapse into ONE project bucket (not three):
+    ///   1. plain absolute path        `/foo`
+    ///   2. the same path + trailing slash `/foo/`
+    ///   3. a symlink alias that canonicalizes to `/foo`
+    /// `validate_project_path` runs `std::fs::canonicalize`, which normalizes the
+    /// trailing slash away and resolves the symlink, so the project get-or-create
+    /// keys all three off the SAME canonical path → the SAME `project_id`. The
+    /// existing `sessions_in_same_canonical_dir_share_one_project_id` test covers
+    /// the plain + symlink forms; this adds the trailing-slash form (and re-states
+    /// the full three-way invariant) so a regression in trailing-slash
+    /// normalization would split one project into two buckets here.
+    #[tokio::test]
+    async fn cwd_trailing_slash_and_symlink_forms_share_one_project_bucket() {
+        let (db, _guard) = create_test_database().await;
+        let projects = crate::services::AgentProjectService::new(db.clone());
+
+        // One real directory. Canonicalize once so the trailing-slash string is
+        // built from the post-canonical path (the writer canonicalizes too, so
+        // both the plain and trailing-slash forms must land the same row).
+        let target = TempDir::new().unwrap();
+        let canonical = std::fs::canonicalize(target.path()).unwrap();
+
+        // Form 1: plain canonical path, no trailing separator.
+        let plain = canonical.to_string_lossy().into_owned();
+        // Form 2: same path with a trailing slash appended.
+        let trailing = format!("{}{}", plain, std::path::MAIN_SEPARATOR);
+        assert_ne!(
+            plain, trailing,
+            "the two forms must differ byte-wise, else the test proves nothing"
+        );
+
+        let p_plain = projects.create_project(plain.clone()).await.unwrap();
+        let p_trailing = projects.create_project(trailing).await.unwrap();
+        assert_eq!(
+            p_trailing.id, p_plain.id,
+            "a trailing slash must canonicalize away → the same project row, not a second"
+        );
+
+        // Form 3: a symlink alias to the same directory resolves to the same row.
+        let link_parent = TempDir::new().unwrap();
+        let link = link_parent.path().join("alias");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target.path(), &link).unwrap();
+            let p_link = projects
+                .create_project(link.to_string_lossy().into_owned())
+                .await
+                .unwrap();
+            assert_eq!(
+                p_link.id, p_plain.id,
+                "a symlink alias must canonicalize to the same project row"
+            );
+        }
+
+        // Exactly one project row backs all the equivalent forms — one bucket.
+        assert_eq!(
+            count_rows(&db, "agent_projects").await,
+            1,
+            "all user-equivalent cwd forms must collapse to a single project row"
+        );
+    }
+
     #[tokio::test]
     async fn create_session_with_unknown_project_returns_not_found_and_no_row() {
         let (db, _guard) = create_test_database().await;

@@ -25,6 +25,8 @@
     UNGROUPED_COLLAPSE_KEY,
   } from "$lib/states/agentProjectCollapse.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { settingsState } from "$lib/states";
+  import { BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
   import { groupSessions, sessionActivityKey } from "$lib/utils/agentGrouping";
   import type { AgentProjectGroup } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
@@ -474,7 +476,12 @@
       thinkingLevel: source?.thinkingLevel,
       temperature: source?.temperature,
       maxTokens: source?.maxTokens,
-      enabledTools: source ? [...source.enabledTools] : undefined,
+      // 无 source 继承时取全局默认（设置页可改）；设置未加载时兜底全 7 个。
+      enabledTools: source
+        ? [...source.enabledTools]
+        : (settingsState.settings?.agent?.defaultEnabledTools ?? [
+            ...BUILTIN_TOOL_IDS,
+          ]),
       toolExecutionMode: source?.toolExecutionMode,
     };
 

@@ -144,6 +144,30 @@ pub struct SkillSettings {
     pub disabled: Vec<String>,
 }
 
+/// Agent 设置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSettings {
+    /// 新建 Agent 会话默认启用的内置工具(coding-agent 注册名)。默认全 7 个。
+    #[serde(default = "default_agent_enabled_tools")]
+    pub default_enabled_tools: Vec<String>,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        Self {
+            default_enabled_tools: default_agent_enabled_tools(),
+        }
+    }
+}
+
+fn default_agent_enabled_tools() -> Vec<String> {
+    ["read", "write", "edit", "bash", "grep", "find", "ls"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -156,6 +180,8 @@ pub struct AppSettings {
     pub quick_tools: QuickToolsSettings,
     #[serde(default)]
     pub skills: SkillSettings,
+    #[serde(default)]
+    pub agent: AgentSettings,
 }
 
 /// 设置更新请求
