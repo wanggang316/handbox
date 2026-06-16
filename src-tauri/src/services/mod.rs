@@ -4,7 +4,7 @@ pub mod agent_jsonl_store;
 pub mod agent_migration;
 pub mod agent_permission;
 pub mod agent_project;
-pub mod agent_runtime;
+pub mod agent_run_types;
 pub mod agent_session;
 pub mod agent_tools;
 pub mod artifact;
@@ -36,7 +36,7 @@ pub use agent_migration::{
     MigrationReport,
 };
 pub use agent_project::AgentProjectService;
-pub use agent_runtime::{AgentRunRequest, AgentRuntime, RunSink};
+pub use agent_run_types::{AgentRunAttachment, AgentRunRequest};
 pub use agent_session::{AgentSessionParameter, AgentSessionService};
 pub use artifact::ArtifactService;
 pub use auth::GoogleOAuthService;

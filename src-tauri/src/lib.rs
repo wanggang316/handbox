@@ -17,10 +17,9 @@ use tauri::{AppHandle, Manager};
 
 use crate::commands::*;
 use crate::services::{
-    selection::setup_selection, AgentProjectService, AgentRuntime, AgentService,
-    AgentSessionService, ArtifactService, McpService, MessageService, ModelService,
-    ProviderService, SearchService, SessionService, SettingsService, StorageService,
-    UserSessionService, WordService,
+    selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
+    ArtifactService, McpService, MessageService, ModelService, ProviderService, SearchService,
+    SessionService, SettingsService, StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
@@ -379,22 +378,13 @@ async fn initialize_services(
         skill_user_root,
     ));
 
-    // 初始化 Agent 运行时（Agent 模式 run 循环 + 事件发射 + 并发去重 + skill 注入）。
-    // 注入 SettingsService 的 clone：assemble 每个 run 现场重读 config.json 的
-    // skills.disabled 全局禁用名单（不缓存）。
-    let agent_runtime = AgentRuntime::new_with_skills(
-        database_service.clone(),
-        skill_service.clone(),
-        settings_service.clone(),
-    );
-
     // 一次性把 pre-M3 的 SQLite agent transcript 物化为 JSONL，迁移成功后 drop
     // 已冗余的 `agent_session_messages` 表（VAL-CASESS-023）。门控在该表的存在性
     // 上——表存在 ⇒ 迁移 + drop；表不存在 ⇒ 已完成、整体跳过（不再每次启动重扫、
     // 也不读已 drop 的表）。**只 drop transcript 表**：`agent_sessions` /
     // `agent_projects` 是 M3 dual-source 下的活配置 + 分组源，绝不 drop。
     //
-    // 必须在 agent_runtime 被 manage、任何 run 发生之前同步完成：否则老会话首次
+    // 必须在 run 命令可被调用、任何 run 发生之前同步完成：否则老会话首次
     // run 只会落新 turn，丢失历史（m3-jsonl-persistence 标注的竞态）。data_dir 同时
     // 充当 JSONL base 与无 working_dir 会话的 cwd 回退（与写入侧 config_from_rows /
     // session_cwd 一致）。迁移整体失败只记录、不阻断启动——逐会话容错留给
@@ -437,7 +427,6 @@ async fn initialize_services(
     app.manage(agent_service);
     app.manage(agent_session_service);
     app.manage(agent_project_service);
-    app.manage(agent_runtime);
     app.manage(skill_service);
 
     // Services are registered — the foreground can now read DB-cached data.

@@ -11,7 +11,7 @@
 
 use crate::models::AppError;
 use crate::services::agent_jsonl_store::{delete_session_file, session_cwd};
-use crate::services::{AgentRuntime, Database};
+use crate::services::Database;
 use crate::storage::types::{AgentProject, CreateAgentProjectRequest, UUID};
 use crate::storage::AgentProjectRepository;
 use sqlx::Row;
@@ -94,31 +94,31 @@ impl AgentProjectService {
 
     /// 删除 Agent Project（先 abort，再删每个会话的 JSONL 文件，最后 SQLite 级联）。
     ///
-    /// 先列出该项目全部会话（id + working_dir），逐个调用 `runtime.abort`（对无
-    /// 活跃 run 的 session 是干净的 no-op，对齐 `agent_session_delete` 先 abort
-    /// 再删的写法），再 best-effort 删除每个会话的 `<id>.jsonl`（透传
-    /// `app_data_dir` 以解析 JSONL 的 cwd），最后调仓储层在单事务内级联删除
-    /// messages / sessions / project（VAL-CASESS-021）。项目不存在时透传 `NOT_FOUND`。
+    /// 先列出该项目全部会话（id + working_dir），逐个调用
+    /// `coding_agent_runtime::abort_run`（对无活跃 run 的 session 是干净的 no-op，
+    /// 对齐 `agent_session_delete` 先 abort 再删的写法），再 best-effort 删除每个
+    /// 会话的 `<id>.jsonl`（透传 `app_data_dir` 以解析 JSONL 的 cwd），最后调仓储层
+    /// 在单事务内级联删除 messages / sessions / project（VAL-CASESS-021）。项目不
+    /// 存在时透传 `NOT_FOUND`。
     ///
     /// `app_data_dir` 既是 JSONL base 也是无 working_dir 会话的 cwd 回退，必须与
     /// 写入侧（`config_from_rows` / `session_cwd`）一致，否则会删错目录。
     pub async fn delete_project(
         &self,
         project_id: UUID,
-        runtime: &AgentRuntime,
         app_data_dir: &Path,
     ) -> Result<(), AppError> {
         self.delete_project_with_abort(project_id, app_data_dir, |session_id| async move {
-            runtime.abort(&session_id).await;
+            crate::services::coding_agent_runtime::abort_run(&session_id);
         })
         .await
     }
 
     /// `delete_project` 的实现体：abort 解耦为可注入闭包。
     ///
-    /// 拆出这一层是为了在单测中无需真实启动 run（AgentRuntime 的 run 注册表
-    /// 对外不可见、测试 seed 设施私有于 agent_runtime 模块），即可断言
-    /// 「每个 session 先被 abort、其 JSONL 文件被删、且这些都发生在级联删除之前」。
+    /// 拆出这一层是为了在单测中无需真实启动 run（coding-agent 驱动的 run 注册表
+    /// 是进程级私有的），即可断言「每个 session 先被 abort、其 JSONL 文件被删、
+    /// 且这些都发生在级联删除之前」。
     async fn delete_project_with_abort<F, Fut>(
         &self,
         project_id: UUID,
@@ -632,7 +632,6 @@ mod tests {
     async fn delete_project_cascades_jsonl_files_for_every_session() {
         let (db, _guard) = create_test_database().await;
         let service = AgentProjectService::new(db.clone());
-        let runtime = AgentRuntime::new(db.clone());
         let base = TempDir::new().unwrap();
 
         let work_dir = TempDir::new().unwrap();
@@ -651,7 +650,7 @@ mod tests {
         let outsider_jsonl = seed_session_jsonl(base.path(), Some(&work_dir_str), &outsider);
 
         service
-            .delete_project(project.id.clone(), &runtime, base.path())
+            .delete_project(project.id.clone(), base.path())
             .await
             .unwrap();
 
@@ -677,12 +676,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_project_with_runtime_cascades_and_passes_through_not_found() {
+    async fn delete_project_public_path_cascades_and_passes_through_not_found() {
         let (db, _guard) = create_test_database().await;
         let service = AgentProjectService::new(db.clone());
-        // A real runtime: abort on sessions without an active run is a clean
-        // no-op, so the full public path is exercised end to end.
-        let runtime = AgentRuntime::new(db.clone());
+        // The public `delete_project` drives the real `abort_run`; on sessions
+        // without an active run that is a clean no-op, so the full public path
+        // is exercised end to end.
         let base = TempDir::new().unwrap();
 
         let work_dir = TempDir::new().unwrap();
@@ -694,7 +693,7 @@ mod tests {
         insert_message(&db, &session, 0).await;
 
         service
-            .delete_project(project.id.clone(), &runtime, base.path())
+            .delete_project(project.id.clone(), base.path())
             .await
             .unwrap();
         let err = service.get_project(project.id).await.expect_err("gone");
@@ -704,7 +703,7 @@ mod tests {
 
         // Missing id -> NOT_FOUND passthrough (and no panic from abort phase).
         let err = service
-            .delete_project("missing".to_string(), &runtime, base.path())
+            .delete_project("missing".to_string(), base.path())
             .await
             .expect_err("should reject");
         assert_eq!(err.code, "NOT_FOUND");
@@ -718,7 +717,6 @@ mod tests {
     async fn delete_project_tolerates_missing_jsonl_file() {
         let (db, _guard) = create_test_database().await;
         let service = AgentProjectService::new(db.clone());
-        let runtime = AgentRuntime::new(db.clone());
         let base = TempDir::new().unwrap();
 
         let work_dir = TempDir::new().unwrap();
@@ -730,7 +728,7 @@ mod tests {
         let _session = insert_session(&db, Some(&project.id), "s1").await;
 
         service
-            .delete_project(project.id.clone(), &runtime, base.path())
+            .delete_project(project.id.clone(), base.path())
             .await
             .expect("a missing JSONL file must not block the SQLite cascade");
         let err = service.get_project(project.id).await.expect_err("gone");

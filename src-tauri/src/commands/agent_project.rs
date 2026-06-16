@@ -5,7 +5,7 @@
 // `agent_project_*`，两者完全独立。
 
 use crate::models::AppError;
-use crate::services::{AgentProjectService, AgentRuntime};
+use crate::services::AgentProjectService;
 use crate::storage::types::{AgentProject, UUID};
 use tauri::{AppHandle, Manager, State};
 
@@ -38,22 +38,21 @@ pub async fn agent_project_rename(
 
 /// 删除 Agent Project
 ///
-/// 删除前先中止该项目全部会话可能存在的活跃 run（`runtime.abort` 对无活跃
-/// run 是 no-op，对齐 `agent_session_delete` 的写法），再 best-effort 删除每个
-/// 会话的 JSONL transcript 文件，最后级联删除项目、其会话及 SQLite transcript
+/// 删除前先中止该项目全部会话可能存在的活跃 run（`coding_agent_runtime::abort_run`
+/// 对无活跃 run 是 no-op，对齐 `agent_session_delete` 的写法），再 best-effort 删除
+/// 每个会话的 JSONL transcript 文件，最后级联删除项目、其会话及 SQLite transcript
 /// （VAL-CASESS-021）。注入 `app_handle` 以解析 JSONL base（app data dir）。
 #[tauri::command]
 pub async fn agent_project_delete(
     project_id: UUID,
     app_handle: AppHandle,
     agent_project_service: State<'_, AgentProjectService>,
-    runtime: State<'_, AgentRuntime>,
 ) -> Result<(), AppError> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| AppError::internal_error(&format!("failed to resolve app data dir: {e}")))?;
     agent_project_service
-        .delete_project(project_id, runtime.inner(), &app_data_dir)
+        .delete_project(project_id, &app_data_dir)
         .await
 }

@@ -11,7 +11,7 @@
 // `agent_run_abort` / `agent_run_steer` 现已切到 coding-agent 驱动路径：经
 // `coding_agent_runtime` 的进程级运行句柄注册表（`drive_agent_run` 在驱动一轮时
 // 注册、closed 时注销）翻转 cancel token / push steering 消息，对新驱动的 run 生效。
-// 旧的 `AgentRuntime` 仍保留（chat/其它路径），将在后续 milestone（M4）退役。
+// 旧的原生 `AgentRuntime` 运行驱动已于 M4 退役，coding-agent 驱动是唯一的 run 路径。
 //
 // M3 起会话走 **JSONL 持久化**：经 `resume_session = <session_id>` 构造，
 // transcript 落 `<app_data_dir>/sessions/<flattened-cwd>/<session_id>.jsonl`，

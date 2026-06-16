@@ -12,9 +12,7 @@
 //    读 JSONL，无 JSONL 文件（pre-M3 老会话）时回退 SQLite transcript。
 
 use crate::models::AppError;
-use crate::services::{
-    agent_jsonl_store, AgentRuntime, AgentSessionParameter, AgentSessionService,
-};
+use crate::services::{abort_run, agent_jsonl_store, AgentSessionParameter, AgentSessionService};
 use crate::storage::types::{AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UUID};
 use tauri::{AppHandle, Manager, State};
 
@@ -240,8 +238,9 @@ fn parse_session_parameter(
 
 /// 删除 Agent Session（M3：同时清理其 JSONL transcript 文件）。
 ///
-/// 顺序：先中止该会话可能存在的活跃 run（`runtime.abort` 对无活跃 run 是 no-op），
-/// 这样删除后不会再有 `agent_stream_event { sessionId: <deleted> }` 抵达前端；
+/// 顺序：先中止该会话可能存在的活跃 run（`coding_agent_runtime::abort_run` 对无
+/// 活跃 run 是 no-op），这样删除后不会再有 `agent_stream_event { sessionId:
+/// <deleted> }` 抵达前端；
 /// 再 best-effort 删除其 JSONL 文件（M3 后 transcript 落在 JSONL，仅删 SQLite 行
 /// 会在磁盘留下孤儿 `<id>.jsonl`）；最后删 SQLite 行（**权威**，决定列表是否还
 /// 显示该行）。即便 JSONL 删除失败（warn），SQLite 删除成功即保证「行消失」。
@@ -254,14 +253,15 @@ pub async fn agent_session_delete(
     session_id: UUID,
     app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
-    runtime: State<'_, AgentRuntime>,
 ) -> Result<(), AppError> {
     // 先取 session 拿 working_dir 以解析 JSONL cwd（也借此对不存在的会话报 NOT_FOUND）。
     let session = agent_session_service
         .get_session(session_id.clone())
         .await?;
 
-    runtime.abort(&session_id).await;
+    // 中止该会话可能存在的活跃 run（coding-agent 驱动的进程级注册表；无活跃 run
+    // 时是干净的 no-op），再删 transcript / SQLite 行。
+    abort_run(&session_id);
 
     // best-effort 清理 JSONL 文件，不阻断权威的 SQLite 删除。
     let app_data_dir = resolve_app_data_dir(&app_handle)?;

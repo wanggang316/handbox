@@ -2,12 +2,13 @@
 //! [`AgentSession`] and map its events onto HandBox's existing three Tauri
 //! channels (`agent_stream_event` / `agent_stream_closed` / `agent_stream_error`).
 //!
-//! This is the platform-shift proof feature: a prompt now runs end-to-end on
-//! `hand_coding_agent::AgentSession` instead of the legacy
-//! [`agent_runtime::AgentRuntime`] loop, while the *frontend* contract stays
-//! byte-for-byte the same. The event payloads, channel names, the
-//! closed-exactly-once invariant, and the sanitized error envelope all mirror
-//! `agent_runtime.rs` so the UI never has to know which engine drove the turn.
+//! This is the platform-shift proof feature: a prompt runs end-to-end on
+//! `hand_coding_agent::AgentSession`. The now-retired native `AgentRuntime` loop
+//! drove this path before M4; this module is now the SOLE Agent-mode run driver,
+//! while the *frontend* contract stays byte-for-byte the same. The event
+//! payloads, channel names, the closed-exactly-once invariant, and the sanitized
+//! error envelope preserve the original native-runtime semantics so the UI never
+//! has to know which engine drove the turn.
 //!
 //! Drive strategy (A — `subscribe` direct-drive):
 //! - The session is `subscribe`d to a callback that unwraps
@@ -60,7 +61,7 @@ use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 
 use crate::models::AppError;
-use crate::services::agent_runtime::AgentRunAttachment;
+use crate::services::agent_run_types::AgentRunAttachment;
 
 /// What a single [`AgentSessionEvent`] maps to on HandBox's event surface.
 ///
@@ -86,19 +87,19 @@ pub enum MappedEvent {
 /// Per-image byte cap enforced at the IPC boundary (CLAUDE.md「输入验证必须完备」).
 /// The frontend already limits attachments to 10 MiB, but the backend never
 /// trusts the frontend: an oversize image is defensively dropped so unbounded
-/// bytes never get base64'd into the model context. Mirrors
-/// `agent_runtime::ATTACHMENT_BYTE_CAP` so both engines enforce the same bound.
+/// bytes never get base64'd into the model context. Preserves the bound the
+/// retired native runtime enforced at the same IPC boundary.
 const ATTACHMENT_BYTE_CAP: usize = 10 * 1024 * 1024;
 /// Per-turn attachment count cap. Attachments beyond this count are dropped so a
-/// pathological request cannot blow up the assembled message. Mirrors
-/// `agent_runtime::ATTACHMENT_MAX_COUNT`.
+/// pathological request cannot blow up the assembled message. Preserves the
+/// retired native runtime's count bound.
 const ATTACHMENT_MAX_COUNT: usize = 16;
 
 /// Validate `attachments` at the IPC boundary and convert the surviving images
 /// into `ImageContent` blocks for `send_message_with_images`.
 ///
-/// The new coding-agent driver path consumed only the prompt text and dropped
-/// attachments entirely; this restores the legacy `agent_runtime` boundary
+/// An earlier version of this driver consumed only the prompt text and dropped
+/// attachments entirely; this preserves the native runtime's IPC-boundary
 /// discipline (VAL-CARUN-018) so the same images that reached the model under
 /// the old engine reach it under the new one, with the identical caps:
 ///
@@ -112,7 +113,7 @@ const ATTACHMENT_MAX_COUNT: usize = 16;
 /// Every drop is SILENT — the turn still runs (an all-dropped batch yields an
 /// empty `Vec`, and the caller falls back to the plain-text path). Each
 /// surviving image's bytes are base64 STANDARD encoded into an `ImageContent`,
-/// matching `agent_runtime::build_user_message`.
+/// matching the user-message assembly the native runtime performed.
 pub fn images_from_attachments(attachments: &[AgentRunAttachment]) -> Vec<ImageContent> {
     let mut images: Vec<ImageContent> =
         Vec::with_capacity(attachments.len().min(ATTACHMENT_MAX_COUNT));
@@ -234,8 +235,8 @@ fn map_session_event(event: &AgentSessionEvent) -> MappedEvent {
 /// Map a run-level [`CodingAgentError`] to a **sanitized** [`AppError`]
 /// `{ code, message, hint }` for the `agent_stream_error` envelope.
 ///
-/// SECURITY: same discipline as `agent_runtime::sanitize_agent_error` — never
-/// echo raw provider / transport error text (it can carry an API key or a
+/// SECURITY: same discipline the native runtime's error sanitizer enforced —
+/// never echo raw provider / transport error text (it can carry an API key or a
 /// credentialed URL). Each variant maps to a stable AppError code plus a
 /// generic-but-useful hint. The `CodingAgentError::Agent` arm delegates to the
 /// exact same `AgentError` classification the legacy path uses, so the error
@@ -284,7 +285,7 @@ fn sanitize_coding_agent_error(err: &CodingAgentError) -> AppError {
 /// Event sink for a coding-agent run — the single choke point through which a
 /// driven turn reaches HandBox's three Tauri channels.
 ///
-/// Shape mirrors `agent_runtime::RunSink` deliberately: `on_event` receives
+/// Shape mirrors the native runtime's run sink deliberately: `on_event` receives
 /// `{ sessionId, event }`, `on_closed` receives the terminal `{ sessionId }`
 /// EXACTLY ONCE, and the optional `on_error` receives the sanitized
 /// `{ sessionId, error }` envelope BEFORE `on_closed`. When `on_error` is
@@ -385,7 +386,7 @@ fn run_controls() -> &'static Mutex<HashMap<String, RunControl>> {
 
 /// Inject `text` as a user [`Message`] into the session's IN-FLIGHT turn.
 ///
-/// Mirrors the legacy `AgentRuntime::steer` contract:
+/// Preserves the native runtime's `steer` contract:
 /// - empty / whitespace-only `text` is a no-op — nothing is enqueued;
 /// - a session with no active run in the registry is a CLEAN no-op (the front
 ///   end may race a steer against a run that just ended naturally; returning an
@@ -409,7 +410,7 @@ pub fn steer_run(session_id: &str, text: String) {
 /// Abort the session's in-flight turn by flipping its cancellation token AND
 /// fail-closing any approval the turn is parked on.
 ///
-/// Mirrors the legacy `AgentRuntime::abort` contract: an unknown / already-
+/// Preserves the native runtime's `abort` contract: an unknown / already-
 /// finished session is a CLEAN no-op (the front end may race an abort against a
 /// run that just ended). The token reached here is the SAME one the in-flight
 /// `send_message` is driving on, so cancelling it makes the agent loop unwind at
