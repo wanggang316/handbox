@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.2.2] - 2026-06-17
+
+### Added
+- Automatic update checks: HandBox now checks for a new version on launch and
+  shows a dialog to download and install it. You can turn auto-checking off or
+  check manually from the About page.
+- A branded splash screen while the app launches.
+
+### Fixed
+- Provider logos are now legible in dark theme.
+
+
 ## [0.2.1] - 2026-06-16
 
 ### Added
