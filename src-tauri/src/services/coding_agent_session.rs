@@ -43,6 +43,14 @@ use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 /// resolution keys off `provider_type` to match `chat_engine`.
 #[derive(Debug, Clone)]
 pub struct HandBoxAgentSessionConfig {
+    /// HandBox DB session id (UUID). Threaded into the [`PermissionExtension`]
+    /// so the approval registry / always-allow set / emitted `sessionId` are all
+    /// keyed off the STABLE HandBox session id — the same id
+    /// `coding_agent_runtime::abort_run` is called with — rather than the
+    /// coding-agent's internal in-memory session id (which `no_session: true`
+    /// re-mints every turn). See the `PermissionExtension::session_id` doc for
+    /// why this matters (abort must be able to unblock a parked approval await).
+    pub session_id: String,
     /// HandBox provider row id (diagnostics only).
     pub provider_id: String,
     /// hand-ai provider tag consumed by [`chat_engine::resolve_model`].
@@ -182,7 +190,15 @@ pub fn build_agent_session(
     // and the FIRST Cancel wins, so a sandbox escape (out-of-cwd
     // read/ls/grep/find) is silently Cancelled by the sandbox FIRST and never
     // reaches — never prompts — this approval gate.
-    session.register_extension(Arc::new(PermissionExtension::new(approval_emitter)));
+    // Key the permission extension off the HandBox session UUID (config.session_id),
+    // NOT the coding-agent's internal in-memory session id: that stable id is what
+    // `coding_agent_runtime::abort_run` / `deny_pending_for_session` use, so an
+    // aborted turn parked on an approval await can actually be unblocked, and the
+    // session's always-allow consent persists across turns.
+    session.register_extension(Arc::new(PermissionExtension::new(
+        config.session_id.clone(),
+        approval_emitter,
+    )));
 
     Ok(session)
 }
@@ -265,6 +281,10 @@ pub fn config_from_rows(
         .unwrap_or_else(|| app_data_dir.clone());
 
     Ok(HandBoxAgentSessionConfig {
+        // The session row's primary key IS the HandBox session UUID — the same
+        // id the IPC layer passes to abort_run / deny_pending_for_session. Thread
+        // it through so the permission extension keys its approval state off it.
+        session_id: session.id.clone(),
         provider_id: provider.id.clone(),
         provider_type: provider.provider_type.clone(),
         model_id,
@@ -291,6 +311,7 @@ mod tests {
 
     fn sample_config(working_dir: PathBuf, app_data_dir: PathBuf) -> HandBoxAgentSessionConfig {
         HandBoxAgentSessionConfig {
+            session_id: "sess-row-uuid".to_string(),
             provider_id: "prov-row-123".to_string(),
             provider_type: "openai".to_string(),
             model_id: "gpt-4o".to_string(),
@@ -597,6 +618,10 @@ mod tests {
         let config = config_from_rows(&session, &provider, data.path().to_path_buf())
             .expect("rows assemble into a config");
 
+        // The HandBox session UUID is the session row's primary key — it must
+        // thread through so the permission extension keys approval state off the
+        // same id `abort_run` uses (the production-hang fix).
+        assert_eq!(config.session_id, "sess-1");
         assert_eq!(config.provider_id, "prov-1");
         assert_eq!(config.provider_type, "openai");
         assert_eq!(config.model_id, "gpt-4o");

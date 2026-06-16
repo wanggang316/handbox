@@ -541,18 +541,45 @@ pub fn respond_to_approval(request_id: &str, decision: ApprovalDecision) {
 /// dangerous tool that clears the sandbox surfaces an approval request.
 pub struct PermissionExtension {
     manifest: ExtensionManifest,
+    /// The HandBox DB session id (UUID) this extension keys all approval state
+    /// off of: the pending-approval registry, the per-session always-allow set,
+    /// and the emitted `agent_approval_request` payload's `sessionId`.
+    ///
+    /// WHY NOT `cx.session_id` (the production-hang fix): the
+    /// [`ExtensionContext::session_id`] the host passes to the hook is the
+    /// VENDORED coding-agent's INTERNAL session id (an `s_<ts>_<…>` minted by
+    /// `SessionManager::in_memory()` because HandBox builds every session with
+    /// `no_session: true`), which is unrelated to HandBox's DB session UUID.
+    /// `coding_agent_runtime::abort_run` / `deny_pending_for_session` are called
+    /// with the HandBox UUID, so keying the pending registry off `cx.session_id`
+    /// meant an abort could NEVER match the entry it had to drop — a run parked
+    /// on an approval await would hang forever (the bare `rx.await` does not race
+    /// the cancel token). Likewise the always-allow set keyed off `cx.session_id`
+    /// degraded to per-turn: each `agent_run_stream` mints a FRESH in-memory
+    /// session (a new `s_…` id), so "始终允许" was never found again. Keying off
+    /// THIS field — the stable HandBox UUID threaded in at construction
+    /// ([`crate::services::coding_agent_session::build_agent_session`]) — makes
+    /// abort hit and always-allow persist across the session's turns.
+    session_id: String,
     /// Emitter pushing `agent_approval_request` to the frontend. `None` →
     /// fail-closed (deny every dangerous tool); see the type-level doc.
     emitter: Option<ApprovalEmitter>,
 }
 
 impl PermissionExtension {
-    /// Construct a permission extension.
+    /// Construct a permission extension bound to the HandBox DB `session_id`
+    /// (UUID).
+    ///
+    /// `session_id` is the stable HandBox session UUID this extension keys all
+    /// approval state off of (pending registry / always-allow / emit payload) —
+    /// NOT the coding-agent's internal `cx.session_id`. It MUST be the same id
+    /// `coding_agent_runtime::abort_run` is called with, or an abort cannot
+    /// unblock a parked approval await (see the `session_id` field doc).
     ///
     /// `emitter` is the approval-request channel: `Some` wires the frontend
     /// prompt + await; `None` makes the extension fail closed (deny dangerous
     /// tools), the safe default when there is no UI to consult.
-    pub fn new(emitter: Option<ApprovalEmitter>) -> Self {
+    pub fn new(session_id: String, emitter: Option<ApprovalEmitter>) -> Self {
         Self {
             manifest: ExtensionManifest {
                 name: PERMISSION_EXTENSION_NAME.to_string(),
@@ -570,6 +597,7 @@ impl PermissionExtension {
                 slash_commands: Vec::new(),
                 custom_tools: Vec::new(),
             },
+            session_id,
             emitter,
         }
     }
@@ -586,13 +614,19 @@ impl PermissionExtension {
     /// (once or always), `Cancel` on deny / fail-closed. Factored out of the
     /// trait method so the rendezvous is directly unit-testable. A non-dangerous
     /// tool never reaches here — the caller short-circuits it to `Continue`.
+    ///
+    /// All approval state is keyed off [`self.session_id`](PermissionExtension::session_id)
+    /// — the stable HandBox UUID, NOT the per-event `cx.session_id` — so an
+    /// `abort_run` (called with the HandBox UUID) can match and drop the pending
+    /// entry, and always-allow persists across the session's turns.
     async fn request_approval(
         &self,
-        session_id: &str,
         call_id: &str,
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> HookDecision {
+        let session_id = self.session_id.as_str();
+
         // SCOPE: a tool the user chose to always allow for THIS session runs
         // without prompting — no event emitted, no await. Checked first so a
         // remembered tool never re-surfaces an approval request.
@@ -665,7 +699,7 @@ impl Extension for PermissionExtension {
 
     async fn on_before_tool_call(
         &self,
-        cx: &ExtensionContext,
+        _cx: &ExtensionContext,
         event: &ToolCallEvent,
     ) -> Result<HookDecision, ExtensionError> {
         // Only the dangerous, side-effecting tools are approval-gated; read-only
@@ -674,13 +708,14 @@ impl Extension for PermissionExtension {
         if !DANGEROUS_TOOLS.contains(&event.tool_name.as_str()) {
             return Ok(HookDecision::Continue);
         }
+        // Key the approval rendezvous off `self.session_id` (the HandBox UUID),
+        // NOT `cx.session_id` (the coding-agent's internal in-memory id). Only
+        // the HandBox UUID matches the id `abort_run` / `deny_pending_for_session`
+        // use, so an aborted turn parked here can actually be unblocked, and
+        // always-allow keys off the same stable id across turns. The call_id /
+        // tool_name / args still come from the live event.
         Ok(self
-            .request_approval(
-                &cx.session_id,
-                &event.call_id,
-                &event.tool_name,
-                &event.arguments,
-            )
+            .request_approval(&event.call_id, &event.tool_name, &event.arguments)
             .await)
     }
 
@@ -1401,13 +1436,20 @@ mod tests {
     /// resolves.
     async fn approve_via_respond(decision: ApprovalDecision) -> (HookDecision, serde_json::Value) {
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        // The extension is keyed off its OWN HandBox session id now (not
+        // cx.session_id); the cx the hook receives is the coding-agent's internal
+        // id and no longer affects keying — use a distinct value to make that
+        // explicit (the emitted sessionId must be the ext's, "test-session").
+        let ext = Arc::new(PermissionExtension::new(
+            "test-session".to_string(),
+            Some(emitter),
+        ));
 
         let hook_ext = Arc::clone(&ext);
         let task = tokio::spawn(async move {
             hook_ext
                 .on_before_tool_call(
-                    &cx(Path::new("/tmp")),
+                    &cx_for_session("coding-agent-internal-id"),
                     &call_event("write", json!({ "path": "out.txt", "content": "data" })),
                 )
                 .await
@@ -1433,6 +1475,10 @@ mod tests {
         // consumes: { sessionId, callId, toolName, args, requestId }.
         assert_eq!(request.get("toolName").unwrap(), "write");
         assert_eq!(request.get("callId").unwrap(), "call-1");
+        // The emitted sessionId is the EXTENSION's HandBox session id
+        // ("test-session"), NOT the cx.session_id the hook was driven with
+        // ("coding-agent-internal-id") — the frontend routes the modal by this
+        // HandBox id, and abort keys off it.
         assert_eq!(request.get("sessionId").unwrap(), "test-session");
         assert_eq!(request.get("args").unwrap().get("path").unwrap(), "out.txt");
         assert!(
@@ -1536,7 +1582,7 @@ mod tests {
     /// is emitted (there is no emitter to emit through).
     #[tokio::test]
     async fn no_emitter_fails_closed_to_cancel() {
-        let ext = PermissionExtension::new(None);
+        let ext = PermissionExtension::new("fail-closed-session".to_string(), None);
         let decision = ext
             .on_before_tool_call(
                 &cx(Path::new("/tmp")),
@@ -1560,7 +1606,7 @@ mod tests {
     #[tokio::test]
     async fn read_only_tool_continues_without_requesting_approval() {
         let (emitter, recorded) = recording_emitter();
-        let ext = PermissionExtension::new(Some(emitter));
+        let ext = PermissionExtension::new("read-only-session".to_string(), Some(emitter));
 
         for tool in ["read", "ls", "grep", "find"] {
             let decision = ext
@@ -1664,26 +1710,36 @@ mod tests {
         panic!("fewer than {expected_count} approval requests were emitted within the bound");
     }
 
-    /// Drive a dangerous `write` call through the real permission hook for
-    /// `session_id` on a background task, resolve the request with `decision`,
-    /// and return the resolved `HookDecision`. `expected_count` is the running
-    /// total of requests the shared `recorded` sink should hold once THIS call's
-    /// request has landed (1 for the first call, 2 for the second, …), so the
-    /// helper resolves THIS call's request rather than a stale earlier one.
-    /// Mirrors the frontend round-trip for a SPECIFIC session.
+    /// A coding-agent-internal `ExtensionContext` whose `session_id` is the
+    /// vendored in-memory id (`s_…`-style) the host actually passes to the hook —
+    /// DELIBERATELY DIFFERENT from the HandBox session id the extension is keyed
+    /// off. Mirrors production, where `no_session: true` mints a fresh internal
+    /// id per turn that has nothing to do with HandBox's DB UUID. Driving the
+    /// hook with this proves the keying is off `self.session_id`, not `cx`.
+    fn cx_coding_agent_internal() -> ExtensionContext {
+        cx_for_session("s_coding_agent_internal_id")
+    }
+
+    /// Drive a dangerous `write` call through the real permission hook of `ext`
+    /// (which is keyed off its OWN HandBox session id) on a background task,
+    /// resolve the request with `decision`, and return the resolved
+    /// `HookDecision`. The hook is driven with a coding-agent-internal cx that
+    /// does NOT match the ext's HandBox id — proving keying is off the ext, not
+    /// the cx. `expected_count` is the running total of requests the shared
+    /// `recorded` sink should hold once THIS call's request has landed (1 for the
+    /// first call, 2 for the second, …), so the helper resolves THIS call's
+    /// request rather than a stale earlier one. Mirrors the frontend round-trip.
     async fn drive_write_for_session(
         ext: &Arc<PermissionExtension>,
-        session_id: &str,
         decision: ApprovalDecision,
         recorded: &Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
         expected_count: usize,
     ) -> HookDecision {
         let hook_ext = Arc::clone(ext);
-        let owned_session = session_id.to_string();
         let task = tokio::spawn(async move {
             hook_ext
                 .on_before_tool_call(
-                    &cx_for_session(&owned_session),
+                    &cx_coding_agent_internal(),
                     &call_event("write", json!({ "path": "out.txt", "content": "data" })),
                 )
                 .await
@@ -1695,18 +1751,19 @@ mod tests {
         task.await.expect("hook task joins")
     }
 
-    /// Drive a dangerous `write` call through the hook for `session_id`,
-    /// EXPECTING the always-allow short-circuit: the call must resolve WITHOUT
-    /// emitting a request (no prompt, no await). Returns the resolved decision.
+    /// Drive a dangerous `write` call through `ext`'s hook EXPECTING the
+    /// always-allow short-circuit: the call must resolve WITHOUT emitting a
+    /// request (no prompt, no await). Returns the resolved decision. Driven with
+    /// the coding-agent-internal cx so the short-circuit is provably off the
+    /// ext's HandBox session id.
     async fn drive_write_expecting_no_prompt(
         ext: &Arc<PermissionExtension>,
-        session_id: &str,
         recorded: &Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     ) -> HookDecision {
         let before = recorded.lock().unwrap().len();
         let decision = ext
             .on_before_tool_call(
-                &cx_for_session(session_id),
+                &cx_coding_agent_internal(),
                 &call_event("write", json!({ "path": "out.txt", "content": "data" })),
             )
             .await
@@ -1726,17 +1783,12 @@ mod tests {
     async fn allow_always_skips_prompt_for_same_session_same_tool() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        let ext = Arc::new(PermissionExtension::new(session_id.clone(), Some(emitter)));
 
-        // First call prompts and the user picks "始终允许" → allowed, remembered.
-        let first = drive_write_for_session(
-            &ext,
-            &session_id,
-            ApprovalDecision::AllowAlways,
-            &recorded,
-            1,
-        )
-        .await;
+        // First call prompts and the user picks "始终允许" → allowed, remembered
+        // against the ext's HandBox session id.
+        let first =
+            drive_write_for_session(&ext, ApprovalDecision::AllowAlways, &recorded, 1).await;
         assert!(
             matches!(first, HookDecision::Continue),
             "allow_always must resolve the first call to Continue"
@@ -1749,10 +1801,57 @@ mod tests {
 
         // Second call to the same tool in the same session: NO new request, and
         // it Continues directly off the remembered consent.
-        let second = drive_write_expecting_no_prompt(&ext, &session_id, &recorded).await;
+        let second = drive_write_expecting_no_prompt(&ext, &recorded).await;
         assert!(
             matches!(second, HookDecision::Continue),
             "a remembered tool must Continue without prompting"
+        );
+    }
+
+    /// VAL-CAPERM-008 (cross-turn, production wiring) — always-allow is keyed off
+    /// the STABLE HandBox session id, so it survives a FRESH `PermissionExtension`
+    /// built for the SAME HandBox session on the NEXT turn. This models the real
+    /// flow: every `agent_run_stream` mints a NEW coding-agent in-memory session
+    /// (a new `s_…` cx.session_id) and a NEW extension, yet the user's "始终允许"
+    /// from turn 1 must still be remembered in turn 2. The OLD code keyed off
+    /// `cx.session_id`, which changed every turn, degrading always-allow to
+    /// per-turn — this test would fail under that regression.
+    #[tokio::test]
+    async fn allow_always_persists_across_turns_for_same_handbox_session() {
+        let handbox_session_id = uuid::Uuid::new_v4().to_string();
+
+        // --- Turn 1: a fresh extension; user picks "始终允许 write". ---
+        let (emitter1, recorded1) = recording_emitter();
+        let ext_turn1 = Arc::new(PermissionExtension::new(
+            handbox_session_id.clone(),
+            Some(emitter1),
+        ));
+        let first =
+            drive_write_for_session(&ext_turn1, ApprovalDecision::AllowAlways, &recorded1, 1).await;
+        assert!(
+            matches!(first, HookDecision::Continue),
+            "turn 1 allow_always resolves to Continue"
+        );
+        assert_eq!(recorded1.lock().unwrap().len(), 1, "turn 1 prompts once");
+
+        // --- Turn 2: a BRAND-NEW extension for the SAME HandBox session (as a
+        // second agent_run_stream would build), with its OWN fresh sink. The
+        // remembered consent must short-circuit the prompt — NO new request. ---
+        let (emitter2, recorded2) = recording_emitter();
+        let ext_turn2 = Arc::new(PermissionExtension::new(
+            handbox_session_id.clone(),
+            Some(emitter2),
+        ));
+        let second = drive_write_expecting_no_prompt(&ext_turn2, &recorded2).await;
+        assert!(
+            matches!(second, HookDecision::Continue),
+            "a tool always-allowed in turn 1 must Continue without prompting in turn 2 — \
+             keyed off the stable HandBox session id, not the per-turn cx.session_id"
+        );
+        assert!(
+            recorded2.lock().unwrap().is_empty(),
+            "turn 2 must NOT re-prompt: always-allow persists across turns of the same \
+             HandBox session (not degraded to per-turn)"
         );
     }
 
@@ -1762,26 +1861,24 @@ mod tests {
     async fn allow_always_does_not_cross_sessions() {
         let session_a = uuid::Uuid::new_v4().to_string();
         let session_b = uuid::Uuid::new_v4().to_string();
+        // One shared sink; a distinct extension per HandBox session (each session
+        // gets its own extension in production). The extensions share the sink so
+        // we can read both emitted requests back.
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        let ext_a = Arc::new(PermissionExtension::new(
+            session_a.clone(),
+            Some(emitter.clone()),
+        ));
+        let ext_b = Arc::new(PermissionExtension::new(session_b.clone(), Some(emitter)));
 
         // Session A: always-allow `write`.
-        let a = drive_write_for_session(
-            &ext,
-            &session_a,
-            ApprovalDecision::AllowAlways,
-            &recorded,
-            1,
-        )
-        .await;
+        let a = drive_write_for_session(&ext_a, ApprovalDecision::AllowAlways, &recorded, 1).await;
         assert!(matches!(a, HookDecision::Continue));
         assert_eq!(recorded.lock().unwrap().len(), 1);
 
         // Session B: the SAME tool still prompts (a second request is emitted)
         // and awaits — A's standing consent does not leak into B.
-        let b =
-            drive_write_for_session(&ext, &session_b, ApprovalDecision::AllowOnce, &recorded, 2)
-                .await;
+        let b = drive_write_for_session(&ext_b, ApprovalDecision::AllowOnce, &recorded, 2).await;
         assert!(matches!(b, HookDecision::Continue));
         assert_eq!(
             recorded.lock().unwrap().len(),
@@ -1805,20 +1902,16 @@ mod tests {
     async fn allow_once_does_not_remember_for_next_call() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        let ext = Arc::new(PermissionExtension::new(session_id.clone(), Some(emitter)));
 
         // First call: allow once.
-        let first =
-            drive_write_for_session(&ext, &session_id, ApprovalDecision::AllowOnce, &recorded, 1)
-                .await;
+        let first = drive_write_for_session(&ext, ApprovalDecision::AllowOnce, &recorded, 1).await;
         assert!(matches!(first, HookDecision::Continue));
         assert_eq!(recorded.lock().unwrap().len(), 1);
 
         // Second call to the same tool: it prompts AGAIN (a second request is
         // emitted) — allow_once left no memory.
-        let second =
-            drive_write_for_session(&ext, &session_id, ApprovalDecision::AllowOnce, &recorded, 2)
-                .await;
+        let second = drive_write_for_session(&ext, ApprovalDecision::AllowOnce, &recorded, 2).await;
         assert!(matches!(second, HookDecision::Continue));
         assert_eq!(
             recorded.lock().unwrap().len(),
@@ -1864,6 +1957,24 @@ mod tests {
             !is_session_allow_always(&fresh_session, "write"),
             "always-allow is per-session: another session is not allowed"
         );
+
+        // CROSS-TURN (the keying fix): the memory is keyed off the STABLE HandBox
+        // session id, so a BRAND-NEW PermissionExtension built for the SAME
+        // session — as a second `build_agent_session` / `agent_run_stream` would
+        // do — still sees the recorded consent and short-circuits the prompt. This
+        // is the property that broke when keying off the per-turn cx.session_id.
+        let (emitter, recorded_sink) = recording_emitter();
+        let ext_next_turn = Arc::new(PermissionExtension::new(
+            recorded_session.clone(),
+            Some(emitter),
+        ));
+        let next_turn = drive_write_expecting_no_prompt(&ext_next_turn, &recorded_sink).await;
+        assert!(
+            matches!(next_turn, HookDecision::Continue),
+            "a fresh extension for the same HandBox session must still honour the \
+             recorded always-allow (no re-prompt) — proving the memory survives a \
+             new build_agent_session, not just the same extension instance"
+        );
     }
 
     #[test]
@@ -1891,7 +2002,7 @@ mod tests {
 
     #[test]
     fn permission_manifest_declares_before_tool_call_capability_and_distinct_name() {
-        let ext = PermissionExtension::new(None);
+        let ext = PermissionExtension::new("manifest-session".to_string(), None);
         let m = ext.manifest();
         assert_eq!(m.name, PERMISSION_EXTENSION_NAME);
         assert_ne!(
@@ -1933,7 +2044,7 @@ mod tests {
     #[tokio::test]
     async fn read_only_tools_never_emit_an_approval_request() {
         let (emitter, recorded) = recording_emitter();
-        let ext = PermissionExtension::new(Some(emitter));
+        let ext = PermissionExtension::new("read-only-edge-session".to_string(), Some(emitter));
 
         // The read-only subset of the path-sandboxed tools — i.e. the ones that
         // are NOT in DANGEROUS_TOOLS. (Since M2 widened PATH_SANDBOXED_TOOLS to
@@ -1980,7 +2091,7 @@ mod tests {
     #[tokio::test]
     async fn illegal_args_never_reach_the_hook_so_no_request_is_emitted() {
         let (emitter, recorded) = recording_emitter();
-        let ext = PermissionExtension::new(Some(emitter));
+        let ext = PermissionExtension::new("illegal-args-session".to_string(), Some(emitter));
 
         // Upstream: invalid args → Immediate error in `prepare_tool_call`, BEFORE
         // `before_tool_call`. So for an illegal-arg dangerous call the hook is
@@ -1994,7 +2105,7 @@ mod tests {
         // Sanity floor: a VALID dangerous call that DOES reach the hook is what
         // emits — proving the emit is gated on the hook firing, not on the tool
         // name alone. (Fail-closed deny so the spawned await resolves.)
-        let no_emitter = PermissionExtension::new(None);
+        let no_emitter = PermissionExtension::new("illegal-args-floor-session".to_string(), None);
         let _ = no_emitter
             .on_before_tool_call(
                 &cx(Path::new("/tmp")),
@@ -2051,14 +2162,16 @@ mod tests {
     async fn dropped_response_resolves_await_to_cancel_not_hang() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        // The ext is keyed off the HandBox session id; the hook is driven with a
+        // DIFFERENT coding-agent-internal cx, so the drop must match off the
+        // ext's id, not cx's.
+        let ext = Arc::new(PermissionExtension::new(session_id.clone(), Some(emitter)));
 
         let hook_ext = Arc::clone(&ext);
-        let owned_session = session_id.clone();
         let task = tokio::spawn(async move {
             hook_ext
                 .on_before_tool_call(
-                    &cx_for_session(&owned_session),
+                    &cx_coding_agent_internal(),
                     &call_event("write", json!({ "path": "out.txt", "content": "data" })),
                 )
                 .await
@@ -2090,21 +2203,25 @@ mod tests {
     async fn deny_pending_for_session_unblocks_awaiting_hook_to_cancel() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        // The ext keys its pending registry off the HandBox session id; the hook
+        // runs against a DIFFERENT coding-agent-internal cx (as in production).
+        // The abort uses the HandBox id — it can only match because the registry
+        // is keyed off the ext's id, not the cx's.
+        let ext = Arc::new(PermissionExtension::new(session_id.clone(), Some(emitter)));
 
         let hook_ext = Arc::clone(&ext);
-        let owned_session = session_id.clone();
         let task = tokio::spawn(async move {
             hook_ext
                 .on_before_tool_call(
-                    &cx_for_session(&owned_session),
+                    &cx_coding_agent_internal(),
                     &call_event("bash", json!({ "command": "rm -rf /" })),
                 )
                 .await
                 .expect("permission hook never returns Err")
         });
 
-        // Turn is parked on the approval await. Abort denies the pending request.
+        // Turn is parked on the approval await. Abort denies the pending request
+        // keyed by the HandBox session id (different from the cx that drove it).
         await_request_id(&recorded).await;
         deny_pending_for_session(&session_id);
 
@@ -2269,7 +2386,7 @@ mod tests {
         let fx = fixture();
         let sandbox = ext(&fx.root);
         let (emitter, recorded) = recording_emitter();
-        let permission = PermissionExtension::new(Some(emitter));
+        let permission = PermissionExtension::new("chain-read-session".to_string(), Some(emitter));
 
         let abs = fx.outside_secret.to_string_lossy().into_owned();
         let event = call_event("read", json!({ "path": abs }));
@@ -2295,7 +2412,7 @@ mod tests {
         let fx = fixture();
         let sandbox = ext(&fx.root);
         let (emitter, recorded) = recording_emitter();
-        let permission = PermissionExtension::new(Some(emitter));
+        let permission = PermissionExtension::new("chain-ls-session".to_string(), Some(emitter));
 
         let outside_dir = fx.outside_secret.parent().unwrap().to_path_buf();
         let abs = outside_dir.to_string_lossy().into_owned();
@@ -2329,27 +2446,29 @@ mod tests {
     async fn responding_to_one_session_does_not_resolve_another_pending() {
         let session_a = uuid::Uuid::new_v4().to_string();
         let session_b = uuid::Uuid::new_v4().to_string();
+        // One shared sink; a distinct extension per HandBox session (as in
+        // production — each session has its own extension keyed off its UUID).
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        let ext_a = Arc::new(PermissionExtension::new(
+            session_a.clone(),
+            Some(emitter.clone()),
+        ));
+        let ext_b = Arc::new(PermissionExtension::new(session_b.clone(), Some(emitter)));
 
         // Park BOTH sessions on a pending `write` approval (each on its own task).
-        let ext_a = Arc::clone(&ext);
-        let sess_a = session_a.clone();
         let task_a = tokio::spawn(async move {
             ext_a
                 .on_before_tool_call(
-                    &cx_for_session(&sess_a),
+                    &cx_coding_agent_internal(),
                     &call_event("write", json!({ "path": "a.txt", "content": "A" })),
                 )
                 .await
                 .expect("permission hook never returns Err")
         });
-        let ext_b = Arc::clone(&ext);
-        let sess_b = session_b.clone();
         let task_b = tokio::spawn(async move {
             ext_b
                 .on_before_tool_call(
-                    &cx_for_session(&sess_b),
+                    &cx_coding_agent_internal(),
                     &call_event("write", json!({ "path": "b.txt", "content": "B" })),
                 )
                 .await
@@ -2420,11 +2539,10 @@ mod tests {
     async fn deny_does_not_remember_so_resend_reprompts() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let (emitter, recorded) = recording_emitter();
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        let ext = Arc::new(PermissionExtension::new(session_id.clone(), Some(emitter)));
 
         // First call: the user denies.
-        let first =
-            drive_write_for_session(&ext, &session_id, ApprovalDecision::Deny, &recorded, 1).await;
+        let first = drive_write_for_session(&ext, ApprovalDecision::Deny, &recorded, 1).await;
         assert!(
             matches!(first, HookDecision::Cancel(_)),
             "a denied call Cancels"
@@ -2439,8 +2557,7 @@ mod tests {
 
         // The model re-sends the SAME tool: it prompts AGAIN (a second request is
         // emitted and awaited) — deny is never remembered.
-        let second =
-            drive_write_for_session(&ext, &session_id, ApprovalDecision::Deny, &recorded, 2).await;
+        let second = drive_write_for_session(&ext, ApprovalDecision::Deny, &recorded, 2).await;
         assert!(matches!(second, HookDecision::Cancel(_)));
         assert_eq!(
             recorded.lock().unwrap().len(),

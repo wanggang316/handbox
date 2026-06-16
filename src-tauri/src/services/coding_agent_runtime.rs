@@ -1511,13 +1511,23 @@ mod tests {
         assert!(!is_registered(&session_id));
     }
 
-    /// VAL-CAPERM-016 (abort承重, end-to-end) — `abort_run` not only flips the
-    /// cancel token but ALSO fail-closes any approval the turn is parked on. The
-    /// permission hook awaits on a BARE `rx.await` that does not race the cancel
-    /// token, so without the second leg the awaiting tool call would hang and a
-    /// late "allow" could still run the tool. Here a real permission hook is
-    /// parked on a `bash` approval for a registered session; `abort_run` must
-    /// unblock it to `Cancel` (the dangerous tool never runs).
+    /// VAL-CAPERM-016 (abort承重, end-to-end, REALISTIC id mismatch) — `abort_run`
+    /// not only flips the cancel token but ALSO fail-closes any approval the turn
+    /// is parked on. The permission hook awaits on a BARE `rx.await` that does not
+    /// race the cancel token, so without the second leg the awaiting tool call
+    /// would hang and a late "allow" could still run the tool.
+    ///
+    /// This test reproduces the PRODUCTION wiring the old version masked: the
+    /// permission hook is driven with the coding-agent's INTERNAL in-memory
+    /// `ExtensionContext.session_id` (an `s_…`-style id minted by
+    /// `SessionManager::in_memory()` because HandBox builds sessions with
+    /// `no_session: true`), which is DELIBERATELY DIFFERENT from the HandBox
+    /// session UUID `abort_run` is called with. The extension is constructed with
+    /// the HandBox UUID, so it keys its pending registry off THAT — meaning the
+    /// abort can match and drop the entry even though the cx id differs. The OLD
+    /// test faked `cx.session_id == abort id`, hiding the bug where production
+    /// keyed the registry off the (mismatched) cx id and the abort never matched
+    /// → permanent hang.
     #[tokio::test]
     async fn abort_run_unblocks_a_pending_approval_to_cancel() {
         use crate::services::agent_permission::{PermissionExtension, APPROVAL_REQUEST_EVENT};
@@ -1525,11 +1535,23 @@ mod tests {
         use hand_coding_agent::{Extension, ExtensionContext, HookDecision};
         use std::path::Path;
 
-        let session_id = fresh_session_id();
-        // Register the run's controls (as `drive_agent_run` would), so `abort_run`
-        // finds the session and flips its token. The pending-approval fail-close
-        // is keyed off the SAME session_id.
-        let (_cancel, _steering) = register_test_run(&session_id);
+        // The HandBox DB session UUID: what the IPC layer passes to `abort_run`
+        // and what `build_agent_session` threads into the PermissionExtension.
+        let handbox_session_id = fresh_session_id();
+        // The coding-agent's INTERNAL in-memory session id: what the host actually
+        // puts in `cx.session_id` for this turn. UNRELATED to the HandBox UUID —
+        // exactly the mismatch the production hang stemmed from.
+        let coding_agent_internal_id = format!("s_{}_internal", uuid::Uuid::new_v4());
+        assert_ne!(
+            handbox_session_id, coding_agent_internal_id,
+            "the cx id and the HandBox id must differ — this is the production reality"
+        );
+
+        // Register the run's controls (as `drive_agent_run` would) under the
+        // HandBox UUID, so `abort_run(handbox_session_id)` finds the session and
+        // flips its token. The pending-approval fail-close is keyed off the SAME
+        // HandBox UUID.
+        let (_cancel, _steering) = register_test_run(&handbox_session_id);
 
         // A recording emitter so we can wait for the approval request to land
         // before aborting (otherwise we'd race the await registration).
@@ -1539,13 +1561,21 @@ mod tests {
             Arc::new(move |payload| sink.lock().unwrap().push(payload));
         assert_eq!(APPROVAL_REQUEST_EVENT, "agent_approval_request");
 
-        let ext = Arc::new(PermissionExtension::new(Some(emitter)));
+        // The extension is keyed off the HandBox UUID (as build_agent_session
+        // wires it), NOT the cx id the hook is driven with.
+        let ext = Arc::new(PermissionExtension::new(
+            handbox_session_id.clone(),
+            Some(emitter),
+        ));
         let hook_ext = Arc::clone(&ext);
-        let hook_session = session_id.clone();
+        let hook_cx_id = coding_agent_internal_id.clone();
         let task = tokio::spawn(async move {
+            // The host passes the coding-agent INTERNAL id here — different from
+            // the HandBox UUID. The pending registry must key off the ext's
+            // HandBox id, or this await can never be unblocked by the abort.
             let cx = ExtensionContext {
                 cwd: Path::new("/tmp").to_path_buf(),
-                session_id: hook_session,
+                session_id: hook_cx_id,
                 data_dir: Path::new("/tmp").join(".hand").join("data"),
             };
             let event = ToolCallEvent {
@@ -1570,19 +1600,29 @@ mod tests {
             !recorded.lock().unwrap().is_empty(),
             "the dangerous tool must have emitted an approval request before abort"
         );
+        // The emitted sessionId is the HandBox UUID (what the frontend routes by),
+        // not the coding-agent internal id — pin that the payload carries the
+        // right key.
+        assert_eq!(
+            recorded.lock().unwrap()[0].get("sessionId").unwrap(),
+            &Value::String(handbox_session_id.clone()),
+            "the approval request must carry the HandBox session id, not the cx id"
+        );
 
-        // Abort: flips the token AND fail-closes the pending approval.
-        abort_run(&session_id);
+        // Abort with the HandBox UUID: flips the token AND fail-closes the pending
+        // approval keyed off that same UUID (the cx id is irrelevant to the match).
+        abort_run(&handbox_session_id);
 
         let decision = task
             .await
             .expect("hook task joins after abort (did not hang)");
         assert!(
             matches!(decision, HookDecision::Cancel(_)),
-            "abort_run must fail-close the pending approval to Cancel — the bash tool must not run"
+            "abort_run must fail-close the pending approval to Cancel even though the \
+             cx.session_id differs from the abort id — the bash tool must not run"
         );
 
-        deregister_run(&session_id);
+        deregister_run(&handbox_session_id);
     }
 
     /// After a run deregisters (its closed emit site fired), a steer / abort for
