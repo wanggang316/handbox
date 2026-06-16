@@ -341,4 +341,263 @@ mod tests {
             .expect_err("a session with no model must error");
         assert_eq!(err.code, "VALIDATION_ERROR");
     }
+
+    // -----------------------------------------------------------------
+    // Read-only tool execution (read / ls / grep / find)
+    //
+    // These tools are coding-agent built-ins; HandBox does NOT reimplement
+    // their logic. The tests below lock in that, once `create_default_tools`
+    // registers them against a HandBox working directory, the AgentTool's
+    // `execute` closure actually runs and returns the expected ToolResult
+    // content (and surfaces a recoverable error — not a panic — on a missing
+    // required parameter).
+    //
+    // Invoke pattern (reused by later sandbox / dangerous-deny features):
+    // build the tool set with `create_default_tools(cwd)`, find the tool by
+    // name, then drive its `execute` closure directly with a hand-built
+    // `ToolExecuteCtx`. The closure is async and returns
+    // `Result<ToolResult, ToolError>`; built-in tools report failures as a
+    // text `ToolResult` (via `ToolResult::error`) rather than `Err`, so the
+    // error rides back as the first text block instead of aborting the turn.
+    // -----------------------------------------------------------------
+
+    use base64::Engine;
+    use hand_agent::{CancellationToken, ToolExecuteCtx, ToolResult};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    /// Pull a built-in tool out of the default set by its registered name.
+    /// Panics with a clear message if the tool is not present, so a wiring
+    /// regression (tool dropped from `create_default_tools`) surfaces as a
+    /// test failure rather than a silent skip.
+    fn builtin_tool(cwd: &std::path::Path, name: &str) -> hand_agent::AgentTool {
+        create_default_tools(cwd)
+            .into_iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("built-in tool `{name}` not registered"))
+    }
+
+    /// Drive a tool's `execute` closure directly and return its `ToolResult`.
+    /// Mirrors the agent loop's call shape without spinning up a session.
+    async fn invoke_tool(tool: &hand_agent::AgentTool, args: serde_json::Value) -> ToolResult {
+        let ctx = ToolExecuteCtx {
+            tool_call_id: "tc-test".to_string(),
+            args,
+            cancel: CancellationToken::new(),
+            on_update: Arc::new(|_: ToolResult| {}),
+        };
+        (tool.execute)(ctx)
+            .await
+            .expect("built-in tool execute closure should not return Err")
+    }
+
+    /// First text content block of a `ToolResult`.
+    fn result_text(result: &ToolResult) -> &str {
+        match &result.content[0] {
+            hand_ai_model::ToolResultContent::Text(t) => &t.text,
+            other => panic!("expected first content block to be text, got: {other:?}"),
+        }
+    }
+
+    /// VAL-CATOOLS-002 — `read` returns the verbatim content of a text file
+    /// inside the working directory and feeds it back.
+    #[tokio::test]
+    async fn read_tool_returns_text_file_content() {
+        let cwd = TempDir::new().unwrap();
+        let body = "alpha\nbeta\ngamma\n";
+        std::fs::write(cwd.path().join("notes.txt"), body).unwrap();
+
+        let tool = builtin_tool(cwd.path(), "read");
+        let result = invoke_tool(&tool, json!({ "path": "notes.txt" })).await;
+
+        assert_eq!(
+            result_text(&result),
+            body,
+            "read must feed back the file's raw content"
+        );
+    }
+
+    /// VAL-CATOOLS-009 — reading an image file renders a thumbnail marker
+    /// (`Read image file [mime]`) plus an image content block, instead of
+    /// dumping raw bytes as text.
+    #[tokio::test]
+    async fn read_tool_renders_image_marker_and_image_block() {
+        let cwd = TempDir::new().unwrap();
+        // 1×1 transparent PNG, the same fixture coding-agent uses to anchor
+        // image detection by file-magic.
+        let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==";
+        let png_bytes = base64::engine::general_purpose::STANDARD
+            .decode(png_b64)
+            .unwrap();
+        std::fs::write(cwd.path().join("pixel.png"), &png_bytes).unwrap();
+
+        let tool = builtin_tool(cwd.path(), "read");
+        let result = invoke_tool(&tool, json!({ "path": "pixel.png" })).await;
+
+        assert!(
+            result_text(&result).contains("Read image file [image/png]"),
+            "image read must carry the thumbnail marker, got: {}",
+            result_text(&result)
+        );
+        let has_image_block = result
+            .content
+            .iter()
+            .any(|c| matches!(c, hand_ai_model::ToolResultContent::Image(_)));
+        assert!(
+            has_image_block,
+            "image read must include an image content block"
+        );
+    }
+
+    /// VAL-CATOOLS-010 — a large file is truncated and the footer carries a
+    /// continuation hint containing `offset=` so the model knows how to read
+    /// the rest.
+    #[tokio::test]
+    async fn read_tool_truncates_large_file_with_offset_hint() {
+        let cwd = TempDir::new().unwrap();
+        // 2500 lines exceeds the default 2000-line cap, triggering the
+        // line-truncation footer.
+        let content: String = (1..=2500)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(cwd.path().join("big.txt"), &content).unwrap();
+
+        let tool = builtin_tool(cwd.path(), "read");
+        let result = invoke_tool(&tool, json!({ "path": "big.txt" })).await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("offset="),
+            "truncation footer must carry an offset= continuation hint, tail: {}",
+            &text[text.len().saturating_sub(120)..]
+        );
+        assert!(
+            !text.contains("Line 2001"),
+            "lines past the 2000-line cap must be truncated, not returned"
+        );
+    }
+
+    /// VAL-CATOOLS-003 — `ls` lists entries with directories first and file
+    /// sizes alongside file entries.
+    #[tokio::test]
+    async fn ls_tool_lists_entries_dirs_first_with_sizes() {
+        let cwd = TempDir::new().unwrap();
+        std::fs::write(cwd.path().join("z_file.txt"), "hello").unwrap();
+        std::fs::create_dir(cwd.path().join("a_dir")).unwrap();
+
+        let tool = builtin_tool(cwd.path(), "ls");
+        let result = invoke_tool(&tool, json!({})).await;
+        let text = result_text(&result);
+
+        let dir_pos = text
+            .find("a_dir/")
+            .expect("directory entry must appear with a trailing slash");
+        let file_pos = text.find("z_file.txt").expect("file entry must appear");
+        assert!(
+            dir_pos < file_pos,
+            "directories must be listed before files"
+        );
+        // The file entry carries its size (5 bytes → "5 B").
+        assert!(
+            text.contains("z_file.txt (5 B)"),
+            "file entries must carry a size, got: {text}"
+        );
+    }
+
+    /// VAL-CATOOLS-004 — `grep` prefixes each hit with `path:linenum:`.
+    #[tokio::test]
+    async fn grep_tool_hit_shows_path_and_line_prefix() {
+        let cwd = TempDir::new().unwrap();
+        std::fs::write(
+            cwd.path().join("haystack.txt"),
+            "first line\nNEEDLE here\nthird line\n",
+        )
+        .unwrap();
+
+        let tool = builtin_tool(cwd.path(), "grep");
+        let result = invoke_tool(&tool, json!({ "pattern": "NEEDLE" })).await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("NEEDLE"),
+            "match content must surface: {text}"
+        );
+        // The hit line carries a `…haystack.txt:2:` prefix (file path, then
+        // `:linenum:`). The needle sits on line 2 of the fixture.
+        assert!(
+            text.contains("haystack.txt:2:"),
+            "grep hit must carry a `path:linenum:` prefix, got: {text}"
+        );
+    }
+
+    /// VAL-CATOOLS-012 — `grep` with no matches is a completed (not failed)
+    /// result whose text is exactly `No matches found.`.
+    #[tokio::test]
+    async fn grep_tool_no_match_is_completed_no_matches_found() {
+        let cwd = TempDir::new().unwrap();
+        std::fs::write(cwd.path().join("haystack.txt"), "nothing relevant here\n").unwrap();
+
+        let tool = builtin_tool(cwd.path(), "grep");
+        let result = invoke_tool(&tool, json!({ "pattern": "absent_token_zzz_9999" })).await;
+
+        assert_eq!(
+            result_text(&result),
+            "No matches found.",
+            "a clean miss is the completed `No matches found.` state"
+        );
+    }
+
+    /// VAL-CATOOLS-005 — `find` lists files matching a glob pattern (and only
+    /// the matching ones).
+    #[tokio::test]
+    async fn find_tool_lists_glob_matches() {
+        let cwd = TempDir::new().unwrap();
+        std::fs::create_dir_all(cwd.path().join("sub")).unwrap();
+        std::fs::write(cwd.path().join("a.rs"), "").unwrap();
+        std::fs::write(cwd.path().join("sub").join("b.rs"), "").unwrap();
+        std::fs::write(cwd.path().join("c.txt"), "").unwrap();
+
+        let tool = builtin_tool(cwd.path(), "find");
+        let result = invoke_tool(&tool, json!({ "pattern": "**/*.rs" })).await;
+        let text = result_text(&result);
+
+        assert!(
+            text.contains("a.rs"),
+            "top-level glob match must appear: {text}"
+        );
+        assert!(
+            text.contains("b.rs"),
+            "nested glob match must appear: {text}"
+        );
+        assert!(
+            !text.contains("c.txt"),
+            "non-matching files must be excluded: {text}"
+        );
+    }
+
+    /// VAL-CATOOLS-011 — a missing required parameter fails the call but feeds
+    /// the error back as a `ToolResult` (`Missing required parameter: <name>`)
+    /// instead of returning `Err` and aborting the turn. Verified on both
+    /// `read` (missing `path`) and `grep` (missing `pattern`).
+    #[tokio::test]
+    async fn missing_required_param_feeds_back_error_result() {
+        let cwd = TempDir::new().unwrap();
+
+        let read_tool = builtin_tool(cwd.path(), "read");
+        let read_result = invoke_tool(&read_tool, json!({})).await;
+        assert_eq!(
+            result_text(&read_result),
+            "Missing required parameter: path",
+            "read without `path` must feed back the missing-parameter error"
+        );
+
+        let grep_tool = builtin_tool(cwd.path(), "grep");
+        let grep_result = invoke_tool(&grep_tool, json!({})).await;
+        assert_eq!(
+            result_text(&grep_result),
+            "Missing required parameter: pattern",
+            "grep without `pattern` must feed back the missing-parameter error"
+        );
+    }
 }
