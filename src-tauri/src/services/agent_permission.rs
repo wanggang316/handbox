@@ -16,10 +16,12 @@
 //!
 //! SCOPE OF THIS FEATURE
 //! ----------------------
-//! This feature enforces the boundary for the READ-ONLY tools `read` and `ls`
-//! only. `write`/`edit` get the same path boundary in a later milestone (M2),
-//! and `bash` is intentionally NOT path-sandboxed here (it is gated by the
-//! approval flow, not by path containment). The deny/approval surface
+//! This feature enforces the boundary for ALL of the READ-ONLY path tools:
+//! `read`, `ls`, `grep`, and `find`. They share one `path` argument and one
+//! containment rule, so they ride a single sandbox table. `write`/`edit` get
+//! the same path boundary in a later milestone (M2), and `bash` is
+//! intentionally NOT path-sandboxed here (it is gated by the approval flow,
+//! not by path containment). The deny/approval surface
 //! (m1-dangerous-deny-stub, M2 approval) layers ON TOP of this extension —
 //! see [`SandboxExtension`] for the extension points designed for that reuse.
 //!
@@ -61,17 +63,26 @@ const OUT_OF_SANDBOX_REASON: &str = "blocked: path is outside the working direct
 /// working directory. `write`/`edit` are added by the M2 boundary; `bash` is
 /// never path-sandboxed (it is approval-gated instead).
 ///
-/// Both `read` and `ls` declare a string `path` parameter resolved relative to
-/// the cwd. `ls` may omit `path` (it then lists the cwd itself, which is in
-/// bounds), so a missing/non-string `path` is treated as in-bounds rather than
-/// a violation.
-const PATH_SANDBOXED_TOOLS: &[&str] = &["read", "ls"];
+/// All four declare the SAME string `path` parameter resolved relative to the
+/// cwd (verified against the coding-agent tool schemas: read/ls, and
+/// grep/find's `path` arg — "Directory or file to search in (default: cwd)").
+/// `ls`/`grep`/`find` may omit `path` (they then operate on the cwd itself,
+/// which is in bounds), so a missing/non-string `path` is treated as in-bounds
+/// rather than a violation. `grep`/`find` are confined here because the
+/// upstream tools apply NO containment of their own: an absolute `path` is used
+/// as-is and a leading `~` would expand to `$HOME`, letting an unsandboxed
+/// `grep`/`find` read file contents / list filenames anywhere on disk — the
+/// exact escape this boundary forbids for `read`/`ls`.
+const PATH_SANDBOXED_TOOLS: &[&str] = &["read", "ls", "grep", "find"];
 
 /// The dangerous, side-effecting tools the M1 deny stub blocks outright:
 /// `write`/`edit` mutate the filesystem and `bash` runs arbitrary subprocesses.
 /// Until the M2 approval UI exists there is no safe way to consent to these, so
-/// every call is denied. Read-only tools (`read`/`ls`/`grep`/`find`) are absent
-/// and pass straight through (the sandbox boundary still confines `read`/`ls`).
+/// every call is denied. The read-only tools (`read`/`ls`/`grep`/`find`) are
+/// absent from this deny table and pass straight through it — but they are NOT
+/// unguarded: each is path-confined to the working directory by
+/// [`SandboxExtension`] / [`PATH_SANDBOXED_TOOLS`], so an out-of-cwd target is
+/// still `Cancel`led there.
 const DANGEROUS_TOOLS: &[&str] = &["write", "edit", "bash"];
 
 /// Tier-1 extension that re-imposes the `working_dir` sandbox boundary on the
@@ -106,7 +117,7 @@ impl SandboxExtension {
                 name: EXTENSION_NAME.to_string(),
                 version: "0.1.0".to_string(),
                 description: Some(
-                    "Confines read-only file tools (read/ls) to the session working directory."
+                    "Confines read-only file tools (read/ls/grep/find) to the session working directory."
                         .to_string(),
                 ),
                 capabilities: ExtensionCapabilities {
@@ -130,7 +141,8 @@ impl SandboxExtension {
     /// confined tool, the `path` argument (when present and a string) is run
     /// through [`resolve_in_sandbox`]: an `Err` (escape / invalid / unresolved)
     /// becomes a generic [`HookDecision::Cancel`]; an in-bounds path or an
-    /// absent/non-string `path` (e.g. `ls` of the cwd) is allowed.
+    /// absent/non-string `path` (e.g. `ls`/`grep`/`find` over the cwd) is
+    /// allowed.
     fn decide(&self, tool_name: &str, arguments: &serde_json::Value) -> HookDecision {
         if !PATH_SANDBOXED_TOOLS.contains(&tool_name) {
             return HookDecision::Continue;
@@ -470,9 +482,11 @@ mod tests {
     #[tokio::test]
     async fn non_sandboxed_tool_is_always_continued() {
         let fx = fixture();
-        // `bash` is NOT path-sandboxed here even with a path-shaped arg; and an
-        // unrelated tool likewise passes through untouched.
-        for tool in ["bash", "grep", "write", "edit"] {
+        // `bash`/`write`/`edit` are NOT path-sandboxed here even with a
+        // path-shaped arg (the deny stub gates them instead); an unrelated
+        // tool likewise passes through untouched. `grep`/`find` are deliberately
+        // ABSENT — they ARE path-confined now, see the grep/find tests below.
+        for tool in ["bash", "write", "edit"] {
             let decision = decide_via_hook(
                 &ext(&fx.root),
                 &fx.root,
@@ -482,9 +496,159 @@ mod tests {
             .await;
             assert!(
                 matches!(decision, HookDecision::Continue),
-                "{tool} must pass through the read/ls-only sandbox"
+                "{tool} must pass through the read/ls/grep/find path sandbox"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // VAL-CATOOLS-014 (grep/find coverage) — `grep`/`find` share the SAME
+    // `path` argument and containment rule as `read`/`ls`. The upstream tools
+    // apply no containment (absolute path used as-is, `~` expands to $HOME), so
+    // without this boundary an injected `grep ~/.ssh/...` or `find /` would
+    // read out-of-cwd file contents / filenames. Confining them here makes the
+    // out-of-sandbox target `Cancel`led (never executed) just like read/ls.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn grep_absolute_outside_path_is_cancelled() {
+        let fx = fixture();
+        // `grep`'s `path` is "Directory or file to search in" — an absolute
+        // out-of-cwd target (e.g. searching ~/.aws) must be refused so the
+        // model never reads file CONTENTS outside the sandbox.
+        let outside_dir = fx.outside_secret.parent().unwrap().to_path_buf();
+        let abs = outside_dir.to_string_lossy().into_owned();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "grep",
+            json!({ "pattern": "SECRET", "path": abs }),
+        )
+        .await;
+        assert_cancel_no_leak(&decision, &outside_dir);
+    }
+
+    #[tokio::test]
+    async fn grep_system_absolute_path_is_cancelled() {
+        let fx = fixture();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "grep",
+            json!({ "pattern": "root", "path": "/etc" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Cancel(_)));
+    }
+
+    #[tokio::test]
+    async fn grep_tilde_path_is_cancelled_not_expanded() {
+        let fx = fixture();
+        // `~/...` must be REFUSED at the boundary, never expanded to $HOME.
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "grep",
+            json!({ "pattern": "id_rsa", "path": "~/.ssh" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Cancel(_)));
+    }
+
+    #[tokio::test]
+    async fn grep_without_path_continues() {
+        let fx = fixture();
+        // Omitting `path` defaults to the cwd (in bounds), so the call is
+        // allowed to proceed.
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "grep",
+            json!({ "pattern": "hello" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Continue));
+    }
+
+    #[tokio::test]
+    async fn grep_inside_path_continues() {
+        let fx = fixture();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "grep",
+            json!({ "pattern": "hello", "path": "sub" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Continue));
+    }
+
+    #[tokio::test]
+    async fn find_absolute_outside_path_is_cancelled() {
+        let fx = fixture();
+        // `find`'s `path` is "Directory to search in" — an absolute out-of-cwd
+        // target must be refused so the model never lists FILENAMES outside the
+        // sandbox.
+        let outside_dir = fx.outside_secret.parent().unwrap().to_path_buf();
+        let abs = outside_dir.to_string_lossy().into_owned();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "find",
+            json!({ "pattern": "**/*", "path": abs }),
+        )
+        .await;
+        assert_cancel_no_leak(&decision, &outside_dir);
+    }
+
+    #[tokio::test]
+    async fn find_tilde_path_is_cancelled_not_expanded() {
+        let fx = fixture();
+        // `~` must be refused, never expanded to $HOME (upstream `find` would
+        // expand it; the sandbox stops it first).
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "find",
+            json!({ "pattern": "**/*.key", "path": "~" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Cancel(_)));
+    }
+
+    #[tokio::test]
+    async fn find_without_path_continues() {
+        let fx = fixture();
+        // Omitting `path` defaults to the cwd (in bounds).
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "find",
+            json!({ "pattern": "**/*.txt" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Continue));
+    }
+
+    #[tokio::test]
+    async fn find_inside_path_continues() {
+        let fx = fixture();
+        let decision = decide_via_hook(
+            &ext(&fx.root),
+            &fx.root,
+            "find",
+            json!({ "pattern": "**/*", "path": "sub" }),
+        )
+        .await;
+        assert!(matches!(decision, HookDecision::Continue));
+    }
+
+    #[test]
+    fn path_sandboxed_tools_cover_all_read_only_tools() {
+        // The four read-only path tools share one containment rule and ride one
+        // table — pin the exact set so a regression (e.g. dropping grep/find,
+        // the original Critical escape) fails loudly here.
+        assert_eq!(PATH_SANDBOXED_TOOLS, &["read", "ls", "grep", "find"]);
     }
 
     #[test]
