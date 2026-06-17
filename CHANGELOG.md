@@ -16,6 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.2.3] - 2026-06-17
+
+### Added
+- Scheduled Jobs: a new Jobs workspace where you can schedule a saved chat,
+  agent, or prompt to run automatically on a recurring schedule.
+- A schedule editor with quick presets and an advanced cron mode that shows
+  the timing in plain language.
+- Each job keeps a timeline of its past runs, and you can trigger any job
+  immediately with Run now.
+- Jobs automatically retry failed runs with a back-off delay, time out runs
+  that take too long, and notify you when a job keeps failing.
+
+
 ## [0.2.2] - 2026-06-17
 
 ### Added
