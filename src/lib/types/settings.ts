@@ -75,6 +75,7 @@ export interface QuickToolsSettings {
 // Agent 设置
 export interface AgentSettings {
   defaultEnabledTools: string[]; // 新建 Agent 会话默认启用的内置工具(coding-agent 注册名)
+  defaultEditorId?: string | null; // "Open in ..." 的默认应用 target id（见 api/openIn.ts）
 }
 
 // 应用设置

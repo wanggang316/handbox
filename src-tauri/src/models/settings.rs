@@ -151,12 +151,17 @@ pub struct AgentSettings {
     /// 新建 Agent 会话默认启用的内置工具(coding-agent 注册名)。默认全 7 个。
     #[serde(default = "default_agent_enabled_tools")]
     pub default_enabled_tools: Vec<String>,
+    /// "Open in ..." 的默认应用 target id（见 commands/open_in.rs）。
+    /// `None` = 未设默认，前端回退到首个可用 editor/terminal。
+    #[serde(default)]
+    pub default_editor_id: Option<String>,
 }
 
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
             default_enabled_tools: default_agent_enabled_tools(),
+            default_editor_id: None,
         }
     }
 }
