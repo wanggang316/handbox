@@ -16,6 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.2.4] - 2026-06-18
+
+### Added
+- Switch the interface language between Chinese and English at any time — the
+  change applies instantly across the whole app, with no restart.
+- Agent sessions have a new "Open in…" button in the header that opens the
+  session's working folder in your editor, terminal, or Finder, and remembers
+  the app you choose.
+
+### Changed
+- Cleaner message input: focusing the Chat or Agent composer no longer shows a
+  colored outline, and the divider above the Agent input is gone.
+- The slash-command menu supports Ctrl/Cmd+N/P to move through items and keeps
+  the highlighted one in view; the skill you pick now appears inline in the
+  input as `/name` instead of a chip below it.
+
+### Removed
+- The unused Wordbook and Components pages have been removed from Settings.
+
+
 ## [0.2.3] - 2026-06-17
 
 ### Added
