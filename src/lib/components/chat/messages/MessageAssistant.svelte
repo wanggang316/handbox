@@ -23,6 +23,7 @@
   } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
   import { t } from "$lib/i18n";
+  import { resolveRenderer } from "$lib/components/chat/renderers/resolve";
 
   interface Props {
     message?: Message;
@@ -62,6 +63,11 @@
     const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
     return ranges.map((range) => ({ start: range.start, end: range.end }));
   });
+
+  // Resolve a dynamic renderer (e.g. translation card) for static (non-streaming)
+  // messages. Streaming and non-envelope/unknown messages fall through to the
+  // existing markdown branches below.
+  const cardHit = $derived(isStreaming ? null : resolveRenderer(message?.content));
 
   let showRangeMenu = $state(false);
   let rangeMenuX = $state(0);
@@ -387,7 +393,12 @@
           {/if}
 
   <!-- 消息内容 -->
-          {#if message && message.id && message.sessionId}
+          {#if cardHit}
+            {@const Card = cardHit.component}
+            <div class="flex-1 break-words">
+              <Card {...cardHit.data} />
+            </div>
+          {:else if message && message.id && message.sessionId}
             <div
               class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
               data-message-id={message.id}
