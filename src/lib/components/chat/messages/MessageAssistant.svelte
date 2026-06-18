@@ -25,6 +25,9 @@
   import { t } from "$lib/i18n";
   import { resolveRenderer } from "$lib/components/chat/renderers/resolve";
   import { looksLikeStreamingEnvelope } from "$lib/components/chat/renderers/envelope";
+  import { resolveSpec } from "$lib/components/chat/renderers/jsonui/resolveSpec";
+  import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
+  import { Renderer, JsonUIProvider } from "@json-render/svelte";
 
   interface Props {
     message?: Message;
@@ -68,15 +71,34 @@
   // Resolve a dynamic renderer (e.g. translation card) for static (non-streaming)
   // messages. Streaming and non-envelope/unknown messages fall through to the
   // existing markdown branches below.
+  // Resolve a json-render spec for static (non-streaming) messages → render via
+  // <Renderer>. Takes priority over the legacy translation-envelope card.
+  const specHit = $derived(isStreaming ? null : resolveSpec(message?.content));
+
+  // Legacy translation-envelope card (kept for back-compat).
   const cardHit = $derived(isStreaming ? null : resolveRenderer(message?.content));
 
-  // While a render envelope is still streaming, its content is an unclosed JSON
-  // fragment that must not be rendered character by character. Show a loading
-  // placeholder instead; the finished card is drawn by the `cardHit` branch once
-  // streaming ends. Ordinary (non-envelope) streamed replies fail this precise
-  // heuristic and fall through to the normal markdown path.
-  const isStreamingEnvelope = $derived(
-    isStreaming && looksLikeStreamingEnvelope(message?.content),
+  // A streamed structured payload (json-render spec OR render envelope) is an
+  // unclosed JSON fragment that must not be rendered character by character.
+  // Show a loading placeholder; the finished UI is drawn once streaming ends.
+  // Ordinary (non-structured) streamed replies fail both heuristics and fall
+  // through to the normal markdown path.
+  function looksLikeStreamingSpec(content: string | null | undefined): boolean {
+    if (!content) return false;
+    const trimmed = content.trimStart();
+    const body = trimmed.startsWith("```")
+      ? trimmed.replace(/^```[a-zA-Z0-9]*\s*/, "")
+      : trimmed;
+    return (
+      body.startsWith("{") &&
+      body.includes('"root"') &&
+      body.includes('"elements"')
+    );
+  }
+  const isStreamingStructured = $derived(
+    isStreaming &&
+      (looksLikeStreamingEnvelope(message?.content) ||
+        looksLikeStreamingSpec(message?.content)),
   );
 
   let showRangeMenu = $state(false);
@@ -403,12 +425,18 @@
           {/if}
 
   <!-- 消息内容 -->
-          {#if cardHit}
+          {#if specHit}
+            <div class="flex-1 break-words">
+              <JsonUIProvider initialState={{}}>
+                <Renderer spec={specHit} registry={uiRegistry} />
+              </JsonUIProvider>
+            </div>
+          {:else if cardHit}
             {@const Card = cardHit.component}
             <div class="flex-1 break-words">
               <Card {...cardHit.data} />
             </div>
-          {:else if isStreamingEnvelope}
+          {:else if isStreamingStructured}
             <div
               class="flex items-center gap-3 rounded-lg border border-dashed border-[var(--hairline)] px-4 py-3 text-sm text-base-content/70"
             >

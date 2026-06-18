@@ -27,7 +27,7 @@
   import DefaultRow from "$lib/components/ui/table/DefaultRow.svelte";
   import TranslationCard from "$lib/components/chat/renderers/TranslationCard.svelte";
   import type { TranslationData } from "$lib/components/chat/renderers/types";
-  import { Renderer } from "@json-render/svelte";
+  import { Renderer, JsonUIProvider } from "@json-render/svelte";
   import type { Spec } from "@json-render/core";
   import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
   import {
@@ -686,11 +686,15 @@
     <div class="grid gap-4 lg:grid-cols-2">
       <div class="space-y-2">
         <div class="text-xs text-base-content/60">Spec A：翻译卡片（由通用组件组合）</div>
-        <Renderer spec={jsonSpecA} registry={uiRegistry} />
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecA} registry={uiRegistry} />
+        </JsonUIProvider>
       </div>
       <div class="space-y-2">
         <div class="text-xs text-base-content/60">Spec B：状态信息卡（多组件嵌套）</div>
-        <Renderer spec={jsonSpecB} registry={uiRegistry} />
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecB} registry={uiRegistry} />
+        </JsonUIProvider>
       </div>
     </div>
   </section>
