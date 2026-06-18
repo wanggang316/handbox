@@ -27,6 +27,9 @@
   import DefaultRow from "$lib/components/ui/table/DefaultRow.svelte";
   import TranslationCard from "$lib/components/chat/renderers/TranslationCard.svelte";
   import type { TranslationData } from "$lib/components/chat/renderers/types";
+  import { Renderer } from "@json-render/svelte";
+  import type { Spec } from "@json-render/core";
+  import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
   import {
     TableGroup,
     TableBaseRow,
@@ -174,6 +177,117 @@
       }
     }
   ];
+
+  // JSON-Render demo specs. Flat (root + elements map), exactly the shape an
+  // AI emits. Every element carries `children` and `visible` because the
+  // generated catalog validator requires both. Composed only from the four
+  // generic components (Card / Stack / Text / Badge).
+  //
+  // Spec A — a translation card assembled from generic primitives, proving that
+  // the bespoke TranslationCard can be expressed as a composition.
+  const jsonSpecA: Spec = {
+    root: "card",
+    elements: {
+      card: {
+        type: "Card",
+        props: { title: "serendipity" },
+        children: ["stack"],
+        visible: true
+      },
+      stack: {
+        type: "Stack",
+        props: { gap: "sm" },
+        children: ["translation", "phonetic", "explanation", "pos"],
+        visible: true
+      },
+      translation: {
+        type: "Text",
+        props: { text: "意外发现珍宝的运气", variant: "heading" },
+        children: [],
+        visible: true
+      },
+      phonetic: {
+        type: "Text",
+        props: { text: "/ˌserənˈdɪpɪti/", variant: "muted" },
+        children: [],
+        visible: true
+      },
+      explanation: {
+        type: "Text",
+        props: {
+          text: "在偶然之中发现美好事物的能力或现象；不期而遇的幸运。",
+          variant: "body"
+        },
+        children: [],
+        visible: true
+      },
+      pos: {
+        type: "Badge",
+        props: { label: "n. 名词", tone: "info" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // Spec B — a richer composition: a status card with a heading row of badges
+  // and several text lines, exercising nested Stacks in both directions.
+  const jsonSpecB: Spec = {
+    root: "card",
+    elements: {
+      card: {
+        type: "Card",
+        props: { title: "部署状态" },
+        children: ["body"],
+        visible: true
+      },
+      body: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["badges", "summary", "detail"],
+        visible: true
+      },
+      badges: {
+        type: "Stack",
+        props: { gap: "sm", direction: "row" },
+        children: ["badgeOk", "badgeWarn", "badgeInfo"],
+        visible: true
+      },
+      badgeOk: {
+        type: "Badge",
+        props: { label: "构建成功", tone: "success" },
+        children: [],
+        visible: true
+      },
+      badgeWarn: {
+        type: "Badge",
+        props: { label: "2 条警告", tone: "warning" },
+        children: [],
+        visible: true
+      },
+      badgeInfo: {
+        type: "Badge",
+        props: { label: "v0.2.3", tone: "info" },
+        children: [],
+        visible: true
+      },
+      summary: {
+        type: "Text",
+        props: { text: "已部署到生产环境", variant: "heading" },
+        children: [],
+        visible: true
+      },
+      detail: {
+        type: "Text",
+        props: {
+          text: "提交 d130f98 于 2 分钟前完成发布，所有健康检查均已通过。",
+          variant: "muted"
+        },
+        children: [],
+        visible: true
+      }
+    }
+  };
 
   function triggerToast(type: "success" | "info" | "warning" | "error") {
     const messages = {
@@ -561,6 +675,23 @@
           <TranslationCard {...sample.data} />
         </div>
       {/each}
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">JSON-Render 生成式 UI</h2>
+    <p class="text-sm text-base-content/70">
+      由扁平 spec（root + elements）驱动的通用组件组合，等价于 AI 输出的结构；文本全部经文本绑定渲染（绝不 @html）。
+    </p>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">Spec A：翻译卡片（由通用组件组合）</div>
+        <Renderer spec={jsonSpecA} registry={uiRegistry} />
+      </div>
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">Spec B：状态信息卡（多组件嵌套）</div>
+        <Renderer spec={jsonSpecB} registry={uiRegistry} />
+      </div>
     </div>
   </section>
 </div>
