@@ -166,6 +166,9 @@ pub fn run() {
             agent_project_list,
             agent_project_rename,
             agent_project_delete,
+            // "Open in ..."（在外部 editor/terminal/Finder 中打开工作目录）
+            open_in_list_targets,
+            open_in_open,
             // Agent 模式 run 命令
             agent_run_stream,
             agent_run_abort,
