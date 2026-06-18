@@ -36,3 +36,29 @@ export interface TranslationData {
   phonetic?: string;
   explanation?: string;
 }
+
+/**
+ * A renderer plugs a single envelope `type` into the registry.
+ *
+ * `C` is the component type. It is generic so that the runtime entry can bind a
+ * concrete Svelte `Component` (e.g. `TranslationCard`) while tests can register
+ * a lightweight placeholder — both without resorting to `any`. The registry
+ * itself never inspects `component`; it only stores and returns it.
+ *
+ * @typeParam N The normalized data shape this renderer produces from `validate`.
+ * @typeParam C The component used to render `N`.
+ */
+export interface Renderer<N = unknown, C = unknown> {
+  /** The envelope discriminator this renderer handles (matched exactly, case-sensitive). */
+  type: string;
+  /**
+   * Validate and normalize a raw envelope payload.
+   *
+   * Receives `Envelope.data` verbatim (the parser does not shape-check it, so
+   * this may be `undefined`, a non-object, etc.). Returns the normalized data
+   * on success, or `null` when the payload is not renderable by this renderer.
+   */
+  validate(data: unknown): N | null;
+  /** The component used to render the normalized data. */
+  component: C;
+}
