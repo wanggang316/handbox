@@ -19,3 +19,20 @@ export interface Envelope {
   type: string;
   data: unknown;
 }
+
+/**
+ * Payload for the `translation` renderer.
+ *
+ * `translation` is the only required field. `term` (the source word/phrase),
+ * `phonetic`, and `explanation` are optional — when absent or empty the
+ * renderer omits the corresponding row entirely (no empty shells). All fields
+ * are plain text and are rendered via Svelte text binding (never `@html`);
+ * `explanation` is plain text too (markdown markers are shown verbatim), with
+ * line breaks preserved for readability.
+ */
+export interface TranslationData {
+  term?: string;
+  translation: string;
+  phonetic?: string;
+  explanation?: string;
+}
