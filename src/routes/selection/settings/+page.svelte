@@ -9,6 +9,7 @@
     hideSettingsPanel,
   } from "$lib/api/selection";
   import { settingsState } from "$lib/states";
+  import { t } from "$lib/i18n";
 
   onMount(() => {
     settingsState.loadSettings().catch((error) => {
@@ -47,28 +48,28 @@
       class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
       onclick={handleHideUntilRestart}
     >
-      隐藏至重启此应用
+      {t("selection.hideUntilRestart")}
     </button>
 
     <button
       class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
       onclick={handleDisableByBundleId}
     >
-      在此应用禁用
+      {t("selection.disableForApp")}
     </button>
 
     <button
       class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
       onclick={handleDisableGlobal}
     >
-      全局禁用
+      {t("selection.disableGlobal")}
     </button>
 
     <button
       class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
       onclick={handleOpenSettings}
     >
-      设置
+      {t("common.settings")}
     </button>
   </div>
 </div>

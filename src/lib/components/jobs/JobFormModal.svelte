@@ -13,6 +13,7 @@
   } from "$lib/states/provider.svelte";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { AppError } from "$lib/api";
+  import { t } from "$lib/i18n";
   import type {
     Agent,
     Artifact,
@@ -220,7 +221,7 @@
   // ──────────────────────────────────────────────────────────────────────
   const nameError = $derived(
     showValidation && form.name.trim().length === 0
-      ? "请输入任务名称"
+      ? t("jobs.form.nameRequired")
       : null,
   );
 
@@ -230,21 +231,25 @@
     const trimmed = raw.trim();
     if (trimmed.length === 0) return null; // 留空 → 用默认
     const n = Number(trimmed);
-    if (!Number.isInteger(n)) return `${label}必须是整数`;
-    if (n < 0) return `${label}不能为负数`;
+    if (!Number.isInteger(n)) return t("jobs.form.mustBeInteger", { label });
+    if (n < 0) return t("jobs.form.mustNotBeNegative", { label });
     return null;
   }
 
   const execTimeoutError = $derived(
     showValidation
-      ? robustnessError(form.execTimeoutSecs, "超时时间")
+      ? robustnessError(form.execTimeoutSecs, t("jobs.form.execTimeoutLabel"))
       : null,
   );
   const maxRetriesError = $derived(
-    showValidation ? robustnessError(form.maxRetries, "最大重试次数") : null,
+    showValidation
+      ? robustnessError(form.maxRetries, t("jobs.form.maxRetriesLabel"))
+      : null,
   );
   const retryDelayError = $derived(
-    showValidation ? robustnessError(form.retryDelaySecs, "重试间隔") : null,
+    showValidation
+      ? robustnessError(form.retryDelaySecs, t("jobs.form.retryDelayLabel"))
+      : null,
   );
 
   /** 把健壮性输入解析为保存值：空串 → undefined（用默认），否则解析为整数。 */
@@ -274,9 +279,12 @@
     showValidation = true;
     if (form.name.trim().length === 0) return false;
     if (!targetValid) return false;
-    if (robustnessError(form.execTimeoutSecs, "超时时间")) return false;
-    if (robustnessError(form.maxRetries, "最大重试次数")) return false;
-    if (robustnessError(form.retryDelaySecs, "重试间隔")) return false;
+    if (robustnessError(form.execTimeoutSecs, t("jobs.form.execTimeoutLabel")))
+      return false;
+    if (robustnessError(form.maxRetries, t("jobs.form.maxRetriesLabel")))
+      return false;
+    if (robustnessError(form.retryDelaySecs, t("jobs.form.retryDelayLabel")))
+      return false;
     return true;
   }
 
@@ -307,7 +315,7 @@
           ? e.message
           : e instanceof Error
             ? e.message
-            : "保存失败，请重试";
+            : t("jobs.form.saveFailed");
     } finally {
       saving = false;
     }
@@ -321,7 +329,7 @@
 
 <Modal
   bind:open={localOpen}
-  title={job ? "编辑任务" : "新建任务"}
+  title={job ? t("jobs.form.editTitle") : t("jobs.form.createTitle")}
   closeOnBackdropClick={true}
   onClose={onClose}
 >
@@ -333,18 +341,18 @@
       class="flex items-start gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-sm text-base-content/80"
     >
       <Info size={16} class="mt-0.5 flex-shrink-0 text-info" />
-      <span>定时任务仅在应用运行时触发；应用关闭期间不会执行。</span>
+      <span>{t("jobs.form.appClosedNotice")}</span>
     </div>
 
     <!-- 基本信息 -->
-    <TableGroup title="基本信息">
+    <TableGroup title={t("jobs.form.sectionBasic")}>
       <div class="flex flex-col gap-3 px-6 py-4">
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">名称</span>
+          <span class="font-medium text-base-content/80">{t("jobs.form.name")}</span>
           <input
             type="text"
             bind:value={form.name}
-            placeholder="输入任务名称"
+            placeholder={t("jobs.form.namePlaceholder")}
             aria-invalid={nameError != null}
             class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {nameError
               ? 'border-error ring-1 ring-error'
@@ -356,21 +364,21 @@
         </label>
 
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">描述（可选）</span>
-          <Textarea bind:value={form.description} placeholder="输入任务描述…" rows={3} />
+          <span class="font-medium text-base-content/80">{t("jobs.form.descriptionOptional")}</span>
+          <Textarea bind:value={form.description} placeholder={t("jobs.form.descriptionPlaceholder")} rows={3} />
         </label>
       </div>
     </TableGroup>
 
     <!-- 调度 -->
-    <TableGroup title="调度">
+    <TableGroup title={t("jobs.form.sectionSchedule")}>
       <div class="px-6 py-4">
         <ScheduleEditor bind:cron={form.cronExpr} />
       </div>
     </TableGroup>
 
     <!-- 目标 -->
-    <TableGroup title="目标">
+    <TableGroup title={t("jobs.form.sectionTarget")}>
       <div class="px-6 py-4">
         <TargetPicker
           bind:target={form.target}
@@ -385,16 +393,16 @@
     </TableGroup>
 
     <!-- 高级（健壮性）：超时 / 重试。留空采用具名默认。 -->
-    <TableGroup title="高级">
+    <TableGroup title={t("jobs.form.sectionAdvanced")}>
       <div class="flex flex-col gap-3 px-6 py-4">
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">超时时间（秒）</span>
+          <span class="font-medium text-base-content/80">{t("jobs.form.execTimeout")}</span>
           <input
             type="number"
             min="0"
             step="1"
             bind:value={form.execTimeoutSecs}
-            placeholder={`留空使用默认 ${DEFAULT_EXEC_TIMEOUT_SECS}（0 表示不限超时）`}
+            placeholder={t("jobs.form.execTimeoutPlaceholder", { n: DEFAULT_EXEC_TIMEOUT_SECS })}
             aria-invalid={execTimeoutError != null}
             class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {execTimeoutError
               ? 'border-error ring-1 ring-error'
@@ -403,18 +411,18 @@
           {#if execTimeoutError}
             <span class="text-xs text-error">{execTimeoutError}</span>
           {:else}
-            <span class="text-xs text-base-content/50">0 表示不限超时；留空使用默认。</span>
+            <span class="text-xs text-base-content/50">{t("jobs.form.execTimeoutHint")}</span>
           {/if}
         </label>
 
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">最大重试次数</span>
+          <span class="font-medium text-base-content/80">{t("jobs.form.maxRetries")}</span>
           <input
             type="number"
             min="0"
             step="1"
             bind:value={form.maxRetries}
-            placeholder={`留空使用默认 ${DEFAULT_MAX_RETRIES}（0 表示不重试）`}
+            placeholder={t("jobs.form.maxRetriesPlaceholder", { n: DEFAULT_MAX_RETRIES })}
             aria-invalid={maxRetriesError != null}
             class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {maxRetriesError
               ? 'border-error ring-1 ring-error'
@@ -423,18 +431,18 @@
           {#if maxRetriesError}
             <span class="text-xs text-error">{maxRetriesError}</span>
           {:else}
-            <span class="text-xs text-base-content/50">0 表示失败后不重试；留空使用默认。</span>
+            <span class="text-xs text-base-content/50">{t("jobs.form.maxRetriesHint")}</span>
           {/if}
         </label>
 
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">重试间隔（秒）</span>
+          <span class="font-medium text-base-content/80">{t("jobs.form.retryDelay")}</span>
           <input
             type="number"
             min="0"
             step="1"
             bind:value={form.retryDelaySecs}
-            placeholder={`留空使用默认 ${DEFAULT_RETRY_DELAY_SECS}`}
+            placeholder={t("jobs.form.retryDelayPlaceholder", { n: DEFAULT_RETRY_DELAY_SECS })}
             aria-invalid={retryDelayError != null}
             class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {retryDelayError
               ? 'border-error ring-1 ring-error'
@@ -443,7 +451,7 @@
           {#if retryDelayError}
             <span class="text-xs text-error">{retryDelayError}</span>
           {:else}
-            <span class="text-xs text-base-content/50">留空使用默认 {DEFAULT_RETRY_DELAY_SECS} 秒。</span>
+            <span class="text-xs text-base-content/50">{t("jobs.form.retryDelayHint", { n: DEFAULT_RETRY_DELAY_SECS })}</span>
           {/if}
         </label>
       </div>
@@ -460,10 +468,10 @@
     <!-- 底部按钮 -->
     <div class="flex items-center justify-end gap-3 pt-4 border-t border-base-300">
       <Button variant="ghost" onclick={handleClose} disabled={saving}>
-        取消
+        {t("common.cancel")}
       </Button>
       <Button variant="primary" onclick={handleSave} disabled={saving}>
-        {saving ? "保存中…" : job ? "保存" : "创建"}
+        {saving ? t("jobs.form.saving") : job ? t("jobs.form.save") : t("jobs.form.createAction")}
       </Button>
     </div>
   </div>

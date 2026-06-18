@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from "$lib/i18n";
+
   interface Props {
     value: string;
     placeholder?: string;
@@ -62,7 +64,7 @@
       {#if maxlength}
         {value.length} / {maxlength}
       {:else}
-        字符数: {value.length}
+        {t("ui.charCount", { count: value.length })}
       {/if}
     </div>
   {/if}

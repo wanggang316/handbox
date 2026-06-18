@@ -2,6 +2,7 @@
   import { Package, Plus, Trash2, Bot } from "@lucide/svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import { t } from "$lib/i18n";
   import type {
     Agent,
     AgentTarget,
@@ -265,7 +266,7 @@
 <div class="flex flex-col gap-3">
   <!-- 目标类型 -->
   <Select
-    label="目标类型"
+    label={t("jobs.target.kindLabel")}
     value={target.kind}
     onChange={handleKindChange}
     class="w-full"
@@ -278,19 +279,19 @@
   {#if artifactTarget}
     <!-- Artifact 选择 -->
     <label class="flex flex-col gap-1 text-sm">
-      <span class="font-medium text-base-content/80">运行的 Artifact</span>
+      <span class="font-medium text-base-content/80">{t("jobs.target.artifactLabel")}</span>
       {#if loading}
-        <div class="text-sm text-base-content/50">加载 Artifact 列表…</div>
+        <div class="text-sm text-base-content/50">{t("jobs.target.artifactLoading")}</div>
       {:else if artifacts.length === 0}
         <div
           class="flex items-center gap-2 rounded-md border border-[var(--hairline)] bg-base-200 px-3 py-2 text-sm text-base-content/60"
         >
           <Package size={14} class="flex-shrink-0" />
-          <span>暂无已安装的 Artifact，请先在 Artifact 页安装。</span>
+          <span>{t("jobs.target.artifactEmpty")}</span>
         </div>
       {:else}
         <select
-          aria-label="运行的 Artifact"
+          aria-label={t("jobs.target.artifactLabel")}
           aria-invalid={artifactInvalid}
           value={artifactTarget.artifactId}
           onchange={(e) =>
@@ -299,46 +300,46 @@
             ? 'border-error ring-1 ring-error'
             : ''}"
         >
-          <option value="" disabled>请选择 Artifact</option>
+          <option value="" disabled>{t("jobs.target.artifactSelect")}</option>
           {#each artifacts as artifact (artifact.id)}
             <option value={artifact.id}>{artifact.name}</option>
           {/each}
         </select>
       {/if}
       {#if artifactInvalid}
-        <span class="text-xs text-error">请选择一个 Artifact</span>
+        <span class="text-xs text-error">{t("jobs.target.artifactRequired")}</span>
       {/if}
     </label>
 
     <!-- 参数 args -->
     <div class="flex flex-col gap-1.5 text-sm">
       <div class="flex items-center justify-between">
-        <span class="font-medium text-base-content/80">命令行参数</span>
+        <span class="font-medium text-base-content/80">{t("jobs.target.argsLabel")}</span>
         <button
           type="button"
           onclick={addArg}
           class="flex items-center gap-1 text-xs text-primary hover:underline"
         >
-          <Plus size={12} /> 添加参数
+          <Plus size={12} /> {t("jobs.target.argsAdd")}
         </button>
       </div>
       {#if (artifactTarget.args ?? []).length === 0}
-        <p class="text-xs text-base-content/50">无额外参数</p>
+        <p class="text-xs text-base-content/50">{t("jobs.target.argsEmpty")}</p>
       {:else}
         {#each artifactTarget.args ?? [] as arg, index (index)}
           <div class="flex items-center gap-2">
             <input
               type="text"
-              aria-label={`参数 ${index + 1}`}
+              aria-label={t("jobs.target.argAria", { n: index + 1 })}
               value={arg}
               oninput={(e) =>
                 updateArg(index, (e.currentTarget as HTMLInputElement).value)}
-              placeholder="--flag 或 value"
+              placeholder={t("jobs.target.argPlaceholder")}
               class={inputClass}
             />
             <button
               type="button"
-              aria-label={`删除参数 ${index + 1}`}
+              aria-label={t("jobs.target.argRemoveAria", { n: index + 1 })}
               onclick={() => removeArg(index)}
               class="flex-shrink-0 rounded-md p-1.5 text-base-content/50 hover:bg-error/10 hover:text-error"
             >
@@ -352,23 +353,23 @@
     <!-- 环境变量 env -->
     <div class="flex flex-col gap-1.5 text-sm">
       <div class="flex items-center justify-between">
-        <span class="font-medium text-base-content/80">环境变量</span>
+        <span class="font-medium text-base-content/80">{t("jobs.target.envLabel")}</span>
         <button
           type="button"
           onclick={addEnvRow}
           class="flex items-center gap-1 text-xs text-primary hover:underline"
         >
-          <Plus size={12} /> 添加变量
+          <Plus size={12} /> {t("jobs.target.envAdd")}
         </button>
       </div>
       {#if envRows.length === 0}
-        <p class="text-xs text-base-content/50">无环境变量</p>
+        <p class="text-xs text-base-content/50">{t("jobs.target.envEmpty")}</p>
       {:else}
         {#each envRows as row, index (index)}
           <div class="flex items-center gap-2">
             <input
               type="text"
-              aria-label={`环境变量名 ${index + 1}`}
+              aria-label={t("jobs.target.envKeyAria", { n: index + 1 })}
               value={row.key}
               oninput={(e) =>
                 updateEnvKey(index, (e.currentTarget as HTMLInputElement).value)}
@@ -377,7 +378,7 @@
             />
             <input
               type="text"
-              aria-label={`环境变量值 ${index + 1}`}
+              aria-label={t("jobs.target.envValueAria", { n: index + 1 })}
               value={row.value}
               oninput={(e) =>
                 updateEnvValue(
@@ -389,7 +390,7 @@
             />
             <button
               type="button"
-              aria-label={`删除环境变量 ${index + 1}`}
+              aria-label={t("jobs.target.envRemoveAria", { n: index + 1 })}
               onclick={() => removeEnvRow(index)}
               class="flex-shrink-0 rounded-md p-1.5 text-base-content/50 hover:bg-error/10 hover:text-error"
             >
@@ -402,7 +403,7 @@
   {:else if promptTarget}
     <!-- Prompt：provider/model 级联（复用 chat 模型选择弹窗）+ prompt 文本 -->
     <div class="flex flex-col gap-1 text-sm">
-      <span class="font-medium text-base-content/80">模型</span>
+      <span class="font-medium text-base-content/80">{t("jobs.target.modelLabel")}</span>
       <div
         class="flex items-center gap-2 rounded-md border px-1 py-1 {promptModelInvalid
           ? 'border-error ring-1 ring-error'
@@ -420,18 +421,18 @@
         {/if}
       </div>
       {#if promptModelInvalid}
-        <span class="text-xs text-error">请选择供应商与模型</span>
+        <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
       {/if}
     </div>
 
     <label class="flex flex-col gap-1 text-sm">
-      <span class="font-medium text-base-content/80">Prompt 文本</span>
+      <span class="font-medium text-base-content/80">{t("jobs.target.promptLabel")}</span>
       <textarea
-        aria-label="Prompt 文本"
+        aria-label={t("jobs.target.promptAria")}
         aria-invalid={promptTextInvalid}
         value={promptTarget.prompt}
         rows={5}
-        placeholder="输入要发送给模型的 prompt…"
+        placeholder={t("jobs.target.promptPlaceholder")}
         oninput={(e) =>
           handlePromptTextChange((e.currentTarget as HTMLTextAreaElement).value)}
         class="{inputClass} resize-none {promptTextInvalid
@@ -439,25 +440,25 @@
           : ''}"
       ></textarea>
       {#if promptTextInvalid}
-        <span class="text-xs text-error">请输入 prompt 文本</span>
+        <span class="text-xs text-error">{t("jobs.target.promptRequired")}</span>
       {/if}
     </label>
   {:else if agentTarget}
     <!-- Agent：选择 agent 模板 + 初始指令 -->
     <label class="flex flex-col gap-1 text-sm">
-      <span class="font-medium text-base-content/80">Agent 模板</span>
+      <span class="font-medium text-base-content/80">{t("jobs.target.agentLabel")}</span>
       {#if agentsLoading}
-        <div class="text-sm text-base-content/50">加载 Agent 列表…</div>
+        <div class="text-sm text-base-content/50">{t("jobs.target.agentLoading")}</div>
       {:else if agents.length === 0}
         <div
           class="flex items-center gap-2 rounded-md border border-[var(--hairline)] bg-base-200 px-3 py-2 text-sm text-base-content/60"
         >
           <Bot size={14} class="flex-shrink-0" />
-          <span>暂无 Agent 模板，请先在 Agents 页创建。</span>
+          <span>{t("jobs.target.agentEmpty")}</span>
         </div>
       {:else}
         <select
-          aria-label="Agent 模板"
+          aria-label={t("jobs.target.agentLabel")}
           aria-invalid={agentInvalid}
           value={agentTarget.agentId}
           onchange={(e) =>
@@ -466,24 +467,24 @@
             ? 'border-error ring-1 ring-error'
             : ''}"
         >
-          <option value="" disabled>请选择 Agent</option>
+          <option value="" disabled>{t("jobs.target.agentSelect")}</option>
           {#each agents as agent (agent.id)}
             <option value={agent.id}>{agent.name}</option>
           {/each}
         </select>
       {/if}
       {#if agentInvalid}
-        <span class="text-xs text-error">请选择一个 Agent</span>
+        <span class="text-xs text-error">{t("jobs.target.agentRequired")}</span>
       {/if}
     </label>
 
     <label class="flex flex-col gap-1 text-sm">
-      <span class="font-medium text-base-content/80">初始指令（可选）</span>
+      <span class="font-medium text-base-content/80">{t("jobs.target.initialMessageLabel")}</span>
       <textarea
-        aria-label="初始指令"
+        aria-label={t("jobs.target.initialMessageAria")}
         value={agentTarget.initialMessage}
         rows={4}
-        placeholder="Agent 启动后执行的初始指令…"
+        placeholder={t("jobs.target.initialMessagePlaceholder")}
         oninput={(e) =>
           handleAgentMessageChange(
             (e.currentTarget as HTMLTextAreaElement).value,

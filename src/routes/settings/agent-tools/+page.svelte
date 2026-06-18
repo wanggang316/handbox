@@ -3,6 +3,7 @@
   import { TableGroup, SwitchRow } from "$lib/components/ui/table";
   import { settingsState } from "$lib/states";
   import { BUILTIN_TOOLS, BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
+  import { t } from "$lib/i18n";
 
   // 全局默认启用的工具集（coding-agent 注册名）。无 agent 段时视为全开默认。
   let enabledTools = $state<string[]>([...BUILTIN_TOOL_IDS]);
@@ -43,16 +44,16 @@
 
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
   <div class="flex flex-col gap-y-1">
-    <h2 class="text-base font-medium text-base-content">Agent 工具</h2>
+    <h2 class="text-base font-medium text-base-content">{t("settings.agentTools.title")}</h2>
     <p class="text-sm text-base-content/60">
-      新建 Agent 会话默认启用的工具。已存在的会话不受影响。
+      {t("settings.agentTools.description")}
     </p>
   </div>
 
   <TableGroup>
     {#each BUILTIN_TOOLS as tool (tool.id)}
       <SwitchRow
-        label={tool.label}
+        label={t(tool.labelKey)}
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
       />

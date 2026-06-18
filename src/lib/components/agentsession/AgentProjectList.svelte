@@ -26,6 +26,7 @@
   } from "$lib/states/agentProjectCollapse.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { settingsState } from "$lib/states";
+  import { t } from "$lib/i18n";
   import { BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
   import { groupSessions, sessionActivityKey } from "$lib/utils/agentGrouping";
   import type { AgentProjectGroup } from "$lib/utils/agentGrouping";
@@ -352,7 +353,10 @@
       (session) => session.projectId === project.id,
     );
     const confirmed = await confirmNative(
-      `将删除项目“${project.name}”及其 ${memberSessions.length} 个会话，不可恢复。`,
+      t("agent.list.deleteProjectConfirm", {
+        name: project.name,
+        count: memberSessions.length,
+      }),
     );
     if (!confirmed) return;
 
@@ -369,7 +373,7 @@
       }
     } catch (error) {
       console.error("Failed to delete agent project:", error);
-      const normalized = normalizeError(error, "删除项目失败");
+      const normalized = normalizeError(error, t("agent.list.deleteProjectFailed"));
       createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
@@ -432,7 +436,7 @@
         ?.scrollIntoView({ block: "nearest" });
     } catch (error) {
       console.error("Failed to create agent project:", error);
-      const normalized = normalizeError(error, "创建项目失败");
+      const normalized = normalizeError(error, t("agent.list.createProjectFailed"));
       createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
@@ -468,7 +472,7 @@
 
     const source = group.sessions.at(0);
     const request: CreateAgentSessionRequest = {
-      name: "未命名",
+      name: t("agent.list.untitledSession"),
       projectId: group.project.id,
       modelId: source?.modelId,
       providerId: source?.providerId,
@@ -495,7 +499,9 @@
     } catch (error) {
       console.error("Failed to create agent session:", error);
       createErrorMessage =
-        error instanceof Error ? error.message : "创建会话失败";
+        error instanceof Error
+          ? error.message
+          : t("agent.list.createSessionFailed");
     }
   }
 </script>
@@ -510,7 +516,7 @@
         bind:value={renameValue}
         onkeydown={handleRenameKeydown}
         onblur={confirmRename}
-        placeholder="输入新名称"
+        placeholder={t("agent.list.renamePlaceholder")}
       />
     </div>
   {:else}
@@ -533,11 +539,11 @@
 <div class="flex flex-col h-full">
   <!-- 标题 + 新建项目按钮 -->
   <div class="flex items-center justify-between pb-2 pl-4 pr-2 flex-shrink-0">
-    <span class="text-sm text-base-content/70">Agent 会话</span>
+    <span class="text-sm text-base-content/70">{t("agent.list.heading")}</span>
     <button
       class="p-1 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-300"
-      title="选择项目目录"
-      aria-label="选择项目目录"
+      title={t("agent.list.pickProjectDir")}
+      aria-label={t("agent.list.pickProjectDir")}
       onclick={handleCreateProject}
     >
       <Plus size={16} />
@@ -557,22 +563,22 @@
   <div class="flex-1 overflow-y-auto space-y-0.5 px-2">
     {#if !initialLoadDone}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
-        加载中…
+        {t("common.loading")}
       </div>
     {:else if loadError}
       <!-- 部分加载失败：不进入分组渲染（避免会话被伪归入「未分组」桶） -->
       <div class="px-2 py-1 text-[12px] leading-[18px] text-error">
-        列表加载失败
+        {t("agent.list.loadFailed")}
       </div>
       <button
         class="mx-2 px-2 py-0.5 rounded-md text-[12px] leading-[18px] border border-base-300 text-base-content/70 hover:text-base-content hover:bg-base-300"
         onclick={loadSidebarData}
       >
-        重试
+        {t("common.retry")}
       </button>
     {:else if isEmpty}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
-        点击 + 选择项目目录开始
+        {t("agent.list.emptyHint")}
       </div>
     {:else}
       {#each grouped.groups as group (group.project.id)}
@@ -599,7 +605,7 @@
                 bind:value={renameProjectValue}
                 onkeydown={handleProjectRenameKeydown}
                 onblur={confirmProjectRename}
-                placeholder="输入新名称"
+                placeholder={t("agent.list.renamePlaceholder")}
               />
             </span>
           </div>
@@ -633,8 +639,10 @@
             <span data-group-control class="flex items-center flex-shrink-0">
               <button
                 class="p-0.5 rounded text-base-content/50 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
-                title="新建会话"
-                aria-label="在项目 {group.project.name} 中新建会话"
+                title={t("agent.list.newSession")}
+                aria-label={t("agent.list.newSessionInProject", {
+                  name: group.project.name,
+                })}
                 onclick={(event) =>
                   handleCreateSessionInProject(event, group)}
               >
@@ -654,7 +662,7 @@
             <div
               class="pl-7 pr-2 py-0.5 text-[12px] leading-[18px] text-base-content/40"
             >
-              No chats
+              {t("agent.list.noChats")}
             </div>
           {:else}
             {#each group.sessions as session (session.id)}
@@ -676,7 +684,7 @@
             handleGroupHeaderClick(event, UNGROUPED_COLLAPSE_KEY)}
         >
           <Inbox size={14} class="flex-shrink-0 text-base-content/60" />
-          <span class="truncate flex-1">未分组</span>
+          <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
           <ChevronRight
             size={14}
             class="flex-shrink-0 text-base-content/40 transition-transform {ungroupedCollapsed
@@ -705,7 +713,7 @@
       onclick={startProjectRename}
     >
       <PencilLine size={14} />
-      重命名
+      {t("common.rename")}
     </button>
 
     <button
@@ -713,7 +721,7 @@
       onclick={handleCopyProjectPath}
     >
       <Copy size={14} />
-      复制路径
+      {t("agent.list.copyPath")}
     </button>
 
     <!-- 分隔线 -->
@@ -723,7 +731,7 @@
       onclick={handleProjectDelete}
     >
       <Trash2 size={14} />
-      删除项目
+      {t("agent.list.deleteProject")}
     </button>
   </div>
 {:else if contextMenu?.kind === "session"}
@@ -736,7 +744,7 @@
       onclick={startRename}
     >
       <PencilLine size={14} />
-      重命名
+      {t("common.rename")}
     </button>
 
     <button
@@ -744,7 +752,7 @@
       onclick={handleCopyId}
     >
       <Hash size={14} />
-      复制ID
+      {t("agent.list.copyId")}
     </button>
 
     <!-- 分隔线 -->
@@ -754,7 +762,7 @@
       onclick={handleDelete}
     >
       <Trash2 size={14} />
-      删除
+      {t("common.delete")}
     </button>
   </div>
 {/if}

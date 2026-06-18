@@ -2,6 +2,7 @@
   import { X } from "@lucide/svelte";
   import TitleBar from "./TitleBar.svelte";
   import IconButton from "./IconButton.svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     open: boolean;
@@ -78,7 +79,7 @@
         {#if showCloseButton}
           <IconButton
             icon={X}
-            ariaLabel="关闭"
+            ariaLabel={t("common.close")}
             customClass="z-[10001]"
             onclick={handleClose}
           />

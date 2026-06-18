@@ -2,25 +2,26 @@
   import { onMount } from "svelte";
   import { TableGroup, SwitchRow, SelectRow } from "$lib/components/ui/table";
   import { settingsState, uiState } from "$lib/states";
+  import { t } from "$lib/i18n";
   import type { Theme, Language } from "$lib/types/settings";
 
-  // 外观样式选项
-  const themeOptions = [
-    { value: "system", label: "跟随系统" },
-    { value: "light", label: "浅色主题" },
-    { value: "dark", label: "深色主题" },
-  ];
+  // 外观样式选项（随语言切换重算）
+  const themeOptions = $derived([
+    { value: "system", label: t("settings.general.theme.system") },
+    { value: "light", label: t("settings.general.theme.light") },
+    { value: "dark", label: t("settings.general.theme.dark") },
+  ]);
 
-  // 语言选项
+  // 语言选项：各语言以其自身名称（endonym）展示，不翻译
   const languageOptions = [
     { value: "zh-CN", label: "简体中文" },
     { value: "en-US", label: "English" },
   ];
 
-  // 本地状态
-  let theme: Theme = "system";
-  let language: Language = "zh-CN";
-  let autoScroll: boolean = true;
+  // 本地状态（本文件已进入 runes 模式，需用 $state 才能保持双向绑定响应式）
+  let theme = $state<Theme>("system");
+  let language = $state<Language>("zh-CN");
+  let autoScroll = $state<boolean>(true);
 
   // 加载设置
   onMount(async () => {
@@ -77,21 +78,21 @@
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
   <TableGroup>
     <SelectRow
-      label="外观样式"
+      label={t("settings.general.appearance")}
       options={themeOptions}
       bind:selectedValue={theme}
       onSelect={(value) => handleThemeChange(value)}
     />
 
     <SelectRow
-      label="语言"
+      label={t("settings.general.language")}
       options={languageOptions}
       bind:selectedValue={language}
       onSelect={(value) => handleLanguageChange(value)}
     />
 
     <SwitchRow
-      label="聊天界面自动下滑"
+      label={t("settings.general.autoScroll")}
       bind:checked={autoScroll}
       description=""
       onChange={handleAutoScrollChange}

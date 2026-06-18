@@ -20,6 +20,7 @@
     CompletionsReasoningProps,
     OpenrouterReasoningProps,
   } from "$lib/types/provider";
+  import { t } from "$lib/i18n";
 
   type SaveStatus = "saved" | "saving" | "error";
 
@@ -296,7 +297,7 @@
   {/if}
 
   {#if advanceParameters.length > 0}
-    <TableGroup title="高级" collapsible defaultCollapsed={true}>
+    <TableGroup title={t("chat.advanced")} collapsible defaultCollapsed={true}>
       {#each advanceParameters as param}
         {#if param.component === "slider"}
           {@const config = renderSliderParameter(param)}

@@ -7,6 +7,7 @@
   import { providerActions } from "$lib/states/provider.svelte";
   import { mcpActions } from "$lib/states/mcp.svelte";
   import { currentChatModel } from "$lib/states/chat.svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     open: boolean;
@@ -54,7 +55,7 @@
   });
 </script>
 
-<Drawer {open} title="聊天设置" {onClose}>
+<Drawer {open} title={t("chat.chatSettings")} {onClose}>
   <div class="flex flex-col gap-6 px-4 py-6 w-[360px]">
     <ModelSelection />
     <PromptSettings />

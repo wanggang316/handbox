@@ -10,6 +10,7 @@
   import { messageStore } from "$lib/states";
   import type { ToolCall } from "$lib/types";
   import { renderCodeBlock } from "$lib/utils/code";
+  import { t } from "$lib/i18n";
 
   interface Props {
     toolCalls?: ToolCall[];
@@ -70,15 +71,15 @@
   function getToolExecutionStatusDisplay(status?: string) {
     switch (status) {
       case "pending":
-        return { text: "待执行", icon: Pause, color: "text-base-content/60" };
+        return { text: t("chat.toolPending"), icon: Pause, color: "text-base-content/60" };
       case "executing":
-        return { text: "执行中", icon: Loader2, color: "text-info", animate: true };
+        return { text: t("chat.toolExecuting"), icon: Loader2, color: "text-info", animate: true };
       case "completed":
-        return { text: "完成", icon: CheckCircle2, color: "text-success" };
+        return { text: t("chat.toolCompleted"), icon: CheckCircle2, color: "text-success" };
       case "failed":
-        return { text: "失败", icon: XCircle, color: "text-error" };
+        return { text: t("chat.toolFailed"), icon: XCircle, color: "text-error" };
       default:
-        return { text: "未知", icon: Pause, color: "text-base-content/40" };
+        return { text: t("chat.toolUnknown"), icon: Pause, color: "text-base-content/40" };
     }
   }
 
@@ -161,7 +162,7 @@
 
               <div class="flex flex-col gap-1">
                 <div class="text-sm text-base-content">
-                  {tool.function?.name || `工具 ${tool.index}`}
+                  {tool.function?.name || t("chat.toolFallbackName", { index: tool.index })}
                 </div>
               </div>
             </button>
@@ -181,7 +182,7 @@
                     onclick={() => handleExecuteSingleTool(tool.id || "")}
                     disabled={isExecuting()}
                   >
-                    执行
+                    {t("chat.execute")}
                   </button>
                 {:else if tool.executionStatus === "failed" || tool.executionStatus === "completed"}
                   <button
@@ -189,7 +190,7 @@
                     onclick={() => handleExecuteSingleTool(tool.id || "")}
                     disabled={isExecuting()}
                   >
-                    重新执行
+                    {t("chat.reExecute")}
                   </button>
                 {/if}
               {/if}

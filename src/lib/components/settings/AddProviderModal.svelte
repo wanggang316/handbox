@@ -14,6 +14,7 @@
   import Modal from "../ui/Modal.svelte";
   import { toastActions } from "$lib/states/toast.svelte";
   import { showAppError } from "$lib/utils";
+  import { t } from "$lib/i18n";
 
   // 使用 $props() 替代 export let
   const { open = false, onClose } = $props<{
@@ -73,8 +74,8 @@
     console.error("Operation failed:", error);
     showAppError(error, {
       requiresAcknowledgement: true,
-      title: '供应商配置错误',
-      fallbackMessage: '操作失败，请稍后重试'
+      title: t("provider.configErrorTitle"),
+      fallbackMessage: t("provider.operationFailed")
     });
   }
 
@@ -82,15 +83,15 @@
     errors = {};
 
     if (!formData.name.trim()) {
-      errors.name = "请输入供应商名称";
+      errors.name = t("provider.validateName");
     }
 
     if (!formData.base_url.trim()) {
-      errors.base_url = "请输入 Base URL";
+      errors.base_url = t("provider.validateBaseUrl");
     }
 
     if (!formData.api_key.trim()) {
-      errors.api_key = "请输入 API Key";
+      errors.api_key = t("provider.validateApiKey");
     }
 
     return Object.keys(errors).length === 0;
@@ -137,7 +138,9 @@
         console.log("Provider created successfully:", newProvider);
       }
       // 成功后显示成功提示并关闭
-      toastActions.success(isEditMode ? '供应商更新成功' : '供应商创建成功');
+      toastActions.success(
+        isEditMode ? t("provider.updateSuccess") : t("provider.createSuccess")
+      );
       modalRef?.handleClose();
     } catch (error) {
       handleError(error);
@@ -225,18 +228,18 @@
   <div class="w-md max-w-md max-h-[80vh] flex flex-col">
     <!-- 头部 -->
     <div class="flex items-center justify-between px-5 py-3.5">
-      <h2 class="text-base font-medium tracking-tight text-base-content">{isEditMode ? '编辑供应商' : '添加供应商'}</h2>
+      <h2 class="text-base font-medium tracking-tight text-base-content">{isEditMode ? t("provider.editProviderTitle") : t("provider.addProviderTitle")}</h2>
     </div>
 
     <div class="flex-1 min-h-0 px-5 py-2 space-y-3">
       <TableGroup>
         <SelectRow
-          label="供应商类型"
+          label={t("provider.providerType")}
           options={providerOptions()}
           selectedValue={formData.provider_type}
           onSelect={selectProviderType}
         ></SelectRow>
-        <TextRow label="供应商名称" bind:value={formData.name}></TextRow>
+        <TextRow label={t("provider.providerName")} bind:value={formData.name}></TextRow>
       </TableGroup>
       <TableGroup>
         <TextRow label="Base URL" bind:value={formData.base_url}></TextRow>
@@ -248,13 +251,13 @@
     <div class="flex items-center justify-end gap-3 px-5 py-3">
       <RoundButton
         customClass="w-18"
-        label="取消"
+        label={t("common.cancel")}
         variant="secondary"
         onclick={handleClose}
       ></RoundButton>
       <RoundButton
         customClass="w-18"
-        label={isEditMode ? '保存' : '确认'}
+        label={isEditMode ? t("common.save") : t("provider.confirm")}
         onclick={handleConfirm}
         disabled={isLoading || !canSave}
         loading={isLoading}

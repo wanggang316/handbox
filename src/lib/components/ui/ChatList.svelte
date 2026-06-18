@@ -12,6 +12,7 @@
   import * as chatApi from "$lib/api/chat";
   import * as messageApi from "$lib/api/message";
   import { favoriteStore } from "$lib/states";
+  import { t } from "$lib/i18n";
 
   interface Chat {
     id: string;
@@ -238,13 +239,13 @@
 <div class="flex flex-col h-full">
   <!-- 标题 + 新建会话 -->
   <div class="flex items-center justify-between pb-2 pl-4 pr-2 flex-shrink-0">
-    <span class="text-sm text-base-content/70">聊天</span>
+    <span class="text-sm text-base-content/70">{t("ui.chatHeading")}</span>
     {#if onNewChat}
       <button
         class="p-1 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-300 transition-colors"
         onclick={onNewChat}
-        title="新建会话"
-        aria-label="新建会话"
+        title={t("ui.newChat")}
+        aria-label={t("ui.newChat")}
       >
         <Plus size={16} />
       </button>
@@ -263,7 +264,7 @@
             bind:value={renameValue}
             onkeydown={handleKeydown}
             onblur={confirmRename}
-            placeholder="输入新名称"
+            placeholder={t("ui.renamePlaceholder")}
           />
         </div>
       {:else}
@@ -309,7 +310,7 @@
         onclick={handleGenerateTitle}
       >
         <Sparkles size={14} />
-        生成标题
+        {t("ui.generateTitle")}
       </button>
     {/if}
 
@@ -323,7 +324,7 @@
       {:else}
         <Star size={14} />
       {/if}
-      收藏对话
+      {t("ui.favoriteChat")}
     </button>
 
     {#if onRename}
@@ -332,7 +333,7 @@
         onclick={startRename}
       >
         <PencilLine size={14} />
-        重命名
+        {t("common.rename")}
       </button>
     {/if}
 
@@ -346,7 +347,7 @@
       onclick={handleCopyTitle}
     >
       <Copy size={14} />
-      复制标题
+      {t("ui.copyTitle")}
     </button>
 
     <button
@@ -354,7 +355,7 @@
       onclick={handleCopyId}
     >
       <Hash size={14} />
-      复制ID
+      {t("ui.copyId")}
     </button>
 
     {#if onDelete}
@@ -365,7 +366,7 @@
         onclick={handleDelete}
       >
         <Trash2 size={14} />
-        删除
+        {t("common.delete")}
       </button>
     {/if}
   </div>

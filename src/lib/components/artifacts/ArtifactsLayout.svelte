@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { Play, Download, Trash2, Search, X, Loader2 } from 'lucide-svelte';
   import { artifactState } from '$lib/states/artifact.svelte';
+  import { t } from '$lib/i18n';
   import type { Artifact, ArtifactType, ExecutionResult } from '$lib/types';
 
   let searchQuery = $state('');
@@ -104,7 +105,7 @@
 
   async function deleteArtifact(artifact: Artifact) {
     if (!artifact.id) return;
-    if (!confirm(`确定要删除 "${artifact.name}" 吗?`)) return;
+    if (!confirm(t('artifacts.deleteConfirm', { name: artifact.name }))) return;
 
     try {
       await artifactState.deleteArtifact(artifact.id);
@@ -130,7 +131,7 @@
       <Search size={16} class="search-icon" />
       <input
         type="text"
-        placeholder="搜索应用..."
+        placeholder={t('artifacts.searchPlaceholder')}
         bind:value={searchQuery}
         class="search-input"
       />
@@ -138,7 +139,7 @@
         <button
           class="clear-btn"
           onclick={() => (searchQuery = '')}
-          aria-label="清除搜索"
+          aria-label={t('artifacts.clearSearch')}
         >
           <X size={16} />
         </button>
@@ -152,7 +153,7 @@
         class:active={selectedType === 'all'}
         onclick={() => (selectedType = 'all')}
       >
-        All
+        {t('artifacts.typeAll')}
       </button>
       {#each ['shell', 'python', 'web'] as type}
         <button
@@ -170,11 +171,11 @@
       {#if artifactState.isLoading}
         <div class="loading">
           <Loader2 size={24} class="spin" />
-          <p>加载中...</p>
+          <p>{t('common.loading')}</p>
         </div>
       {:else if filteredArtifacts().length === 0}
         <div class="empty">
-          <p>没有找到应用</p>
+          <p>{t('artifacts.emptyList')}</p>
         </div>
       {:else}
         {#each filteredArtifacts() as artifact (artifact.id)}
@@ -199,7 +200,7 @@
               <p class="artifact-meta">
                 {typeLabels[artifact.type]}
                 {#if artifact.isInstalled}
-                  <span class="badge installed">已安装</span>
+                  <span class="badge installed">{t('artifacts.installed')}</span>
                 {/if}
               </p>
             </div>
@@ -224,7 +225,7 @@
               <div class="meta-info">
                 <span class="badge type">{typeLabels[selectedArtifact.type]}</span>
                 {#if selectedArtifact.isInstalled}
-                  <span class="badge installed">已安装</span>
+                  <span class="badge installed">{t('artifacts.installed')}</span>
                 {/if}
                 {#if selectedArtifact.author}
                   <span class="author">by {selectedArtifact.author}</span>
@@ -241,7 +242,7 @@
                 disabled={artifactState.isLoading}
               >
                 <Download size={16} />
-                安装
+                {t('artifacts.install')}
               </button>
             {/if}
             <button
@@ -254,13 +255,13 @@
               {:else}
                 <Play size={16} />
               {/if}
-              运行
+              {t('artifacts.run')}
             </button>
             {#if !selectedArtifact.isBuiltin}
               <button
                 class="btn btn-danger"
                 onclick={() => deleteArtifact(selectedArtifact!)}
-                aria-label="删除"
+                aria-label={t('common.delete')}
               >
                 <Trash2 size={16} />
               </button>
@@ -287,18 +288,18 @@
         <!-- 技术信息 -->
         <div class="tech-info">
           <div class="info-row">
-            <span class="label">入口文件:</span>
+            <span class="label">{t('artifacts.entryFile')}</span>
             <code>{selectedArtifact.entryFile}</code>
           </div>
           {#if selectedArtifact.installedVersion}
             <div class="info-row">
-              <span class="label">版本:</span>
+              <span class="label">{t('artifacts.version')}</span>
               <code>{selectedArtifact.installedVersion}</code>
             </div>
           {/if}
           {#if selectedArtifact.runCount > 0}
             <div class="info-row">
-              <span class="label">运行次数:</span>
+              <span class="label">{t('artifacts.runCount')}</span>
               <span>{selectedArtifact.runCount}</span>
             </div>
           {/if}
@@ -308,34 +309,34 @@
         {#if executionResult}
           <div class="execution-result" class:success={executionResult.success} class:error={!executionResult.success}>
             <div class="result-header">
-              <h3>{executionResult.success ? '✅ 执行成功' : '❌ 执行失败'}</h3>
+              <h3>{executionResult.success ? t('artifacts.executionSuccess') : t('artifacts.executionFailed')}</h3>
               <span class="duration">{executionResult.duration}ms</span>
             </div>
 
             {#if executionResult.stdout}
               <div class="output">
-                <h4>标准输出:</h4>
+                <h4>{t('artifacts.stdout')}</h4>
                 <pre>{executionResult.stdout}</pre>
               </div>
             {/if}
 
             {#if executionResult.stderr}
               <div class="output stderr">
-                <h4>标准错误:</h4>
+                <h4>{t('artifacts.stderr')}</h4>
                 <pre>{executionResult.stderr}</pre>
               </div>
             {/if}
 
             {#if executionResult.error}
               <div class="output error-msg">
-                <h4>错误信息:</h4>
+                <h4>{t('artifacts.errorMessage')}</h4>
                 <pre>{executionResult.error}</pre>
               </div>
             {/if}
 
             {#if executionResult.exitCode !== undefined}
               <div class="exit-code">
-                退出码: <code>{executionResult.exitCode}</code>
+                {t('artifacts.exitCode')} <code>{executionResult.exitCode}</code>
               </div>
             {/if}
           </div>
@@ -344,8 +345,8 @@
     {:else}
       <div class="empty-state">
         <div class="empty-icon">📦</div>
-        <h3>选择一个应用</h3>
-        <p>从左侧列表中选择一个应用以查看详情</p>
+        <h3>{t('artifacts.emptyTitle')}</h3>
+        <p>{t('artifacts.emptyHint')}</p>
       </div>
     {/if}
   </main>

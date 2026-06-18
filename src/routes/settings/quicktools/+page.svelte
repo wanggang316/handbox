@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { TableGroup, SwitchRow } from "$lib/components/ui/table";
   import { settingsState } from "$lib/states";
+  import { t } from "$lib/i18n";
   import { ExternalLink, RefreshCcw, Trash2, X } from "@lucide/svelte";
   import {
     checkAccessibilityPermission,
@@ -123,9 +124,9 @@
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-6">
   <TableGroup>
     <SwitchRow
-      label="选中文本显示工具栏"
+      label={t("settings.quicktools.showToolbarOnSelection")}
       bind:checked={showToolbarOnSelection}
-      description={permissionGranted ? "" : "需要辅助功能权限"}
+      description={permissionGranted ? "" : t("settings.quicktools.permissionRequired")}
       disabled={isCheckingPermission}
       onChange={handleToggleChange}
     />
@@ -134,7 +135,7 @@
   <!-- 禁用的应用列表 -->
   <TableGroup>
     <div class="flex items-center justify-between px-6 py-4">
-      <h3 class="text-sm text-base-content">禁用的应用</h3>
+      <h3 class="text-sm text-base-content">{t("settings.quicktools.disabledApps")}</h3>
       {#if !isLoadingApps}
         <IconButton
           icon={RefreshCcw}
@@ -146,12 +147,12 @@
 
     {#if isLoadingApps}
       <div class="flex justify-center py-8">
-        <div class="text-sm text-base-content/50">加载中...</div>
+        <div class="text-sm text-base-content/50">{t("common.loading")}</div>
       </div>
     {:else if disabledApps.length === 0}
       <div class="flex justify-center py-8">
         <p class="text-sm text-base-content/50">
-          禁止使用划词工具的应用将显示在这里。
+          {t("settings.quicktools.disabledAppsEmpty")}
         </p>
       </div>
     {:else}
@@ -167,7 +168,7 @@
               icon={Trash2}
               iconSize={14}
               onclick={() => handleRemoveApp(app.bundle_id)}
-              title="移除"
+              title={t("common.remove")}
             />
           </div>
         {/each}
@@ -178,8 +179,7 @@
   {#if !permissionGranted}
     <div class="bg-base-300 rounded-lg p-4 flex flex-col gap-3">
       <p class="text-sm text-base-content/70">
-        启用此功能需要授予辅助功能权限。请前往"系统设置 &gt; 隐私与安全性 &gt;
-        辅助功能"，并启用 HandBox 的权限。
+        {t("settings.quicktools.permissionGuide")}
       </p>
       <div class="flex items-center gap-2">
         <button
@@ -187,13 +187,13 @@
           onclick={handleOpenSettings}
         >
           <ExternalLink size={14} />
-          打开系统设置
+          {t("settings.quicktools.openSystemSettings")}
         </button>
         <button
           class="px-3 py-1.5 text-sm rounded-lg bg-base-300 text-base-content hover:bg-base-300/80"
           onclick={handleRefreshPermission}
         >
-          刷新权限状态
+          {t("settings.quicktools.refreshPermission")}
         </button>
       </div>
     </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Avatar from "../ui/Avatar.svelte";
+  import { t } from "$lib/i18n";
 
   // 用户信息接口
   interface UserInfo {
@@ -17,7 +18,9 @@
   let { user }: Props = $props();
 
   const displayName = $derived(
-    user.isLoggedIn ? user.username || "用户" : "未登录"
+    user.isLoggedIn
+      ? user.username || t("settings.account.defaultUsername")
+      : t("settings.account.notLoggedIn")
   );
   const planText = $derived(
     user.isLoggedIn ? (user.isPro ? "Pro" : "Free") : ""
@@ -50,7 +53,7 @@
   <div class="flex flex-row gap-2 items-center">
     <Avatar size="lg" />
     <div class="flex-1">
-      <div class="text-xs text-base-content/70">未登录</div>
+      <div class="text-xs text-base-content/70">{t("settings.account.notLoggedIn")}</div>
     </div>
   </div>
 {/if}

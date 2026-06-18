@@ -23,6 +23,7 @@
   import { messageStore } from "$lib/states";
   import { toastActions } from "$lib/states";
   import type { ChatAttachment } from "$lib/types/chat";
+  import { t } from "$lib/i18n";
 
   let chatId = $state("");
   let messageInput = $state("");
@@ -148,7 +149,7 @@
           return {
             serverId: config.serverId,
             name: server.displayName || server.name,
-            reason: "服务器已关闭",
+            reason: t("chat.reasonServerDisabled"),
           };
         }
 
@@ -157,7 +158,7 @@
           return {
             serverId: config.serverId,
             name: server.displayName || server.name,
-            reason: "服务器未就绪",
+            reason: t("chat.reasonServerNotReady"),
           };
         }
 
@@ -166,7 +167,7 @@
           return {
             serverId: config.serverId,
             name: config.serverId,
-            reason: "服务器已删除",
+            reason: t("chat.reasonServerDeleted"),
           };
         }
 
@@ -237,7 +238,7 @@
       }
     } catch (error) {
       console.error("Failed to generate title:", error);
-      toastActions.warning("自动生成标题失败，可右键会话手动生成");
+      toastActions.warning(t("chat.titleGenerationFailed"));
     } finally {
       titleGenInFlight.delete(targetChatId);
     }
@@ -357,10 +358,15 @@
 <!-- 已关闭 MCP 提示弹窗 -->
 <ConfirmModal
   open={showDisabledMcpWarning}
-  title="检测到已关闭的 MCP 服务器"
-  message={`当前聊天配置中有 <span class='font-medium'>${disabledMcpServers.length}</span> 个 MCP 服务器在全局设置中被关闭：<br/>${disabledMcpServers.map((s) => `<span class='text-warning'>• ${s.name}</span> - ${s.reason}`).join("<br/>")}`}
-  confirmText="设置"
-  cancelText="取消"
+  title={t("chat.disabledMcpDetectedTitle")}
+  message={t("chat.disabledMcpDetectedMessage", {
+    count: disabledMcpServers.length,
+    list: disabledMcpServers
+      .map((s) => `<span class='text-warning'>• ${s.name}</span> - ${s.reason}`)
+      .join("<br/>"),
+  })}
+  confirmText={t("common.settings")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="primary"
   onClose={() => (showDisabledMcpWarning = false)}
   onConfirm={handleOpenChatSettings}

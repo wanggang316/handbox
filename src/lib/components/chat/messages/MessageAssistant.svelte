@@ -22,6 +22,7 @@
     openPathInSystem,
   } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     message?: Message;
@@ -369,7 +370,7 @@
                   <ChevronRight size={16} class="text-base-content" />
                 {/if}
                 <span class="text-sm font-medium text-base-content/80">
-                  {isReasoning ? "推理中..." : "推理过程"}
+                  {isReasoning ? t("chat.reasoningInProgress") : t("chat.reasoningProcess")}
                 </span>
               </button>
 
@@ -418,7 +419,7 @@
               <div
                 class="w-4 h-4 border-2 border-base-content/30 border-t-transparent rounded-full animate-spin"
               ></div>
-              <span>图像生成中…</span>
+              <span>{t("chat.generatingImage")}</span>
             </div>
           {/if}
 
@@ -427,7 +428,7 @@
               {#each assets as asset (asset.id)}
                 <div
                   class="relative rounded-lg bg-base-100 max-w-[320px]"
-                  title="点击在系统预览中打开"
+                  title={t("chat.openInSystemPreview")}
                   role="button"
                   tabindex="0"
                   onclick={() => openAssetExternally(asset)}
@@ -504,7 +505,7 @@
               <!-- 复制按钮 -->
               <button
                 class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"
-                title="复制消息"
+                title={t("chat.copyMessage")}
                 onclick={handleCopy}
               >
                 <Copy class="w-3.5 h-3.5" />
@@ -513,7 +514,7 @@
               <!-- 重新生成按钮 -->
               <button
                 class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="重新生成"
+                title={t("chat.regenerate")}
                 disabled={isOperating}
                 onclick={handleRegenerate}
               >
@@ -529,7 +530,7 @@
               <!-- 删除按钮 -->
               <button
                 class="p-1.5 text-base-content/60 hover:text-error hover:bg-error/10 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="删除消息"
+                title={t("chat.deleteMessage")}
                 disabled={isOperating}
                 onclick={handleDelete}
               >
@@ -568,14 +569,14 @@
       onclick={copyImage}
     >
       <Copy size={14} />
-      <span>复制图片</span>
+      <span>{t("chat.copyImage")}</span>
     </button>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
       onclick={saveImage}
     >
       <Save size={14} />
-      <span>保存图片</span>
+      <span>{t("chat.saveImage")}</span>
     </button>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
@@ -587,14 +588,14 @@
       {:else}
         <Star size={14} />
       {/if}
-      <span>收藏图片</span>
+      <span>{t("chat.favoriteImage")}</span>
     </button>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
       onclick={showInFinder}
     >
       <FolderOpen size={14} />
-      <span>在 Finder 中打开</span>
+      <span>{t("chat.openInFinder")}</span>
     </button>
   </div>
 {/if}
@@ -605,7 +606,7 @@
     style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
     role="menu"
     tabindex="-1"
-    aria-label="收藏范围操作"
+    aria-label={t("chat.favoriteRangeActions")}
     onmouseenter={() => (isRangeMenuHovering = true)}
     onmouseleave={() => {
       isRangeMenuHovering = false;
@@ -617,7 +618,7 @@
       class="px-2 py-1 rounded hover:bg-error/10 text-error"
       onclick={handleRemoveRange}
     >
-      取消收藏
+      {t("chat.unfavorite")}
     </button>
   </div>
 {/if}

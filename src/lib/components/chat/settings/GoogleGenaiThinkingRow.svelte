@@ -17,6 +17,7 @@
   import LabeledSlider from "../../ui/LabeledSlider.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
   import InfoTooltip from "../../ui/InfoTooltip.svelte";
+  import { t } from "$lib/i18n";
 
   let {
     label = undefined,
@@ -267,7 +268,7 @@
       <!-- Include Thoughts Toggle -->
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-1">
-          <span class="text-xs text-base-content/60">包含过程</span>
+          <span class="text-xs text-base-content/60">{t("chat.includeThoughts")}</span>
           {#if thinkingProps?.include_thoughts_tip}
             <InfoTooltip content={thinkingProps.include_thoughts_tip} />
           {/if}
@@ -288,7 +289,7 @@
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1">
-              <span class="text-xs text-base-content/60">预算模式</span>
+              <span class="text-xs text-base-content/60">{t("chat.budgetMode")}</span>
               {#if thinkingProps?.budget_tip}
                 <InfoTooltip content={thinkingProps.budget_tip} />
               {/if}

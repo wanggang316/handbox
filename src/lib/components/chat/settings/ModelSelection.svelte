@@ -4,6 +4,7 @@
   import type { ModelWithProvider } from "$lib/types/provider";
   import { ChevronsUpDown } from "lucide-svelte";
   import ChatModelSelectModal from "../ChatModelSelectModal.svelte";
+  import { t } from "$lib/i18n";
 
   const currentModel = $derived<ModelWithProvider | undefined>(
     currentChatModel().model
@@ -35,17 +36,17 @@
           {#if providerIcon}
             <img
               src={providerIcon}
-              alt={currentModel?.providerName ?? "模型供应商"}
+              alt={currentModel?.providerName ?? t("chat.modelProvider")}
               class="h-4 w-4 rounded-md object-contain"
             />
           {/if}
           <p class="text-xs text-base-content/50">
-            {currentModel?.providerName ?? "模型供应商"}
+            {currentModel?.providerName ?? t("chat.modelProvider")}
           </p>
         </div>
 
         <div class="text-md text-base-content">
-          {currentModel ? currentModel.name : "未选择模型"}
+          {currentModel ? currentModel.name : t("chat.noModelSelected")}
         </div>
         <div
           class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60"
@@ -61,7 +62,7 @@
   {:else}
     <div class="flex flex-row justify-between items-center px-2">
       <p class="text-left text-sm leading-relaxed text-base-content">
-        选择一个模型以开始对话
+        {t("chat.selectModelToStart")}
       </p>
       <ChevronsUpDown size={14} />
     </div>

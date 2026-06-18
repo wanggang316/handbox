@@ -23,6 +23,7 @@
     ChevronDown,
     ChevronRight,
   } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
 
   let serverId = $state("");
   let activeTab = $state("tools");
@@ -275,7 +276,7 @@
     <CircleButton
       icon={ChevronLeft}
       iconSize={22}
-      ariaLabel="返回"
+      ariaLabel={t("provider.backAria")}
       size="w-8 h-8"
       variant="secondary"
       customClass="hover:text-base-content/80 z-10004 relative"
@@ -323,7 +324,7 @@
       {#if server.lastSyncAt}
         <div class="px-6 mt-2 mb-4 flex justify-end">
           <span class="text-xs text-base-content/60">
-            最后同步: {formatDateTime(server.lastSyncAt)}
+            {t("provider.lastSync", { time: formatDateTime(server.lastSyncAt) })}
           </span>
         </div>
       {/if}
@@ -344,9 +345,9 @@
         <Tabs
           value={activeTab}
           items={[
-            { value: "tools", label: "工具" },
-            { value: "prompts", label: "提示" },
-            { value: "resources", label: "资源" },
+            { value: "tools", label: t("provider.tabTools") },
+            { value: "prompts", label: t("provider.tabPrompts") },
+            { value: "resources", label: t("provider.tabResources") },
           ]}
           onChange={(val) => {
             activeTab = val;
@@ -357,7 +358,7 @@
         {#if activeTab === "tools"}
           {#if server.tools.length === 0}
             <div class="text-center text-sm py-8 text-base-content/70">
-              暂无工具数据
+              {t("provider.emptyTools")}
             </div>
           {:else}
             <div class="space-y-2 mt-4">
@@ -387,13 +388,15 @@
                       >
                         {#if expandedTools[tool.name]}
                           <ChevronDown size={12} />
-                          <span>参数</span>
+                          <span>{t("provider.params")}</span>
                         {:else}
                           <ChevronRight size={12} />
                           <span
-                            >参数 ({Object.keys(
-                              tool.inputSchema.properties || {}
-                            ).length})</span
+                            >{t("provider.paramsWithCount", {
+                              count: Object.keys(
+                                tool.inputSchema.properties || {}
+                              ).length,
+                            })}</span
                           >
                         {/if}
                       </button>
@@ -440,7 +443,7 @@
         {:else if activeTab === "prompts"}
           {#if server.prompts.length === 0}
             <div class="text-center text-sm py-8 text-base-content/70">
-              暂无提示数据
+              {t("provider.emptyPrompts")}
             </div>
           {:else}
             <div class="space-y-4 mt-4">
@@ -460,10 +463,14 @@
                       >
                         {#if expandedPrompts[prompt.name]}
                           <ChevronDown size={14} />
-                          <span>参数</span>
+                          <span>{t("provider.params")}</span>
                         {:else}
                           <ChevronRight size={14} />
-                          <span>参数 ({prompt.arguments.length})</span>
+                          <span
+                            >{t("provider.paramsWithCount", {
+                              count: prompt.arguments.length,
+                            })}</span
+                          >
                         {/if}
                       </button>
 
@@ -497,7 +504,7 @@
         {:else if activeTab === "resources"}
           {#if server.resources.length === 0}
             <div class="text-center text-sm py-8 text-base-content/70">
-              暂无资源数据
+              {t("provider.emptyResources")}
             </div>
           {:else}
             <div class="space-y-4 mt-4">
@@ -516,10 +523,10 @@
                     >
                       {#if expandedResources[resource.uri]}
                         <ChevronDown size={14} />
-                        <span>详情</span>
+                        <span>{t("provider.detail")}</span>
                       {:else}
                         <ChevronRight size={14} />
-                        <span>详情</span>
+                        <span>{t("provider.detail")}</span>
                       {/if}
                     </button>
 
@@ -566,11 +573,12 @@
 <ConfirmModal
   bind:this={confirmModalRef}
   open={showDeleteConfirm}
-  title="删除 MCP 服务器"
-  message="确认要删除 <span class='font-medium'>{server?.displayName ||
-    server?.name}</span> 吗？<br/><br/>此操作无法撤销。"
-  confirmText="删除"
-  cancelText="取消"
+  title={t("provider.deleteMcpTitle")}
+  message={t("provider.deleteMcpMessage", {
+    name: server?.displayName || server?.name || "",
+  })}
+  confirmText={t("common.delete")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="danger"
   isLoading={mcpState.isLoading}
   autoCloseOnConfirm={false}
@@ -582,31 +590,36 @@
 <!-- 禁用确认弹窗 -->
 <ConfirmModal
   open={showDisableConfirm}
-  title="关闭 MCP 服务器"
+  title={t("provider.disableMcpTitle")}
   message={relatedChatsCount > 0
-    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${server?.displayName || server?.name}</span>。<br/><br/>请选择要执行的操作：`
-    : `确认关闭 <span class='font-medium'>${server?.displayName || server?.name}</span> 吗？`}
+    ? t("provider.disableMcpWithChats", {
+        count: relatedChatsCount,
+        name: server?.displayName || server?.name || "",
+      })
+    : t("provider.disableMcpConfirm", {
+        name: server?.displayName || server?.name || "",
+      })}
   actions={relatedChatsCount > 0
     ? [
         {
-          label: "解除关联后关闭",
+          label: t("provider.disableAndRemove"),
           style: "primary",
           onClick: handleDisableAndRemove
         },
         {
-          label: "仅关闭 MCP",
+          label: t("provider.disableMcpOnly"),
           style: "danger",
           onClick: handleDisableWithoutRemove
         },
         {
-          label: "取消",
+          label: t("common.cancel"),
           style: "secondary",
           onClick: handleCancelDisable
         }
       ]
     : undefined}
-  confirmText="关闭"
-  cancelText="取消"
+  confirmText={t("provider.closeAction")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="danger"
   onClose={() => (showDisableConfirm = false)}
   onConfirm={handleDisableWithoutRemove}

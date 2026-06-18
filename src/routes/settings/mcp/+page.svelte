@@ -22,6 +22,7 @@
     ChevronsUpDown,
     Settings2,
   } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
 
   let showFormModal = $state(false);
   let editingServer = $state<McpServer | null>(null);
@@ -161,7 +162,7 @@
     <div class="flex items-center justify-center py-8">
       <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
       <span class="ml-2 text-sm text-base-content/70"
-        >正在加载 MCP 服务器...</span
+        >{t("provider.loadingMcpServers")}</span
       >
     </div>
   {/if}
@@ -193,7 +194,7 @@
               <IconButton
                 icon={Settings2}
                 iconSize={16}
-                ariaLabel="编辑"
+                ariaLabel={t("provider.editAria")}
                 size="w-7 h-7"
                 onclick={(e) => handleEditServer(server, e)}
               />
@@ -212,7 +213,10 @@
                   onclick={() => toggleTools(server.id)}
                 >
                   <span
-                    >{server.tools.length} tools, {server.enabledTools.length} enabled</span
+                    >{t("provider.mcpToolsSummary", {
+                      total: server.tools.length,
+                      enabled: server.enabledTools.length,
+                    })}</span
                   >
                   <ChevronsUpDown size={12} />
                 </button>
@@ -225,7 +229,7 @@
             {:else}
               <div class="flex items-center gap-2">
                 <div class="text-xs text-base-content/60">
-                  0 tools, 0 enabled
+                  {t("provider.mcpToolsSummary", { total: 0, enabled: 0 })}
                 </div>
                 {#if server.lastSyncAt}
                   <span class="text-xs text-base-content/50">
@@ -259,10 +263,10 @@
         <div class="p-8 text-center">
           <Puzzle class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
           <p class="text-base text-base-content/70 mb-4">
-            添加 MCP 服务器来扩展 AI 能力
+            {t("provider.mcpEmptyHint")}
           </p>
           <Button variant="primary" size="sm" onclick={handleAddServer}>
-            添加 MCP 服务器
+            {t("provider.addMcpServer")}
           </Button>
         </div>
       {/if}
@@ -273,7 +277,7 @@
   {#if mcpState.servers.length > 0}
     <div>
       <Button variant="gray" size="sm" onclick={handleAddServer}>
-        添加 MCP 服务器
+        {t("provider.addMcpServer")}
       </Button>
     </div>
   {/if}
@@ -290,31 +294,36 @@
 <!-- 禁用确认弹窗 -->
 <ConfirmModal
   open={showDisableConfirm}
-  title="关闭 MCP 服务器"
+  title={t("provider.disableMcpTitle")}
   message={relatedChatsCount > 0
-    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${serverToDisable?.displayName || serverToDisable?.name}</span>。<br/><br/>请选择要执行的操作：`
-    : `确认关闭 <span class='font-medium'>${serverToDisable?.displayName || serverToDisable?.name}</span> 吗？`}
+    ? t("provider.disableMcpWithChats", {
+        count: relatedChatsCount,
+        name: serverToDisable?.displayName || serverToDisable?.name || "",
+      })
+    : t("provider.disableMcpConfirm", {
+        name: serverToDisable?.displayName || serverToDisable?.name || "",
+      })}
   actions={relatedChatsCount > 0
     ? [
         {
-          label: "解除关联后关闭",
+          label: t("provider.disableAndRemove"),
           style: "primary",
           onClick: handleDisableAndRemove
         },
         {
-          label: "仅关闭 MCP",
+          label: t("provider.disableMcpOnly"),
           style: "danger",
           onClick: handleDisableWithoutRemove
         },
         {
-          label: "取消",
+          label: t("common.cancel"),
           style: "secondary",
           onClick: handleCancelDisable
         }
       ]
     : undefined}
-  confirmText="关闭"
-  cancelText="取消"
+  confirmText={t("provider.closeAction")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="danger"
   onClose={() => (showDisableConfirm = false)}
   onConfirm={handleDisableWithoutRemove}

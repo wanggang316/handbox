@@ -3,6 +3,7 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { ArrowLeft } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
   import { getWord } from "$lib/api/word";
   import type { Word } from "$lib/types";
 
@@ -14,7 +15,7 @@
 
   async function loadDetail() {
     if (!wordId) {
-      errorMessage = "无效的单词 ID";
+      errorMessage = t("words.error.invalidId");
       return;
     }
     try {
@@ -23,7 +24,7 @@
       word = await getWord(wordId);
     } catch (error) {
       console.error("Failed to load word detail:", error);
-      errorMessage = "加载详情失败";
+      errorMessage = t("words.error.loadDetailFailed");
     } finally {
       isLoading = false;
     }
@@ -39,7 +40,7 @@
       onclick={() => goto("/words")}
     >
       <ArrowLeft size={14} />
-      返回单词本
+      {t("words.back")}
     </button>
   </div>
 
@@ -50,7 +51,7 @@
   {/if}
 
   {#if isLoading}
-    <div class="text-sm text-base-content/60">加载中...</div>
+    <div class="text-sm text-base-content/60">{t("common.loading")}</div>
   {:else if word}
     <div class="rounded-lg bg-base-300 border border-[var(--hairline)] p-6">
       <div>
@@ -73,19 +74,19 @@
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div class="rounded-lg bg-base-300 border border-[var(--hairline)] p-6">
-        <h2 class="text-sm font-medium text-base-content/70 mb-3">简明解释</h2>
+        <h2 class="text-sm font-medium text-base-content/70 mb-3">{t("words.explanation")}</h2>
         <p class="text-sm text-base-content/70">
-          {word.explanation || "暂无解释"}
+          {word.explanation || t("words.noExplanation")}
         </p>
       </div>
       <div class="rounded-lg bg-base-300 border border-[var(--hairline)] p-6">
-        <h2 class="text-sm font-medium text-base-content/70 mb-3">备注</h2>
+        <h2 class="text-sm font-medium text-base-content/70 mb-3">{t("words.note")}</h2>
         <p class="text-sm text-base-content/70">
-          {word.note || "暂无备注"}
+          {word.note || t("words.noNote")}
         </p>
       </div>
     </div>
   {:else}
-    <div class="text-sm text-base-content/60">未找到单词</div>
+    <div class="text-sm text-base-content/60">{t("words.notFound")}</div>
   {/if}
 </div>

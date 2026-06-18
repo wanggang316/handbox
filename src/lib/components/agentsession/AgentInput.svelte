@@ -8,6 +8,7 @@
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { BUILTIN_TOOLS, type BuiltinTool } from "$lib/constants/agentTools";
+  import { t } from "$lib/i18n";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
@@ -28,12 +29,13 @@
   let { session }: Props = $props();
 
   // 思考强度档位（thinkingLevel 为后端自由文本字段）。
-  const thinkingLevelOptions = [
-    { value: "off", label: "关闭" },
-    { value: "low", label: "低" },
-    { value: "medium", label: "中" },
-    { value: "high", label: "高" },
-  ];
+  // $derived so labels re-render on language switch.
+  const thinkingLevelOptions = $derived([
+    { value: "off", label: t("agent.thinking.off") },
+    { value: "low", label: t("agent.thinking.low") },
+    { value: "medium", label: t("agent.thinking.medium") },
+    { value: "high", label: t("agent.thinking.high") },
+  ]);
 
   // 单张图片软上限（10 MiB）。超限的图片不阻塞 UI，仅静默跳过并提示，避免把
   // 巨大的字节数组塞进 IPC 导致界面卡死/挂起（VAL-RUN-018）。
@@ -344,7 +346,7 @@
       attachments = [...attachments, ...additions];
     }
     if (skippedOversize) {
-      modelPrompt = "部分图片超过 10MB 已跳过";
+      modelPrompt = t("agent.input.oversizeSkipped");
     }
 
     // 复位，使重选同一文件也能再次触发 change。
@@ -401,7 +403,9 @@
         // steer 失败：仅提示，不回填覆盖已清空的 input（保持简单）。
         console.error("Failed to steer agent run:", error);
         modelPrompt =
-          error instanceof Error ? error.message : "发送 steering 消息失败";
+          error instanceof Error
+            ? error.message
+            : t("agent.input.steerFailed");
       }
       return;
     }
@@ -411,7 +415,7 @@
 
     // 无模型则提示并阻断（防御性；创建会话通常已含模型）（VAL-RUN-010）。
     if (!session.modelId || !session.providerId) {
-      modelPrompt = "请先选择模型";
+      modelPrompt = t("agent.input.selectModelFirst");
       return;
     }
 
@@ -453,7 +457,7 @@
       attachments = sentAttachments;
       adjustTextareaHeight();
       modelPrompt =
-        error instanceof Error ? error.message : "启动 Agent 运行失败";
+        error instanceof Error ? error.message : t("agent.input.runFailed");
     }
   }
 
@@ -518,8 +522,8 @@
       bind:this={textareaRef}
       bind:value={input}
       placeholder={awaitingApproval
-        ? "等待审批中，请在弹窗中允许或拒绝"
-        : "在这里输入消息，按 Enter 发送"}
+        ? t("agent.input.awaitingApprovalPlaceholder")
+        : t("agent.input.placeholder")}
       onkeydown={handleKeydown}
       oninput={handleInput}
       oncompositionstart={handleCompositionStart}
@@ -544,7 +548,7 @@
           <button
             class="absolute top-1 right-1 p-1 bg-base-200/80 hover:bg-base-200 rounded-full text-base-content transition-colors"
             type="button"
-            title="移除图片"
+            title={t("agent.input.removeImage")}
             onclick={() => removeAttachment(attachment.id)}
           >
             <X size={12} />
@@ -561,7 +565,7 @@
       <span
         class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
       ></span>
-      <span>等待工具审批，对话已暂停</span>
+      <span>{t("agent.input.awaitingApprovalHint")}</span>
     </div>
   {/if}
 
@@ -575,8 +579,8 @@
     <div class="flex flex-row flex-wrap items-center gap-2">
       <IconButton
         icon={Plus}
-        ariaLabel="添加图片"
-        title="上传图片"
+        ariaLabel={t("agent.input.addImage")}
+        title={t("agent.input.uploadImage")}
         onclick={handleAddAttachment}
       />
 
@@ -590,10 +594,10 @@
               ? "bg-base-300 text-base-content"
               : "text-base-content hover:bg-base-300"
           }`}
-          aria-label="工具"
+          aria-label={t("agent.input.tools")}
           aria-haspopup="menu"
           aria-expanded={toolsMenuOpen}
-          title="工具"
+          title={t("agent.input.tools")}
           onclick={toggleToolsMenu}
         >
           <SlidersHorizontal size={18} />
@@ -613,7 +617,7 @@
               <div
                 class="px-2 py-1.5 text-xs text-base-content/50"
               >
-                需设置工作目录后才能启用工具
+                {t("agent.input.workingDirRequired")}
               </div>
             {/if}
             {#each BUILTIN_TOOLS as tool (tool.id)}
@@ -623,13 +627,15 @@
                 class={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 ${
                   disabled ? "opacity-50" : ""
                 }`}
-                title={disabled ? `${tool.label}（需设置工作目录）` : tool.label}
+                title={disabled
+                  ? t("agent.input.toolNeedsWorkingDir", { label: t(tool.labelKey) })
+                  : t(tool.labelKey)}
               >
                 <span
                   class="flex min-w-0 items-center gap-2 text-sm text-base-content"
                 >
                   <ToolIcon size={16} class="shrink-0 text-base-content/70" />
-                  <span class="truncate">{tool.label}</span>
+                  <span class="truncate">{t(tool.labelKey)}</span>
                 </span>
                 <Toggle
                   checked={isToolEnabled(tool.id)}
@@ -659,7 +665,7 @@
           icon={Square}
           iconSize={16}
           size="w-8 h-8"
-          ariaLabel="停止"
+          ariaLabel={t("agent.input.stop")}
           onclick={handleStop}
         />
       {:else}
@@ -667,7 +673,7 @@
           icon={ArrowUp}
           iconSize={18}
           size="w-8 h-8"
-          ariaLabel="发送"
+          ariaLabel={t("agent.input.send")}
           disabled={awaitingApproval}
           onclick={sendAgentRun}
         />

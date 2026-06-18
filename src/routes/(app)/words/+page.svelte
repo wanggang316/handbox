@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { BookPlus, BookCheck, Trash2, BookMinus } from "lucide-svelte";
+  import { t } from "$lib/i18n";
   import {
     createWord,
     listWords,
@@ -30,10 +31,10 @@
     exists: boolean;
   };
 
-  const tabs: Array<{ id: TabId; label: string }> = [
-    { id: "lookup", label: "查词" },
-    { id: "learn", label: "学习" },
-  ];
+  const tabs: Array<{ id: TabId; label: string }> = $derived([
+    { id: "lookup", label: t("words.tab.lookup") },
+    { id: "learn", label: t("words.tab.learn") },
+  ]);
 
   let activeTab = $state<TabId>("lookup");
   let isLoading = $state(false);
@@ -108,7 +109,7 @@
       }
     } catch (error) {
       console.error("Failed to create/update translation session:", error);
-      errorMessage = "创建翻译会话失败";
+      errorMessage = t("words.error.createSessionFailed");
       return null;
     } finally {
       isUpdatingSession = false;
@@ -126,7 +127,7 @@
       });
     } catch (error) {
       console.error("Failed to load words:", error);
-      errorMessage = "加载单词失败";
+      errorMessage = t("words.error.loadWordsFailed");
     } finally {
       isLoading = false;
     }
@@ -166,7 +167,7 @@
       } else {
         const sessionId = await createOrUpdateTranslationSession();
         if (!sessionId) {
-          errorMessage = "请先配置翻译 Agent 和模型";
+          errorMessage = t("words.error.configRequired");
           isLoading = false;
           return;
         }
@@ -209,14 +210,14 @@
           },
           onError: (error) => {
             console.error("Translation failed:", error);
-            errorMessage = "翻译失败";
+            errorMessage = t("words.error.translateFailed");
             isLoading = false;
           },
         });
       }
     } catch (error) {
       console.error("Failed to lookup word:", error);
-      errorMessage = "查词失败";
+      errorMessage = t("words.error.lookupFailed");
       isLoading = false;
     }
   }
@@ -288,7 +289,7 @@
       await loadWords();
     } catch (error) {
       console.error("Failed to add lookup word:", error);
-      errorMessage = "添加单词失败";
+      errorMessage = t("words.error.addWordFailed");
     } finally {
       isLoading = false;
     }
@@ -300,7 +301,7 @@
       await loadWords();
     } catch (error) {
       console.error("Failed to delete word:", error);
-      errorMessage = "删除单词失败";
+      errorMessage = t("words.error.deleteWordFailed");
     }
   }
 
@@ -344,7 +345,7 @@
       await loadWords();
     } catch (error) {
       console.error("Failed to add word from history:", error);
-      errorMessage = "添加单词失败";
+      errorMessage = t("words.error.addWordFailed");
     } finally {
       isLoading = false;
     }
@@ -356,7 +357,7 @@
       await loadTranslationHistory();
     } catch (error) {
       console.error("Failed to delete history:", error);
-      errorMessage = "删除历史失败";
+      errorMessage = t("words.error.deleteHistoryFailed");
     }
   }
 
@@ -379,7 +380,7 @@
       }
     } catch (error) {
       console.error("Failed to remove word from wordbook:", error);
-      errorMessage = "移除单词失败";
+      errorMessage = t("words.error.removeWordFailed");
     }
   }
 
@@ -410,7 +411,7 @@
       errorMessage = null;
     } catch (error) {
       console.error("Failed to save config:", error);
-      errorMessage = "保存配置失败";
+      errorMessage = t("words.error.saveConfigFailed");
     }
   }
 
@@ -519,7 +520,7 @@
 <div class="h-full flex flex-col gap-4 p-6">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-medium text-base-content">单词本</h1>
+      <h1 class="text-xl font-medium text-base-content">{t("words.title")}</h1>
     </div>
   </div>
 
@@ -550,7 +551,7 @@
       <div class="flex flex-col md:flex-row gap-3">
         <input
           class="flex-1 h-10 rounded-lg bg-base-200 border border-[var(--hairline)] px-3 text-sm outline-none"
-          placeholder="搜索单词或释义"
+          placeholder={t("words.listSearchPlaceholder")}
           bind:value={listQuery}
           onkeydown={(event) => event.key === "Enter" && loadWords()}
         />
@@ -559,7 +560,7 @@
           onclick={loadWords}
           disabled={isLoading}
         >
-          搜索
+          {t("common.search")}
         </button>
       </div>
     </div>
@@ -571,7 +572,7 @@
         <textarea
           class="w-full h-20 rounded-lg bg-base-200 border border-[var(--hairline)] px-3 py-2 text-sm outline-none resize-none"
           rows={2}
-          placeholder="输入单词、短语或句子"
+          placeholder={t("words.lookupPlaceholder")}
           bind:value={lookupQuery}
           onkeydown={(event) =>
             event.key === "Enter" && !event.shiftKey && handleLookup()}
@@ -581,7 +582,7 @@
         <div class="flex flex-wrap items-center gap-3">
           <!-- Agent 选择 -->
           <div class="flex items-center gap-2">
-            <span class="text-xs text-base-content/60">翻译 Agent</span>
+            <span class="text-xs text-base-content/60">{t("words.translationAgent")}</span>
             <Select
               options={agentOptions}
               bind:selectedValue={agentId}
@@ -606,22 +607,22 @@
             onclick={handleLookup}
             disabled={isLoading || !agentId || !modelId}
           >
-            {isLoading ? "查询中..." : "查询"}
+            {isLoading ? t("words.querying") : t("words.query")}
           </button>
         </div>
 
         <!-- 提示信息 -->
         {#if agentOptions.length === 0}
           <div class="text-xs text-base-content/60">
-            暂无可用 Agent，请先在 Agent 管理页面创建翻译 Agent。
+            {t("words.noAgentHint")}
           </div>
         {:else if !agentId}
           <div class="text-xs text-base-content/60">
-            请选择翻译 Agent
+            {t("words.selectAgentHint")}
           </div>
         {:else if !modelId}
           <div class="text-xs text-base-content/60">
-            请选择翻译模型
+            {t("words.selectModelHint")}
           </div>
         {/if}
       </div>
@@ -629,7 +630,7 @@
 
     {#if translationHistory.length > 0}
       <div class="rounded-lg bg-base-300 p-4 border border-[var(--hairline)]">
-        <div class="text-xs text-base-content/60 mb-3">历史查询</div>
+        <div class="text-xs text-base-content/60 mb-3">{t("words.history")}</div>
         <div class="divide-y divide-base-200 max-h-96 overflow-y-auto">
           {#each translationHistory as message, index}
             {#if message.role === "user" && translationHistory[index + 1]?.role === "assistant"}
@@ -650,7 +651,7 @@
                         <IconButton
                           icon={BookMinus}
                           iconSize={16}
-                          title="从单词本移除"
+                          title={t("words.removeFromWordbook")}
                           disabled={isLoading}
                           onclick={() => handleRemoveFromHistory(message.content)}
                         />
@@ -658,7 +659,7 @@
                         <IconButton
                           icon={BookPlus}
                           iconSize={16}
-                          title="加入单词本"
+                          title={t("words.addToWordbook")}
                           disabled={isLoading}
                           onclick={() => handleAddFromHistory(message, translationHistory[index + 1])}
                         />
@@ -666,7 +667,7 @@
                       <IconButton
                         icon={Trash2}
                         iconSize={16}
-                        title="删除"
+                        title={t("common.delete")}
                         onclick={() => handleDeleteHistory(message.id)}
                       />
                     </div>
@@ -685,9 +686,9 @@
       class="flex-1 overflow-auto rounded-lg bg-base-300 border border-[var(--hairline)]"
     >
       {#if isLoading}
-        <div class="p-6 text-sm text-base-content/60">加载中...</div>
+        <div class="p-6 text-sm text-base-content/60">{t("common.loading")}</div>
       {:else if words.length === 0}
-        <div class="p-6 text-sm text-base-content/60">暂无单词</div>
+        <div class="p-6 text-sm text-base-content/60">{t("words.emptyList")}</div>
       {:else}
         <div class="divide-y divide-base-200">
           {#each words as word}
@@ -723,7 +724,7 @@
                     handleDeleteWord(word.id);
                   }}
                 >
-                  删除
+                  {t("common.delete")}
                 </button>
               </div>
               <div class="flex items-center gap-2 text-xs text-base-content/50">

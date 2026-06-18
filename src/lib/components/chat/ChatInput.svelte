@@ -8,6 +8,7 @@
   import type { ModelWithProvider } from "$lib/types/provider";
   import type { ChatAttachment } from "$lib/types/chat";
   import { onDestroy } from "svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     messageInput?: string;
@@ -187,11 +188,11 @@
     >
       <div class="flex items-center gap-2 text-sm text-base-content/70">
         <Pencil size={14} />
-        <span>编辑消息</span>
+        <span>{t("chat.editMessage")}</span>
       </div>
       <button
         class="p-1 hover:bg-base-300 rounded transition-colors"
-        title="取消编辑"
+        title={t("chat.cancelEdit")}
         onclick={handleCancelEdit}
       >
         <X size={16} />
@@ -203,8 +204,8 @@
     bind:this={textareaRef}
     bind:value={messageInput}
     placeholder={isEditing
-      ? "编辑消息内容..."
-      : "在这里输入消息，按 Enter 发送"}
+      ? t("chat.editMessagePlaceholder")
+      : t("chat.inputPlaceholder")}
     onkeydown={handleKeydown}
     oninput={adjustTextareaHeight}
     rows="1"
@@ -225,7 +226,7 @@
           <button
             class="absolute top-1 right-1 p-1 bg-base-200/80 hover:bg-base-200 rounded-full text-base-content transition-colors"
             type="button"
-            title="移除图片"
+            title={t("chat.removeImage")}
             onclick={() => removeAttachment(attachment.id)}
           >
             <X size={12} />
@@ -244,9 +245,9 @@
     {#if supportsNonTextInput}
       <IconButton
         icon={Plus}
-        ariaLabel="添加附件"
+        ariaLabel={t("chat.addAttachment")}
         onclick={handleAddAttachment}
-        title="上传图片"
+        title={t("chat.uploadImage")}
         disabled={isEditing}
       />
     {/if}
@@ -263,7 +264,7 @@
         icon={ArrowUp}
         iconSize={18}
         size="w-8 h-8"
-        ariaLabel={isEditing ? "更新消息" : "发送"}
+        ariaLabel={isEditing ? t("chat.updateMessage") : t("common.send")}
         onclick={sendMessage}
       />
     </div>

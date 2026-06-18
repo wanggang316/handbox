@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { Snippet } from "svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     initialWidth?: number;
@@ -135,6 +136,6 @@
     onpointerup={endDrag}
     onpointercancel={endDrag}
     ondblclick={resetWidth}
-    aria-label="调整侧栏宽度"
+    aria-label={t("ui.resizeSidebar")}
   ></div>
 </div>

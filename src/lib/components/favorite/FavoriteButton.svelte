@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Star } from "lucide-svelte";
+  import { t } from "$lib/i18n";
   import { favoriteStore } from "$lib/states";
   import type { FavoriteMessageType } from "$lib/types/favorite";
   import type { UUID } from "$lib/types";
@@ -46,7 +47,7 @@
 
 <button
   class="text-base-content/60 hover:text-amber-500 hover:bg-amber-500/10 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-  title={isFavorited ? "取消收藏" : "收藏"}
+  title={isFavorited ? t("favorites.toggle.unfavorite") : t("favorites.toggle.favorite")}
   onclick={handleToggle}
   disabled={isLoading}
 >

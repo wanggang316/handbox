@@ -16,6 +16,7 @@
   import Select from "../../ui/Select.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
   import Toggle from "../../ui/Toggle.svelte";
+  import { t } from "$lib/i18n";
 
   let {
     paramName,
@@ -143,7 +144,7 @@
     );
 
     return [
-      { value: "", label: "跟随模型" },
+      { value: "", label: t("chat.followModel") },
       ...configuredOptions.map((opt) => ({
         value: opt,
         label: opt.charAt(0).toUpperCase() + opt.slice(1),
@@ -168,7 +169,7 @@
       <!-- Include Reasoning Toggle (if configured) -->
       {#if includeReasoning()}
         <div class="flex items-center justify-between">
-          <span class="text-xs text-base-content/60">包含推理</span>
+          <span class="text-xs text-base-content/60">{t("chat.includeReasoning")}</span>
           <Toggle
             checked={currentReasoning?.reasoningEffort?.includeReasoning ?? false}
             onChange={(value) => {
@@ -183,7 +184,7 @@
 
       <!-- Effort Selection -->
       <div class="flex items-center justify-between">
-        <span class="text-xs text-base-content/60">难度</span>
+        <span class="text-xs text-base-content/60">{t("chat.effort")}</span>
         <Select
           value={currentReasoning?.reasoningEffort?.effort ?? ""}
           options={effortOptions()}

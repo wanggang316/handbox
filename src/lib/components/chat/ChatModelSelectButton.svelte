@@ -3,6 +3,7 @@
   import Button from "$lib/components/ui/Button.svelte";
   import ChatModelSelectModal from "$lib/components/chat/ChatModelSelectModal.svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
+  import { t } from "$lib/i18n";
 
   interface Props {
     selectedModel?: ModelWithProvider | null;
@@ -29,7 +30,7 @@
 </script>
 
 <Button {variant} {size} {customClass} onclick={() => (open = true)}>
-  {selectedModel ? selectedModel.name : "选择模型"}
+  {selectedModel ? selectedModel.name : t("chat.selectModel")}
   <ChevronsUpDown size={14} />
 </Button>
 

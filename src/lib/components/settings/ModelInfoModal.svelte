@@ -3,6 +3,7 @@
   import type { Model, ModelPricing } from "$lib/types/provider";
   import { Copy, Check, ExternalLink } from "lucide-svelte";
   import { openInBrowser } from "$lib/utils/browser";
+  import { t } from "$lib/i18n";
 
   const props = $props<{
     open?: boolean;
@@ -87,7 +88,7 @@
 
       if (current.id) {
         rows.push({
-          label: "模型 ID",
+          label: t("provider.modelId"),
           value: current.id,
           mono: true,
         });
@@ -96,14 +97,14 @@
       // 使用后端格式化的字段
       if (current.display_context_length) {
         rows.push({
-          label: "上下文长度",
+          label: t("provider.contextLength"),
           value: current.display_context_length,
         });
       }
 
       if (current.display_output_max_tokens) {
         rows.push({
-          label: "最大输出长度",
+          label: t("provider.maxOutputLength"),
           value: current.display_output_max_tokens,
         });
       }
@@ -111,7 +112,7 @@
       const inputPrice = formatPricePerMillion(promptPrice);
       if (inputPrice) {
         rows.push({
-          label: "输入价格",
+          label: t("provider.inputPrice"),
           value: inputPrice,
         });
       }
@@ -119,7 +120,7 @@
       const outputPrice = formatPricePerMillion(completionPrice);
       if (outputPrice) {
         rows.push({
-          label: "输出价格",
+          label: t("provider.outputPrice"),
           value: outputPrice,
         });
       }
@@ -127,25 +128,25 @@
       const supportedFeatures = formatList(current.supported_features);
 
       if (supportedFeatures) {
-        rows.push({ label: "支持特性", value: supportedFeatures });
+        rows.push({ label: t("provider.supportedFeatures"), value: supportedFeatures });
       }
 
       const inputModalities = formatList(current.input_modalities);
 
       if (inputModalities) {
-        rows.push({ label: "输入模态", value: inputModalities });
+        rows.push({ label: t("provider.inputModalities"), value: inputModalities });
       }
 
       const outputModalities = formatList(current.output_modalities);
 
       if (outputModalities) {
-        rows.push({ label: "输出模态", value: outputModalities });
+        rows.push({ label: t("provider.outputModalities"), value: outputModalities });
       }
 
       const supportedMethods = formatList(current.supported_chat_methods);
       if (supportedMethods) {
         rows.push({
-          label: "支持方法",
+          label: t("provider.supportedMethods"),
           value: supportedMethods,
           mono: true,
         });
@@ -156,7 +157,7 @@
         .join(", ");
       if (supportedParameters) {
         rows.push({
-          label: "支持参数",
+          label: t("provider.supportedParameters"),
           value: supportedParameters,
           mono: true,
         });
@@ -165,7 +166,7 @@
       const description = current.description?.trim();
       if (description) {
         rows.push({
-          label: "描述",
+          label: t("common.description"),
           value: description,
           preserveWhitespace: true,
         });
@@ -187,7 +188,7 @@
 
 </script>
 
-<Modal {open} {onClose} title={model?.name ?? "模型信息"}>
+<Modal {open} {onClose} title={model?.name ?? t("provider.modelInfo")}>
   <div
     class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 pb-6 space-y-6 text-sm text-base-content/90 scrollbar-padding relative"
   >
@@ -195,7 +196,7 @@
       <button
         type="button"
         class="absolute top-0 right-6 inline-flex items-center justify-center h-8 w-8 rounded-full text-base-content/60 hover:text-primary transition-colors"
-        title="查看模型详情"
+        title={t("provider.viewModelDetail")}
         onclick={handleOpenModelUrl}
       >
         <ExternalLink size={16} stroke-width={1.75} />
@@ -220,7 +221,7 @@
                   >
                     {row.value}
                   </p>
-                {:else if row.label === "模型 ID"}
+                {:else if row.label === t("provider.modelId")}
                   <div class="flex items-center gap-2">
                     <span
                       class={`py-[0px] h-full text-xs text-base-content/80 ${row.mono ? "font-mono break-all" : ""}`}
@@ -230,7 +231,7 @@
                     <button
                       onclick={handleCopyModelId}
                       class="p-1 hover:bg-base-300 rounded transition-colors"
-                      title="复制模型 ID"
+                      title={t("provider.copyModelId")}
                     >
                       {#if copied}
                         <Check size={12} class="text-success" />
@@ -252,7 +253,7 @@
         </tbody>
       </table>
     {:else}
-      <div class="text-base-content/70">暂无模型信息</div>
+      <div class="text-base-content/70">{t("provider.emptyModelInfo")}</div>
     {/if}
   </div>
 </Modal>

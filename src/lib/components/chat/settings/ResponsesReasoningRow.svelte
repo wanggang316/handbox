@@ -16,6 +16,7 @@
   } from "$lib/types/provider";
   import Select from "../../ui/Select.svelte";
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
+  import { t } from "$lib/i18n";
 
   let {
     paramName,
@@ -141,7 +142,7 @@
     );
 
     return [
-      { value: "", label: "跟随模型" },
+      { value: "", label: t("chat.followModel") },
       ...configuredOptions.map((opt) => ({
         value: opt,
         label: opt.charAt(0).toUpperCase() + opt.slice(1),
@@ -158,7 +159,7 @@
     );
 
     return [
-      { value: "", label: "跟随模型" },
+      { value: "", label: t("chat.followModel") },
       ...configuredOptions.map((opt) => ({
         value: opt,
         label: opt.charAt(0).toUpperCase() + opt.slice(1),
@@ -179,7 +180,7 @@
   <TableBaseRow label={label ?? "Reasoning"} {helpText} layout="vertical">
     <div class="flex flex-col gap-2 pt-2 pl-2">
       <div class="flex items-center justify-between">
-        <span class="text-xs text-base-content/60">难度</span>
+        <span class="text-xs text-base-content/60">{t("chat.effort")}</span>
         <Select
           value={currentReasoning?.responses?.effort ?? ""}
           options={effortOptions()}
@@ -194,7 +195,7 @@
         />
       </div>
       <div class="flex items-center justify-between">
-        <span class="text-xs text-base-content/60">总结</span>
+        <span class="text-xs text-base-content/60">{t("chat.summary")}</span>
         <Select
           value={currentReasoning?.responses?.summary ?? ""}
           options={summaryOptions()}

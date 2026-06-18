@@ -9,6 +9,7 @@
   import JobFormModal from "$lib/components/jobs/JobFormModal.svelte";
   import JobDetailModal from "$lib/components/jobs/JobDetailModal.svelte";
   import type { JobFormData } from "$lib/components/jobs/JobFormModal.svelte";
+  import { t } from "$lib/i18n";
   import type { Job } from "$lib/types";
 
   let searchQuery = $state("");
@@ -90,7 +91,7 @@
   const deleteMessage = $derived(
     deleteError
       ? `<span class="text-error">${escapeHtml(deleteError)}</span>`
-      : "确定要删除这个任务吗？此操作无法撤销。",
+      : t("jobs.delete.confirmMessage"),
   );
 
   function closeFormModal() {
@@ -140,7 +141,7 @@
     } catch (e) {
       // 删除失败：行保留（store 不移除），错误就地展示在确认框内，不关闭。
       console.error("Failed to delete job:", e);
-      deleteError = jobStore.error ?? "删除失败，请重试";
+      deleteError = jobStore.error ?? t("jobs.delete.failed");
     } finally {
       deleting = false;
     }
@@ -182,10 +183,10 @@
       <div class="flex items-center gap-4">
         <h1 class="text-xl font-semibold text-base-content flex items-center gap-2">
           <Clock size={24} />
-          任务
+          {t("jobs.title")}
         </h1>
         <span class="text-sm text-base-content/60">
-          {filteredJobs.length} 个
+          {t("jobs.count", { n: filteredJobs.length })}
         </span>
       </div>
       <Button
@@ -195,14 +196,14 @@
         customClass="flex items-center gap-2"
       >
         <Plus size={16} />
-        新建任务
+        {t("jobs.create")}
       </Button>
     </div>
 
     <div class="relative">
       <input
         type="text"
-        placeholder="搜索任务名称..."
+        placeholder={t("jobs.searchPlaceholder")}
         class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
         bind:value={searchQuery}
       />
@@ -223,29 +224,29 @@
     {:else if jobStore.error}
       <div class="flex flex-col items-center justify-center h-full text-base-content/50">
         <AlertCircle size={48} class="mb-4 opacity-30 text-error" />
-        <p class="mb-2 text-base-content/70">加载任务失败</p>
+        <p class="mb-2 text-base-content/70">{t("jobs.loadError")}</p>
         <p class="text-sm mb-4 text-base-content/50">{jobStore.error}</p>
         <button
           class="text-primary hover:underline cursor-pointer"
           onclick={() => jobStore.load().catch(() => {})}
         >
-          重试
+          {t("common.retry")}
         </button>
       </div>
     {:else if filteredJobs.length === 0}
       <div class="flex flex-col items-center justify-center h-full text-base-content/50">
         <Clock size={48} class="mb-4 opacity-20" />
         {#if searchQuery.trim()}
-          <p class="mb-2">没有找到匹配的任务</p>
+          <p class="mb-2">{t("jobs.empty.noMatch")}</p>
           <button
             class="text-primary hover:underline cursor-pointer"
             onclick={() => (searchQuery = "")}
           >
-            清除搜索
+            {t("jobs.empty.clearSearch")}
           </button>
         {:else}
-          <p>还没有创建任何任务</p>
-          <p class="text-sm mt-2">点击上方按钮创建您的第一个定时任务</p>
+          <p>{t("jobs.empty.none")}</p>
+          <p class="text-sm mt-2">{t("jobs.empty.hint")}</p>
         {/if}
       </div>
     {:else}
@@ -281,10 +282,10 @@
 
 <!-- 删除确认模态框 -->
 <ConfirmModal
-  title="删除任务"
+  title={t("jobs.delete.confirmTitle")}
   message={deleteMessage}
-  confirmText="删除"
-  cancelText="取消"
+  confirmText={t("common.delete")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="danger"
   isLoading={deleting}
   autoCloseOnConfirm={false}

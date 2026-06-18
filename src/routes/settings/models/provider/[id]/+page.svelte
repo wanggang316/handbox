@@ -31,6 +31,7 @@
   import ModelInfoModal from "$lib/components/settings/ModelInfoModal.svelte";
   import { countChatsUsingProvider } from "$lib/api/provider";
   import { countChatsUsingModel } from "$lib/api/model";
+  import { t } from "$lib/i18n";
 
   let providerId = $state("");
   let showDeleteConfirm = $state(false);
@@ -294,7 +295,7 @@
       showAddModel = false;
     } catch (error) {
       addModelError =
-        error instanceof Error ? error.message : "添加模型失败";
+        error instanceof Error ? error.message : t("provider.addModelFailed");
     } finally {
       addingModel = false;
     }
@@ -347,7 +348,7 @@
     <CircleButton
       icon={ChevronLeft}
       iconSize={22}
-      ariaLabel="返回"
+      ariaLabel={t("provider.backAria")}
       size="w-8 h-8"
       variant="secondary"
       customClass="hover:text-base-content/80 z-10004 relative"
@@ -365,7 +366,7 @@
 
             <IconButton
               icon={RefreshCw}
-              ariaLabel="刷新模型列表"
+              ariaLabel={t("provider.refreshModels")}
               onclick={refreshModels}
               disabled={isRefreshing}
               customClass={`transition-transform ${isRefreshing ? "animate-spin text-primary" : ""}`}
@@ -384,14 +385,14 @@
     {/if}
 
     <div class="flex items-center mt-6 mb-2">
-      <div class="flex-1 text-base-content text-base mx-2">模型列表</div>
+      <div class="flex-1 text-base-content text-base mx-2">{t("provider.modelList")}</div>
       {#if isCustom}
         <button
           onclick={() => (showAddModel = !showAddModel)}
           class="flex items-center gap-1 px-2 py-1 mr-2 rounded-md text-xs bg-base-300 text-base-content border border-[var(--hairline)] hover:bg-base-300/80"
         >
           <Plus size={14} />
-          添加模型
+          {t("provider.addModel")}
         </button>
       {/if}
     </div>
@@ -403,7 +404,7 @@
         <input
           type="text"
           bind:value={newModelId}
-          placeholder="输入 model id，例如 llama-3.1-8b"
+          placeholder={t("provider.addModelPlaceholder")}
           onkeydown={(e) => {
             if (e.key === "Enter") handleAddModel();
             if (e.key === "Escape") cancelAddModel();
@@ -415,13 +416,13 @@
           disabled={addingModel || !newModelId.trim()}
           class="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-content disabled:opacity-50"
         >
-          {addingModel ? "添加中…" : "添加"}
+          {addingModel ? t("provider.adding") : t("provider.add")}
         </button>
         <button
           onclick={cancelAddModel}
           class="px-3 py-1.5 text-sm rounded-md bg-base-300 text-base-content hover:bg-base-300/80"
         >
-          取消
+          {t("common.cancel")}
         </button>
       </div>
       {#if addModelError}
@@ -456,7 +457,7 @@
                 <div class="flex items-center flex-1 gap-2">
                   <span class="text-base-content text-xs">{model.name}</span>
                   {#if model.support_image}
-                    <span title="支持图片生成">
+                    <span title={t("provider.supportImage")}>
                       <EyeIcon size={14} class="text-info" />
                     </span>
                   {/if}
@@ -491,8 +492,8 @@
                     }}
                     class="p-1 rounded hover:bg-base-300 transition-colors"
                     aria-label={model.favorite
-                      ? "Remove from favorites"
-                      : "Add to favorites"}
+                      ? t("provider.removeFromFavorites")
+                      : t("provider.addToFavorites")}
                   >
                     <Star
                       size={16}
@@ -508,7 +509,7 @@
                     icon={Info}
                     iconSize={16}
                     size="w-6 h-6"
-                    ariaLabel="查看模型信息"
+                    ariaLabel={t("provider.viewModelInfo")}
                     onclick={() => openModelInfo(model)}
                   />
                 </div>
@@ -519,9 +520,9 @@
       {:else}
         <div class="text-center text-sm py-8 text-base-content/70">
           {#if isCustom}
-            该自定义供应商暂无模型，点击「添加模型」手动添加端点支持的 model id
+            {t("provider.emptyCustomModels")}
           {:else}
-            暂无模型数据，请检查供应商配置或网络连接
+            {t("provider.emptyModels")}
           {/if}
         </div>
       {/if}
@@ -545,10 +546,12 @@
 <ConfirmModal
   bind:this={confirmModalRef}
   open={showDeleteConfirm}
-  title="删除供应商"
-  message="确认要删除 <span class='font-medium'>{currentProvider?.name}</span> 吗？"
-  confirmText="删除"
-  cancelText="取消"
+  title={t("provider.deleteProviderTitle")}
+  message={t("provider.deleteProviderMessage", {
+    name: currentProvider?.name ?? "",
+  })}
+  confirmText={t("common.delete")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="danger"
   isLoading={providerState.isLoading}
   autoCloseOnConfirm={false}
@@ -560,12 +563,17 @@
 <!-- 禁用供应商确认弹窗 -->
 <ConfirmModal
   open={showDisableConfirm}
-  title="关闭供应商"
+  title={t("provider.disableProviderTitle")}
   message={relatedChatsCount > 0
-    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用 <span class='font-medium'>${currentProvider?.name}</span>。<br/><br/>关闭此供应商后，这些会话将无法使用该供应商的模型。<br/><br/>确定要关闭吗？`
-    : `确认关闭 <span class='font-medium'>${currentProvider?.name}</span> 吗？`}
-  confirmText="关闭"
-  cancelText="取消"
+    ? t("provider.disableProviderWithChats", {
+        count: relatedChatsCount,
+        name: currentProvider?.name ?? "",
+      })
+    : t("provider.disableProviderConfirm", {
+        name: currentProvider?.name ?? "",
+      })}
+  confirmText={t("provider.closeAction")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="danger"
   onClose={() => (showDisableConfirm = false)}
   onConfirm={confirmDisableProvider}
@@ -575,12 +583,17 @@
 <!-- 禁用模型确认弹窗 -->
 <ConfirmModal
   open={showModelDisableConfirm}
-  title="禁用模型"
+  title={t("provider.disableModelTitle")}
   message={relatedChatsCount > 0
-    ? `检测到有 <span class='font-medium'>${relatedChatsCount}</span> 个会话正在使用模型 <span class='font-medium'>${modelToDisable?.name}</span>。<br/><br/>禁用此模型后，这些会话将无法使用该模型。<br/><br/>确定要禁用吗？`
-    : `确认禁用模型 <span class='font-medium'>${modelToDisable?.name}</span> 吗？`}
-  confirmText="禁用"
-  cancelText="取消"
+    ? t("provider.disableModelWithChats", {
+        count: relatedChatsCount,
+        name: modelToDisable?.name ?? "",
+      })
+    : t("provider.disableModelConfirm", {
+        name: modelToDisable?.name ?? "",
+      })}
+  confirmText={t("provider.disableAction")}
+  cancelText={t("common.cancel")}
   confirmButtonStyle="danger"
   onClose={() => (showModelDisableConfirm = false)}
   onConfirm={confirmDisableModel}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { TriangleAlert, CircleCheck, TriangleAlert as Warning, Info, X } from '@lucide/svelte';
   import { toastStore, toastActions, type ToastMessage } from '$lib/states/toast.svelte';
+  import { t } from '$lib/i18n';
 
   function getIcon(type: ToastMessage['type']) {
     switch (type) {
@@ -62,10 +63,10 @@
 
   function getTitle(type: ToastMessage['type']) {
     switch (type) {
-      case 'success': return '操作成功';
-      case 'warning': return '注意';
-      case 'info': return '提示';
-      default: return '操作失败';
+      case 'success': return t('ui.toastSuccessTitle');
+      case 'warning': return t('ui.toastWarningTitle');
+      case 'info': return t('ui.toastInfoTitle');
+      default: return t('ui.toastErrorTitle');
     }
   }
 </script>
@@ -105,7 +106,7 @@
               onclick={() => toastActions.remove(toast.id)}
               class="px-3 py-1 text-xs font-medium rounded-full border transition-colors {styles.action}"
             >
-              {toast.acknowledgeLabel ?? '我知道了'}
+              {toast.acknowledgeLabel ?? t('ui.gotIt')}
             </button>
           {:else}
             <button 

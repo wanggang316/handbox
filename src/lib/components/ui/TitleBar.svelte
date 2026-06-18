@@ -1,6 +1,7 @@
 <script lang="ts">
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import { PanelLeft } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     sidebarOpen?: boolean;
@@ -29,7 +30,7 @@
         icon={PanelLeft}
         iconSize={15}
         strokeWidth={1.5}
-        ariaLabel={sidebarOpen ? "隐藏侧边栏 (⌘B)" : "显示侧边栏 (⌘B)"}
+        ariaLabel={sidebarOpen ? t("ui.hideSidebar") : t("ui.showSidebar")}
         onclick={handleToggle}
       />
     </div>

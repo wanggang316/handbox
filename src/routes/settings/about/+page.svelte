@@ -6,6 +6,7 @@
   import UpdateDialog from "$lib/components/update/UpdateDialog.svelte";
   import { updateState } from "$lib/states/update.svelte";
   import { openInBrowser } from "$lib/utils";
+  import { t } from "$lib/i18n";
 
   onMount(() => {
     updateState.load().catch((error) => {
@@ -16,10 +17,14 @@
   // 检查更新行的状态文案
   const checkValue = $derived(
     updateState.status === "checking"
-      ? "检查中…"
+      ? t("settings.about.checking")
       : updateState.status === "available"
-        ? `发现新版本 v${updateState.info?.version ?? ""}`
-        : `当前版本 v${updateState.currentVersion}`
+        ? t("settings.about.updateAvailable", {
+            version: updateState.info?.version ?? "",
+          })
+        : t("settings.about.currentVersion", {
+            version: updateState.currentVersion,
+          })
   );
 
   function handleCheckVersion(): void {
@@ -60,15 +65,15 @@
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
   <!-- 软件更新 -->
   <div class="rounded-xl overflow-hidden">
-    <TableGroup title="软件更新">
+    <TableGroup title={t("settings.about.softwareUpdate")}>
       <SwitchRow
-        label="自动检查更新"
-        description="启动时自动检查"
+        label={t("settings.about.autoCheck")}
+        description={t("settings.about.autoCheckHint")}
         checked={updateState.autoCheck}
         onChange={handleAutoCheckChange}
       />
       <DefaultRow
-        label="检查更新"
+        label={t("settings.about.checkUpdate")}
         value={checkValue}
         onclick={handleCheckVersion}
       />
@@ -77,9 +82,9 @@
 
   <!-- 关于 -->
   <div class="rounded-xl overflow-hidden">
-    <TableGroup title="关于">
-      <DefaultRow label="更新日志" onclick={handleOpenChangelog} />
-      <DefaultRow label="官方网站" onclick={handleOpenOfficalSite} />
+    <TableGroup title={t("settings.about.title")}>
+      <DefaultRow label={t("settings.about.changelog")} onclick={handleOpenChangelog} />
+      <DefaultRow label={t("settings.about.officialSite")} onclick={handleOpenOfficalSite} />
     </TableGroup>
   </div>
 </div>

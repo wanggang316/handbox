@@ -9,10 +9,24 @@ export type AppMode = "chat" | "agent";
 
 const APP_MODE_KEY = "appMode";
 const LAST_AGENT_SESSION_ID_KEY = "lastAgentSessionId";
+const LANGUAGE_KEY = "language";
+
+const SUPPORTED_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
+  "zh-CN",
+  "en-US",
+]);
 
 function loadPersistedAppMode(): AppMode {
   if (typeof localStorage === "undefined") return "chat";
   return localStorage.getItem(APP_MODE_KEY) === "agent" ? "agent" : "chat";
+}
+
+function loadPersistedLanguage(): Language {
+  if (typeof localStorage === "undefined") return "zh-CN";
+  const saved = localStorage.getItem(LANGUAGE_KEY);
+  return saved && SUPPORTED_LANGUAGES.has(saved as Language)
+    ? (saved as Language)
+    : "zh-CN";
 }
 
 function loadPersistedLastAgentSessionId(): string | null {
@@ -51,7 +65,7 @@ class UIState {
     modals: {},
     notifications: [],
     theme: "system",
-    language: "zh-CN",
+    language: loadPersistedLanguage(),
     globalLoading: false,
     appMode: loadPersistedAppMode(),
     lastAgentSessionId: loadPersistedLastAgentSessionId(),
@@ -250,6 +264,14 @@ class UIState {
    */
   setLanguage(lang: Language): void {
     this.state.language = lang;
+
+    // 持久化到 localStorage（用于快速启动与跨窗口同步）
+    if (typeof localStorage !== "undefined") {
+      const current = localStorage.getItem(LANGUAGE_KEY);
+      if (current !== lang) {
+        localStorage.setItem(LANGUAGE_KEY, lang);
+      }
+    }
 
     // 更新 HTML lang 属性
     if (typeof document !== "undefined") {

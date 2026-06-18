@@ -1,5 +1,6 @@
 <script lang="ts">
   import Modal from '$lib/components/ui/Modal.svelte';
+  import { t } from '$lib/i18n';
   import { Search as SearchIcon, Loader2, Clock, ArrowUpRight, X } from 'lucide-svelte';
   import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
@@ -156,14 +157,14 @@
           bind:this={searchInput}
           type="text"
           class="w-full pl-10 pr-9 py-2.5 rounded-md border border-[var(--hairline)] bg-base-300 text-base-content focus:border-primary"
-          placeholder="搜索聊天记录..."
+          placeholder={t('search.placeholder')}
           bind:value={query}
         />
         {#if query}
           <button
             type="button"
             class="absolute right-2 p-1 text-base-content/60 hover:text-base-content"
-            aria-label="清空"
+            aria-label={t('common.clear')}
             onclick={handleClear}
           >
             <X size={16} />
@@ -175,14 +176,14 @@
     <div class="flex-1 overflow-y-auto px-6 pb-6 space-y-4">
       {#if error}
         <div class="rounded-lg bg-error/10 text-error px-4 py-3 text-sm">
-          搜索失败：{error}
+          {t('search.failed', { error })}
         </div>
       {/if}
 
       {#if !query && history.length > 0}
         <div class="space-y-2">
           <div class="text-xs uppercase tracking-wide text-base-content/50 flex items-center gap-2">
-            <Clock size={14} /> 历史搜索
+            <Clock size={14} /> {t('search.history')}
           </div>
           <div class="flex flex-wrap gap-2">
             {#each history as item}
@@ -200,13 +201,13 @@
 
       {#if isLoading}
         <div class="flex items-center justify-center h-full text-base-content/70">
-          <Loader2 class="mr-2 animate-spin" size={16} /> 正在搜索...
+          <Loader2 class="mr-2 animate-spin" size={16} /> {t('search.searching')}
         </div>
       {:else if query && results.length === 0}
         <div class="text-center text-base-content/60 py-12">
-          未找到与
+          {t('search.noResultsPrefix')}
           <span class="font-medium text-base-content">“{query}”</span>
-          相关的聊天记录
+          {t('search.noResultsSuffix')}
         </div>
       {:else if results.length > 0}
         <div class="space-y-4">

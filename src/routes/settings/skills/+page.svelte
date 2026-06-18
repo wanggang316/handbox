@@ -6,6 +6,7 @@
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import { skillState, skillActions } from "$lib/states/skill.svelte";
   import type { SkillInfo, SkillScope } from "$lib/types";
+  import { t } from "$lib/i18n";
   import {
     LoaderCircle,
     Sparkles,
@@ -40,11 +41,11 @@
   function getScopeLabel(scope: SkillScope): string {
     switch (scope) {
       case "user":
-        return "用户";
+        return t("settings.skills.scope.user");
       case "project":
-        return "项目";
+        return t("settings.skills.scope.project");
       case "appData":
-        return "应用";
+        return t("settings.skills.scope.appData");
       default:
         return scope;
     }
@@ -98,9 +99,9 @@
   <!-- 头部：标题 + 刷新 -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-base font-medium text-base-content">技能</h1>
+      <h1 class="text-base font-medium text-base-content">{t("settings.skills.title")}</h1>
       <p class="text-xs text-base-content/60 mt-0.5">
-        将 SKILL.md 放入技能目录后会在此处展示，可启停有效的技能
+        {t("settings.skills.description")}
       </p>
     </div>
     <Button
@@ -114,7 +115,7 @@
       {:else}
         <RefreshCw size={14} />
       {/if}
-      刷新
+      {t("common.refresh")}
     </Button>
   </div>
 
@@ -122,7 +123,7 @@
   {#if skillState.isLoading && skillState.skills.length === 0}
     <div class="flex items-center justify-center py-8">
       <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
-      <span class="ml-2 text-sm text-base-content/70">正在加载技能...</span>
+      <span class="ml-2 text-sm text-base-content/70">{t("settings.skills.loading")}</span>
     </div>
   {/if}
 
@@ -175,7 +176,7 @@
                 onclick={() => handleOpenDir(skill)}
               >
                 <FolderOpen size={14} />
-                <span>打开目录</span>
+                <span>{t("settings.skills.openDir")}</span>
               </button>
             </div>
           </div>
@@ -200,7 +201,7 @@
                 class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-300 rounded px-1 -ml-1 py-0.5 transition-colors"
                 onclick={() => toggleBody(skill)}
               >
-                <span>{expanded ? "收起内容" : "查看内容"}</span>
+                <span>{expanded ? t("settings.skills.collapseBody") : t("settings.skills.expandBody")}</span>
                 <ChevronsUpDown size={12} />
               </button>
               {#if expanded}
@@ -216,9 +217,9 @@
       {#if !skillState.isLoading && skillState.skills.length === 0 && !skillState.error}
         <div class="p-8 text-center">
           <Sparkles class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
-          <p class="text-base text-base-content/70 mb-1">暂无技能</p>
+          <p class="text-base text-base-content/70 mb-1">{t("settings.skills.empty")}</p>
           <p class="text-sm text-base-content/60">
-            在技能目录中放入 SKILL.md 文件，然后点击「刷新」即可在此处看到。
+            {t("settings.skills.emptyHint")}
           </p>
         </div>
       {/if}

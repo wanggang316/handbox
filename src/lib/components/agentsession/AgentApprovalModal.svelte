@@ -3,6 +3,7 @@
   import Modal from "$lib/components/ui/Modal.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import { renderCodeBlock } from "$lib/utils/code";
+  import { t } from "$lib/i18n";
   import type {
     AgentApprovalRequest,
     ApprovalDecision,
@@ -24,17 +25,19 @@
 
   let { request, onRespond }: Props = $props();
 
-  // 工具名 → 中文 label + 图标。危险工具（write/edit/bash）已知集；未知名兜底回显
-  // 原始 toolName（绝不静默隐藏调用本体）。
-  const TOOL_META: Record<string, { label: string; icon: typeof Terminal }> = {
-    write: { label: "写入文件", icon: FilePlus },
-    edit: { label: "编辑文件", icon: FilePen },
-    bash: { label: "执行命令", icon: Terminal },
-  };
+  // 工具名 → 本地化 label + 图标。危险工具（write/edit/bash）已知集；未知名兜底回显
+  // 原始 toolName（绝不静默隐藏调用本体）。$derived so labels track language switch.
+  const TOOL_META = $derived<
+    Record<string, { label: string; icon: typeof Terminal }>
+  >({
+    write: { label: t("agent.approval.toolWrite"), icon: FilePlus },
+    edit: { label: t("agent.approval.toolEdit"), icon: FilePen },
+    bash: { label: t("agent.approval.toolBash"), icon: Terminal },
+  });
 
   const meta = $derived(
     TOOL_META[request.toolName] ?? {
-      label: request.toolName || "工具调用",
+      label: request.toolName || t("agent.approval.toolFallback"),
       icon: ShieldAlert,
     },
   );
@@ -192,7 +195,7 @@
         <ShieldAlert size={18} />
       </span>
       <h2 id="agent-approval-title" class="text-sm font-medium text-base-content">
-        需要你的确认
+        {t("agent.approval.title")}
       </h2>
     </div>
 
@@ -206,13 +209,15 @@
       </div>
 
       <p class="text-[12px] text-base-content/70">
-        Agent 请求执行以下操作，确认后才会运行。请核对参数。
+        {t("agent.approval.intro")}
       </p>
 
       <!-- bash：完整 command（不截断）。 -->
       {#if command !== null}
         <div>
-          <div class="mb-1 text-[10px] text-base-content/60">命令</div>
+          <div class="mb-1 text-[10px] text-base-content/60">
+            {t("agent.approval.command")}
+          </div>
           <div class="text-[11px] break-words leading-relaxed">
             {@html renderText(command)}
           </div>
@@ -222,7 +227,9 @@
       <!-- write/edit：目标路径（完整可见）。 -->
       {#if targetPath !== null}
         <div>
-          <div class="mb-1 text-[10px] text-base-content/60">目标路径</div>
+          <div class="mb-1 text-[10px] text-base-content/60">
+            {t("agent.approval.targetPath")}
+          </div>
           <div class="text-[11px] break-all leading-relaxed">
             {@html renderText(targetPath)}
           </div>
@@ -232,7 +239,9 @@
       <!-- write/edit：内容预览（长内容可滚动）。 -->
       {#if contentPreview !== null}
         <div>
-          <div class="mb-1 text-[10px] text-base-content/60">内容</div>
+          <div class="mb-1 text-[10px] text-base-content/60">
+            {t("agent.approval.content")}
+          </div>
           <div
             class="text-[11px] break-words leading-relaxed max-h-48 overflow-auto"
           >
@@ -244,7 +253,9 @@
       <!-- 完整参数（JSON）：展示值==执行值的兜底全量视图。 -->
       {#if argsJson}
         <div>
-          <div class="mb-1 text-[10px] text-base-content/60">完整参数</div>
+          <div class="mb-1 text-[10px] text-base-content/60">
+            {t("agent.approval.fullArgs")}
+          </div>
           <div class="text-[11px] break-words leading-relaxed">
             {@html argsJson}
           </div>
@@ -262,7 +273,7 @@
     >
       <RoundButton
         customClass="w-20"
-        label="拒绝"
+        label={t("agent.approval.deny")}
         size="h-8"
         fontSize="text-sm"
         bgColor="bg-base-300"
@@ -272,7 +283,7 @@
       />
       <RoundButton
         customClass="w-24"
-        label="本次允许"
+        label={t("agent.approval.allowOnce")}
         size="h-8"
         fontSize="text-sm"
         bgColor="bg-base-300"
@@ -282,7 +293,7 @@
       />
       <RoundButton
         customClass="w-28"
-        label="始终允许"
+        label={t("agent.approval.allowAlways")}
         size="h-8"
         fontSize="text-sm"
         bgColor="bg-primary"

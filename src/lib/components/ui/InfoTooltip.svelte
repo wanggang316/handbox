@@ -1,6 +1,7 @@
 <script lang="ts">
   import { HelpCircle } from "@lucide/svelte";
   import { fade, fly } from "svelte/transition";
+  import { t } from "$lib/i18n";
 
   interface Props {
     content: string;
@@ -42,7 +43,7 @@
     onmouseenter={show}
     onmouseleave={hide}
     class="text-base-content/40 hover:text-base-content/70 transition-colors"
-    aria-label="显示帮助信息"
+    aria-label={t("ui.showHelp")}
   >
     <HelpCircle {size} />
   </button>

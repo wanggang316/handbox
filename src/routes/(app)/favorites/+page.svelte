@@ -15,6 +15,7 @@
     ChevronDown,
     ChevronUp,
   } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
   import { favoriteStore } from "$lib/states";
   import type {
     Favorite,
@@ -53,41 +54,41 @@
   const COLLAPSED_TAG_FILTER_HEIGHT = 48;
 
   const messageTypes: { value: FavoriteMessageType | "all"; label: string }[] =
-    [
-      { value: "all", label: "全部" },
-      { value: "text", label: "文本" },
-      { value: "image", label: "图片" },
-      { value: "message", label: "消息" },
-      { value: "chat", label: "对话" },
-      { value: "external", label: "外部" },
-    ];
+    $derived([
+      { value: "all", label: t("common.all") },
+      { value: "text", label: t("favorites.type.text") },
+      { value: "image", label: t("favorites.type.image") },
+      { value: "message", label: t("favorites.type.message") },
+      { value: "chat", label: t("favorites.type.chat") },
+      { value: "external", label: t("favorites.type.external") },
+    ]);
 
-  const tagColors: { value: TagColor; label: string; class: string }[] = [
+  const tagColors: { value: TagColor; label: string; class: string }[] = $derived([
     {
       value: "primary",
-      label: "主色",
+      label: t("favorites.color.primary"),
       class: "bg-primary text-primary-content",
     },
     {
       value: "secondary",
-      label: "次要",
+      label: t("favorites.color.secondary"),
       class: "bg-secondary text-secondary-content",
     },
-    { value: "accent", label: "强调", class: "bg-accent text-accent-content" },
+    { value: "accent", label: t("favorites.color.accent"), class: "bg-accent text-accent-content" },
     {
       value: "success",
-      label: "成功",
+      label: t("favorites.color.success"),
       class: "bg-success text-success-content",
     },
     {
       value: "warning",
-      label: "警告",
+      label: t("favorites.color.warning"),
       class: "bg-warning text-warning-content",
     },
-    { value: "error", label: "错误", class: "bg-error text-error-content" },
-    { value: "info", label: "信息", class: "bg-info text-info-content" },
-    { value: "gray", label: "灰色", class: "bg-base-300 text-base-content" },
-  ];
+    { value: "error", label: t("favorites.color.error"), class: "bg-error text-error-content" },
+    { value: "info", label: t("favorites.color.info"), class: "bg-info text-info-content" },
+    { value: "gray", label: t("favorites.color.gray"), class: "bg-base-300 text-base-content" },
+  ]);
 
   let filteredFavorites = $derived.by(() => {
     let result = favoriteStore.favorites;
@@ -221,7 +222,7 @@
     normalized.forEach((range, index) => {
       const snippet = escapeHtml(text.slice(range.start, range.end));
       pieces.push(
-        `<span class="text-base-content/50 text-xs">段落${index + 1}</span>`
+        `<span class="text-base-content/50 text-xs">${t("favorites.paragraph", { n: index + 1 })}</span>`
       );
       pieces.push("<br />");
       pieces.push(`<span class="px-1 rounded">${snippet}</span>`);
@@ -413,11 +414,11 @@
   function getRoleLabel(role: string): string {
     switch (role) {
       case "user":
-        return "用户";
+        return t("favorites.role.user");
       case "assistant":
-        return "助手";
+        return t("favorites.role.assistant");
       case "system":
-        return "系统";
+        return t("favorites.role.system");
       default:
         return role;
     }
@@ -425,11 +426,11 @@
 
   function getMessageTypeLabel(type: FavoriteMessageType): string {
     const labels: Record<FavoriteMessageType, string> = {
-      text: "文本",
-      image: "图片",
-      message: "消息",
-      chat: "对话",
-      external: "外部",
+      text: t("favorites.type.text"),
+      image: t("favorites.type.image"),
+      message: t("favorites.type.message"),
+      chat: t("favorites.type.chat"),
+      external: t("favorites.type.external"),
     };
     return labels[type] || type;
   }
@@ -480,9 +481,11 @@
 
   function getNavigateLabel(favorite: Favorite): string | null {
     if (favorite.messageType === "external") {
-      return favorite.sourceUrl ? "打开来源" : null;
+      return favorite.sourceUrl ? t("favorites.openSource") : null;
     }
-    return favorite.messageType === "chat" ? "查看对话" : "查看消息";
+    return favorite.messageType === "chat"
+      ? t("favorites.viewChat")
+      : t("favorites.viewMessage");
   }
 
   onMount(() => {
@@ -516,9 +519,9 @@
 <div class="h-full flex flex-col">
   <div class="flex-shrink-0 p-4 border-b border-base-300">
     <div class="flex items-center gap-4 mb-4">
-      <h1 class="text-xl font-semibold text-base-content">收藏</h1>
+      <h1 class="text-xl font-semibold text-base-content">{t("favorites.title")}</h1>
       <span class="text-sm text-base-content/60">
-        {filteredFavorites.length} 条
+        {t("favorites.count", { n: filteredFavorites.length })}
       </span>
     </div>
 
@@ -530,7 +533,7 @@
         />
         <input
           type="text"
-          placeholder="搜索收藏内容或标签..."
+          placeholder={t("favorites.searchPlaceholder")}
           class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 text-sm"
           bind:value={searchQuery}
         />
@@ -586,7 +589,7 @@
               class="inline-flex h-5 items-center rounded-full border border-dashed border-base-300 px-1.5 text-[11px] leading-none text-base-content/50 hover:text-base-content hover:border-base-content/50 transition-colors cursor-pointer"
               onclick={() => (selectedTags = [])}
             >
-              清除
+              {t("common.clear")}
             </button>
           {/if}
         </div>
@@ -597,10 +600,10 @@
           >
             {#if tagFilterExpanded}
               <ChevronUp size={12} />
-              收起
+              {t("favorites.collapse")}
             {:else}
               <ChevronDown size={12} />
-              展开
+              {t("common.expand")}
             {/if}
           </button>
         {/if}
@@ -621,7 +624,7 @@
       >
         <Star size={48} class="mb-4 opacity-20" />
         {#if searchQuery || selectedType !== "all" || selectedTags.length > 0}
-          <p class="mb-2">没有找到匹配的收藏</p>
+          <p class="mb-2">{t("favorites.empty.noMatch")}</p>
           <button
             class="text-primary hover:underline cursor-pointer"
             onclick={() => {
@@ -630,11 +633,11 @@
               selectedTags = [];
             }}
           >
-            清除筛选
+            {t("favorites.clearFilter")}
           </button>
         {:else}
-          <p>还没有收藏任何消息</p>
-          <p class="text-sm mt-2">点击消息旁的星号图标即可收藏</p>
+          <p>{t("favorites.empty.none")}</p>
+          <p class="text-sm mt-2">{t("favorites.empty.hint")}</p>
         {/if}
       </div>
     {:else}
@@ -696,7 +699,7 @@
                   {#if getImageSrc(favorite.content)}
                     <img
                       src={getImageSrc(favorite.content)}
-                      alt="收藏的图片"
+                      alt={t("favorites.imageAlt")}
                       class="max-h-48 rounded-lg object-contain"
                     />
                   {:else}
@@ -719,9 +722,9 @@
                       onclick={() => toggleExpand(favorite.id)}
                     >
                       {#if isExpanded(favorite.id)}
-                        收起
+                        {t("favorites.collapse")}
                       {:else}
-                        展开消息
+                        {t("favorites.expandMessage")}
                       {/if}
                     </button>
                   {/if}
@@ -733,24 +736,24 @@
                     {#if favorite.selectionTextRaw &&
                     favorite.selectionTextRaw !== favorite.content}
                       <div class="text-xs text-base-content/60">
-                        原文: {favorite.selectionTextRaw}
+                        {t("favorites.source.original")}: {favorite.selectionTextRaw}
                       </div>
                     {/if}
                     <div class="flex flex-wrap gap-2 text-xs text-base-content/60">
                       {#if favorite.sourceAppName}
-                        <span>应用: {favorite.sourceAppName}</span>
+                        <span>{t("favorites.source.app")}: {favorite.sourceAppName}</span>
                       {/if}
                       {#if favorite.sourceWindowTitle}
-                        <span>窗口: {favorite.sourceWindowTitle}</span>
+                        <span>{t("favorites.source.window")}: {favorite.sourceWindowTitle}</span>
                       {/if}
                       {#if favorite.sourceUrl}
-                        <span>链接: {favorite.sourceUrl}</span>
+                        <span>{t("favorites.source.url")}: {favorite.sourceUrl}</span>
                       {/if}
                       {#if favorite.sourceDomain}
-                        <span>域名: {favorite.sourceDomain}</span>
+                        <span>{t("favorites.source.domain")}: {favorite.sourceDomain}</span>
                       {/if}
                       {#if favorite.sourceTabTitle}
-                        <span>标签: {favorite.sourceTabTitle}</span>
+                        <span>{t("favorites.source.tab")}: {favorite.sourceTabTitle}</span>
                       {/if}
                     </div>
                   </div>
@@ -773,7 +776,7 @@
                         class="text-xs text-primary hover:underline mt-2 cursor-pointer flex items-center gap-1"
                         onclick={() => toggleExpand(favorite.id)}
                       >
-                        展开消息
+                        {t("favorites.expandMessage")}
                       </button>
                     {:else}
                       <div
@@ -791,20 +794,20 @@
                           onclick={() => toggleExpand(favorite.id)}
                         >
                           {#if isExpanded(favorite.id)}
-                            收起
+                            {t("favorites.collapse")}
                           {:else}
-                            展开消息
+                            {t("favorites.expandMessage")}
                           {/if}
                         </button>
                       {/if}
                     {/if}
                   {:else if favorite.context}
                     <p class="text-sm text-base-content/70 italic">
-                      无效的文本范围
+                      {t("favorites.invalidRange")}
                     </p>
                   {:else}
                     <p class="text-sm text-base-content/70 italic">
-                      数据格式已更新，请重新收藏
+                      {t("favorites.outdatedFormat")}
                     </p>
                   {/if}
                 {/if}
@@ -830,7 +833,7 @@
       onclick={() => handleEditTags(selectedFavorite!)}
     >
       <Pencil size={14} />
-      编辑标签
+      {t("favorites.editTags")}
     </button>
     <div class="border-t border-base-300 my-1 mx-2"></div>
     <button
@@ -838,7 +841,7 @@
       onclick={() => handleDeleteFavorite(selectedFavorite!)}
     >
       <Trash2 size={14} />
-      删除收藏
+      {t("favorites.deleteFavorite")}
     </button>
   </div>
 {/if}
@@ -852,7 +855,7 @@
   >
     <div class="flex items-center gap-2 mb-3">
       <Tag size={16} />
-      <h3 class="text-sm font-medium">编辑标签</h3>
+      <h3 class="text-sm font-medium">{t("favorites.editTags")}</h3>
     </div>
 
     {#if editingFavoriteId}
@@ -881,7 +884,7 @@
 
       {#if favoriteStore.tags.length > 0}
         <div class="mb-3">
-          <p class="text-xs text-base-content/60 mb-1">已有标签</p>
+          <p class="text-xs text-base-content/60 mb-1">{t("favorites.existingTags")}</p>
           <div class="flex flex-wrap gap-1">
             {#each favoriteStore.tags.filter((tag) => !currentTagNames.has(tag.name)) as tag}
               <button
@@ -901,7 +904,7 @@
     <div class="flex gap-2 mb-3">
       <input
         type="text"
-        placeholder="标签名称..."
+        placeholder={t("favorites.tagNamePlaceholder")}
         class="flex-1 h-8 px-2 text-xs bg-base-200 rounded border border-base-300 focus:border-primary"
         bind:value={newTagName}
         onkeydown={(e) => {
@@ -915,7 +918,7 @@
         class="h-8 px-3 text-xs rounded bg-primary text-primary-content hover:bg-primary/90"
         onclick={handleAddTag}
       >
-        添加
+        {t("common.add")}
       </button>
     </div>
 

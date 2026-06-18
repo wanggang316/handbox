@@ -7,6 +7,7 @@
     ChevronDown,
   } from "@lucide/svelte";
   import { renderCodeBlock } from "$lib/utils/code";
+  import { t } from "$lib/i18n";
   import type { ToolCallView } from "$lib/states/agentRun.svelte";
   import type { ToolResultContent } from "$lib/types/agentSession";
 
@@ -30,21 +31,21 @@
     switch (toolCall.status) {
       case "executing":
         return {
-          text: "执行中",
+          text: t("agent.toolCall.executing"),
           icon: Loader2,
           color: "text-info",
           animate: true,
         };
       case "completed":
         return {
-          text: "完成",
+          text: t("agent.toolCall.completed"),
           icon: CheckCircle2,
           color: "text-success",
           animate: false,
         };
       case "error":
         return {
-          text: "失败",
+          text: t("agent.toolCall.error"),
           icon: XCircle,
           color: "text-error",
           animate: false,
@@ -124,7 +125,7 @@
 
       <div class="flex flex-col gap-1">
         <div class="text-sm text-base-content">
-          {toolCall.toolName || "工具"}
+          {toolCall.toolName || t("agent.toolCall.fallbackName")}
         </div>
       </div>
     </button>
@@ -162,7 +163,7 @@
           {#each imageResults as image, idx (idx)}
             <img
               src={imageSrc(image)}
-              alt="工具结果图片"
+              alt={t("agent.toolCall.resultImageAlt")}
               class="max-w-full h-auto rounded-md mb-2"
             />
           {/each}
