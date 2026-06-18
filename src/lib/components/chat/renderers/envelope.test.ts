@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEnvelope } from "./envelope";
+import { looksLikeStreamingEnvelope, parseEnvelope } from "./envelope";
 
 describe("parseEnvelope", () => {
   // ---------------------------------------------------------------------------
@@ -287,6 +287,112 @@ describe("parseEnvelope", () => {
     it("passes through inside a fenced block too", () => {
       const content = '```json\n{"__render":"card","data":"x"}\n```';
       expect(parseEnvelope(content)).toEqual({ type: "card", data: "x" });
+    });
+  });
+});
+
+describe("looksLikeStreamingEnvelope", () => {
+  // ---------------------------------------------------------------------------
+  // true — opener (`{` or ```json) AND contains the `"__render"` marker.
+  // Covers partial, still-streaming (unclosed) fragments (VAL-STREAM-001).
+  // ---------------------------------------------------------------------------
+  describe("looks like a streaming render envelope", () => {
+    it("matches a complete bare envelope", () => {
+      const content = '{"__render":"translation","data":{"text":"hello"}}';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+
+    it("matches a half-streamed, unclosed bare envelope", () => {
+      const content = '{"__render":"translation","data":{"tex';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+
+    it("matches a bare envelope where __render arrives before the open value", () => {
+      const content = '{"version":1,"__render":"translation","data":{';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+
+    it("matches a ```json fence with an unclosed inner envelope", () => {
+      const content = '```json\n{"__render":"translation","data":{"a":';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+
+    it("treats the json language token case-insensitively", () => {
+      const content = '```JSON\n{"__render":"translation"';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+
+    it("matches a fence with a trailing info string after json", () => {
+      const content = '```json title=result\n{"__render":"trans';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+
+    it("tolerates leading whitespace before the opener", () => {
+      const content = '  \n\t {"__render":"translation"';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+
+    it("tolerates an indented ```json fence", () => {
+      const content = '   ```json\n{"__render":"translation"';
+      expect(looksLikeStreamingEnvelope(content)).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // false — fails the opener check, the marker check, or both. Ordinary
+  // streamed prose must never be mistaken for an envelope (VAL-STREAM-004).
+  // ---------------------------------------------------------------------------
+  describe("does not look like a streaming render envelope", () => {
+    it("rejects plain prose", () => {
+      expect(looksLikeStreamingEnvelope("这是一段普通的中文回复")).toBe(false);
+      expect(looksLikeStreamingEnvelope("Here is a normal answer.")).toBe(false);
+    });
+
+    it("rejects JSON that does not carry the __render marker", () => {
+      const content = '{"text":"hello","data":{"x":1}}';
+      expect(looksLikeStreamingEnvelope(content)).toBe(false);
+    });
+
+    it("rejects a half-streamed plain JSON object without __render", () => {
+      const content = '{"text":"hel';
+      expect(looksLikeStreamingEnvelope(content)).toBe(false);
+    });
+
+    it("rejects prose that opens before a brace, even with __render later", () => {
+      const content = 'here is the result: {"__render":"translation"}';
+      expect(looksLikeStreamingEnvelope(content)).toBe(false);
+    });
+
+    it("rejects a ```json fence whose inner content lacks __render", () => {
+      const content = '```json\n{"text":"hello"';
+      expect(looksLikeStreamingEnvelope(content)).toBe(false);
+    });
+
+    it("rejects a non-json fenced block even when it mentions __render", () => {
+      const content = '```ts\nconst x = "__render";';
+      expect(looksLikeStreamingEnvelope(content)).toBe(false);
+    });
+
+    it("rejects a fence with no language token", () => {
+      const content = '```\n{"__render":"translation"';
+      expect(looksLikeStreamingEnvelope(content)).toBe(false);
+    });
+
+    it("rejects json5/jsonc language tokens", () => {
+      expect(looksLikeStreamingEnvelope('```json5\n{"__render":"x"')).toBe(false);
+      expect(looksLikeStreamingEnvelope('```jsonc\n{"__render":"x"')).toBe(false);
+    });
+
+    it("rejects prose that merely mentions the unquoted word __render", () => {
+      const content = "the __render directive is used to draw cards";
+      expect(looksLikeStreamingEnvelope(content)).toBe(false);
+    });
+
+    it("rejects empty, whitespace-only, null, and undefined content", () => {
+      expect(looksLikeStreamingEnvelope("")).toBe(false);
+      expect(looksLikeStreamingEnvelope("   \n\t ")).toBe(false);
+      expect(looksLikeStreamingEnvelope(null)).toBe(false);
+      expect(looksLikeStreamingEnvelope(undefined)).toBe(false);
     });
   });
 });

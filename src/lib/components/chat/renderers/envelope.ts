@@ -54,6 +54,73 @@ export function parseEnvelope(content: string | null | undefined): Envelope | nu
 }
 
 /**
+ * Cheap heuristic: does this *in-progress* streaming content look like a render
+ * envelope that is still being generated?
+ *
+ * During streaming the accumulated content is almost always an unclosed JSON
+ * fragment, so {@link parseEnvelope} cannot decide. This function answers a
+ * narrower, parse-free question used solely to swap in a loading placeholder
+ * while a render envelope streams in (rather than rendering half a JSON blob
+ * character by character).
+ *
+ * It is intentionally precise to avoid misfiring on ordinary prose replies:
+ * BOTH conditions must hold on the trimmed content —
+ *
+ *  1. it starts with a render-envelope carrier opener: a bare `{`, OR a
+ *     ```json fence whose language token is `json` (case-insensitive); AND
+ *  2. it contains the `"__render"` discriminator marker somewhere.
+ *
+ * A normal streamed message (plain text, or JSON without `__render`, or text
+ * that does not open with `{`/```json) fails at least one check and is left to
+ * the existing per-character markdown rendering path.
+ *
+ * @param content Raw, possibly-partial streaming content (accepts
+ *   `null`/`undefined` defensively).
+ */
+export function looksLikeStreamingEnvelope(
+  content: string | null | undefined,
+): boolean {
+  if (typeof content !== "string") {
+    return false;
+  }
+
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  if (!startsWithEnvelopeOpener(trimmed)) {
+    return false;
+  }
+
+  // The `__render` discriminator is what distinguishes a render envelope from
+  // any other JSON object. Match the quoted key so plain prose mentioning the
+  // word "render" cannot trip the heuristic.
+  return trimmed.includes('"__render"');
+}
+
+/**
+ * Whether the trimmed content opens with a render-envelope carrier: a bare JSON
+ * object (`{`) or a ```json fenced code block whose language token is `json`
+ * (case-insensitive). The fence may be indented and may carry a trailing info
+ * string (first whitespace-delimited token wins).
+ */
+function startsWithEnvelopeOpener(trimmed: string): boolean {
+  if (trimmed.startsWith("{")) {
+    return true;
+  }
+
+  const firstLine = trimmed.split(/\r\n?|\n/, 1)[0] ?? "";
+  const openMatch = /^[ \t]*```(.*)$/.exec(firstLine);
+  if (openMatch === null) {
+    return false;
+  }
+
+  const langToken = openMatch[1].trim().split(/\s+/, 1)[0] ?? "";
+  return langToken.toLowerCase() === "json";
+}
+
+/**
  * Return the trimmed text when it is exactly one JSON object (first char `{`,
  * last char `}`), otherwise `null`. We only do a cheap bracket check here;
  * full validity is decided by `JSON.parse` later. This deliberately rejects

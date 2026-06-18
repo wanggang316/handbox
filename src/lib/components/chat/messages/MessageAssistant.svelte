@@ -24,6 +24,7 @@
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
   import { t } from "$lib/i18n";
   import { resolveRenderer } from "$lib/components/chat/renderers/resolve";
+  import { looksLikeStreamingEnvelope } from "$lib/components/chat/renderers/envelope";
 
   interface Props {
     message?: Message;
@@ -68,6 +69,15 @@
   // messages. Streaming and non-envelope/unknown messages fall through to the
   // existing markdown branches below.
   const cardHit = $derived(isStreaming ? null : resolveRenderer(message?.content));
+
+  // While a render envelope is still streaming, its content is an unclosed JSON
+  // fragment that must not be rendered character by character. Show a loading
+  // placeholder instead; the finished card is drawn by the `cardHit` branch once
+  // streaming ends. Ordinary (non-envelope) streamed replies fail this precise
+  // heuristic and fall through to the normal markdown path.
+  const isStreamingEnvelope = $derived(
+    isStreaming && looksLikeStreamingEnvelope(message?.content),
+  );
 
   let showRangeMenu = $state(false);
   let rangeMenuX = $state(0);
@@ -397,6 +407,15 @@
             {@const Card = cardHit.component}
             <div class="flex-1 break-words">
               <Card {...cardHit.data} />
+            </div>
+          {:else if isStreamingEnvelope}
+            <div
+              class="flex items-center gap-3 rounded-lg border border-dashed border-[var(--hairline)] px-4 py-3 text-sm text-base-content/70"
+            >
+              <div
+                class="w-4 h-4 border-2 border-base-content/30 border-t-transparent rounded-full animate-spin"
+              ></div>
+              <span>结构化结果生成中…</span>
             </div>
           {:else if message && message.id && message.sessionId}
             <div
