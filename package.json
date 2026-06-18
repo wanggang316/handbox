@@ -10,6 +10,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "release": "bash ./scripts/release.sh",
+    "test": "vitest run",
     "tauri": "tauri"
   },
   "license": "MIT",
@@ -42,6 +43,7 @@
     "svelte-check": "^4.0.0",
     "tailwindcss": "^4.1.11",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^3.2.6"
   }
 }
