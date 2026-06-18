@@ -8,6 +8,7 @@
    */
   import { Bot, FolderOpen, Brain, Settings2 } from "@lucide/svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import { t } from "$lib/i18n";
   import {
     agentSessionState,
     agentSessionActions,
@@ -137,7 +138,7 @@
       <IconButton
         icon={Settings2}
         iconSize={16}
-        ariaLabel="编辑 System Prompt"
+        ariaLabel={t("agent.systemPrompt.editAria")}
         title="System Prompt"
         onclick={togglePromptPopover}
       />
@@ -150,7 +151,7 @@
 
           <textarea
             bind:value={promptDraft}
-            placeholder="输入系统提示词..."
+            placeholder={t("agent.systemPrompt.placeholder")}
             rows="6"
             class="w-full min-h-28 max-h-64 px-3 py-2 border border-base-300 rounded-md resize-y
                    focus:border-transparent
@@ -161,7 +162,7 @@
             <div
               class="text-xs text-error bg-error/10 border border-error/20 rounded-md px-2 py-1.5 break-words"
             >
-              保存失败：{promptError}
+              {t("agent.systemPrompt.saveFailed", { error: promptError })}
             </div>
           {/if}
 
@@ -171,7 +172,7 @@
               class="rounded-full border border-base-300 px-3 py-1 text-xs font-medium text-base-content hover:border-base-300/70 hover:bg-base-200 transition-colors"
               onclick={closePromptPopover}
             >
-              取消
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -179,7 +180,7 @@
               disabled={isSavingPrompt}
               onclick={savePrompt}
             >
-              {isSavingPrompt ? "保存中…" : "保存"}
+              {isSavingPrompt ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </div>

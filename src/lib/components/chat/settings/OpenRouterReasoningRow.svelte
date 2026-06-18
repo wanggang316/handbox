@@ -17,6 +17,7 @@
   import TableBaseRow from "../../ui/table/TableBaseRow.svelte";
   import Toggle from "../../ui/Toggle.svelte";
   import LabeledSlider from "../../ui/LabeledSlider.svelte";
+  import { t } from "$lib/i18n";
 
   let {
     paramName,
@@ -150,7 +151,7 @@
     const options = reasoningProps?.effort_options || ["low", "medium", "high"];
 
     return [
-      { value: "", label: "跟随模型" },
+      { value: "", label: t("chat.followModel") },
       ...options.map((opt) => ({
         value: opt,
         label: opt.charAt(0).toUpperCase() + opt.slice(1),
@@ -216,7 +217,7 @@
       {#if showEffect()}
         <div class="flex items-center justify-between">
           <span class="text-xs text-base-content/60" title={effectTips()}>
-            难度
+            {t("chat.effort")}
           </span>
           <Select
             value={currentReasoning?.openrouter?.effort ?? ""}
@@ -256,7 +257,7 @@
       <!-- Exclude Toggle (default on, inverted logic) -->
       {#if showExclude()}
         <div class="flex items-center justify-between">
-          <span class="text-xs text-base-content/60">包含推理</span>
+          <span class="text-xs text-base-content/60">{t("chat.includeReasoning")}</span>
           <Toggle
             checked={!(currentReasoning?.openrouter?.exclude ?? false)}
             onChange={(value) => {

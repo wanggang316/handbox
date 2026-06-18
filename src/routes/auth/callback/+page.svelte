@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { t } from '$lib/i18n';
 
   /**
    * Google OAuth 回调页面
@@ -34,6 +35,6 @@
 <div class="flex items-center justify-center min-h-screen bg-base-100">
   <div class="text-center">
     <div class="w-16 h-16 mx-auto mb-4 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-    <p class="text-base-content/80">正在处理登录...</p>
+    <p class="text-base-content/80">{t('ui.processingLogin')}</p>
   </div>
 </div>

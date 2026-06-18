@@ -1,6 +1,7 @@
 <script lang="ts">
   import { chatState, chatActions } from "$lib/states/chat.svelte";
   import Modal from "../../ui/Modal.svelte";
+  import { t } from "$lib/i18n";
 
   let draftPrompt = $state("");
   let showModal = $state(false);
@@ -65,7 +66,7 @@
     {#if hasPrompt}
       {promptText}
     {:else}
-      <span class="text-base-content/50">暂无系统提示词</span>
+      <span class="text-base-content/50">{t("chat.noSystemPrompt")}</span>
     {/if}
   </div>
 </button>
@@ -73,14 +74,14 @@
 <Modal
   bind:this={modalRef}
   bind:open={showModal}
-  title="编辑系统提示词"
+  title={t("chat.editSystemPrompt")}
   onClose={handleCloseModal}
 >
   <div class="w-[70vw] h-[80vh] px-6 pt-16 pb-6 flex flex-col gap-5">
     <div class="flex-1 min-h-0">
       <textarea
         bind:value={draftPrompt}
-        placeholder="输入系统提示词..."
+        placeholder={t("chat.systemPromptPlaceholder")}
         class="w-full h-full px-3 py-2 border border-base-300 rounded-md resize-none
                focus:border-transparent
                font-mono text-sm text-base-content bg-base-200
@@ -91,7 +92,7 @@
 
     <div class="flex items-center justify-between">
       <div class="text-xs text-base-content/70">
-        字符数: {draftPrompt.length}
+        {t("chat.characterCount", { count: draftPrompt.length })}
       </div>
       <div class="flex items-center gap-3">
         <button
@@ -99,14 +100,14 @@
           class="rounded-full border border-base-300 px-4 py-2 text-sm font-medium text-base-content hover:border-base-300/70 hover:bg-base-200 transition-colors"
           onclick={handleCancelModal}
         >
-          取消
+          {t("common.cancel")}
         </button>
         <button
           type="button"
           class="rounded-full border border-base-300 px-4 py-2 text-sm font-medium text-base-content hover:border-primary/50 hover:bg-primary/10 transition-colors"
           onclick={handleSaveModal}
         >
-          完成
+          {t("common.done")}
         </button>
       </div>
     </div>

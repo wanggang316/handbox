@@ -5,6 +5,7 @@
   import { previewSchedule } from "$lib/api/job";
   import { AppError } from "$lib/api";
   import { cronToHuman } from "$lib/utils/cronReadable";
+  import { t } from "$lib/i18n";
 
   interface Props {
     /**
@@ -30,10 +31,10 @@
   type Tab = "quick" | "advanced";
   let activeTab = $state<Tab>("quick");
 
-  const TAB_ITEMS = [
-    { value: "quick", label: "快捷" },
-    { value: "advanced", label: "高级 Cron" },
-  ];
+  const TAB_ITEMS = $derived([
+    { value: "quick", label: t("jobs.schedule.tabQuick") },
+    { value: "advanced", label: t("jobs.schedule.tabAdvanced") },
+  ]);
 
   // ──────────────────────────────────────────────────────────────────────
   // 快捷预设参数（仅在快捷面板内编辑，交互时编译写回单一 cron 出口）
@@ -47,15 +48,23 @@
   let weekdays = $state<number[]>([1]); // 每周：0=周日 .. 6=周六，可多选
   let monthDay = $state(15); // 每月第几日
 
-  const PRESET_ITEMS = [
-    { value: "minutes", label: "每 N 分钟" },
-    { value: "hours", label: "每 N 小时" },
-    { value: "daily", label: "每天" },
-    { value: "weekly", label: "每周" },
-    { value: "monthly", label: "每月" },
-  ];
+  const PRESET_ITEMS = $derived([
+    { value: "minutes", label: t("jobs.schedule.presetMinutes") },
+    { value: "hours", label: t("jobs.schedule.presetHours") },
+    { value: "daily", label: t("jobs.schedule.presetDaily") },
+    { value: "weekly", label: t("jobs.schedule.presetWeekly") },
+    { value: "monthly", label: t("jobs.schedule.presetMonthly") },
+  ]);
 
-  const WEEKDAY_LABELS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const WEEKDAY_LABELS = $derived([
+    t("jobs.schedule.weekday.sun"),
+    t("jobs.schedule.weekday.mon"),
+    t("jobs.schedule.weekday.tue"),
+    t("jobs.schedule.weekday.wed"),
+    t("jobs.schedule.weekday.thu"),
+    t("jobs.schedule.weekday.fri"),
+    t("jobs.schedule.weekday.sat"),
+  ]);
 
   /** 把 `HH:MM` 拆成 cron 的 minute / hour 字段；非法时回退 0 0。 */
   function timeFields(value: string): { minute: number; hour: number } {
@@ -146,7 +155,7 @@
     // 空 cron 直接清空预览并提示，不打后端。
     if (!trimmed) {
       occurrences = [];
-      previewError = "请填写 cron 表达式";
+      previewError = t("jobs.schedule.cronRequired");
       loading = false;
       return;
     }
@@ -167,7 +176,7 @@
             ? err.message
             : err instanceof Error
               ? err.message
-              : "预览失败";
+              : t("jobs.schedule.previewFailed");
       } finally {
         if (!cancelled) loading = false;
       }
@@ -198,7 +207,7 @@
   {#if activeTab === "quick"}
     <div class="flex flex-col gap-3">
       <Select
-        label="频率"
+        label={t("jobs.schedule.frequency")}
         value={presetKind}
         options={PRESET_ITEMS}
         onChange={handlePresetChange}
@@ -207,7 +216,7 @@
 
       {#if presetKind === "minutes"}
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">每隔多少分钟</span>
+          <span class="font-medium text-base-content/80">{t("jobs.schedule.everyMinutes")}</span>
           <input
             type="number"
             min="1"
@@ -219,7 +228,7 @@
         </label>
       {:else if presetKind === "hours"}
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">每隔多少小时</span>
+          <span class="font-medium text-base-content/80">{t("jobs.schedule.everyHours")}</span>
           <input
             type="number"
             min="1"
@@ -231,7 +240,7 @@
         </label>
       {:else if presetKind === "daily"}
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">时间</span>
+          <span class="font-medium text-base-content/80">{t("jobs.schedule.time")}</span>
           <input
             type="time"
             bind:value={timeStr}
@@ -241,7 +250,7 @@
         </label>
       {:else if presetKind === "weekly"}
         <div class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">星期（可多选）</span>
+          <span class="font-medium text-base-content/80">{t("jobs.schedule.weekdays")}</span>
           <div class="flex flex-wrap gap-1.5">
             {#each WEEKDAY_LABELS as label, day (day)}
               <button
@@ -260,7 +269,7 @@
           </div>
         </div>
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">时间</span>
+          <span class="font-medium text-base-content/80">{t("jobs.schedule.time")}</span>
           <input
             type="time"
             bind:value={timeStr}
@@ -270,7 +279,7 @@
         </label>
       {:else if presetKind === "monthly"}
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">每月第几日</span>
+          <span class="font-medium text-base-content/80">{t("jobs.schedule.dayOfMonth")}</span>
           <input
             type="number"
             min="1"
@@ -281,7 +290,7 @@
           />
         </label>
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">时间</span>
+          <span class="font-medium text-base-content/80">{t("jobs.schedule.time")}</span>
           <input
             type="time"
             bind:value={timeStr}
@@ -293,7 +302,7 @@
     </div>
   {:else}
     <label class="flex flex-col gap-1 text-sm">
-      <span class="font-medium text-base-content/80">Cron 表达式（标准 5 段：分 时 日 月 周）</span>
+      <span class="font-medium text-base-content/80">{t("jobs.schedule.cronLabel")}</span>
       <input
         type="text"
         value={cron}
@@ -315,7 +324,7 @@
   <!-- 预览区 -->
   <div class="rounded-md border border-[var(--hairline)] bg-base-200 p-3">
     <div class="mb-2 text-xs font-medium text-base-content/60">
-      接下来 {previewCount} 次执行（本地时间）
+      {t("jobs.schedule.previewTitle", { n: previewCount })}
     </div>
 
     {#if previewError}
@@ -324,9 +333,9 @@
         <span>{previewError}</span>
       </div>
     {:else if loading && occurrences.length === 0}
-      <div class="text-sm text-base-content/50">计算中…</div>
+      <div class="text-sm text-base-content/50">{t("jobs.schedule.calculating")}</div>
     {:else if occurrences.length === 0}
-      <div class="text-sm text-base-content/50">近期无可执行时间</div>
+      <div class="text-sm text-base-content/50">{t("jobs.schedule.noOccurrences")}</div>
     {:else}
       <ol class="flex flex-col gap-1 text-sm text-base-content/80">
         {#each occurrences as ms (ms)}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
   import RoundButton from "./RoundButton.svelte";
+  import { t } from "$lib/i18n";
 
   // 定义操作按钮类型
   type ActionButton = {
@@ -11,10 +12,10 @@
 
   const {
     open = false,
-    title = "确认操作",
-    message = "确认要执行此操作吗？",
-    confirmText = "确认",
-    cancelText = "取消",
+    title,
+    message,
+    confirmText,
+    cancelText,
     isLoading = false,
     confirmButtonStyle = "danger", // "danger" | "accent"
     autoCloseOnConfirm = true, // 确认后是否自动关闭
@@ -36,6 +37,12 @@
     onConfirm?: () => void;
     onCancel?: () => void;
   }>();
+
+  // 文案回退：未传入时用本地化默认值（保持语言切换时响应式）
+  const resolvedTitle = $derived(title ?? t("ui.confirmTitle"));
+  const resolvedMessage = $derived(message ?? t("ui.confirmMessage"));
+  const resolvedConfirmText = $derived(confirmText ?? t("common.confirm"));
+  const resolvedCancelText = $derived(cancelText ?? t("common.cancel"));
 
   let modalRef: Modal;
 
@@ -79,12 +86,12 @@
   <div class="max-w-md flex flex-col">
     <!-- 头部 -->
     <div class="flex items-center justify-center px-6 pt-4 pb-0">
-      <h2 class="text-sm">{title}</h2>
+      <h2 class="text-sm">{resolvedTitle}</h2>
     </div>
 
     <!-- 内容 -->
     <div class="px-6 py-2 text-center text-base-content text-[12px]">
-      {@html message}
+      {@html resolvedMessage}
     </div>
 
     <!-- 底部按钮 -->
@@ -108,7 +115,7 @@
       <div class="flex items-center justify-center gap-4 px-6 pt-2 pb-4">
         <RoundButton
           customClass="w-22"
-          label={cancelText}
+          label={resolvedCancelText}
           size="h-8"
           fontSize="text-sm"
           variant="secondary"
@@ -118,7 +125,7 @@
           customClass="w-22"
           size="h-8"
           fontSize="text-sm"
-          label={isLoading ? "处理中..." : confirmText}
+          label={isLoading ? t("ui.processing") : resolvedConfirmText}
           variant={confirmButtonStyle}
           disabled={isLoading}
           onclick={handleConfirm}

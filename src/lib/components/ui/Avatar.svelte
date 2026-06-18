@@ -1,6 +1,7 @@
 <script lang="ts">
   import { User, Edit } from "@lucide/svelte";
   import { proxyImage, shouldProxyImage } from "$lib/api/image";
+  import { t } from "$lib/i18n";
 
   interface Props {
     src?: string; // 头像 URL
@@ -102,12 +103,12 @@
     class:cursor-default={!editable}
     onclick={editable ? handleFileUpload : undefined}
     disabled={!editable}
-    title={editable ? "点击上传" : undefined}
+    title={editable ? t("ui.clickToUpload") : undefined}
   >
     {#if avatarSrc}
       <img
         src={avatarSrc}
-        alt="头像"
+        alt={t("ui.avatarAlt")}
         class="w-full h-full rounded-full object-cover"
         onerror={() => {
           // 如果图片加载失败，可以在这里处理回退逻辑
@@ -135,7 +136,7 @@
         <div
           class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-base-100 text-xs text-center"
         >
-          点击上传
+          {t("ui.clickToUpload")}
         </div>
       </div>
     {/if}

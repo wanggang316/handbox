@@ -1,6 +1,7 @@
 <script lang="ts">
   import Avatar from "../ui/Avatar.svelte";
   import { Settings } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
 
   // 用户信息接口
   interface UserInfo {
@@ -19,7 +20,9 @@
     $props();
 
   const displayName = $derived(
-    user.isLoggedIn ? user.username || "用户" : "未登录"
+    user.isLoggedIn
+      ? user.username || t("ui.userFallbackName")
+      : t("ui.notLoggedIn")
   );
   const planText = $derived(
     user.isLoggedIn ? (user.isPro ? "Pro Plan" : "Free Plan") : ""
@@ -52,7 +55,7 @@
   {:else}
     <div class="flex items-center gap-2 flex-1 justify-start">
       <Settings size={14} class="text-base-content/70" />
-      <div class="text-[12px] font-normal text-base-content/80">设置</div>
+      <div class="text-[12px] font-normal text-base-content/80">{t("common.settings")}</div>
     </div>
   {/if}
 </div>

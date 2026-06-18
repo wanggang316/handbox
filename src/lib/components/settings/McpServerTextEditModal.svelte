@@ -3,6 +3,7 @@
 
 	import RoundButton from "../ui/RoundButton.svelte";
 	import Modal from "../ui/Modal.svelte";
+	import { t } from "$lib/i18n";
 
 	export let open = false;
 	
@@ -49,7 +50,7 @@
 		errors = {};
 
 		if (!mcpJson.trim()) {
-			errors.name = "请输入MCP服务器配置";
+			errors.name = t("provider.validateMcpJson");
 		}
 
 		return Object.keys(errors).length === 0;
@@ -61,13 +62,13 @@
 		class="min-w-lg max-w-xl h-[80vh] overflow-hidden flex flex-col"
 	>
 		<div class="flex items-center justify-between px-6 py-4">
-			<h2 class="font-normal text-base-content">编辑MCP服务器</h2>
+			<h2 class="font-normal text-base-content">{t("provider.editMcpJsonTitle")}</h2>
 		</div>
 
 		<div class="flex-1 px-6">
 			<textarea
 				class="w-full h-full min-h-40 border border-[var(--hairline)] rounded-md p-2 resize-none bg-base-300 text-base-content"
-				placeholder="请输入MCP服务器配置..."
+				placeholder={t("provider.mcpJsonPlaceholder")}
 				bind:value={mcpJson}
 			></textarea>
 		</div>
@@ -76,13 +77,13 @@
 		<div class="flex items-center justify-end gap-3 px-6 py-3">
 			<RoundButton
 				customClass="w-18"
-				label="取消"
+				label={t("common.cancel")}
 				variant="secondary"
 				onclick={handleClose}
 			></RoundButton>
 			<RoundButton
 				customClass="w-18"
-				label="确认"
+				label={t("provider.confirm")}
 				onclick={handleConfirm}
 				disabled={isLoading}
 			></RoundButton>

@@ -8,6 +8,7 @@
   import AgentProjectList from "$lib/components/agentsession/AgentProjectList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
   import { uiState } from "$lib/states/ui.svelte";
+  import { t } from "$lib/i18n";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
   import {
     BookOpen,
@@ -232,7 +233,7 @@
         />
         <input
           type="text"
-          placeholder="搜索..."
+          placeholder={t("sidebar.searchPlaceholder")}
           class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 text-[12px]"
           onfocus={() => (showSearchModal = true)}
           readonly
@@ -243,7 +244,7 @@
     <!-- 全局入口：收藏 / Artifacts -->
     <div class="flex flex-col px-2 space-y-0.5">
       <MenuButton
-        title="收藏"
+        title={t("sidebar.favorites")}
         icon={Star}
         iconSize={16}
         isActive={currentRoute === "/favorites"}
@@ -259,7 +260,7 @@
         onclick={() => handleArtifactClick()}
       />
       <MenuButton
-        title="任务"
+        title={t("sidebar.jobs")}
         icon={Clock}
         iconSize={16}
         isActive={currentRoute === "/jobs"}
@@ -312,7 +313,7 @@
             onclick={() => handleAgentClick()}
           />
           <MenuButton
-            title="单词本"
+            title={t("sidebar.words")}
             icon={BookOpen}
             iconSize={16}
             isActive={currentRoute === "/words"}
@@ -347,7 +348,7 @@
         onclick={() => updateState.openDialog()}
       >
         <Download size={14} />
-        <span>有新版本可更新</span>
+        <span>{t("sidebar.updateAvailable")}</span>
         {#if updateState.info?.version}
           <span class="ml-auto text-[11px] text-primary/70"
             >v{updateState.info.version}</span
@@ -377,14 +378,14 @@
           onclick={handleMenuAccount}
         >
           <User size={14} />
-          账号
+          {t("common.account")}
         </button>
       {:else}
         <button
           class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
           onclick={handleMenuLogin}
         >
-          登录
+          {t("common.login")}
         </button>
       {/if}
 
@@ -395,7 +396,7 @@
         onclick={handleMenuSettings}
       >
         <Settings size={14} />
-        设置
+        {t("common.settings")}
       </button>
 
       {#if currentUser.isLoggedIn}
@@ -405,7 +406,7 @@
           onclick={handleMenuLogout}
         >
           <LogOut size={14} />
-          退出
+          {t("common.logout")}
         </button>
       {/if}
     </div>

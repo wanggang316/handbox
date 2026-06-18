@@ -5,6 +5,7 @@
   import { uiState } from "$lib/states/ui.svelte";
   import Button from "../ui/Button.svelte";
   import { RefreshCw } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     chatId?: string;
@@ -49,7 +50,7 @@
     {#if chatId}
       <IconButton
         icon={Ellipsis}
-        ariaLabel="设置"
+        ariaLabel={t("chat.settings")}
         onclick={handleChatSettings}
       />
     {/if}

@@ -2,6 +2,7 @@
   import { Pencil, Trash2, Clock, Repeat, CalendarClock } from "@lucide/svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import { cronToHuman } from "$lib/utils/cronReadable";
+  import { t } from "$lib/i18n";
   import type { Job, ExecutionStatus } from "$lib/types";
 
   interface Props {
@@ -21,11 +22,11 @@
 
   // 目标类型 -> 展示标签 + 语义配色 chip 类（artifact→primary / agent→info / prompt→success）。
   // 类名写成完整字面量，确保 Tailwind 4 JIT 能静态扫描到（动态拼接 `bg-{x}` 会被 purge）。
-  const TARGET_META: Record<Job["target"]["kind"], { label: string; chip: string }> = {
-    artifact: { label: "Artifact", chip: "bg-primary/20 text-primary" },
-    agent: { label: "Agent", chip: "bg-info/20 text-info" },
-    prompt: { label: "Prompt", chip: "bg-success/20 text-success" },
-  };
+  const TARGET_META: Record<Job["target"]["kind"], { label: string; chip: string }> = $derived({
+    artifact: { label: t("jobs.target.artifact"), chip: "bg-primary/20 text-primary" },
+    agent: { label: t("jobs.target.agent"), chip: "bg-info/20 text-info" },
+    prompt: { label: t("jobs.target.prompt"), chip: "bg-success/20 text-success" },
+  });
 
   const targetMeta = $derived(TARGET_META[job.target.kind]);
 
@@ -33,18 +34,18 @@
 
   // 下次运行：禁用任务显示「已禁用」语义而非误导性时间
   const nextRunText = $derived.by(() => {
-    if (!job.enabled) return "已禁用";
+    if (!job.enabled) return t("jobs.status.disabled");
     if (job.nextRunAt == null) return "—";
     return new Date(job.nextRunAt).toLocaleString("zh-CN");
   });
 
   // 上次状态：未运行（无 lastStatus）显示「从未运行」。chip 类同样写成完整字面量。
-  const STATUS_META: Record<ExecutionStatus, { label: string; chip: string }> = {
-    running: { label: "运行中", chip: "bg-info/20 text-info" },
-    success: { label: "成功", chip: "bg-success/20 text-success" },
-    failed: { label: "失败", chip: "bg-error/20 text-error" },
-    timeout: { label: "超时", chip: "bg-warning/20 text-warning" },
-  };
+  const STATUS_META: Record<ExecutionStatus, { label: string; chip: string }> = $derived({
+    running: { label: t("jobs.status.running"), chip: "bg-info/20 text-info" },
+    success: { label: t("jobs.status.success"), chip: "bg-success/20 text-success" },
+    failed: { label: t("jobs.status.failed"), chip: "bg-error/20 text-error" },
+    timeout: { label: t("jobs.status.timeout"), chip: "bg-warning/20 text-warning" },
+  });
 
   const lastStatusMeta = $derived(job.lastStatus ? STATUS_META[job.lastStatus] : null);
 </script>
@@ -53,7 +54,7 @@
   class="bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors flex flex-col cursor-pointer"
   role="button"
   tabindex="0"
-  aria-label={`查看任务 ${job.name} 详情`}
+  aria-label={t("jobs.view.aria", { name: job.name })}
   onclick={() => onView(job)}
   onkeydown={(e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -84,16 +85,16 @@
       <button
         class="p-1.5 rounded-lg hover:bg-base-100 text-base-content/60 hover:text-base-content transition-colors"
         onclick={() => onEdit(job)}
-        aria-label={`编辑任务 ${job.name}`}
-        title="编辑"
+        aria-label={t("jobs.edit.aria", { name: job.name })}
+        title={t("common.edit")}
       >
         <Pencil size={14} />
       </button>
       <button
         class="p-1.5 rounded-lg hover:bg-error/10 text-base-content/60 hover:text-error transition-colors"
         onclick={() => onDelete(job)}
-        aria-label={`删除任务 ${job.name}`}
-        title="删除"
+        aria-label={t("jobs.delete.aria", { name: job.name })}
+        title={t("common.delete")}
       >
         <Trash2 size={14} />
       </button>
@@ -108,18 +109,18 @@
     <div class="flex items-center gap-2 text-base-content/70">
       <CalendarClock size={14} class="flex-shrink-0 text-base-content/50" />
       <span class="truncate">
-        下次运行：<span class:text-base-content={!job.enabled}>{nextRunText}</span>
+        {t("jobs.card.nextRun")}<span class:text-base-content={!job.enabled}>{nextRunText}</span>
       </span>
     </div>
     <div class="flex items-center gap-2 text-base-content/70">
       <Clock size={14} class="flex-shrink-0 text-base-content/50" />
-      <span>上次状态：</span>
+      <span>{t("jobs.card.lastStatus")}</span>
       {#if lastStatusMeta}
         <span class="px-2 py-0.5 text-xs rounded-full {lastStatusMeta.chip}">
           {lastStatusMeta.label}
         </span>
       {:else}
-        <span class="text-base-content/50">从未运行</span>
+        <span class="text-base-content/50">{t("jobs.card.neverRun")}</span>
       {/if}
     </div>
   </div>
@@ -127,9 +128,9 @@
   <div
     class="mt-3 pt-3 border-t border-base-300 text-xs text-base-content/50 flex items-center justify-between"
   >
-    <span>运行次数：{job.runCount}</span>
+    <span>{t("jobs.card.runCount", { n: job.runCount })}</span>
     {#if job.failureCount > 0}
-      <span class="text-error/70">失败 {job.failureCount} 次</span>
+      <span class="text-error/70">{t("jobs.card.failureCount", { n: job.failureCount })}</span>
     {/if}
   </div>
 </div>

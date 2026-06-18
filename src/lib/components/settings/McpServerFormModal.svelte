@@ -7,6 +7,7 @@
   import TextareaRow from "$lib/components/ui/table/TextareaRow.svelte";
   import SelectRow from "$lib/components/ui/table/SelectRow.svelte";
   import { showAppError } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import type {
     CreateMcpServerRequest,
     McpConnectionType,
@@ -179,21 +180,21 @@
 
     // 验证名称
     if (!formData.name.trim()) {
-      nextErrors.name = "请输入服务器名称";
+      nextErrors.name = t("provider.validateMcpName");
     }
 
     // 验证连接配置
     if (formData.connectionType === 'stdio') {
       if (!formData.command.trim()) {
-        nextErrors.command = "请输入执行命令";
+        nextErrors.command = t("provider.validateCommand");
       }
     } else {
       if (!formData.endpoint.trim()) {
-        nextErrors.endpoint = "请输入端点URL";
+        nextErrors.endpoint = t("provider.validateEndpoint");
       }
       // 验证超时时间
       if (formData.timeoutMs && isNaN(Number(formData.timeoutMs))) {
-        nextErrors.timeoutMs = "超时时间必须是数字";
+        nextErrors.timeoutMs = t("provider.validateTimeout");
       }
     }
 
@@ -284,7 +285,7 @@
       closeModal();
     } catch (error) {
       showAppError(error, {
-        fallbackMessage: '保存失败，请重试'
+        fallbackMessage: t("provider.saveFailed")
       });
     } finally {
       isSubmitting = false;
@@ -303,7 +304,7 @@
     <!-- 头部 -->
     <div class="flex items-center justify-between px-6 py-4">
       <h2 class="font-normal text-base-content">
-        {isEditMode ? "编辑 MCP 服务器" : "添加 MCP 服务器"}
+        {isEditMode ? t("provider.editMcpTitle") : t("provider.addMcpTitle")}
       </h2>
       <div class="flex items-center gap-2">
         <Toggle bind:checked={formData.enabled} />
@@ -314,54 +315,54 @@
       <!-- 基本信息 -->
       <TableGroup>
         <TextRow
-          label="名称"
+          label={t("provider.mcpName")}
           bind:value={formData.name}
-          placeholder="唯一名称，如 filesystem"
+          placeholder={t("provider.mcpNamePlaceholder")}
         />
         <TextRow
-          label="显示名称"
+          label={t("provider.mcpDisplayName")}
           bind:value={formData.displayName}
-          placeholder="可选的用户可读名称"
+          placeholder={t("provider.mcpDisplayNamePlaceholder")}
         />
 
         <SelectRow
-          label="连接类型"
+          label={t("provider.connectionType")}
           bind:selectedValue={formData.connectionType}
           options={[
-            { value: "stdio", label: "标准输入输出 (stdio)" },
-            { value: "sse", label: "服务器发送事件 (SSE)" },
-            { value: "http", label: "流式传输HTTP" }
+            { value: "stdio", label: t("provider.connectionStdio") },
+            { value: "sse", label: t("provider.connectionSse") },
+            { value: "http", label: t("provider.connectionHttp") }
           ]}
         />
 
         {#if formData.connectionType === 'stdio'}
           <TextRow
-            label="命令"
+            label={t("provider.mcpCommand")}
             bind:value={formData.command}
-            placeholder="如 npx 或 uvx"
+            placeholder={t("provider.mcpCommandPlaceholder")}
           />
           <TextareaRow
-            label="参数"
+            label={t("provider.mcpArgs")}
             bind:value={formData.argsText}
-            placeholder="一行一个，或使用逗号分隔"
+            placeholder={t("provider.mcpArgsPlaceholder")}
             rows={3}
           />
           <TextRow
-            label="工作目录"
+            label={t("provider.mcpWorkingDir")}
             bind:value={formData.workingDir}
-            placeholder="可选"
+            placeholder={t("provider.optional")}
             layout="vertical"
           />
         {:else}
           <TextRow
-            label="端点URL"
+            label={t("provider.mcpEndpoint")}
             bind:value={formData.endpoint}
-            placeholder="如 http://localhost:3000/mcp 或 ws://localhost:8080"
+            placeholder={t("provider.mcpEndpointPlaceholder")}
           />
           <TextRow
-            label="超时时间 (毫秒)"
+            label={t("provider.mcpTimeout")}
             bind:value={formData.timeoutMs}
-            placeholder="可选，默认无超时"
+            placeholder={t("provider.mcpTimeoutPlaceholder")}
           />
         {/if}
       </TableGroup>
@@ -371,13 +372,13 @@
         <TableGroup>
           <div class="p-4 space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-sm text-base-content/80">环境变量</span>
+              <span class="text-sm text-base-content/80">{t("provider.envVars")}</span>
               <button
                 class="text-primary text-sm hover:text-primary/80"
                 type="button"
                 onclick={addEnvEntry}
               >
-                新增
+                {t("provider.addEntry")}
               </button>
             </div>
 
@@ -386,14 +387,14 @@
                 <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder="键"
+                    placeholder={t("provider.envKeyPlaceholder")}
                     value={entry.key}
                     oninput={(e) =>
                       updateEnvEntry(index, "key", e.currentTarget.value)}
                   />
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder="值"
+                    placeholder={t("provider.envValuePlaceholder")}
                     value={entry.value}
                     oninput={(e) =>
                       updateEnvEntry(index, "value", e.currentTarget.value)}
@@ -403,7 +404,7 @@
                     type="button"
                     onclick={() => removeEnvEntry(index)}
                   >
-                    删除
+                    {t("common.delete")}
                   </button>
                 </div>
               {/each}
@@ -417,13 +418,13 @@
         <TableGroup>
           <div class="p-4 space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-sm text-base-content/80">HTTP 头部</span>
+              <span class="text-sm text-base-content/80">{t("provider.httpHeaders")}</span>
               <button
                 class="text-primary text-sm hover:text-primary/80"
                 type="button"
                 onclick={addHeaderEntry}
               >
-                新增
+                {t("provider.addEntry")}
               </button>
             </div>
 
@@ -432,14 +433,14 @@
                 <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder="头部名称"
+                    placeholder={t("provider.headerKeyPlaceholder")}
                     value={entry.key}
                     oninput={(e) =>
                       updateHeaderEntry(index, "key", e.currentTarget.value)}
                   />
                   <input
                     class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder="头部值"
+                    placeholder={t("provider.headerValuePlaceholder")}
                     value={entry.value}
                     oninput={(e) =>
                       updateHeaderEntry(index, "value", e.currentTarget.value)}
@@ -449,7 +450,7 @@
                     type="button"
                     onclick={() => removeHeaderEntry(index)}
                   >
-                    删除
+                    {t("common.delete")}
                   </button>
                 </div>
               {/each}
@@ -472,13 +473,13 @@
     <div class="flex items-center justify-end gap-3 px-6 py-3">
       <RoundButton
         customClass="w-18"
-        label="取消"
+        label={t("common.cancel")}
         variant="secondary"
         onclick={closeModal}
       />
       <RoundButton
         customClass="w-18"
-        label={isSubmitting ? "保存中..." : "保存"}
+        label={isSubmitting ? t("common.saving") : t("common.save")}
         onclick={handleConfirm}
         disabled={isSubmitting || !canSave}
         loading={isSubmitting}

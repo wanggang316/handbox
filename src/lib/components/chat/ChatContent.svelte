@@ -6,6 +6,7 @@
   import { Bot } from 'lucide-svelte';
   import type { Message } from '$lib/types';
   import { tick } from 'svelte';
+  import { t } from '$lib/i18n';
 
   // Import child components
   import UserMessageView from './messages/MessageUser.svelte';
@@ -274,7 +275,7 @@
       <div class="flex items-center justify-center h-full">
         <div class="flex items-center gap-2 text-base-content/70">
           <div class="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
-          加载消息中...
+          {t('chat.loadingMessages')}
         </div>
       </div>
     {:else if messages.length === 0 && !streamingMessageId}
@@ -282,7 +283,7 @@
       <div class="flex items-center justify-center h-full">
         <div class="text-center text-base-content/70">
           <Bot class="w-12 h-12 mx-auto mb-4" />
-          <p class="text-lg mb-2">开始新的对话</p>
+          <p class="text-lg mb-2">{t('chat.startNewConversation')}</p>
         </div>
       </div>
     {:else}
@@ -334,10 +335,10 @@
 <!-- 删除消息确认对话框 -->
 <ConfirmModal
   open={showDeleteConfirm}
-  title="确认删除"
-  message="确定要删除这条消息吗？"
-  confirmText="删除"
-  cancelText="取消"
+  title={t('chat.deleteConfirmTitle')}
+  message={t('chat.deleteConfirmMessage')}
+  confirmText={t('common.delete')}
+  cancelText={t('common.cancel')}
   confirmButtonStyle="danger"
   onConfirm={confirmDeleteMessage}
   onCancel={cancelDelete}
@@ -347,10 +348,10 @@
 <!-- 重发消息确认对话框 -->
 <ConfirmModal
   open={showResendConfirm}
-  title="确认重发"
-  message="重发此消息将删除它之后的所有消息，确定要继续吗？"
-  confirmText="重发"
-  cancelText="取消"
+  title={t('chat.resendConfirmTitle')}
+  message={t('chat.resendConfirmMessage')}
+  confirmText={t('chat.resend')}
+  cancelText={t('common.cancel')}
   confirmButtonStyle="accent"
   onConfirm={confirmResendMessage}
   onCancel={cancelResend}
@@ -360,10 +361,10 @@
 <!-- 重新生成消息确认对话框 -->
 <ConfirmModal
   open={showRegenerateConfirm}
-  title="确认重新生成"
-  message="重新生成此回复将删除该消息及之后的所有消息，确定要继续吗？"
-  confirmText="重新生成"
-  cancelText="取消"
+  title={t('chat.regenerateConfirmTitle')}
+  message={t('chat.regenerateConfirmMessage')}
+  confirmText={t('chat.regenerate')}
+  cancelText={t('common.cancel')}
   confirmButtonStyle="accent"
   onConfirm={confirmRegenerateMessage}
   onCancel={cancelRegenerate}

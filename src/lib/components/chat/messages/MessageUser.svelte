@@ -6,6 +6,7 @@
   import { highlightRange } from "$lib/utils";
   import { resolveLocalAssetPath, openPathInSystem } from "$lib/utils/tauri";
   import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     message: Message;
@@ -146,7 +147,7 @@
               {#if attachment.mimeType?.startsWith("image/")}
                 <div
                   class="relative rounded-lg max-w-[300px]"
-                  title="点击在系统预览中打开"
+                  title={t("chat.openInSystemPreview")}
                   role="button"
                   tabindex="0"
                   onclick={() => openAttachmentExternally(attachment.path)}
@@ -197,7 +198,7 @@
         <!-- 复制按钮 -->
         <button
           class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"
-          title="复制消息"
+          title={t("chat.copyMessage")}
           onclick={handleCopy}
         >
           <Copy class="w-3.5 h-3.5" />
@@ -205,7 +206,7 @@
         <!-- 编辑按钮 -->
         <button
           class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="编辑并重发"
+          title={t("chat.editAndResend")}
           disabled={isOperating}
           onclick={handleEdit}
         >
@@ -214,7 +215,7 @@
         <!-- 重发按钮 -->
         <button
           class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="重发消息"
+          title={t("chat.resendMessage")}
           disabled={isOperating}
           onclick={handleResend}
         >
@@ -237,7 +238,7 @@
     style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
     role="menu"
     tabindex="-1"
-    aria-label="收藏范围操作"
+    aria-label={t("chat.favoriteRangeActions")}
     onmouseenter={() => (isRangeMenuHovering = true)}
     onmouseleave={() => {
       isRangeMenuHovering = false;
@@ -249,7 +250,7 @@
       class="px-2 py-1 rounded hover:bg-error/10 text-error"
       onclick={handleRemoveRange}
     >
-      取消收藏
+      {t("chat.unfavorite")}
     </button>
   </div>
 {/if}

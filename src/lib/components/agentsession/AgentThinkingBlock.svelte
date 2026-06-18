@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ChevronDown, ChevronRight } from "@lucide/svelte";
   import { renderMarkdown, markdownInteractions } from "$lib/utils";
+  import { t } from "$lib/i18n";
 
   interface Props {
     // 思考内容：流式累积文本，或已提交助手消息的 thinking 块内容。
@@ -31,7 +32,9 @@
       <ChevronRight size={16} class="text-base-content" />
     {/if}
     <span class="text-sm font-medium text-base-content/80">
-      {isStreaming ? "思考中..." : "思考"}
+      {isStreaming
+        ? t("agent.thinkingBlock.streaming")
+        : t("agent.thinkingBlock.title")}
     </span>
   </button>
 

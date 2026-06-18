@@ -14,6 +14,7 @@
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
   import type { Provider } from "$lib/types/provider";
   import Button from "$lib/components/ui/Button.svelte";
+  import { t } from "$lib/i18n";
 
   let showAddProviderModal = $state(false);
 
@@ -53,7 +54,7 @@
   }
 
   function getProviderStatusText(provider: Provider): string {
-    return provider.enabled ? "已启用" : "已禁用";
+    return provider.enabled ? t("common.enabled") : t("common.disabled");
   }
 </script>
 
@@ -63,7 +64,7 @@
   {#if providerState.isLoading}
     <div class="flex items-center justify-center py-8">
       <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
-      <span class="ml-2 text-sm text-base-content/70">正在加载供应商...</span>
+      <span class="ml-2 text-sm text-base-content/70">{t("provider.loadingProviders")}</span>
     </div>
   {/if}
 
@@ -92,10 +93,10 @@
         <div class="p-8 text-center">
           <Cpu class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
           <p class="text-base text-base-content/70 mb-4">
-            添加 AI 供应商开始使用各种模型
+            {t("provider.emptyHint")}
           </p>
           <Button variant="primary" size="sm" onclick={handleAddProvider}>
-            添加供应商
+            {t("provider.addProvider")}
           </Button>
         </div>
       {/if}
@@ -106,7 +107,7 @@
   {#if providerState.providers.length > 0}
     <div>
       <Button variant="gray" size="sm" onclick={handleAddProvider}>
-        添加其它供应商
+        {t("provider.addOtherProvider")}
       </Button>
     </div>
   {/if}

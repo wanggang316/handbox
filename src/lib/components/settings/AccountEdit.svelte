@@ -3,6 +3,7 @@
   import { TextRow, TableGroup } from "../ui/table";
   import Avatar from "../ui/Avatar.svelte";
   import RoundButton from "../ui/RoundButton.svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     open?: boolean;
@@ -102,9 +103,9 @@
     <div class="mb-8">
       <TableGroup>
         <TextRow
-          label="用户名"
+          label={t("settings.account.username")}
           bind:value={editedUsername}
-          placeholder="请输入"
+          placeholder={t("settings.account.usernamePlaceholder")}
         />
       </TableGroup>
     </div>
@@ -112,15 +113,15 @@
     <div class="flex justify-end gap-4">
       <RoundButton
         customClass="w-18"
-        label="取消"
+        label={t("common.cancel")}
         variant="secondary"
         onclick={handleCancel}
       />
 
-      <RoundButton 
-        customClass="w-18" 
-        label="保存" 
-        onclick={handleSave} 
+      <RoundButton
+        customClass="w-18"
+        label={t("common.save")}
+        onclick={handleSave}
       />
     </div>
   </div>

@@ -2,6 +2,7 @@
   import { Eye, EyeOff } from "@lucide/svelte";
   import IconButton from "../IconButton.svelte";
   import TableBaseRow from "./TableBaseRow.svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     layout?: "horizontal" | "vertical";
@@ -19,7 +20,7 @@
     layout = "horizontal",
     label,
     value = $bindable(""),
-    placeholder = "请输入",
+    placeholder,
     readonly = false,
     isPassword = false,
     disabled = false,
@@ -34,6 +35,8 @@
   const inputType = $derived(
     isPassword ? (showPassword ? "text" : "password") : "text"
   );
+  // 占位文案回退：未传入时用本地化默认值（保持语言切换响应式）
+  const resolvedPlaceholder = $derived(placeholder ?? t("ui.inputPlaceholder"));
 
   function togglePassword() {
     showPassword = !showPassword;
@@ -47,7 +50,7 @@
       <input
         {id}
         bind:value
-        {placeholder}
+        placeholder={resolvedPlaceholder}
         {readonly}
         {disabled}
         {required}
@@ -75,7 +78,7 @@
         {id}
         type={inputType}
         bind:value
-        {placeholder}
+        placeholder={resolvedPlaceholder}
         {readonly}
         {disabled}
         {required}

@@ -4,6 +4,7 @@
   import { goto } from "$app/navigation";
   import { settingsState } from "$lib/states/settings.svelte";
   import { providerActions } from "$lib/states/provider.svelte";
+  import { t } from "$lib/i18n";
 
   // 启动页停留到「主界面关键数据就绪」为止，而非一个固定时长：
   // 加载快 → 一闪而过；加载慢 → 多停一会。
@@ -51,9 +52,9 @@
     />
     <div class="splash__brand">
       <h1 class="splash__title">HandBox</h1>
-      <p class="splash__slogan">你的本地优先 AI 工作台</p>
+      <p class="splash__slogan">{t("ui.splashSlogan")}</p>
     </div>
-    <div class="splash__loader" role="status" aria-label="Loading">
+    <div class="splash__loader" role="status" aria-label={t("ui.loading")}>
       <span></span><span></span><span></span>
     </div>
   </div>

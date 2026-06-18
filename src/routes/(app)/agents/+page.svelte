@@ -3,6 +3,7 @@
   import { Plus, Bot, Pencil, Trash2, Settings, Play } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
+  import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
@@ -145,7 +146,7 @@
   }
 
   function getModelName(agent: Agent): string {
-    return agent.model || "未设置";
+    return agent.model || t("agent.manage.modelUnset");
   }
 
   onMount(async () => {
@@ -162,7 +163,7 @@
           Agents
         </h1>
         <span class="text-sm text-base-content/60">
-          {filteredAgents.length} 个
+          {t("agent.manage.count", { count: filteredAgents.length })}
         </span>
       </div>
       <Button
@@ -172,14 +173,14 @@
         customClass="flex items-center gap-2"
       >
         <Plus size={16} />
-        新建 Agent
+        {t("agent.manage.newAgent")}
       </Button>
     </div>
 
     <div class="relative">
       <input
         type="text"
-        placeholder="搜索 Agent 名称或技能..."
+        placeholder={t("agent.manage.searchPlaceholder")}
         class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 text-sm"
         bind:value={searchQuery}
       />
@@ -203,16 +204,16 @@
       >
         <Bot size={48} class="mb-4 opacity-20" />
         {#if searchQuery}
-          <p class="mb-2">没有找到匹配的 Agent</p>
+          <p class="mb-2">{t("agent.manage.noMatch")}</p>
           <button
             class="text-primary hover:underline cursor-pointer"
             on:click={() => (searchQuery = "")}
           >
-            清除搜索
+            {t("agent.manage.clearSearch")}
           </button>
         {:else}
-          <p>还没有创建任何 Agent</p>
-          <p class="text-sm mt-2">点击上方按钮创建您的第一个 Agent</p>
+          <p>{t("agent.manage.empty")}</p>
+          <p class="text-sm mt-2">{t("agent.manage.emptyHint")}</p>
         {/if}
       </div>
     {:else}
@@ -239,21 +240,21 @@
                 <button
                   class="p-1.5 rounded-lg hover:bg-success/10 text-base-content/60 hover:text-success transition-colors"
                   on:click={() => handleUseAgent(agent)}
-                  title="使用"
+                  title={t("agent.manage.use")}
                 >
                   <Play size={14} />
                 </button>
                 <button
                   class="p-1.5 rounded-lg hover:bg-base-100 text-base-content/60 hover:text-base-content transition-colors"
                   on:click={() => openEditModal(agent)}
-                  title="编辑"
+                  title={t("common.edit")}
                 >
                   <Pencil size={14} />
                 </button>
                 <button
                   class="p-1.5 rounded-lg hover:bg-error/10 text-base-content/60 hover:text-error transition-colors"
                   on:click={() => openDeleteConfirm(agent)}
-                  title="删除"
+                  title={t("common.delete")}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -298,9 +299,9 @@
 
 <!-- 删除确认模态框 -->
 <ConfirmModal
-  title="删除 Agent"
-  message="确定要删除这个 Agent 吗？此操作无法撤销。"
-  confirmText="删除"
+  title={t("agent.manage.deleteTitle")}
+  message={t("agent.manage.deleteConfirm")}
+  confirmText={t("common.delete")}
   confirmButtonStyle="danger"
   open={showDeleteConfirm}
   onClose={() => (showDeleteConfirm = false)}

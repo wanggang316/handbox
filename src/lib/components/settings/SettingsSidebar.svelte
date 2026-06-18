@@ -3,24 +3,30 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Menu from '$lib/components/ui/Menu.svelte';
+  import { t } from '$lib/i18n';
+  import type { Snippet } from 'svelte';
+
+  let { footer }: { footer?: Snippet } = $props();
 
   type Item = { id: string; title: string; icon: any, url: string, isActive?: boolean };
 
-  let baseItems: Item[] = [
-    { id: 'account', title: '账户', icon: User, url: '/settings/account' },
-    { id: 'general', title: '通用', icon: Palette, url: '/settings/general' },
-    { id: 'quicktools', title: '快捷工具', icon: MousePointerClick, url: '/settings/quicktools' },
-    { id: 'models', title: '模型', icon: Brain, url: '/settings/models' },
-    { id: 'agent-tools', title: 'Agent 工具', icon: Wrench, url: '/settings/agent-tools' },
+  const baseItems: Item[] = $derived([
+    { id: 'account', title: t('settings.sidebar.account'), icon: User, url: '/settings/account' },
+    { id: 'general', title: t('settings.sidebar.general'), icon: Palette, url: '/settings/general' },
+    { id: 'quicktools', title: t('settings.sidebar.quicktools'), icon: MousePointerClick, url: '/settings/quicktools' },
+    { id: 'models', title: t('settings.sidebar.models'), icon: Brain, url: '/settings/models' },
+    { id: 'agent-tools', title: t('settings.sidebar.agentTools'), icon: Wrench, url: '/settings/agent-tools' },
     { id: 'mcp', title: 'MCP', icon: Zap, url: '/settings/mcp' },
-    { id: 'skills', title: '技能', icon: Sparkles, url: '/settings/skills' },
-    { id: 'shortcuts', title: '快捷键', icon: Keyboard, url: '/settings/shortcuts' },
-    { id: 'about', title: '关于', icon: Info, url: '/settings/about' },
-  ];
+    { id: 'skills', title: t('settings.sidebar.skills'), icon: Sparkles, url: '/settings/skills' },
+    { id: 'shortcuts', title: t('settings.sidebar.shortcuts'), icon: Keyboard, url: '/settings/shortcuts' },
+    { id: 'about', title: t('settings.sidebar.about'), icon: Info, url: '/settings/about' },
+  ]);
 
-  let defaultItem = baseItems.find(i => i.id === 'account');
-  
-  $: currentItemId = baseItems.find(i => $page.url.pathname.startsWith(i.url))?.id || defaultItem?.id || '';
+  const defaultItem = $derived(baseItems.find(i => i.id === 'account'));
+
+  const currentItemId = $derived(
+    baseItems.find(i => $page.url.pathname.startsWith(i.url))?.id || defaultItem?.id || ''
+  );
 
   function navTo(id: string) {
     goto(baseItems.find(i => i.id === id)?.url || defaultItem?.url || '/settings/account');
@@ -37,5 +43,5 @@
       activeId={currentItemId}
     />
   </div>
-  <slot name="footer" />
+  {@render footer?.()}
 </div>

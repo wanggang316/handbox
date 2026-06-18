@@ -16,6 +16,7 @@
     showSettingsPanel,
     type ContentPanelMode,
   } from "$lib/api/selection";
+  import { t } from "$lib/i18n";
 
   const appWindow = getCurrentWindow();
 
@@ -107,7 +108,7 @@
       onclick={handleShow}
     >
       <Eye class="size-3.5" />
-      显示
+      {t("selection.modeShow")}
     </button>
 
     <button
@@ -115,7 +116,7 @@
       onclick={handleCopy}
     >
       <Copy class="size-3.5" />
-      复制
+      {t("common.copy")}
     </button>
 
     <button
@@ -123,7 +124,7 @@
       onclick={handleTranslate}
     >
       <Languages class="size-3.5" />
-      翻译
+      {t("selection.modeTranslate")}
     </button>
 
     <button
@@ -131,7 +132,7 @@
       onclick={handleAi}
     >
       <Sparkles class="size-3.5" />
-      问 AI
+      {t("selection.modeAi")}
     </button>
   </div>
   <button

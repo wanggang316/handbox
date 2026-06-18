@@ -2,6 +2,7 @@
   import Modal from "$lib/components/ui/Modal.svelte";
   import RoundButton from "$lib/components/ui/RoundButton.svelte";
   import { updateState } from "$lib/states/update.svelte";
+  import { t } from "$lib/i18n";
   import { Download } from "@lucide/svelte";
 
   let modalRef = $state<Modal>();
@@ -39,7 +40,7 @@
         <Download size={20} />
       </div>
       <div class="flex flex-col">
-        <h2 class="text-sm font-medium text-base-content">发现新版本</h2>
+        <h2 class="text-sm font-medium text-base-content">{t("update.newVersionFound")}</h2>
         <span class="text-[12px] text-base-content/60">
           v{updateState.currentVersion} → v{updateState.info?.version ?? ""}
         </span>
@@ -61,7 +62,7 @@
         <div
           class="mb-1.5 flex items-center justify-between text-[12px] text-base-content/70"
         >
-          <span>正在下载更新…</span>
+          <span>{t("update.downloading")}</span>
           {#if hasTotal}<span>{percent}%</span>{/if}
         </div>
         <div class="h-1.5 w-full overflow-hidden rounded-full bg-base-300">
@@ -80,7 +81,7 @@
     <!-- 操作按钮 -->
     <div class="flex items-center justify-end gap-3">
       <RoundButton
-        label="稍后提醒"
+        label={t("update.remindLater")}
         size="h-8"
         fontSize="text-sm"
         variant="secondary"
@@ -89,7 +90,7 @@
         onclick={handleLater}
       />
       <RoundButton
-        label={downloading ? "更新中…" : "立即更新"}
+        label={downloading ? t("update.updating") : t("update.updateNow")}
         size="h-8"
         fontSize="text-sm"
         variant="primary"

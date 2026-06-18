@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ChevronUp, ChevronDown } from '@lucide/svelte';
+  import { t } from '$lib/i18n';
 
   interface Props {
     value: number;
@@ -76,7 +77,7 @@
       onclick={increment}
       disabled={disabled || value >= max}
       class="p-0.5 text-base-content/60 hover:text-base-content disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-      aria-label="增加"
+      aria-label={t('ui.increase')}
     >
       <ChevronUp size={12} />
     </button>
@@ -85,7 +86,7 @@
       onclick={decrement}
       disabled={disabled || value <= min}
       class="p-0.5 text-base-content/60 hover:text-base-content disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-      aria-label="减少"
+      aria-label={t('ui.decrease')}
     >
       <ChevronDown size={12} />
     </button>

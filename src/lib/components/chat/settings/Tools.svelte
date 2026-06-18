@@ -23,6 +23,7 @@
   import type { McpServer, McpServerConfig } from "$lib/types";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
+  import { t } from "$lib/i18n";
 
   let currentServers = $state<McpServerConfig[]>(
     chatState.currentChat?.mcpServers || []
@@ -37,10 +38,10 @@
   let isCollapsed = $state(false);
   let isHovering = $state(false);
 
-  const executionModeOptions = [
-    { value: "auto", label: "自动执行" },
-    { value: "manual", label: "手动执行" },
-  ];
+  const executionModeOptions = $derived([
+    { value: "auto", label: t("chat.autoExecution") },
+    { value: "manual", label: t("chat.manualExecution") },
+  ]);
 
   onMount(() => {
     // 注册跨窗口事件监听器（用于同步 MCP 服务器状态）
@@ -236,7 +237,7 @@
     onmouseenter={() => (isHovering = true)}
     onmouseleave={() => (isHovering = false)}
   >
-    <span>工具</span>
+    <span>{t("chat.tools")}</span>
     {#if isHovering}
       {#if isCollapsed}
         <ChevronDown size={16} />
@@ -250,9 +251,9 @@
     <div class="flex items-center justify-between pl-2 pr-1">
       <div class="text-[12px] text-base-content/50">
         {#if !chatState.currentChat}
-          请先选择或创建聊天
+          {t("chat.selectOrCreateChatFirst")}
         {:else}
-          已选中 {currentServers.length} 个服务器
+          {t("chat.serversSelected", { count: currentServers.length })}
         {/if}
       </div>
 
@@ -267,13 +268,13 @@
 
     {#if !chatState.currentChat}
       <div class="text-center py-8 text-base-content/70">
-        <p class="text-sm mb-2">请先选择或创建聊天</p>
-        <p class="text-xs">MCP 服务器配置将与聊天关联</p>
+        <p class="text-sm mb-2">{t("chat.selectOrCreateChatFirst")}</p>
+        <p class="text-xs">{t("chat.mcpAssociatedWithChat")}</p>
       </div>
     {:else if availableServers().length === 0 && disabledConfiguredServers().length === 0}
       <div class="text-center py-8 text-base-content/70">
-        <p class="text-sm mb-2">暂无可用的 MCP 服务器</p>
-        <p class="text-xs">请在应用设置中配置并开启 MCP 服务器</p>
+        <p class="text-sm mb-2">{t("chat.noAvailableMcpServers")}</p>
+        <p class="text-xs">{t("chat.configureMcpInSettings")}</p>
       </div>
     {:else}
       <!-- 可用的 MCP 服务器 -->
@@ -296,7 +297,9 @@
                 <div class="flex items-center gap-2 justify-between">
                   <div class="flex items-center gap-1 pt-1">
                     <ArrowButton
-                      label="{item.server.enabledTools.length} enabled tools"
+                      label={t("chat.enabledToolsCount", {
+                        count: item.server.enabledTools.length,
+                      })}
                       onclick={() => toggleTools(item.server.id)}
                     />
                   </div>
@@ -340,7 +343,9 @@
       {#if disabledConfiguredServers().length > 0}
         <div class="mt-3">
           <div class="text-[12px] text-base-content/40 pl-2 mb-1">
-            已关闭的服务器 ({disabledConfiguredServers().length})
+            {t("chat.disabledServersHeading", {
+              count: disabledConfiguredServers().length,
+            })}
           </div>
           <TableGroup>
             {#each disabledConfiguredServers() as item (item.config.serverId)}
@@ -373,20 +378,20 @@
                 <div class="flex flex-col gap-1 text-sm opacity-60">
                   <div class="text-xs text-base-content/60">
                     {#if item.reason === "disabled"}
-                      <span class="text-warning/80">● 服务器已关闭</span>
+                      <span class="text-warning/80">{t("chat.serverDisabled")}</span>
                     {:else if item.reason === "not_ready"}
-                      <span class="text-error/80">● 服务器未就绪</span>
+                      <span class="text-error/80">{t("chat.serverNotReady")}</span>
                     {:else if item.reason === "deleted"}
-                      <span class="text-error/80">● 服务器已删除</span>
+                      <span class="text-error/80">{t("chat.serverDeleted")}</span>
                     {/if}
                   </div>
                   <div class="text-xs text-base-content/50">
                     {#if item.reason === "disabled"}
-                      此服务器已在全局设置中关闭，请启用后再使用
+                      {t("chat.serverDisabledHint")}
                     {:else if item.reason === "not_ready"}
-                      此服务器状态异常，请检查配置
+                      {t("chat.serverNotReadyHint")}
                     {:else if item.reason === "deleted"}
-                      此服务器已被删除，建议移除此配置
+                      {t("chat.serverDeletedHint")}
                     {/if}
                   </div>
                 </div>

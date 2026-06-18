@@ -7,6 +7,7 @@
   import { authState, logout as authLogout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateUserProfile } from "$lib/api/auth";
   import { AppError } from "$lib/api";
+  import { t } from "$lib/i18n";
 
   // Modal 状态控制
   let showEditModal = $state(false);
@@ -59,7 +60,7 @@
       if (error instanceof AppError) {
         errorMessage = error.message;
       } else {
-        errorMessage = "更新失败，请重试";
+        errorMessage = t("settings.account.updateFailed");
       }
     } finally {
       isLoading = false;
@@ -79,7 +80,7 @@
       console.log("退出登录成功");
     } catch (error) {
       console.error("退出登录失败:", error);
-      errorMessage = "退出失败，请重试";
+      errorMessage = t("settings.account.logoutFailed");
     } finally {
       isLoading = false;
     }
@@ -109,7 +110,7 @@
               onclick={handleEditProfile}
               disabled={isLoading}
             >
-              编辑资料
+              {t("settings.account.editProfile")}
             </Button>
           </div>
         {/if}
@@ -124,7 +125,7 @@
         onclick={handleLogout}
         disabled={isLoading}
       >
-        {isLoading ? "退出中..." : "退出登录"}
+        {isLoading ? t("settings.account.loggingOut") : t("settings.account.logout")}
       </Button>
     </div>
   {:else}

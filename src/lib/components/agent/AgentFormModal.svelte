@@ -5,6 +5,7 @@
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TableBaseRow from "../ui/table/TableBaseRow.svelte";
   import { Bot } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
 
   interface Props {
@@ -46,7 +47,7 @@
 
   async function handleSave() {
     if (!formData.name.trim()) {
-      alert("请输入 Agent 名称");
+      alert(t("agent.form.nameRequired"));
       return;
     }
 
@@ -57,7 +58,7 @@
       onClose();
     } catch (error) {
       console.error("Failed to save agent:", error);
-      alert("保存失败，请重试");
+      alert(t("agent.form.saveFailed"));
     } finally {
       saving = false;
     }
@@ -87,13 +88,13 @@
   });
 </script>
 
-<Modal bind:open={localOpen} title={agent ? "编辑 Agent" : "新建 Agent"} onClose={onClose}>
+<Modal bind:open={localOpen} title={agent ? t("agent.form.editTitle") : t("agent.form.createTitle")} onClose={onClose}>
   <div class="w-[600px] max-h-[80vh] overflow-y-auto px-6 pt-16 pb-6 flex flex-col gap-5">
     <!-- 基本信息 -->
     <TableGroup>
-      <TableBaseRow label="名称" layout="vertical">
+      <TableBaseRow label={t("agent.form.nameLabel")} layout="vertical">
         <Input
-          placeholder="输入 Agent 名称"
+          placeholder={t("agent.form.namePlaceholder")}
           bind:value={formData.name}
         />
       </TableBaseRow>
@@ -101,53 +102,53 @@
 
     <!-- 模型选择 -->
     <TableGroup>
-      <TableBaseRow label="模型" layout="vertical">
+      <TableBaseRow label={t("agent.form.modelLabel")} layout="vertical">
         <Input
-          placeholder="输入模型标识符 (例如: gpt-4, claude-3-5-sonnet-20241022)"
+          placeholder={t("agent.form.modelPlaceholder")}
           bind:value={formData.model}
         />
         <p class="mt-1 text-xs text-base-content/50">
-          模型标识符可以是任何字符串，不限于已配置的模型
+          {t("agent.form.modelHint")}
         </p>
       </TableBaseRow>
     </TableGroup>
 
     <!-- 系统提示词 -->
-    <TableGroup title="系统提示词">
+    <TableGroup title={t("agent.form.systemPromptTitle")}>
       <div class="px-6">
         <textarea
           bind:value={formData.systemPrompt}
-          placeholder="输入系统提示词..."
+          placeholder={t("agent.systemPrompt.placeholder")}
           rows="4"
           class="w-full px-3 py-2 border border-base-300 rounded-md resize-none
                  focus:border-transparent
                  font-mono text-sm text-base-content bg-base-300"
         ></textarea>
         <div class="mt-1 text-xs text-base-content/50 text-right">
-          {formData.systemPrompt.length} 字符
+          {t("agent.form.charCount", { count: formData.systemPrompt.length })}
         </div>
       </div>
     </TableGroup>
 
     <!-- 技能 -->
-    <TableGroup title="技能">
-      <TableBaseRow label="技能标签" layout="vertical">
+    <TableGroup title={t("agent.form.skillsTitle")}>
+      <TableBaseRow label={t("agent.form.skillsLabel")} layout="vertical">
         <input
           type="text"
           bind:value={formData.skills}
-          placeholder="例如: coding, writing, translation"
+          placeholder={t("agent.form.skillsPlaceholder")}
           class="w-full px-3 py-2 border border-base-300 rounded-md
                  focus:border-transparent
                  text-sm text-base-content bg-base-300"
         />
         <p class="mt-1 text-xs text-base-content/50">
-          用逗号分隔多个技能标签
+          {t("agent.form.skillsHint")}
         </p>
       </TableBaseRow>
     </TableGroup>
 
     <!-- 模型参数 - 始终显示 -->
-    <TableGroup title="模型参数" collapsible defaultCollapsed={true}>
+    <TableGroup title={t("agent.form.modelParams")} collapsible defaultCollapsed={true}>
       <div class="px-6 space-y-3">
         <TableBaseRow label="Temperature">
           <input
@@ -204,10 +205,10 @@
     </TableGroup>
 
     <!-- MCP 服务器 - 始终显示 -->
-    <TableGroup title="MCP 服务器" collapsible defaultCollapsed={true}>
+    <TableGroup title={t("agent.form.mcpServers")} collapsible defaultCollapsed={true}>
       <div class="px-6">
         <p class="text-sm text-base-content/60">
-          MCP 服务器配置即将推出，敬请期待...
+          {t("agent.form.mcpComingSoon")}
         </p>
       </div>
     </TableGroup>
@@ -219,14 +220,14 @@
         onclick={onClose}
         disabled={saving}
       >
-        取消
+        {t("common.cancel")}
       </Button>
       <Button
         variant="primary"
         onclick={handleSave}
         disabled={saving || !formData.name.trim()}
       >
-        {saving ? "保存中..." : agent ? "保存" : "创建"}
+        {saving ? t("common.saving") : agent ? t("common.save") : t("common.create")}
       </Button>
     </div>
   </div>

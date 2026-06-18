@@ -1,5 +1,6 @@
 <script lang="ts">
   import { renderMarkdown, markdownInteractions } from "$lib/utils";
+  import { t } from "$lib/i18n";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import type {
     AgentMessage,
@@ -233,9 +234,13 @@
                  （避免误导性的零用量、绝不串上一轮数值——VAL-CARUN-008）。 -->
             {#if hasUsage(message)}
               <div class="mt-2 flex flex-row gap-2 text-xs text-base-content/50">
-                <span>输入 {message.usage.input}</span>
+                <span>{t("agent.timeline.usageInput", {
+                    count: message.usage.input,
+                  })}</span>
                 <span>·</span>
-                <span>输出 {message.usage.output}</span>
+                <span>{t("agent.timeline.usageOutput", {
+                    count: message.usage.output,
+                  })}</span>
               </div>
             {/if}
           </div>
@@ -284,7 +289,7 @@
         <div
           class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
         ></div>
-        <span>整理上下文中…</span>
+        <span>{t("agent.timeline.compacting")}</span>
       </div>
     {/if}
 

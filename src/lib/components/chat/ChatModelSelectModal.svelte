@@ -16,6 +16,7 @@
     providerActions,
     getProviderIconById,
   } from "$lib/states/provider.svelte";
+  import { t } from "$lib/i18n";
 
   interface Props {
     open?: boolean;
@@ -191,7 +192,7 @@
         <input
           type="text"
           bind:value={searchQuery}
-          placeholder="搜索模型..."
+          placeholder={t("chat.searchModelPlaceholder")}
           class="w-full pl-10 pr-4 py-2 border border-[var(--hairline)] bg-base-300 rounded-md focus:border-primary"
         />
         {#if searchQuery}
@@ -208,9 +209,9 @@
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs text-base-content/70">
           {#if isLoadingModels}
-            正在加载模型...
+            {t("chat.loadingModels")}
           {:else}
-            共找到 {filteredModelsResult.length} 个模型
+            {t("chat.modelCount", { count: filteredModelsResult.length })}
           {/if}
         </div>
 
@@ -219,7 +220,7 @@
           <Select
             bind:value={selectedProviderFilter}
             options={[
-              { value: "all", label: "全部供应商" },
+              { value: "all", label: t("chat.allProviders") },
               ...availableProvidersResult.map((p) => ({ value: p, label: p })),
             ]}
             autoWidth={true}
@@ -239,7 +240,7 @@
                 ? "fill-warning text-warning"
                 : "text-base-content/60"}
             />
-            收藏
+            {t("chat.favorites")}
           </button>
         </div>
       </div>
@@ -252,8 +253,8 @@
           class="flex flex-col items-center justify-center py-12 text-base-content/70"
         >
           <Search size={48} class="mb-4 opacity-50" />
-          <p class="text-lg">未找到匹配的模型</p>
-          <p class="text-sm">尝试调整搜索条件或清除过滤器</p>
+          <p class="text-lg">{t("chat.noMatchingModels")}</p>
+          <p class="text-sm">{t("chat.adjustSearchHint")}</p>
         </div>
       {:else}
         <!-- 分组模型列表 -->
@@ -284,7 +285,7 @@
                         <EyeIcon
                           size={14}
                           class="text-info"
-                          aria-label="支持图片生成"
+                          aria-label={t("chat.supportsImageGeneration")}
                         />
                       {/if}
                       {#if model.id === selectedModelId}
@@ -335,7 +336,7 @@
           <div class="text-base text-base-content flex items-center gap-2">
             {hoveredModel.name}
             {#if hoveredModel.support_image}
-              <EyeIcon size={14} class="text-info" aria-label="支持图片生成" />
+              <EyeIcon size={14} class="text-info" aria-label={t("chat.supportsImageGeneration")} />
             {/if}
           </div>
         </div>
@@ -353,7 +354,7 @@
         <div class="space-y-2 mb-4 text-xs">
           {#if hoveredModel.display_context_length}
             <div class="flex justify-between items-center">
-              <span class="text-base-content/70">上下文长度</span>
+              <span class="text-base-content/70">{t("chat.contextLength")}</span>
               <span class="font-medium text-base-content">
                 {hoveredModel.display_context_length}
               </span>
@@ -361,7 +362,7 @@
           {/if}
           {#if hoveredModel.display_output_max_tokens}
             <div class="flex justify-between items-center">
-              <span class="text-base-content/70">最大输出长度</span>
+              <span class="text-base-content/70">{t("chat.maxOutputLength")}</span>
               <span class="font-medium text-base-content">
                 {hoveredModel.display_output_max_tokens}
               </span>
@@ -369,7 +370,7 @@
           {/if}
           {#if hoveredModel.pricing?.input_text}
             <div class="flex justify-between items-center">
-              <span class="text-base-content/70">输入价格</span>
+              <span class="text-base-content/70">{t("chat.inputPrice")}</span>
               <span class="font-medium text-base-content">
                 {hoveredModel.pricing.input_text}
               </span>
@@ -377,7 +378,7 @@
           {/if}
           {#if hoveredModel.pricing?.output_text}
             <div class="flex justify-between items-center">
-              <span class="text-base-content/70">输出价格</span>
+              <span class="text-base-content/70">{t("chat.outputPrice")}</span>
               <span class="font-medium text-base-content">
                 {hoveredModel.pricing.output_text}
               </span>

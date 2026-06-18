@@ -4,6 +4,7 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { Bot } from "@lucide/svelte";
+  import { t } from "$lib/i18n";
   import { uiState } from "$lib/states/ui.svelte";
   import {
     agentSessionState,
@@ -158,7 +159,11 @@
         class="flex-1 flex flex-col items-center justify-center text-base-content/40"
       >
         <Bot size={40} class="mb-3 opacity-20" />
-        <p class="text-sm">开始与 {currentSession?.name ?? "Agent"} 对话</p>
+        <p class="text-sm">
+          {t("agent.page.startConversation", {
+            name: currentSession?.name ?? "Agent",
+          })}
+        </p>
       </div>
     {:else}
       <AgentTimeline {sessionId} />
@@ -192,9 +197,9 @@
     <div class="flex-1 flex flex-col items-center justify-center text-base-content/50">
       <Bot size={48} class="mb-4 opacity-20" />
       {#if hasProjects}
-        <p class="text-sm">在左侧选择一个会话，或在项目上点 + 新建</p>
+        <p class="text-sm">{t("agent.page.landingWithProjects")}</p>
       {:else}
-        <p class="text-sm">先在左侧点 + 选择项目目录</p>
+        <p class="text-sm">{t("agent.page.landingNoProjects")}</p>
       {/if}
     </div>
   {/if}

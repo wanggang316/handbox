@@ -18,6 +18,7 @@
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { hideContentPanel, setContentPanelPinned } from "$lib/api/selection";
   import { settingsState } from "$lib/states/settings.svelte";
+  import { t } from "$lib/i18n";
   import * as agentApi from "$lib/api/agent";
   import * as chatApi from "$lib/api/chat";
   import * as messageApi from "$lib/api/message";
@@ -53,11 +54,15 @@
   let showModeDropdown = $state(false);
 
   // 模式配置
-  const modeConfig = {
-    show: { icon: Eye, label: "显示", color: "text-red-600" },
-    translate: { icon: Languages, label: "翻译", color: "text-blue-600" },
-    ai: { icon: Sparkles, label: "问 AI", color: "text-purple-600" },
-  };
+  const modeConfig = $derived({
+    show: { icon: Eye, label: t("selection.modeShow"), color: "text-red-600" },
+    translate: {
+      icon: Languages,
+      label: t("selection.modeTranslate"),
+      color: "text-blue-600",
+    },
+    ai: { icon: Sparkles, label: t("selection.modeAi"), color: "text-purple-600" },
+  });
 
   onMount(() => {
     console.log("=====> [selection/content] onMount executed");
@@ -217,7 +222,7 @@
 
     const sessionId = await getOrCreateTranslationSession();
     if (!sessionId) {
-      translation.error = "请先在单词本页面配置翻译 Agent 和模型";
+      translation.error = t("selection.translationConfigHint");
       return;
     }
 
@@ -254,13 +259,13 @@
         },
         onError: (error) => {
           console.error("Translation failed:", error);
-          translation.error = "翻译失败";
+          translation.error = t("selection.translationFailed");
           translation.isLoading = false;
         },
       });
     } catch (error) {
       console.error("Translation error:", error);
-      translation.error = "翻译失败";
+      translation.error = t("selection.translationFailed");
       translation.isLoading = false;
     }
   }
@@ -319,7 +324,7 @@
             ? 'text-primary'
             : 'text-base-content/50 hover:text-base-content'}"
           onclick={togglePin}
-          title={isPinned ? "取消置顶" : "置顶"}
+          title={isPinned ? t("selection.unpin") : t("selection.pin")}
         >
           {#if isPinned}
             <Pin class="size-3.5" />
@@ -344,7 +349,7 @@
       {#if translation.isLoading}
         <div class="flex items-center justify-center py-8">
           <Loader2 class="size-5 animate-spin text-primary" />
-          <span class="ml-2 text-sm text-base-content/60">翻译中...</span>
+          <span class="ml-2 text-sm text-base-content/60">{t("selection.translating")}</span>
         </div>
       {:else if translation.error}
         <div class="p-3 rounded-lg bg-error/10 text-error text-sm">
@@ -375,7 +380,7 @@
           </div>
         </div>
       {:else}
-        <p class="text-sm text-base-content/40 text-center py-4">等待翻译...</p>
+        <p class="text-sm text-base-content/40 text-center py-4">{t("selection.waitingTranslation")}</p>
       {/if}
     {:else if content.text}
       <p
@@ -384,7 +389,7 @@
         {content.text}
       </p>
     {:else}
-      <p class="text-sm text-base-content/40 text-center py-4">暂无内容</p>
+      <p class="text-sm text-base-content/40 text-center py-4">{t("selection.noContent")}</p>
     {/if}
   </div>
 
@@ -397,7 +402,7 @@
       <button
         class="flex items-center justify-center w-7 h-7 text-base-content/60 hover:text-base-content hover:bg-base-300/50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
         onclick={handleCopy}
-        title="复制"
+        title={t("common.copy")}
         disabled={!content.text}
       >
         <Copy class="size-3.5" />
@@ -406,7 +411,7 @@
         <button
           class="flex items-center justify-center w-7 h-7 text-base-content/60 hover:text-base-content hover:bg-base-300/50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           onclick={handleTranslate}
-          title="重新翻译"
+          title={t("selection.retranslate")}
           disabled={!content.text || translation.isLoading}
         >
           <RotateCcw class="size-3.5" />
@@ -415,7 +420,7 @@
         <button
           class="flex items-center justify-center w-7 h-7 text-base-content/60 hover:text-base-content hover:bg-base-300/50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           onclick={handleRegenerate}
-          title="重新生成"
+          title={t("selection.regenerate")}
           disabled={!content.text}
         >
           <RotateCcw class="size-3.5" />
@@ -427,11 +432,11 @@
     <button
       class="flex items-center px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       onclick={handleContinue}
-      title="继续问"
+      title={t("selection.continueAsk")}
       disabled={!content.text}
     >
       <MessageCirclePlus class="size-3.5" />
-      <span>继续问</span>
+      <span>{t("selection.continueAsk")}</span>
     </button>
   </div>
 </div>

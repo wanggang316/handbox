@@ -22,6 +22,7 @@
   import { listExecutions, listenJobExecuted, runNow } from "$lib/api/job";
   import { getChat } from "$lib/api/chat";
   import { getAgentSession } from "$lib/api/agentSession";
+  import { t } from "$lib/i18n";
   import type { Job, JobExecution, ExecutionStatus, Trigger } from "$lib/types";
 
   interface Props {
@@ -57,17 +58,17 @@
   const STATUS_TO_LABEL: Record<
     ExecutionStatus,
     { variant: "enabled" | "disabled" | "idle" | "error"; text: string }
-  > = {
-    running: { variant: "idle", text: "运行中" },
-    success: { variant: "enabled", text: "成功" },
-    failed: { variant: "error", text: "失败" },
-    timeout: { variant: "error", text: "超时" },
-  };
+  > = $derived({
+    running: { variant: "idle", text: t("jobs.status.running") },
+    success: { variant: "enabled", text: t("jobs.status.success") },
+    failed: { variant: "error", text: t("jobs.status.failed") },
+    timeout: { variant: "error", text: t("jobs.status.timeout") },
+  });
 
-  const TRIGGER_TEXT: Record<Trigger, string> = {
-    schedule: "定时",
-    manual: "手动",
-  };
+  const TRIGGER_TEXT: Record<Trigger, string> = $derived({
+    schedule: t("jobs.trigger.schedule"),
+    manual: t("jobs.trigger.manual"),
+  });
 
   /**
    * 行耗时文案：
@@ -76,7 +77,8 @@
    * - 终态但缺 duration（异常数据）退回「—」。
    */
   function durationText(exec: JobExecution): string {
-    if (exec.status === "running" || exec.endedAt == null) return "运行中";
+    if (exec.status === "running" || exec.endedAt == null)
+      return t("jobs.detail.runningDuration");
     if (exec.duration == null) return "—";
     return formatDuration(exec.duration);
   }
@@ -165,7 +167,7 @@
     } catch (e) {
       console.error("Failed to load job executions:", e);
       loadError =
-        e instanceof Error ? e.message : "加载执行历史失败，请重试";
+        e instanceof Error ? e.message : t("jobs.detail.historyLoadError");
     } finally {
       loading = false;
     }
@@ -203,7 +205,7 @@
       await loadHistory(job.id);
     } catch (e) {
       console.error("Failed to run job now:", e);
-      runError = e instanceof Error ? e.message : "立即运行失败，请重试";
+      runError = e instanceof Error ? e.message : t("jobs.detail.runNowFailed");
     } finally {
       triggering = false;
     }
@@ -257,7 +259,7 @@
   onMount(() => {});
 </script>
 
-<Modal {open} title={job?.name ?? "任务详情"} showCloseButton {onClose}>
+<Modal {open} title={job?.name ?? t("jobs.detail.title")} showCloseButton {onClose}>
   {#if job}
     <div class="w-[44rem] max-w-[88vw] flex flex-col max-h-[80vh]">
       <!-- 任务概览：调度 + 下次运行 + 运行统计 -->
@@ -272,17 +274,17 @@
         <div class="flex items-center gap-2 text-base-content/70">
           <CalendarClock size={14} class="flex-shrink-0 text-base-content/50" />
           <span class="truncate">
-            下次运行：{!job.enabled
-              ? "已禁用"
+            {t("jobs.detail.nextRun")}{!job.enabled
+              ? t("jobs.status.disabled")
               : job.nextRunAt == null
                 ? "—"
                 : formatDateTime(job.nextRunAt)}
           </span>
         </div>
         <div class="flex items-center gap-4 text-xs text-base-content/50 pt-1">
-          <span>运行 {job.runCount} 次</span>
+          <span>{t("jobs.detail.runCount", { n: job.runCount })}</span>
           {#if job.failureCount > 0}
-            <span class="text-error/70">失败 {job.failureCount} 次</span>
+            <span class="text-error/70">{t("jobs.detail.failureCount", { n: job.failureCount })}</span>
           {/if}
         </div>
       </div>
@@ -295,7 +297,7 @@
           class="text-sm font-medium text-base-content/80 flex items-center gap-2"
         >
           <History size={15} class="text-base-content/50" />
-          执行历史
+          {t("jobs.detail.history")}
         </h4>
         <!-- 立即运行：禁用任务也可手动运行（禁用仅停自动调度）；运行进行中
              （triggering 或已有 running 行）按钮禁用，避免重复触发。 -->
@@ -305,7 +307,7 @@
           onclick={handleRunNow}
         >
           <Play size={13} class="flex-shrink-0" />
-          {triggering ? "运行中…" : "立即运行"}
+          {triggering ? t("jobs.detail.runningNow") : t("jobs.detail.runNow")}
         </button>
       </div>
 
@@ -336,7 +338,7 @@
               class="text-primary hover:underline cursor-pointer text-sm"
               onclick={() => job?.id && loadHistory(job.id)}
             >
-              重试
+              {t("common.retry")}
             </button>
           </div>
         {:else if executions.length === 0}
@@ -344,7 +346,7 @@
             class="flex flex-col items-center justify-center py-10 text-base-content/50"
           >
             <Clock size={32} class="mb-3 opacity-20" />
-            <p class="text-sm">无执行记录</p>
+            <p class="text-sm">{t("jobs.detail.emptyHistory")}</p>
           </div>
         {:else}
           <ul class="space-y-2">
@@ -444,7 +446,7 @@
                             class="flex items-center gap-2 rounded-md border border-[var(--hairline)] bg-base-100 px-3 py-2 text-xs text-base-content/50"
                           >
                             <AlertCircle size={14} class="flex-shrink-0" />
-                            <span>结果不可用</span>
+                            <span>{t("jobs.detail.resultUnavailable")}</span>
                           </div>
                         {:else}
                           <button
@@ -460,8 +462,8 @@
                             {/if}
                             <span>
                               {resultState === "checking"
-                                ? "检查结果…"
-                                : "跳转到结果"}
+                                ? t("jobs.detail.checkingResult")
+                                : t("jobs.detail.jumpToResult")}
                             </span>
                             <ExternalLink size={13} class="flex-shrink-0" />
                           </button>
