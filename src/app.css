@@ -124,6 +124,14 @@ summary:focus-visible,
   border-radius: 0.375rem;
 }
 
+/* 聊天 / Agent 消息输入框：外层容器已有边框，再叠加键盘焦点环会显得是「框中框」。
+   故对带 .composer-input 标记的 textarea 抑制焦点环；与上面的全局规则同为 unlayered，
+   且 type+class 特异性更高，稳定覆盖。仅作用于消息输入域，不影响其它表单控件的
+   a11y 焦点环。 */
+textarea.composer-input:focus-visible {
+  outline: none;
+}
+
 /* 浅色主题（默认） */
 :root {
   --base-100: var(--color-base-100);

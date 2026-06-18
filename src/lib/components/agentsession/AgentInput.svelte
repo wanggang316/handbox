@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ArrowUp, Square, Plus, X, SlidersHorizontal } from "@lucide/svelte";
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
@@ -127,11 +127,9 @@
   // 触发条件：空输入框（整段 textarea 为空）首字符**键入** `/`（非粘贴、非词中、
   // 非 Shift+Enter 后行首、非 IME 合成）→ 打开锚定 textarea 的 skill 浮层。
   // 候选只含未禁用 skill；query 为 `/` 之后的文本，大小写不敏感子串匹配 name。
-  // 选中 → 追加可移除的 forced-skill chip（按 name 去重）并清掉 textarea 的 /query。
-  //
-  // forcedSkills：选中的强制 skill 列表（按 name 去重）。本 feature 仅维护与渲染；
-  // 下个 feature（forced-chip-send-lifecycle）把这些 skill 的 name 接入 sendAgentRun。
-  let forcedSkills = $state<SkillInfo[]>([]);
+  // 选中 → 把 `/<name> ` 写回输入文本的原位置（替换已键入的 /query），不再单独用
+  // chip 行展示。文本即唯一真源：发送时从行首 `/<name>` 解析出强制 skill 名传给后端，
+  // 由后端把 skill body 注入 system prompt（forcedSkills wire 机制保持不变）。
 
   let slashOpen = $state(false);
   let slashQuery = $state("");
@@ -183,17 +181,30 @@
     adjustTextareaHeight();
   }
 
-  function selectSkill(skill: SkillInfo) {
-    // 按 name 去重：已存在则仅消费 query、不重复加 chip。
-    if (!forcedSkills.some((s) => s.name === skill.name)) {
-      forcedSkills = [...forcedSkills, skill];
-    }
-    clearSlashQuery();
+  async function selectSkill(skill: SkillInfo) {
+    // 把 `/<name> ` 写回输入文本的原位置（替换整段 /query），不再单独加 chip。
+    // 关浮层后把焦点与光标交还 textarea 末尾，便于直接接着输入正文。强制 skill
+    // 名在发送时从行首 `/<name>` 解析得到（见 leadingForcedSkillNames）。
+    input = `/${skill.name} `;
     closeSlashPopover();
+    await tick();
+    if (!textareaRef) return;
+    textareaRef.focus();
+    const end = textareaRef.value.length;
+    textareaRef.setSelectionRange(end, end);
+    adjustTextareaHeight();
   }
 
-  function removeForcedSkill(name: string) {
-    forcedSkills = forcedSkills.filter((s) => s.name !== name);
+  // 行首 `/<name>` → 强制 skill 名（仅匹配已知未禁用 skill；否则视为普通文本，
+  // 返回空）。slash 触发只在整段恰为单个 `/` 时发生，故选中后正文总以 `/<name> `
+  // 起头，至多一个前导强制 skill。
+  function leadingForcedSkillNames(text: string): string[] {
+    const m = text.trimStart().match(/^\/(\S+)/);
+    if (!m) return [];
+    const name = m[1];
+    return availableSkills.some((s) => !s.disabled && s.name === name)
+      ? [name]
+      : [];
   }
 
   function adjustTextareaHeight() {
@@ -213,8 +224,14 @@
     if (composing || event.isComposing) return;
 
     if (slashOpen) {
-      if (event.key === "ArrowDown") {
-        // 端点有界、不动文本光标（preventDefault）。
+      // ↓ 或 Ctrl|Cmd+N 下移、↑ 或 Ctrl|Cmd+P 上移（emacs 风）；端点有界、
+      // 不动文本光标（preventDefault）。高亮变化由浮层 scrollIntoView 跟随。
+      const mod = event.metaKey || event.ctrlKey;
+      const navDown =
+        event.key === "ArrowDown" || (mod && event.key.toLowerCase() === "n");
+      const navUp =
+        event.key === "ArrowUp" || (mod && event.key.toLowerCase() === "p");
+      if (navDown) {
         event.preventDefault();
         if (slashCandidates.length > 0) {
           slashHighlight = Math.min(
@@ -224,7 +241,7 @@
         }
         return;
       }
-      if (event.key === "ArrowUp") {
+      if (navUp) {
         event.preventDefault();
         if (slashCandidates.length > 0) {
           slashHighlight = Math.max(effectiveHighlight - 1, 0);
@@ -367,9 +384,8 @@
 
     // run 进行中：消息走 steering 队列，不起第二个 run。后端 agent_run_steer 把
     // 文本压入活跃 run 的 steering 队列、在 turn 边界 drain；纯空白为干净 no-op。
-    // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）；forced
-    // chip 同样不随 steer 发送、也不被清空——forced 是给下一个完整 run 的瞬时态，
-    // 不该被 mid-run steering 误清，故此分支不触碰 forcedSkills。
+    // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）；正文里的
+    // 行首 `/<name>` 不做强制 skill 解析（steer 不注入 skill），原样作为文本入队。
     // 活跃 run 必有模型，故此分支无需查 model 守卫；放在 model 守卫之前自洽。
     if (running) {
       // 纯空白输入：干净 no-op（不清空、不入队、不调用）。
@@ -410,16 +426,12 @@
       data: Array.from(a.data),
     }));
     const sentAttachments = attachments;
-    // forced chip 是本回合（per-turn）瞬时态：dispatch 前快照 + 清空，与 input/
-    // attachments 同构。成功则保持清空（下一 run 的 forced_skills 为空，
-    // VAL-SLASH-021）；失败则在 catch 里与文本/附件一并原子回填，杜绝「文本回来了
-    // 但强制丢了」的不一致（VAL-SLASH-024）。chip 文案=skill 名，slash 已被消费，
-    // 故发给模型的 user message 正文绝不含字面 `/skillname`（VAL-SLASH-007）。
-    const sentForcedSkills = forcedSkills;
-    const forcedSkillNames = forcedSkills.map((s) => s.name);
+    // 强制 skill 名从正文行首 `/<name>` 解析：文本即唯一真源，故 catch 回填 input
+    // 即自动恢复强制 skill，无需单独快照。`/<name>` 随正文一并发给模型（与就地内联
+    // 展示一致），同时后端按此 list 把 skill body 注入 system prompt。
+    const forcedSkillNames = leadingForcedSkillNames(text);
     input = "";
     attachments = [];
-    forcedSkills = [];
     adjustTextareaHeight();
     try {
       await runAgentStream(
@@ -435,10 +447,10 @@
         }
       });
     } catch (error) {
-      // 启动失败：回填输入、附件与 forced chip，提示错误，便于重试。
+      // 启动失败：回填输入与附件（input 含行首 `/<name>`，强制 skill 自动恢复），
+      // 提示错误，便于重试。
       input = text;
       attachments = sentAttachments;
-      forcedSkills = sentForcedSkills;
       adjustTextareaHeight();
       modelPrompt =
         error instanceof Error ? error.message : "启动 Agent 运行失败";
@@ -514,30 +526,9 @@
       oncompositionend={handleCompositionEnd}
       rows="1"
       disabled={awaitingApproval}
-      class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
+      class="composer-input bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
     ></textarea>
   </div>
-
-  {#if forcedSkills.length}
-    <div class="px-4 pb-2 flex flex-wrap gap-2">
-      {#each forcedSkills as skill (skill.name)}
-        <span
-          class="flex items-center gap-1 rounded-md border border-info/50 bg-info/10 px-2 py-1 text-xs text-info"
-        >
-          <span class="truncate max-w-[160px]">{skill.name}</span>
-          <button
-            type="button"
-            class="rounded-full p-0.5 transition-colors hover:bg-info/20"
-            title="移除 skill"
-            aria-label={`移除 skill ${skill.name}`}
-            onclick={() => removeForcedSkill(skill.name)}
-          >
-            <X size={12} />
-          </button>
-        </span>
-      {/each}
-    </div>
-  {/if}
 
   {#if attachments.length}
     <div class="px-4 pb-2 flex flex-wrap gap-3">

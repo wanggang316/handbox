@@ -13,6 +13,18 @@
   }
 
   let { items, highlightedIndex, onSelect, onHover }: Props = $props();
+
+  // 列表容器引用：高亮变化时把当前项滚入可视区，使键盘（↑/↓、Ctrl|Cmd+N/P）
+  // 移动高亮越过 max-h 边界时列表跟随滚动。`nearest` 只在必要时滚动，已可见则不动。
+  let listRef = $state<HTMLDivElement>();
+  $effect(() => {
+    const idx = highlightedIndex;
+    if (idx < 0 || !listRef) return;
+    const active = listRef.querySelector('[aria-selected="true"]');
+    if (active instanceof HTMLElement) {
+      active.scrollIntoView({ block: "nearest" });
+    }
+  });
 </script>
 
 <!--
@@ -22,6 +34,7 @@
   a11y：listbox/option role + aria-selected，高亮态可程序读取（VAL-SLASH-026）。
 -->
 <div
+  bind:this={listRef}
   class="max-h-60 w-72 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-200 py-1 shadow-lg"
   role="listbox"
   aria-label="Skill 自动补全"
