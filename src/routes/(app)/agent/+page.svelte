@@ -171,7 +171,7 @@
       forced chip / slash 浮层）全部回到初值，绝不在会话 A 与 B 间串台
       （VAL-SLASH-023）。组件实例被复用是底层 bug；重新挂载即正确语义。
     -->
-    <div class="shrink-0 border-t border-base-300 px-4 py-3">
+    <div class="shrink-0 px-4 pb-3">
       {#if currentSession}
         {#key currentSession.id}
           <AgentInput session={currentSession} />

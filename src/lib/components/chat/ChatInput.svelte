@@ -208,7 +208,7 @@
     onkeydown={handleKeydown}
     oninput={adjustTextareaHeight}
     rows="1"
-    class="bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
+    class="composer-input bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto"
   ></textarea>
 
   {#if attachments.length}
