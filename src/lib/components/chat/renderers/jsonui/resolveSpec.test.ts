@@ -415,8 +415,8 @@ describe("resolveSpec — per-component prop validation", () => {
  * whether an in-progress (usually unclosed) message looks like a JSON-Render
  * spec, so the chat bubble can show a loading placeholder instead of rendering
  * a half-finished JSON blob. It must fire on partial spec fragments yet stay
- * silent on prose, plain config JSON, and `__render` envelope content (the
- * envelope heuristic's job). Boundaries pinned here trace to VAL-STREAM-003.
+ * silent on prose, plain config JSON, and any other JSON that lacks the spec's
+ * `root`/`elements` markers. Boundaries pinned here trace to VAL-STREAM-003.
  */
 describe("looksLikeStreamingSpec", () => {
   it("is TRUE for a partial, unclosed spec fragment (bare JSON)", () => {
@@ -447,9 +447,9 @@ describe("looksLikeStreamingSpec", () => {
     expect(looksLikeStreamingSpec(config)).toBe(false);
   });
 
-  it("is FALSE for `__render` envelope content (the envelope heuristic's job)", () => {
-    const envelope = '{ "__render": "translation", "data": { "term":';
-    expect(looksLikeStreamingSpec(envelope)).toBe(false);
+  it("is FALSE for JSON that lacks the spec markers (e.g. a `__render`-style payload)", () => {
+    const other = '{ "__render": "translation", "data": { "term":';
+    expect(looksLikeStreamingSpec(other)).toBe(false);
   });
 
   it("is FALSE for ordinary markdown prose", () => {

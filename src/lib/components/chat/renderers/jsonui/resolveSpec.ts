@@ -209,15 +209,14 @@ export function explainSpec(content: string | null | undefined): SpecDiagnostic 
  * fragment, so {@link resolveSpec} cannot decide (and returns `null`). This
  * function answers a narrower, parse-free question used solely to swap in a
  * loading placeholder while a spec streams in — rather than rendering half a
- * JSON blob character by character. It mirrors `looksLikeStreamingEnvelope`,
- * but keys off the spec's `"root"` + `"elements"` markers instead of the
- * envelope's `"__render"` discriminator.
+ * JSON blob character by character. It keys off the spec's `"root"` +
+ * `"elements"` markers.
  *
  * It is intentionally precise to avoid misfiring on ordinary prose replies: the
  * trimmed content (after an optional opening ```fence) must start with `{` and
  * contain BOTH the `"root"` and `"elements"` markers. A normal streamed message
- * (plain text, JSON config without those markers, or `__render` envelope
- * content) fails at least one check and is left to the existing markdown /
+ * (plain text, or JSON config without those markers) fails at least one check
+ * and is left to the existing markdown /
  * envelope-placeholder paths.
  *
  * @param content Raw, possibly-partial streaming content (accepts

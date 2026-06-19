@@ -25,8 +25,6 @@
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
   import ChatList from "$lib/components/ui/ChatList.svelte";
   import DefaultRow from "$lib/components/ui/table/DefaultRow.svelte";
-  import TranslationCard from "$lib/components/chat/renderers/TranslationCard.svelte";
-  import type { TranslationData } from "$lib/components/chat/renderers/types";
   import { Renderer, JsonUIProvider } from "@json-render/svelte";
   import type { Spec } from "@json-render/core";
   import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
@@ -110,86 +108,12 @@
     { id: "chat-3", title: "组件 API 设计" }
   ];
 
-  const translationSamples: { label: string; data: TranslationData }[] = [
-    {
-      label: "happy（全字段）",
-      data: {
-        term: "ephemeral",
-        translation: "短暂的，转瞬即逝的",
-        phonetic: "/ɪˈfem(ə)rəl/",
-        explanation: "形容事物存在或持续时间很短。\n例：The beauty of cherry blossoms is ephemeral."
-      }
-    },
-    {
-      label: "含 term（仅原词+译文）",
-      data: {
-        term: "serendipity",
-        translation: "意外发现珍宝的运气"
-      }
-    },
-    {
-      label: "缺 phonetic + explanation",
-      data: {
-        term: "résumé",
-        translation: "简历"
-      }
-    },
-    {
-      label: "空字符串字段",
-      data: {
-        term: "",
-        translation: "只有译文，其余为空字符串",
-        phonetic: "",
-        explanation: ""
-      }
-    },
-    {
-      label: "XSS（script / img onerror）",
-      data: {
-        term: "<script>alert(1)<\/script>",
-        translation: "<img src=x onerror=alert(1)>",
-        phonetic: "<svg onload=alert(1)>",
-        explanation: "<script>alert('xss')<\/script>\n<img src=x onerror=alert(2)>"
-      }
-    },
-    {
-      label: "markdown 标记（应字面显示）",
-      data: {
-        term: "**bold**",
-        translation: "# heading",
-        phonetic: "`code`",
-        explanation: "**bold** text, # heading, and [link](http://e) should all show literally."
-      }
-    },
-    {
-      label: "超长译文与释义（换行不溢出）",
-      data: {
-        term: "supercalifragilisticexpialidocious-pneumonoultramicroscopicsilicovolcanoconiosis",
-        translation:
-          "这是一段刻意写得非常非常长的译文用来验证卡片在固定宽度下能够正确换行而不会产生横向溢出滚动条这是一段刻意写得非常非常长的译文用来验证卡片在固定宽度下能够正确换行而不会产生横向溢出滚动条",
-        phonetic: "/ˌsuːpərˌkælɪˌfrædʒɪˌlɪstɪkˌɛkspiˌælɪˈdoʊʃəs/",
-        explanation:
-          "Loremipsumdolorsitametconsecteturadipiscingelitsedeiusmoddolorlongwordwithoutspaces 这是一段没有空格的超长释义文本用来确认在没有自然断点时也能依靠 break-words 强制换行而不撑破卡片宽度。"
-      }
-    },
-    {
-      label: "unicode / RTL / emoji / CJK",
-      data: {
-        term: "مرحبا",
-        translation: "你好 こんにちは 안녕 👋🌍 café naïve",
-        phonetic: "/marħaban/ 😀",
-        explanation: "阿拉伯语 term + 中文 + 假名 + 韩文 + emoji 👍🏽 + 组合变音 é ñ，应正常显示不乱码。"
-      }
-    }
-  ];
-
   // JSON-Render demo specs. Flat (root + elements map), exactly the shape an
   // AI emits. Every element carries `children` and `visible` because the
   // generated catalog validator requires both. Composed only from the four
   // generic components (Card / Stack / Text / Badge).
   //
-  // Spec A — a translation card assembled from generic primitives, proving that
-  // the bespoke TranslationCard can be expressed as a composition.
+  // Spec A — a translation card assembled entirely from generic primitives.
   const jsonSpecA: Spec = {
     root: "card",
     elements: {
@@ -1230,21 +1154,6 @@
           onclick={() => triggerToast("info")}
         />
       </TableGroup>
-    </div>
-  </section>
-
-  <section class="space-y-4">
-    <h2 class="text-base font-medium text-base-content">Agent 输出渲染器</h2>
-    <p class="text-sm text-base-content/70">
-      TranslationCard：所有字段经文本绑定渲染（绝不 @html），切换主题 / 注入脚本以验证安全与适配。
-    </p>
-    <div class="grid gap-4 lg:grid-cols-2">
-      {#each translationSamples as sample (sample.label)}
-        <div class="space-y-2">
-          <div class="text-xs text-base-content/60">{sample.label}</div>
-          <TranslationCard {...sample.data} />
-        </div>
-      {/each}
     </div>
   </section>
 
