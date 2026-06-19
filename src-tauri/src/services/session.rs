@@ -133,6 +133,7 @@ impl SessionService {
             artifact_id: None,
             agent_id: None,
             reasoning: None,
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -178,6 +179,7 @@ impl SessionService {
             artifact_id: None,
             agent_id: Some(agent_id),
             reasoning: agent.reasoning,
+            generative_ui: agent.generative_ui,
             created_at: now,
             updated_at: now,
         };
@@ -969,5 +971,88 @@ mod tests {
         assert_eq!(updated.top_k, Some(40)); // 保持原值
         assert_eq!(updated.max_tokens, Some(2048)); // 保持原值
         assert_eq!(updated.stream, Some(true)); // 保持原值
+    }
+
+    fn seed_agent(now: i64, generative_ui: Option<bool>) -> crate::storage::types::Agent {
+        crate::storage::types::Agent {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "GenUI Agent".to_string(),
+            model: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            reasoning: None,
+            max_tokens: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            skills: vec![],
+            generative_ui,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    // VAL-AGENT-008: create_session_from_agent snapshots the agent's generative_ui
+    // onto the new session, and the value reads back via BOTH get_session_by_id and
+    // list_sessions.
+    #[tokio::test]
+    async fn create_session_from_agent_snapshots_generative_ui_on_both_read_paths() {
+        let db = create_test_database().await;
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // generative_ui = Some(true) snapshots onto the session.
+        let agent_on = seed_agent(now, Some(true));
+        service
+            .agent_repository
+            .create_agent(&agent_on)
+            .await
+            .unwrap();
+        let session = service
+            .create_session_from_agent(agent_on.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(session.generative_ui, Some(true));
+
+        let via_get = service
+            .repository
+            .get_session_by_id(&session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(via_get.generative_ui, Some(true));
+
+        let via_list = service.repository.list_sessions(50, 0).await.unwrap();
+        let listed = via_list
+            .iter()
+            .find(|s| s.id == session.id)
+            .expect("session present in list");
+        assert_eq!(listed.generative_ui, Some(true));
+
+        // generative_ui = None (off) snapshots through as None.
+        let agent_off = seed_agent(now, None);
+        service
+            .agent_repository
+            .create_agent(&agent_off)
+            .await
+            .unwrap();
+        let session_off = service
+            .create_session_from_agent(agent_off.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(session_off.generative_ui, None);
+
+        let off_via_get = service
+            .repository
+            .get_session_by_id(&session_off.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(off_via_get.generative_ui, None);
     }
 }

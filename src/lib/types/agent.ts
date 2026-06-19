@@ -31,6 +31,7 @@ export interface Agent extends BaseEntity {
   systemPrompt?: string;
   mcpServers: McpServerConfig[];
   skills: string[];
+  generativeUi?: boolean;
 }
 
 // 创建 Agent 请求
@@ -45,6 +46,7 @@ export interface CreateAgentRequest {
   systemPrompt?: string;
   mcpServers?: McpServerConfig[];
   skills?: string[];
+  generativeUi?: boolean;
 }
 
 // 更新 Agent 请求
@@ -59,4 +61,5 @@ export interface UpdateAgentRequest {
   systemPrompt?: string | null;
   mcpServers?: McpServerConfig[];
   skills?: string[];
+  generativeUi?: boolean;
 }

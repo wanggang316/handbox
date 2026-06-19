@@ -2819,6 +2819,7 @@ mod tests {
             artifact_id: None,
             agent_id: None,
             reasoning: None,
+            generative_ui: None,
             created_at: 0,
             updated_at: 0
         };
@@ -2863,6 +2864,7 @@ mod tests {
             artifact_id: None,
             agent_id: None,
             reasoning: None,
+            generative_ui: None,
             created_at: 0,
             updated_at: 0,
         };

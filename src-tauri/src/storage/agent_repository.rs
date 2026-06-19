@@ -34,8 +34,8 @@ impl AgentRepository {
         let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         "#;
 
         sqlx::query(query)
@@ -50,6 +50,7 @@ impl AgentRepository {
             .bind(&agent.system_prompt)
             .bind(&mcp_servers_json)
             .bind(&skills_json)
+            .bind(agent.generative_ui)
             .bind(agent.created_at)
             .bind(agent.updated_at)
             .execute(self.db.pool())
@@ -62,7 +63,7 @@ impl AgentRepository {
     /// 获取 Agent 列表
     pub async fn list_agents(&self, limit: i32, offset: i32) -> Result<Vec<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, created_at, updated_at
             FROM agents ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -84,7 +85,7 @@ impl AgentRepository {
     /// 根据 ID 获取 Agent
     pub async fn get_agent_by_id(&self, agent_id: &UUID) -> Result<Option<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, created_at, updated_at
             FROM agents WHERE id = $1
         "#;
 
@@ -118,8 +119,8 @@ impl AgentRepository {
         let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, updated_at = $11
-            WHERE id = $12
+            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, generative_ui = $11, updated_at = $12
+            WHERE id = $13
         "#;
 
         let result = sqlx::query(query)
@@ -133,6 +134,7 @@ impl AgentRepository {
             .bind(&agent.system_prompt)
             .bind(&mcp_servers_json)
             .bind(&skills_json)
+            .bind(agent.generative_ui)
             .bind(agent.updated_at)
             .bind(&agent.id)
             .execute(self.db.pool())
@@ -275,6 +277,8 @@ impl AgentRepository {
         let top_p: Option<f32> = row.try_get::<Option<f32>, _>("top_p")?;
         let top_k: Option<i32> = row.try_get::<Option<i32>, _>("top_k")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
+        // Option<bool> 显式解码：SQL NULL -> None（旧行），INTEGER 0/1 -> Some(false/true)。
+        let generative_ui: Option<bool> = row.try_get::<Option<bool>, _>("generative_ui")?;
 
         Ok(Agent {
             id: row.try_get("id")?,
@@ -288,6 +292,7 @@ impl AgentRepository {
             system_prompt: row.try_get("system_prompt").ok(),
             mcp_servers,
             skills,
+            generative_ui,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -340,6 +345,7 @@ mod tests {
                 },
             ],
             skills: vec!["code-analysis".to_string(), "refactoring".to_string()],
+            generative_ui: Some(true),
             created_at: now,
             updated_at: now,
         };
@@ -398,6 +404,7 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             skills: vec![],
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -414,6 +421,7 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             skills: vec![],
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -430,6 +438,7 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             skills: vec![],
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -474,6 +483,7 @@ mod tests {
                 enabled_tools: vec![],
             }],
             skills: vec![],
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -501,6 +511,7 @@ mod tests {
                 },
             ],
             skills: vec![],
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -517,5 +528,82 @@ mod tests {
         let updated_agent2 = repo.get_agent_by_id(&agent2.id).await.unwrap().unwrap();
         assert_eq!(updated_agent2.mcp_servers.len(), 1);
         assert_eq!(updated_agent2.mcp_servers[0].server_id, "server2");
+    }
+
+    fn minimal_agent(now: i64, generative_ui: Option<bool>) -> Agent {
+        Agent {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "GenUI Agent".to_string(),
+            model: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            reasoning: None,
+            max_tokens: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            skills: vec![],
+            generative_ui,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    // VAL-AGENT-001: generative_ui round-trips through create -> get -> update -> get.
+    #[tokio::test]
+    async fn test_agent_generative_ui_round_trip() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let agent = minimal_agent(now, Some(true));
+        repo.create_agent(&agent).await.unwrap();
+
+        let fetched = repo.get_agent_by_id(&agent.id).await.unwrap().unwrap();
+        assert_eq!(fetched.generative_ui, Some(true));
+
+        let mut updated = fetched.clone();
+        updated.generative_ui = Some(false);
+        updated.updated_at = now + 1000;
+        repo.update_agent(&updated).await.unwrap();
+
+        let after = repo.get_agent_by_id(&agent.id).await.unwrap().unwrap();
+        assert_eq!(after.generative_ui, Some(false));
+    }
+
+    // VAL-AGENT-002: an old row with generative_ui NULL decodes to None on both
+    // read paths (get_agent_by_id + list_agents) without a sqlx decode error.
+    #[tokio::test]
+    async fn test_agent_generative_ui_null_decodes_to_none() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db = Arc::new(db);
+        let repo = AgentRepository::new(db.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // Simulate a legacy row: insert directly, omitting generative_ui (stays NULL).
+        let agent_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+            .bind(&agent_id)
+            .bind("Legacy Agent")
+            .bind(now)
+            .bind(now)
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let fetched = repo.get_agent_by_id(&agent_id).await.unwrap().unwrap();
+        assert_eq!(fetched.generative_ui, None);
+
+        let listed = repo.list_agents(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].generative_ui, None);
     }
 }

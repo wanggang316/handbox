@@ -38,6 +38,9 @@ pub struct Session {
     pub artifact_id: Option<UUID>,
     pub agent_id: Option<UUID>, // 关联的 Agent ID
     pub reasoning: Option<SessionReasoningConfig>,
+    /// 生成式 UI 开关，会话创建时由 Agent 快照而来（write-once）。
+    /// `None` 等同「关闭」（旧行 / NULL 列）。
+    pub generative_ui: Option<bool>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -104,6 +107,7 @@ mod tests {
             artifact_id: None,
             agent_id: None,
             reasoning: None,
+            generative_ui: Some(true),
             created_at: 1000,
             updated_at: 2000,
         };

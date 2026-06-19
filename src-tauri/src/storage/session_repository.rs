@@ -38,8 +38,8 @@ impl SessionRepository {
             .and_then(|value| serde_json::to_string(value).ok());
 
         let query = r#"
-            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
         sqlx::query(query)
@@ -58,6 +58,7 @@ impl SessionRepository {
             .bind(blank_ref_to_none(&session.artifact_id))
             .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
+            .bind(session.generative_ui)
             .bind(session.created_at)
             .bind(session.updated_at)
             .execute(self.db.pool())
@@ -75,7 +76,7 @@ impl SessionRepository {
     /// 获取 Session 列表
     pub async fn list_sessions(&self, limit: i32, offset: i32) -> Result<Vec<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, created_at, updated_at
             FROM sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -102,7 +103,7 @@ impl SessionRepository {
     /// 根据 ID 获取 Session
     pub async fn get_session_by_id(&self, session_id: &UUID) -> Result<Option<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, created_at, updated_at
             FROM sessions WHERE id = $1
         "#;
 
@@ -391,6 +392,8 @@ impl SessionRepository {
         let top_k: Option<i32> = row.try_get::<Option<i32>, _>("top_k")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
         let stream: Option<bool> = row.try_get::<Option<bool>, _>("stream")?;
+        // Option<bool> 显式解码：SQL NULL -> None（旧行），INTEGER 0/1 -> Some(false/true)。
+        let generative_ui: Option<bool> = row.try_get::<Option<bool>, _>("generative_ui")?;
 
         Ok(Session {
             id: row.try_get("id")?,
@@ -420,6 +423,7 @@ impl SessionRepository {
                 .flatten()
                 .filter(|s| !s.trim().is_empty()),
             reasoning,
+            generative_ui,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -478,6 +482,7 @@ mod tests {
             artifact_id: None,
             agent_id: None,
             reasoning: None,
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -554,6 +559,7 @@ mod tests {
             artifact_id: None,
             agent_id: Some(agent_id.clone()),
             reasoning: None,
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -595,6 +601,7 @@ mod tests {
             artifact_id: Some(String::new()),
             agent_id: Some(String::new()),
             reasoning: None,
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
@@ -615,5 +622,40 @@ mod tests {
         assert_eq!(after.name, "已生成标题");
         assert_eq!(after.agent_id, None);
         assert_eq!(after.artifact_id, None);
+    }
+
+    // VAL-AGENT-009: a session row with generative_ui NULL decodes to None on both
+    // read paths (get_session_by_id + list_sessions) without a sqlx decode error.
+    #[tokio::test]
+    async fn test_session_generative_ui_null_decodes_to_none() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db = Arc::new(db);
+        let repo = SessionRepository::new(db.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // Simulate a legacy row: insert directly, omitting generative_ui (stays NULL).
+        let session_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO sessions (id, name, message_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&session_id)
+        .bind("Legacy Session")
+        .bind(0_i32)
+        .bind(now)
+        .bind(now)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let fetched = repo.get_session_by_id(&session_id).await.unwrap().unwrap();
+        assert_eq!(fetched.generative_ui, None);
+
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].generative_ui, None);
     }
 }

@@ -61,6 +61,7 @@ impl AgentService {
             system_prompt,
             mcp_servers: mcp_servers.unwrap_or_default(),
             skills: skills.unwrap_or_default(),
+            generative_ui: None,
             created_at: now,
             updated_at: now,
         };
