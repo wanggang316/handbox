@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { resolveSpec } from "./resolveSpec";
+import { resolveSpec, looksLikeStreamingSpec } from "./resolveSpec";
 
 /** A catalog-valid spec: a Card → Stack → (Text, Badge) tree. */
 const validSpec = {
@@ -407,5 +407,96 @@ describe("resolveSpec — per-component prop validation", () => {
     const props = result?.elements?.["x"]?.props ?? {};
     expect(props).not.toHaveProperty("color");
     expect(props).toMatchObject({ letter: "ada", size: "lg" });
+  });
+});
+
+/**
+ * `looksLikeStreamingSpec` is the parse-free streaming heuristic that decides
+ * whether an in-progress (usually unclosed) message looks like a JSON-Render
+ * spec, so the chat bubble can show a loading placeholder instead of rendering
+ * a half-finished JSON blob. It must fire on partial spec fragments yet stay
+ * silent on prose, plain config JSON, and `__render` envelope content (the
+ * envelope heuristic's job). Boundaries pinned here trace to VAL-STREAM-003.
+ */
+describe("looksLikeStreamingSpec", () => {
+  it("is TRUE for a partial, unclosed spec fragment (bare JSON)", () => {
+    const partial = '{ "root": "card", "elements": { "card": { "type":';
+    expect(looksLikeStreamingSpec(partial)).toBe(true);
+  });
+
+  it("is TRUE for the ```json-fenced partial variant", () => {
+    const partial = '```json\n{ "root": "card", "elements": { "card": {';
+    expect(looksLikeStreamingSpec(partial)).toBe(true);
+  });
+
+  it("is TRUE for a bare ``` fence (no language) carrying a partial spec", () => {
+    const partial = '```\n{ "root": "card", "elements": {';
+    expect(looksLikeStreamingSpec(partial)).toBe(true);
+  });
+
+  it("is FALSE when only `root` is present (no `elements` yet)", () => {
+    const partial = '{ "root": "card", "title":';
+    expect(looksLikeStreamingSpec(partial)).toBe(false);
+  });
+
+  it("is FALSE for plain config JSON carrying neither marker", () => {
+    const config = '{ "model": "gpt-4", "temperature": 0.7';
+    expect(looksLikeStreamingSpec(config)).toBe(false);
+  });
+
+  it("is FALSE for `__render` envelope content (the envelope heuristic's job)", () => {
+    const envelope = '{ "__render": "translation", "data": { "term":';
+    expect(looksLikeStreamingSpec(envelope)).toBe(false);
+  });
+
+  it("is FALSE for ordinary markdown prose", () => {
+    expect(
+      looksLikeStreamingSpec("Here is the **root** of the elements I found"),
+    ).toBe(false);
+  });
+
+  it("is FALSE for prose that precedes an otherwise-spec-like object", () => {
+    // Must open with `{` (after an optional fence); leading prose disqualifies.
+    expect(
+      looksLikeStreamingSpec('Sure: { "root": "card", "elements": {'),
+    ).toBe(false);
+  });
+
+  it("is FALSE for empty, whitespace, null, and undefined input", () => {
+    expect(looksLikeStreamingSpec("")).toBe(false);
+    expect(looksLikeStreamingSpec("   \n  ")).toBe(false);
+    expect(looksLikeStreamingSpec(null)).toBe(false);
+    expect(looksLikeStreamingSpec(undefined)).toBe(false);
+  });
+});
+
+/**
+ * The streaming render decision in `MessageAssistant.svelte` is driven by the
+ * pair (`resolveSpec`, `looksLikeStreamingSpec`): while the streamed JSON is
+ * unclosed, `resolveSpec` is null and the heuristic is true → placeholder; once
+ * the spec closes and validates, `resolveSpec` hits → render; a closed spec
+ * with an unregistered component fails `resolveSpec` → markdown fallback. This
+ * suite pins that transition (VAL-STREAM-001 logic) on the pure functions.
+ */
+describe("specHit transition (resolveSpec × looksLikeStreamingSpec)", () => {
+  it("partial spec → resolveSpec null AND heuristic true (⇒ placeholder)", () => {
+    const partial = JSON.stringify(validSpec).slice(0, 60);
+    expect(resolveSpec(partial)).toBeNull();
+    expect(looksLikeStreamingSpec(partial)).toBe(true);
+  });
+
+  it("closed valid spec → resolveSpec non-null (⇒ renders)", () => {
+    const closed = JSON.stringify(validSpec);
+    expect(resolveSpec(closed)).not.toBeNull();
+  });
+
+  it("closed spec with an unregistered component → resolveSpec null (⇒ markdown)", () => {
+    const unknownType = JSON.stringify({
+      root: "x",
+      elements: {
+        x: { type: "Carousel", props: {}, children: [], visible: true },
+      },
+    });
+    expect(resolveSpec(unknownType)).toBeNull();
   });
 });

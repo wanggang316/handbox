@@ -112,6 +112,45 @@ export function resolveSpec(content: string | null | undefined): Spec | null {
 }
 
 /**
+ * Cheap heuristic: does this *in-progress* streaming content look like a
+ * JSON-Render spec that is still being generated?
+ *
+ * During streaming the accumulated content is almost always an unclosed JSON
+ * fragment, so {@link resolveSpec} cannot decide (and returns `null`). This
+ * function answers a narrower, parse-free question used solely to swap in a
+ * loading placeholder while a spec streams in — rather than rendering half a
+ * JSON blob character by character. It mirrors `looksLikeStreamingEnvelope`,
+ * but keys off the spec's `"root"` + `"elements"` markers instead of the
+ * envelope's `"__render"` discriminator.
+ *
+ * It is intentionally precise to avoid misfiring on ordinary prose replies: the
+ * trimmed content (after an optional opening ```fence) must start with `{` and
+ * contain BOTH the `"root"` and `"elements"` markers. A normal streamed message
+ * (plain text, JSON config without those markers, or `__render` envelope
+ * content) fails at least one check and is left to the existing markdown /
+ * envelope-placeholder paths.
+ *
+ * @param content Raw, possibly-partial streaming content (accepts
+ *   `null`/`undefined` defensively).
+ */
+export function looksLikeStreamingSpec(
+  content: string | null | undefined,
+): boolean {
+  if (!content) {
+    return false;
+  }
+  const trimmed = content.trimStart();
+  const body = trimmed.startsWith("```")
+    ? trimmed.replace(/^```[a-zA-Z0-9]*\s*/, "")
+    : trimmed;
+  return (
+    body.startsWith("{") &&
+    body.includes('"root"') &&
+    body.includes('"elements"')
+  );
+}
+
+/**
  * Validate (and normalise) every element's `props` against its component's
  * catalog Zod schema, mutating each element's `props` to the parsed result so
  * undeclared keys are stripped from the resolved spec's data.

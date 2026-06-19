@@ -25,7 +25,10 @@
   import { t } from "$lib/i18n";
   import { resolveRenderer } from "$lib/components/chat/renderers/resolve";
   import { looksLikeStreamingEnvelope } from "$lib/components/chat/renderers/envelope";
-  import { resolveSpec } from "$lib/components/chat/renderers/jsonui/resolveSpec";
+  import {
+    resolveSpec,
+    looksLikeStreamingSpec,
+  } from "$lib/components/chat/renderers/jsonui/resolveSpec";
   import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
   import { Renderer, JsonUIProvider } from "@json-render/svelte";
 
@@ -71,11 +74,22 @@
   // Resolve a dynamic renderer (e.g. translation card) for static (non-streaming)
   // messages. Streaming and non-envelope/unknown messages fall through to the
   // existing markdown branches below.
-  // Resolve a json-render spec for static (non-streaming) messages → render via
-  // <Renderer>. Takes priority over the legacy translation-envelope card.
-  const specHit = $derived(isStreaming ? null : resolveSpec(message?.content));
+  // Resolve a json-render spec, including during streaming. While the streamed
+  // JSON is unclosed, `resolveSpec` returns null → the message falls through to
+  // the `isStreamingStructured` placeholder; once the spec closes and validates,
+  // `resolveSpec` hits → the <Renderer> draws it (no per-character JSON flash).
+  // During streaming the resolve is gated by `looksLikeStreamingSpec` so only
+  // spec-shaped streams pay the per-token parse cost; ordinary markdown streams
+  // skip it and stay null. Takes priority over the legacy translation-envelope
+  // card.
+  const specHit = $derived(
+    !isStreaming || looksLikeStreamingSpec(message?.content)
+      ? resolveSpec(message?.content)
+      : null,
+  );
 
-  // Legacy translation-envelope card (kept for back-compat).
+  // Legacy translation-envelope card (kept for back-compat). Still resolves only
+  // at stream end; spec and envelope share the streaming placeholder below.
   const cardHit = $derived(isStreaming ? null : resolveRenderer(message?.content));
 
   // A streamed structured payload (json-render spec OR render envelope) is an
@@ -83,18 +97,6 @@
   // Show a loading placeholder; the finished UI is drawn once streaming ends.
   // Ordinary (non-structured) streamed replies fail both heuristics and fall
   // through to the normal markdown path.
-  function looksLikeStreamingSpec(content: string | null | undefined): boolean {
-    if (!content) return false;
-    const trimmed = content.trimStart();
-    const body = trimmed.startsWith("```")
-      ? trimmed.replace(/^```[a-zA-Z0-9]*\s*/, "")
-      : trimmed;
-    return (
-      body.startsWith("{") &&
-      body.includes('"root"') &&
-      body.includes('"elements"')
-    );
-  }
   const isStreamingStructured = $derived(
     isStreaming &&
       (looksLikeStreamingEnvelope(message?.content) ||
@@ -428,7 +430,7 @@
           {#if specHit}
             <div class="flex-1 break-words">
               <JsonUIProvider initialState={{}}>
-                <Renderer spec={specHit} registry={uiRegistry} />
+                <Renderer spec={specHit} registry={uiRegistry} loading={isStreaming} />
               </JsonUIProvider>
             </div>
           {:else if cardHit}
