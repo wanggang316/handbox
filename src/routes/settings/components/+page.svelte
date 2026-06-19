@@ -289,6 +289,464 @@
     }
   };
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-001: StatusLabel four states side by side.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecStatusLabel: Spec = {
+    root: "row",
+    elements: {
+      row: {
+        type: "Stack",
+        props: { gap: "md", direction: "row" },
+        children: ["slEnabled", "slDisabled", "slIdle", "slError"],
+        visible: true
+      },
+      slEnabled: {
+        type: "StatusLabel",
+        props: { status: "enabled", text: "Enabled" },
+        children: [],
+        visible: true
+      },
+      slDisabled: {
+        type: "StatusLabel",
+        props: { status: "disabled", text: "Disabled" },
+        children: [],
+        visible: true
+      },
+      slIdle: {
+        type: "StatusLabel",
+        props: { status: "idle", text: "Idle" },
+        children: [],
+        visible: true
+      },
+      slError: {
+        type: "StatusLabel",
+        props: { status: "error", text: "Error" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-002: Avatar — first letter of "hello" → "H"; sm/md/lg sizes.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecAvatar: Spec = {
+    root: "row",
+    elements: {
+      row: {
+        type: "Stack",
+        props: { gap: "md", direction: "row" },
+        children: ["avSm", "avMd", "avLg"],
+        visible: true
+      },
+      avSm: {
+        type: "Avatar",
+        props: { letter: "hello", size: "sm" },
+        children: [],
+        visible: true
+      },
+      avMd: {
+        type: "Avatar",
+        props: { letter: "world", size: "md" },
+        children: [],
+        visible: true
+      },
+      avLg: {
+        type: "Avatar",
+        props: { letter: "GPT-4", size: "lg" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-003: Divider, KeyValue, Table, InfoTooltip — each rendered.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecAtomics: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["kv", "divH", "tbl", "tip"],
+        visible: true
+      },
+      kv: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "Model", value: "claude-3-7-sonnet" },
+            { key: "Temperature", value: "0.7" },
+            { key: "Max tokens", value: "4096" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      divH: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      },
+      tbl: {
+        type: "Table",
+        props: {
+          columns: ["Name", "Role", "Status"],
+          rows: [
+            ["Alice", "Admin", "Active"],
+            ["Bob", "Viewer", "Inactive"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tip: {
+        type: "InfoTooltip",
+        props: { content: "This tooltip explains an adjacent field inline." },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-004: Nested composition — Card > Stack > [Text, Badge, Table,
+  // StatusLabel, Avatar, Divider, KeyValue, InfoTooltip].
+  // Children must render in declared array order.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecNested: Spec = {
+    root: "card",
+    elements: {
+      card: {
+        type: "Card",
+        props: { title: "Nested Composition" },
+        children: ["body"],
+        visible: true
+      },
+      body: {
+        type: "Stack",
+        props: { gap: "sm", direction: "col" },
+        children: ["heading", "badge", "divider1", "meta", "divider2", "statusRow", "tip"],
+        visible: true
+      },
+      heading: {
+        type: "Text",
+        props: { text: "1 — Text (heading)", variant: "heading" },
+        children: [],
+        visible: true
+      },
+      badge: {
+        type: "Badge",
+        props: { label: "2 — Badge (success)", tone: "success" },
+        children: [],
+        visible: true
+      },
+      divider1: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      },
+      meta: {
+        type: "Table",
+        props: {
+          columns: ["#", "Component"],
+          rows: [
+            ["3", "Divider (above)"],
+            ["4", "Table (this)"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      divider2: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      },
+      statusRow: {
+        type: "Stack",
+        props: { gap: "md", direction: "row" },
+        children: ["sl", "av", "kv"],
+        visible: true
+      },
+      sl: {
+        type: "StatusLabel",
+        props: { status: "enabled", text: "5 — StatusLabel" },
+        children: [],
+        visible: true
+      },
+      av: {
+        type: "Avatar",
+        props: { letter: "6-Avatar", size: "sm" },
+        children: [],
+        visible: true
+      },
+      kv: {
+        type: "KeyValue",
+        props: { items: [{ key: "7 — KeyValue", value: "present" }] },
+        children: [],
+        visible: true
+      },
+      tip: {
+        type: "InfoTooltip",
+        props: { content: "8 — InfoTooltip: last child in order." },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-005: Graceful degradation.
+  //   - Avatar letter:"" (empty string exercises degraded path, keeps type OK)
+  //   - Card without title (title is optional)
+  //   - KeyValue item with empty value
+  //   - Table with 0 rows (header only)
+  //   - Table ragged row (cell count != column count)
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecDegrade: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["cardNoTitle", "avEmpty", "kvEmpty", "tblNoRows", "tblRagged"],
+        visible: true
+      },
+      cardNoTitle: {
+        type: "Card",
+        props: {},
+        children: ["cardText"],
+        visible: true
+      },
+      cardText: {
+        type: "Text",
+        props: { text: "Card with no title prop", variant: "muted" },
+        children: [],
+        visible: true
+      },
+      avEmpty: {
+        type: "Avatar",
+        props: { letter: "", size: "md" },
+        children: [],
+        visible: true
+      },
+      kvEmpty: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "Filled key", value: "" },
+            { key: "Another key", value: "" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblNoRows: {
+        type: "Table",
+        props: { columns: ["Col A", "Col B", "Col C"], rows: [] },
+        children: [],
+        visible: true
+      },
+      tblRagged: {
+        type: "Table",
+        props: {
+          columns: ["Col 1", "Col 2", "Col 3"],
+          rows: [
+            ["only one cell"],
+            ["a", "b", "c", "d", "extra cell"]
+          ]
+        },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-006: Long no-space string, CJK, Arabic RTL, combining
+  // diacritics, emoji in new component text fields.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecUnicode: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["slUni", "avUni", "kvUni", "tblUni", "tipUni", "divUni"],
+        visible: true
+      },
+      slUni: {
+        type: "StatusLabel",
+        props: {
+          status: "idle",
+          text: "مرحبا 你好 こんにちは 👋 supercalifragilisticexpialidocious"
+        },
+        children: [],
+        visible: true
+      },
+      avUni: {
+        type: "Avatar",
+        props: { letter: "مرحبا", size: "lg" },
+        children: [],
+        visible: true
+      },
+      kvUni: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "RTL term", value: "مرحبا بالعالم" },
+            {
+              key: "Long no-space",
+              value:
+                "Loremipsumdolorsitametconsecteturadipiscingelitsedeiusmoddolorcatalogexpansionverificationtest"
+            },
+            { key: "CJK + emoji", value: "中文 日本語 한국어 🌍 café naïve ñ é" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblUni: {
+        type: "Table",
+        props: {
+          columns: ["Lang 🌐", "Sample"],
+          rows: [
+            ["Arabic", "مرحبا 👋"],
+            ["CJK", "你好 こんにちは 안녕"],
+            ["Diacritics", "café naïve résumé ñ"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tipUni: {
+        type: "InfoTooltip",
+        props: { content: "Arabic: مرحبا | CJK: 你好 | emoji: 🌍👋 | long: Loremipsumdolorsitamet" },
+        children: [],
+        visible: true
+      },
+      divUni: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-007: XSS payloads as literal text — must display as text, never
+  // execute. Components use text binding (never @html), so these are safe to
+  // feed in; the reviewer confirms no alert() / injected DOM nodes.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecXss: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["slXss", "kvXss", "tblXss", "avXss"],
+        visible: true
+      },
+      slXss: {
+        type: "StatusLabel",
+        props: {
+          status: "error",
+          text: "<script>alert(1)<\/script> | <img src=x onerror=alert(1)>"
+        },
+        children: [],
+        visible: true
+      },
+      kvXss: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "XSS key", value: "<script>alert(1)<\/script>" },
+            { key: "img payload", value: "<img src=x onerror=alert(1)>" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblXss: {
+        type: "Table",
+        props: {
+          columns: ["Type", "Payload"],
+          rows: [
+            ["script tag", "<script>alert(1)<\/script>"],
+            ["img onerror", "<img src=x onerror=alert(1)>"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      avXss: {
+        type: "Avatar",
+        props: { letter: "<script>alert(1)<\/script>", size: "md" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-008: markdown markers in text fields — must show literally,
+  // not rendered (components never parse markdown, just display text).
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecMarkdown: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["slMd", "kvMd", "tblMd", "tipMd"],
+        visible: true
+      },
+      slMd: {
+        type: "StatusLabel",
+        props: { status: "idle", text: "**bold** and _italic_ and `code`" },
+        children: [],
+        visible: true
+      },
+      kvMd: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "**bold key**", value: "# Not a heading" },
+            { key: "[link](http://e)", value: "> blockquote not parsed" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblMd: {
+        type: "Table",
+        props: {
+          columns: ["Marker", "Expected"],
+          rows: [
+            ["**bold**", "literal asterisks"],
+            ["# heading", "literal hash"],
+            ["[x](http://e)", "literal brackets"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tipMd: {
+        type: "InfoTooltip",
+        props: { content: "**bold** # heading [link](http://e) — all literal." },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
   function triggerToast(type: "success" | "info" | "warning" | "error") {
     const messages = {
       success: "保存成功",
@@ -694,6 +1152,89 @@
         <div class="text-xs text-base-content/60">Spec B：状态信息卡（多组件嵌套）</div>
         <JsonUIProvider initialState={{}}>
           <Renderer spec={jsonSpecB} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-001: StatusLabel four states (enabled/disabled/idle/error) -->
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-001 — StatusLabel: four states side by side
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecStatusLabel} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-002: Avatar letter → uppercase first char; sm/md/lg sizes -->
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-002 — Avatar: letter→"H"/"W"/"G", sizes sm/md/lg
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecAvatar} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-003: Divider / KeyValue / Table / InfoTooltip -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-003 — Divider, KeyValue (3 rows), Table (header + 2 data rows), InfoTooltip
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecAtomics} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-004: Nested composition, children order -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-004 — Nested composition: Card › Stack › [Text, Badge, Divider, Table,
+          StatusLabel, Avatar, KeyValue, InfoTooltip] in declared order
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecNested} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-005: Graceful degradation — missing/empty optional fields -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-005 — Degradation: Card no-title, Avatar letter="", KeyValue empty values,
+          Table 0 rows (header only), Table ragged rows
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecDegrade} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-006: Long/unicode/RTL/emoji/CJK -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-006 — Unicode/RTL/emoji: Arabic مرحبا, CJK, long no-space word, emoji 👋🌍
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecUnicode} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-007: XSS payloads — must show as literal text, no execution -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-007 — XSS: &lt;script&gt;alert(1)&lt;/script&gt; and &lt;img onerror&gt; as
+          literal text in StatusLabel/KeyValue/Table/Avatar (no @html anywhere)
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecXss} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-008: markdown markers — must display literally, not parsed -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-008 — Markdown literals: **bold** # heading [x](http://e) shown as-is
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecMarkdown} registry={uiRegistry} />
         </JsonUIProvider>
       </div>
     </div>
