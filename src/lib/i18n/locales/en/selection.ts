@@ -11,7 +11,7 @@ export const selectionEn: Record<keyof typeof selectionZh, string> = {
   // modes
   "selection.modeShow": "Show",
   "selection.modeTranslate": "Translate",
-  "selection.modeAi": "Ask AI",
+  "selection.modeAi": "Ask",
   // content panel
   "selection.unpin": "Unpin",
   "selection.pin": "Pin",

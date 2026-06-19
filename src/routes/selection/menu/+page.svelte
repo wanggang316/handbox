@@ -2,13 +2,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
-  import {
-    Eye,
-    Copy,
-    Languages,
-    Sparkles,
-    EllipsisVertical,
-  } from "@lucide/svelte";
+  import { Copy, Languages, Sparkles, EllipsisVertical } from "@lucide/svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import {
     hideMenuPanel,
@@ -60,12 +54,6 @@
     await hidePanel();
   }
 
-  // 显示完整内容
-  async function handleShow() {
-    console.log("-----> show: ", captured.text);
-    await openContentPanel("show");
-  }
-
   // 复制文本
   async function handleCopy() {
     await writeText(captured.text);
@@ -104,15 +92,7 @@
     class="flex flex-row flex-1 items-center justify-between gap-1 px-2 text-[14px] text-gray-600"
   >
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-200 hover:bg-red-300"
-      onclick={handleShow}
-    >
-      <Eye class="size-3.5" />
-      {t("selection.modeShow")}
-    </button>
-
-    <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-200"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100"
       onclick={handleCopy}
     >
       <Copy class="size-3.5" />
@@ -120,7 +100,7 @@
     </button>
 
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-200"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100"
       onclick={handleTranslate}
     >
       <Languages class="size-3.5" />
@@ -128,7 +108,7 @@
     </button>
 
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-200"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100"
       onclick={handleAi}
     >
       <Sparkles class="size-3.5" />
