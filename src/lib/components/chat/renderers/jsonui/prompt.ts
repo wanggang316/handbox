@@ -82,9 +82,11 @@ const EXAMPLE_SPEC = {
  * (the parse order of `prompt()` is not contractually stable; the caller's
  * `componentNames` order is).
  */
-function componentSignatureLines(): Map<string, string> {
+function componentSignatureLines(
+  catalog: typeof uiCatalog,
+): Map<string, string> {
   const byType = new Map<string, string>();
-  for (const raw of uiCatalog.prompt().split("\n")) {
+  for (const raw of catalog.prompt().split("\n")) {
     const line = raw.trimEnd();
     const match = /^- ([A-Za-z][A-Za-z0-9]*): \{/.exec(line);
     if (match !== null) {
@@ -108,7 +110,7 @@ function componentSignatureLines(): Map<string, string> {
 export function buildGenerativeUiPrompt(
   catalog: typeof uiCatalog = uiCatalog,
 ): string {
-  const signatures = componentSignatureLines();
+  const signatures = componentSignatureLines(catalog);
   const components = catalog.data.components as Record<
     string,
     { description?: string }

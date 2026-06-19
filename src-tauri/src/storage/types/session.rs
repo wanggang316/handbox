@@ -116,5 +116,47 @@ mod tests {
         let deserialized: Session = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(session.id, deserialized.id);
         assert_eq!(session.name, deserialized.name);
+        assert_eq!(session.generative_ui, deserialized.generative_ui);
+    }
+
+    /// 锁定 JS<->Rust 线缆键：serde camelCase 把 `generative_ui` 转成 `generativeUi`
+    /// （小写 `i`），而非 `generativeUI`。前端 `generativeUi?: boolean` 必须与之匹配。
+    /// 键名不符会通过纯 Rust 的 round-trip，却在边界静默丢值。
+    #[test]
+    fn session_generative_ui_wire_key_is_camel_case() {
+        let session = Session {
+            id: "session_1".to_string(),
+            name: "Test".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            agent_id: None,
+            reasoning: None,
+            generative_ui: Some(true),
+            created_at: 1000,
+            updated_at: 2000,
+        };
+
+        let json = serde_json::to_string(&session).expect("serialize");
+        let deserialized: Session = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(session.generative_ui, deserialized.generative_ui);
+        assert!(
+            json.contains("\"generativeUi\""),
+            "expected wire key `generativeUi`, got: {json}"
+        );
+        assert!(
+            !json.contains("\"generativeUI\""),
+            "wire key must be `generativeUi` (lowercase i), not `generativeUI`: {json}"
+        );
     }
 }

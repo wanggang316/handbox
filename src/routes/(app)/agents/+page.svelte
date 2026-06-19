@@ -105,11 +105,11 @@
       }
 
       // 生成式 UI: 显式比较布尔值，关闭时必须发送 false（不能被假值跳过）
-      if ((data.generativeUI ?? false) !== (editingAgent.generativeUi ?? false)) {
+      if ((data.generativeUi ?? false) !== (editingAgent.generativeUi ?? false)) {
         await agentActions.updateAgentField(
           editingAgent.id,
           "generativeUi",
-          data.generativeUI ?? false
+          data.generativeUi ?? false
         );
       }
     } else {
@@ -127,7 +127,7 @@
         skills: data.skills
           ? data.skills.split(",").map((s) => s.trim()).filter(Boolean)
           : [],
-        generativeUi: data.generativeUI,
+        generativeUi: data.generativeUi,
       });
     }
   }

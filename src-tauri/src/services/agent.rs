@@ -120,6 +120,10 @@ impl AgentService {
     }
 
     /// 批量更新 Agent 设置
+    ///
+    /// 注意：本方法刻意不含 `generative_ui` 参数（与 `create_agent` 不同）。该字段
+    /// 通过 `update_agent_parameter(AgentParameter::GenerativeUi)`（对应前端
+    /// `agent_update_field` 的 "generativeUi" 路径）单独更新，不走批量更新——并非遗漏。
     pub async fn update_agent(
         &self,
         agent_id: UUID,

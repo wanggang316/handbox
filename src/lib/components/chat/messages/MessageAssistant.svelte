@@ -71,9 +71,6 @@
     return ranges.map((range) => ({ start: range.start, end: range.end }));
   });
 
-  // Resolve a dynamic renderer (e.g. translation card) for static (non-streaming)
-  // messages. Streaming and non-envelope/unknown messages fall through to the
-  // existing markdown branches below.
   // Resolve a json-render spec, including during streaming. While the streamed
   // JSON is unclosed, `resolveSpec` returns null → the message falls through to
   // the `isStreamingStructured` placeholder; once the spec closes and validates,

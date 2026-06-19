@@ -658,4 +658,55 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].generative_ui, None);
     }
+
+    // write-once：`update_session` 的 SET 子句故意不含 `generative_ui`，因此一次
+    // 整行 UPDATE（即便传入的 session.generative_ui == None）也不能清掉已落库的值。
+    // 这把会话级 generative_ui 的「创建时由 Agent 快照、此后只读」语义钉死。
+    #[tokio::test]
+    async fn test_update_session_does_not_clobber_generative_ui() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = SessionRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let session = Session {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Original".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            agent_id: None,
+            reasoning: None,
+            generative_ui: Some(true),
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_session(&session).await.unwrap();
+
+        // 整行 UPDATE：改名，且故意把 generative_ui 置为 None。
+        let mut updated = session.clone();
+        updated.name = "Renamed".to_string();
+        updated.generative_ui = None;
+        updated.updated_at = now + 1000;
+        repo.update_session(&updated).await.unwrap();
+
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(fetched.name, "Renamed");
+        // 仍为 Some(true)：SET 子句排除了 generative_ui，落库值未被覆盖。
+        assert_eq!(fetched.generative_ui, Some(true));
+    }
 }

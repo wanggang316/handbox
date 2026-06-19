@@ -430,6 +430,9 @@ describe("looksLikeStreamingSpec", () => {
   });
 
   it("is TRUE for a bare ``` fence (no language) carrying a partial spec", () => {
+    // Known, intentional edge: the heuristic fires on a bare fence, but
+    // resolveSpec/extractFencedJson only accept a ```json tag — so a bare-fence
+    // spec degrades gracefully (placeholder → markdown), it is not a bug.
     const partial = '```\n{ "root": "card", "elements": {';
     expect(looksLikeStreamingSpec(partial)).toBe(true);
   });

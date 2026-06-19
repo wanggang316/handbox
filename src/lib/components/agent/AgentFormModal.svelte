@@ -25,7 +25,7 @@
     maxTokens?: number;
     systemPrompt: string;
     skills: string;
-    generativeUI: boolean;
+    generativeUi: boolean;
   }
 
   let { open, agent, onClose, onSave }: Props = $props();
@@ -43,7 +43,7 @@
     model: "",
     systemPrompt: "",
     skills: "",
-    generativeUI: false,
+    generativeUi: false,
   });
 
   let saving = $state(false);
@@ -79,7 +79,7 @@
         maxTokens: agent.maxTokens,
         systemPrompt: agent.systemPrompt || "",
         skills: agent.skills.join(", "),
-        generativeUI: agent.generativeUi ?? false,
+        generativeUi: agent.generativeUi ?? false,
       };
     } else {
       formData = {
@@ -87,7 +87,7 @@
         model: "",
         systemPrompt: "",
         skills: "",
-        generativeUI: false,
+        generativeUi: false,
       };
     }
   });
@@ -157,7 +157,7 @@
       <SwitchRow
         label="生成式 UI"
         description="允许助手在回复中渲染交互式界面"
-        bind:checked={formData.generativeUI}
+        bind:checked={formData.generativeUi}
       />
     </TableGroup>
 
