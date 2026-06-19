@@ -45,7 +45,126 @@ const validSpec = {
   },
 };
 
+/**
+ * A catalog-valid spec exercising the catalog-expansion components: a Card →
+ * Stack holding a StatusLabel, an Avatar, a Divider, a KeyValue list, a read-only
+ * Table, and an InfoTooltip.
+ */
+const mixedSpec = {
+  root: "card",
+  elements: {
+    card: {
+      type: "Card",
+      props: { title: "Profile" },
+      children: ["stack"],
+      visible: true,
+    },
+    stack: {
+      type: "Stack",
+      props: { gap: "md" },
+      children: ["status", "avatar", "rule", "kv", "table", "help"],
+      visible: true,
+    },
+    status: {
+      type: "StatusLabel",
+      props: { status: "enabled", text: "Online" },
+      children: [],
+      visible: true,
+    },
+    avatar: {
+      type: "Avatar",
+      props: { letter: "ada", size: "lg" },
+      children: [],
+      visible: true,
+    },
+    rule: {
+      type: "Divider",
+      props: { orientation: "horizontal" },
+      children: [],
+      visible: true,
+    },
+    kv: {
+      type: "KeyValue",
+      props: { items: [{ key: "Role", value: "Admin" }] },
+      children: [],
+      visible: true,
+    },
+    table: {
+      type: "Table",
+      props: { columns: ["Metric", "Value"], rows: [["Sessions", "12"]] },
+      children: [],
+      visible: true,
+    },
+    help: {
+      type: "InfoTooltip",
+      props: { content: "Status reflects the last heartbeat." },
+      children: [],
+      visible: true,
+    },
+  },
+};
+
 describe("resolveSpec", () => {
+  it("resolves a mixed spec using the catalog-expansion components (bare JSON)", () => {
+    const result = resolveSpec(JSON.stringify(mixedSpec));
+    expect(result).not.toBeNull();
+    expect(result?.root).toBe("card");
+    expect(result?.elements?.["status"]?.type).toBe("StatusLabel");
+    expect(result?.elements?.["table"]?.type).toBe("Table");
+  });
+
+  it("resolves the same mixed spec wrapped in a ```json fenced block", () => {
+    const fenced = "```json\n" + JSON.stringify(mixedSpec, null, 2) + "\n```";
+    const result = resolveSpec(fenced);
+    expect(result).not.toBeNull();
+    expect(result?.elements?.["help"]?.type).toBe("InfoTooltip");
+  });
+
+  it("returns null for a case-mismatched new-component type", () => {
+    const caseMismatch = {
+      root: "x",
+      elements: {
+        x: {
+          type: "statuslabel",
+          props: { status: "enabled", text: "x" },
+          children: [],
+          visible: true,
+        },
+      },
+    };
+    expect(resolveSpec(JSON.stringify(caseMismatch))).toBeNull();
+  });
+
+  it("returns null for a spec whose root names no element (dangling root)", () => {
+    const danglingRoot = {
+      root: "missing",
+      elements: {
+        present: {
+          type: "Divider",
+          props: {},
+          children: [],
+          visible: true,
+        },
+      },
+    };
+    expect(resolveSpec(JSON.stringify(danglingRoot))).toBeNull();
+  });
+
+  it("returns null for a spec with a child referencing no element (dangling child)", () => {
+    const danglingChild = {
+      root: "card",
+      elements: {
+        card: {
+          type: "Card",
+          props: { title: "x" },
+          children: ["ghost"],
+          visible: true,
+        },
+      },
+    };
+    expect(resolveSpec(JSON.stringify(danglingChild))).toBeNull();
+  });
+
   it("returns a bare-JSON spec that validates against the catalog", () => {
     const result = resolveSpec(JSON.stringify(validSpec));
     expect(result).not.toBeNull();
@@ -97,7 +216,9 @@ describe("resolveSpec", () => {
 
   it("returns null for ordinary markdown prose", () => {
     expect(
-      resolveSpec("Here is the translation of **serendipity**: 意外发现珍宝的运气."),
+      resolveSpec(
+        "Here is the translation of **serendipity**: 意外发现珍宝的运气.",
+      ),
     ).toBeNull();
   });
 
@@ -128,5 +249,163 @@ describe("resolveSpec", () => {
     expect(resolveSpec("[1, 2, 3]")).toBeNull();
     expect(resolveSpec('"just a string"')).toBeNull();
     expect(resolveSpec("42")).toBeNull();
+  });
+});
+
+/**
+ * Per-component prop enforcement happens in `resolveSpec` (not in
+ * `uiCatalog.validate`, which leaves multi-component props opaque). These cases
+ * pin that boundary: invalid props sink the whole spec to `null`, while
+ * undeclared props are stripped from the resolved data.
+ */
+describe("resolveSpec — per-component prop validation", () => {
+  /** Helper: a one-element spec rooted at `x` for the given element. */
+  function specOf(element: Record<string, unknown>): string {
+    return JSON.stringify({ root: "x", elements: { x: element } });
+  }
+
+  it("returns null when a required prop is missing (StatusLabel without text)", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "StatusLabel",
+          props: { status: "enabled" },
+          children: [],
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when a required prop is missing (Avatar without letter)", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "Avatar",
+          props: { size: "sm" },
+          children: [],
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for a wrong prop type (Table columns given a string)", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "Table",
+          props: { columns: "A,B", rows: [] },
+          children: [],
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for a wrong nested prop type (KeyValue item value is a number)", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "KeyValue",
+          props: { items: [{ key: "n", value: 1 }] },
+          children: [],
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for an illegal StatusLabel.status enum value", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "StatusLabel",
+          props: { status: "online", text: "x" },
+          children: [],
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for an illegal Avatar.size enum value", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "Avatar",
+          props: { letter: "x", size: "xl" },
+          children: [],
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for an illegal Divider.orientation enum value", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "Divider",
+          props: { orientation: "diagonal" },
+          children: [],
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when an element is missing `children`", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "Divider",
+          props: {},
+          visible: true,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when an element is missing `visible`", () => {
+    expect(
+      resolveSpec(
+        specOf({
+          type: "Divider",
+          props: {},
+          children: [],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("strips undeclared props so they do not survive into the resolved data", () => {
+    const result = resolveSpec(
+      specOf({
+        type: "StatusLabel",
+        props: { status: "enabled", text: "x", rogue: "drop-me" },
+        children: [],
+        visible: true,
+      }),
+    );
+    expect(result).not.toBeNull();
+    const props = result?.elements?.["x"]?.props ?? {};
+    expect(props).not.toHaveProperty("rogue");
+    expect(props).toMatchObject({ status: "enabled", text: "x" });
+  });
+
+  it("strips undeclared optional props while keeping declared optional props", () => {
+    const result = resolveSpec(
+      specOf({
+        type: "Avatar",
+        props: { letter: "ada", size: "lg", color: "red" },
+        children: [],
+        visible: true,
+      }),
+    );
+    expect(result).not.toBeNull();
+    const props = result?.elements?.["x"]?.props ?? {};
+    expect(props).not.toHaveProperty("color");
+    expect(props).toMatchObject({ letter: "ada", size: "lg" });
   });
 });

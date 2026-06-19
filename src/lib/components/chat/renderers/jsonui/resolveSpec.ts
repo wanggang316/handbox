@@ -11,19 +11,47 @@
  *     nothing but whitespace around it.
  *
  * Unlike the envelope parser, no `__render` discriminator is required. Instead a
- * candidate qualifies as a spec only when it (a) structurally looks like a spec
- * — a string `root` plus an object `elements` — and (b) passes
- * `uiCatalog.validate`, which checks every element's `type`/`props` against the
- * catalog. A spec referencing an unregistered component type therefore fails
- * validation and yields `null`.
+ * candidate qualifies as a spec only when it
+ *
+ *  (a) structurally looks like a spec — a string `root` plus an object
+ *      `elements`;
+ *  (b) passes `uiCatalog.validate`, the catalog's structural pass that checks
+ *      the spec shape and every element's `type` membership / `children` /
+ *      `visible`;
+ *  (c) passes per-component prop validation — each element's `props` is parsed
+ *      through the catalog's Zod schema for that component type. A missing
+ *      required prop, a wrong type, or an illegal enum value fails the spec;
+ *      undeclared props are stripped from the resolved data. (The catalog's
+ *      multi-component `validate` path itself treats `props` as an opaque record,
+ *      so this enforcement is applied explicitly here.)
+ *  (d) passes `validateSpec` for reference integrity — the `root` and every
+ *      `children` entry must name an existing element.
+ *
+ * A spec referencing an unregistered component type, carrying invalid props, or
+ * with a dangling root/child reference therefore fails and yields `null`.
  *
  * The function never throws: any malformed, non-spec, or non-JSON input — and
  * any internal validation error — yields `null`, signalling the caller to fall
  * back to ordinary markdown rendering.
  */
 
-import type { Spec } from "@json-render/core";
+import type { Spec, UIElement } from "@json-render/core";
+import { validateSpec } from "@json-render/core";
+import type { ZodTypeAny } from "zod";
 import { uiCatalog } from "./catalog";
+
+/**
+ * The catalog's per-component prop schemas, keyed by component type. The
+ * multi-component `uiCatalog.validate` path validates structure only and leaves
+ * `props` as an opaque record, so {@link validateElementProps} reaches into this
+ * map to enforce (and strip to) each component's declared prop shape.
+ */
+const componentPropsSchemas: Record<string, ZodTypeAny> = Object.fromEntries(
+  Object.entries(uiCatalog.data.components).map(([type, def]) => [
+    type,
+    def.props as ZodTypeAny,
+  ]),
+);
 
 /**
  * Resolve raw message content to a JSON-Render {@link Spec}, or `null` when the
@@ -56,12 +84,56 @@ export function resolveSpec(content: string | null | undefined): Spec | null {
       return null;
     }
 
-    return result.data as Spec;
+    const spec = result.data as Spec;
+
+    // The multi-component catalog `validate` path treats `props` as an opaque
+    // record, so enforce each element's declared prop schema here: reject on any
+    // invalid props and strip undeclared keys from the resolved data.
+    if (!validateElementProps(spec)) {
+      return null;
+    }
+
+    // Structural prop validation passes even when the tree's references are
+    // broken (a `root` naming no element, or a `children` entry naming no
+    // element). `validateSpec` covers exactly that reference integrity; a
+    // dangling reference would render blank, so we fall back instead of
+    // forwarding such a spec.
+    const integrity = validateSpec(spec);
+    if (!integrity.valid) {
+      return null;
+    }
+
+    return spec;
   } catch {
     // Defensive: nothing in this path should throw, but a spec resolver must
     // never break the message-rendering pipeline.
     return null;
   }
+}
+
+/**
+ * Validate (and normalise) every element's `props` against its component's
+ * catalog Zod schema, mutating each element's `props` to the parsed result so
+ * undeclared keys are stripped from the resolved spec's data.
+ *
+ * Returns `false` on the first element whose props fail their schema (missing
+ * required prop, wrong type, illegal enum) — the caller then falls back. An
+ * element whose `type` has no schema (defensive: `uiCatalog.validate` already
+ * rejected unknown types) is skipped, not rejected.
+ */
+function validateElementProps(spec: Spec): boolean {
+  for (const element of Object.values(spec.elements) as UIElement[]) {
+    const schema = componentPropsSchemas[element.type];
+    if (schema === undefined) {
+      continue;
+    }
+    const parsed = schema.safeParse(element.props ?? {});
+    if (!parsed.success) {
+      return false;
+    }
+    element.props = parsed.data as Record<string, unknown>;
+  }
+  return true;
 }
 
 /**

@@ -53,6 +53,51 @@ export const uiCatalog = defineCatalog(schema, {
       slots: ["default"],
       description: "A flex layout container. Put items in children.",
     },
+    StatusLabel: {
+      props: z.object({
+        status: z.enum(["enabled", "disabled", "idle", "error"]),
+        text: z.string(),
+      }),
+      description:
+        "A pill-shaped status label. 'enabled' is green, 'error' is red, 'disabled' is neutral grey, 'idle' is blue.",
+    },
+    Avatar: {
+      props: z.object({
+        letter: z.string(),
+        size: z.enum(["sm", "md", "lg"]).optional(),
+      }),
+      description:
+        "A circular avatar placeholder showing the uppercased first character of 'letter'. Display-only; no image.",
+    },
+    Divider: {
+      props: z.object({
+        orientation: z.enum(["horizontal", "vertical"]).optional(),
+      }),
+      description:
+        "A thin separator line. Defaults to a horizontal rule; use 'vertical' inside a row.",
+    },
+    KeyValue: {
+      props: z.object({
+        items: z.array(z.object({ key: z.string(), value: z.string() })),
+      }),
+      description:
+        "A list of key/value rows, one row per item rendered as 'key — value'. An empty list renders nothing.",
+    },
+    Table: {
+      props: z.object({
+        columns: z.array(z.string()),
+        rows: z.array(z.array(z.string())),
+      }),
+      description:
+        "A read-only table. 'columns' is the header; each entry in 'rows' is one data row of cell strings.",
+    },
+    InfoTooltip: {
+      props: z.object({
+        content: z.string(),
+      }),
+      description:
+        "A help icon that reveals 'content' in a hover popover. Use for inline explanatory hints.",
+    },
   },
   // The schema's catalog shape types `actions` as required; this PoC exposes no
   // actions, so an empty map satisfies the type without adding behaviour.

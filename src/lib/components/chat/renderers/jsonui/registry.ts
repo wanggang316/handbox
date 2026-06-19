@@ -15,7 +15,24 @@ import Card from "./components/Card.svelte";
 import Text from "./components/Text.svelte";
 import Badge from "./components/Badge.svelte";
 import Stack from "./components/Stack.svelte";
+import StatusLabel from "./components/StatusLabel.svelte";
+import Avatar from "./components/Avatar.svelte";
+import Divider from "./components/Divider.svelte";
+import KeyValue from "./components/KeyValue.svelte";
+import Table from "./components/Table.svelte";
+import InfoTooltip from "./components/InfoTooltip.svelte";
 
 export const { registry: uiRegistry } = defineRegistry(uiCatalog, {
-  components: { Card, Text, Badge, Stack },
+  components: {
+    Card,
+    Text,
+    Badge,
+    Stack,
+    StatusLabel,
+    Avatar,
+    Divider,
+    KeyValue,
+    Table,
+    InfoTooltip,
+  },
 });
