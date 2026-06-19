@@ -131,6 +131,17 @@ Agent 模式是接入 hand-ai `hand-agent` agentic-loop 的自主智能体工作
 - **启动接线**（`lib.rs initialize_services`，迁移与 services 注册之后）：detached task 执行 `reconcile_stale_running`（重启回收孤儿 running 行）→ `recompute_all_enabled`（从 now 重算 `next_run_at`，**不补跑** downtime 期间错过的触发）→ `spawn_tick_loop`；reconcile/recompute 失败仅 warn，绝不阻断启动或循环。executor 因 `ArtifactService<R>` 派生 Clone 携带 `R: Clone` 约束（Tauri runtime 非 Clone）而持有 `Arc<ArtifactService>` 第二实例；agent 目标用专属 `Arc<AgentRuntime>`（非被 manage 的那个，因其非 Clone 且命令消费 `State<AgentRuntime>`）。
 - **前端数据流**：`states` 内 jobStore（`$state` 单例，仅在后端写入 resolve 后 upsert，无 ghost 卡片）↔ `/jobs` 列表页 + JobCard（六字段 + enable/disable toggle 失败回滚）↔ JobFormModal（artifact/prompt/agent 三类 TargetPicker + ScheduleEditor 快捷/高级 cron tab + 健壮性字段）↔ JobDetailModal（历史时间线、stdout/stderr vs result-link、立即运行、跳转结果会话）↔ Tauri 事件 `job_executed`（开着的详情时间线原地翻转 + 列表卡片实时刷新，关闭时漏掉的事件经 list 命令在重开时对账）。
 
+### 3.6 生成式 UI（JSON-Render，自 generative-ui 计划 M1 起）
+
+生成式 UI 让模型输出一份扁平 `Spec`（`root` + `elements` 字典），客户端用一套**受控的展示组件 catalog**把它渲染成 UI，而非自由 HTML。基于 `@json-render/core` + `@json-render/svelte` 的三层（Catalog / Agent / Render）。代码位于 `src/lib/components/chat/renderers/jsonui/`；与既有「信封方案」（`renderers/` 的 envelope/registry/TranslationCard）**共存**——json-render 为上位通用机制，信封为保留的特例，二者均不删。M1（catalog-expansion）只交付 catalog + 渲染 + 校验 + 组件画廊；Agent 级开关、prompt 注入与流式接入属 M2（agent-integration），尚未实现。
+
+- **Catalog**（`catalog.ts`）：`defineCatalog(schema, …)` 声明当前 10 个纯展示组件（Card / Text / Badge / Stack 四个 PoC + StatusLabel / Avatar / Divider / KeyValue / Table / InfoTooltip 六个新增），每个带 Zod `props` schema 与面向 LLM 的 `description`（后者经 `uiCatalog.prompt()` 注入系统提示，供 M2 使用）。本模块只 import schema + Zod（**不 import `.svelte`**），故可被纯 Node 环境的 vitest 直接拉入。
+- **校验管道**（`resolveSpec.ts`，**单一入口**、**never-throws**）：把一段消息文本解析为可渲染 `Spec` 的唯一路径，顺序固定为 ① `uiCatalog.validate`（结构 + 组件类型成员 + children/visible）→ ② `validateElementProps`（逐组件 Zod `props`：拒绝缺失/类型错/非法 enum，剥离未声明 prop，并把 `element.props` 替换为剥离后的解析值）→ ③ `validateSpec`（引用完整性：悬挂 root/child）。任一步失败即返回 `null`，调用方据此回退到 markdown 渲染；顶层 `try/catch` 兜底，绝不抛出。
+  - **关键约束（props 不透明）**：`@json-render/core` 的 `uiCatalog.validate` 在 catalog 注册**多于一个**组件时，会把 `props` 退化为 `z.record(z.string(), z.unknown())`——即**不做逐组件 prop 校验**。因此 required/type/enum 校验与未声明 prop 剥离**必须**落在 `resolveSpec` 的第 ② 步，而非 `uiCatalog.validate`。直接探测 catalog 的验证者会看到 props 原样透传；只有走 `resolveSpec` 才能观察到拒绝/剥离。（`catalog.test.ts` 刻意 pin 住 `uiCatalog.validate` 的「仅结构」真实行为，`resolveSpec.test.ts` 持有 prop 校验 + 剥离矩阵。）
+- **Render + registry**（`registry.ts`）：把 catalog 的组件名绑定到各 `.svelte` 实现，是**唯一** import `.svelte` 的模块，**有意排除在 Node vitest 图之外**（纯逻辑测试只 import `catalog.ts` / `resolveSpec.ts`）。渲染经 `<JsonUIProvider><Renderer spec registry={uiRegistry} /></JsonUIProvider>`。
+- **安全不变量（XSS 信任边界，M2 负载级）**：所有组件的文本字段一律经 Svelte 文本插值 `{value}`（自动转义）落入 DOM，**绝不用 `{@html}`**；模型产出的 `<script>` / `<img onerror>` 等 payload 字面显示、不执行、DOM 内无注入节点。Avatar 仅展示 `letter` 首字符大写、无图片/网络。这条「文本绑定、永不 @html」约束是 M2 把组件接入真实 LLM 输出后的核心安全主张。
+- **组件画廊**（`src/routes/settings/components/+page.svelte` 的「JSON-Render 生成式 UI」区）：手写 `Spec` 字面量 demo，覆盖各组件单渲染、多组件嵌套（children 顺序）、缺空字段与 Table 退化、超长/unicode/RTL/emoji、XSS 字面、markdown 字面、亮/暗主题——经 `npm run dev` → `/settings/components` + Chrome MCP 验证（cheap、可靠，不需 Tauri host）。注意画廊直接 `<Renderer>` 渲染受信的手写 spec，**绕过 `resolveSpec`**（demo 专用）；生产 chat 路径仍须经 `resolveSpec` 才能获得上述拒绝/剥离/转义保证。
+
 ## 4. 数据与存储设计
 
 存储位置：平台对应的应用数据目录下，例如：
