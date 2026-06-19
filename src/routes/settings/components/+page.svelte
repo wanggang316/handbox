@@ -30,6 +30,11 @@
   import { Renderer, JsonUIProvider } from "@json-render/svelte";
   import type { Spec } from "@json-render/core";
   import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
+  import { uiCatalog } from "$lib/components/chat/renderers/jsonui/catalog";
+  import {
+    explainSpec,
+    type SpecDiagnosticStage,
+  } from "$lib/components/chat/renderers/jsonui/resolveSpec";
   import {
     TableGroup,
     TableBaseRow,
@@ -760,6 +765,53 @@
       code: type.toUpperCase()
     });
   }
+
+  // --- JSON-Render Playground ---------------------------------------------
+  // Edit the spec JSON on the left; the right pane renders it live through the
+  // exact pipeline the chat uses (explainSpec runs resolveSpec's stages but
+  // reports the failing stage + reason instead of silently returning null).
+  const playgroundSeed: Spec = {
+    root: "card",
+    elements: {
+      card: { type: "Card", props: { title: "Playground" }, children: ["stack"], visible: true },
+      stack: { type: "Stack", props: { gap: "md" }, children: ["intro", "status", "kv"], visible: true },
+      intro: { type: "Text", props: { text: "编辑左侧 JSON，右侧实时渲染。", variant: "body" }, children: [], visible: true },
+      status: { type: "StatusLabel", props: { status: "enabled", text: "实时校验通过" }, children: [], visible: true },
+      kv: { type: "KeyValue", props: { items: [{ key: "可用组件", value: "10" }, { key: "校验", value: "实时" }] }, children: [], visible: true },
+    },
+  };
+
+  let playgroundInput = $state(JSON.stringify(playgroundSeed, null, 2));
+  const playgroundResult = $derived(explainSpec(playgroundInput));
+  const playgroundSpec = $derived(playgroundResult.ok ? playgroundResult.spec : null);
+  const playgroundError = $derived(playgroundResult.ok ? null : playgroundResult);
+
+  const playgroundExamples: { label: string; spec: Spec }[] = [
+    { label: "翻译卡", spec: jsonSpecA },
+    { label: "状态卡", spec: jsonSpecB },
+    { label: "原子组件", spec: jsonSpecAtomics },
+    { label: "嵌套组合", spec: jsonSpecNested },
+  ];
+
+  function loadExample(spec: Spec) {
+    playgroundInput = JSON.stringify(spec, null, 2);
+  }
+
+  const catalogComponents = Object.entries(uiCatalog.data.components).map(
+    ([name, def]) => ({
+      name,
+      description: (def as { description?: string }).description ?? "",
+    }),
+  );
+
+  const stageLabels: Record<SpecDiagnosticStage, string> = {
+    empty: "空输入",
+    json: "JSON 语法",
+    shape: "顶层结构",
+    components: "组件 / 结构",
+    props: "组件 props",
+    references: "引用完整性",
+  };
 </script>
 
 <div class="p-6 pr-8 space-y-10">
@@ -769,6 +821,66 @@
       用于集中预览公共组件的状态与交互，按类型划分展示。
     </p>
   </header>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">JSON-Render Playground</h2>
+    <p class="text-sm text-base-content/70">
+      左侧编辑 spec JSON，右侧实时渲染（走与聊天相同的 resolveSpec 校验管线）；非法时显示失败阶段与原因。
+    </p>
+
+    <div class="flex flex-wrap gap-2">
+      {#each playgroundExamples as example (example.label)}
+        <button
+          type="button"
+          class="px-3 py-1 text-xs rounded-lg border border-base-300 hover:bg-base-200 transition-colors"
+          onclick={() => loadExample(example.spec)}
+        >
+          {example.label}
+        </button>
+      {/each}
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="space-y-1">
+        <div class="text-xs text-base-content/60">spec JSON</div>
+        <textarea
+          bind:value={playgroundInput}
+          spellcheck="false"
+          class="w-full h-96 rounded-lg border border-base-300 bg-base-100 p-3 font-mono text-xs leading-relaxed text-base-content focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+        ></textarea>
+      </div>
+
+      <div class="space-y-1">
+        <div class="text-xs text-base-content/60">渲染结果</div>
+        <div class="min-h-96 rounded-lg border border-base-300 bg-base-100 p-3">
+          {#if playgroundSpec}
+            <JsonUIProvider initialState={{}}>
+              <Renderer spec={playgroundSpec} registry={uiRegistry} />
+            </JsonUIProvider>
+          {:else if playgroundError}
+            <div class="space-y-2">
+              <div class="inline-flex items-center gap-2 text-xs font-medium text-error">
+                <span class="px-2 py-0.5 rounded bg-error/10">{stageLabels[playgroundError.stage]}</span>
+                校验未通过
+              </div>
+              <pre class="whitespace-pre-wrap break-words text-xs text-base-content/70">{playgroundError.message}</pre>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+
+    <details class="text-xs text-base-content/60">
+      <summary class="cursor-pointer select-none">可用组件（{catalogComponents.length}）</summary>
+      <ul class="mt-2 space-y-1">
+        {#each catalogComponents as component (component.name)}
+          <li>
+            <span class="font-mono text-base-content/80">{component.name}</span> — {component.description}
+          </li>
+        {/each}
+      </ul>
+    </details>
+  </section>
 
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">按钮类</h2>
