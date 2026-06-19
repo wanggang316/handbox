@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { User, Palette, Brain, Zap, Sparkles, Keyboard, Info, MousePointerClick, Wrench } from '@lucide/svelte';
+  import { User, Palette, Brain, Zap, Sparkles, Keyboard, Info, MousePointerClick, LayoutGrid, Wrench } from '@lucide/svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Menu from '$lib/components/ui/Menu.svelte';
@@ -18,6 +18,7 @@
     { id: 'agent-tools', title: t('settings.sidebar.agentTools'), icon: Wrench, url: '/settings/agent-tools' },
     { id: 'mcp', title: 'MCP', icon: Zap, url: '/settings/mcp' },
     { id: 'skills', title: t('settings.sidebar.skills'), icon: Sparkles, url: '/settings/skills' },
+    { id: 'components', title: t('settings.sidebar.components'), icon: LayoutGrid, url: '/settings/components' },
     { id: 'shortcuts', title: t('settings.sidebar.shortcuts'), icon: Keyboard, url: '/settings/shortcuts' },
     { id: 'about', title: t('settings.sidebar.about'), icon: Info, url: '/settings/about' },
   ]);

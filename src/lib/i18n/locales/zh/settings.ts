@@ -16,6 +16,7 @@ export const settingsZh = {
   "settings.sidebar.models": "模型",
   "settings.sidebar.agentTools": "Agent 工具",
   "settings.sidebar.skills": "技能",
+  "settings.sidebar.components": "组件",
   "settings.sidebar.shortcuts": "快捷键",
   "settings.sidebar.about": "关于",
 
