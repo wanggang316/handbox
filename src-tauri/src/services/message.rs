@@ -22,6 +22,15 @@ use std::{collections::HashMap, fs, sync::Arc};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
+/// 冻结的 "generative-UI" 系统提示词。
+///
+/// 由前端的 `buildGenerativeUiPrompt(uiCatalog)` 生成、经
+/// `scripts/gen-generative-ui-prompt.ts` 写入 `resources/generative-ui-prompt.txt`，
+/// 在编译期通过 `include_str!` 嵌入。一个 vitest drift 测试保证该 `.txt` 与生成器
+/// 输出逐字节一致，因此此处嵌入的内容即权威目录提示。仅在会话
+/// `generative_ui == Some(true)` 时注入到 LLM 请求的 System 段。
+const GENERATIVE_UI_PROMPT: &str = include_str!("../../resources/generative-ui-prompt.txt");
+
 /// 流式回调 trait 定义
 ///
 /// 这些 trait 用于统一流式消息处理的回调接口
@@ -2136,6 +2145,51 @@ impl MessageService {
         }
     }
 
+    /// 构建请求开头的 System 段消息。
+    ///
+    /// 纯函数，便于单元测试。返回值依次包含：
+    /// 1. 用户配置的 `system_prompt`（存在且去空白后非空时）；
+    /// 2. 当 `generative_ui == Some(true)` 时，一条独立的、内容为
+    ///    [`GENERATIVE_UI_PROMPT`] 的 System 消息。
+    ///
+    /// 两者共存——目录提示是追加的独立消息，绝不覆盖或截断用户的系统提示
+    /// （VAL-INJECT-006）。注入仅在 `Some(true)` 时发生：`None` / `Some(false)`
+    /// 均不注入（VAL-INJECT-002）。本函数仅产出请求消息，从不写回
+    /// `session.system_prompt`（VAL-INJECT-003）；每次调用都是全新构建，故重复调用
+    /// 不会叠加目录提示（VAL-INJECT-003 的幂等性）。
+    fn build_system_messages(
+        system_prompt: &Option<String>,
+        generative_ui: Option<bool>,
+    ) -> Vec<LlmMessage> {
+        let mut messages = Vec::new();
+
+        if let Some(prompt) = system_prompt {
+            if !prompt.trim().is_empty() {
+                messages.push(LlmMessage {
+                    role: LlmMessageRole::System,
+                    content: prompt.clone(),
+                    reasoning: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                    attachments: None,
+                });
+            }
+        }
+
+        if generative_ui == Some(true) {
+            messages.push(LlmMessage {
+                role: LlmMessageRole::System,
+                content: GENERATIVE_UI_PROMPT.to_string(),
+                reasoning: None,
+                tool_calls: None,
+                tool_call_id: None,
+                attachments: None,
+            });
+        }
+
+        messages
+    }
+
     /// 根据 chat_id 和 turn_id 构建 MessageRequest
     ///
     /// 用于重新生成消息或执行工具调用时，根据特定轮次的消息历史构建请求
@@ -2169,19 +2223,12 @@ impl MessageService {
         // 3. 构建消息数组
         let mut request_messages = Vec::new();
 
-        // 添加系统提示词
-        if let Some(system_prompt) = &chat.system_prompt {
-            if !system_prompt.trim().is_empty() {
-                request_messages.push(LlmMessage {
-                    role: LlmMessageRole::System,
-                    content: system_prompt.clone(),
-                    reasoning: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                    attachments: None,
-                });
-            }
-        }
+        // 添加系统提示词（用户配置的系统提示 + 可选的 generative-UI 目录提示）。
+        // 通过 `build_system_messages` 集中生成，是所有发送路径共用的唯一注入点。
+        request_messages.extend(Self::build_system_messages(
+            &chat.system_prompt,
+            chat.generative_ui,
+        ));
 
         // 4. 获取 turn_count，优先使用聊天配置中的值
         let turn_count = message_config.turn_count.unwrap_or(5); // 默认 5 轮
@@ -2913,5 +2960,94 @@ mod tests {
         let (_chat_service, message_service, _chat_id) = setup_services().await;
         // Must not panic; no assertion needed beyond returning normally.
         message_service.cancel_stream("does-not-exist").await;
+    }
+
+    /// A deterministic substring of the embedded generative-UI prompt. Drawn from
+    /// a component description in `resources/generative-ui-prompt.txt`, so it is
+    /// present iff the catalog prompt was injected.
+    const CATALOG_MARKER: &str = "A help icon that reveals 'content' in a hover popover.";
+
+    /// Count how many of the produced messages carry the catalog prompt marker.
+    fn catalog_messages(messages: &[LlmMessage]) -> usize {
+        messages
+            .iter()
+            .filter(|m| m.content.contains(CATALOG_MARKER))
+            .count()
+    }
+
+    // VAL-INJECT-001 (unit): generative_ui = Some(true) injects the catalog prompt.
+    #[test]
+    fn build_system_messages_injects_when_generative_ui_on() {
+        let messages = MessageService::build_system_messages(&None, Some(true));
+        assert_eq!(
+            catalog_messages(&messages),
+            1,
+            "exactly one catalog-prompt System message must be present"
+        );
+        assert!(messages.iter().any(
+            |m| matches!(m.role, LlmMessageRole::System) && m.content.contains(CATALOG_MARKER)
+        ));
+    }
+
+    // VAL-INJECT-002 (unit): None and Some(false) never inject the catalog prompt.
+    #[test]
+    fn build_system_messages_skips_when_generative_ui_off_or_null() {
+        let none = MessageService::build_system_messages(&None, None);
+        assert_eq!(catalog_messages(&none), 0, "None must not inject");
+        assert!(none.is_empty(), "no system_prompt + None => no messages");
+
+        let off = MessageService::build_system_messages(&None, Some(false));
+        assert_eq!(catalog_messages(&off), 0, "Some(false) must not inject");
+        assert!(
+            off.is_empty(),
+            "no system_prompt + Some(false) => no messages"
+        );
+    }
+
+    // VAL-INJECT-006 (unit): user system_prompt and the catalog prompt coexist;
+    // the user prompt is preserved intact, never overwritten or truncated.
+    #[test]
+    fn build_system_messages_preserves_user_prompt_alongside_catalog() {
+        let user_prompt = "You are a meticulous assistant.".to_string();
+        let messages =
+            MessageService::build_system_messages(&Some(user_prompt.clone()), Some(true));
+
+        // User prompt present and byte-identical.
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m.role, LlmMessageRole::System) && m.content == user_prompt),
+            "the user system_prompt must be present unchanged"
+        );
+        // Catalog prompt also present.
+        assert_eq!(
+            catalog_messages(&messages),
+            1,
+            "the catalog prompt must coexist with the user prompt"
+        );
+    }
+
+    // A blank user system_prompt is dropped (as before); only the catalog prompt
+    // survives when generative_ui is on.
+    #[test]
+    fn build_system_messages_drops_blank_user_prompt() {
+        let messages = MessageService::build_system_messages(&Some("   ".to_string()), Some(true));
+        assert_eq!(messages.len(), 1, "blank user prompt is dropped");
+        assert_eq!(catalog_messages(&messages), 1);
+    }
+
+    // VAL-INJECT-003 (unit): each call builds a fresh request; the catalog prompt
+    // never stacks across repeated calls.
+    #[test]
+    fn build_system_messages_is_idempotent_no_doubling() {
+        let first = MessageService::build_system_messages(&None, Some(true));
+        let second = MessageService::build_system_messages(&None, Some(true));
+        assert_eq!(catalog_messages(&first), 1);
+        assert_eq!(catalog_messages(&second), 1);
+        assert_eq!(
+            first.len(),
+            second.len(),
+            "repeated calls must yield the same message set, never a doubled prompt"
+        );
     }
 }

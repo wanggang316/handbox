@@ -10,6 +10,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "release": "bash ./scripts/release.sh",
+    "gen:gui-prompt": "vite-node scripts/gen-generative-ui-prompt.ts",
     "test": "vitest run",
     "tauri": "tauri"
   },
