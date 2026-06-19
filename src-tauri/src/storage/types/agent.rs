@@ -22,6 +22,9 @@ pub struct Agent {
     pub skills: Vec<String>,
     /// 是否启用生成式 UI。`None` 等同「关闭」（旧行 / NULL 列）。
     pub generative_ui: Option<bool>,
+    /// 关联的 GenUI（具名 JSON-Render spec）id。`None` 表示未关联（旧行 / NULL 列）；
+    /// 引用的 GenUI 被删除后由仓储层置空，悬挂 id 在前端表单中显示为「未关联」。
+    pub genui_id: Option<UUID>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -41,6 +44,7 @@ pub struct CreateAgentRequest {
     pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub skills: Option<Vec<String>>,
     pub generative_ui: Option<bool>,
+    pub genui_id: Option<UUID>,
 }
 
 /// 更新 Agent 请求
@@ -58,6 +62,7 @@ pub struct UpdateAgentRequest {
     pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub skills: Option<Vec<String>>,
     pub generative_ui: Option<bool>,
+    pub genui_id: Option<UUID>,
 }
 
 #[cfg(test)]
@@ -83,6 +88,7 @@ mod tests {
             }],
             skills: vec!["code-analysis".to_string(), "refactoring".to_string()],
             generative_ui: Some(true),
+            genui_id: None,
             created_at: 1000,
             updated_at: 2000,
         };
@@ -113,6 +119,7 @@ mod tests {
             mcp_servers: vec![],
             skills: vec![],
             generative_ui: Some(true),
+            genui_id: None,
             created_at: 1000,
             updated_at: 2000,
         };

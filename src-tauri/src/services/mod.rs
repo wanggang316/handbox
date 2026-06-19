@@ -13,6 +13,7 @@ pub mod catalog_sync;
 pub mod chat_engine;
 pub mod coding_agent_runtime;
 pub mod coding_agent_session;
+pub mod genui;
 pub mod hand_ai_catalog;
 pub mod job;
 pub mod job_executor;
@@ -46,6 +47,7 @@ pub use auth::GoogleOAuthService;
 pub use coding_agent_runtime::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, CodingRunSink, RunDriveHandles,
 };
+pub use genui::GenUiService;
 pub use job::{JobCreateRequest, JobService, JobUpdateRequest};
 pub use job_executor::JobExecutor;
 pub use job_scheduler::JobScheduler;

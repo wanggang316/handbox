@@ -19,6 +19,7 @@ pub enum AgentParameter {
     McpServers(Vec<McpServerConfig>),
     Skills(Vec<String>),
     GenerativeUi(Option<bool>),
+    GenUiId(Option<UUID>),
 }
 
 /// Agent 服务
@@ -48,6 +49,7 @@ impl AgentService {
         mcp_servers: Option<Vec<McpServerConfig>>,
         skills: Option<Vec<String>>,
         generative_ui: Option<bool>,
+        genui_id: Option<UUID>,
     ) -> Result<Agent, AppError> {
         let now = Self::current_timestamp();
 
@@ -64,6 +66,7 @@ impl AgentService {
             mcp_servers: mcp_servers.unwrap_or_default(),
             skills: skills.unwrap_or_default(),
             generative_ui,
+            genui_id,
             created_at: now,
             updated_at: now,
         };
@@ -112,6 +115,7 @@ impl AgentService {
             AgentParameter::McpServers(servers) => agent.mcp_servers = servers,
             AgentParameter::Skills(skills) => agent.skills = skills,
             AgentParameter::GenerativeUi(v) => agent.generative_ui = v,
+            AgentParameter::GenUiId(v) => agent.genui_id = v,
         }
 
         agent.updated_at = Self::current_timestamp();
@@ -238,6 +242,7 @@ mod tests {
                 }]),
                 Some(vec!["code-analysis".to_string(), "refactoring".to_string()]),
                 None,
+                None,
             )
             .await
             .expect("agent creation failed");
@@ -284,6 +289,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -293,6 +299,7 @@ mod tests {
         service
             .create_agent(
                 "Agent 2".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -325,6 +332,7 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -369,6 +377,7 @@ mod tests {
         let created = service
             .create_agent(
                 "Original Name".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -439,6 +448,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -464,6 +474,7 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
+                None,
                 None,
                 None,
                 None,
@@ -524,6 +535,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -570,6 +582,7 @@ mod tests {
                 Some(40),
                 None,
                 Some(2048),
+                None,
                 None,
                 None,
                 None,
@@ -622,6 +635,7 @@ mod tests {
                 None,
                 None,
                 Some(true),
+                None,
             )
             .await
             .unwrap();
@@ -652,6 +666,7 @@ mod tests {
                 None,
                 None,
                 Some(true),
+                None,
             )
             .await
             .unwrap();
@@ -690,6 +705,7 @@ mod tests {
                 None,
                 Some(vec!["skill1".to_string()]),
                 Some(true),
+                None,
             )
             .await
             .unwrap();

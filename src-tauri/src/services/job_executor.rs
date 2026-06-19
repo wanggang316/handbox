@@ -3199,6 +3199,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .expect("seed agent");

@@ -18,9 +18,9 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    ArtifactService, JobExecutor, JobScheduler, JobService, McpService, MessageService,
-    ModelService, ProviderService, SearchService, SessionService, SettingsService, StorageService,
-    UserSessionService, WordService,
+    ArtifactService, GenUiService, JobExecutor, JobScheduler, JobService, McpService,
+    MessageService, ModelService, ProviderService, SearchService, SessionService, SettingsService,
+    StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
 use crate::utils::logger;
@@ -153,6 +153,12 @@ pub fn run() {
             agent_update_field,
             agent_update_name,
             agent_delete,
+            // GenUI（具名 JSON-Render UI spec CRUD）命令
+            genui_create,
+            genui_list,
+            genui_get,
+            genui_update,
+            genui_delete,
             // Agent Session（Agent 模式会话 CRUD）命令
             agent_session_create,
             agent_session_list,
@@ -384,6 +390,9 @@ async fn initialize_services(
     // 初始化 Agent 服务
     let agent_service = AgentService::new(database_service.clone());
 
+    // 初始化 GenUI 服务（具名 JSON-Render UI spec 的 CRUD）
+    let genui_service = GenUiService::new(database_service.clone());
+
     // 初始化 Agent Session 服务（Agent 模式会话 CRUD）
     let agent_session_service = AgentSessionService::new(database_service.clone());
 
@@ -483,6 +492,7 @@ async fn initialize_services(
     app.manage(artifact_service);
     app.manage(favorite_repo);
     app.manage(agent_service);
+    app.manage(genui_service);
     app.manage(agent_session_service);
     app.manage(agent_project_service);
     app.manage(skill_service);

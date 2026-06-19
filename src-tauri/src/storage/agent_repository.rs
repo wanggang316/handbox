@@ -34,8 +34,8 @@ impl AgentRepository {
         let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         "#;
 
         sqlx::query(query)
@@ -51,6 +51,7 @@ impl AgentRepository {
             .bind(&mcp_servers_json)
             .bind(&skills_json)
             .bind(agent.generative_ui)
+            .bind(&agent.genui_id)
             .bind(agent.created_at)
             .bind(agent.updated_at)
             .execute(self.db.pool())
@@ -63,7 +64,7 @@ impl AgentRepository {
     /// 获取 Agent 列表
     pub async fn list_agents(&self, limit: i32, offset: i32) -> Result<Vec<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at
             FROM agents ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -85,7 +86,7 @@ impl AgentRepository {
     /// 根据 ID 获取 Agent
     pub async fn get_agent_by_id(&self, agent_id: &UUID) -> Result<Option<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at
             FROM agents WHERE id = $1
         "#;
 
@@ -119,8 +120,8 @@ impl AgentRepository {
         let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, generative_ui = $11, updated_at = $12
-            WHERE id = $13
+            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, generative_ui = $11, genui_id = $12, updated_at = $13
+            WHERE id = $14
         "#;
 
         let result = sqlx::query(query)
@@ -135,6 +136,7 @@ impl AgentRepository {
             .bind(&mcp_servers_json)
             .bind(&skills_json)
             .bind(agent.generative_ui)
+            .bind(&agent.genui_id)
             .bind(agent.updated_at)
             .bind(&agent.id)
             .execute(self.db.pool())
@@ -279,6 +281,8 @@ impl AgentRepository {
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
         // Option<bool> 显式解码：SQL NULL -> None（旧行），INTEGER 0/1 -> Some(false/true)。
         let generative_ui: Option<bool> = row.try_get::<Option<bool>, _>("generative_ui")?;
+        // Option<String> 显式解码：SQL NULL -> None（旧行 / 未关联）。
+        let genui_id: Option<String> = row.try_get::<Option<String>, _>("genui_id")?;
 
         Ok(Agent {
             id: row.try_get("id")?,
@@ -293,6 +297,7 @@ impl AgentRepository {
             mcp_servers,
             skills,
             generative_ui,
+            genui_id,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -346,6 +351,7 @@ mod tests {
             ],
             skills: vec!["code-analysis".to_string(), "refactoring".to_string()],
             generative_ui: Some(true),
+            genui_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -405,6 +411,7 @@ mod tests {
             mcp_servers: vec![],
             skills: vec![],
             generative_ui: None,
+            genui_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -422,6 +429,7 @@ mod tests {
             mcp_servers: vec![],
             skills: vec![],
             generative_ui: None,
+            genui_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -439,6 +447,7 @@ mod tests {
             mcp_servers: vec![],
             skills: vec![],
             generative_ui: None,
+            genui_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -484,6 +493,7 @@ mod tests {
             }],
             skills: vec![],
             generative_ui: None,
+            genui_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -512,6 +522,7 @@ mod tests {
             ],
             skills: vec![],
             generative_ui: None,
+            genui_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -544,6 +555,7 @@ mod tests {
             mcp_servers: vec![],
             skills: vec![],
             generative_ui,
+            genui_id: None,
             created_at: now,
             updated_at: now,
         }

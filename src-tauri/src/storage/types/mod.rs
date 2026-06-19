@@ -4,6 +4,7 @@ pub mod agent_session;
 pub mod artifact;
 pub mod common;
 pub mod favorite;
+pub mod genui;
 pub mod job;
 pub mod mcp;
 pub mod message;
@@ -24,6 +25,7 @@ pub use artifact::{
 };
 pub use common::{Timestamp, UUID};
 pub use favorite::{CreateFavoriteRequest, Favorite, FavoriteMessageType, FavoriteTag};
+pub use genui::{CreateGenUiRequest, GenUi, UpdateGenUiRequest};
 pub use job::{
     ExecutionStatus, Job, JobExecution, JobTarget, SessionStrategy, Trigger,
     DEFAULT_EXEC_TIMEOUT_SECS, DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY_SECS,

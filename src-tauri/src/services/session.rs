@@ -987,6 +987,7 @@ mod tests {
             mcp_servers: vec![],
             skills: vec![],
             generative_ui,
+            genui_id: None,
             created_at: now,
             updated_at: now,
         }

@@ -19,6 +19,7 @@ pub struct AgentCreateRequest {
     pub mcp_servers: Option<Vec<crate::storage::types::McpServerConfig>>,
     pub skills: Option<Vec<String>>,
     pub generative_ui: Option<bool>,
+    pub genui_id: Option<UUID>,
 }
 
 /// 创建新的 Agent
@@ -40,6 +41,7 @@ pub async fn agent_create(
             request.mcp_servers,
             request.skills,
             request.generative_ui,
+            request.genui_id,
         )
         .await
 }
@@ -188,6 +190,19 @@ pub async fn agent_update_field(
                 )
             };
             AgentParameter::GenerativeUi(v)
+        }
+        "genuiId" => {
+            let v = if value.is_null() {
+                None
+            } else {
+                Some(
+                    value
+                        .as_str()
+                        .ok_or_else(|| AppError::validation_error("Invalid genuiId value"))?
+                        .to_string(),
+                )
+            };
+            AgentParameter::GenUiId(v)
         }
         _ => {
             return Err(AppError::validation_error(&format!(
