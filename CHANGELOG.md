@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.2.5] - 2026-06-19
+
+### Changed
+- The text-selection floating menu is now a cleaner row of flat Copy /
+  Translate / Ask buttons without colored backgrounds; the redundant Show
+  button is gone.
+
+### Fixed
+- The interface no longer briefly flickers between Chinese and English when you
+  bring the app to the foreground.
+
+
 ## [0.2.4] - 2026-06-18
 
 ### Added
