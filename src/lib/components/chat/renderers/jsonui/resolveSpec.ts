@@ -36,8 +36,8 @@
  */
 
 import type { Spec, UIElement } from "@json-render/core";
-import { validateSpec } from "@json-render/core";
-import type { ZodTypeAny } from "zod";
+import { formatSpecIssues, validateSpec } from "@json-render/core";
+import type { ZodError, ZodTypeAny } from "zod";
 import { uiCatalog } from "./catalog";
 
 /**
@@ -111,6 +111,96 @@ export function resolveSpec(content: string | null | undefined): Spec | null {
   }
 }
 
+/** The pipeline stage at which {@link explainSpec} rejected a candidate. */
+export type SpecDiagnosticStage =
+  | "empty"
+  | "json"
+  | "shape"
+  | "components"
+  | "props"
+  | "references";
+
+/**
+ * Result of {@link explainSpec}: either the normalised, renderable spec, or the
+ * stage that rejected it plus a human-readable reason.
+ */
+export type SpecDiagnostic =
+  | { ok: true; spec: Spec }
+  | { ok: false; stage: SpecDiagnosticStage; message: string };
+
+/**
+ * Authoring / playground counterpart to {@link resolveSpec}: run the *same*
+ * validation pipeline but, instead of collapsing every failure to `null`,
+ * report which stage rejected the spec and why. Used by the components
+ * playground so an author editing raw JSON sees the concrete reason — syntax
+ * error, missing fields, unknown component, bad prop, dangling reference —
+ * rather than a blank pane.
+ *
+ * On success the returned `spec` is normalised exactly as `resolveSpec`
+ * normalises it (undeclared props stripped), so the caller renders it through
+ * the same `<Renderer>` the chat uses. Accepts a bare JSON object or a single
+ * ```json fenced block (mirroring `resolveSpec`'s carriers); the playground
+ * feeds raw JSON, so a bare object is the common case.
+ *
+ * @param content Raw spec text (accepts `null`/`undefined` defensively).
+ */
+export function explainSpec(content: string | null | undefined): SpecDiagnostic {
+  if (typeof content !== "string" || content.trim().length === 0) {
+    return { ok: false, stage: "empty", message: "请输入一个 JSON spec。" };
+  }
+
+  const trimmed = content.trim();
+  const jsonText = extractFencedJson(trimmed) ?? trimmed;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (error) {
+    return {
+      ok: false,
+      stage: "json",
+      message: `JSON 语法错误：${(error as Error).message}`,
+    };
+  }
+
+  if (!isPlainObject(parsed)) {
+    return { ok: false, stage: "shape", message: "顶层必须是一个 JSON 对象。" };
+  }
+  if (!looksLikeSpec(parsed)) {
+    return {
+      ok: false,
+      stage: "shape",
+      message: '缺少必需字段：顶层需要 { "root": string, "elements": object }。',
+    };
+  }
+
+  const result = uiCatalog.validate(parsed);
+  if (!result.success || result.data === undefined) {
+    return {
+      ok: false,
+      stage: "components",
+      message: formatZodError(result.error),
+    };
+  }
+  const spec = result.data as Spec;
+
+  const propsIssue = firstPropsIssue(spec);
+  if (propsIssue !== null) {
+    return { ok: false, stage: "props", message: propsIssue };
+  }
+
+  const integrity = validateSpec(spec);
+  if (!integrity.valid) {
+    return {
+      ok: false,
+      stage: "references",
+      message: formatSpecIssues(integrity.issues),
+    };
+  }
+
+  return { ok: true, spec };
+}
+
 /**
  * Cheap heuristic: does this *in-progress* streaming content look like a
  * JSON-Render spec that is still being generated?
@@ -152,27 +242,52 @@ export function looksLikeStreamingSpec(
 
 /**
  * Validate (and normalise) every element's `props` against its component's
- * catalog Zod schema, mutating each element's `props` to the parsed result so
- * undeclared keys are stripped from the resolved spec's data.
- *
- * Returns `false` on the first element whose props fail their schema (missing
- * required prop, wrong type, illegal enum) — the caller then falls back. An
- * element whose `type` has no schema (defensive: `uiCatalog.validate` already
- * rejected unknown types) is skipped, not rejected.
+ * catalog Zod schema — the boolean hot-path form used by {@link resolveSpec}.
+ * Delegates to {@link firstPropsIssue}, which performs the mutation (stripping
+ * undeclared keys) and reports the first failure; here we only need pass/fail.
  */
 function validateElementProps(spec: Spec): boolean {
-  for (const element of Object.values(spec.elements) as UIElement[]) {
+  return firstPropsIssue(spec) === null;
+}
+
+/**
+ * Walk every element, parsing its `props` through the component's catalog Zod
+ * schema and mutating `props` to the parsed result so undeclared keys are
+ * stripped from the resolved spec's data. Returns a human-readable message for
+ * the first element whose props fail (naming the element key, component type,
+ * and offending fields), or `null` when every element passes. An element whose
+ * `type` has no schema (defensive: `uiCatalog.validate` already rejected unknown
+ * types) is skipped, not rejected.
+ */
+function firstPropsIssue(spec: Spec): string | null {
+  for (const [key, element] of Object.entries(spec.elements) as [
+    string,
+    UIElement,
+  ][]) {
     const schema = componentPropsSchemas[element.type];
     if (schema === undefined) {
       continue;
     }
     const parsed = schema.safeParse(element.props ?? {});
     if (!parsed.success) {
-      return false;
+      return `元素 "${key}"（${element.type}）的 props 不合法：${formatZodError(parsed.error)}`;
     }
     element.props = parsed.data as Record<string, unknown>;
   }
-  return true;
+  return null;
+}
+
+/** Format a Zod error's issues into a compact `path: message；…` string. */
+function formatZodError(error: ZodError | undefined): string {
+  if (error === undefined || error.issues.length === 0) {
+    return "结构校验失败。";
+  }
+  return error.issues
+    .map((issue) => {
+      const path = issue.path.join(".");
+      return path.length > 0 ? `${path}: ${issue.message}` : issue.message;
+    })
+    .join("；");
 }
 
 /**

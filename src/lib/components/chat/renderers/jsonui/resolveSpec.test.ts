@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { resolveSpec, looksLikeStreamingSpec } from "./resolveSpec";
+import { resolveSpec, looksLikeStreamingSpec, explainSpec } from "./resolveSpec";
 
 /** A catalog-valid spec: a Card → Stack → (Text, Badge) tree. */
 const validSpec = {
@@ -501,5 +501,110 @@ describe("specHit transition (resolveSpec × looksLikeStreamingSpec)", () => {
       },
     });
     expect(resolveSpec(unknownType)).toBeNull();
+  });
+});
+
+describe("explainSpec", () => {
+  /** Assert explainSpec rejected the input and return the narrowed failure. */
+  function failure(input: string | null | undefined) {
+    const result = explainSpec(input);
+    if (result.ok) {
+      throw new Error("expected a failure diagnostic but explainSpec returned ok");
+    }
+    return result;
+  }
+
+  it("returns ok with the normalised spec for a catalog-valid input", () => {
+    const result = explainSpec(JSON.stringify(validSpec));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spec.root).toBe("card");
+      expect(result.spec.elements?.["title"]?.type).toBe("Text");
+    }
+  });
+
+  it("accepts a single ```json fenced block, mirroring resolveSpec", () => {
+    const fenced = "```json\n" + JSON.stringify(mixedSpec, null, 2) + "\n```";
+    const result = explainSpec(fenced);
+    expect(result.ok).toBe(true);
+  });
+
+  it("strips undeclared props on success (same normalisation as resolveSpec)", () => {
+    const withExtra = {
+      root: "card",
+      elements: {
+        card: {
+          type: "Card",
+          props: { title: "x", bogus: "drop me" },
+          children: [],
+          visible: true,
+        },
+      },
+    };
+    const result = explainSpec(JSON.stringify(withExtra));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spec.elements?.["card"]?.props).toEqual({ title: "x" });
+    }
+  });
+
+  it("reports stage 'empty' for blank or nullish input", () => {
+    expect(failure("").stage).toBe("empty");
+    expect(failure("   \n  ").stage).toBe("empty");
+    expect(failure(null).stage).toBe("empty");
+    expect(failure(undefined).stage).toBe("empty");
+  });
+
+  it("reports stage 'json' with the parser message for malformed JSON", () => {
+    const result = failure('{ "root": "x", elements: }');
+    expect(result.stage).toBe("json");
+    expect(result.message).toContain("JSON");
+  });
+
+  it("reports stage 'shape' when the top level is not an object", () => {
+    expect(failure("[]").stage).toBe("shape");
+    expect(failure("42").stage).toBe("shape");
+  });
+
+  it("reports stage 'shape' when root/elements are missing", () => {
+    expect(failure(JSON.stringify({ foo: 1 })).stage).toBe("shape");
+  });
+
+  it("reports stage 'components' for an unregistered component type", () => {
+    const unknown = {
+      root: "x",
+      elements: {
+        x: { type: "Carousel", props: {}, children: [], visible: true },
+      },
+    };
+    expect(failure(JSON.stringify(unknown)).stage).toBe("components");
+  });
+
+  it("reports stage 'props' and names the offending element for bad props", () => {
+    const badProps = {
+      root: "x",
+      elements: {
+        x: {
+          type: "Badge",
+          props: { label: "ok", tone: "neon" },
+          children: [],
+          visible: true,
+        },
+      },
+    };
+    const result = failure(JSON.stringify(badProps));
+    expect(result.stage).toBe("props");
+    expect(result.message).toContain("Badge");
+    expect(result.message).toContain('"x"');
+  });
+
+  it("reports stage 'references' for a dangling root reference", () => {
+    const danglingRoot = {
+      root: "missing",
+      elements: {
+        present: { type: "Divider", props: {}, children: [], visible: true },
+      },
+    };
+    expect(failure(JSON.stringify(danglingRoot)).stage).toBe("references");
   });
 });
