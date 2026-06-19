@@ -26,10 +26,11 @@
       uiState.setTheme("system");
     }
 
-    // 启动时应用持久化的语言（uiState 已从 localStorage 初始化，这里确保
-    // document.lang 同步；后端设置加载后再做权威回填）。
+    // 启动时仅把已从 localStorage 初始化的语言同步到 document.lang。
+    // 不要在此用启动快照回写 localStorage——后端权威回填（见下）才是唯一
+    // 应当写缓存的被动点，否则多窗口 reload 时两者会相互覆盖、反复闪动。
     const allowedLanguages = new Set<Language>(["zh-CN", "en-US"]);
-    uiState.setLanguage(uiState.language);
+    document.documentElement.lang = uiState.language;
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleSystemThemeChange = () => {
@@ -47,9 +48,10 @@
           uiState.setTheme("system");
         }
       } else if (event.key === "language") {
-        // 跨窗口同步语言（主窗口与设置窗口共享 localStorage）
+        // 跨窗口被动同步：发起方已写过共享 localStorage，这里只更新内存与
+        // document.lang，绝不回写，避免触发新一轮广播形成闪动。
         if (event.newValue && allowedLanguages.has(event.newValue as Language)) {
-          uiState.setLanguage(event.newValue as Language);
+          uiState.syncLanguageFromExternal(event.newValue as Language);
         }
       }
     };
