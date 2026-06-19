@@ -1,8 +1,9 @@
 /**
  * JSON-Render catalog for the generative-UI PoC.
  *
- * Declares the four minimal presentational components (Card / Text / Badge /
- * Stack) that an AI may compose into a flat {@link Spec}. The catalog drives
+ * Declares the ten presentational components (Card, Text, Badge, Stack,
+ * StatusLabel, Avatar, Divider, KeyValue, Table, InfoTooltip) that an AI may
+ * compose into a flat {@link Spec}. The catalog drives
  * three things:
  *
  *  - `uiCatalog.validate(spec)` — structural + per-component prop validation,

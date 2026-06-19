@@ -413,8 +413,8 @@
   };
 
   // ──────────────────────────────────────────────────────────────────────────
-  // VAL-RENDER-004: Nested composition — Card > Stack > [Text, Badge, Table,
-  // StatusLabel, Avatar, Divider, KeyValue, InfoTooltip].
+  // VAL-RENDER-004: Nested composition — Card > Stack > [Text, Badge, Divider,
+  // Table, Divider, Stack > [StatusLabel, Avatar, KeyValue], InfoTooltip].
   // Children must render in declared array order.
   // ──────────────────────────────────────────────────────────────────────────
   const jsonSpecNested: Spec = {

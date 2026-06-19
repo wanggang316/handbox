@@ -1,7 +1,8 @@
 /**
  * Runtime registry for the JSON-Render generative-UI PoC.
  *
- * Binds the four catalog component names to their `.svelte` implementations and
+ * Binds the ten catalog component names (Card, Text, Badge, Stack, StatusLabel,
+ * Avatar, Divider, KeyValue, Table, InfoTooltip) to their `.svelte` implementations and
  * exports the registry consumed by `<Renderer spec registry={uiRegistry} />`.
  *
  * This is the only module in the directory that imports a `.svelte` file, so it
