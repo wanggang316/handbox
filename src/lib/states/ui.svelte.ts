@@ -280,6 +280,23 @@ class UIState {
   }
 
   /**
+   * 被动同步语言：仅更新内存状态与 document.lang，**绝不回写 localStorage**。
+   *
+   * 专用于响应其他窗口的 `storage` 事件。发起方已把新语言写进了共享
+   * localStorage，跟随方若再经 `setLanguage` 回写，会触发新一轮跨窗口广播；
+   * 在多窗口（main / settings / 3 个划词面板）从后台恢复时整页 reload 的
+   * 时序下，这条回写与权威回填相互覆盖，正是中英文反复闪动的根源。
+   * 被动路径保持单向只读，从根上消除 ping-pong。
+   */
+  syncLanguageFromExternal(lang: Language): void {
+    this.state.language = lang;
+
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = lang;
+    }
+  }
+
+  /**
    * 设置应用模式（chat / agent），并持久化到 localStorage。
    */
   setAppMode(mode: AppMode): void {
