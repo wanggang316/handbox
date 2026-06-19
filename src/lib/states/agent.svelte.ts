@@ -118,6 +118,7 @@ export const agentActions = {
     systemPrompt?: string;
     mcpServers?: McpServerConfig[];
     skills?: string[];
+    generativeUi?: boolean;
   }): Promise<Agent> {
     try {
       agentState.isLoading = true;
@@ -134,6 +135,7 @@ export const agentActions = {
         config.systemPrompt,
         config.mcpServers,
         config.skills,
+        config.generativeUi,
       );
 
       // 添加到列表
@@ -194,7 +196,8 @@ export const agentActions = {
       | "systemPrompt"
       | "mcpServers"
       | "skills"
-      | "reasoning",
+      | "reasoning"
+      | "generativeUi",
     value:
       | number
       | boolean

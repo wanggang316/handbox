@@ -4,6 +4,7 @@
   import Button from "../ui/Button.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TableBaseRow from "../ui/table/TableBaseRow.svelte";
+  import SwitchRow from "../ui/table/SwitchRow.svelte";
   import { Bot } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
@@ -24,6 +25,7 @@
     maxTokens?: number;
     systemPrompt: string;
     skills: string;
+    generativeUI: boolean;
   }
 
   let { open, agent, onClose, onSave }: Props = $props();
@@ -41,6 +43,7 @@
     model: "",
     systemPrompt: "",
     skills: "",
+    generativeUI: false,
   });
 
   let saving = $state(false);
@@ -76,6 +79,7 @@
         maxTokens: agent.maxTokens,
         systemPrompt: agent.systemPrompt || "",
         skills: agent.skills.join(", "),
+        generativeUI: agent.generativeUi ?? false,
       };
     } else {
       formData = {
@@ -83,6 +87,7 @@
         model: "",
         systemPrompt: "",
         skills: "",
+        generativeUI: false,
       };
     }
   });
@@ -145,6 +150,15 @@
           {t("agent.form.skillsHint")}
         </p>
       </TableBaseRow>
+    </TableGroup>
+
+    <!-- 生成式 UI -->
+    <TableGroup>
+      <SwitchRow
+        label="生成式 UI"
+        description="允许助手在回复中渲染交互式界面"
+        bind:checked={formData.generativeUI}
+      />
     </TableGroup>
 
     <!-- 模型参数 - 始终显示 -->

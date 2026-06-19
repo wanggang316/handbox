@@ -103,6 +103,15 @@
       if (JSON.stringify(skills) !== JSON.stringify(editingAgent.skills)) {
         await agentActions.updateAgentField(editingAgent.id, "skills", skills);
       }
+
+      // 生成式 UI: 显式比较布尔值，关闭时必须发送 false（不能被假值跳过）
+      if ((data.generativeUI ?? false) !== (editingAgent.generativeUi ?? false)) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "generativeUi",
+          data.generativeUI ?? false
+        );
+      }
     } else {
       // 创建新 Agent
       await agentActions.createAgent({
@@ -118,6 +127,7 @@
         skills: data.skills
           ? data.skills.split(",").map((s) => s.trim()).filter(Boolean)
           : [],
+        generativeUi: data.generativeUI,
       });
     }
   }

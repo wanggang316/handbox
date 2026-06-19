@@ -18,6 +18,7 @@ pub struct AgentCreateRequest {
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<crate::storage::types::McpServerConfig>>,
     pub skills: Option<Vec<String>>,
+    pub generative_ui: Option<bool>,
 }
 
 /// 创建新的 Agent
@@ -38,6 +39,7 @@ pub async fn agent_create(
             request.system_prompt,
             request.mcp_servers,
             request.skills,
+            request.generative_ui,
         )
         .await
 }
@@ -174,6 +176,18 @@ pub async fn agent_update_field(
                 )
             };
             AgentParameter::Reasoning(reasoning_value)
+        }
+        "generativeUi" => {
+            let v = if value.is_null() {
+                None
+            } else {
+                Some(
+                    value
+                        .as_bool()
+                        .ok_or_else(|| AppError::validation_error("Invalid generativeUi value"))?,
+                )
+            };
+            AgentParameter::GenerativeUi(v)
         }
         _ => {
             return Err(AppError::validation_error(&format!(

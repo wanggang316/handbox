@@ -3198,6 +3198,7 @@ mod tests {
                 Some("You are a helpful agent.".to_string()),
                 None,
                 None,
+                None,
             )
             .await
             .expect("seed agent");
