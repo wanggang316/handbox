@@ -11,8 +11,10 @@
   } from "$lib/components/chat/renderers/jsonui/resolveSpec";
   import Button from "$lib/components/ui/Button.svelte";
   import Input from "$lib/components/ui/Input.svelte";
+  import Select from "$lib/components/ui/Select.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import { genuiActions } from "$lib/states/genui.svelte";
+  import { genuiExamples } from "./examples";
   import type { GenUi } from "$lib/types";
 
   interface Props {
@@ -49,6 +51,27 @@
   let showDeleteConfirm = $state(false);
 
   const isEdit = $derived(Boolean(genui?.id));
+
+  // 「载入示例」选择器：从内置模板库填充编辑器（新建模式）。选择后即把 spec 写入
+  // 左侧文本域、空名称时顺带填名，再把选择器复位到首项（值为空、非 disabled，故
+  // 能真正回弹，也允许再次选中同一示例以「重置」编辑）。
+  let exampleChoice = $state("");
+  const exampleOptions = [
+    { value: "", label: "从示例载入…" },
+    ...genuiExamples.map((e) => ({ value: e.id, label: e.name })),
+  ];
+
+  function loadExample(id: string) {
+    const ex = genuiExamples.find((e) => e.id === id);
+    if (!ex) return;
+    specInput = JSON.stringify(ex.spec, null, 2);
+    if (!name.trim()) name = ex.name;
+    // 复位到首项要放到下一个 tick：在 change 事件同一刷新内重置受控 <select> 不会
+    // 回写到 DOM。延迟一拍让 Svelte 重新同步原生元素，回到「从示例载入…」。
+    setTimeout(() => {
+      exampleChoice = "";
+    }, 0);
+  }
 
   // 走与聊天相同的 resolveSpec 校验管线；非法时报告失败阶段与原因。
   const result = $derived(explainSpec(specInput));
@@ -123,6 +146,15 @@
         <Input label="名称" placeholder="为这份 GenUI 取个名字" bind:value={name} required />
       </div>
       <div class="flex items-center gap-2">
+        {#if !isEdit}
+          <Select
+            options={exampleOptions}
+            bind:selectedValue={exampleChoice}
+            onChange={loadExample}
+            size="sm"
+            autoWidth
+          />
+        {/if}
         {#if isEdit}
           <Button
             variant="danger"
