@@ -38,8 +38,8 @@ impl SessionRepository {
             .and_then(|value| serde_json::to_string(value).ok());
 
         let query = r#"
-            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         "#;
 
         sqlx::query(query)
@@ -59,6 +59,7 @@ impl SessionRepository {
             .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
             .bind(session.generative_ui)
+            .bind(&session.genui_spec)
             .bind(session.created_at)
             .bind(session.updated_at)
             .execute(self.db.pool())
@@ -76,7 +77,7 @@ impl SessionRepository {
     /// 获取 Session 列表
     pub async fn list_sessions(&self, limit: i32, offset: i32) -> Result<Vec<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
             FROM sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -103,7 +104,7 @@ impl SessionRepository {
     /// 根据 ID 获取 Session
     pub async fn get_session_by_id(&self, session_id: &UUID) -> Result<Option<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
             FROM sessions WHERE id = $1
         "#;
 
@@ -162,7 +163,10 @@ impl SessionRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to update session: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Session not found: {}", session.id)));
+            return Err(AppError::not_found(&format!(
+                "Session not found: {}",
+                session.id
+            )));
         }
 
         Ok(())
@@ -182,7 +186,10 @@ impl SessionRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to delete session: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Session not found: {}", session_id)));
+            return Err(AppError::not_found(&format!(
+                "Session not found: {}",
+                session_id
+            )));
         }
 
         Ok(())
@@ -263,7 +270,10 @@ impl SessionRepository {
             .fetch_all(self.db.pool())
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to query sessions with MCP server: {}", e))
+                AppError::internal_error(&format!(
+                    "Failed to query sessions with MCP server: {}",
+                    e
+                ))
             })?;
 
         let mut updated_count = 0;
@@ -394,6 +404,8 @@ impl SessionRepository {
         let stream: Option<bool> = row.try_get::<Option<bool>, _>("stream")?;
         // Option<bool> 显式解码：SQL NULL -> None（旧行），INTEGER 0/1 -> Some(false/true)。
         let generative_ui: Option<bool> = row.try_get::<Option<bool>, _>("generative_ui")?;
+        // GenUI 范例 spec 快照：SQL NULL（旧行 / 未关联）-> None。
+        let genui_spec: Option<String> = row.try_get::<Option<String>, _>("genui_spec")?;
 
         Ok(Session {
             id: row.try_get("id")?,
@@ -424,6 +436,7 @@ impl SessionRepository {
                 .filter(|s| !s.trim().is_empty()),
             reasoning,
             generative_ui,
+            genui_spec,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -483,6 +496,7 @@ mod tests {
             agent_id: None,
             reasoning: None,
             generative_ui: None,
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -560,6 +574,7 @@ mod tests {
             agent_id: Some(agent_id.clone()),
             reasoning: None,
             generative_ui: None,
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -602,6 +617,7 @@ mod tests {
             agent_id: Some(String::new()),
             reasoning: None,
             generative_ui: None,
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -691,6 +707,7 @@ mod tests {
             agent_id: None,
             reasoning: None,
             generative_ui: Some(true),
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -708,5 +725,92 @@ mod tests {
         assert_eq!(fetched.name, "Renamed");
         // 仍为 Some(true)：SET 子句排除了 generative_ui，落库值未被覆盖。
         assert_eq!(fetched.generative_ui, Some(true));
+    }
+
+    // write-once：与 generative_ui 同理，`update_session` 的 SET 子句不含 `genui_spec`，
+    // 故整行 UPDATE（即便传入 None）也不能清掉建会话时快照的范例 spec。
+    #[tokio::test]
+    async fn test_update_session_does_not_clobber_genui_spec() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = SessionRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let session = Session {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Original".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            artifact_id: None,
+            agent_id: None,
+            reasoning: None,
+            generative_ui: Some(true),
+            genui_spec: Some(r#"{"root":"card","elements":{}}"#.to_string()),
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_session(&session).await.unwrap();
+
+        // 整行 UPDATE：改名，且故意把 genui_spec 置为 None。
+        let mut updated = session.clone();
+        updated.name = "Renamed".to_string();
+        updated.genui_spec = None;
+        updated.updated_at = now + 1000;
+        repo.update_session(&updated).await.unwrap();
+
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(fetched.name, "Renamed");
+        // 范例 spec 未被覆盖：SET 子句排除了 genui_spec。
+        assert_eq!(
+            fetched.genui_spec,
+            Some(r#"{"root":"card","elements":{}}"#.to_string())
+        );
+    }
+
+    // 旧行（genui_spec 为 NULL）在两条读路径上都解码为 None，不触发 sqlx 解码错误。
+    #[tokio::test]
+    async fn test_session_genui_spec_null_decodes_to_none() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db = Arc::new(db);
+        let repo = SessionRepository::new(db.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let session_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO sessions (id, name, message_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&session_id)
+        .bind("Legacy Session")
+        .bind(0_i32)
+        .bind(now)
+        .bind(now)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let fetched = repo.get_session_by_id(&session_id).await.unwrap().unwrap();
+        assert_eq!(fetched.genui_spec, None);
+
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].genui_spec, None);
     }
 }

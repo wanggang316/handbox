@@ -5,7 +5,7 @@ use crate::models::AppError;
 use crate::services::chat_engine::{self, ChatMessage, ChatOptions, ChatProvider};
 use crate::services::{Database, ProviderService};
 use crate::storage::types::{McpServerConfig, Session, SessionReasoningConfig, UUID};
-use crate::storage::{AgentRepository, MessageRepository, SessionRepository};
+use crate::storage::{AgentRepository, GenUiRepository, MessageRepository, SessionRepository};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -82,6 +82,7 @@ pub enum SessionParameter {
 pub struct SessionService {
     repository: SessionRepository,
     agent_repository: AgentRepository,
+    genui_repository: GenUiRepository,
     message_repository: MessageRepository,
     provider_service: Arc<ProviderService>,
 }
@@ -91,6 +92,7 @@ impl SessionService {
         Self {
             repository: SessionRepository::new(db.clone()),
             agent_repository: AgentRepository::new(db.clone()),
+            genui_repository: GenUiRepository::new(db.clone()),
             message_repository: MessageRepository::new(db),
             provider_service,
         }
@@ -134,6 +136,7 @@ impl SessionService {
             agent_id: None,
             reasoning: None,
             generative_ui: None,
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -160,6 +163,19 @@ impl SessionService {
             .unwrap()
             .as_millis() as i64;
 
+        // few-shot 范例：把 Agent 关联的 GenUI 模板 spec 快照进 Session（write-once）。
+        // 未关联 / 模板已删 / 查询失败均降级为 None——范例是增强项，绝不阻断建会话。
+        let genui_spec = match agent.genui_id.as_ref() {
+            Some(id) if !id.trim().is_empty() => self
+                .genui_repository
+                .get_genui_by_id(id)
+                .await
+                .ok()
+                .flatten()
+                .map(|g| g.spec),
+            _ => None,
+        };
+
         // 从 Agent 创建 Session，复制所有配置
         let session = Session {
             id: uuid::Uuid::new_v4().to_string(),
@@ -180,6 +196,7 @@ impl SessionService {
             agent_id: Some(agent_id),
             reasoning: agent.reasoning,
             generative_ui: agent.generative_ui,
+            genui_spec,
             created_at: now,
             updated_at: now,
         };
@@ -973,7 +990,11 @@ mod tests {
         assert_eq!(updated.stream, Some(true)); // 保持原值
     }
 
-    fn seed_agent(now: i64, generative_ui: Option<bool>) -> crate::storage::types::Agent {
+    fn seed_agent(
+        now: i64,
+        generative_ui: Option<bool>,
+        genui_id: Option<String>,
+    ) -> crate::storage::types::Agent {
         crate::storage::types::Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "GenUI Agent".to_string(),
@@ -987,7 +1008,7 @@ mod tests {
             mcp_servers: vec![],
             skills: vec![],
             generative_ui,
-            genui_id: None,
+            genui_id,
             created_at: now,
             updated_at: now,
         }
@@ -1008,7 +1029,7 @@ mod tests {
             .as_millis() as i64;
 
         // generative_ui = Some(true) snapshots onto the session.
-        let agent_on = seed_agent(now, Some(true));
+        let agent_on = seed_agent(now, Some(true), None);
         service
             .agent_repository
             .create_agent(&agent_on)
@@ -1036,7 +1057,7 @@ mod tests {
         assert_eq!(listed.generative_ui, Some(true));
 
         // generative_ui = None (off) snapshots through as None.
-        let agent_off = seed_agent(now, None);
+        let agent_off = seed_agent(now, None, None);
         service
             .agent_repository
             .create_agent(&agent_off)
@@ -1055,5 +1076,77 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(off_via_get.generative_ui, None);
+    }
+
+    // create_session_from_agent 把 Agent 关联的 GenUI 模板 spec 快照进 session：
+    // 关联存在的模板 -> Some(spec)；未关联 -> None；关联的模板缺失 -> None（优雅降级）。
+    #[tokio::test]
+    async fn create_session_from_agent_snapshots_linked_genui_spec() {
+        let db = create_test_database().await;
+        let provider_service = Arc::new(ProviderService::new(db.clone()));
+        let service = SessionService::new(db, provider_service);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // seed 一份 GenUI 模板
+        let spec_text = r#"{"root":"card","elements":{"card":{"type":"Card","props":{},"children":[],"visible":true}}}"#;
+        let genui = crate::storage::types::GenUi {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Translate Card".to_string(),
+            spec: spec_text.to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+        service.genui_repository.create_genui(&genui).await.unwrap();
+
+        // 关联模板的 agent -> session.genui_spec == 模板 spec
+        let agent_linked = seed_agent(now, Some(true), Some(genui.id.clone()));
+        service
+            .agent_repository
+            .create_agent(&agent_linked)
+            .await
+            .unwrap();
+        let session = service
+            .create_session_from_agent(agent_linked.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(session.genui_spec.as_deref(), Some(spec_text));
+
+        let via_get = service
+            .repository
+            .get_session_by_id(&session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(via_get.genui_spec.as_deref(), Some(spec_text));
+
+        // 未关联模板的 agent -> None
+        let agent_unlinked = seed_agent(now, Some(true), None);
+        service
+            .agent_repository
+            .create_agent(&agent_unlinked)
+            .await
+            .unwrap();
+        let session_unlinked = service
+            .create_session_from_agent(agent_unlinked.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(session_unlinked.genui_spec, None);
+
+        // 关联了一个不存在的模板 id -> 优雅降级为 None（不阻断建会话）
+        let agent_dangling = seed_agent(now, Some(true), Some("missing-genui".to_string()));
+        service
+            .agent_repository
+            .create_agent(&agent_dangling)
+            .await
+            .unwrap();
+        let session_dangling = service
+            .create_session_from_agent(agent_dangling.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(session_dangling.genui_spec, None);
     }
 }

@@ -1,5 +1,8 @@
 // 消息服务实现
 
+use crate::models::llm_types::{
+    LlmGeneratedImage, LlmMessage, LlmMessageRole, LlmReasoningEffort, LlmToolFunction,
+};
 use crate::models::{
     AppError, MessageRequest, MessageRequestAttachment, MessageResponse, StreamChunk,
     UserMessageSendRequest,
@@ -7,17 +10,14 @@ use crate::models::{
 use crate::services::chat_engine::{
     self, ChatMessage, ChatOptions, ChatProvider, ChatTool, ChatToolCall, HydratedAttachment,
 };
-use crate::services::{SessionService, Database, McpService, ProviderService, StorageService};
+use crate::services::{Database, McpService, ProviderService, SessionService, StorageService};
 use crate::storage::types::{
-    Session, McpServer, McpServerStatus, Message, MessageAttachment, MessageConfig, MessageToolCall,
-    MessageToolExecutionMode, MessageToolExecutionStatus, UUID,
+    McpServer, McpServerStatus, Message, MessageAttachment, MessageConfig, MessageToolCall,
+    MessageToolExecutionMode, MessageToolExecutionStatus, Session, UUID,
 };
 use crate::storage::MessageRepository;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::Utc;
-use crate::models::llm_types::{
-    LlmGeneratedImage, LlmMessage, LlmMessageRole, LlmReasoningEffort, LlmToolFunction,
-};
 use std::{collections::HashMap, fs, sync::Arc};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
@@ -30,6 +30,11 @@ use tokio_util::sync::CancellationToken;
 /// 输出逐字节一致，因此此处嵌入的内容即权威目录提示。仅在会话
 /// `generative_ui == Some(true)` 时注入到 LLM 请求的 System 段。
 const GENERATIVE_UI_PROMPT: &str = include_str!("../../resources/generative-ui-prompt.txt");
+
+/// 当会话关联了一份 GenUI 范例模板（`session.genui_spec`）时，把模板 spec 框定为
+/// 「应模仿其结构与风格的输出范例」（few-shot / "A" 模式）。仅在 `generative_ui`
+/// 开启且范例非空时，作为目录提示之后的又一条独立 System 段注入；单回合、不持久化。
+const GENERATIVE_UI_EXAMPLE_PREAMBLE: &str = "以下是一份生成式 UI 输出范例。当你需要输出界面时，请模仿其组件结构与风格，仅把内容替换为与当前对话相关的真实信息：";
 
 /// 流式回调 trait 定义
 ///
@@ -625,7 +630,10 @@ impl MessageService {
         };
 
         // 8. 使用 build_request_from_turn 重新构建请求
-        let resend_request = match self.build_message_request(&message.session_id, turn_id).await {
+        let resend_request = match self
+            .build_message_request(&message.session_id, turn_id)
+            .await
+        {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -751,7 +759,10 @@ impl MessageService {
         };
 
         // 5. 获取聊天配置并构建请求
-        let regenerate_request = match self.build_message_request(&message.session_id, turn_id).await {
+        let regenerate_request = match self
+            .build_message_request(&message.session_id, turn_id)
+            .await
+        {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -1080,7 +1091,10 @@ impl MessageService {
         };
 
         // 11. 构建包含工具调用结果的新请求
-        let request = match self.build_message_request(&message.session_id, turn_id).await {
+        let request = match self
+            .build_message_request(&message.session_id, turn_id)
+            .await
+        {
             Ok(req) => req,
             Err(e) => {
                 tracing::error!(
@@ -1240,12 +1254,13 @@ impl MessageService {
                     if or_cfg.exclude == Some(true) {
                         return None;
                     }
-                    or_cfg.effort.as_ref().and_then(|s| {
-                        match s.to_ascii_lowercase().as_str() {
+                    or_cfg
+                        .effort
+                        .as_ref()
+                        .and_then(|s| match s.to_ascii_lowercase().as_str() {
                             "minimal" | "low" | "medium" | "high" => Some(s.to_ascii_lowercase()),
                             _ => None,
-                        }
-                    })
+                        })
                 })
             })
         } else {
@@ -1508,12 +1523,13 @@ impl MessageService {
                     if or_cfg.exclude == Some(true) {
                         return None;
                     }
-                    or_cfg.effort.as_ref().and_then(|s| {
-                        match s.to_ascii_lowercase().as_str() {
+                    or_cfg
+                        .effort
+                        .as_ref()
+                        .and_then(|s| match s.to_ascii_lowercase().as_str() {
                             "minimal" | "low" | "medium" | "high" => Some(s.to_ascii_lowercase()),
                             _ => None,
-                        }
-                    })
+                        })
                 })
             })
         } else {
@@ -2157,9 +2173,15 @@ impl MessageService {
     /// 均不注入（VAL-INJECT-002）。本函数仅产出请求消息，从不写回
     /// `session.system_prompt`（VAL-INJECT-003）；每次调用都是全新构建，故重复调用
     /// 不会叠加目录提示（VAL-INJECT-003 的幂等性）。
+    ///
+    /// 当 `generative_ui == Some(true)` 且 `genui_example` 为非空白文本时，再追加
+    /// 第三条独立 System 段：把该范例（会话创建时由关联 GenUI 模板快照而来）框定为
+    /// 应模仿的输出范例。范例只在目录提示之后注入；`generative_ui` 未开启时即便有
+    /// 范例也不注入。
     fn build_system_messages(
         system_prompt: &Option<String>,
         generative_ui: Option<bool>,
+        genui_example: Option<&str>,
     ) -> Vec<LlmMessage> {
         let mut messages = Vec::new();
 
@@ -2185,6 +2207,21 @@ impl MessageService {
                 tool_call_id: None,
                 attachments: None,
             });
+
+            // 关联了范例模板时，追加一条「模仿此范例」的 System 段（目录提示之后）。
+            if let Some(example) = genui_example {
+                let trimmed = example.trim();
+                if !trimmed.is_empty() {
+                    messages.push(LlmMessage {
+                        role: LlmMessageRole::System,
+                        content: format!("{GENERATIVE_UI_EXAMPLE_PREAMBLE}\n\n{trimmed}"),
+                        reasoning: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                        attachments: None,
+                    });
+                }
+            }
         }
 
         messages
@@ -2228,6 +2265,7 @@ impl MessageService {
         request_messages.extend(Self::build_system_messages(
             &chat.system_prompt,
             chat.generative_ui,
+            chat.genui_spec.as_deref(),
         ));
 
         // 4. 获取 turn_count，优先使用聊天配置中的值
@@ -2690,7 +2728,7 @@ impl MessageService {
 mod tests {
     use super::*;
     use crate::models::{ModelParameters, UserMessageSendRequest};
-    use crate::services::{SessionService, McpService, ProviderService, StorageService};
+    use crate::services::{McpService, ProviderService, SessionService, StorageService};
     use crate::storage::types::MessageConfig;
     use crate::storage::Database;
     use std::sync::Arc;
@@ -2710,10 +2748,7 @@ mod tests {
         let db = create_test_database().await;
         let provider_service = Arc::new(ProviderService::new(db.clone()));
         let mcp_service = Arc::new(McpService::new(db.clone()));
-        let chat_service = Arc::new(SessionService::new(
-            db.clone(),
-            provider_service.clone(),
-        ));
+        let chat_service = Arc::new(SessionService::new(db.clone(), provider_service.clone()));
         let storage_dir = TempDir::new().expect("Failed to create temp storage dir");
         let storage_path = storage_dir.path().to_path_buf();
         let storage_service =
@@ -2751,10 +2786,7 @@ mod tests {
         let db = create_test_database().await;
         let provider_service = Arc::new(ProviderService::new(db.clone()));
         let mcp_service = Arc::new(McpService::new(db.clone()));
-        let chat_service = Arc::new(SessionService::new(
-            db.clone(),
-            provider_service.clone(),
-        ));
+        let chat_service = Arc::new(SessionService::new(db.clone(), provider_service.clone()));
         let storage_dir = TempDir::new().expect("Failed to create temp storage dir");
         let storage_path = storage_dir.path().to_path_buf();
         let storage_service =
@@ -2867,8 +2899,9 @@ mod tests {
             agent_id: None,
             reasoning: None,
             generative_ui: None,
+            genui_spec: None,
             created_at: 0,
-            updated_at: 0
+            updated_at: 0,
         };
 
         let config = MessageService::message_config_from_chat(&chat);
@@ -2912,6 +2945,7 @@ mod tests {
             agent_id: None,
             reasoning: None,
             generative_ui: None,
+            genui_spec: None,
             created_at: 0,
             updated_at: 0,
         };
@@ -2978,7 +3012,7 @@ mod tests {
     // VAL-INJECT-001 (unit): generative_ui = Some(true) injects the catalog prompt.
     #[test]
     fn build_system_messages_injects_when_generative_ui_on() {
-        let messages = MessageService::build_system_messages(&None, Some(true));
+        let messages = MessageService::build_system_messages(&None, Some(true), None);
         assert_eq!(
             catalog_messages(&messages),
             1,
@@ -2992,11 +3026,11 @@ mod tests {
     // VAL-INJECT-002 (unit): None and Some(false) never inject the catalog prompt.
     #[test]
     fn build_system_messages_skips_when_generative_ui_off_or_null() {
-        let none = MessageService::build_system_messages(&None, None);
+        let none = MessageService::build_system_messages(&None, None, None);
         assert_eq!(catalog_messages(&none), 0, "None must not inject");
         assert!(none.is_empty(), "no system_prompt + None => no messages");
 
-        let off = MessageService::build_system_messages(&None, Some(false));
+        let off = MessageService::build_system_messages(&None, Some(false), None);
         assert_eq!(catalog_messages(&off), 0, "Some(false) must not inject");
         assert!(
             off.is_empty(),
@@ -3010,7 +3044,7 @@ mod tests {
     fn build_system_messages_preserves_user_prompt_alongside_catalog() {
         let user_prompt = "You are a meticulous assistant.".to_string();
         let messages =
-            MessageService::build_system_messages(&Some(user_prompt.clone()), Some(true));
+            MessageService::build_system_messages(&Some(user_prompt.clone()), Some(true), None);
 
         // User prompt present and byte-identical.
         assert!(
@@ -3031,7 +3065,8 @@ mod tests {
     // survives when generative_ui is on.
     #[test]
     fn build_system_messages_drops_blank_user_prompt() {
-        let messages = MessageService::build_system_messages(&Some("   ".to_string()), Some(true));
+        let messages =
+            MessageService::build_system_messages(&Some("   ".to_string()), Some(true), None);
         assert_eq!(messages.len(), 1, "blank user prompt is dropped");
         assert_eq!(catalog_messages(&messages), 1);
     }
@@ -3040,8 +3075,8 @@ mod tests {
     // never stacks across repeated calls.
     #[test]
     fn build_system_messages_is_idempotent_no_doubling() {
-        let first = MessageService::build_system_messages(&None, Some(true));
-        let second = MessageService::build_system_messages(&None, Some(true));
+        let first = MessageService::build_system_messages(&None, Some(true), None);
+        let second = MessageService::build_system_messages(&None, Some(true), None);
         assert_eq!(catalog_messages(&first), 1);
         assert_eq!(catalog_messages(&second), 1);
         assert_eq!(
@@ -3049,5 +3084,83 @@ mod tests {
             second.len(),
             "repeated calls must yield the same message set, never a doubled prompt"
         );
+    }
+
+    /// A sentinel embedded in the example spec; present iff the example was injected.
+    const EXAMPLE_MARKER: &str = "demo-card-sentinel";
+
+    /// Count messages that carry the genui example (preamble + the example spec).
+    fn example_messages(messages: &[LlmMessage]) -> usize {
+        messages
+            .iter()
+            .filter(|m| {
+                m.content.contains(GENERATIVE_UI_EXAMPLE_PREAMBLE)
+                    && m.content.contains(EXAMPLE_MARKER)
+            })
+            .count()
+    }
+
+    // generative_ui on + a non-blank example -> the example is injected as its own
+    // System message, after the catalog prompt, both coexisting.
+    #[test]
+    fn build_system_messages_injects_example_after_catalog_when_on() {
+        let example = format!(r#"{{"root":"{EXAMPLE_MARKER}","elements":{{}}}}"#);
+        let messages =
+            MessageService::build_system_messages(&None, Some(true), Some(example.as_str()));
+
+        assert_eq!(catalog_messages(&messages), 1, "catalog must be present");
+        assert_eq!(
+            example_messages(&messages),
+            1,
+            "example must be injected once"
+        );
+        assert_eq!(
+            messages.len(),
+            2,
+            "no user prompt => exactly catalog + example"
+        );
+
+        // 范例必须排在目录提示之后。
+        let catalog_idx = messages
+            .iter()
+            .position(|m| m.content.contains(CATALOG_MARKER))
+            .expect("catalog present");
+        let example_idx = messages
+            .iter()
+            .position(|m| m.content.contains(EXAMPLE_MARKER))
+            .expect("example present");
+        assert!(
+            example_idx > catalog_idx,
+            "example must come after the catalog prompt"
+        );
+    }
+
+    // An example without generative_ui is never injected: off / null gate it out
+    // exactly like the catalog prompt.
+    #[test]
+    fn build_system_messages_ignores_example_when_generative_ui_off_or_null() {
+        let example = format!(r#"{{"root":"{EXAMPLE_MARKER}","elements":{{}}}}"#);
+
+        let off = MessageService::build_system_messages(&None, Some(false), Some(example.as_str()));
+        assert_eq!(
+            example_messages(&off),
+            0,
+            "Some(false) must not inject example"
+        );
+        assert!(off.is_empty(), "off + no user prompt => no messages");
+
+        let null = MessageService::build_system_messages(&None, None, Some(example.as_str()));
+        assert_eq!(example_messages(&null), 0, "None must not inject example");
+        assert!(null.is_empty(), "None + no user prompt => no messages");
+    }
+
+    // A blank example is dropped even when generative_ui is on: only the catalog
+    // prompt survives (mirrors the blank-user-prompt handling).
+    #[test]
+    fn build_system_messages_drops_blank_example() {
+        let messages = MessageService::build_system_messages(&None, Some(true), Some("   "));
+        assert_eq!(catalog_messages(&messages), 1);
+        assert_eq!(example_messages(&messages), 0, "blank example is dropped");
+        assert_eq!(messages.len(), 1, "only the catalog prompt remains");
     }
 }
