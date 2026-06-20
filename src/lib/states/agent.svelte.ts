@@ -119,6 +119,7 @@ export const agentActions = {
     mcpServers?: McpServerConfig[];
     skills?: string[];
     generativeUi?: boolean;
+    genuiId?: string;
   }): Promise<Agent> {
     try {
       agentState.isLoading = true;
@@ -136,6 +137,7 @@ export const agentActions = {
         config.mcpServers,
         config.skills,
         config.generativeUi,
+        config.genuiId,
       );
 
       // 添加到列表
@@ -197,7 +199,8 @@ export const agentActions = {
       | "mcpServers"
       | "skills"
       | "reasoning"
-      | "generativeUi",
+      | "generativeUi"
+      | "genuiId",
     value:
       | number
       | boolean

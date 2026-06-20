@@ -63,6 +63,7 @@ export class AppError extends Error {
 // 导出 API 模块
 export * from "./accessibility";
 export * from "./agent";
+export * from "./genui";
 export * from "./chat";
 export * from "./message";
 export * from "./provider";

@@ -1,13 +1,16 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import Modal from "../ui/Modal.svelte";
   import Input from "../ui/Input.svelte";
   import Button from "../ui/Button.svelte";
+  import Select from "../ui/Select.svelte";
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TableBaseRow from "../ui/table/TableBaseRow.svelte";
   import SwitchRow from "../ui/table/SwitchRow.svelte";
   import { Bot } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
+  import { genuiState, genuiActions } from "$lib/states/genui.svelte";
 
   interface Props {
     open: boolean;
@@ -26,9 +29,23 @@
     systemPrompt: string;
     skills: string;
     generativeUi: boolean;
+    // 关联的 GenUI id；空串表示未关联
+    genuiId: string;
   }
 
   let { open, agent, onClose, onSave }: Props = $props();
+
+  // GenUI 下拉选项：首项为「未关联」，其余来自已保存的 GenUI 列表。
+  const genuiOptions = $derived([
+    { value: "", label: "未关联" },
+    ...genuiState.genuis.map((g) => ({ value: g.id ?? "", label: g.name })),
+  ]);
+
+  onMount(() => {
+    if (genuiState.genuis.length === 0) {
+      genuiActions.loadGenuis().catch((e) => console.error("Failed to load GenUIs:", e));
+    }
+  });
 
   // 本地状态，因为 props 是只读的
   let localOpen = $state(false);
@@ -44,6 +61,7 @@
     systemPrompt: "",
     skills: "",
     generativeUi: false,
+    genuiId: "",
   });
 
   let saving = $state(false);
@@ -80,6 +98,7 @@
         systemPrompt: agent.systemPrompt || "",
         skills: agent.skills.join(", "),
         generativeUi: agent.generativeUi ?? false,
+        genuiId: agent.genuiId ?? "",
       };
     } else {
       formData = {
@@ -88,6 +107,7 @@
         systemPrompt: "",
         skills: "",
         generativeUi: false,
+        genuiId: "",
       };
     }
   });
@@ -159,6 +179,17 @@
         description="允许助手在回复中渲染交互式界面"
         bind:checked={formData.generativeUi}
       />
+      {#if formData.generativeUi}
+        <TableBaseRow label="关联 GenUI" layout="vertical">
+          <Select
+            options={genuiOptions}
+            bind:selectedValue={formData.genuiId}
+          />
+          <p class="mt-1 text-xs text-base-content/50">
+            选择一份已保存的 GenUI 模板（可在 Agents 页的 GenUI 标签中创建与管理）。
+          </p>
+        </TableBaseRow>
+      {/if}
     </TableGroup>
 
     <!-- 模型参数 - 始终显示 -->
