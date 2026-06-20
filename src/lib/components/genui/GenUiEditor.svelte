@@ -11,7 +11,6 @@
   } from "$lib/components/chat/renderers/jsonui/resolveSpec";
   import Button from "$lib/components/ui/Button.svelte";
   import Input from "$lib/components/ui/Input.svelte";
-  import Select from "$lib/components/ui/Select.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import { genuiActions } from "$lib/states/genui.svelte";
   import { genuiExamples } from "./examples";
@@ -52,25 +51,22 @@
 
   const isEdit = $derived(Boolean(genui?.id));
 
-  // 「载入示例」选择器：从内置模板库填充编辑器（新建模式）。选择后即把 spec 写入
-  // 左侧文本域、空名称时顺带填名，再把选择器复位到首项（值为空、非 disabled，故
-  // 能真正回弹，也允许再次选中同一示例以「重置」编辑）。
-  let exampleChoice = $state("");
-  const exampleOptions = [
-    { value: "", label: "从示例载入…" },
-    ...genuiExamples.map((e) => ({ value: e.id, label: e.name })),
-  ];
+  // 示例库：把内置模板渲染成可点击的卡片（新建模式，置于编辑器下方）。点击即把 spec
+  // 写入左侧文本域、空名称时顺带填名，并把该卡片高亮为「已载入」。每个示例预先过一遍
+  // explainSpec 做归一化（与右侧实时预览同一管线），非法示例只是缩略图不渲染，而不会
+  // 整页报错。explainSpec 改写的是 JSON.stringify 出来的副本，不会污染原始 example。
+  let loadedExampleId = $state<string | null>(null);
+  const examplePreviews = genuiExamples.map((ex) => {
+    const resolved = explainSpec(JSON.stringify(ex.spec));
+    return { ...ex, preview: resolved.ok ? resolved.spec : null };
+  });
 
   function loadExample(id: string) {
     const ex = genuiExamples.find((e) => e.id === id);
     if (!ex) return;
     specInput = JSON.stringify(ex.spec, null, 2);
     if (!name.trim()) name = ex.name;
-    // 复位到首项要放到下一个 tick：在 change 事件同一刷新内重置受控 <select> 不会
-    // 回写到 DOM。延迟一拍让 Svelte 重新同步原生元素，回到「从示例载入…」。
-    setTimeout(() => {
-      exampleChoice = "";
-    }, 0);
+    loadedExampleId = ex.id;
   }
 
   // 走与聊天相同的 resolveSpec 校验管线；非法时报告失败阶段与原因。
@@ -146,15 +142,6 @@
         <Input label="名称" placeholder="为这份 GenUI 取个名字" bind:value={name} required />
       </div>
       <div class="flex items-center gap-2">
-        {#if !isEdit}
-          <Select
-            options={exampleOptions}
-            bind:selectedValue={exampleChoice}
-            onChange={loadExample}
-            size="sm"
-            autoWidth
-          />
-        {/if}
         {#if isEdit}
           <Button
             variant="danger"
@@ -182,7 +169,7 @@
 
   <!-- 编辑器主体：左 JSON / 右实时渲染 -->
   <div class="flex-1 min-h-0 overflow-y-auto p-4">
-    <div class="grid gap-4 lg:grid-cols-2 h-full min-h-0">
+    <div class="grid gap-4 lg:grid-cols-2 min-h-0 {isEdit ? 'h-full' : ''}">
       <div class="flex flex-col gap-1 min-h-0">
         <div class="text-xs text-base-content/60">spec JSON</div>
         <textarea
@@ -211,6 +198,51 @@
         </div>
       </div>
     </div>
+
+    {#if !isEdit}
+      <section class="mt-6">
+        <div class="mb-2 text-xs text-base-content/60">
+          从示例开始 · 点击卡片载入到左侧编辑（{examplePreviews.length}）
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {#each examplePreviews as ex (ex.id)}
+            <button
+              type="button"
+              onclick={() => loadExample(ex.id)}
+              title={ex.description}
+              class="group flex flex-col overflow-hidden rounded-lg border bg-base-100 text-left transition hover:shadow-sm {loadedExampleId ===
+              ex.id
+                ? 'border-primary ring-1 ring-primary'
+                : 'border-base-300 hover:border-primary/60'}"
+            >
+              <div class="border-b border-base-300 px-3 py-2">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-sm font-medium text-base-content">{ex.name}</span>
+                  {#if loadedExampleId === ex.id}
+                    <span class="shrink-0 text-[10px] font-medium text-primary">已载入</span>
+                  {/if}
+                </div>
+                <div class="mt-0.5 line-clamp-2 text-xs text-base-content/55">{ex.description}</div>
+              </div>
+              <div class="relative h-40 overflow-hidden bg-base-200/30 p-3">
+                {#if ex.preview}
+                  <div class="pointer-events-none">
+                    <JsonUIProvider initialState={{}}>
+                      <Renderer spec={ex.preview} registry={uiRegistry} />
+                    </JsonUIProvider>
+                  </div>
+                  <div
+                    class="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-base-100 to-transparent"
+                  ></div>
+                {:else}
+                  <div class="text-xs text-base-content/40">预览不可用</div>
+                {/if}
+              </div>
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     <details class="mt-4 text-xs text-base-content/60">
       <summary class="cursor-pointer select-none">可用组件（{catalogComponents.length}）</summary>
