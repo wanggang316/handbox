@@ -41,7 +41,6 @@ export const uiZh = {
   "ui.userFallbackName": "用户",
   "ui.notLoggedIn": "未登录",
   // Splash (+page)
-  "ui.splashSlogan": "你的本地优先 AI 工作台",
   "ui.loading": "Loading",
   // Auth callback
   "ui.processingLogin": "正在处理登录…",

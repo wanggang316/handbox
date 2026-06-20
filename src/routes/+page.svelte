@@ -52,7 +52,6 @@
     />
     <div class="splash__brand">
       <h1 class="splash__title">HandBox</h1>
-      <p class="splash__slogan">{t("ui.splashSlogan")}</p>
     </div>
     <div class="splash__loader" role="status" aria-label={t("ui.loading")}>
       <span></span><span></span><span></span>
@@ -100,13 +99,6 @@
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--base-content);
-  }
-
-  .splash__slogan {
-    margin: 0;
-    font-size: 0.875rem;
-    /* 设计系统弱化辅助文字色，深浅主题各有定义 */
-    color: var(--ink-subtle);
   }
 
   .splash__loader {

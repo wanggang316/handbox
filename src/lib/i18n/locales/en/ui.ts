@@ -43,7 +43,6 @@ export const uiEn: Record<keyof typeof uiZh, string> = {
   "ui.userFallbackName": "User",
   "ui.notLoggedIn": "Not signed in",
   // Splash (+page)
-  "ui.splashSlogan": "Your local-first AI workspace",
   "ui.loading": "Loading",
   // Auth callback
   "ui.processingLogin": "Signing you in…",
