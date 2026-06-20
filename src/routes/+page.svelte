@@ -43,13 +43,6 @@
 
 <div class="splash">
   <div class="splash__content">
-    <img
-      class="splash__logo"
-      src="/logo-150.png"
-      alt="HandBox"
-      width="80"
-      height="80"
-    />
     <div class="splash__brand">
       <h1 class="splash__title">HandBox</h1>
     </div>
@@ -78,12 +71,6 @@
     gap: 1.25rem;
     animation: splash-fade-in var(--dur-slow, 300ms) var(--ease-out, ease-out)
       both;
-  }
-
-  .splash__logo {
-    border-radius: 1.125rem;
-    box-shadow: 0 8px 24px -12px var(--overlay);
-    animation: splash-logo-float 3s var(--ease-standard, ease-in-out) infinite;
   }
 
   .splash__brand {
@@ -134,16 +121,6 @@
     }
   }
 
-  @keyframes splash-logo-float {
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-    50% {
-      transform: translateY(-5px);
-    }
-  }
-
   @keyframes splash-dot {
     0%,
     100% {
@@ -159,7 +136,6 @@
   /* 尊重系统「减少动态效果」偏好 */
   @media (prefers-reduced-motion: reduce) {
     .splash__content,
-    .splash__logo,
     .splash__loader span {
       animation: none;
     }
