@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.2.6] - 2026-06-21
+
+### Changed
+- Refreshed the app icon with new artwork.
+- The launch splash screen is simpler — just the HandBox wordmark and a loading
+  indicator; the logo image and tagline are gone.
+
+
 ## [0.2.5] - 2026-06-19
 
 ### Changed
