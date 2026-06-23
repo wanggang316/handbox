@@ -16,7 +16,6 @@
     Settings,
     User,
     LogOut,
-    Box,
     Download,
     Clock,
   } from "@lucide/svelte";
@@ -48,11 +47,6 @@
     console.log("Clicked chat:", chat);
     // 使用 SvelteKit 的客户端路由导航，避免页面重新加载
     goto(`/chat?id=${chat.id}`);
-  }
-
-  function handleArtifactClick() {
-    console.log("Clicked artifact menu");
-    goto(`/artifacts`);
   }
 
   function handleWordsClick() {
@@ -214,16 +208,8 @@
 >
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-3 mb-3">
-    <!-- 全局入口：Artifacts / 任务 -->
+    <!-- 全局入口：任务 -->
     <div class="flex flex-col px-2 space-y-0.5">
-      <MenuButton
-        title="Artifacts"
-        icon={Box}
-        iconSize={16}
-        isActive={currentRoute === "/artifacts"}
-        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onclick={() => handleArtifactClick()}
-      />
       <MenuButton
         title={t("sidebar.jobs")}
         icon={Clock}

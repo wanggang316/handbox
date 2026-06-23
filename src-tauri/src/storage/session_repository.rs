@@ -14,8 +14,8 @@ pub struct SessionRepository {
 
 /// 把空白的可选外键引用归一化为 `None`，使其以 SQL NULL 形式绑定。
 ///
-/// 空字符串的 `agent_id` / `artifact_id` 语义上等同「无引用」。若按 `""` 绑定，
-/// 会触发 `agent_id -> agents(id)` 外键约束失败（不存在 id == "" 的行），导致整行
+/// 空字符串的 `agent_id` 语义上等同「无引用」。若按 `""` 绑定，会触发
+/// `agent_id -> agents(id)` 外键约束失败（不存在 id == "" 的行），导致整行
 /// UPDATE（如重命名）整体回滚。配合读取侧将 NULL 正确解码为 `None`，杜绝 `""` 进入
 /// 外键列。
 fn blank_ref_to_none(value: &Option<String>) -> Option<&str> {
@@ -38,8 +38,8 @@ impl SessionRepository {
             .and_then(|value| serde_json::to_string(value).ok());
 
         let query = r#"
-            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
         sqlx::query(query)
@@ -55,7 +55,6 @@ impl SessionRepository {
             .bind(&session.system_prompt)
             .bind(&mcp_servers_json)
             .bind(session.turn_count)
-            .bind(blank_ref_to_none(&session.artifact_id))
             .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
             .bind(session.generative_ui)
@@ -77,7 +76,7 @@ impl SessionRepository {
     /// 获取 Session 列表
     pub async fn list_sessions(&self, limit: i32, offset: i32) -> Result<Vec<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
             FROM sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -104,7 +103,7 @@ impl SessionRepository {
     /// 根据 ID 获取 Session
     pub async fn get_session_by_id(&self, session_id: &UUID) -> Result<Option<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
             FROM sessions WHERE id = $1
         "#;
 
@@ -137,8 +136,8 @@ impl SessionRepository {
             .and_then(|value| serde_json::to_string(value).ok());
 
         let query = r#"
-            UPDATE sessions SET name = $1, temperature = $2, top_p = $3, top_k = $4, max_tokens = $5, stream = $6, model_id = $7, provider_id = $8, system_prompt = $9, mcp_servers = $10, turn_count = $11, artifact_id = $12, agent_id = $13, reasoning = $14, updated_at = $15
-            WHERE id = $16
+            UPDATE sessions SET name = $1, temperature = $2, top_p = $3, top_k = $4, max_tokens = $5, stream = $6, model_id = $7, provider_id = $8, system_prompt = $9, mcp_servers = $10, turn_count = $11, agent_id = $12, reasoning = $13, updated_at = $14
+            WHERE id = $15
         "#;
 
         let result = sqlx::query(query)
@@ -153,7 +152,6 @@ impl SessionRepository {
             .bind(&session.system_prompt)
             .bind(&mcp_servers_json)
             .bind(session.turn_count)
-            .bind(blank_ref_to_none(&session.artifact_id))
             .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
             .bind(session.updated_at)
@@ -424,11 +422,6 @@ impl SessionRepository {
             turn_count: row.try_get("turn_count").ok(),
             // 显式按 Option 解码：避免 NULL 经 `try_get::<String>().ok()` 落成
             // `Some("")`（再回写时触发 agents 外键失败）。空白同样视为「无引用」。
-            artifact_id: row
-                .try_get::<Option<String>, _>("artifact_id")
-                .ok()
-                .flatten()
-                .filter(|s| !s.trim().is_empty()),
             agent_id: row
                 .try_get::<Option<String>, _>("agent_id")
                 .ok()
@@ -492,7 +485,6 @@ mod tests {
                 },
             ],
             turn_count: Some(5),
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
             generative_ui: None,
@@ -570,7 +562,6 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: None,
             agent_id: Some(agent_id.clone()),
             reasoning: None,
             generative_ui: None,
@@ -585,11 +576,11 @@ mod tests {
         assert_eq!(fetched.agent_id, Some(agent_id));
     }
 
-    // 回归：空字符串的 agent_id / artifact_id 必须归一化为 NULL（读回 None）。
+    // 回归：空字符串的 agent_id 必须归一化为 NULL（读回 None）。
     // 此前整行 UPDATE（重命名 / 自动生成标题）会绑定 ""，触发 agents 外键失败而整体
     // 回滚，导致标题永远写不进去。
     #[tokio::test]
-    async fn test_blank_agent_and_artifact_ids_normalize_to_none() {
+    async fn test_blank_agent_id_normalizes_to_none() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = SessionRepository::new(Arc::new(db));
 
@@ -613,7 +604,6 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: Some(String::new()),
             agent_id: Some(String::new()),
             reasoning: None,
             generative_ui: None,
@@ -626,7 +616,6 @@ mod tests {
         repo.create_session(&session).await.unwrap();
         let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(fetched.agent_id, None);
-        assert_eq!(fetched.artifact_id, None);
 
         // 重命名（整行 UPDATE）：归一化后不再绑定 ""，可正常持久化。
         let mut renamed = fetched.clone();
@@ -637,7 +626,6 @@ mod tests {
         let after = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(after.name, "已生成标题");
         assert_eq!(after.agent_id, None);
-        assert_eq!(after.artifact_id, None);
     }
 
     // VAL-AGENT-009: a session row with generative_ui NULL decodes to None on both
@@ -703,7 +691,6 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
             generative_ui: Some(true),
@@ -754,7 +741,6 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
             generative_ui: Some(true),

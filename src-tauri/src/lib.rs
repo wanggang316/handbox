@@ -18,11 +18,11 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    ArtifactService, GenUiService, JobExecutor, JobScheduler, JobService, McpService,
-    MessageService, ModelService, ProviderService, SessionService, SettingsService,
-    StorageService, UserSessionService, WordService,
+    GenUiService, JobExecutor, JobScheduler, JobService, McpService, MessageService, ModelService,
+    ProviderService, SessionService, SettingsService, StorageService, UserSessionService,
+    WordService,
 };
-use crate::storage::{ArtifactRepository, Database, WordRepository};
+use crate::storage::{Database, WordRepository};
 use crate::utils::logger;
 use std::sync::Arc;
 
@@ -245,15 +245,6 @@ pub fn run() {
             get_provider_configs,
             get_provider_config_by_type,
             hand_ai_list_providers,
-            // Artifact 相关命令
-            artifact_create,
-            artifact_update,
-            artifact_get,
-            artifact_list,
-            artifact_delete,
-            artifact_install,
-            artifact_execute,
-            artifact_init_builtin,
             // 定时任务相关命令
             job_preview_schedule,
             job_create,
@@ -357,10 +348,6 @@ async fn initialize_services(
         tracing::warn!("恢复用户会话失败: {:?}", e);
     }
 
-    // 初始化 Artifact 服务
-    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
-    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
-
     // 初始化 Agent 服务
     let agent_service = AgentService::new(database_service.clone());
 
@@ -462,7 +449,6 @@ async fn initialize_services(
     app.manage(settings_service);
     app.manage(word_service);
     app.manage(user_session_service);
-    app.manage(artifact_service);
     app.manage(agent_service);
     app.manage(genui_service);
     app.manage(agent_session_service);

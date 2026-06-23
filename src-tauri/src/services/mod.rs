@@ -7,7 +7,6 @@ pub mod agent_project;
 pub mod agent_run_types;
 pub mod agent_session;
 pub mod agent_tools;
-pub mod artifact;
 pub mod auth;
 pub mod catalog_sync;
 pub mod chat_engine;
@@ -41,7 +40,6 @@ pub use agent_migration::{
 pub use agent_project::AgentProjectService;
 pub use agent_run_types::{AgentRunAttachment, AgentRunRequest};
 pub use agent_session::{AgentSessionParameter, AgentSessionService};
-pub use artifact::ArtifactService;
 pub use auth::GoogleOAuthService;
 pub use coding_agent_runtime::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, CodingRunSink, RunDriveHandles,

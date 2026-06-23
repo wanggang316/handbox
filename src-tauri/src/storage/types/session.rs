@@ -37,7 +37,6 @@ pub struct Session {
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<McpServerConfig>,
     pub turn_count: Option<i32>,
-    pub artifact_id: Option<UUID>,
     pub agent_id: Option<UUID>, // 关联的 Agent ID
     pub reasoning: Option<SessionReasoningConfig>,
     /// 生成式 UI 开关，会话创建时由 Agent 快照而来（write-once）。
@@ -109,7 +108,6 @@ mod tests {
                 enabled_tools: vec!["tool1".to_string()],
             }],
             turn_count: Some(5),
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
             generative_ui: Some(true),
@@ -146,7 +144,6 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
             generative_ui: Some(true),
@@ -187,7 +184,6 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
             generative_ui: None,

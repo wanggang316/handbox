@@ -22,9 +22,6 @@ export {
   getProviderDropdownOptions
 } from './provider.svelte';
 
-// Artifact 相关
-export { artifactState } from './artifact.svelte';
-
 // 设置相关
 export { settingsState } from './settings.svelte';
 

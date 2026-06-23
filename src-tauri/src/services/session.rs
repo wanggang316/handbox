@@ -132,7 +132,6 @@ impl SessionService {
             system_prompt,
             mcp_servers: mcp_servers.unwrap_or_default(),
             turn_count: Some(5), // 默认值为 5
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
             generative_ui: None,
@@ -192,7 +191,6 @@ impl SessionService {
             system_prompt: agent.system_prompt,
             mcp_servers: agent.mcp_servers,
             turn_count: Some(5),
-            artifact_id: None,
             agent_id: Some(agent_id),
             reasoning: agent.reasoning,
             generative_ui: agent.generative_ui,

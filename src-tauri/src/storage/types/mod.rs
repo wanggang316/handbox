@@ -1,7 +1,6 @@
 pub mod agent;
 pub mod agent_project;
 pub mod agent_session;
-pub mod artifact;
 pub mod common;
 pub mod genui;
 pub mod job;
@@ -16,11 +15,6 @@ pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequ
 pub use agent_project::{AgentProject, CreateAgentProjectRequest};
 pub use agent_session::{
     AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UpdateAgentSessionRequest,
-};
-pub use artifact::{
-    Artifact, ArtifactFilter, ArtifactType, CreateArtifactRequest, ExecuteArtifactRequest,
-    ExecutionConfig, ExecutionResult, InstallArtifactRequest, ModelParameters,
-    UpdateArtifactRequest,
 };
 pub use common::{Timestamp, UUID};
 pub use genui::{CreateGenUiRequest, GenUi, UpdateGenUiRequest};

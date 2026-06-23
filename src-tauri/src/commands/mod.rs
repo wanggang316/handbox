@@ -4,7 +4,6 @@ pub mod agent;
 pub mod agent_project;
 pub mod agent_run;
 pub mod agent_session;
-pub mod artifact;
 pub mod auth;
 pub mod clipboard;
 pub mod debug;
@@ -31,7 +30,6 @@ pub use agent::*;
 pub use agent_project::*;
 pub use agent_run::*;
 pub use agent_session::*;
-pub use artifact::*;
 pub use auth::*;
 // 导出 session 命令，同时保留 chat 别名以保持向后兼容
 pub use session::*;

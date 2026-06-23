@@ -108,7 +108,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../src/lib/internal_artifacts": "internal_artifacts",
       "llm_config.json": "llm_config.json"
     },
     "macOS": {

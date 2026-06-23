@@ -3,7 +3,6 @@
 pub mod agent_project_repository;
 pub mod agent_repository;
 pub mod agent_session_repository;
-pub mod artifact_repository;
 pub mod database;
 pub mod genui_repository;
 pub mod job_repository;
@@ -18,7 +17,6 @@ pub mod word_repository;
 pub use agent_project_repository::AgentProjectRepository;
 pub use agent_repository::AgentRepository;
 pub use agent_session_repository::AgentSessionRepository;
-pub use artifact_repository::ArtifactRepository;
 pub use session_repository::SessionRepository;
 pub use database::Database;
 pub use genui_repository::GenUiRepository;
