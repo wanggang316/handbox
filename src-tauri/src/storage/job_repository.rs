@@ -704,7 +704,6 @@ const EXECUTION_SELECT_COLUMNS: &str = r#"
 mod tests {
     use super::*;
     use crate::storage::types::{Job, JobTarget, SessionStrategy};
-    use std::collections::HashMap;
     use tempfile::tempdir;
 
     /// 建一个临时 SQLite 库并跑全部迁移（含 049/050 的 jobs/job_executions）。
@@ -716,16 +715,14 @@ mod tests {
     }
 
     fn sample_job(id: &str, now: Timestamp) -> Job {
-        let mut env = HashMap::new();
-        env.insert("KEY".to_string(), "value".to_string());
         Job {
             id: id.to_string(),
             name: format!("Job {}", id),
             description: Some("a scheduled job".to_string()),
-            target: JobTarget::Artifact {
-                artifact_id: "artifact_1".to_string(),
-                args: vec!["--flag".to_string()],
-                env,
+            target: JobTarget::Agent {
+                agent_id: "agent_1".to_string(),
+                initial_message: "go".to_string(),
+                project_id: None,
             },
             cron_expr: "0 9 * * *".to_string(),
             timezone: "local".to_string(),
@@ -824,7 +821,7 @@ mod tests {
                 id, name, target_kind, target_config, cron_expr, timezone,
                 enabled, run_count, failure_count, created_at, updated_at
             )
-            VALUES ($1, $2, 'artifact', '{"artifactId":"a1"}', '0 9 * * *', 'local',
+            VALUES ($1, $2, 'prompt', '{"providerId":"p1","modelId":"m1","prompt":"hi"}', '0 9 * * *', 'local',
                     1, 0, 0, $3, $3)
             "#,
         )

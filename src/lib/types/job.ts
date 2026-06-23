@@ -16,14 +16,6 @@ export type Trigger = "schedule" | "manual";
 // Prompt 目标的会话策略（当前仅「每次新建会话」）
 export type SessionStrategy = "new_session";
 
-// 运行 Artifact
-export interface ArtifactTarget {
-  kind: "artifact";
-  artifactId: UUID;
-  args?: string[];
-  env?: Record<string, string>;
-}
-
 // 触发 Agent（可选限定 project）
 export interface AgentTarget {
   kind: "agent";
@@ -42,7 +34,7 @@ export interface PromptTarget {
 }
 
 // 任务目标：按 `kind` 判别的联合类型
-export type JobTarget = ArtifactTarget | AgentTarget | PromptTarget;
+export type JobTarget = AgentTarget | PromptTarget;
 
 // 健壮性配置的具名默认值（与 Rust 端 storage/types/job.rs 常量保持一致）。
 // execTimeoutSecs=0 表示不限超时；maxRetries=0 表示不重试；retryDelaySecs 默认 60s。

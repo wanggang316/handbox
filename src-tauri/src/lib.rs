@@ -359,11 +359,7 @@ async fn initialize_services(
 
     // 初始化 Artifact 服务
     let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
-    let artifact_service = ArtifactService::new(artifact_repo.clone(), app.clone());
-    // 供 JobExecutor 复用的共享 ArtifactService（与被 manage 的实例共享同一
-    // repo + AppHandle，行为一致）。ArtifactService 的派生 Clone 带 `R: Clone`
-    // 约束（Wry 不满足），故另建一个实例而非 clone。
-    let artifact_service_shared = Arc::new(ArtifactService::new(artifact_repo, app.clone()));
+    let artifact_service = ArtifactService::new(artifact_repo, app.clone());
 
     // 初始化 Agent 服务
     let agent_service = AgentService::new(database_service.clone());
@@ -436,7 +432,7 @@ async fn initialize_services(
     // agent 协作者复用与前台命令同源的服务，并把 data_dir 作为 coding-agent session 的
     // base_dir / 无 working_dir 会话的 cwd 回退（与前台命令经 Window PathResolver 解析
     // app_data_dir 等价；后台执行器无 Window，故直接传入）。
-    let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared)
+    let job_executor = JobExecutor::from_db(database_service.clone())
         .with_app_handle(app.clone())
         .with_prompt_services(
             session_service_shared,

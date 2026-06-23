@@ -360,14 +360,10 @@ fn current_timestamp() -> Timestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::ArtifactService;
-    use crate::storage::types::{
-        ArtifactType, CreateArtifactRequest, ExecutionConfig, InstallArtifactRequest, JobTarget,
-    };
-    use crate::storage::{ArtifactRepository, Database};
+    use crate::storage::types::{JobTarget, SessionStrategy};
+    use crate::storage::Database;
     use sqlx::Row;
-    use std::collections::HashMap;
-    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+    use tauri::test::MockRuntime;
     use tempfile::tempdir;
 
     // ---- Pure-function tests (no DB / no runtime): the core scheduling logic ----
@@ -440,7 +436,6 @@ mod tests {
         jobs: JobRepository,
         executions: crate::storage::JobExecutionRepository,
         db: Arc<Database>,
-        artifact_service: Arc<ArtifactService<MockRuntime>>,
         _temp_dir: tempfile::TempDir,
     }
 
@@ -449,12 +444,10 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let db = Arc::new(Database::new(&db_path).await.unwrap());
 
-        let artifact_repo = Arc::new(ArtifactRepository::new(db.clone()));
-        let context = mock_context::<MockRuntime, _>(noop_assets());
-        let app = mock_builder().build(context).expect("build app");
-        let artifact_service = Arc::new(ArtifactService::new(artifact_repo, app.handle().clone()));
-
-        let executor = JobExecutor::from_db(db.clone(), artifact_service.clone());
+        // A `MockRuntime` executor (no AppHandle) is enough to drive scheduling:
+        // dispatch fails cleanly (prompt services are unwired), but the execution
+        // still completes — a row is inserted and finalized, stats advance.
+        let executor = JobExecutor::<MockRuntime>::from_db(db.clone());
         let scheduler = JobScheduler::from_db(db.clone(), executor);
 
         TestEnv {
@@ -462,51 +455,8 @@ mod tests {
             jobs: JobRepository::new(db.clone()),
             executions: crate::storage::JobExecutionRepository::new(db.clone()),
             db,
-            artifact_service,
             _temp_dir: temp_dir,
         }
-    }
-
-    async fn install_shell_artifact(env: &TestEnv, script: &str) -> String {
-        let src_dir = tempdir().unwrap();
-        let entry = src_dir.path().join("main.sh");
-        tokio::fs::write(&entry, script).await.unwrap();
-
-        let artifact = env
-            .artifact_service
-            .create_artifact(CreateArtifactRequest {
-                name: format!("shell-{}", uuid::Uuid::new_v4()),
-                description: None,
-                artifact_type: ArtifactType::Shell,
-                entry_file: "main.sh".to_string(),
-                source_path: Some(src_dir.path().to_string_lossy().to_string()),
-                model_id: None,
-                provider_id: None,
-                system_prompt: None,
-                model_parameters: None,
-                tools: None,
-                execution_config: Some(ExecutionConfig {
-                    args: vec![],
-                    env: HashMap::new(),
-                    permissions: vec![],
-                    timeout: 5000,
-                }),
-                tags: None,
-                icon: None,
-            })
-            .await
-            .expect("create artifact");
-
-        env.artifact_service
-            .install_artifact(InstallArtifactRequest {
-                artifact_id: artifact.id.clone(),
-                model_id: None,
-                provider_id: None,
-            })
-            .await
-            .expect("install artifact");
-        drop(src_dir);
-        artifact.id
     }
 
     fn make_job(id: &str, target: JobTarget, cron: &str, now: Timestamp) -> Job {
@@ -531,11 +481,16 @@ mod tests {
         }
     }
 
-    fn artifact_target(artifact_id: &str) -> JobTarget {
-        JobTarget::Artifact {
-            artifact_id: artifact_id.to_string(),
-            args: vec![],
-            env: HashMap::new(),
+    /// A deterministic fail-clean target: with no prompt services wired the
+    /// dispatch returns a terminal "not configured" failure, so the execution
+    /// still COMPLETES (a running row is inserted then finalized to `failed`)
+    /// and job stats advance — everything scheduling mechanics assert on.
+    fn prompt_target() -> JobTarget {
+        JobTarget::Prompt {
+            provider_id: "p1".into(),
+            model_id: "m1".into(),
+            prompt: "do it".into(),
+            session_strategy: SessionStrategy::NewSession,
         }
     }
 
@@ -570,15 +525,14 @@ mod tests {
     async fn tick_fires_due_enabled_job_and_advances_next_run() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
-        let mut job = make_job("due_job", artifact_target(&artifact_id), "* * * * *", now);
+        let mut job = make_job("due_job", prompt_target(), "* * * * *", now);
         job.next_run_at = Some(now - 1000); // due
         env.jobs.create(&job).await.unwrap();
 
         let dispatched = env.scheduler.tick().await;
         assert_eq!(dispatched, 1, "the single due job is dispatched once");
 
-        // The execution completes (success) — one terminal row.
+        // The execution completes (fail-clean dispatch) — one terminal row.
         assert_eq!(wait_for_terminal_rows(&env, "due_job", 1).await, 1);
 
         // next_run_at was advanced strictly past now BEFORE dispatch.
@@ -592,13 +546,7 @@ mod tests {
     async fn tick_never_fires_disabled_job() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
-        let mut job = make_job(
-            "disabled_job",
-            artifact_target(&artifact_id),
-            "* * * * *",
-            now,
-        );
+        let mut job = make_job("disabled_job", prompt_target(), "* * * * *", now);
         job.enabled = false;
         job.next_run_at = Some(now - 1000); // overdue but disabled
         env.jobs.create(&job).await.unwrap();
@@ -617,8 +565,7 @@ mod tests {
     async fn two_ticks_within_a_minute_fire_once() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
-        let mut job = make_job("once_job", artifact_target(&artifact_id), "* * * * *", now);
+        let mut job = make_job("once_job", prompt_target(), "* * * * *", now);
         job.next_run_at = Some(now - 1000); // due
         env.jobs.create(&job).await.unwrap();
 
@@ -644,8 +591,7 @@ mod tests {
     async fn in_flight_job_is_skipped_by_tick() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
-        let mut job = make_job("busy_job", artifact_target(&artifact_id), "* * * * *", now);
+        let mut job = make_job("busy_job", prompt_target(), "* * * * *", now);
         job.next_run_at = Some(now - 1000); // due
         env.jobs.create(&job).await.unwrap();
 
@@ -685,13 +631,7 @@ mod tests {
     async fn in_flight_slot_released_after_run() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
-        let mut job = make_job(
-            "release_job",
-            artifact_target(&artifact_id),
-            "* * * * *",
-            now,
-        );
+        let mut job = make_job("release_job", prompt_target(), "* * * * *", now);
         job.next_run_at = Some(now - 1000);
         env.jobs.create(&job).await.unwrap();
 
@@ -718,8 +658,7 @@ mod tests {
     async fn failing_target_records_failure_loop_continues() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo boom 1>&2\nexit 7\n").await;
-        let mut job = make_job("fail_job", artifact_target(&artifact_id), "* * * * *", now);
+        let mut job = make_job("fail_job", prompt_target(), "* * * * *", now);
         job.next_run_at = Some(now - 1000);
         env.jobs.create(&job).await.unwrap();
 
@@ -734,7 +673,10 @@ mod tests {
         .await
         .unwrap();
         let status: String = rows[0].try_get("status").unwrap();
-        assert_eq!(status, "failed", "non-zero exit recorded as failed");
+        assert_eq!(
+            status, "failed",
+            "fail-clean dispatch recorded as failed; the loop keeps running"
+        );
 
         // Slot released; next_run_at still advanced so it will fire again.
         for _ in 0..200 {
@@ -753,11 +695,10 @@ mod tests {
     async fn same_tick_dispatches_multiple_due_jobs() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
 
         for i in 0..3 {
             let id = format!("multi_{i}");
-            let mut job = make_job(&id, artifact_target(&artifact_id), "* * * * *", now);
+            let mut job = make_job(&id, prompt_target(), "* * * * *", now);
             job.next_run_at = Some(now - 1000);
             env.jobs.create(&job).await.unwrap();
         }
@@ -777,16 +718,15 @@ mod tests {
     async fn recompute_all_enabled_advances_future_skips_disabled() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
 
         // Enabled, badly overdue (would catch up if we replayed) — must jump to
         // a single future occurrence instead.
-        let mut overdue = make_job("overdue", artifact_target(&artifact_id), "* * * * *", now);
+        let mut overdue = make_job("overdue", prompt_target(), "* * * * *", now);
         overdue.next_run_at = Some(now - 10_000_000);
         env.jobs.create(&overdue).await.unwrap();
 
         // Disabled — left untouched.
-        let mut disabled = make_job("disabled", artifact_target(&artifact_id), "* * * * *", now);
+        let mut disabled = make_job("disabled", prompt_target(), "* * * * *", now);
         disabled.enabled = false;
         disabled.next_run_at = Some(now - 5000);
         env.jobs.create(&disabled).await.unwrap();
@@ -818,8 +758,7 @@ mod tests {
     async fn no_immediate_fire_after_startup_recompute() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
-        let mut overdue = make_job("startup", artifact_target(&artifact_id), "* * * * *", now);
+        let mut overdue = make_job("startup", prompt_target(), "* * * * *", now);
         overdue.next_run_at = Some(now - 10_000_000);
         env.jobs.create(&overdue).await.unwrap();
 
@@ -839,8 +778,7 @@ mod tests {
     async fn reconcile_finalizes_stale_running_rows() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
-        let job = make_job("stale", artifact_target(&artifact_id), "* * * * *", now);
+        let job = make_job("stale", prompt_target(), "* * * * *", now);
         env.jobs.create(&job).await.unwrap();
 
         // Simulate a crash: a running row with no live process behind it.
@@ -871,13 +809,12 @@ mod tests {
     async fn tick_rereads_db_each_time() {
         let env = setup().await;
         let now = current_timestamp();
-        let artifact_id = install_shell_artifact(&env, "echo ran\nexit 0\n").await;
 
         // First tick: nothing scheduled.
         assert_eq!(env.scheduler.tick().await, 0, "idle tick, empty DB");
 
         // Now add a due job and tick again.
-        let mut job = make_job("late", artifact_target(&artifact_id), "* * * * *", now);
+        let mut job = make_job("late", prompt_target(), "* * * * *", now);
         job.next_run_at = Some(now - 1000);
         env.jobs.create(&job).await.unwrap();
 
