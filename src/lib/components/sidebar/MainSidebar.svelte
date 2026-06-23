@@ -13,7 +13,6 @@
   import {
     BookOpen,
     Bot,
-    Search,
     Settings,
     User,
     LogOut,
@@ -25,7 +24,6 @@
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateState } from "$lib/states/update.svelte";
-  import SearchModal from "$lib/components/search/SearchModal.svelte";
 
   // 获取当前选中的聊天 ID
   let currentChatId = $derived(
@@ -101,8 +99,6 @@
     const lastId = uiState.lastAgentSessionId;
     goto(lastId ? `/agent?id=${lastId}` : "/agent");
   }
-
-  let showSearchModal = $state(false);
 
   // 从 authState 获取用户状态
   const currentUser = $derived({
@@ -224,23 +220,6 @@
 >
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-3 mb-3">
-    <!-- 搜索框 -->
-    <div class="px-2">
-      <div class="relative">
-        <Search
-          class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
-          size={14}
-        />
-        <input
-          type="text"
-          placeholder={t("sidebar.searchPlaceholder")}
-          class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 text-[12px]"
-          onfocus={() => (showSearchModal = true)}
-          readonly
-        />
-      </div>
-    </div>
-
     <!-- 全局入口：收藏 / Artifacts -->
     <div class="flex flex-col px-2 space-y-0.5">
       <MenuButton
@@ -411,8 +390,6 @@
       {/if}
     </div>
   {/if}
-
-  <SearchModal bind:open={showSearchModal} />
 </div>
 
 <svelte:window onclick={handleUserMenuOutside} />

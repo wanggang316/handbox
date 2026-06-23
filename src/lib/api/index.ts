@@ -70,7 +70,6 @@ export * from "./provider";
 export * from "./model";
 export * from "./artifact";
 export * from "./settings";
-export * from "./search";
 export * from "./window";
 export * from "./mcp";
 export * from "./skill";

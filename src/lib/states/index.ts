@@ -31,9 +31,6 @@ export { settingsState } from './settings.svelte';
 // MCP 相关
 export { mcpState, mcpActions } from './mcp.svelte';
 
-// 搜索相关
-export { searchState } from './search.svelte';
-
 // UI 相关
 export { uiState, type Notification } from './ui.svelte';
 

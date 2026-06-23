@@ -35,11 +35,6 @@ impl StorageService {
         self.data_dir.join("mcp.json")
     }
 
-    /// 获取搜索历史存储路径
-    pub fn get_search_history_path(&self) -> PathBuf {
-        self.data_dir.join("search_history.json")
-    }
-
     /// 获取日志目录
     pub fn get_logs_dir(&self) -> PathBuf {
         self.data_dir.join("logs")

@@ -19,7 +19,7 @@ use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
     ArtifactService, GenUiService, JobExecutor, JobScheduler, JobService, McpService,
-    MessageService, ModelService, ProviderService, SearchService, SessionService, SettingsService,
+    MessageService, ModelService, ProviderService, SessionService, SettingsService,
     StorageService, UserSessionService, WordService,
 };
 use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
@@ -245,12 +245,6 @@ pub fn run() {
             get_provider_configs,
             get_provider_config_by_type,
             hand_ai_list_providers,
-            // 搜索相关命令
-            search_query,
-            search_history,
-            search_add_history,
-            search_clear_history,
-            search_suggestions,
             // Artifact 相关命令
             artifact_create,
             artifact_update,
@@ -360,8 +354,6 @@ async fn initialize_services(
     // non-streaming). Cloning the service is cheap (its repos / registries are
     // `Arc`-backed), so the executor and the managed instance share state.
     let message_service_shared = Arc::new(message_service.clone());
-
-    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
 
     let settings_service = SettingsService::new(storage_service.clone());
 
@@ -485,7 +477,6 @@ async fn initialize_services(
     app.manage(provider_service);
     app.manage(model_service);
     app.manage(mcp_service);
-    app.manage(search_service);
     app.manage(settings_service);
     app.manage(word_service);
     app.manage(user_session_service);
