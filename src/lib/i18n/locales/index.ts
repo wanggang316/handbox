@@ -15,7 +15,6 @@ import { agentZh } from "./zh/agent";
 import { chatZh } from "./zh/chat";
 import { jobsZh } from "./zh/jobs";
 import { wordsZh } from "./zh/words";
-import { favoritesZh } from "./zh/favorites";
 import { artifactsZh } from "./zh/artifacts";
 import { updateZh } from "./zh/update";
 import { selectionZh } from "./zh/selection";
@@ -29,7 +28,6 @@ import { agentEn } from "./en/agent";
 import { chatEn } from "./en/chat";
 import { jobsEn } from "./en/jobs";
 import { wordsEn } from "./en/words";
-import { favoritesEn } from "./en/favorites";
 import { artifactsEn } from "./en/artifacts";
 import { updateEn } from "./en/update";
 import { selectionEn } from "./en/selection";
@@ -45,7 +43,6 @@ const zh = {
   ...chatZh,
   ...jobsZh,
   ...wordsZh,
-  ...favoritesZh,
   ...artifactsZh,
   ...updateZh,
   ...selectionZh,
@@ -61,7 +58,6 @@ const en = {
   ...chatEn,
   ...jobsEn,
   ...wordsEn,
-  ...favoritesEn,
   ...artifactsEn,
   ...updateEn,
   ...selectionEn,

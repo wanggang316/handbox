@@ -22,7 +22,6 @@ export const uiZh = {
   "ui.newChat": "新建会话",
   "ui.renamePlaceholder": "输入新名称",
   "ui.generateTitle": "生成标题",
-  "ui.favoriteChat": "收藏对话",
   "ui.copyTitle": "复制标题",
   "ui.copyId": "复制 ID",
   // Textarea

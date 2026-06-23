@@ -87,8 +87,6 @@ export const chatZh = {
   "chat.resendMessage": "重发消息",
   "chat.deleteMessage": "删除消息",
   "chat.openInSystemPreview": "点击在系统预览中打开",
-  "chat.favoriteRangeActions": "收藏范围操作",
-  "chat.unfavorite": "取消收藏",
 
   // Assistant 消息
   "chat.reasoningInProgress": "推理中...",
@@ -96,7 +94,6 @@ export const chatZh = {
   "chat.generatingImage": "图像生成中…",
   "chat.copyImage": "复制图片",
   "chat.saveImage": "保存图片",
-  "chat.favoriteImage": "收藏图片",
   "chat.openInFinder": "在 Finder 中打开",
 
   // 工具调用

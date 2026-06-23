@@ -22,7 +22,7 @@ use crate::services::{
     MessageService, ModelService, ProviderService, SessionService, SettingsService,
     StorageService, UserSessionService, WordService,
 };
-use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
+use crate::storage::{ArtifactRepository, Database, WordRepository};
 use crate::utils::logger;
 use std::sync::Arc;
 
@@ -268,17 +268,6 @@ pub fn run() {
             clipboard_copy_image,
             // 图片相关命令
             image_proxy,
-            // 收藏相关命令
-            favorite_toggle,
-            favorite_is_favorited,
-            favorite_list,
-            favorite_list_by_chat,
-            favorite_list_tags,
-            favorite_save_text_ranges,
-            favorite_add_tag,
-            favorite_remove_tag,
-            favorite_delete,
-            favorite_create_external,
             // 辅助功能权限命令
             accessibility_check_permission,
             accessibility_request_permission,
@@ -375,9 +364,6 @@ async fn initialize_services(
     // repo + AppHandle，行为一致）。ArtifactService 的派生 Clone 带 `R: Clone`
     // 约束（Wry 不满足），故另建一个实例而非 clone。
     let artifact_service_shared = Arc::new(ArtifactService::new(artifact_repo, app.clone()));
-
-    // 初始化 Favorite 服务
-    let favorite_repo = FavoriteRepository::new(database_service.clone());
 
     // 初始化 Agent 服务
     let agent_service = AgentService::new(database_service.clone());
@@ -481,7 +467,6 @@ async fn initialize_services(
     app.manage(word_service);
     app.manage(user_session_service);
     app.manage(artifact_service);
-    app.manage(favorite_repo);
     app.manage(agent_service);
     app.manage(genui_service);
     app.manage(agent_session_service);

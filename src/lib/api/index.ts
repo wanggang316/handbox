@@ -75,7 +75,6 @@ export * from "./mcp";
 export * from "./skill";
 export * from "./auth";
 export * from "./word";
-export * from "./favorite";
 export * from "./selection";
 export * from "./agentSession";
 export * from "./agentProject";

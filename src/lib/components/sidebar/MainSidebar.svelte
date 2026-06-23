@@ -16,7 +16,6 @@
     Settings,
     User,
     LogOut,
-    Star,
     Box,
     Download,
     Clock,
@@ -54,11 +53,6 @@
   function handleArtifactClick() {
     console.log("Clicked artifact menu");
     goto(`/artifacts`);
-  }
-
-  function handleFavoriteClick() {
-    console.log("Clicked favorite menu");
-    goto(`/favorites`);
   }
 
   function handleWordsClick() {
@@ -220,16 +214,8 @@
 >
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-3 mb-3">
-    <!-- 全局入口：收藏 / Artifacts -->
+    <!-- 全局入口：Artifacts / 任务 -->
     <div class="flex flex-col px-2 space-y-0.5">
-      <MenuButton
-        title={t("sidebar.favorites")}
-        icon={Star}
-        iconSize={16}
-        isActive={currentRoute === "/favorites"}
-        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onclick={() => handleFavoriteClick()}
-      />
       <MenuButton
         title="Artifacts"
         icon={Box}
