@@ -16,6 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.3.0] - 2026-06-25
+
+### Added
+- Generative UI: assistants and agents can now reply with rich, interactive
+  cards — titles, key-value lists, tables and more — that build up live as the
+  response streams in, instead of plain text.
+- A GenUI template workspace (from the Agents page) where you can create and
+  name your own response layouts, preview them live, and start from built-in
+  example templates.
+- Link a GenUI template to an agent so its replies follow that layout.
+
+### Removed
+- The Artifacts feature has been removed, including the Artifacts page and the
+  ability to schedule an artifact as a job.
+- The Favorites feature has been removed.
+- Global search has been removed.
+
+
 ## [0.2.6] - 2026-06-21
 
 ### Changed
