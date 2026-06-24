@@ -1,0 +1,1310 @@
+<script lang="ts">
+  import { Bell, Box, LayoutGrid, Settings, User } from "@lucide/svelte";
+  import Button from "$lib/components/ui/Button.svelte";
+  import RoundButton from "$lib/components/ui/RoundButton.svelte";
+  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
+  import MenuButton from "$lib/components/ui/MenuButton.svelte";
+  import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
+  import TrafficLightsRedButton from "$lib/components/ui/TrafficLightsRedButton.svelte";
+  import Input from "$lib/components/ui/Input.svelte";
+  import Textarea from "$lib/components/ui/Textarea.svelte";
+  import Select from "$lib/components/ui/Select.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
+  import Slider from "$lib/components/ui/Slider.svelte";
+  import LabeledSlider from "$lib/components/ui/LabeledSlider.svelte";
+  import NumberStepper from "$lib/components/ui/NumberStepper.svelte";
+  import Modal from "$lib/components/ui/Modal.svelte";
+  import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
+  import Drawer from "$lib/components/ui/Drawer.svelte";
+  import InfoTooltip from "$lib/components/ui/InfoTooltip.svelte";
+  import Tabs from "$lib/components/ui/Tabs.svelte";
+  import StatusLabel from "$lib/components/ui/StatusLabel.svelte";
+  import Avatar from "$lib/components/ui/Avatar.svelte";
+  import Menu from "$lib/components/ui/Menu.svelte";
+  import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
+  import ChatList from "$lib/components/ui/ChatList.svelte";
+  import DefaultRow from "$lib/components/ui/table/DefaultRow.svelte";
+  import { Renderer, JsonUIProvider } from "@json-render/svelte";
+  import type { Spec } from "@json-render/core";
+  import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
+  import { uiCatalog } from "$lib/components/chat/renderers/jsonui/catalog";
+  import {
+    explainSpec,
+    type SpecDiagnosticStage,
+  } from "$lib/components/chat/renderers/jsonui/resolveSpec";
+  import {
+    TableGroup,
+    TableBaseRow,
+    SwitchRow,
+    SelectRow,
+    NumberStepperRow,
+    LabeledSliderRow,
+    TextareaRow,
+    TextRow,
+    StatusLabelRow
+  } from "$lib/components/ui/table";
+  import { toastActions } from "$lib/states/toast.svelte";
+
+  let textValue = $state("Hello Handbox");
+  let textareaValue = $state("这是一个多行输入示例。\n支持换行与字符计数。");
+  let selectValue = $state("beta");
+  let toggleValue = $state(true);
+  let sliderValue = $state(35);
+  let labeledValue = $state(0.6);
+  let numberValue = $state(3);
+  let tabValue = $state("overview");
+
+  let modalOpen = $state(false);
+  let confirmOpen = $state(false);
+  let drawerOpen = $state(false);
+
+  let tableToggle = $state(true);
+  let tableSelect = $state("alpha");
+  let tableNumber = $state(2);
+  let tableTextarea = $state("配置说明，支持多行内容。");
+  let tableText = $state("可编辑值");
+
+  // 表单状态校验演示
+  let requiredValue = $state("");
+  let errorValue = $state("");
+  let tableErrorText = $state("");
+  let passwordValue = $state("secret123");
+
+  let activeMenuId = $state("profile");
+  let activeMenuButtonId = $state("active");
+
+  const menuButtonSamples = [
+    { id: "active", title: "当前选中项", icon: LayoutGrid },
+    {
+      id: "long",
+      title: "一个非常非常长的菜单标题用于演示文本截断的省略号显示效果",
+      icon: Box
+    }
+  ];
+
+  const selectOptions = [
+    { value: "alpha", label: "Alpha" },
+    { value: "beta", label: "Beta" },
+    { value: "gamma", label: "Gamma" }
+  ];
+
+  const tabItems = [
+    { value: "overview", label: "概览" },
+    { value: "details", label: "详情" },
+    { value: "activity", label: "动态" }
+  ];
+
+  const menuItems = [
+    { id: "profile", title: "个人资料", icon: User },
+    { id: "notifications", title: "消息通知", icon: Bell },
+    { id: "preferences", title: "偏好设置", icon: Settings },
+    { id: "workspace", title: "工作区", icon: LayoutGrid }
+  ];
+
+  const chatSamples = [
+    { id: "chat-1", title: "产品定位讨论" },
+    { id: "chat-2", title: "模型表现评估" },
+    { id: "chat-3", title: "组件 API 设计" }
+  ];
+
+  // JSON-Render demo specs. Flat (root + elements map), exactly the shape an
+  // AI emits. Every element carries `children` and `visible` because the
+  // generated catalog validator requires both. Composed only from the four
+  // generic components (Card / Stack / Text / Badge).
+  //
+  // Spec A — a translation card assembled entirely from generic primitives.
+  const jsonSpecA: Spec = {
+    root: "card",
+    elements: {
+      card: {
+        type: "Card",
+        props: { title: "serendipity" },
+        children: ["stack"],
+        visible: true
+      },
+      stack: {
+        type: "Stack",
+        props: { gap: "sm" },
+        children: ["translation", "phonetic", "explanation", "pos"],
+        visible: true
+      },
+      translation: {
+        type: "Text",
+        props: { text: "意外发现珍宝的运气", variant: "heading" },
+        children: [],
+        visible: true
+      },
+      phonetic: {
+        type: "Text",
+        props: { text: "/ˌserənˈdɪpɪti/", variant: "muted" },
+        children: [],
+        visible: true
+      },
+      explanation: {
+        type: "Text",
+        props: {
+          text: "在偶然之中发现美好事物的能力或现象；不期而遇的幸运。",
+          variant: "body"
+        },
+        children: [],
+        visible: true
+      },
+      pos: {
+        type: "Badge",
+        props: { label: "n. 名词", tone: "info" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // Spec B — a richer composition: a status card with a heading row of badges
+  // and several text lines, exercising nested Stacks in both directions.
+  const jsonSpecB: Spec = {
+    root: "card",
+    elements: {
+      card: {
+        type: "Card",
+        props: { title: "部署状态" },
+        children: ["body"],
+        visible: true
+      },
+      body: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["badges", "summary", "detail"],
+        visible: true
+      },
+      badges: {
+        type: "Stack",
+        props: { gap: "sm", direction: "row" },
+        children: ["badgeOk", "badgeWarn", "badgeInfo"],
+        visible: true
+      },
+      badgeOk: {
+        type: "Badge",
+        props: { label: "构建成功", tone: "success" },
+        children: [],
+        visible: true
+      },
+      badgeWarn: {
+        type: "Badge",
+        props: { label: "2 条警告", tone: "warning" },
+        children: [],
+        visible: true
+      },
+      badgeInfo: {
+        type: "Badge",
+        props: { label: "v0.2.3", tone: "info" },
+        children: [],
+        visible: true
+      },
+      summary: {
+        type: "Text",
+        props: { text: "已部署到生产环境", variant: "heading" },
+        children: [],
+        visible: true
+      },
+      detail: {
+        type: "Text",
+        props: {
+          text: "提交 d130f98 于 2 分钟前完成发布，所有健康检查均已通过。",
+          variant: "muted"
+        },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-001: StatusLabel four states side by side.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecStatusLabel: Spec = {
+    root: "row",
+    elements: {
+      row: {
+        type: "Stack",
+        props: { gap: "md", direction: "row" },
+        children: ["slEnabled", "slDisabled", "slIdle", "slError"],
+        visible: true
+      },
+      slEnabled: {
+        type: "StatusLabel",
+        props: { status: "enabled", text: "Enabled" },
+        children: [],
+        visible: true
+      },
+      slDisabled: {
+        type: "StatusLabel",
+        props: { status: "disabled", text: "Disabled" },
+        children: [],
+        visible: true
+      },
+      slIdle: {
+        type: "StatusLabel",
+        props: { status: "idle", text: "Idle" },
+        children: [],
+        visible: true
+      },
+      slError: {
+        type: "StatusLabel",
+        props: { status: "error", text: "Error" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-002: Avatar — first letter of "hello" → "H"; sm/md/lg sizes.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecAvatar: Spec = {
+    root: "row",
+    elements: {
+      row: {
+        type: "Stack",
+        props: { gap: "md", direction: "row" },
+        children: ["avSm", "avMd", "avLg"],
+        visible: true
+      },
+      avSm: {
+        type: "Avatar",
+        props: { letter: "hello", size: "sm" },
+        children: [],
+        visible: true
+      },
+      avMd: {
+        type: "Avatar",
+        props: { letter: "world", size: "md" },
+        children: [],
+        visible: true
+      },
+      avLg: {
+        type: "Avatar",
+        props: { letter: "GPT-4", size: "lg" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-003: Divider, KeyValue, Table, InfoTooltip — each rendered.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecAtomics: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["kv", "divH", "tbl", "tip"],
+        visible: true
+      },
+      kv: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "Model", value: "claude-3-7-sonnet" },
+            { key: "Temperature", value: "0.7" },
+            { key: "Max tokens", value: "4096" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      divH: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      },
+      tbl: {
+        type: "Table",
+        props: {
+          columns: ["Name", "Role", "Status"],
+          rows: [
+            ["Alice", "Admin", "Active"],
+            ["Bob", "Viewer", "Inactive"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tip: {
+        type: "InfoTooltip",
+        props: { content: "This tooltip explains an adjacent field inline." },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-004: Nested composition — Card > Stack > [Text, Badge, Divider,
+  // Table, Divider, Stack > [StatusLabel, Avatar, KeyValue], InfoTooltip].
+  // Children must render in declared array order.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecNested: Spec = {
+    root: "card",
+    elements: {
+      card: {
+        type: "Card",
+        props: { title: "Nested Composition" },
+        children: ["body"],
+        visible: true
+      },
+      body: {
+        type: "Stack",
+        props: { gap: "sm", direction: "col" },
+        children: ["heading", "badge", "divider1", "meta", "divider2", "statusRow", "tip"],
+        visible: true
+      },
+      heading: {
+        type: "Text",
+        props: { text: "1 — Text (heading)", variant: "heading" },
+        children: [],
+        visible: true
+      },
+      badge: {
+        type: "Badge",
+        props: { label: "2 — Badge (success)", tone: "success" },
+        children: [],
+        visible: true
+      },
+      divider1: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      },
+      meta: {
+        type: "Table",
+        props: {
+          columns: ["#", "Component"],
+          rows: [
+            ["3", "Divider (above)"],
+            ["4", "Table (this)"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      divider2: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      },
+      statusRow: {
+        type: "Stack",
+        props: { gap: "md", direction: "row" },
+        children: ["sl", "av", "kv"],
+        visible: true
+      },
+      sl: {
+        type: "StatusLabel",
+        props: { status: "enabled", text: "5 — StatusLabel" },
+        children: [],
+        visible: true
+      },
+      av: {
+        type: "Avatar",
+        props: { letter: "6-Avatar", size: "sm" },
+        children: [],
+        visible: true
+      },
+      kv: {
+        type: "KeyValue",
+        props: { items: [{ key: "7 — KeyValue", value: "present" }] },
+        children: [],
+        visible: true
+      },
+      tip: {
+        type: "InfoTooltip",
+        props: { content: "8 — InfoTooltip: last child in order." },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-005: Graceful degradation.
+  //   - Avatar letter:"" (empty string exercises degraded path, keeps type OK)
+  //   - Card without title (title is optional)
+  //   - KeyValue item with empty value
+  //   - Table with 0 rows (header only)
+  //   - Table ragged row (cell count != column count)
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecDegrade: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["cardNoTitle", "avEmpty", "kvEmpty", "tblNoRows", "tblRagged"],
+        visible: true
+      },
+      cardNoTitle: {
+        type: "Card",
+        props: {},
+        children: ["cardText"],
+        visible: true
+      },
+      cardText: {
+        type: "Text",
+        props: { text: "Card with no title prop", variant: "muted" },
+        children: [],
+        visible: true
+      },
+      avEmpty: {
+        type: "Avatar",
+        props: { letter: "", size: "md" },
+        children: [],
+        visible: true
+      },
+      kvEmpty: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "Filled key", value: "" },
+            { key: "Another key", value: "" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblNoRows: {
+        type: "Table",
+        props: { columns: ["Col A", "Col B", "Col C"], rows: [] },
+        children: [],
+        visible: true
+      },
+      tblRagged: {
+        type: "Table",
+        props: {
+          columns: ["Col 1", "Col 2", "Col 3"],
+          rows: [
+            ["only one cell"],
+            ["a", "b", "c", "d", "extra cell"]
+          ]
+        },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-006: Long no-space string, CJK, Arabic RTL, combining
+  // diacritics, emoji in new component text fields.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecUnicode: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["slUni", "avUni", "kvUni", "tblUni", "tipUni", "divUni"],
+        visible: true
+      },
+      slUni: {
+        type: "StatusLabel",
+        props: {
+          status: "idle",
+          text: "مرحبا 你好 こんにちは 👋 supercalifragilisticexpialidocious"
+        },
+        children: [],
+        visible: true
+      },
+      avUni: {
+        type: "Avatar",
+        props: { letter: "مرحبا", size: "lg" },
+        children: [],
+        visible: true
+      },
+      kvUni: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "RTL term", value: "مرحبا بالعالم" },
+            {
+              key: "Long no-space",
+              value:
+                "Loremipsumdolorsitametconsecteturadipiscingelitsedeiusmoddolorcatalogexpansionverificationtest"
+            },
+            { key: "CJK + emoji", value: "中文 日本語 한국어 🌍 café naïve ñ é" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblUni: {
+        type: "Table",
+        props: {
+          columns: ["Lang 🌐", "Sample"],
+          rows: [
+            ["Arabic", "مرحبا 👋"],
+            ["CJK", "你好 こんにちは 안녕"],
+            ["Diacritics", "café naïve résumé ñ"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tipUni: {
+        type: "InfoTooltip",
+        props: { content: "Arabic: مرحبا | CJK: 你好 | emoji: 🌍👋 | long: Loremipsumdolorsitamet" },
+        children: [],
+        visible: true
+      },
+      divUni: {
+        type: "Divider",
+        props: { orientation: "horizontal" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-007: XSS payloads as literal text — must display as text, never
+  // execute. Components use text binding (never @html), so these are safe to
+  // feed in; the reviewer confirms no alert() / injected DOM nodes.
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecXss: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["slXss", "kvXss", "tblXss", "avXss"],
+        visible: true
+      },
+      slXss: {
+        type: "StatusLabel",
+        props: {
+          status: "error",
+          text: "<script>alert(1)<\/script> | <img src=x onerror=alert(1)>"
+        },
+        children: [],
+        visible: true
+      },
+      kvXss: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "XSS key", value: "<script>alert(1)<\/script>" },
+            { key: "img payload", value: "<img src=x onerror=alert(1)>" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblXss: {
+        type: "Table",
+        props: {
+          columns: ["Type", "Payload"],
+          rows: [
+            ["script tag", "<script>alert(1)<\/script>"],
+            ["img onerror", "<img src=x onerror=alert(1)>"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      avXss: {
+        type: "Avatar",
+        props: { letter: "<script>alert(1)<\/script>", size: "md" },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // VAL-RENDER-008: markdown markers in text fields — must show literally,
+  // not rendered (components never parse markdown, just display text).
+  // ──────────────────────────────────────────────────────────────────────────
+  const jsonSpecMarkdown: Spec = {
+    root: "col",
+    elements: {
+      col: {
+        type: "Stack",
+        props: { gap: "md", direction: "col" },
+        children: ["slMd", "kvMd", "tblMd", "tipMd"],
+        visible: true
+      },
+      slMd: {
+        type: "StatusLabel",
+        props: { status: "idle", text: "**bold** and _italic_ and `code`" },
+        children: [],
+        visible: true
+      },
+      kvMd: {
+        type: "KeyValue",
+        props: {
+          items: [
+            { key: "**bold key**", value: "# Not a heading" },
+            { key: "[link](http://e)", value: "> blockquote not parsed" }
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tblMd: {
+        type: "Table",
+        props: {
+          columns: ["Marker", "Expected"],
+          rows: [
+            ["**bold**", "literal asterisks"],
+            ["# heading", "literal hash"],
+            ["[x](http://e)", "literal brackets"]
+          ]
+        },
+        children: [],
+        visible: true
+      },
+      tipMd: {
+        type: "InfoTooltip",
+        props: { content: "**bold** # heading [link](http://e) — all literal." },
+        children: [],
+        visible: true
+      }
+    }
+  };
+
+  function triggerToast(type: "success" | "info" | "warning" | "error") {
+    const messages = {
+      success: "保存成功",
+      info: "信息已更新",
+      warning: "请检查输入",
+      error: "操作失败"
+    } as const;
+
+    toastActions[type](messages[type], {
+      hint: "这是一个示例 Toast",
+      code: type.toUpperCase()
+    });
+  }
+
+  // --- JSON-Render Playground ---------------------------------------------
+  // Edit the spec JSON on the left; the right pane renders it live through the
+  // exact pipeline the chat uses (explainSpec runs resolveSpec's stages but
+  // reports the failing stage + reason instead of silently returning null).
+  const playgroundSeed: Spec = {
+    root: "card",
+    elements: {
+      card: { type: "Card", props: { title: "Playground" }, children: ["stack"], visible: true },
+      stack: { type: "Stack", props: { gap: "md" }, children: ["intro", "status", "kv"], visible: true },
+      intro: { type: "Text", props: { text: "编辑左侧 JSON，右侧实时渲染。", variant: "body" }, children: [], visible: true },
+      status: { type: "StatusLabel", props: { status: "enabled", text: "实时校验通过" }, children: [], visible: true },
+      kv: { type: "KeyValue", props: { items: [{ key: "可用组件", value: "10" }, { key: "校验", value: "实时" }] }, children: [], visible: true },
+    },
+  };
+
+  let playgroundInput = $state(JSON.stringify(playgroundSeed, null, 2));
+  const playgroundResult = $derived(explainSpec(playgroundInput));
+  const playgroundSpec = $derived(playgroundResult.ok ? playgroundResult.spec : null);
+  const playgroundError = $derived(playgroundResult.ok ? null : playgroundResult);
+
+  const playgroundExamples: { label: string; spec: Spec }[] = [
+    { label: "翻译卡", spec: jsonSpecA },
+    { label: "状态卡", spec: jsonSpecB },
+    { label: "原子组件", spec: jsonSpecAtomics },
+    { label: "嵌套组合", spec: jsonSpecNested },
+  ];
+
+  function loadExample(spec: Spec) {
+    playgroundInput = JSON.stringify(spec, null, 2);
+  }
+
+  const catalogComponents = Object.entries(uiCatalog.data.components).map(
+    ([name, def]) => ({
+      name,
+      description: (def as { description?: string }).description ?? "",
+    }),
+  );
+
+  const stageLabels: Record<SpecDiagnosticStage, string> = {
+    empty: "空输入",
+    json: "JSON 语法",
+    shape: "顶层结构",
+    components: "组件 / 结构",
+    props: "组件 props",
+    references: "引用完整性",
+  };
+</script>
+
+<div class="p-6 pr-8 space-y-10">
+  <header class="space-y-2">
+    <h1 class="text-xl font-medium text-base-content">UI 组件测试</h1>
+    <p class="text-sm text-base-content/70">
+      用于集中预览公共组件的状态与交互，按类型划分展示。
+    </p>
+  </header>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">JSON-Render Playground</h2>
+    <p class="text-sm text-base-content/70">
+      左侧编辑 spec JSON，右侧实时渲染（走与聊天相同的 resolveSpec 校验管线）；非法时显示失败阶段与原因。
+    </p>
+
+    <div class="flex flex-wrap gap-2">
+      {#each playgroundExamples as example (example.label)}
+        <button
+          type="button"
+          class="px-3 py-1 text-xs rounded-lg border border-base-300 hover:bg-base-200 transition-colors"
+          onclick={() => loadExample(example.spec)}
+        >
+          {example.label}
+        </button>
+      {/each}
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="space-y-1">
+        <div class="text-xs text-base-content/60">spec JSON</div>
+        <textarea
+          bind:value={playgroundInput}
+          spellcheck="false"
+          class="w-full h-96 rounded-lg border border-base-300 bg-base-100 p-3 font-mono text-xs leading-relaxed text-base-content focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+        ></textarea>
+      </div>
+
+      <div class="space-y-1">
+        <div class="text-xs text-base-content/60">渲染结果</div>
+        <div class="min-h-96 rounded-lg border border-base-300 bg-base-100 p-3">
+          {#if playgroundSpec}
+            <JsonUIProvider initialState={{}}>
+              <Renderer spec={playgroundSpec} registry={uiRegistry} />
+            </JsonUIProvider>
+          {:else if playgroundError}
+            <div class="space-y-2">
+              <div class="inline-flex items-center gap-2 text-xs font-medium text-error">
+                <span class="px-2 py-0.5 rounded bg-error/10">{stageLabels[playgroundError.stage]}</span>
+                校验未通过
+              </div>
+              <pre class="whitespace-pre-wrap break-words text-xs text-base-content/70">{playgroundError.message}</pre>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+
+    <details class="text-xs text-base-content/60">
+      <summary class="cursor-pointer select-none">可用组件（{catalogComponents.length}）</summary>
+      <ul class="mt-2 space-y-1">
+        {#each catalogComponents as component (component.name)}
+          <li>
+            <span class="font-mono text-base-content/80">{component.name}</span> — {component.description}
+          </li>
+        {/each}
+      </ul>
+    </details>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">按钮类</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Button</div>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button>Primary</Button>
+          <Button variant="secondary">Secondary</Button>
+          <Button variant="gray">Gray</Button>
+          <Button variant="ghost">Ghost</Button>
+          <Button variant="danger">Danger</Button>
+          <Button variant="clear">Clear</Button>
+          <Button variant="primary" disabled onclick={() => triggerToast("error")}>
+            Disabled
+          </Button>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">RoundButton / CircleButton / IconButton</div>
+        <div class="flex flex-wrap items-center gap-3">
+          <RoundButton label="确认" />
+          <RoundButton label="加载中" loading />
+          <CircleButton icon={Box} ariaLabel="Circle" />
+          <IconButton icon={Settings} ariaLabel="Settings" />
+          <IconButton icon={Settings} ariaLabel="Settings 禁用" disabled />
+          <TrafficLightsRedButton />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">MenuButton</div>
+        <div class="max-w-60 space-y-1">
+          {#each menuButtonSamples as item (item.id)}
+            <MenuButton
+              title={item.title}
+              icon={item.icon}
+              isActive={item.id === activeMenuButtonId}
+              onclick={() => (activeMenuButtonId = item.id)}
+            />
+          {/each}
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">ArrowButton</div>
+        <ArrowButton label="高级选项" />
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">表单类</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Input / Select</div>
+        <Input
+          label="名称"
+          placeholder="请输入名称"
+          value={textValue}
+          onInput={(val) => (textValue = val)}
+        />
+        <Select
+          label="状态"
+          options={selectOptions}
+          placeholder="请选择"
+          bind:selectedValue={selectValue}
+          onChange={(value) => (selectValue = value)}
+        />
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Textarea</div>
+        <Textarea
+          bind:value={textareaValue}
+          rows={4}
+          maxlength={120}
+          showCharCount
+        />
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Toggle / NumberStepper</div>
+        <div class="flex items-center gap-4">
+          <Toggle label="启用" bind:checked={toggleValue} />
+          <NumberStepper bind:value={numberValue} min={0} max={10} step={1} />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Slider / LabeledSlider</div>
+        <Slider
+          label="紧凑度"
+          bind:value={sliderValue}
+          min={0}
+          max={100}
+          step={5}
+          description="拖动滑杆调整参数"
+        />
+        <LabeledSlider
+          bind:value={labeledValue}
+          min={0}
+          max={1}
+          step={0.1}
+          leftLabel="保守"
+          rightLabel="激进"
+          showScaleMarks
+          scaleMarks={[
+            { value: 0, position: 0 },
+            { value: 0.5, position: 50 },
+            { value: 1, position: 100 }
+          ]}
+        />
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">表单状态校验</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Disabled Input / TextRow</div>
+        <Input label="名称（禁用）" value="只读内容" placeholder="请输入名称" disabled />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow label="显示名称（禁用）" value="只读内容" disabled />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Required Input / TextRow</div>
+        <Input
+          label="必填名称"
+          placeholder="必须填写"
+          required
+          value={requiredValue}
+          onInput={(val) => (requiredValue = val)}
+        />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow label="必填显示名称" bind:value={requiredValue} required />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Error Input / TextRow</div>
+        <Input
+          label="邮箱"
+          placeholder="name@example.com"
+          value={errorValue}
+          onInput={(val) => (errorValue = val)}
+          error="请输入有效的邮箱地址"
+        />
+        <div class="rounded-lg border border-[var(--hairline)]">
+          <TextRow
+            label="显示名称"
+            bind:value={errorValue}
+            error="名称不能为空"
+          />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Vertical Password TextRow</div>
+        <div class="rounded-lg border border-[var(--hairline)] p-2">
+          <TextRow
+            label="访问密钥"
+            layout="vertical"
+            isPassword
+            bind:value={passwordValue}
+            placeholder="输入密钥"
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">导航与布局</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Tabs</div>
+        <Tabs value={tabValue} items={tabItems} onChange={(val) => (tabValue = val)} />
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Menu</div>
+        <Menu
+          items={menuItems}
+          activeId={activeMenuId}
+          onItemClick={(item) => (activeMenuId = item.id)}
+        />
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">ResizableSidebar</div>
+        <div class="flex h-40 rounded-lg border border-base-300 overflow-hidden">
+          <ResizableSidebar
+            initialWidth={180}
+            minWidth={140}
+            maxWidth={240}
+            storageKey="components.sidebar.demo"
+          >
+            <div class="h-full bg-base-300 p-3 text-xs text-base-content/70">
+              可拖拽侧栏
+            </div>
+          </ResizableSidebar>
+          <div class="flex-1 p-3 text-xs text-base-content/70">
+            主区域内容
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">反馈与弹层</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Toast</div>
+        <div class="flex flex-wrap gap-2">
+          <Button size="sm" onclick={() => triggerToast("success")}>Success</Button>
+          <Button size="sm" variant="secondary" onclick={() => triggerToast("info")}>Info</Button>
+          <Button size="sm" variant="gray" onclick={() => triggerToast("warning")}>Warning</Button>
+          <Button size="sm" variant="danger" onclick={() => triggerToast("error")}>Error</Button>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Modal / ConfirmModal / Drawer</div>
+        <div class="flex flex-wrap gap-2">
+          <Button size="sm" onclick={() => (modalOpen = true)}>打开 Modal</Button>
+          <Button size="sm" variant="secondary" onclick={() => (confirmOpen = true)}>
+            打开 Confirm
+          </Button>
+          <Button size="sm" variant="gray" onclick={() => (drawerOpen = true)}>
+            打开 Drawer
+          </Button>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">InfoTooltip</div>
+        <div class="flex items-center gap-2 text-sm text-base-content">
+          帮助信息
+          <InfoTooltip content="这里展示提示信息，适合解释表单字段。" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">数据展示</h2>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">Avatar / StatusLabel</div>
+        <div class="flex items-center gap-4">
+          <Avatar src="/logo-openai.png" size="md" />
+          <Avatar letter="H" size="md" />
+          <StatusLabel status="enabled" text="启用" />
+          <StatusLabel status="idle" text="待机" />
+          <StatusLabel status="disabled" text="禁用" />
+          <StatusLabel status="error" text="异常" />
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4 space-y-3">
+        <div class="text-xs text-base-content/60">ChatList</div>
+        <div class="h-44 rounded-lg border border-base-300 overflow-hidden">
+          <ChatList
+            chats={chatSamples}
+            activeId="chat-2"
+            onChatClick={() => triggerToast("info")}
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">表格行组件</h2>
+    <div class="rounded-lg border border-[var(--hairline)] bg-base-300 p-4">
+      <TableGroup title="基础组件" collapsible showDivider>
+        <SwitchRow
+          label="自动同步"
+          bind:checked={tableToggle}
+          description="打开后自动保存配置"
+        />
+        <SelectRow
+          label="运行环境"
+          options={selectOptions}
+          bind:selectedValue={tableSelect}
+          description="选择默认环境"
+        />
+        <NumberStepperRow
+          label="重试次数"
+          bind:value={tableNumber}
+          min={0}
+          max={5}
+          step={1}
+        />
+        <LabeledSliderRow
+          label="创造性"
+          bind:value={labeledValue}
+          min={0}
+          max={1}
+          step={0.1}
+          leftLabel="保守"
+          rightLabel="大胆"
+          scaleMarks={[
+            { value: 0, position: 0 },
+            { value: 0.5, position: 50 },
+            { value: 1, position: 100 }
+          ]}
+        />
+        <TextareaRow
+          label="说明"
+          bind:value={tableTextarea}
+          rows={3}
+          showCharCount
+          maxlength={80}
+          description="支持多行输入"
+        />
+        <TextRow
+          label="显示名称"
+          bind:value={tableText}
+          placeholder="输入名称"
+        />
+        <TextRow
+          label="API 名称"
+          bind:value={tableErrorText}
+          placeholder="输入名称"
+          error="名称已被占用"
+        />
+        <TableBaseRow label="端点地址" error="格式无效，需以 https:// 开头">
+          <span class="text-sm text-base-content/70">https//api.example</span>
+        </TableBaseRow>
+        <StatusLabelRow
+          label="供应商状态"
+          status="enabled"
+          statusText="运行中"
+          icon="AI"
+          onclick={() => triggerToast("success")}
+        />
+        <DefaultRow
+          label="进入高级设置"
+          value="共 6 项"
+          onclick={() => triggerToast("info")}
+        />
+      </TableGroup>
+    </div>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-base font-medium text-base-content">JSON-Render 生成式 UI</h2>
+    <p class="text-sm text-base-content/70">
+      由扁平 spec（root + elements）驱动的通用组件组合，等价于 AI 输出的结构；文本全部经文本绑定渲染（绝不 @html）。
+    </p>
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">Spec A：翻译卡片（由通用组件组合）</div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecA} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">Spec B：状态信息卡（多组件嵌套）</div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecB} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-001: StatusLabel four states (enabled/disabled/idle/error) -->
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-001 — StatusLabel: four states side by side
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecStatusLabel} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-002: Avatar letter → uppercase first char; sm/md/lg sizes -->
+      <div class="space-y-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-002 — Avatar: letter→"H"/"W"/"G", sizes sm/md/lg
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecAvatar} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-003: Divider / KeyValue / Table / InfoTooltip -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-003 — Divider, KeyValue (3 rows), Table (header + 2 data rows), InfoTooltip
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecAtomics} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-004: Nested composition, children order -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-004 — Nested composition: Card › Stack › [Text, Badge, Divider, Table,
+          StatusLabel, Avatar, KeyValue, InfoTooltip] in declared order
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecNested} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-005: Graceful degradation — missing/empty optional fields -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-005 — Degradation: Card no-title, Avatar letter="", KeyValue empty values,
+          Table 0 rows (header only), Table ragged rows
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecDegrade} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-006: Long/unicode/RTL/emoji/CJK -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-006 — Unicode/RTL/emoji: Arabic مرحبا, CJK, long no-space word, emoji 👋🌍
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecUnicode} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-007: XSS payloads — must show as literal text, no execution -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-007 — XSS: &lt;script&gt;alert(1)&lt;/script&gt; and &lt;img onerror&gt; as
+          literal text in StatusLabel/KeyValue/Table/Avatar (no @html anywhere)
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecXss} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+
+      <!-- VAL-RENDER-008: markdown markers — must display literally, not parsed -->
+      <div class="space-y-2 lg:col-span-2">
+        <div class="text-xs text-base-content/60">
+          VAL-RENDER-008 — Markdown literals: **bold** # heading [x](http://e) shown as-is
+        </div>
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={jsonSpecMarkdown} registry={uiRegistry} />
+        </JsonUIProvider>
+      </div>
+    </div>
+  </section>
+</div>
+
+<Modal
+  open={modalOpen}
+  title="示例 Modal"
+  onClose={() => (modalOpen = false)}
+  closeOnBackdropClick
+>
+  <div class="max-w-lg bg-base-300 rounded-lg px-6 py-5">
+    <div class="space-y-2">
+      <h3 class="text-base font-medium text-base-content">Modal 内容</h3>
+      <p class="text-sm text-base-content/70">
+        这里可以放置表单、说明文字或操作按钮。
+      </p>
+      <div class="flex gap-2">
+        <Button size="sm" variant="secondary" onclick={() => (modalOpen = false)}>
+          关闭
+        </Button>
+        <Button size="sm" onclick={() => triggerToast("success")}>执行操作</Button>
+      </div>
+    </div>
+  </div>
+</Modal>
+
+<ConfirmModal
+  open={confirmOpen}
+  title="确认删除"
+  message="确认要删除这条记录吗？此操作不可撤销。"
+  onConfirm={() => {
+    triggerToast("success");
+    confirmOpen = false;
+  }}
+  onCancel={() => (confirmOpen = false)}
+  onClose={() => (confirmOpen = false)}
+/>
+
+<Drawer
+  open={drawerOpen}
+  title="侧边抽屉"
+  onClose={() => (drawerOpen = false)}
+>
+  <div class="p-4 space-y-3">
+    <p class="text-sm text-base-content/70">
+      抽屉适合放置批量操作或辅助信息。
+    </p>
+    <Button size="sm" onclick={() => (drawerOpen = false)}>关闭</Button>
+  </div>
+</Drawer>

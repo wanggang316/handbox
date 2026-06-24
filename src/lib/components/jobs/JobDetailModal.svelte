@@ -83,13 +83,11 @@
     return formatDuration(exec.duration);
   }
 
-  // 目标 kind 决定历史行的渲染形态与跳转目标路由：
-  // - artifact → stdout/stderr/error 输出块（VAL-HISTORY-031 的 artifact 分支）
-  // - prompt   → 「跳转到结果」入口，跳到生成的 chat（/chat?id=<chatId>）
-  // - agent    → 「跳转到结果」入口，跳到生成的 agent 会话（/agent?id=<sessionId>）
+  // 目标 kind 决定历史行展开后的跳转目标路由：
+  // - prompt → 「跳转到结果」入口，跳到生成的 chat（/chat?id=<chatId>）
+  // - agent  → 「跳转到结果」入口，跳到生成的 agent 会话（/agent?id=<sessionId>）
   // 同一 job 的所有执行共享 target.kind；执行行不单独携带 kind，故据此判定。
-  const targetKind = $derived(job?.target.kind ?? "artifact");
-  const isOutputTarget = $derived(targetKind === "artifact");
+  const targetKind = $derived(job?.target.kind ?? "prompt");
 
   // result_ref 指向的会话当前是否可达。lazy 探测：行展开时对其 result_ref
   // 调一次 getChat / getAgentSession，命中错误（如已删除）→ 标记 missing，
@@ -101,7 +99,6 @@
   async function probeResult(exec: JobExecution): Promise<void> {
     const ref = exec.resultRef;
     if (!ref) return;
-    if (isOutputTarget) return;
     if (resultStates[exec.id]) return; // 已探测 / 探测中
     resultStates = { ...resultStates, [exec.id]: "checking" };
     try {
@@ -123,7 +120,6 @@
   // 入口自动从「结果不可用」转为可探测，无需用户重新展开。已探测的 id 由
   // probeResult 内部去重，不会重复请求。
   $effect(() => {
-    if (isOutputTarget) return;
     for (const exec of executions) {
       if (expanded.has(exec.id) && exec.resultRef && !resultStates[exec.id]) {
         void probeResult(exec);
@@ -392,12 +388,13 @@
                   </span>
                 </button>
 
-                <!-- 展开区（行级扩展点）：按目标 kind 区分（VAL-HISTORY-031）。
-                     artifact → stdout / stderr / error 输出块；
-                     prompt/agent → 「跳转到结果」入口（而非输出块）。 -->
+                <!-- 展开区（行级扩展点）：prompt/agent 的「跳转到结果」入口
+                     （跳到生成的 chat / agent 会话）。失败时仍可能有 error。 -->
                 {#if isOpen}
+                  {@const resultState = resultStates[exec.id]}
+                  {@const unavailable =
+                    exec.resultRef == null || resultState === "missing"}
                   <div class="px-3 pb-3 pt-1 space-y-3 border-t border-base-300">
-                    {#if isOutputTarget}
                       {#if exec.error != null}
                         <div>
                           <p class="text-xs font-medium text-error/80 mb-1">
@@ -408,38 +405,6 @@
                         </div>
                       {/if}
 
-                      <div>
-                        <p class="text-xs font-medium text-base-content/60 mb-1">
-                          stdout
-                        </p>
-                        <pre
-                          class="text-xs bg-base-100 text-base-content/80 rounded-md p-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{exec.stdout ??
-                            ""}</pre>
-                      </div>
-
-                      <div>
-                        <p class="text-xs font-medium text-base-content/60 mb-1">
-                          stderr
-                        </p>
-                        <pre
-                          class="text-xs bg-base-100 text-base-content/80 rounded-md p-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{exec.stderr ??
-                            ""}</pre>
-                      </div>
-                    {:else}
-                      <!-- prompt/agent：结果跳转入口。失败时仍可能有 error。 -->
-                      {#if exec.error != null}
-                        <div>
-                          <p class="text-xs font-medium text-error/80 mb-1">
-                            error
-                          </p>
-                          <pre
-                            class="text-xs bg-base-100 text-error rounded-md p-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{exec.error}</pre>
-                        </div>
-                      {/if}
-
-                      {@const resultState = resultStates[exec.id]}
-                      {@const unavailable =
-                        exec.resultRef == null || resultState === "missing"}
                       <div class="pt-1">
                         {#if unavailable}
                           <div
@@ -469,7 +434,6 @@
                           </button>
                         {/if}
                       </div>
-                    {/if}
                   </div>
                 {/if}
               </li>

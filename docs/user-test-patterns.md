@@ -37,6 +37,7 @@ For pure-frontend work (UI consistency, component refactors, theming, accessibil
 - **Static-check diff:** `npm run check` (= `svelte-kit sync && svelte-check`). It is the only frontend static gate (no prettier/eslint configured). Assertions compare against a **recorded baseline** (state the baseline error/warning count + files in the case); any failure beyond baseline = FAIL.
 - **Structural guards (grep):** for invariants with no visible surface (an anti-pattern removed, a token present/absent), `grep` the source as terminal-output evidence — e.g. `grep -rn "var(--color-blue-500)" src` returns empty. These are `(guard: ...)` assertions, not user-observable behavior.
 - **Ready signal:** vite stdout logs `ready in NNNms` AND the gallery page renders its "UI 组件测试" heading with no console errors.
+- **JSON-Render generative-UI section:** the gallery's "JSON-Render 生成式 UI" section demos all 10 json-render catalog components (Card/Text/Badge/Stack + StatusLabel/Avatar/Divider/KeyValue/Table/InfoTooltip) via hand-authored `Spec` literals — covering single render, nested order, empty/degenerate fields, unicode/RTL/emoji, literal XSS/markdown payloads, and both themes. Verify via `npm run dev` (no Tauri host needed). For XSS, probe the DOM with `javascript_tool` (assert 0 injected `<script>`/`<img>`/`onerror` nodes), not just a screenshot.
 - **Coverage gap:** the gallery does NOT demo `MenuButton` or `TitleBar`; assert those separately (extend the gallery, or inspect in `tauri dev`).
 
 ### HTTP API / Web / Mobile

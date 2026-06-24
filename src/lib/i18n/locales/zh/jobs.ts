@@ -17,7 +17,6 @@ export const jobsZh = {
   "jobs.delete.failed": "删除失败，请重试",
 
   // 卡片
-  "jobs.target.artifact": "Artifact",
   "jobs.target.agent": "Agent",
   "jobs.target.prompt": "Prompt",
   "jobs.view.aria": "查看任务 {name} 详情",
@@ -118,23 +117,6 @@ export const jobsZh = {
 
   // 目标选择器
   "jobs.target.kindLabel": "目标类型",
-  "jobs.target.artifactLabel": "运行的 Artifact",
-  "jobs.target.artifactLoading": "加载 Artifact 列表…",
-  "jobs.target.artifactEmpty": "暂无已安装的 Artifact，请先在 Artifact 页安装。",
-  "jobs.target.artifactSelect": "请选择 Artifact",
-  "jobs.target.artifactRequired": "请选择一个 Artifact",
-  "jobs.target.argsLabel": "命令行参数",
-  "jobs.target.argsAdd": "添加参数",
-  "jobs.target.argsEmpty": "无额外参数",
-  "jobs.target.argAria": "参数 {n}",
-  "jobs.target.argRemoveAria": "删除参数 {n}",
-  "jobs.target.argPlaceholder": "--flag 或 value",
-  "jobs.target.envLabel": "环境变量",
-  "jobs.target.envAdd": "添加变量",
-  "jobs.target.envEmpty": "无环境变量",
-  "jobs.target.envKeyAria": "环境变量名 {n}",
-  "jobs.target.envValueAria": "环境变量值 {n}",
-  "jobs.target.envRemoveAria": "删除环境变量 {n}",
   "jobs.target.modelLabel": "模型",
   "jobs.target.modelRequired": "请选择供应商与模型",
   "jobs.target.promptLabel": "Prompt 文本",

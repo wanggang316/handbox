@@ -24,7 +24,6 @@ export const uiEn: Record<keyof typeof uiZh, string> = {
   "ui.newChat": "New chat",
   "ui.renamePlaceholder": "Enter a new name",
   "ui.generateTitle": "Generate title",
-  "ui.favoriteChat": "Favorite chat",
   "ui.copyTitle": "Copy title",
   "ui.copyId": "Copy ID",
   // Textarea

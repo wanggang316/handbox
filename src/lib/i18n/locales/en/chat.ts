@@ -95,8 +95,6 @@ export const chatEn: Record<keyof typeof chatZh, string> = {
   "chat.resendMessage": "Resend message",
   "chat.deleteMessage": "Delete message",
   "chat.openInSystemPreview": "Click to open in system preview",
-  "chat.favoriteRangeActions": "Favorite range actions",
-  "chat.unfavorite": "Unfavorite",
 
   // Assistant message
   "chat.reasoningInProgress": "Reasoning...",
@@ -104,7 +102,6 @@ export const chatEn: Record<keyof typeof chatZh, string> = {
   "chat.generatingImage": "Generating image…",
   "chat.copyImage": "Copy image",
   "chat.saveImage": "Save image",
-  "chat.favoriteImage": "Favorite image",
   "chat.openInFinder": "Reveal in Finder",
 
   // Tool calls

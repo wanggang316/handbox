@@ -18,6 +18,8 @@ pub enum AgentParameter {
     SystemPrompt(Option<String>),
     McpServers(Vec<McpServerConfig>),
     Skills(Vec<String>),
+    GenerativeUi(Option<bool>),
+    GenUiId(Option<UUID>),
 }
 
 /// Agent 服务
@@ -46,6 +48,8 @@ impl AgentService {
         system_prompt: Option<String>,
         mcp_servers: Option<Vec<McpServerConfig>>,
         skills: Option<Vec<String>>,
+        generative_ui: Option<bool>,
+        genui_id: Option<UUID>,
     ) -> Result<Agent, AppError> {
         let now = Self::current_timestamp();
 
@@ -61,6 +65,8 @@ impl AgentService {
             system_prompt,
             mcp_servers: mcp_servers.unwrap_or_default(),
             skills: skills.unwrap_or_default(),
+            generative_ui,
+            genui_id,
             created_at: now,
             updated_at: now,
         };
@@ -108,6 +114,8 @@ impl AgentService {
             AgentParameter::SystemPrompt(prompt) => agent.system_prompt = prompt,
             AgentParameter::McpServers(servers) => agent.mcp_servers = servers,
             AgentParameter::Skills(skills) => agent.skills = skills,
+            AgentParameter::GenerativeUi(v) => agent.generative_ui = v,
+            AgentParameter::GenUiId(v) => agent.genui_id = v,
         }
 
         agent.updated_at = Self::current_timestamp();
@@ -116,6 +124,10 @@ impl AgentService {
     }
 
     /// 批量更新 Agent 设置
+    ///
+    /// 注意：本方法刻意不含 `generative_ui` 参数（与 `create_agent` 不同）。该字段
+    /// 通过 `update_agent_parameter(AgentParameter::GenerativeUi)`（对应前端
+    /// `agent_update_field` 的 "generativeUi" 路径）单独更新，不走批量更新——并非遗漏。
     pub async fn update_agent(
         &self,
         agent_id: UUID,
@@ -229,6 +241,8 @@ mod tests {
                     enabled_tools: vec!["tool1".to_string()],
                 }]),
                 Some(vec!["code-analysis".to_string(), "refactoring".to_string()]),
+                None,
+                None,
             )
             .await
             .expect("agent creation failed");
@@ -274,6 +288,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -283,6 +299,8 @@ mod tests {
         service
             .create_agent(
                 "Agent 2".to_string(),
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -314,6 +332,8 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -357,6 +377,8 @@ mod tests {
         let created = service
             .create_agent(
                 "Original Name".to_string(),
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -425,6 +447,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -450,6 +474,8 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -508,6 +534,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -557,6 +585,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -583,5 +613,115 @@ mod tests {
         assert_eq!(updated.top_p, Some(0.9)); // 保持原值
         assert_eq!(updated.top_k, Some(40)); // 保持原值
         assert_eq!(updated.max_tokens, Some(2048)); // 保持原值
+    }
+
+    /// VAL-AGENT-005: creating an agent with generative_ui = Some(true)
+    /// persists `true` and reads back `true`.
+    #[tokio::test]
+    async fn creates_agent_with_generative_ui_true() {
+        let db = create_test_database().await;
+        let service = AgentService::new(db);
+
+        let created = service
+            .create_agent(
+                "Generative Agent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(true),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(created.generative_ui, Some(true));
+
+        let fetched = service.get_agent(created.id).await.unwrap();
+        assert_eq!(fetched.generative_ui, Some(true));
+    }
+
+    /// VAL-AGENT-004: turning generative_ui OFF must persist `false`, not be
+    /// swallowed as a falsy value at the service layer.
+    #[tokio::test]
+    async fn update_generative_ui_false_persists() {
+        let db = create_test_database().await;
+        let service = AgentService::new(db);
+
+        let created = service
+            .create_agent(
+                "Generative Agent".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(true),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.generative_ui, Some(true));
+
+        let updated = service
+            .update_agent_parameter(
+                created.id.clone(),
+                AgentParameter::GenerativeUi(Some(false)),
+            )
+            .await
+            .expect("update generative_ui failed");
+        assert_eq!(updated.generative_ui, Some(false));
+
+        let fetched = service.get_agent(created.id).await.unwrap();
+        assert_eq!(fetched.generative_ui, Some(false));
+    }
+
+    /// VAL-AGENT-006: editing an unrelated field (Name) must preserve
+    /// generative_ui and the other unrelated fields.
+    #[tokio::test]
+    async fn preserves_generative_ui_on_unrelated_edit() {
+        let db = create_test_database().await;
+        let service = AgentService::new(db);
+
+        let created = service
+            .create_agent(
+                "Original Name".to_string(),
+                Some("gpt-4o".to_string()),
+                Some(0.7),
+                None,
+                None,
+                None,
+                None,
+                Some("Original prompt".to_string()),
+                None,
+                Some(vec!["skill1".to_string()]),
+                Some(true),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let updated = service
+            .update_agent_parameter(
+                created.id.clone(),
+                AgentParameter::Name("Renamed".to_string()),
+            )
+            .await
+            .expect("rename failed");
+
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(updated.generative_ui, Some(true)); // preserved
+        assert_eq!(updated.system_prompt, Some("Original prompt".to_string()));
+        assert_eq!(updated.skills, vec!["skill1".to_string()]);
+        assert_eq!(updated.temperature, Some(0.7));
     }
 }

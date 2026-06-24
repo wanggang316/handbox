@@ -20,7 +20,6 @@ export const jobsEn: Record<keyof typeof jobsZh, string> = {
   "jobs.delete.failed": "Delete failed, please try again",
 
   // Card
-  "jobs.target.artifact": "Artifact",
   "jobs.target.agent": "Agent",
   "jobs.target.prompt": "Prompt",
   "jobs.view.aria": "View job {name} details",
@@ -128,24 +127,6 @@ export const jobsEn: Record<keyof typeof jobsZh, string> = {
 
   // Target picker
   "jobs.target.kindLabel": "Target type",
-  "jobs.target.artifactLabel": "Artifact to run",
-  "jobs.target.artifactLoading": "Loading Artifact list…",
-  "jobs.target.artifactEmpty":
-    "No installed Artifacts, please install one on the Artifact page first.",
-  "jobs.target.artifactSelect": "Please select an Artifact",
-  "jobs.target.artifactRequired": "Please select an Artifact",
-  "jobs.target.argsLabel": "Command-line arguments",
-  "jobs.target.argsAdd": "Add argument",
-  "jobs.target.argsEmpty": "No extra arguments",
-  "jobs.target.argAria": "Argument {n}",
-  "jobs.target.argRemoveAria": "Remove argument {n}",
-  "jobs.target.argPlaceholder": "--flag or value",
-  "jobs.target.envLabel": "Environment variables",
-  "jobs.target.envAdd": "Add variable",
-  "jobs.target.envEmpty": "No environment variables",
-  "jobs.target.envKeyAria": "Environment variable name {n}",
-  "jobs.target.envValueAria": "Environment variable value {n}",
-  "jobs.target.envRemoveAria": "Remove environment variable {n}",
   "jobs.target.modelLabel": "Model",
   "jobs.target.modelRequired": "Please select a provider and model",
   "jobs.target.promptLabel": "Prompt text",

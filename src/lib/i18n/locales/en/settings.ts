@@ -18,6 +18,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.sidebar.models": "Models",
   "settings.sidebar.agentTools": "Agent Tools",
   "settings.sidebar.skills": "Skills",
+  "settings.sidebar.components": "Components",
   "settings.sidebar.shortcuts": "Shortcuts",
   "settings.sidebar.about": "About",
 

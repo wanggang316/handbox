@@ -20,10 +20,9 @@
 
   let { job, onToggleEnabled, onEdit, onDelete, onView }: Props = $props();
 
-  // 目标类型 -> 展示标签 + 语义配色 chip 类（artifact→primary / agent→info / prompt→success）。
+  // 目标类型 -> 展示标签 + 语义配色 chip 类（agent→info / prompt→success）。
   // 类名写成完整字面量，确保 Tailwind 4 JIT 能静态扫描到（动态拼接 `bg-{x}` 会被 purge）。
   const TARGET_META: Record<Job["target"]["kind"], { label: string; chip: string }> = $derived({
-    artifact: { label: t("jobs.target.artifact"), chip: "bg-primary/20 text-primary" },
     agent: { label: t("jobs.target.agent"), chip: "bg-info/20 text-info" },
     prompt: { label: t("jobs.target.prompt"), chip: "bg-success/20 text-success" },
   });

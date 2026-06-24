@@ -8,21 +8,24 @@
     X as CloseIcon,
     Save,
     FolderOpen,
-    Star,
   } from "@lucide/svelte";
   import ToolCallList from "./ToolCallCard.svelte";
   import type { Message, MessageAttachment } from "$lib/types";
-  import type { TextRange } from "$lib/types/favorite";
-  import { messageStore, favoriteStore } from "$lib/states";
+  import { messageStore } from "$lib/states";
   import { providerLogoUrl } from "$lib/states/provider.svelte";
-  import { highlightRange, openInBrowser, renderMarkdown, markdownInteractions, copyToClipboard } from "$lib/utils";
+  import { openInBrowser, renderMarkdown, markdownInteractions, copyToClipboard } from "$lib/utils";
   import {
     resolveLocalAssetPath,
     isTauriEnvironment,
     openPathInSystem,
   } from "$lib/utils/tauri";
-  import FavoriteButton from "$lib/components/favorite/FavoriteButton.svelte";
   import { t } from "$lib/i18n";
+  import {
+    resolveSpec,
+    looksLikeStreamingSpec,
+  } from "$lib/components/chat/renderers/jsonui/resolveSpec";
+  import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
+  import { Renderer, JsonUIProvider } from "@json-render/svelte";
 
   interface Props {
     message?: Message;
@@ -57,57 +60,26 @@
     return undefined;
   });
 
-  const textRanges = $derived.by(() => {
-    if (!message?.id || !message.sessionId) return [];
-    const ranges = favoriteStore.textRangesByMessageId[message.id] ?? [];
-    return ranges.map((range) => ({ start: range.start, end: range.end }));
-  });
+  // Resolve a json-render spec, including during streaming. While the streamed
+  // JSON is unclosed, `resolveSpec` returns null → the message falls through to
+  // the `isStreamingStructured` placeholder; once the spec closes and validates,
+  // `resolveSpec` hits → the <Renderer> draws it (no per-character JSON flash).
+  // During streaming the resolve is gated by `looksLikeStreamingSpec` so only
+  // spec-shaped streams pay the per-token parse cost; ordinary markdown streams
+  // skip it and stay null.
+  const specHit = $derived(
+    !isStreaming || looksLikeStreamingSpec(message?.content)
+      ? resolveSpec(message?.content)
+      : null,
+  );
 
-  let showRangeMenu = $state(false);
-  let rangeMenuX = $state(0);
-  let rangeMenuY = $state(0);
-  let hoveredRange = $state<TextRange | null>(null);
-  let isRangeMenuHovering = $state(false);
-
-  function handleRangeHover(payload: { range: TextRange; rect: DOMRect }) {
-    hoveredRange = payload.range;
-    rangeMenuX = payload.rect.left + payload.rect.width / 2;
-    rangeMenuY = payload.rect.top - 8;
-    showRangeMenu = true;
-  }
-
-  function handleRangeLeave() {
-    if (isRangeMenuHovering || showRangeMenu) return;
-    showRangeMenu = false;
-    hoveredRange = null;
-  }
-
-  async function handleRemoveRange() {
-    if (!hoveredRange || !message?.id || !message.sessionId) return;
-    try {
-      await favoriteStore.removeTextRange(
-        message.id,
-        message.sessionId,
-        hoveredRange,
-        message.role,
-        message.content,
-      );
-    } catch (error) {
-      console.error("Failed to remove text favorite range:", error);
-    } finally {
-      showRangeMenu = false;
-      hoveredRange = null;
-    }
-  }
-
-  function handleRangeMenuOutside(event: MouseEvent) {
-    if (!showRangeMenu) return;
-    const target = event.target as HTMLElement;
-    if (!target.closest(".favorite-range-menu")) {
-      showRangeMenu = false;
-      hoveredRange = null;
-    }
-  }
+  // A streamed json-render spec is an unclosed JSON fragment that must not be
+  // rendered character by character. Show a loading placeholder; the finished UI
+  // is drawn once streaming ends. Ordinary (non-spec) streamed replies fail the
+  // heuristic and fall through to the normal markdown path.
+  const isStreamingStructured = $derived(
+    isStreaming && looksLikeStreamingSpec(message?.content),
+  );
 
   let assets = $state<MessageAttachment[]>([]);
   let isAssetsLoading = $state(false);
@@ -133,9 +105,6 @@
     y: 0,
     asset: null,
   });
-
-  // 收藏图片状态
-  let isFavoritingImage = $state(false);
 
   // 格式化时间戳
   function formatTime(timestamp: number): string {
@@ -294,29 +263,6 @@
     closeContextMenu();
   }
 
-  async function favoriteImage() {
-    if (!contextMenu.asset || !message) return;
-
-    isFavoritingImage = true;
-    try {
-      const imageMarkdown = `![${contextMenu.asset.name}](${contextMenu.asset.path})`;
-      await favoriteStore.toggleFavorite(
-        message.id ?? "",
-        message.sessionId,
-        imageMarkdown,
-        message.role ?? "assistant",
-        "image",
-        [],
-        undefined,
-        undefined
-      );
-      closeContextMenu();
-    } catch (error) {
-      console.error("[MessageAssistant] Failed to favorite image", error);
-    } finally {
-      isFavoritingImage = false;
-    }
-  }
 </script>
 
 <div
@@ -387,21 +333,20 @@
           {/if}
 
   <!-- 消息内容 -->
-          {#if message && message.id && message.sessionId}
+          {#if specHit}
+            <div class="flex-1 break-words">
+              <JsonUIProvider initialState={{}}>
+                <Renderer spec={specHit} registry={uiRegistry} loading={isStreaming} />
+              </JsonUIProvider>
+            </div>
+          {:else if isStreamingStructured}
             <div
-              class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-              data-message-id={message.id}
-              use:highlightRange={{
-                ranges: textRanges,
-                onRangeHover: handleRangeHover,
-                onRangeLeave: handleRangeLeave,
-                hoverDelayMs: 2000,
-                version: favoriteStore.textRangesVersion,
-              }}
-              data-favorite-highlight-version={favoriteStore.textRangesVersion}
-              use:markdownInteractions
+              class="flex items-center gap-3 rounded-lg border border-dashed border-[var(--hairline)] px-4 py-3 text-sm text-base-content/70"
             >
-              {@html renderMarkdown(message.content || "")}
+              <div
+                class="w-4 h-4 border-2 border-base-content/30 border-t-transparent rounded-full animate-spin"
+              ></div>
+              <span>结构化结果生成中…</span>
             </div>
           {:else if message}
             <div
@@ -492,16 +437,6 @@
             class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
           >
             <div class="inline-flex gap-1">
-              <!-- 收藏按钮 -->
-              {#if message && message.id}
-                <FavoriteButton
-                  messageId={message.id}
-                  chatId={message.sessionId}
-                  content={message.content}
-                  role={message.role}
-                />
-              {/if}
-
               <!-- 复制按钮 -->
               <button
                 class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded transition-colors"
@@ -580,18 +515,6 @@
     </button>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
-      onclick={favoriteImage}
-      disabled={isFavoritingImage}
-    >
-      {#if isFavoritingImage}
-        <div class="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-      {:else}
-        <Star size={14} />
-      {/if}
-      <span>{t("chat.favoriteImage")}</span>
-    </button>
-    <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
       onclick={showInFinder}
     >
       <FolderOpen size={14} />
@@ -599,28 +522,3 @@
     </button>
   </div>
 {/if}
-
-{#if showRangeMenu && hoveredRange}
-  <div
-    class="favorite-range-menu fixed z-[10040] bg-base-100 border border-base-300 rounded-lg shadow-lg px-2 py-1 text-xs"
-    style="left: {rangeMenuX}px; top: {rangeMenuY}px; transform: translateX(-50%);"
-    role="menu"
-    tabindex="-1"
-    aria-label={t("chat.favoriteRangeActions")}
-    onmouseenter={() => (isRangeMenuHovering = true)}
-    onmouseleave={() => {
-      isRangeMenuHovering = false;
-      showRangeMenu = false;
-      hoveredRange = null;
-    }}
-  >
-    <button
-      class="px-2 py-1 rounded hover:bg-error/10 text-error"
-      onclick={handleRemoveRange}
-    >
-      {t("chat.unfavorite")}
-    </button>
-  </div>
-{/if}
-
-<svelte:window on:click={handleRangeMenuOutside} />

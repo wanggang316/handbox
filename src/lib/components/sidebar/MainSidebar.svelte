@@ -13,19 +13,15 @@
   import {
     BookOpen,
     Bot,
-    Search,
     Settings,
     User,
     LogOut,
-    Star,
-    Box,
     Download,
     Clock,
   } from "@lucide/svelte";
   import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateState } from "$lib/states/update.svelte";
-  import SearchModal from "$lib/components/search/SearchModal.svelte";
 
   // 获取当前选中的聊天 ID
   let currentChatId = $derived(
@@ -51,16 +47,6 @@
     console.log("Clicked chat:", chat);
     // 使用 SvelteKit 的客户端路由导航，避免页面重新加载
     goto(`/chat?id=${chat.id}`);
-  }
-
-  function handleArtifactClick() {
-    console.log("Clicked artifact menu");
-    goto(`/artifacts`);
-  }
-
-  function handleFavoriteClick() {
-    console.log("Clicked favorite menu");
-    goto(`/favorites`);
   }
 
   function handleWordsClick() {
@@ -101,8 +87,6 @@
     const lastId = uiState.lastAgentSessionId;
     goto(lastId ? `/agent?id=${lastId}` : "/agent");
   }
-
-  let showSearchModal = $state(false);
 
   // 从 authState 获取用户状态
   const currentUser = $derived({
@@ -224,41 +208,8 @@
 >
   <!-- 顶部固定区域 -->
   <div class="flex-shrink-0 space-y-3 mb-3">
-    <!-- 搜索框 -->
-    <div class="px-2">
-      <div class="relative">
-        <Search
-          class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
-          size={14}
-        />
-        <input
-          type="text"
-          placeholder={t("sidebar.searchPlaceholder")}
-          class="w-full h-7 pl-9 pr-3 bg-base-300 rounded-md text-base-content placeholder:text-base-content/50 text-[12px]"
-          onfocus={() => (showSearchModal = true)}
-          readonly
-        />
-      </div>
-    </div>
-
-    <!-- 全局入口：收藏 / Artifacts -->
+    <!-- 全局入口：任务 -->
     <div class="flex flex-col px-2 space-y-0.5">
-      <MenuButton
-        title={t("sidebar.favorites")}
-        icon={Star}
-        iconSize={16}
-        isActive={currentRoute === "/favorites"}
-        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onclick={() => handleFavoriteClick()}
-      />
-      <MenuButton
-        title="Artifacts"
-        icon={Box}
-        iconSize={16}
-        isActive={currentRoute === "/artifacts"}
-        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onclick={() => handleArtifactClick()}
-      />
       <MenuButton
         title={t("sidebar.jobs")}
         icon={Clock}
@@ -411,8 +362,6 @@
       {/if}
     </div>
   {/if}
-
-  <SearchModal bind:open={showSearchModal} />
 </div>
 
 <svelte:window onclick={handleUserMenuOutside} />

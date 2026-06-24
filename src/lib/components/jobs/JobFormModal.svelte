@@ -6,7 +6,6 @@
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import ScheduleEditor from "$lib/components/jobs/ScheduleEditor.svelte";
   import TargetPicker from "$lib/components/jobs/TargetPicker.svelte";
-  import { artifactState } from "$lib/states/artifact.svelte";
   import {
     providerState,
     providerActions,
@@ -14,12 +13,7 @@
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { AppError } from "$lib/api";
   import { t } from "$lib/i18n";
-  import type {
-    Agent,
-    Artifact,
-    Job,
-    JobTarget,
-  } from "$lib/types";
+  import type { Agent, Job, JobTarget } from "$lib/types";
   import {
     DEFAULT_EXEC_TIMEOUT_SECS,
     DEFAULT_MAX_RETRIES,
@@ -64,7 +58,13 @@
   const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   function emptyTarget(): JobTarget {
-    return { kind: "artifact", artifactId: "", args: [], env: {} };
+    return {
+      kind: "prompt",
+      providerId: "",
+      modelId: "",
+      prompt: "",
+      sessionStrategy: "new_session",
+    };
   }
 
   interface FormState {
@@ -144,29 +144,6 @@
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Artifact 候选：打开时加载已安装的 artifact 列表。
-  // ──────────────────────────────────────────────────────────────────────
-  let artifacts = $state<Artifact[]>([]);
-  let artifactsLoading = $state(false);
-
-  $effect(() => {
-    if (!open) return;
-    artifactsLoading = true;
-    artifactState
-      .loadArtifacts({ isInstalled: true })
-      .then(() => {
-        artifacts = artifactState.artifacts.filter((a) => a.isInstalled);
-      })
-      .catch((e) => {
-        console.error("Failed to load artifacts for job target:", e);
-        artifacts = [];
-      })
-      .finally(() => {
-        artifactsLoading = false;
-      });
-  });
-
-  // ──────────────────────────────────────────────────────────────────────
   // Prompt / Agent 候选：打开时加载已启用供应商（含模型）与 Agent 模板列表。
   // providersWithModels 用于把目标里存的 (providerId, modelId) 解析为展示名；
   // agents 用于 agent 目标的模板下拉。读自共享状态，TargetPicker 不直接触状态。
@@ -213,7 +190,6 @@
 
   // ──────────────────────────────────────────────────────────────────────
   // 校验。目标按 kind 分支校验（与 TargetPicker 的高亮提示同源）：
-  // - artifact：必须选中 artifact（VAL-TARGET-011）
   // - prompt：必须同时选中 provider 与 model（VAL-TARGET-013），且 prompt
   //   文本非空白（VAL-TARGET-012）
   // - agent：必须选中 agent 模板（VAL-TARGET-014）
@@ -262,8 +238,6 @@
   const targetValid = $derived.by((): boolean => {
     const t = form.target;
     switch (t.kind) {
-      case "artifact":
-        return t.artifactId.length > 0;
       case "prompt":
         return (
           t.providerId.length > 0 &&
@@ -382,10 +356,8 @@
       <div class="px-6 py-4">
         <TargetPicker
           bind:target={form.target}
-          {artifacts}
           {providersWithModels}
           {agents}
-          loading={artifactsLoading}
           {agentsLoading}
           showError={showValidation}
         />

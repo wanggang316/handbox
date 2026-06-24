@@ -20,6 +20,11 @@ pub struct Agent {
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<McpServerConfig>,
     pub skills: Vec<String>,
+    /// 是否启用生成式 UI。`None` 等同「关闭」（旧行 / NULL 列）。
+    pub generative_ui: Option<bool>,
+    /// 关联的 GenUI（具名 JSON-Render spec）id。`None` 表示未关联（旧行 / NULL 列）；
+    /// 引用的 GenUI 被删除后由仓储层置空，悬挂 id 在前端表单中显示为「未关联」。
+    pub genui_id: Option<UUID>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -38,6 +43,8 @@ pub struct CreateAgentRequest {
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub skills: Option<Vec<String>>,
+    pub generative_ui: Option<bool>,
+    pub genui_id: Option<UUID>,
 }
 
 /// 更新 Agent 请求
@@ -54,6 +61,8 @@ pub struct UpdateAgentRequest {
     pub system_prompt: Option<String>,
     pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub skills: Option<Vec<String>>,
+    pub generative_ui: Option<bool>,
+    pub genui_id: Option<UUID>,
 }
 
 #[cfg(test)]
@@ -78,6 +87,8 @@ mod tests {
                 enabled_tools: vec!["tool1".to_string()],
             }],
             skills: vec!["code-analysis".to_string(), "refactoring".to_string()],
+            generative_ui: Some(true),
+            genui_id: None,
             created_at: 1000,
             updated_at: 2000,
         };
@@ -87,6 +98,41 @@ mod tests {
         assert_eq!(agent.id, deserialized.id);
         assert_eq!(agent.name, deserialized.name);
         assert_eq!(agent.skills, deserialized.skills);
+        assert_eq!(agent.generative_ui, deserialized.generative_ui);
+    }
+
+    /// 锁定 JS<->Rust 线缆键：serde camelCase 把 `generative_ui` 转成 `generativeUi`
+    /// （小写 `i`），而非 `generativeUI`。前端 `generativeUi?: boolean` 必须与之匹配。
+    /// 键名不符会通过纯 Rust 的 round-trip，却在边界静默丢值。
+    #[test]
+    fn agent_generative_ui_wire_key_is_camel_case() {
+        let agent = Agent {
+            id: "agent_1".to_string(),
+            name: "Code Assistant".to_string(),
+            model: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            reasoning: None,
+            max_tokens: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            skills: vec![],
+            generative_ui: Some(true),
+            genui_id: None,
+            created_at: 1000,
+            updated_at: 2000,
+        };
+
+        let json = serde_json::to_string(&agent).expect("serialize");
+        assert!(
+            json.contains("\"generativeUi\""),
+            "expected wire key `generativeUi`, got: {json}"
+        );
+        assert!(
+            !json.contains("\"generativeUI\""),
+            "wire key must be `generativeUi` (lowercase i), not `generativeUI`: {json}"
+        );
     }
 
     #[test]

@@ -10,12 +10,16 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "release": "bash ./scripts/release.sh",
+    "gen:gui-prompt": "vite-node scripts/gen-generative-ui-prompt.ts",
+    "test": "vitest run",
     "tauri": "tauri"
   },
   "license": "MIT",
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
+    "@json-render/core": "^0.19.0",
+    "@json-render/svelte": "^0.19.0",
     "@lucide/svelte": "^0.539.0",
     "@tailwindcss/typography": "^0.5.16",
     "@tailwindcss/vite": "^4.1.11",
@@ -31,7 +35,8 @@
     "katex": "^0.16.11",
     "lucide-svelte": "^0.542.0",
     "marked": "^16.2.1",
-    "marked-highlight": "^2.1.1"
+    "marked-highlight": "^2.1.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
@@ -42,6 +47,7 @@
     "svelte-check": "^4.0.0",
     "tailwindcss": "^4.1.11",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^3.2.6"
   }
 }

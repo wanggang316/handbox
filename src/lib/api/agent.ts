@@ -25,6 +25,8 @@ export async function createAgent(
   systemPrompt?: string,
   mcpServers?: McpServerConfig[],
   skills?: string[],
+  generativeUi?: boolean,
+  genuiId?: string,
 ): Promise<Agent> {
   const request = {
     name,
@@ -37,6 +39,8 @@ export async function createAgent(
     system_prompt: systemPrompt,
     mcp_servers: mcpServers,
     skills,
+    generative_ui: generativeUi,
+    genui_id: genuiId,
   };
   console.log("Creating agent:", request);
   return apiCall<Agent>("agent_create", { request });
@@ -84,7 +88,9 @@ export async function updateAgentField(
     | "systemPrompt"
     | "mcpServers"
     | "skills"
-    | "reasoning",
+    | "reasoning"
+    | "generativeUi"
+    | "genuiId",
   value:
     | string
     | number

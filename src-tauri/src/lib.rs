@@ -18,11 +18,11 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    ArtifactService, JobExecutor, JobScheduler, JobService, McpService, MessageService,
-    ModelService, ProviderService, SearchService, SessionService, SettingsService, StorageService,
-    UserSessionService, WordService,
+    GenUiService, JobExecutor, JobScheduler, JobService, McpService, MessageService, ModelService,
+    ProviderService, SessionService, SettingsService, StorageService, UserSessionService,
+    WordService,
 };
-use crate::storage::{ArtifactRepository, Database, FavoriteRepository, WordRepository};
+use crate::storage::{Database, WordRepository};
 use crate::utils::logger;
 use std::sync::Arc;
 
@@ -153,6 +153,12 @@ pub fn run() {
             agent_update_field,
             agent_update_name,
             agent_delete,
+            // GenUI（具名 JSON-Render UI spec CRUD）命令
+            genui_create,
+            genui_list,
+            genui_get,
+            genui_update,
+            genui_delete,
             // Agent Session（Agent 模式会话 CRUD）命令
             agent_session_create,
             agent_session_list,
@@ -239,21 +245,6 @@ pub fn run() {
             get_provider_configs,
             get_provider_config_by_type,
             hand_ai_list_providers,
-            // 搜索相关命令
-            search_query,
-            search_history,
-            search_add_history,
-            search_clear_history,
-            search_suggestions,
-            // Artifact 相关命令
-            artifact_create,
-            artifact_update,
-            artifact_get,
-            artifact_list,
-            artifact_delete,
-            artifact_install,
-            artifact_execute,
-            artifact_init_builtin,
             // 定时任务相关命令
             job_preview_schedule,
             job_create,
@@ -268,17 +259,6 @@ pub fn run() {
             clipboard_copy_image,
             // 图片相关命令
             image_proxy,
-            // 收藏相关命令
-            favorite_toggle,
-            favorite_is_favorited,
-            favorite_list,
-            favorite_list_by_chat,
-            favorite_list_tags,
-            favorite_save_text_ranges,
-            favorite_add_tag,
-            favorite_remove_tag,
-            favorite_delete,
-            favorite_create_external,
             // 辅助功能权限命令
             accessibility_check_permission,
             accessibility_request_permission,
@@ -355,8 +335,6 @@ async fn initialize_services(
     // `Arc`-backed), so the executor and the managed instance share state.
     let message_service_shared = Arc::new(message_service.clone());
 
-    let search_service = SearchService::new(database_service.clone(), storage_service.clone());
-
     let settings_service = SettingsService::new(storage_service.clone());
 
     let word_repo = Arc::new(WordRepository::new(database_service.clone()));
@@ -370,19 +348,11 @@ async fn initialize_services(
         tracing::warn!("恢复用户会话失败: {:?}", e);
     }
 
-    // 初始化 Artifact 服务
-    let artifact_repo = Arc::new(ArtifactRepository::new(database_service.clone()));
-    let artifact_service = ArtifactService::new(artifact_repo.clone(), app.clone());
-    // 供 JobExecutor 复用的共享 ArtifactService（与被 manage 的实例共享同一
-    // repo + AppHandle，行为一致）。ArtifactService 的派生 Clone 带 `R: Clone`
-    // 约束（Wry 不满足），故另建一个实例而非 clone。
-    let artifact_service_shared = Arc::new(ArtifactService::new(artifact_repo, app.clone()));
-
-    // 初始化 Favorite 服务
-    let favorite_repo = FavoriteRepository::new(database_service.clone());
-
     // 初始化 Agent 服务
     let agent_service = AgentService::new(database_service.clone());
+
+    // 初始化 GenUI 服务（具名 JSON-Render UI spec 的 CRUD）
+    let genui_service = GenUiService::new(database_service.clone());
 
     // 初始化 Agent Session 服务（Agent 模式会话 CRUD）
     let agent_session_service = AgentSessionService::new(database_service.clone());
@@ -449,7 +419,7 @@ async fn initialize_services(
     // agent 协作者复用与前台命令同源的服务，并把 data_dir 作为 coding-agent session 的
     // base_dir / 无 working_dir 会话的 cwd 回退（与前台命令经 Window PathResolver 解析
     // app_data_dir 等价；后台执行器无 Window，故直接传入）。
-    let job_executor = JobExecutor::from_db(database_service.clone(), artifact_service_shared)
+    let job_executor = JobExecutor::from_db(database_service.clone())
         .with_app_handle(app.clone())
         .with_prompt_services(
             session_service_shared,
@@ -476,13 +446,11 @@ async fn initialize_services(
     app.manage(provider_service);
     app.manage(model_service);
     app.manage(mcp_service);
-    app.manage(search_service);
     app.manage(settings_service);
     app.manage(word_service);
     app.manage(user_session_service);
-    app.manage(artifact_service);
-    app.manage(favorite_repo);
     app.manage(agent_service);
+    app.manage(genui_service);
     app.manage(agent_session_service);
     app.manage(agent_project_service);
     app.manage(skill_service);

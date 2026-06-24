@@ -215,20 +215,12 @@ fn validate_name(name: &str) -> Result<String, AppError> {
 }
 
 /// Validate that a `JobTarget` carries everything its kind needs:
-/// - artifact: non-empty `artifact_id`;
 /// - prompt: non-empty `provider_id`, `model_id`, and `prompt`;
 /// - agent: non-empty `agent_id`.
 ///
 /// Whitespace-only values count as empty.
 fn validate_target(target: &JobTarget) -> Result<(), AppError> {
     match target {
-        JobTarget::Artifact { artifact_id, .. } => {
-            if artifact_id.trim().is_empty() {
-                return Err(AppError::validation_error(
-                    "Artifact target requires an artifact_id",
-                ));
-            }
-        }
         JobTarget::Prompt {
             provider_id,
             model_id,
@@ -333,7 +325,6 @@ mod tests {
     use super::*;
     use crate::storage::types::SessionStrategy;
     use crate::storage::Database;
-    use std::collections::HashMap;
     use tempfile::tempdir;
 
     async fn create_service() -> (JobService, tempfile::TempDir) {
@@ -341,14 +332,6 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let db = Database::new(&db_path).await.expect("db");
         (JobService::from_db(Arc::new(db)), temp_dir)
-    }
-
-    fn artifact_target() -> JobTarget {
-        JobTarget::Artifact {
-            artifact_id: "artifact_1".to_string(),
-            args: vec![],
-            env: HashMap::new(),
-        }
     }
 
     fn prompt_target() -> JobTarget {
@@ -386,7 +369,7 @@ mod tests {
     async fn create_rejects_empty_name() {
         let (service, _tmp) = create_service().await;
         let err = service
-            .create(create_request("", artifact_target()))
+            .create(create_request("", prompt_target()))
             .await
             .expect_err("empty name must fail");
         assert_eq!(err.code, "VALIDATION_ERROR");
@@ -396,7 +379,7 @@ mod tests {
     async fn create_rejects_whitespace_name() {
         let (service, _tmp) = create_service().await;
         let err = service
-            .create(create_request("   ", artifact_target()))
+            .create(create_request("   ", prompt_target()))
             .await
             .expect_err("whitespace name must fail");
         assert_eq!(err.code, "VALIDATION_ERROR");
@@ -406,7 +389,7 @@ mod tests {
     async fn create_trims_name() {
         let (service, _tmp) = create_service().await;
         let job = service
-            .create(create_request("  Daily  ", artifact_target()))
+            .create(create_request("  Daily  ", prompt_target()))
             .await
             .expect("create");
         assert_eq!(job.name, "Daily");
@@ -416,30 +399,15 @@ mod tests {
     async fn create_allows_duplicate_names_with_distinct_ids() {
         let (service, _tmp) = create_service().await;
         let a = service
-            .create(create_request("Same Name", artifact_target()))
+            .create(create_request("Same Name", prompt_target()))
             .await
             .expect("first create");
         let b = service
-            .create(create_request("Same Name", artifact_target()))
+            .create(create_request("Same Name", prompt_target()))
             .await
             .expect("second create with same name");
         assert_eq!(a.name, b.name);
         assert_ne!(a.id, b.id);
-    }
-
-    #[tokio::test]
-    async fn create_rejects_artifact_missing_artifact_id() {
-        let (service, _tmp) = create_service().await;
-        let target = JobTarget::Artifact {
-            artifact_id: "  ".to_string(),
-            args: vec![],
-            env: HashMap::new(),
-        };
-        let err = service
-            .create(create_request("Job", target))
-            .await
-            .expect_err("missing artifact_id must fail");
-        assert_eq!(err.code, "VALIDATION_ERROR");
     }
 
     #[tokio::test]
@@ -619,7 +587,7 @@ mod tests {
     async fn list_executions_empty_for_job_without_runs() {
         let (service, _tmp) = create_service().await;
         let job = service
-            .create(create_request("Job", artifact_target()))
+            .create(create_request("Job", prompt_target()))
             .await
             .expect("create");
 
@@ -646,7 +614,7 @@ mod tests {
         // Seed a job through the service, then drive the execution repository
         // directly to mirror what the executor would produce.
         let job = service
-            .create(create_request("Job", artifact_target()))
+            .create(create_request("Job", prompt_target()))
             .await
             .expect("create");
         let execs = JobExecutionRepository::new(db.clone());
@@ -710,7 +678,7 @@ mod tests {
     async fn update_rejects_invalid_name() {
         let (service, _tmp) = create_service().await;
         let created = service
-            .create(create_request("Job", artifact_target()))
+            .create(create_request("Job", prompt_target()))
             .await
             .expect("create");
         let err = service
@@ -719,7 +687,7 @@ mod tests {
                 JobUpdateRequest {
                     name: "   ".to_string(),
                     description: None,
-                    target: artifact_target(),
+                    target: prompt_target(),
                     cron_expr: "0 9 * * *".to_string(),
                     timezone: "local".to_string(),
                     enabled: true,
@@ -739,7 +707,7 @@ mod tests {
         // the row (VAL-ROBUST-002): 0/0/60, never an unexpected NULL.
         let (service, _tmp) = create_service().await;
         let job = service
-            .create(create_request("Job", artifact_target()))
+            .create(create_request("Job", prompt_target()))
             .await
             .expect("create");
         assert_eq!(job.exec_timeout_secs, DEFAULT_EXEC_TIMEOUT_SECS);
@@ -758,7 +726,7 @@ mod tests {
     async fn create_persists_explicit_robustness_values() {
         // VAL-ROBUST-001: supplied values are stored and read back verbatim.
         let (service, _tmp) = create_service().await;
-        let mut req = create_request("Job", artifact_target());
+        let mut req = create_request("Job", prompt_target());
         req.exec_timeout_secs = Some(300);
         req.max_retries = Some(4);
         req.retry_delay_secs = Some(15);
@@ -776,7 +744,7 @@ mod tests {
         // no out-of-range row is written.
         let (service, _tmp) = create_service().await;
 
-        let mut neg_timeout = create_request("Job", artifact_target());
+        let mut neg_timeout = create_request("Job", prompt_target());
         neg_timeout.exec_timeout_secs = Some(-1);
         assert_eq!(
             service
@@ -787,7 +755,7 @@ mod tests {
             "VALIDATION_ERROR"
         );
 
-        let mut neg_retries = create_request("Job", artifact_target());
+        let mut neg_retries = create_request("Job", prompt_target());
         neg_retries.max_retries = Some(-1);
         assert_eq!(
             service
@@ -798,7 +766,7 @@ mod tests {
             "VALIDATION_ERROR"
         );
 
-        let mut neg_delay = create_request("Job", artifact_target());
+        let mut neg_delay = create_request("Job", prompt_target());
         neg_delay.retry_delay_secs = Some(-5);
         assert_eq!(
             service
@@ -821,7 +789,7 @@ mod tests {
     async fn create_allows_zero_robustness_values() {
         // 0 is meaningful (no timeout / no retries) and must NOT be rejected.
         let (service, _tmp) = create_service().await;
-        let mut req = create_request("Job", artifact_target());
+        let mut req = create_request("Job", prompt_target());
         req.exec_timeout_secs = Some(0);
         req.max_retries = Some(0);
         req.retry_delay_secs = Some(0);
@@ -836,7 +804,7 @@ mod tests {
         // VAL-ROBUST-003 on the update path.
         let (service, _tmp) = create_service().await;
         let created = service
-            .create(create_request("Job", artifact_target()))
+            .create(create_request("Job", prompt_target()))
             .await
             .expect("create");
         let err = service
@@ -845,7 +813,7 @@ mod tests {
                 JobUpdateRequest {
                     name: "Job".to_string(),
                     description: None,
-                    target: artifact_target(),
+                    target: prompt_target(),
                     cron_expr: "0 9 * * *".to_string(),
                     timezone: "local".to_string(),
                     enabled: true,

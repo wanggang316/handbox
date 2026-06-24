@@ -14,8 +14,8 @@ pub struct SessionRepository {
 
 /// 把空白的可选外键引用归一化为 `None`，使其以 SQL NULL 形式绑定。
 ///
-/// 空字符串的 `agent_id` / `artifact_id` 语义上等同「无引用」。若按 `""` 绑定，
-/// 会触发 `agent_id -> agents(id)` 外键约束失败（不存在 id == "" 的行），导致整行
+/// 空字符串的 `agent_id` 语义上等同「无引用」。若按 `""` 绑定，会触发
+/// `agent_id -> agents(id)` 外键约束失败（不存在 id == "" 的行），导致整行
 /// UPDATE（如重命名）整体回滚。配合读取侧将 NULL 正确解码为 `None`，杜绝 `""` 进入
 /// 外键列。
 fn blank_ref_to_none(value: &Option<String>) -> Option<&str> {
@@ -38,8 +38,8 @@ impl SessionRepository {
             .and_then(|value| serde_json::to_string(value).ok());
 
         let query = r#"
-            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            INSERT INTO sessions (id, name, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
         sqlx::query(query)
@@ -55,9 +55,10 @@ impl SessionRepository {
             .bind(&session.system_prompt)
             .bind(&mcp_servers_json)
             .bind(session.turn_count)
-            .bind(blank_ref_to_none(&session.artifact_id))
             .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
+            .bind(session.generative_ui)
+            .bind(&session.genui_spec)
             .bind(session.created_at)
             .bind(session.updated_at)
             .execute(self.db.pool())
@@ -75,7 +76,7 @@ impl SessionRepository {
     /// 获取 Session 列表
     pub async fn list_sessions(&self, limit: i32, offset: i32) -> Result<Vec<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
             FROM sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -102,7 +103,7 @@ impl SessionRepository {
     /// 根据 ID 获取 Session
     pub async fn get_session_by_id(&self, session_id: &UUID) -> Result<Option<Session>, AppError> {
         let query = r#"
-            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, artifact_id, agent_id, reasoning, created_at, updated_at
+            SELECT id, name, last_message_at, message_count, temperature, top_p, top_k, max_tokens, stream, model_id, provider_id, system_prompt, mcp_servers, turn_count, agent_id, reasoning, generative_ui, genui_spec, created_at, updated_at
             FROM sessions WHERE id = $1
         "#;
 
@@ -135,8 +136,8 @@ impl SessionRepository {
             .and_then(|value| serde_json::to_string(value).ok());
 
         let query = r#"
-            UPDATE sessions SET name = $1, temperature = $2, top_p = $3, top_k = $4, max_tokens = $5, stream = $6, model_id = $7, provider_id = $8, system_prompt = $9, mcp_servers = $10, turn_count = $11, artifact_id = $12, agent_id = $13, reasoning = $14, updated_at = $15
-            WHERE id = $16
+            UPDATE sessions SET name = $1, temperature = $2, top_p = $3, top_k = $4, max_tokens = $5, stream = $6, model_id = $7, provider_id = $8, system_prompt = $9, mcp_servers = $10, turn_count = $11, agent_id = $12, reasoning = $13, updated_at = $14
+            WHERE id = $15
         "#;
 
         let result = sqlx::query(query)
@@ -151,7 +152,6 @@ impl SessionRepository {
             .bind(&session.system_prompt)
             .bind(&mcp_servers_json)
             .bind(session.turn_count)
-            .bind(blank_ref_to_none(&session.artifact_id))
             .bind(blank_ref_to_none(&session.agent_id))
             .bind(reasoning_json)
             .bind(session.updated_at)
@@ -161,7 +161,10 @@ impl SessionRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to update session: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Session not found: {}", session.id)));
+            return Err(AppError::not_found(&format!(
+                "Session not found: {}",
+                session.id
+            )));
         }
 
         Ok(())
@@ -181,7 +184,10 @@ impl SessionRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to delete session: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Session not found: {}", session_id)));
+            return Err(AppError::not_found(&format!(
+                "Session not found: {}",
+                session_id
+            )));
         }
 
         Ok(())
@@ -262,7 +268,10 @@ impl SessionRepository {
             .fetch_all(self.db.pool())
             .await
             .map_err(|e| {
-                AppError::internal_error(&format!("Failed to query sessions with MCP server: {}", e))
+                AppError::internal_error(&format!(
+                    "Failed to query sessions with MCP server: {}",
+                    e
+                ))
             })?;
 
         let mut updated_count = 0;
@@ -391,6 +400,10 @@ impl SessionRepository {
         let top_k: Option<i32> = row.try_get::<Option<i32>, _>("top_k")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
         let stream: Option<bool> = row.try_get::<Option<bool>, _>("stream")?;
+        // Option<bool> 显式解码：SQL NULL -> None（旧行），INTEGER 0/1 -> Some(false/true)。
+        let generative_ui: Option<bool> = row.try_get::<Option<bool>, _>("generative_ui")?;
+        // GenUI 范例 spec 快照：SQL NULL（旧行 / 未关联）-> None。
+        let genui_spec: Option<String> = row.try_get::<Option<String>, _>("genui_spec")?;
 
         Ok(Session {
             id: row.try_get("id")?,
@@ -409,17 +422,14 @@ impl SessionRepository {
             turn_count: row.try_get("turn_count").ok(),
             // 显式按 Option 解码：避免 NULL 经 `try_get::<String>().ok()` 落成
             // `Some("")`（再回写时触发 agents 外键失败）。空白同样视为「无引用」。
-            artifact_id: row
-                .try_get::<Option<String>, _>("artifact_id")
-                .ok()
-                .flatten()
-                .filter(|s| !s.trim().is_empty()),
             agent_id: row
                 .try_get::<Option<String>, _>("agent_id")
                 .ok()
                 .flatten()
                 .filter(|s| !s.trim().is_empty()),
             reasoning,
+            generative_ui,
+            genui_spec,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -475,9 +485,10 @@ mod tests {
                 },
             ],
             turn_count: Some(5),
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
+            generative_ui: None,
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -551,9 +562,10 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: None,
             agent_id: Some(agent_id.clone()),
             reasoning: None,
+            generative_ui: None,
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -564,11 +576,11 @@ mod tests {
         assert_eq!(fetched.agent_id, Some(agent_id));
     }
 
-    // 回归：空字符串的 agent_id / artifact_id 必须归一化为 NULL（读回 None）。
+    // 回归：空字符串的 agent_id 必须归一化为 NULL（读回 None）。
     // 此前整行 UPDATE（重命名 / 自动生成标题）会绑定 ""，触发 agents 外键失败而整体
     // 回滚，导致标题永远写不进去。
     #[tokio::test]
-    async fn test_blank_agent_and_artifact_ids_normalize_to_none() {
+    async fn test_blank_agent_id_normalizes_to_none() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = SessionRepository::new(Arc::new(db));
 
@@ -592,9 +604,10 @@ mod tests {
             system_prompt: None,
             mcp_servers: vec![],
             turn_count: None,
-            artifact_id: Some(String::new()),
             agent_id: Some(String::new()),
             reasoning: None,
+            generative_ui: None,
+            genui_spec: None,
             created_at: now,
             updated_at: now,
         };
@@ -603,7 +616,6 @@ mod tests {
         repo.create_session(&session).await.unwrap();
         let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(fetched.agent_id, None);
-        assert_eq!(fetched.artifact_id, None);
 
         // 重命名（整行 UPDATE）：归一化后不再绑定 ""，可正常持久化。
         let mut renamed = fetched.clone();
@@ -614,6 +626,177 @@ mod tests {
         let after = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(after.name, "已生成标题");
         assert_eq!(after.agent_id, None);
-        assert_eq!(after.artifact_id, None);
+    }
+
+    // VAL-AGENT-009: a session row with generative_ui NULL decodes to None on both
+    // read paths (get_session_by_id + list_sessions) without a sqlx decode error.
+    #[tokio::test]
+    async fn test_session_generative_ui_null_decodes_to_none() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db = Arc::new(db);
+        let repo = SessionRepository::new(db.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        // Simulate a legacy row: insert directly, omitting generative_ui (stays NULL).
+        let session_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO sessions (id, name, message_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&session_id)
+        .bind("Legacy Session")
+        .bind(0_i32)
+        .bind(now)
+        .bind(now)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let fetched = repo.get_session_by_id(&session_id).await.unwrap().unwrap();
+        assert_eq!(fetched.generative_ui, None);
+
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].generative_ui, None);
+    }
+
+    // write-once：`update_session` 的 SET 子句故意不含 `generative_ui`，因此一次
+    // 整行 UPDATE（即便传入的 session.generative_ui == None）也不能清掉已落库的值。
+    // 这把会话级 generative_ui 的「创建时由 Agent 快照、此后只读」语义钉死。
+    #[tokio::test]
+    async fn test_update_session_does_not_clobber_generative_ui() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = SessionRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let session = Session {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Original".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            agent_id: None,
+            reasoning: None,
+            generative_ui: Some(true),
+            genui_spec: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_session(&session).await.unwrap();
+
+        // 整行 UPDATE：改名，且故意把 generative_ui 置为 None。
+        let mut updated = session.clone();
+        updated.name = "Renamed".to_string();
+        updated.generative_ui = None;
+        updated.updated_at = now + 1000;
+        repo.update_session(&updated).await.unwrap();
+
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(fetched.name, "Renamed");
+        // 仍为 Some(true)：SET 子句排除了 generative_ui，落库值未被覆盖。
+        assert_eq!(fetched.generative_ui, Some(true));
+    }
+
+    // write-once：与 generative_ui 同理，`update_session` 的 SET 子句不含 `genui_spec`，
+    // 故整行 UPDATE（即便传入 None）也不能清掉建会话时快照的范例 spec。
+    #[tokio::test]
+    async fn test_update_session_does_not_clobber_genui_spec() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = SessionRepository::new(Arc::new(db));
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let session = Session {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Original".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            agent_id: None,
+            reasoning: None,
+            generative_ui: Some(true),
+            genui_spec: Some(r#"{"root":"card","elements":{}}"#.to_string()),
+            created_at: now,
+            updated_at: now,
+        };
+
+        repo.create_session(&session).await.unwrap();
+
+        // 整行 UPDATE：改名，且故意把 genui_spec 置为 None。
+        let mut updated = session.clone();
+        updated.name = "Renamed".to_string();
+        updated.genui_spec = None;
+        updated.updated_at = now + 1000;
+        repo.update_session(&updated).await.unwrap();
+
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(fetched.name, "Renamed");
+        // 范例 spec 未被覆盖：SET 子句排除了 genui_spec。
+        assert_eq!(
+            fetched.genui_spec,
+            Some(r#"{"root":"card","elements":{}}"#.to_string())
+        );
+    }
+
+    // 旧行（genui_spec 为 NULL）在两条读路径上都解码为 None，不触发 sqlx 解码错误。
+    #[tokio::test]
+    async fn test_session_genui_spec_null_decodes_to_none() {
+        let (db, _temp_dir) = create_test_db().await;
+        let db = Arc::new(db);
+        let repo = SessionRepository::new(db.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let session_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO sessions (id, name, message_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&session_id)
+        .bind("Legacy Session")
+        .bind(0_i32)
+        .bind(now)
+        .bind(now)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let fetched = repo.get_session_by_id(&session_id).await.unwrap().unwrap();
+        assert_eq!(fetched.genui_spec, None);
+
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].genui_spec, None);
     }
 }

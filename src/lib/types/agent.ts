@@ -31,6 +31,9 @@ export interface Agent extends BaseEntity {
   systemPrompt?: string;
   mcpServers: McpServerConfig[];
   skills: string[];
+  generativeUi?: boolean;
+  // 关联的 GenUI（具名 JSON-Render spec）id；未关联时为 undefined
+  genuiId?: string;
 }
 
 // 创建 Agent 请求
@@ -45,6 +48,8 @@ export interface CreateAgentRequest {
   systemPrompt?: string;
   mcpServers?: McpServerConfig[];
   skills?: string[];
+  generativeUi?: boolean;
+  genuiId?: string;
 }
 
 // 更新 Agent 请求
@@ -59,4 +64,6 @@ export interface UpdateAgentRequest {
   systemPrompt?: string | null;
   mcpServers?: McpServerConfig[];
   skills?: string[];
+  generativeUi?: boolean;
+  genuiId?: string | null;
 }

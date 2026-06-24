@@ -33,9 +33,9 @@ export interface BaseEntity {
 
 // 导出子模块类型
 export * from "./agent";
+export * from "./genui";
 export * from "./chat";
 export * from "./provider";
-export * from "./artifact";
 export * from "./settings";
 export * from "./mcp";
 export * from "./skill";

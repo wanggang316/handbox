@@ -1,5 +1,7 @@
 use super::common::{Timestamp, UUID};
-use crate::models::llm_types::{LlmReasoningEffortConfig, LlmResponsesReasoning, LlmThinkingConfig};
+use crate::models::llm_types::{
+    LlmReasoningEffortConfig, LlmResponsesReasoning, LlmThinkingConfig,
+};
 use serde::{Deserialize, Serialize};
 
 fn default_execution_mode() -> String {
@@ -35,9 +37,14 @@ pub struct Session {
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<McpServerConfig>,
     pub turn_count: Option<i32>,
-    pub artifact_id: Option<UUID>,
     pub agent_id: Option<UUID>, // 关联的 Agent ID
     pub reasoning: Option<SessionReasoningConfig>,
+    /// 生成式 UI 开关，会话创建时由 Agent 快照而来（write-once）。
+    /// `None` 等同「关闭」（旧行 / NULL 列）。
+    pub generative_ui: Option<bool>,
+    /// 关联的 GenUI 模板 spec 快照，会话创建时由 Agent 的 `genui_id` 解析并冻结
+    /// （write-once，仅作 few-shot「范例」用途）。`None` 表示未关联模板。
+    pub genui_spec: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -101,9 +108,10 @@ mod tests {
                 enabled_tools: vec!["tool1".to_string()],
             }],
             turn_count: Some(5),
-            artifact_id: None,
             agent_id: None,
             reasoning: None,
+            generative_ui: Some(true),
+            genui_spec: Some(r#"{"root":"x","elements":{}}"#.to_string()),
             created_at: 1000,
             updated_at: 2000,
         };
@@ -112,5 +120,84 @@ mod tests {
         let deserialized: Session = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(session.id, deserialized.id);
         assert_eq!(session.name, deserialized.name);
+        assert_eq!(session.generative_ui, deserialized.generative_ui);
+        assert_eq!(session.genui_spec, deserialized.genui_spec);
+    }
+
+    /// 锁定 JS<->Rust 线缆键：serde camelCase 把 `generative_ui` 转成 `generativeUi`
+    /// （小写 `i`），而非 `generativeUI`。前端 `generativeUi?: boolean` 必须与之匹配。
+    /// 键名不符会通过纯 Rust 的 round-trip，却在边界静默丢值。
+    #[test]
+    fn session_generative_ui_wire_key_is_camel_case() {
+        let session = Session {
+            id: "session_1".to_string(),
+            name: "Test".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            agent_id: None,
+            reasoning: None,
+            generative_ui: Some(true),
+            genui_spec: None,
+            created_at: 1000,
+            updated_at: 2000,
+        };
+
+        let json = serde_json::to_string(&session).expect("serialize");
+        let deserialized: Session = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(session.generative_ui, deserialized.generative_ui);
+        assert!(
+            json.contains("\"generativeUi\""),
+            "expected wire key `generativeUi`, got: {json}"
+        );
+        assert!(
+            !json.contains("\"generativeUI\""),
+            "wire key must be `generativeUi` (lowercase i), not `generativeUI`: {json}"
+        );
+    }
+
+    /// 锁定 `genui_spec` 的线缆键为 camelCase `genuiSpec`，与前端 `GenUi`/session
+    /// 期望一致。镜像上面 generative_ui 的 wire-key 守卫。
+    #[test]
+    fn session_genui_spec_wire_key_is_camel_case() {
+        let session = Session {
+            id: "session_1".to_string(),
+            name: "Test".to_string(),
+            last_message_at: None,
+            message_count: 0,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            stream: None,
+            model_id: None,
+            provider_id: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            turn_count: None,
+            agent_id: None,
+            reasoning: None,
+            generative_ui: None,
+            genui_spec: Some(r#"{"root":"card","elements":{}}"#.to_string()),
+            created_at: 1000,
+            updated_at: 2000,
+        };
+
+        let json = serde_json::to_string(&session).expect("serialize");
+        let deserialized: Session = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(session.genui_spec, deserialized.genui_spec);
+        assert!(
+            json.contains("\"genuiSpec\""),
+            "expected wire key `genuiSpec`, got: {json}"
+        );
     }
 }

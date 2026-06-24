@@ -6,7 +6,6 @@
 // via `JobTarget::into_db_parts` / `JobTarget::from_db_parts`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use super::{Timestamp, UUID};
 
@@ -24,20 +23,12 @@ pub const DEFAULT_RETRY_DELAY_SECS: i64 = 60;
 
 /// What a job runs when it fires.
 ///
-/// Internally tagged by `kind`; the tag values (`artifact` / `agent` /
-/// `prompt`) are stored in `jobs.target_kind`, and the remaining fields are
-/// stored as JSON in `jobs.target_config`.
+/// Internally tagged by `kind`; the tag values (`agent` / `prompt`) are stored
+/// in `jobs.target_kind`, and the remaining fields are stored as JSON in
+/// `jobs.target_config`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum JobTarget {
-    /// Run an installed Artifact.
-    Artifact {
-        artifact_id: UUID,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(default)]
-        env: HashMap<String, String>,
-    },
     /// Send an initial message to an Agent (optionally scoped to a project).
     Agent {
         agent_id: UUID,
@@ -70,7 +61,6 @@ impl JobTarget {
     /// The `target_kind` column value for this variant.
     pub fn kind(&self) -> &'static str {
         match self {
-            JobTarget::Artifact { .. } => "artifact",
             JobTarget::Agent { .. } => "agent",
             JobTarget::Prompt { .. } => "prompt",
         }
@@ -182,23 +172,6 @@ mod tests {
     }
 
     #[test]
-    fn job_target_artifact_roundtrip() {
-        let mut env = HashMap::new();
-        env.insert("KEY".to_string(), "value".to_string());
-        let target = JobTarget::Artifact {
-            artifact_id: "artifact_1".to_string(),
-            args: vec!["--flag".to_string(), "x".to_string()],
-            env,
-        };
-        assert_eq!(roundtrip(&target), target);
-
-        // Tag and camelCase field naming appear in the wire form.
-        let json = serde_json::to_value(&target).expect("serialize");
-        assert_eq!(json["kind"], "artifact");
-        assert!(json.get("artifactId").is_some());
-    }
-
-    #[test]
     fn job_target_agent_roundtrip() {
         let target = JobTarget::Agent {
             agent_id: "agent_1".to_string(),
@@ -231,18 +204,7 @@ mod tests {
 
     #[test]
     fn job_target_optional_fields_default() {
-        // Artifact with no args/env, agent with no project.
-        let artifact = JobTarget::from_db_parts("artifact", r#"{"artifactId":"a1"}"#)
-            .expect("from_db_parts");
-        assert_eq!(
-            artifact,
-            JobTarget::Artifact {
-                artifact_id: "a1".to_string(),
-                args: vec![],
-                env: HashMap::new(),
-            }
-        );
-
+        // Agent with no project.
         let agent = JobTarget::from_db_parts(
             "agent",
             r#"{"agentId":"ag1","initialMessage":"hi"}"#,
@@ -260,14 +222,7 @@ mod tests {
 
     #[test]
     fn job_target_db_parts_roundtrip() {
-        let mut env = HashMap::new();
-        env.insert("A".to_string(), "1".to_string());
         let targets = vec![
-            JobTarget::Artifact {
-                artifact_id: "a1".to_string(),
-                args: vec!["x".to_string()],
-                env,
-            },
             JobTarget::Agent {
                 agent_id: "ag1".to_string(),
                 initial_message: "go".to_string(),

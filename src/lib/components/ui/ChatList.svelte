@@ -6,12 +6,9 @@
     Copy,
     Hash,
     LoaderCircle,
-    Star,
     Plus,
   } from "@lucide/svelte";
   import * as chatApi from "$lib/api/chat";
-  import * as messageApi from "$lib/api/message";
-  import { favoriteStore } from "$lib/states";
   import { t } from "$lib/i18n";
 
   interface Chat {
@@ -56,10 +53,6 @@
   // 标题生成状态
   let isGeneratingTitle = $state(false);
   let generatingChatId = $state("");
-
-  // 收藏状态
-  let isFavoriting = $state(false);
-  let favoritingChatId = $state("");
 
   // 处理右键点击
   function handleContextMenu(event: MouseEvent, chat: Chat) {
@@ -188,37 +181,6 @@
     }
   }
 
-  // 收藏对话
-  async function handleFavoriteChat() {
-    if (!selectedChat) return;
-
-    showContextMenu = false;
-    isFavoriting = true;
-    favoritingChatId = selectedChat.id;
-
-    try {
-      const messages = await messageApi.getMessages(selectedChat.id, 1, 0);
-      if (messages.length > 0) {
-        const message = messages[0];
-        await favoriteStore.toggleFavorite(
-          message.id ?? "",
-          selectedChat.id,
-          selectedChat.title,
-          message.role ?? "assistant",
-          "chat",
-          [],
-          undefined,
-          undefined,
-        );
-      }
-    } catch (error) {
-      console.error("Failed to favorite chat:", error);
-    } finally {
-      isFavoriting = false;
-      favoritingChatId = "";
-    }
-  }
-
   // 点击外部关闭菜单
   function handleClickOutside(event: MouseEvent) {
     // 检查点击是否在右键菜单外部
@@ -313,19 +275,6 @@
         {t("ui.generateTitle")}
       </button>
     {/if}
-
-    <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
-      onclick={handleFavoriteChat}
-      disabled={isFavoriting || !selectedChat}
-    >
-      {#if isFavoriting && selectedChat && favoritingChatId === selectedChat.id}
-        <LoaderCircle size={14} class="animate-spin" />
-      {:else}
-        <Star size={14} />
-      {/if}
-      {t("ui.favoriteChat")}
-    </button>
 
     {#if onRename}
       <button
