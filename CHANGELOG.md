@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.3.1] - 2026-06-25
+
+### Added
+- Quick Action: a global hotkey opens a floating overlay from any app where you
+  can pick an agent, type a request, and get a streaming reply without switching
+  to HandBox.
+- Continue any Quick Action conversation in the main window with one click.
+- A new Settings → Shortcuts page to record the Quick Action hotkey and choose
+  the default model it uses.
+
+
 ## [0.3.0] - 2026-06-25
 
 ### Added
