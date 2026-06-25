@@ -32,9 +32,6 @@ export const settingsZh = {
   "settings.about.changelog": "更新日志",
   "settings.about.officialSite": "官方网站",
 
-  // 快捷键页
-  "settings.shortcuts.sendMessage": "发送消息",
-
   // 快捷工具页
   "settings.quicktools.showToolbarOnSelection": "选中文本显示工具栏",
   "settings.quicktools.permissionRequired": "需要辅助功能权限",
