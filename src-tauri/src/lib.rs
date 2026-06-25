@@ -52,7 +52,13 @@ pub fn run() {
         // Desktop notifications: the job executor raises a macOS banner when a
         // job's continuous-failure count crosses the alert threshold. Registered
         // here so the executor's `AppHandle` can resolve the notification state.
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        // Global shortcut: backs the Quick Action overlay's summon hotkey. The
+        // plugin only stands up the manager here; the actual accelerator from
+        // `quickAction.shortcut` is registered later in the async service-init
+        // path (after SettingsService is available). No per-shortcut handler on
+        // the builder — each shortcut carries its own handler via `on_shortcut`.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
 
     #[cfg(target_os = "macos")]
     {
@@ -79,6 +85,10 @@ pub fn run() {
                     eprintln!("Failed to setup selection panels: {e}");
                     // 不退出应用，因为选择面板是可选功能
                 }
+
+                // 创建 Quick Action 浮层 (NSPanel) - 同步创建于主线程，
+                // 因为 to_panel 依赖 tauri.conf.json 预声明的 quick_action 窗口。
+                crate::services::selection::quick_action_panel::init_panel(app.handle());
             }
 
             // 异步初始化服务
@@ -120,6 +130,12 @@ pub fn run() {
             selection_disable_global,
             selection_get_disabled_apps,
             selection_remove_disabled_app,
+            // Quick Action 浮层命令
+            quick_action_show,
+            quick_action_hide,
+            quick_action_toggle,
+            quick_action_register_shortcut,
+            quick_action_continue_in_chat,
             // selection_hide_action_panel,
             // selection_show_action_panel,
             // // selection_overlay_hide,
@@ -336,6 +352,33 @@ async fn initialize_services(
     let message_service_shared = Arc::new(message_service.clone());
 
     let settings_service = SettingsService::new(storage_service.clone());
+
+    // Register the Quick Action global hotkey from the persisted
+    // `quickAction.shortcut`. This runs in the ASYNC service-init path (after
+    // SettingsService exists) — an early-launch press before this completes is
+    // the accepted no-op (VAL-OVERLAY-015). A failed registration is LOGGED and
+    // swallowed so the app still launches (VAL-OVERLAY-016); the structured
+    // AppError surfaces via the re-register command instead.
+    #[cfg(target_os = "macos")]
+    {
+        match settings_service.get_settings() {
+            Ok(settings) => {
+                if let Err(e) = crate::services::quick_action::register_shortcut(
+                    app,
+                    &settings.quick_action.shortcut,
+                ) {
+                    tracing::error!(
+                        "[QuickActionShortcut::register] startup registration failed (continuing): {e}"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[QuickActionShortcut::register] could not read settings for hotkey (continuing): {e}"
+                );
+            }
+        }
+    }
 
     let word_repo = Arc::new(WordRepository::new(database_service.clone()));
     let word_service = WordService::new(word_repo, settings_service.clone());

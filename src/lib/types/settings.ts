@@ -78,6 +78,13 @@ export interface AgentSettings {
   defaultEditorId?: string | null; // "Open in ..." 的默认应用 target id（见 api/openIn.ts）
 }
 
+// 快捷动作设置
+export interface QuickActionSettings {
+  shortcut?: string; // 唤起快捷动作面板的全局快捷键
+  modelId?: string | null; // 快捷动作默认使用的模型 ID（未设则由默认模型解析器回退）
+  providerId?: string | null; // 快捷动作默认使用的供应商 ID（未设则由默认模型解析器回退）
+}
+
 // 应用设置
 export interface AppSettings {
   general: GeneralSettings;
@@ -86,6 +93,7 @@ export interface AppSettings {
   translation: TranslationSettings;
   quickTools: QuickToolsSettings;
   agent: AgentSettings;
+  quickAction?: QuickActionSettings;
 }
 
 // 设置更新请求

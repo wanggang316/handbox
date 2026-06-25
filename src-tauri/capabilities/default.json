@@ -7,7 +7,8 @@
     "settings",
     "selection_menu",
     "selection_content",
-    "selection_settings"
+    "selection_settings",
+    "quick_action"
   ],
   "permissions": [
     "core:default",
@@ -61,6 +62,8 @@
     "updater:allow-download-and-install",
     "process:default",
     "process:allow-restart",
-    "notification:default"
+    "notification:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister"
   ]
 }

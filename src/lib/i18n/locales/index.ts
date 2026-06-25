@@ -19,6 +19,7 @@ import { updateZh } from "./zh/update";
 import { selectionZh } from "./zh/selection";
 import { uiZh } from "./zh/ui";
 import { providerZh } from "./zh/provider";
+import { quickactionZh } from "./zh/quickaction";
 
 import { commonEn } from "./en/common";
 import { sidebarEn } from "./en/sidebar";
@@ -31,6 +32,7 @@ import { updateEn } from "./en/update";
 import { selectionEn } from "./en/selection";
 import { uiEn } from "./en/ui";
 import { providerEn } from "./en/provider";
+import { quickactionEn } from "./en/quickaction";
 
 // 权威词典：key 的唯一来源。
 const zh = {
@@ -45,6 +47,7 @@ const zh = {
   ...selectionZh,
   ...uiZh,
   ...providerZh,
+  ...quickactionZh,
 };
 
 const en = {
@@ -59,6 +62,7 @@ const en = {
   ...selectionEn,
   ...uiEn,
   ...providerEn,
+  ...quickactionEn,
 };
 
 export type Locale = "zh-CN" | "en-US";

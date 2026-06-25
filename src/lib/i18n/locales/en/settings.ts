@@ -34,9 +34,6 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.about.changelog": "Changelog",
   "settings.about.officialSite": "Official Website",
 
-  // Shortcuts page
-  "settings.shortcuts.sendMessage": "Send message",
-
   // Quick Tools page
   "settings.quicktools.showToolbarOnSelection": "Show toolbar on text selection",
   "settings.quicktools.permissionRequired": "Accessibility permission required",

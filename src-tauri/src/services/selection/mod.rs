@@ -2,9 +2,16 @@
 pub mod manager;
 pub mod menu_panel;
 pub mod content_panel;
+pub mod quick_action_panel;
 pub mod settings_panel;
 
 pub use manager::setup_selection;
+#[cfg(target_os = "macos")]
+pub use quick_action_panel::hide_panel as hide_quick_action_panel;
+#[cfg(target_os = "macos")]
+pub use quick_action_panel::show_panel as show_quick_action_panel;
+#[cfg(target_os = "macos")]
+pub use quick_action_panel::toggle as toggle_quick_action_panel;
 pub use menu_panel::show_panel as show_menu_panel;
 pub use menu_panel::hide_panel as hide_menu_panel;
 pub use content_panel::show_panel as show_content_panel;

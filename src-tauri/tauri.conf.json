@@ -86,6 +86,19 @@
         "visible": false,
         "resizable": false,
         "skipTaskbar": true
+      },
+      {
+        "label": "quick_action",
+        "title": "Quick Action",
+        "url": "/quick",
+        "width": 720,
+        "height": 480,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "skipTaskbar": true
       }
     ],
     "security": {
