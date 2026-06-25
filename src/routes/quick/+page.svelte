@@ -24,15 +24,21 @@
   import type { UnlistenFn } from "@tauri-apps/api/event";
   import QuickInput from "$lib/components/quickaction/QuickInput.svelte";
   import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
+  import AgentApprovalModal from "$lib/components/agentsession/AgentApprovalModal.svelte";
   import { Settings } from "@lucide/svelte";
   import type { ModelWithProvider } from "$lib/types/provider";
   import type { UUID } from "$lib/types";
+  import type {
+    AgentApprovalRequest,
+    ApprovalDecision,
+  } from "$lib/types/agentSession";
   import { isTauriEnvironment } from "$lib/utils/tauri";
   import { t } from "$lib/i18n";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { runAgentStream } from "$lib/api/agentSession";
   import { openSettingsWindow } from "$lib/api/window";
   import {
@@ -58,6 +64,16 @@
   const running = $derived(
     sessionId !== null && agentRunStore.isRunning(sessionId),
   );
+
+  // 当前会话的待审批请求（危险工具调用 write/edit/bash → 弹审批弹窗、对话暂停）。
+  // 镜像 /agent 页：按本浮层的 sessionId 分键；后端 app-wide 广播，弹窗在挂载了
+  // 该 sessionId 的上下文里弹出（VAL-COMMS-005）。
+  const pendingApproval = $derived(
+    sessionId !== null ? agentApprovalStore.pendingFor(sessionId) : null,
+  );
+
+  // 待审批期间输入暂停（送出为干净 no-op，VAL-COMMS-016）。
+  const awaitingApproval = $derived(pendingApproval !== null);
 
   // ⌘↵ continue-in-chat 仅在有内容时可用（主窗口交接留待后续里程碑）。
   const canContinue = $derived(value.trim().length > 0);
@@ -99,6 +115,9 @@
    */
   async function handleSend(text: string): Promise<void> {
     if (!text.trim()) return;
+    // 待审批暂停：对话挂起在一次危险工具调用上，送出为干净 no-op，直到用户在
+    // 审批弹窗里允许 / 拒绝（VAL-COMMS-016）。
+    if (awaitingApproval) return;
     if (running) return;
 
     // Follow-up：会话已存在，复用之，不新建。
@@ -140,6 +159,20 @@
       // run 级错误处理留待 qa-run-controls-errors（F10）；此处仅记录。
       console.error("quick: failed to start run", error);
     }
+  }
+
+  /**
+   * 回应审批弹窗当前展示的请求（含作用域）：deny → 工具被 Cancel、对话继续；
+   * allow_once → 本次允许；allow_always → 本会话始终允许该工具（后端按 sessionId
+   * 键控的进程内存集，VAL-COMMS-005/025）。透传**弹窗持有的 request 引用**，store
+   * 据其 requestId 精确回灌（展示==回灌，无重取竞态）后清键关弹窗。Esc 关闭由弹窗
+   * 内部 fail-closed 映射为 deny（VAL-COMMS-017），此处只处理用户主动决策。
+   */
+  function handleApprovalRespond(
+    request: AgentApprovalRequest,
+    decision: ApprovalDecision,
+  ): void {
+    void agentApprovalStore.respondTo(request, decision);
   }
 
   /** 打开设置窗口（模型/供应商配置页），让用户配置默认模型后再回来。 */
@@ -197,9 +230,16 @@
     return () => unlisten?.();
   });
 
-  /** Esc → 隐藏浮层（仅在 Tauri 环境可解析该命令）。 */
+  /**
+   * Esc → 隐藏浮层（仅在 Tauri 环境可解析该命令）。
+   *
+   * 待审批期间让位给审批弹窗：弹窗自身把 Esc 接到 fail-closed deny（VAL-COMMS-017），
+   * 此时不隐藏整张浮层——否则一次 Esc 既隐藏窗口又决策，UX 混乱且偏离 /agent。
+   * 弹窗的 Esc 在其 backdrop 上处理后冒泡到此，故在此守门、不再 hide。
+   */
   async function handleKeydown(event: KeyboardEvent): Promise<void> {
     if (event.key !== "Escape") return;
+    if (awaitingApproval) return;
     event.preventDefault();
     if (!isTauriEnvironment()) return;
     await invoke("quick_action_hide");
@@ -249,6 +289,7 @@
       bind:this={composer}
       bind:value
       {running}
+      {awaitingApproval}
       {selectedModel}
       {canContinue}
       onModelSelect={handleModelSelect}
@@ -258,6 +299,16 @@
       onNewClear={handleNewClear}
     />
   </div>
+
+  <!-- 工具审批弹窗：危险工具调用（write/edit/bash）待决期间弹出、对话暂停；
+       allow_once / allow_always / deny 经 store 回灌后端后关闭。Esc 关闭由弹窗内部
+       fail-closed 映射为 deny（VAL-COMMS-005/017/025）。按本浮层会话分键。 -->
+  {#if pendingApproval}
+    <AgentApprovalModal
+      request={pendingApproval}
+      onRespond={handleApprovalRespond}
+    />
+  {/if}
 </div>
 
 <style>

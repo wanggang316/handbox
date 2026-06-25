@@ -28,6 +28,12 @@
     value: string;
     /** 是否有活跃 run —— 驱动 Send <-> Stop 切换（父级决定）。 */
     running?: boolean;
+    /**
+     * 是否有待审批的危险工具调用 —— 对话暂停在审批弹窗上。镜像 AgentInput：
+     * 置位时禁用输入与发送（占位文案改为审批提示），发送为干净 no-op，直到用户
+     * 在弹窗里允许 / 拒绝（VAL-COMMS-016）。
+     */
+    awaitingApproval?: boolean;
     /** 当前选中模型，透传给 ChatModelSelectButton。 */
     selectedModel?: ModelWithProvider | null;
     /** 模型选择回调，透传给 ChatModelSelectButton。 */
@@ -49,6 +55,7 @@
   let {
     value = $bindable(""),
     running = false,
+    awaitingApproval = false,
     selectedModel = null,
     onModelSelect = () => {},
     canContinue = false,
@@ -80,8 +87,10 @@
     adjustTextareaHeight();
   }
 
-  // 发送：纯空白为干净 no-op（不回调）；running 时不在此处理（按钮变 Stop）。
+  // 发送：纯空白为干净 no-op（不回调）；running 时不在此处理（按钮变 Stop）；
+  // 待审批暂停时干净 no-op（对话挂起在审批弹窗上，VAL-COMMS-016）。
   function send(): void {
+    if (awaitingApproval) return;
     if (running) return;
     if (!value.trim()) return;
     onSend(value);
@@ -129,9 +138,12 @@
     oninput={handleInput}
     oncompositionstart={handleCompositionStart}
     oncompositionend={handleCompositionEnd}
-    placeholder={placeholder ?? t("quickaction.placeholder")}
+    placeholder={awaitingApproval
+      ? t("agent.input.awaitingApprovalPlaceholder")
+      : (placeholder ?? t("quickaction.placeholder"))}
+    disabled={awaitingApproval}
     rows={1}
-    class="flex-1 w-full resize-none bg-transparent px-4 py-3 text-sm leading-relaxed text-[var(--base-content)] placeholder:text-[var(--base-content)]/40 focus:outline-none max-h-[200px] overflow-y-auto"
+    class="flex-1 w-full resize-none bg-transparent px-4 py-3 text-sm leading-relaxed text-[var(--base-content)] placeholder:text-[var(--base-content)]/40 focus:outline-none max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
   ></textarea>
 
   <div class="flex flex-row items-center justify-between gap-3 px-3 pb-2 pt-0">
@@ -158,6 +170,7 @@
           iconSize={18}
           size="w-8 h-8"
           ariaLabel={t("quickaction.send")}
+          disabled={awaitingApproval}
           onclick={send}
         />
       {/if}
