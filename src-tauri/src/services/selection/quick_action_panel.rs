@@ -53,8 +53,24 @@ tauri_panel! {
 pub fn init_panel(app_handle: &AppHandle) {
     tracing::info!("Setting up quick action panel");
 
-    let window = app_handle.get_webview_window(PANEL_LABEL).unwrap();
-    let panel = window.to_panel::<QuickActionPanel>().unwrap();
+    // 容错初始化：若 tauri.conf.json 与运行时漂移导致 quick_action 窗口缺失或
+    // NSPanel 转换失败，记录并提前返回，让应用正常启动（仅浮层不可用），而不是
+    // panic 整个 app（与 lib.rs / setup_selection 的 log-and-continue 一致）。
+    let Some(window) = app_handle.get_webview_window(PANEL_LABEL) else {
+        tracing::error!(
+            "quick action window '{PANEL_LABEL}' not found; overlay disabled (check tauri.conf.json)"
+        );
+        return;
+    };
+    let panel = match window.to_panel::<QuickActionPanel>() {
+        Ok(panel) => panel,
+        Err(e) => {
+            tracing::error!(
+                "failed to convert quick action window to NSPanel: {e}; overlay disabled"
+            );
+            return;
+        }
+    };
     panel.set_level(PanelLevel::Floating.value());
     // can_join_all_spaces + full_screen_auxiliary：悬浮于全屏 app 之上且不切走 Space
     // (VAL-OVERLAY-005)。
@@ -167,10 +183,71 @@ pub struct MonitorFrame {
     pub height: f64,
 }
 
+/// 一块显示器在**物理坐标系**下的几何（origin/size 为物理像素）加上 DPI scale。
+/// 作为 `select_monitor` 的纯输入，便于在不依赖 tauri 运行时的情况下做单元测试。
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy)]
+struct MonitorInfo {
+    pos_x: f64,
+    pos_y: f64,
+    width_phys: f64,
+    height_phys: f64,
+    scale: f64,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl MonitorInfo {
+    /// 用该屏 scale 把物理矩形换算到逻辑坐标系（点）。
+    fn logical_frame(&self) -> MonitorFrame {
+        MonitorFrame {
+            x: self.pos_x / self.scale,
+            y: self.pos_y / self.scale,
+            width: self.width_phys / self.scale,
+            height: self.height_phys / self.scale,
+        }
+    }
+
+    /// 在物理空间判断鼠标是否落在此屏内。
+    fn contains_phys(&self, cursor_phys_x: f64, cursor_phys_y: f64) -> bool {
+        cursor_phys_x >= self.pos_x
+            && cursor_phys_x < self.pos_x + self.width_phys
+            && cursor_phys_y >= self.pos_y
+            && cursor_phys_y < self.pos_y + self.height_phys
+    }
+}
+
+/// 纯函数：在已知显示器集合中为鼠标挑选目标显示器，返回其**逻辑**矩形与鼠标的
+/// **逻辑** x。回退顺序（least-surprise）：
+/// 1. 包含鼠标的显示器；
+/// 2. 主显示器（`primary_index`）——鼠标落在所有屏之外时，浮层落在主屏而非任意一块；
+/// 3. 第一块可用显示器；
+/// 4. `None`（无任何显示器，由调用方给出虚拟矩形）。
+#[cfg(any(target_os = "macos", test))]
+fn select_monitor(
+    monitors: &[MonitorInfo],
+    primary_index: Option<usize>,
+    cursor_phys_x: f64,
+    cursor_phys_y: f64,
+) -> Option<(MonitorFrame, f64)> {
+    let to_result = |m: &MonitorInfo| (m.logical_frame(), cursor_phys_x / m.scale);
+
+    if let Some(m) = monitors
+        .iter()
+        .find(|m| m.contains_phys(cursor_phys_x, cursor_phys_y))
+    {
+        return Some(to_result(m));
+    }
+    if let Some(m) = primary_index.and_then(|i| monitors.get(i)) {
+        return Some(to_result(m));
+    }
+    monitors.first().map(to_result)
+}
+
 /// 在物理坐标系下找到包含鼠标的显示器，返回其**逻辑**矩形与鼠标的**逻辑** x。
 /// 多显示器在物理空间匹配（各屏 DPI 可能不同），匹配后用该屏 scale 统一换算到
-/// 逻辑坐标系。找不到时回退到第一块显示器，再退回到以鼠标为中心、面板大小的一
-/// 块虚拟矩形（保证 `calculate_panel_position` 仍能给出可见结果）。
+/// 逻辑坐标系。鼠标落在所有屏之外时优先回退到主显示器，再退到第一块可用显示器，
+/// 最后退回到以鼠标为中心、面板大小的一块虚拟矩形（保证 `calculate_panel_position`
+/// 仍能给出可见结果）。
 #[cfg(target_os = "macos")]
 fn resolve_cursor_monitor(
     window: &tauri::WebviewWindow,
@@ -178,34 +255,26 @@ fn resolve_cursor_monitor(
     cursor_phys_y: f64,
 ) -> (MonitorFrame, f64) {
     if let Ok(monitors) = window.available_monitors() {
-        let mut first: Option<(MonitorFrame, f64)> = None;
-        for monitor in monitors.iter() {
-            let scale = monitor.scale_factor();
-            let pos_x = monitor.position().x as f64;
-            let pos_y = monitor.position().y as f64;
-            let width_phys = monitor.size().width as f64;
-            let height_phys = monitor.size().height as f64;
+        let infos: Vec<MonitorInfo> = monitors
+            .iter()
+            .map(|monitor| MonitorInfo {
+                pos_x: monitor.position().x as f64,
+                pos_y: monitor.position().y as f64,
+                width_phys: monitor.size().width as f64,
+                height_phys: monitor.size().height as f64,
+                scale: monitor.scale_factor(),
+            })
+            .collect();
 
-            let frame = MonitorFrame {
-                x: pos_x / scale,
-                y: pos_y / scale,
-                width: width_phys / scale,
-                height: height_phys / scale,
-            };
-            let cursor_logical_x = cursor_phys_x / scale;
-            if first.is_none() {
-                first = Some((frame, cursor_logical_x));
-            }
-            // 在物理空间判断鼠标归属（各屏 origin/size 均为物理像素）。
-            if cursor_phys_x >= pos_x
-                && cursor_phys_x < pos_x + width_phys
-                && cursor_phys_y >= pos_y
-                && cursor_phys_y < pos_y + height_phys
-            {
-                return (frame, cursor_logical_x);
-            }
-        }
-        if let Some(result) = first {
+        // 主显示器在 available_monitors 中的下标（用于鼠标落空时的回退）。
+        let primary_index = window.primary_monitor().ok().flatten().and_then(|primary| {
+            let p = primary.position();
+            infos
+                .iter()
+                .position(|m| m.pos_x == p.x as f64 && m.pos_y == p.y as f64)
+        });
+
+        if let Some(result) = select_monitor(&infos, primary_index, cursor_phys_x, cursor_phys_y) {
             return result;
         }
     }
@@ -320,5 +389,67 @@ mod tests {
         // 面板比屏幕宽：max_x 退化为 min_x，应左对齐屏幕原点而非产生越界负值。
         let (x, _) = calculate_panel_position(frame(0.0, 0.0, 600.0, 1080.0), 300.0, 720.0, 480.0);
         assert_eq!(x, 0.0);
+    }
+
+    fn monitor(pos_x: f64, pos_y: f64, w: f64, h: f64, scale: f64) -> MonitorInfo {
+        MonitorInfo {
+            pos_x,
+            pos_y,
+            width_phys: w,
+            height_phys: h,
+            scale,
+        }
+    }
+
+    #[test]
+    fn select_monitor_prefers_monitor_under_cursor() {
+        // 鼠标落在第二块屏内：忽略 primary，选包含鼠标的那块。
+        let monitors = [
+            monitor(0.0, 0.0, 1920.0, 1080.0, 1.0),
+            monitor(1920.0, 0.0, 1920.0, 1080.0, 1.0),
+        ];
+        let (frame, cursor_logical_x) =
+            select_monitor(&monitors, Some(0), 2880.0, 540.0).expect("a monitor");
+        assert_eq!(frame.x, 1920.0);
+        assert_eq!(cursor_logical_x, 2880.0);
+    }
+
+    #[test]
+    fn select_monitor_falls_back_to_primary_when_cursor_outside_all() {
+        // 鼠标在所有屏之外：回退到 primary（下标 1），而非第一块。
+        let monitors = [
+            monitor(0.0, 0.0, 1920.0, 1080.0, 1.0),
+            monitor(1920.0, 0.0, 1920.0, 1080.0, 1.0),
+        ];
+        let (frame, _) = select_monitor(&monitors, Some(1), -5000.0, -5000.0).expect("a monitor");
+        assert_eq!(frame.x, 1920.0);
+    }
+
+    #[test]
+    fn select_monitor_falls_back_to_first_when_no_primary() {
+        // 鼠标在所有屏之外且无 primary 信息：回退到第一块可用显示器。
+        let monitors = [
+            monitor(0.0, 0.0, 1920.0, 1080.0, 1.0),
+            monitor(1920.0, 0.0, 1920.0, 1080.0, 1.0),
+        ];
+        let (frame, _) = select_monitor(&monitors, None, -5000.0, -5000.0).expect("a monitor");
+        assert_eq!(frame.x, 0.0);
+    }
+
+    #[test]
+    fn select_monitor_returns_none_when_empty() {
+        // 无任何显示器：返回 None，由调用方给出虚拟矩形。
+        assert!(select_monitor(&[], None, 0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn select_monitor_converts_to_logical_with_scale() {
+        // Retina 屏（scale=2）：逻辑矩形与逻辑鼠标 x 应除以 scale。
+        let monitors = [monitor(0.0, 0.0, 3840.0, 2160.0, 2.0)];
+        let (frame, cursor_logical_x) =
+            select_monitor(&monitors, Some(0), 1920.0, 1080.0).expect("a monitor");
+        assert_eq!(frame.width, 1920.0);
+        assert_eq!(frame.height, 1080.0);
+        assert_eq!(cursor_logical_x, 960.0);
     }
 }
