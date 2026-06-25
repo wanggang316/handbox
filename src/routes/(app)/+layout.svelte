@@ -2,6 +2,9 @@
   import "../../app.css";
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
+  import { goto } from "$app/navigation";
+  import { listen } from "@tauri-apps/api/event";
+  import { isTauriEnvironment } from "$lib/utils/tauri";
   import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
   import { uiState } from "$lib/states/ui.svelte";
@@ -111,6 +114,29 @@
         console.error("Failed to init update checker:", error);
       });
 
+    // Quick Action continue-in-chat 交接：浮层 ⌘↵ 调用后端，后端把本（主）窗口前置
+    // 并广播 `quick-action-open-session`（payload = 裸 session-id 字符串）。无论主窗口
+    // 当前停在 /chat / 设置 / 裸 /agent / /agent?id=<其它>，都导航到该会话
+    // （VAL-CONTINUE-008..010）。在 onMount 即注册，使冷启动（窗口刚被前置首挂）时
+    // 抵达的 navigate 事件也能被接住。
+    let openSessionUnlisten: (() => void) | null = null;
+    let openSessionStale = false; // 卸载早于 listen 解析时，丢弃迟到的 unlisten。
+    if (isTauriEnvironment()) {
+      listen<string>("quick-action-open-session", (event) => {
+        void goto(`/agent?id=${event.payload}`);
+      })
+        .then((unlisten) => {
+          if (openSessionStale) {
+            unlisten();
+            return;
+          }
+          openSessionUnlisten = unlisten;
+        })
+        .catch((error) => {
+          console.error("Failed to listen for quick-action open-session:", error);
+        });
+    }
+
     if (browser) {
       windowWidth = window.innerWidth;
       handleResize();
@@ -120,6 +146,8 @@
         window.removeEventListener("keydown", handleKeydown);
         window.removeEventListener("resize", handleResize);
         updateUnlisten?.();
+        openSessionStale = true;
+        openSessionUnlisten?.();
       };
     }
   });

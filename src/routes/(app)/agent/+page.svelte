@@ -73,30 +73,30 @@
     if (agentSessionActions.setCurrentById(id)) {
       return;
     }
-    if (agentSessionState.sessions.length === 0) {
-      if (probedSessionId === id) {
-        // 本 id 拉取在途：失效判定交由下方 .then，避免重拉循环。
-        return;
-      }
-      probedSessionId = id;
-      agentSessionActions
-        .loadSessions()
-        .then(() => {
-          probedSessionId = "";
-          // 用户可能已离开该 id（guard 后仅在仍停留时处理失效指针）；
-          // 拉取失败走 catch 只记录，不误判为指针失效。
-          if (sessionId === id && !agentSessionActions.setCurrentById(id)) {
-            handleMissingSession(id);
-          }
-        })
-        .catch((error) => {
-          probedSessionId = "";
-          console.error("Failed to load agent sessions:", error);
-        });
+    // 内存列表未命中：可能列表从未加载（直接打开 /agent?id=），也可能列表是过期快照
+    // ——quick-action continue-in-chat 交接来的一次性会话刚落盘，但晚于本窗口上次
+    // loadSessions，故不在内存列表里（VAL-CONTINUE-010/012）。两种情形都先从磁盘重拉
+    // 一次（loadSessions 读 SQLite 全量），命中即定位；唯有重拉后磁盘上仍无此 id，才
+    // 判为失效指针、回落地态——绝不 bounce 一个可加载的有效 id。
+    if (probedSessionId === id) {
+      // 本 id 拉取在途：失效判定交由下方 .then，避免重拉循环。
       return;
     }
-    // 列表已就绪但查不到：指针指向不存在的会话，优雅回落地态。
-    handleMissingSession(id);
+    probedSessionId = id;
+    agentSessionActions
+      .loadSessions()
+      .then(() => {
+        probedSessionId = "";
+        // 用户可能已离开该 id（guard 后仅在仍停留时处理失效指针）；
+        // 拉取失败走 catch 只记录，不误判为指针失效。
+        if (sessionId === id && !agentSessionActions.setCurrentById(id)) {
+          handleMissingSession(id);
+        }
+      })
+      .catch((error) => {
+        probedSessionId = "";
+        console.error("Failed to load agent sessions:", error);
+      });
   });
 
   const currentSession = $derived(agentSessionState.currentSession);

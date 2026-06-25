@@ -90,8 +90,15 @@
   // 待审批期间输入暂停（送出为干净 no-op，VAL-COMMS-016）。
   const awaitingApproval = $derived(pendingApproval !== null);
 
-  // ⌘↵ continue-in-chat 仅在有内容时可用（主窗口交接留待后续里程碑）。
-  const canContinue = $derived(value.trim().length > 0);
+  // ⌘↵ continue-in-chat 仅在已有会话（首次发送后）时可用：把这个一次性会话交接给
+  // 主窗口。发送后 composer 通常已清空，故以「有无会话」而非「有无文本」为闸——
+  // 首发前 / new-clear 后无会话，⌘↵ 是干净 no-op（VAL-CONTINUE-005/006）。
+  const canContinue = $derived(sessionId !== null);
+
+  // continue-in-chat 交接的 in-flight 闸：handleContinue 是 async（invoke +
+  // hide），双击 ⌘↵ 时第二次须早返回，避免重复 invoke / 重复 navigate
+  // （VAL-CONTINUE-007 幂等）。交接完成后会话指针即重置，亦自然挡住重入。
+  let continuing = $state(false);
 
   /** 聚焦输入框（下一帧，确保窗口/DOM 就绪后才聚焦）。 */
   function focusInput(): void {
@@ -239,10 +246,40 @@
     }
   }
 
-  // ── 暂为 stub 的回调（留待后续 feature 实装）─────────────────────────────
-  function handleContinue(): void {
-    // continue-in-chat（主窗口交接）属于后续里程碑。
-    console.log("quick:continue", value);
+  /**
+   * ⌘↵ continue-in-chat：把当前一次性会话交接给主窗口（VAL-CONTINUE-001..012）。
+   *
+   * 浮层与主窗口是两个独立 webview JS 上下文，交接不传递任何内存态——只传 sessionId。
+   * 后端 `quick_action_continue_in_chat` 据 id 把主窗口前置并广播 `quick-action-open-session`
+   * （payload = 裸 session-id 字符串），主窗口 `(app)/+layout.svelte` 监听后 goto
+   * `/agent?id=<id>`，从磁盘 + app-wide 事件广播重建「相同 transcript」（live run 续跑、
+   * 审批在主窗口里解析一次）。
+   *
+   * - 无会话（首发前 / new-clear 后）：干净 no-op，绝不建空 /agent、绝不前置主窗口
+   *   （VAL-CONTINUE-005/006）。canContinue 已先一道闸，此处兜底。
+   * - 双击 ⌘↵：`continuing` 闸 + 交接后立即重置会话指针 → 单次 navigate、不双聚焦
+   *   （VAL-CONTINUE-007 幂等）。
+   * - 交接后重置会话指针（sessionId=null + 清空输入/错误/配置引导），使下一次召唤是
+   *   全新空 composer，不向后泄漏状态（VAL-CONTINUE-011）。复用 handleNewClear 的
+   *   重置路径以与 new/clear 语义一致；但绝不 abort——交接的 run 须在主窗口续活。
+   */
+  async function handleContinue(): Promise<void> {
+    if (sessionId === null) return;
+    if (continuing) return;
+    if (!isTauriEnvironment()) return;
+
+    const id = sessionId;
+    continuing = true;
+    try {
+      await invoke("quick_action_continue_in_chat", { sessionId: id });
+      await invoke("quick_action_hide");
+      // 交接成功：重置为全新空白会话（不 abort——run 已属主窗口，跨 hide 续活）。
+      resetSession();
+    } catch (error) {
+      console.error("quick: failed to continue in chat", error);
+    } finally {
+      continuing = false;
+    }
   }
 
   /** Stop：中止当前会话的活跃 run（finalized/aborted turn，输入重新可用，VAL-COMMS-012）。 */
@@ -254,10 +291,26 @@
   }
 
   /**
-   * new/clear：彻底重置为一个全新的空白一次性会话（VAL-COMMS-011）——sessionId→null、
-   * 清空输入与 run 错误；timeline 随 sessionId 消失，直到下一次发送懒建全新会话。
+   * 重置为一个全新的空白一次性会话——sessionId→null、清空输入 / run 错误 / 配置引导；
+   * timeline 随 sessionId 消失，直到下一次发送懒建全新会话。
    *
-   * 若仍有活跃 run，先 abort 旧 run，避免一个无可见界面的孤儿 run 继续在后台跑。
+   * 由 new/clear（先 abort 旧 run）与 continue-in-chat（交接后、绝不 abort）共用，
+   * 二者「重置为全新空会话」的语义一致（VAL-COMMS-011 / VAL-CONTINUE-011）。abort
+   * 与否的差异由各调用方在调用前自行决定，此处只做纯粹的状态清零。
+   */
+  function resetSession(): void {
+    sessionId = null;
+    value = "";
+    runError = null;
+    configurePrompt = null;
+    focusInput();
+  }
+
+  /**
+   * new/clear：彻底重置为一个全新的空白一次性会话（VAL-COMMS-011）。
+   *
+   * 若仍有活跃 run，先 abort 旧 run，避免一个无可见界面的孤儿 run 继续在后台跑；
+   * 随后复用 resetSession 清空状态。
    */
   function handleNewClear(): void {
     if (sessionId !== null && running) {
@@ -265,11 +318,7 @@
         console.error("quick: failed to abort agent run on new/clear", error);
       });
     }
-    sessionId = null;
-    value = "";
-    runError = null;
-    configurePrompt = null;
-    focusInput();
+    resetSession();
   }
 
   function handleModelSelect(model: ModelWithProvider): void {
