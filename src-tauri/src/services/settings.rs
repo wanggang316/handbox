@@ -811,6 +811,57 @@ mod tests {
         assert_eq!(settings.quick_action.shortcut, "CmdOrCtrl+Shift+Space");
     }
 
+    // VAL-SETTINGS-012: persisting a quickAction value via the SettingsService
+    // update path (the code path the `settings_update` command calls) SUCCEEDS
+    // — it does NOT return `VALIDATION_ERROR: 未知设置分组` — and a subsequent
+    // `get_settings` on the SAME service (the `settings_get` path) returns the
+    // new value. This is the user-observable update→get round-trip, distinct
+    // from the low-level merge_json unit: it exercises the closed section enum,
+    // the save, and the read back together.
+    #[test]
+    fn update_quick_action_then_get_round_trips_without_unknown_section_error() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let result = svc.update_settings(UpdateSettingsRequest {
+            section: "quickAction".to_string(),
+            data: serde_json::json!({ "shortcut": "Alt+Space" }),
+        });
+
+        // The update path must accept the section — not reject it as unknown.
+        let updated = result.unwrap_or_else(|err| {
+            panic!(
+                "persisting quickAction must succeed, got {}: {}",
+                error_code(&err),
+                err.message
+            )
+        });
+        assert_eq!(updated.quick_action.shortcut, "Alt+Space");
+
+        // The subsequent read on the same service returns the new value.
+        let got = svc.get_settings().unwrap();
+        assert_eq!(
+            got.quick_action.shortcut, "Alt+Space",
+            "settings_get must return the value persisted by settings_update"
+        );
+    }
+
+    // VAL-SETTINGS-012 (error-branch guard): an unknown section IS rejected with
+    // VALIDATION_ERROR, so the success above is a real acceptance of
+    // "quickAction" and not a path that swallows every section.
+    #[test]
+    fn update_unknown_section_is_rejected_with_validation_error() {
+        let dir = TempDir::new().unwrap();
+        let err = service(&dir)
+            .update_settings(UpdateSettingsRequest {
+                section: "notASection".to_string(),
+                data: serde_json::json!({}),
+            })
+            .unwrap_err();
+        assert_eq!(error_code(&err), "VALIDATION_ERROR");
+        assert_eq!(err.message, "未知设置分组");
+    }
+
     // The closed section enum recognizes "quickAction" in both update and
     // reset (NOT VALIDATION_ERROR 未知设置分组), and the new shortcut
     // round-trips through config.json via a fresh service.
