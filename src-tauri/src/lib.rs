@@ -79,6 +79,10 @@ pub fn run() {
                     eprintln!("Failed to setup selection panels: {e}");
                     // 不退出应用，因为选择面板是可选功能
                 }
+
+                // 创建 Quick Action 浮层 (NSPanel) - 同步创建于主线程，
+                // 因为 to_panel 依赖 tauri.conf.json 预声明的 quick_action 窗口。
+                crate::services::selection::quick_action_panel::init_panel(app.handle());
             }
 
             // 异步初始化服务
@@ -120,6 +124,10 @@ pub fn run() {
             selection_disable_global,
             selection_get_disabled_apps,
             selection_remove_disabled_app,
+            // Quick Action 浮层命令
+            quick_action_show,
+            quick_action_hide,
+            quick_action_toggle,
             // selection_hide_action_panel,
             // selection_show_action_panel,
             // // selection_overlay_hide,
