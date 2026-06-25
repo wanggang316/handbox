@@ -180,12 +180,20 @@ pub struct QuickActionSettings {
     /// 唤起快捷动作面板的全局快捷键(Tauri global-shortcut 加速键语法)。
     #[serde(default = "default_quick_action_shortcut")]
     pub shortcut: String,
+    /// 快捷动作默认使用的模型 ID。`None` = 未设默认，由默认模型解析器回退。
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// 快捷动作默认使用的供应商 ID。`None` = 未设默认，由默认模型解析器回退。
+    #[serde(default)]
+    pub provider_id: Option<String>,
 }
 
 impl Default for QuickActionSettings {
     fn default() -> Self {
         Self {
             shortcut: default_quick_action_shortcut(),
+            model_id: None,
+            provider_id: None,
         }
     }
 }
@@ -266,5 +274,45 @@ mod tests {
         let parsed: QuickActionSettings =
             serde_json::from_value(serde_json::json!({ "shortcut": "Alt+Space" })).unwrap();
         assert_eq!(parsed.shortcut, "Alt+Space");
+    }
+
+    // The model/provider fields default to None when absent.
+    #[test]
+    fn quick_action_default_model_and_provider_are_none() {
+        let defaults = QuickActionSettings::default();
+        assert_eq!(defaults.model_id, None);
+        assert_eq!(defaults.provider_id, None);
+    }
+
+    // A `quickAction` section missing the model/provider fields falls back to
+    // None via serde(default) on each field (old configs upgrade cleanly).
+    #[test]
+    fn quick_action_missing_model_provider_fields_default_to_none() {
+        let parsed: QuickActionSettings =
+            serde_json::from_value(serde_json::json!({ "shortcut": "Alt+Space" })).unwrap();
+        assert_eq!(parsed.model_id, None);
+        assert_eq!(parsed.provider_id, None);
+    }
+
+    // The model/provider fields round-trip under their camelCase JSON keys.
+    #[test]
+    fn quick_action_model_provider_use_camel_case_keys() {
+        let settings = QuickActionSettings {
+            shortcut: "Alt+Space".to_string(),
+            model_id: Some("gpt-4o".to_string()),
+            provider_id: Some("openai".to_string()),
+        };
+        let value = serde_json::to_value(&settings).unwrap();
+        assert_eq!(value["modelId"], "gpt-4o");
+        assert_eq!(value["providerId"], "openai");
+
+        let parsed: QuickActionSettings = serde_json::from_value(serde_json::json!({
+            "shortcut": "Alt+Space",
+            "modelId": "gpt-4o",
+            "providerId": "openai",
+        }))
+        .unwrap();
+        assert_eq!(parsed.model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(parsed.provider_id.as_deref(), Some("openai"));
     }
 }

@@ -874,6 +874,121 @@ mod tests {
         );
     }
 
+    // Fresh environment: quickAction.modelId / providerId default to None and
+    // are absent (or null) in the auto-written config.json.
+    #[test]
+    fn fresh_env_defaults_to_no_quick_action_model_or_provider() {
+        let dir = TempDir::new().unwrap();
+        let settings = service(&dir).get_settings().unwrap();
+        assert_eq!(settings.quick_action.model_id, None);
+        assert_eq!(settings.quick_action.provider_id, None);
+    }
+
+    // A valid config.json whose `quickAction` section omits the model/provider
+    // fields parses without error → both fall back to None (old configs that
+    // only carry a shortcut upgrade cleanly).
+    #[test]
+    fn quick_action_missing_model_provider_keys_parse_as_none() {
+        let dir = TempDir::new().unwrap();
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value["quickAction"] = serde_json::json!({ "shortcut": "Alt+Space" });
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let settings = service(&dir).get_settings().unwrap();
+        assert_eq!(settings.quick_action.shortcut, "Alt+Space");
+        assert_eq!(settings.quick_action.model_id, None);
+        assert_eq!(settings.quick_action.provider_id, None);
+    }
+
+    // modelId / providerId round-trip through update → config.json → a fresh
+    // service (the durable store).
+    #[test]
+    fn quick_action_model_provider_round_trip_through_config() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({ "modelId": "gpt-4o", "providerId": "openai" }),
+            })
+            .unwrap();
+        assert_eq!(updated.quick_action.model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(updated.quick_action.provider_id.as_deref(), Some("openai"));
+
+        let reread = service(&dir).get_settings().unwrap();
+        assert_eq!(reread.quick_action.model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(reread.quick_action.provider_id.as_deref(), Some("openai"));
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["quickAction"]["modelId"], "gpt-4o");
+        assert_eq!(written["quickAction"]["providerId"], "openai");
+    }
+
+    // A shallow quickAction merge that patches only modelId leaves the existing
+    // shortcut untouched (merge_json only overwrites keys present in the patch).
+    #[test]
+    fn quick_action_patch_model_only_keeps_shortcut() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        svc.update_settings(UpdateSettingsRequest {
+            section: "quickAction".to_string(),
+            data: serde_json::json!({ "shortcut": "Alt+Space" }),
+        })
+        .unwrap();
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({ "modelId": "gpt-4o" }),
+            })
+            .unwrap();
+        assert_eq!(
+            updated.quick_action.shortcut, "Alt+Space",
+            "a model-only patch must not snap the shortcut back to default"
+        );
+        assert_eq!(updated.quick_action.model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(updated.quick_action.provider_id, None);
+    }
+
+    // The mirror case: patching only the shortcut leaves an existing modelId /
+    // providerId untouched.
+    #[test]
+    fn quick_action_patch_shortcut_only_keeps_model_and_provider() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        svc.update_settings(UpdateSettingsRequest {
+            section: "quickAction".to_string(),
+            data: serde_json::json!({ "modelId": "gpt-4o", "providerId": "openai" }),
+        })
+        .unwrap();
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({ "shortcut": "Alt+Space" }),
+            })
+            .unwrap();
+        assert_eq!(updated.quick_action.shortcut, "Alt+Space");
+        assert_eq!(
+            updated.quick_action.model_id.as_deref(),
+            Some("gpt-4o"),
+            "a shortcut-only patch must not clear the model id"
+        );
+        assert_eq!(
+            updated.quick_action.provider_id.as_deref(),
+            Some("openai"),
+            "a shortcut-only patch must not clear the provider id"
+        );
+    }
+
     // An empty quickAction patch is a shallow merge that leaves the existing
     // shortcut value untouched (merge_json only overwrites keys present in the
     // patch — it does not reset absent keys to their default).
