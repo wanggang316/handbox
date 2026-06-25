@@ -126,11 +126,10 @@ pub fn show_panel(handle: &AppHandle, cursor_phys_x: f64, cursor_phys_y: f64) {
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             // 在物理坐标系下解析鼠标所在显示器，再换算到逻辑坐标系（点）。
             // `set_position(LogicalPosition)` 与 `calculate_panel_position` 都工作
-            // 在逻辑坐标系，故定位计算前统一换算。
-            let (frame, cursor_logical_x) =
+            // 在逻辑坐标系。面板居中于显示器（与鼠标 x 无关），故这里只取显示器矩形。
+            let (frame, _cursor_logical_x) =
                 resolve_cursor_monitor(&window, cursor_phys_x, cursor_phys_y);
-            let (target_x, target_y) =
-                calculate_panel_position(frame, cursor_logical_x, PANEL_WIDTH, PANEL_HEIGHT);
+            let (target_x, target_y) = calculate_panel_position(frame, PANEL_WIDTH, PANEL_HEIGHT);
 
             let _ = window.set_position(LogicalPosition::new(target_x, target_y));
             let _ = window.show();
@@ -291,27 +290,28 @@ fn resolve_cursor_monitor(
     )
 }
 
-/// 纯函数：在给定显示器矩形内，把面板水平居中、纵向置于上三分之一处，并夹紧到
-/// 屏幕范围内使其完整可见。
+/// 纯函数：在给定显示器矩形内，把面板水平居中于**显示器**、纵向置于上三分之一处，
+/// 并夹紧到屏幕范围内使其完整可见。
 ///
-/// - 水平：默认居中于鼠标所在显示器（VAL-OVERLAY-008），随后夹紧到 `[x, x+width-panel]`
-///   使其不越界（VAL-OVERLAY-009）；当面板比屏幕宽时退化为左对齐屏幕原点。
-/// - 纵向：目标顶边设在显示器高度的 1/3 处（“上三分之一”），同样夹紧到屏内。
+/// - 水平：居中于鼠标所在**显示器**（VAL-OVERLAY-008，与鼠标 x 无关），随后夹紧到
+///   `[x, x+width-panel]` 使其不越界（VAL-OVERLAY-009）；当面板比屏幕宽时退化为左
+///   对齐屏幕原点。
+/// - 纵向：目标顶边设在显示器高度约 20% 处（“上三分之一”，VAL-OVERLAY-001），同样
+///   夹紧到屏内。
 #[cfg(any(target_os = "macos", test))]
 fn calculate_panel_position(
     frame: MonitorFrame,
-    cursor_x: f64,
     panel_width: f64,
     panel_height: f64,
 ) -> (f64, f64) {
-    // 水平居中于鼠标，随后整体夹紧进屏幕。
-    let mut target_x = cursor_x - panel_width / 2.0;
+    // 水平居中于显示器（而非鼠标），随后整体夹紧进屏幕。
+    let mut target_x = frame.x + (frame.width - panel_width) / 2.0;
     let min_x = frame.x;
     let max_x = (frame.x + frame.width - panel_width).max(min_x);
     target_x = target_x.clamp(min_x, max_x);
 
-    // 纵向：上三分之一。顶边设在屏幕高度的 1/3 处。
-    let mut target_y = frame.y + frame.height / 3.0;
+    // 纵向：上三分之一。顶边设在屏幕高度约 20% 处。
+    let mut target_y = frame.y + frame.height * 0.2;
     let min_y = frame.y;
     let max_y = (frame.y + frame.height - panel_height).max(min_y);
     target_y = target_y.clamp(min_y, max_y);
@@ -333,61 +333,73 @@ mod tests {
     }
 
     #[test]
-    fn centers_horizontally_on_cursor_within_screen() {
-        // 1920x1080 主屏，鼠标居中：面板应水平居中、顶边在 1/3 高度处。
-        let (x, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 1080.0), 960.0, 720.0, 480.0);
-        assert_eq!(x, 960.0 - 360.0); // 600.0
-        assert_eq!(y, 360.0); // 1080 / 3
+    fn centers_horizontally_on_display_in_upper_third() {
+        // 1920x1080 主屏：面板水平居中于显示器，顶边在屏高约 20% 处（上三分之一）。
+        let (x, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 1080.0), 720.0, 480.0);
+        assert_eq!(x, (1920.0 - 720.0) / 2.0); // 600.0 — display center
+        assert_eq!(y, 1080.0 * 0.2); // 216.0 — upper third, not mid-screen
     }
 
     #[test]
-    fn clamps_to_left_edge_when_cursor_near_left() {
-        // 鼠标贴左边：水平居中会越过左界，应夹紧到屏幕左缘。
-        let (x, _) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 1080.0), 10.0, 720.0, 480.0);
-        assert_eq!(x, 0.0);
+    fn horizontal_center_independent_of_cursor() {
+        // 修复回归点：水平位置与鼠标 x 无关，永远是显示器中心。
+        // （bug 复现：鼠标 x=629 时旧逻辑把面板中心放到 629；x=1600 时夹紧到 1200。
+        //  现在两者都应给出 (1920 - 720) / 2 = 600。）
+        let f = frame(0.0, 0.0, 1920.0, 1080.0);
+        let (x_left, _) = calculate_panel_position(f, 720.0, 480.0);
+        let (x_right, _) = calculate_panel_position(f, 720.0, 480.0);
+        assert_eq!(x_left, 600.0);
+        assert_eq!(x_right, 600.0);
+        // 面板水平中心 == 显示器水平中心。
+        assert_eq!(x_left + 720.0 / 2.0, 0.0 + 1920.0 / 2.0);
     }
 
     #[test]
-    fn clamps_to_right_edge_when_cursor_near_right() {
-        // 鼠标贴右边：水平居中会越过右界，应夹紧到 (width - panel)。
-        let (x, _) =
-            calculate_panel_position(frame(0.0, 0.0, 1920.0, 1080.0), 1910.0, 720.0, 480.0);
-        assert_eq!(x, 1920.0 - 720.0); // 1200.0
+    fn clamps_when_display_center_would_overflow() {
+        // 面板比屏幕窄但接近：居中后两侧仍应留在屏内（夹紧不改变已合法的居中值）。
+        let (x, _) = calculate_panel_position(frame(0.0, 0.0, 800.0, 1080.0), 720.0, 480.0);
+        assert_eq!(x, (800.0 - 720.0) / 2.0); // 40.0，完整可见
+        assert!(x >= 0.0);
+        assert!(x + 720.0 <= 800.0);
     }
 
     #[test]
     fn stays_fully_on_screen_vertically() {
-        // 矮屏：1/3 处加面板高度会越过底界，纵向应夹紧到 (height - panel)。
-        let (_, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 600.0), 960.0, 720.0, 480.0);
-        // 1/3 == 200, 200 + 480 = 680 > 600 → 夹紧到 600 - 480 = 120
+        // 矮屏：20% 处加面板高度会越过底界，纵向应夹紧到 (height - panel)。
+        let (_, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 600.0), 720.0, 480.0);
+        // 0.2 * 600 = 120, 120 + 480 = 600 == 600 → 仍恰好可见，不夹紧。
         assert_eq!(y, 120.0);
     }
 
     #[test]
-    fn honors_monitor_origin_offset() {
-        // 第二块显示器原点在 (1920, 0)：定位应相对该显示器原点计算。
-        let (x, y) = calculate_panel_position(
-            frame(1920.0, 0.0, 1920.0, 1080.0),
-            1920.0 + 960.0,
-            720.0,
-            480.0,
-        );
-        assert_eq!(x, 1920.0 + 600.0);
-        assert_eq!(y, 360.0);
+    fn clamps_vertically_on_short_display() {
+        // 更矮的屏：20% 顶边加面板高度越界，纵向夹紧到 (height - panel)。
+        let (_, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 500.0), 720.0, 480.0);
+        // 0.2 * 500 = 100, 100 + 480 = 580 > 500 → 夹紧到 500 - 480 = 20
+        assert_eq!(y, 20.0);
     }
 
     #[test]
-    fn negative_origin_monitor_clamps_within_bounds() {
-        // 左侧扩展屏原点为负：贴左边时夹紧到该屏左缘（负坐标）。
-        let (x, _) =
-            calculate_panel_position(frame(-1920.0, 0.0, 1920.0, 1080.0), -1910.0, 720.0, 480.0);
-        assert_eq!(x, -1920.0);
+    fn honors_monitor_origin_offset() {
+        // 第二块显示器原点在 (1920, 0)：定位应相对该显示器原点居中。
+        let (x, y) = calculate_panel_position(frame(1920.0, 0.0, 1920.0, 1080.0), 720.0, 480.0);
+        assert_eq!(x, 1920.0 + (1920.0 - 720.0) / 2.0); // 1920 + 600
+        assert_eq!(y, 1080.0 * 0.2); // 216.0
+    }
+
+    #[test]
+    fn negative_origin_monitor_centers_within_bounds() {
+        // 左侧扩展屏原点为负：居中应相对该屏原点（负坐标），并完整落在屏内。
+        let (x, _) = calculate_panel_position(frame(-1920.0, 0.0, 1920.0, 1080.0), 720.0, 480.0);
+        assert_eq!(x, -1920.0 + (1920.0 - 720.0) / 2.0); // -1920 + 600 = -1320
+        assert!(x >= -1920.0);
+        assert!(x + 720.0 <= -1920.0 + 1920.0);
     }
 
     #[test]
     fn panel_wider_than_screen_left_aligns() {
         // 面板比屏幕宽：max_x 退化为 min_x，应左对齐屏幕原点而非产生越界负值。
-        let (x, _) = calculate_panel_position(frame(0.0, 0.0, 600.0, 1080.0), 300.0, 720.0, 480.0);
+        let (x, _) = calculate_panel_position(frame(0.0, 0.0, 600.0, 1080.0), 720.0, 480.0);
         assert_eq!(x, 0.0);
     }
 
