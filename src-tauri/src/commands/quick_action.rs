@@ -67,3 +67,16 @@ pub async fn quick_action_hide(_app: tauri::AppHandle) -> Result<(), AppError> {
 pub async fn quick_action_toggle(_app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
+
+/// 重新注册唤起 Quick Action 浮层的全局快捷键。
+///
+/// 反注册先前记录的加速键、注册新加速键，使被替换的旧组合彻底失活（设置页 live
+/// rebind 调用此命令实现）。注册失败返回结构化 [`AppError`]，前端据此提示用户更
+/// 换组合。
+#[tauri::command]
+pub async fn quick_action_register_shortcut(
+    app: tauri::AppHandle,
+    accelerator: String,
+) -> Result<(), AppError> {
+    crate::services::quick_action::register_shortcut(&app, &accelerator)
+}

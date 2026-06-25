@@ -62,6 +62,9 @@
     "updater:allow-download-and-install",
     "process:default",
     "process:allow-restart",
-    "notification:default"
+    "notification:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all"
   ]
 }
