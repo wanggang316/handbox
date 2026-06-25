@@ -6,8 +6,9 @@
  * quick-action session-request builder and its Node-environment Vitest suite)
  * can import the canonical id list without dragging in the Lucide `.svelte`
  * icon imports that `agentTools.ts` carries. `agentTools.ts` re-exports
- * `BUILTIN_TOOL_IDS` from here and derives it for `BUILTIN_TOOLS`, so the order
- * stays single-sourced.
+ * `BUILTIN_TOOL_IDS` from here; its `BUILTIN_TOOLS` list is maintained
+ * separately and kept in sync with this list by convention (same ids, same
+ * order) — neither is derived from the other.
  *
  * Each id == the coding-agent registration name the backend gates on, in
  * canonical display order.

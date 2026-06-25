@@ -44,8 +44,9 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
 /**
  * All 7 tool ids in canonical order — the default enabled set (everything on).
  *
- * Re-exported from the icon-free `builtinToolIds` module (single source of
- * truth) so pure modules can import the id list without the Lucide `.svelte`
- * imports this file carries. `BUILTIN_TOOLS` above is kept in lock-step with it.
+ * Re-exported from the icon-free `builtinToolIds` module so pure modules can
+ * import the id list without the Lucide `.svelte` imports this file carries.
+ * `BUILTIN_TOOLS` above is a separate, hand-maintained list; the two are kept
+ * in sync by convention (same ids, same order) — not derived from one another.
  */
 export { BUILTIN_TOOL_IDS };

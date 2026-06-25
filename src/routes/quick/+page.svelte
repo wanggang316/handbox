@@ -68,6 +68,12 @@
   // mid-STREAM 错误由 AgentTimeline 渲染 runState.error，不经本状态（VAL-COMMS-009）。
   let runError = $state<string | null>(null);
 
+  // 首次发送的 in-flight 闸：handleSend 是 async，冷召唤时同步守卫后 await
+  // createSession，sessionId 仅在 await 之后赋值。无此闸，await 期间第二次 Enter
+  // 会重入同一分支（sessionId 仍 null、running 仍 false）建出第二个一次性会话 +
+  // run，首个 run 成孤儿计费。故在 await 前同步置位、finally 清除，重入即早返回。
+  let creating = $state(false);
+
   // running 反映该会话是否有活跃 run；驱动 Send <-> Stop（停止留待 F10）。
   // 无会话时恒为 false。
   const running = $derived(
@@ -124,6 +130,9 @@
    */
   async function handleSend(text: string): Promise<void> {
     if (!text.trim()) return;
+    // 首次发送的 in-flight 重入守卫：createSession 进行中再次 Enter 直接早返回，
+    // 避免冷召唤时建出第二个一次性会话 + 孤儿 run（见 `creating` 声明处）。
+    if (creating) return;
     // 待审批暂停：对话挂起在一次危险工具调用上，送出为干净 no-op，直到用户在
     // 审批弹窗里允许 / 拒绝（VAL-COMMS-016）。
     if (awaitingApproval) return;
@@ -165,6 +174,9 @@
       return;
     }
 
+    // 同步置闸（在 await 之前），冷召唤期间的第二次 Enter 命中开头的 `creating`
+    // 早返回；finally 清闸，无论建会话成败下一次发送都能正常进入。
+    creating = true;
     try {
       const session = await agentSessionActions.createSession(decision.request);
       sessionId = session.id;
@@ -172,6 +184,12 @@
       await startRun(session.id, text);
     } catch (error) {
       console.error("quick: failed to create session", error);
+      // 建会话失败：浮层否则一片沉寂、看似冻结。置 runError（QuickInput 已渲染该
+      // 状态）让用户看见失败；已键入文本仍在 value 中，可直接重试。
+      runError =
+        error instanceof Error ? error.message : t("quickaction.runFailed");
+    } finally {
+      creating = false;
     }
   }
 
