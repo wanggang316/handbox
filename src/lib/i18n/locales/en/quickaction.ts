@@ -31,4 +31,16 @@ export const quickactionEn: Record<keyof typeof quickactionZh, string> = {
     "That key is not supported, please pick another combination.",
   "quickaction.shortcut.registerFailed":
     "Failed to register the shortcut, please try another combination.",
+
+  // Settings page · default-model selector
+  "quickaction.model.title": "Default model",
+  "quickaction.model.label": "Default model",
+  "quickaction.model.hint":
+    "The model used by default when you summon the Quick Action overlay; you can switch it on the fly inside the overlay.",
+  "quickaction.model.none": "Not selected",
+  "quickaction.model.unavailable":
+    "The selected model is no longer available, please re-select",
+  "quickaction.model.emptyCatalog":
+    "Enable a provider and add a model under Models first.",
+  "quickaction.model.openModels": "Open model settings",
 };

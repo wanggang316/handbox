@@ -28,4 +28,16 @@ export const quickactionZh = {
   "quickaction.shortcut.invalid.unsupportedKey": "该按键不受支持，请换一个组合。",
   // 注册失败兜底提示（错误无 message 时）。
   "quickaction.shortcut.registerFailed": "快捷键注册失败，请更换组合后重试。",
+
+  // 设置页 · 默认模型选择
+  "quickaction.model.title": "默认模型",
+  "quickaction.model.label": "默认模型",
+  "quickaction.model.hint": "唤起快捷动作浮层后默认使用的模型，可在浮层内临时切换。",
+  // 尚未选择默认模型（catalog 非空，但未指定）。
+  "quickaction.model.none": "未选择",
+  // 已选模型的供应商已被删除或停用，引用悬空：提示重新选择，但保留磁盘上的旧值。
+  "quickaction.model.unavailable": "所选模型已不可用，请重新选择",
+  // catalog 为空（无已启用的供应商/模型）：引导先去配置供应商。
+  "quickaction.model.emptyCatalog": "请先在「模型」中启用一个供应商并添加模型。",
+  "quickaction.model.openModels": "前往模型设置",
 };
