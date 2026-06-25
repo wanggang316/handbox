@@ -1,84 +1,64 @@
 <!--
-  Quick Action 浮层的轻量 composer。
+  Quick Action 浮层的 Raycast 式统一面板（输入壳）。
 
-  AgentInput 的精简版：textarea + 模型选择按钮 + 发送/停止 + 新建/清空。
-  无附件、无 slash/skill 浮层、无内置工具菜单、无思考强度控制。
+  一张面板,自上而下:输入行(前导 sparkle 图标 + 可选 Agent scope chip + 大号输入)
+  → 分隔线 → 内容区(Agent 列表 / transcript / 空态,经 `children` snippet 由父级注入)
+  → footer(随模式切换的键位提示)。无模型选择、无 New(+)、无附件、无工具菜单。
 
-  本组件只负责输入与键盘交互，不接 agent / 不起 run / 不做会话创建——
-  所有行为通过 props 上的回调交给父级（/quick/+page.svelte）。后续 feature
-  （qa-session-send-stream）把这些 stub 回调换成真实的 session/run 逻辑，
-  无需改动本组件的形状。
+  本组件只负责输入与键盘交互的**呈现与语义化**,不接 chat / 不建会话 / 不发消息——
+  所有行为通过语义化回调交给父级(/quick/+page.svelte):
+  - onSubmit   ↵(非空、非 IME 合成)→ 选择高亮 Agent(选择步)或发送消息(消息步)
+  - onContinue ⌘↵ → 在对话中继续(answered 步)
+  - onArrowUp / onArrowDown → 在 Agent 列表中上下移动高亮(选择步)
+  - onDeselect Backspace(空输入)→ 取消已选 Agent,回到选择步
 
-  键盘（镜像 AgentInput ~382-470 的 send/steer 键处理，但精简）：
-  - Enter（非空）→ onSend(text)；Shift+Enter → 换行
-  - ⌘↵ (Cmd+Enter) → onContinue()（continue-in-chat；此处仅回调，主窗口交接是后续里程碑）
-  - running 为 true 时发送控件变为 Stop → onStop()
-  - IME 合成期间所有键交给输入法，不触发发送/继续（VAL-SLASH-014 同理）
+  键盘:IME 合成期间所有键交给输入法,不触发任何回调;Shift+Enter → 换行。
 -->
 <script lang="ts">
-  import { ArrowUp, Square, Plus } from "@lucide/svelte";
-  import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import IconButton from "$lib/components/ui/IconButton.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import type { Snippet } from "svelte";
+  import { Sparkles, X } from "@lucide/svelte";
   import { t } from "$lib/i18n";
-  import type { ModelWithProvider } from "$lib/types/provider";
 
   interface Props {
-    /** 输入文本（双向绑定，文本即唯一真源）。 */
     value: string;
-    /** 是否有活跃 run —— 驱动 Send <-> Stop 切换（父级决定）。 */
-    running?: boolean;
-    /**
-     * 是否有待审批的危险工具调用 —— 对话暂停在审批弹窗上。镜像 AgentInput：
-     * 置位时禁用输入与发送（占位文案改为审批提示），发送为干净 no-op，直到用户
-     * 在弹窗里允许 / 拒绝（VAL-COMMS-016）。
-     */
-    awaitingApproval?: boolean;
-    /**
-     * run 启动失败的错误提示（父级在 runAgentStream 同步拒绝时置位）。镜像
-     * AgentInput 的 modelPrompt：非空时在控件上方以 warning 色展示一行，便于重试
-     * （此时输入已由父级回填，VAL-COMMS-018）。
-     */
-    runError?: string | null;
-    /** 当前选中模型，透传给 ChatModelSelectButton。 */
-    selectedModel?: ModelWithProvider | null;
-    /** 模型选择回调，透传给 ChatModelSelectButton。 */
-    onModelSelect?: (model: ModelWithProvider) => void;
-    /** ⌘↵ continue-in-chat 是否可用（父级按有无会话/内容决定）。 */
-    canContinue?: boolean;
-    /** textarea placeholder。 */
     placeholder?: string;
-    /** Enter（非空）发送：把当前文本交给父级。 */
-    onSend?: (text: string) => void;
-    /** ⌘↵ continue-in-chat。 */
+    /** 已选 Agent 名;非空 → 显示 scope chip 并切到消息模式 footer。 */
+    selectedAgentName?: string | null;
+    /** 输入禁用(answered:一回合已发送,不再可输入)。 */
+    disabled?: boolean;
+    /** ⌘↵「在对话中继续」是否可用(已发送、有会话)。 */
+    canContinue?: boolean;
+    runError?: string | null;
+    /** 是否有内容区(Agent 列表 / transcript / 空态);false 时面板仅输入行 + footer。 */
+    hasContent?: boolean;
+    /** 内容区,渲染在输入行与 footer 之间。 */
+    children?: Snippet;
+    onSubmit?: () => void;
     onContinue?: () => void;
-    /** running 时点击 Stop。 */
-    onStop?: () => void;
-    /** 新建/清空控件。 */
-    onNewClear?: () => void;
+    onArrowUp?: () => void;
+    onArrowDown?: () => void;
+    onDeselect?: () => void;
   }
 
   let {
     value = $bindable(""),
-    running = false,
-    awaitingApproval = false,
-    runError = null,
-    selectedModel = null,
-    onModelSelect = () => {},
-    canContinue = false,
     placeholder,
-    onSend = () => {},
+    selectedAgentName = null,
+    disabled = false,
+    canContinue = false,
+    runError = null,
+    hasContent = false,
+    children,
+    onSubmit = () => {},
     onContinue = () => {},
-    onStop = () => {},
-    onNewClear = () => {},
+    onArrowUp = () => {},
+    onArrowDown = () => {},
+    onDeselect = () => {},
   }: Props = $props();
 
   let textareaRef = $state<HTMLTextAreaElement | null>(null);
-
-  // IME 合成标记：合成期间 Enter / ⌘↵ 不触发发送/继续，交给输入法。
   let composing = $state(false);
 
-  /** 暴露聚焦给父级（每次召唤浮层都要重新聚焦输入框）。 */
   export function focus(): void {
     requestAnimationFrame(() => textareaRef?.focus());
   }
@@ -86,7 +66,7 @@
   function adjustTextareaHeight(): void {
     if (!textareaRef) return;
     textareaRef.style.height = "auto";
-    const maxHeight = 200;
+    const maxHeight = 132;
     textareaRef.style.height = Math.min(textareaRef.scrollHeight, maxHeight) + "px";
   }
 
@@ -94,99 +74,186 @@
     adjustTextareaHeight();
   }
 
-  // 发送：纯空白为干净 no-op（不回调）；running 时不在此处理（按钮变 Stop）；
-  // 待审批暂停时干净 no-op（对话挂起在审批弹窗上，VAL-COMMS-016）。
-  function send(): void {
-    if (awaitingApproval) return;
-    if (running) return;
-    if (!value.trim()) return;
-    onSend(value);
-  }
-
-  // Enter 发送；Shift+Enter 换行；⌘↵（Cmd/Ctrl+Enter）= continue-in-chat。
-  // 镜像 AgentInput 的键处理，但去掉 slash 浮层分支。
   function handleKeydown(event: KeyboardEvent): void {
-    // IME 合成中：所有键交给输入法（双保险：标记 + isComposing）。
     if (composing || event.isComposing) return;
 
-    if (event.key !== "Enter") return;
-
-    // ⌘↵ / Ctrl+↵ → continue-in-chat（仅在父级允许时）。
-    if (event.metaKey || event.ctrlKey) {
+    // ⌘↵ / Ctrl+↵ → 在对话中继续。
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       if (canContinue) onContinue();
       return;
     }
-
-    // Shift+Enter → 换行（默认行为，不拦截）。
-    if (event.shiftKey) return;
-
-    // Enter → 发送。
-    event.preventDefault();
-    send();
-  }
-
-  function handleCompositionStart(): void {
-    composing = true;
-  }
-
-  function handleCompositionEnd(): void {
-    composing = false;
+    // ↵(非 Shift)→ 选择 / 发送(具体语义由父级按当前步骤决定)。
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      onSubmit();
+      return;
+    }
+    // ↑↓ → 在 Agent 列表中移动高亮(选择步)。
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      onArrowDown();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      onArrowUp();
+      return;
+    }
+    // Backspace(空输入且已选 Agent)→ 取消选择,回到选择步。
+    if (event.key === "Backspace" && value.length === 0 && selectedAgentName) {
+      event.preventDefault();
+      onDeselect();
+      return;
+    }
   }
 </script>
 
 <div
-  class="flex h-full w-full flex-col rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] text-[var(--base-content)] shadow-2xl overflow-hidden"
+  class="quick-panel flex h-fit max-h-full w-full flex-col self-start overflow-hidden rounded-[14px] border border-white/10 text-[var(--base-content)] shadow-2xl ring-1 ring-black/5"
 >
-  <textarea
-    bind:this={textareaRef}
-    bind:value
-    onkeydown={handleKeydown}
-    oninput={handleInput}
-    oncompositionstart={handleCompositionStart}
-    oncompositionend={handleCompositionEnd}
-    placeholder={awaitingApproval
-      ? t("agent.input.awaitingApprovalPlaceholder")
-      : (placeholder ?? t("quickaction.placeholder"))}
-    disabled={awaitingApproval}
-    rows={1}
-    class="flex-1 w-full resize-none bg-transparent px-4 py-3 text-sm leading-relaxed text-[var(--base-content)] placeholder:text-[var(--base-content)]/40 focus:outline-none max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
-  ></textarea>
+  <!-- 输入行 -->
+  <div class="flex shrink-0 items-center gap-2.5 px-4">
+    <Sparkles size={20} class="shrink-0 text-[var(--base-content)]/35" />
+    {#if selectedAgentName}
+      <span class="qa-chip">
+        <span class="max-w-[140px] truncate">{selectedAgentName}</span>
+        {#if !disabled}
+          <button
+            type="button"
+            class="qa-chip-x"
+            aria-label={t("common.cancel")}
+            onclick={() => onDeselect()}
+          >
+            <X size={11} />
+          </button>
+        {/if}
+      </span>
+    {/if}
+    <textarea
+      bind:this={textareaRef}
+      bind:value
+      onkeydown={handleKeydown}
+      oninput={handleInput}
+      oncompositionstart={() => (composing = true)}
+      oncompositionend={() => (composing = false)}
+      {placeholder}
+      {disabled}
+      rows={1}
+      class="composer-input w-full resize-none bg-transparent py-[14px] text-[15px] leading-6 text-[var(--base-content)] placeholder:text-[var(--base-content)]/35 focus:outline-none overflow-y-auto disabled:cursor-default"
+    ></textarea>
+  </div>
 
-  {#if runError}
-    <div class="px-4 pb-1 text-xs text-warning">
-      {runError}
+  <!-- 内容区(Agent 列表 / transcript / 空态) -->
+  {#if hasContent}
+    <div class="h-px w-full shrink-0 bg-[var(--hairline)]"></div>
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      {@render children?.()}
     </div>
   {/if}
 
-  <div class="flex flex-row items-center justify-between gap-3 px-3 pb-2 pt-0">
-    <IconButton
-      icon={Plus}
-      ariaLabel={t("quickaction.newClear")}
-      title={t("quickaction.newClear")}
-      onclick={() => onNewClear()}
-    />
+  {#if runError}
+    <div class="shrink-0 px-4 pb-1.5 text-xs text-warning">{runError}</div>
+  {/if}
 
-    <div class="flex flex-row items-center gap-3">
-      <ChatModelSelectButton {selectedModel} {onModelSelect} />
-      {#if running}
-        <CircleButton
-          icon={Square}
-          iconSize={16}
-          size="w-8 h-8"
-          ariaLabel={t("quickaction.stop")}
-          onclick={() => onStop()}
-        />
+  <!-- footer:键位提示随当前步骤切换。 -->
+  <div
+    class="flex h-11 shrink-0 items-center justify-end gap-1 border-t border-[var(--hairline)] bg-[var(--base-200)]/40 px-2.5"
+  >
+    {#if selectedAgentName}
+      <!-- 消息步 / answered 步 -->
+      {#if canContinue}
+        <button type="button" onclick={() => onContinue()} class="qa-action">
+          <kbd class="qa-key">⌘↵</kbd>
+          <span>{t("quickaction.continueInChat")}</span>
+        </button>
       {:else}
-        <CircleButton
-          icon={ArrowUp}
-          iconSize={18}
-          size="w-8 h-8"
-          ariaLabel={t("quickaction.send")}
-          disabled={awaitingApproval}
-          onclick={send}
-        />
+        <button
+          type="button"
+          onclick={() => onSubmit()}
+          class="qa-action qa-action-primary"
+        >
+          <kbd class="qa-key">↵</kbd>
+          <span>{t("quickaction.send")}</span>
+        </button>
       {/if}
-    </div>
+    {:else}
+      <!-- 选择步 -->
+      <span class="qa-action">
+        <kbd class="qa-key">↑↓</kbd>
+        <span>{t("quickaction.navigate")}</span>
+      </span>
+      <span class="qa-action qa-action-primary">
+        <kbd class="qa-key">↵</kbd>
+        <span>{t("quickaction.select")}</span>
+      </span>
+    {/if}
   </div>
 </div>
+
+<style>
+  /* Raycast 式磨砂背景:透明窗口下用半透明 + backdrop blur 营造层次(原生 vibrancy
+     若由窗口 effects 提供则叠加更佳)。 */
+  .quick-panel {
+    background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+    backdrop-filter: saturate(180%);
+    -webkit-backdrop-filter: saturate(180%);
+  }
+
+  /* 已选 Agent 的 scope chip(Raycast 式作用域令牌)。 */
+  .qa-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    border-radius: 7px;
+    padding: 0.2rem 0.4rem 0.2rem 0.55rem;
+    font-size: 13px;
+    line-height: 1;
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+    color: var(--base-content);
+  }
+  .qa-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    padding: 0.1rem;
+    color: color-mix(in srgb, var(--base-content) 55%, transparent);
+    transition: background-color 0.12s ease;
+  }
+  .qa-chip-x:hover {
+    background: color-mix(in srgb, var(--base-content) 12%, transparent);
+    color: var(--base-content);
+  }
+
+  .qa-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 7px;
+    padding: 0.25rem 0.5rem;
+    font-size: 12px;
+    color: color-mix(in srgb, var(--base-content) 62%, transparent);
+    transition: background-color 0.12s ease;
+  }
+  button.qa-action:hover {
+    background: color-mix(in srgb, var(--base-content) 8%, transparent);
+  }
+  .qa-action-primary {
+    color: color-mix(in srgb, var(--base-content) 88%, transparent);
+  }
+  .qa-key {
+    display: inline-flex;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 5px;
+    padding: 0 0.25rem;
+    font-size: 11px;
+    font-family: inherit;
+    background: color-mix(in srgb, var(--base-content) 10%, transparent);
+    color: color-mix(in srgb, var(--base-content) 70%, transparent);
+  }
+</style>

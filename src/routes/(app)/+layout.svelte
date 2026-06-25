@@ -115,25 +115,25 @@
       });
 
     // Quick Action continue-in-chat 交接：浮层 ⌘↵ 调用后端，后端把本（主）窗口前置
-    // 并广播 `quick-action-open-session`（payload = 裸 session-id 字符串）。无论主窗口
-    // 当前停在 /chat / 设置 / 裸 /agent / /agent?id=<其它>，都导航到该会话
-    // （VAL-CONTINUE-008..010）。在 onMount 即注册，使冷启动（窗口刚被前置首挂）时
-    // 抵达的 navigate 事件也能被接住。
-    let openSessionUnlisten: (() => void) | null = null;
-    let openSessionStale = false; // 卸载早于 listen 解析时，丢弃迟到的 unlisten。
+    // 并广播 `quick-action-open-chat`（payload = 裸 chat-id 字符串）。无论主窗口当前
+    // 停在哪个路由，都导航到该会话 `/chat?id=<chatId>`（浮层创建的是真实持久化的 chat
+    // 会话）。在 onMount 即注册，使冷启动（窗口刚被前置首挂）时抵达的 navigate 事件也
+    // 能被接住。
+    let openChatUnlisten: (() => void) | null = null;
+    let openChatStale = false; // 卸载早于 listen 解析时，丢弃迟到的 unlisten。
     if (isTauriEnvironment()) {
-      listen<string>("quick-action-open-session", (event) => {
-        void goto(`/agent?id=${event.payload}`);
+      listen<string>("quick-action-open-chat", (event) => {
+        void goto(`/chat?id=${event.payload}`);
       })
         .then((unlisten) => {
-          if (openSessionStale) {
+          if (openChatStale) {
             unlisten();
             return;
           }
-          openSessionUnlisten = unlisten;
+          openChatUnlisten = unlisten;
         })
         .catch((error) => {
-          console.error("Failed to listen for quick-action open-session:", error);
+          console.error("Failed to listen for quick-action open-chat:", error);
         });
     }
 
@@ -146,8 +146,8 @@
         window.removeEventListener("keydown", handleKeydown);
         window.removeEventListener("resize", handleResize);
         updateUnlisten?.();
-        openSessionStale = true;
-        openSessionUnlisten?.();
+        openChatStale = true;
+        openChatUnlisten?.();
       };
     }
   });

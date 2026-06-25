@@ -3,13 +3,26 @@
  */
 export const quickactionZh = {
   "quickaction.placeholder": "输入你想做的事…",
+  // 浮层第一步：输入即过滤 Agent 列表的搜索占位符。
+  "quickaction.searchPlaceholder": "搜索 Agent…",
+  // 浮层第二步：选中 Agent 后的消息输入占位符（{name} 为 Agent 名）。
+  "quickaction.messagePlaceholder": "给 {name} 发消息…",
   "quickaction.send": "发送",
+  "quickaction.continueInChat": "在对话中继续",
   "quickaction.stop": "停止",
   "quickaction.newClear": "新建",
-  // run 启动失败的兜底提示（错误无 message 时）。
-  "quickaction.runFailed": "启动失败，请重试。",
+  // 键位提示：选择高亮的 Agent / 在列表中上下切换。
+  "quickaction.select": "选择",
+  "quickaction.navigate": "切换",
+  // 发送失败的兜底提示（错误无 message 时）。
+  "quickaction.runFailed": "发送失败，请重试。",
   // 浮层会话的默认名（一次性 sandbox 会话）。
   "quickaction.sessionName": "快捷动作",
+  // 尚无 Agent 时的引导空状态（去应用里创建）。
+  "quickaction.noAgents.title": "尚无可用 Agent",
+  "quickaction.noAgents.description": "在应用的「Agents」中创建一个后即可在此对话。",
+  // 有 Agent 但搜索无匹配时的空状态。
+  "quickaction.noMatch": "没有匹配的 Agent",
   // 无可用模型时的配置引导空状态。
   "quickaction.noModel.title": "尚未配置可用模型",
   "quickaction.noModel.description": "在设置中启用一个供应商并选择默认模型后即可使用。",

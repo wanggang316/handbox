@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_nspanel::{
     tauri_panel, CollectionBehavior, PanelLevel, StyleMask, TrackingAreaOptions, WebviewWindowExt,
 };
@@ -62,6 +62,16 @@ pub fn init_panel(app_handle: &AppHandle) {
         );
         return;
     };
+    // Raycast 式磨砂背景：原生 NSVisualEffectView（vibrancy），随系统外观自适应。
+    // 半透明卡片叠加其上即得到 frosted-glass 观感；radius 与卡片圆角一致以裁剪材质。
+    let _ = window.set_effects(
+        tauri::window::EffectsBuilder::new()
+            .effect(tauri::window::Effect::Popover)
+            .state(tauri::window::EffectState::Active)
+            .radius(14.0)
+            .build(),
+    );
+
     let panel = match window.to_panel::<QuickActionPanel>() {
         Ok(panel) => panel,
         Err(e) => {
@@ -83,7 +93,7 @@ pub fn init_panel(app_handle: &AppHandle) {
     // nonactivating：显示面板不抢占前台 app 的激活态 (VAL-OVERLAY-021 的 frameless
     // 体验由 decorations:false + transparent:true + 此 style mask 共同保证)。
     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
-    panel.set_corner_radius(18.0);
+    panel.set_corner_radius(14.0);
 
     let handler = QuickActionEventHandler::new();
 
@@ -138,6 +148,11 @@ pub fn show_panel(handle: &AppHandle, cursor_phys_x: f64, cursor_phys_y: f64) {
             if let Ok(panel) = window.to_panel::<QuickActionPanel>() {
                 panel.make_key_and_order_front();
             }
+
+            // 通知前端：本次召唤把浮层重置为全新空白状态（一次召唤 = 一个一回合文档）。
+            // show_panel 是所有召唤的必经路径，比 nonactivating panel 不可靠的 AppKit
+            // key 通知更稳妥。
+            let _ = window.emit("quick-action-shown", ());
         }
     });
 }
