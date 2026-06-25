@@ -14,8 +14,14 @@
     一次性 AgentSession（无 projectId → sandbox cwd）→ `runAgentStream`。
   - 后续发送（上一轮已结束）复用同一个会话（保留上下文），不新建。
   - 流式渲染复用 `AgentTimeline` + `agentRunStore`（按 sessionId 分键）。
-  - 审批 / 停止 / steering / run 错误 / new-clear 重置属于后续两个 feature
-    （qa-overlay-approvals / qa-run-controls-errors）；本页仅保留对应 stub 回调。
+  - 停止 / steering / run 错误 / new-clear 重置（qa-run-controls-errors）：
+    · Stop → `agentRunStore.abort(sessionId)`（VAL-COMMS-012）。
+    · running 中发送 → `steerAgentRun`，由 in-flight reply 消费，不起第二个 run
+      （VAL-COMMS-004/024）。
+    · run-START 失败 → 回填输入 + 展示错误（VAL-COMMS-018）；mid-STREAM 错误经
+      `runState.error` 由 AgentTimeline 渲染（VAL-COMMS-009）。
+    · new/clear → sessionId=null + 清空，重置为全新空白会话（VAL-COMMS-011）。
+    · hide（Esc/blur/hotkey）绝不 abort，run 跨 hide 存活（VAL-COMMS-008）。
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -39,7 +45,7 @@
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
-  import { runAgentStream } from "$lib/api/agentSession";
+  import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import { openSettingsWindow } from "$lib/api/window";
   import {
     resolveQuickActionModel,
@@ -58,6 +64,9 @@
   let sessionId = $state<UUID | null>(null);
   // 无可用模型时的配置引导空态（首次发送解析为空时置位；选定模型即清除）。
   let configurePrompt = $state<QuickActionEmptyReason | null>(null);
+  // run 启动失败的错误提示（runAgentStream 同步拒绝时置位；下一次发送/输入清除）。
+  // mid-STREAM 错误由 AgentTimeline 渲染 runState.error，不经本状态（VAL-COMMS-009）。
+  let runError = $state<string | null>(null);
 
   // running 反映该会话是否有活跃 run；驱动 Send <-> Stop（停止留待 F10）。
   // 无会话时恒为 false。
@@ -109,7 +118,7 @@
    * 发送：首次发送守空态 → 懒建会话 → run；后续发送复用同一会话。
    *
    * - 空 / 纯空白：干净 no-op（QuickInput 已先一道闸，此处再兜底）。
-   * - running 中：不发（按钮变 Stop，留待 F10）。
+   * - running 中：文本走 steering 队列注入活跃 run，不起第二个 run（VAL-COMMS-004/024）。
    * - 无会话：解析模型；空态展示配置引导、不建会话；否则建会话、置 sessionId、run。
    * - 有会话：直接对同一会话 run（follow-up，保留上下文）。
    */
@@ -118,6 +127,23 @@
     // 待审批暂停：对话挂起在一次危险工具调用上，送出为干净 no-op，直到用户在
     // 审批弹窗里允许 / 拒绝（VAL-COMMS-016）。
     if (awaitingApproval) return;
+
+    // run 进行中：文本走 steering 队列注入活跃 run，不起第二个 run（不触发
+    // AGENT_RUN_ALREADY_ACTIVE）。镜像 AgentInput.sendAgentRun：清空输入后再调
+    // agent_run_steer，由 in-flight reply 在 turn 边界消费（VAL-COMMS-004/024）。
+    // steer 失败仅提示、不回填已清空的输入（与 AgentInput 一致，丢弃该 follow-up）。
+    if (running && sessionId !== null) {
+      const id = sessionId;
+      value = "";
+      focusInput();
+      try {
+        await steerAgentRun(id, text);
+      } catch (error) {
+        console.error("quick: failed to steer agent run", error);
+      }
+      return;
+    }
+    // 防御：running 但 sessionId 已不存在（理论上不发生，running 依赖 sessionId）。
     if (running) return;
 
     // Follow-up：会话已存在，复用之，不新建。
@@ -149,15 +175,26 @@
     }
   }
 
-  /** 启动一次 run；输入随即清空，流式输出经 AgentTimeline 渲染。 */
+  /**
+   * 启动一次 run；输入随即清空，流式输出经 AgentTimeline 渲染。
+   *
+   * run-START 同步失败（runAgentStream 拒绝）：回填已清空的输入并展示错误，便于
+   * 重试（镜像 AgentInput ~453-461，VAL-COMMS-018）。mid-STREAM 错误不走此路径——
+   * 它经 agent_stream_error 落入 runState.error，由 AgentTimeline 渲染（VAL-COMMS-009）。
+   */
   async function startRun(id: UUID, text: string): Promise<void> {
+    runError = null;
     value = "";
     focusInput();
     try {
       await runAgentStream(id, text);
     } catch (error) {
-      // run 级错误处理留待 qa-run-controls-errors（F10）；此处仅记录。
       console.error("quick: failed to start run", error);
+      // 启动失败：回填输入、展示错误，便于重试。
+      value = text;
+      focusInput();
+      runError =
+        error instanceof Error ? error.message : t("quickaction.runFailed");
     }
   }
 
@@ -190,14 +227,30 @@
     console.log("quick:continue", value);
   }
 
+  /** Stop：中止当前会话的活跃 run（finalized/aborted turn，输入重新可用，VAL-COMMS-012）。 */
   function handleStop(): void {
-    // stop/abort 属于 qa-run-controls-errors（F10）。
-    console.log("quick:stop");
+    if (sessionId === null) return;
+    void agentRunStore.abort(sessionId).catch((error) => {
+      console.error("quick: failed to abort agent run", error);
+    });
   }
 
+  /**
+   * new/clear：彻底重置为一个全新的空白一次性会话（VAL-COMMS-011）——sessionId→null、
+   * 清空输入与 run 错误；timeline 随 sessionId 消失，直到下一次发送懒建全新会话。
+   *
+   * 若仍有活跃 run，先 abort 旧 run，避免一个无可见界面的孤儿 run 继续在后台跑。
+   */
   function handleNewClear(): void {
-    // new/clear 重置属于 qa-run-controls-errors（F10）；此处仅清空草稿。
+    if (sessionId !== null && running) {
+      void agentRunStore.abort(sessionId).catch((error) => {
+        console.error("quick: failed to abort agent run on new/clear", error);
+      });
+    }
+    sessionId = null;
     value = "";
+    runError = null;
+    configurePrompt = null;
     focusInput();
   }
 
@@ -290,6 +343,7 @@
       bind:value
       {running}
       {awaitingApproval}
+      {runError}
       {selectedModel}
       {canContinue}
       onModelSelect={handleModelSelect}

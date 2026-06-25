@@ -34,6 +34,12 @@
      * 在弹窗里允许 / 拒绝（VAL-COMMS-016）。
      */
     awaitingApproval?: boolean;
+    /**
+     * run 启动失败的错误提示（父级在 runAgentStream 同步拒绝时置位）。镜像
+     * AgentInput 的 modelPrompt：非空时在控件上方以 warning 色展示一行，便于重试
+     * （此时输入已由父级回填，VAL-COMMS-018）。
+     */
+    runError?: string | null;
     /** 当前选中模型，透传给 ChatModelSelectButton。 */
     selectedModel?: ModelWithProvider | null;
     /** 模型选择回调，透传给 ChatModelSelectButton。 */
@@ -56,6 +62,7 @@
     value = $bindable(""),
     running = false,
     awaitingApproval = false,
+    runError = null,
     selectedModel = null,
     onModelSelect = () => {},
     canContinue = false,
@@ -145,6 +152,12 @@
     rows={1}
     class="flex-1 w-full resize-none bg-transparent px-4 py-3 text-sm leading-relaxed text-[var(--base-content)] placeholder:text-[var(--base-content)]/40 focus:outline-none max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
   ></textarea>
+
+  {#if runError}
+    <div class="px-4 pb-1 text-xs text-warning">
+      {runError}
+    </div>
+  {/if}
 
   <div class="flex flex-row items-center justify-between gap-3 px-3 pb-2 pt-0">
     <IconButton

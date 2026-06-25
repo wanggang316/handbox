@@ -8,6 +8,7 @@ export const quickactionEn: Record<keyof typeof quickactionZh, string> = {
   "quickaction.send": "Send",
   "quickaction.stop": "Stop",
   "quickaction.newClear": "New",
+  "quickaction.runFailed": "Failed to start, please try again.",
   "quickaction.sessionName": "Quick Action",
   "quickaction.noModel.title": "No usable model configured",
   "quickaction.noModel.description":
