@@ -3,4 +3,7 @@
  */
 export const quickactionZh = {
   "quickaction.placeholder": "输入你想做的事…",
+  "quickaction.send": "发送",
+  "quickaction.stop": "停止",
+  "quickaction.newClear": "新建",
 };
