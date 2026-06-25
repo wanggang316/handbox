@@ -80,3 +80,33 @@ pub async fn quick_action_register_shortcut(
 ) -> Result<(), AppError> {
     crate::services::quick_action::register_shortcut(&app, &accelerator)
 }
+
+/// 「在聊天中继续」的后端：把主窗口带到前台并通知前端导航到指定会话。
+///
+/// 取消最小化、显示并聚焦 `main` 窗口，随后向该窗口发送
+/// `quick-action-open-session` 事件，载荷为 `session_id`。前端监听器（下个 feature）
+/// 据此路由到对应的 agent 会话。`main` 窗口始终存在（关闭仅隐藏），若意外缺失则返回
+/// 结构化 [`AppError`]。
+#[tauri::command]
+pub async fn quick_action_continue_in_chat(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<(), AppError> {
+    use tauri::{Emitter, Manager};
+
+    tracing::info!("quick_action_continue_in_chat session_id={session_id}");
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| AppError::internal_error("主窗口不存在，无法在聊天中继续"))?;
+
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    window
+        .emit("quick-action-open-session", session_id)
+        .map_err(|e| AppError::internal_error(&format!("发送会话导航事件失败: {e}")))?;
+
+    Ok(())
+}

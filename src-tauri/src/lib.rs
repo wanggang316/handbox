@@ -135,6 +135,7 @@ pub fn run() {
             quick_action_hide,
             quick_action_toggle,
             quick_action_register_shortcut,
+            quick_action_continue_in_chat,
             // selection_hide_action_panel,
             // selection_show_action_panel,
             // // selection_overlay_hide,
