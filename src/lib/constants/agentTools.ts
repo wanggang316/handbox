@@ -19,6 +19,7 @@ import {
   FolderTree,
 } from "@lucide/svelte";
 import type { MessageKey } from "$lib/i18n";
+import { BUILTIN_TOOL_IDS } from "./builtinToolIds";
 
 export interface BuiltinTool {
   /** coding-agent registration name; backend `build_agent_session` gates on this. */
@@ -40,5 +41,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   { id: "ls", labelKey: "agent.tool.ls", icon: FolderTree, requiresWorkingDir: true },
 ];
 
-/** All 7 tool ids in canonical order — the default enabled set (everything on). */
-export const BUILTIN_TOOL_IDS: string[] = BUILTIN_TOOLS.map((t) => t.id);
+/**
+ * All 7 tool ids in canonical order — the default enabled set (everything on).
+ *
+ * Re-exported from the icon-free `builtinToolIds` module (single source of
+ * truth) so pure modules can import the id list without the Lucide `.svelte`
+ * imports this file carries. `BUILTIN_TOOLS` above is kept in lock-step with it.
+ */
+export { BUILTIN_TOOL_IDS };
