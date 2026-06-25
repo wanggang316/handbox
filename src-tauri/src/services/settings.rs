@@ -2,8 +2,8 @@
 
 use crate::models::{
     AccountSettings, AgentSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
-    QuickToolsSettings, ShortcutConfig, SkillSettings, Theme, ThemeColor, TranslationSettings,
-    UpdateSettingsRequest,
+    QuickActionSettings, QuickToolsSettings, ShortcutConfig, SkillSettings, Theme, ThemeColor,
+    TranslationSettings, UpdateSettingsRequest,
 };
 use crate::services::StorageService;
 use serde_json::Value;
@@ -72,6 +72,10 @@ impl SettingsService {
             "agent" => {
                 settings.agent = self.merge_section(settings.agent, request.data, "agent")?;
             }
+            "quickAction" => {
+                settings.quick_action =
+                    self.merge_section(settings.quick_action, request.data, "quickAction")?;
+            }
             _ => {
                 return Err(AppError::validation_error("未知设置分组"));
             }
@@ -119,6 +123,9 @@ impl SettingsService {
                         "quickTools" => current.quick_tools = default_settings.quick_tools.clone(),
                         "skills" => current.skills = default_settings.skills.clone(),
                         "agent" => current.agent = default_settings.agent.clone(),
+                        "quickAction" => {
+                            current.quick_action = default_settings.quick_action.clone()
+                        }
                         _ => return Err(AppError::validation_error("未知设置分组")),
                     }
                 }
@@ -246,6 +253,7 @@ fn default_settings() -> AppSettings {
         },
         skills: SkillSettings::default(),
         agent: AgentSettings::default(),
+        quick_action: QuickActionSettings::default(),
     }
 }
 
@@ -770,6 +778,126 @@ mod tests {
 
         let reread = service(&dir).get_settings().unwrap();
         assert!(reread.agent.default_enabled_tools.is_empty());
+    }
+
+    // Fresh environment: quickAction.shortcut defaults to the global hotkey
+    // accelerator.
+    #[test]
+    fn fresh_env_defaults_to_quick_action_shortcut() {
+        let dir = TempDir::new().unwrap();
+        let settings = service(&dir).get_settings().unwrap();
+        assert_eq!(settings.quick_action.shortcut, "CmdOrCtrl+Shift+Space");
+    }
+
+    // A valid config.json missing the `quickAction` section parses without
+    // error via serde(default) → shortcut falls back to the default
+    // accelerator (old configs upgrade cleanly).
+    #[test]
+    fn missing_quick_action_section_parses_with_default_shortcut() {
+        let dir = TempDir::new().unwrap();
+        let mut value = serde_json::to_value(default_settings()).unwrap();
+        value.as_object_mut().unwrap().remove("quickAction");
+        assert!(
+            value.get("quickAction").is_none(),
+            "fixture must omit the quickAction section"
+        );
+        fs::write(
+            config_path(&dir),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let settings = service(&dir).get_settings().unwrap();
+        assert_eq!(settings.quick_action.shortcut, "CmdOrCtrl+Shift+Space");
+    }
+
+    // The closed section enum recognizes "quickAction" in both update and
+    // reset (NOT VALIDATION_ERROR 未知设置分组), and the new shortcut
+    // round-trips through config.json via a fresh service.
+    #[test]
+    fn update_and_reset_recognize_quick_action_section() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({ "shortcut": "Alt+Space" }),
+            })
+            .unwrap();
+        assert_eq!(updated.quick_action.shortcut, "Alt+Space");
+
+        // Round-trips through config.json (fresh service, same data dir).
+        let reread = service(&dir).get_settings().unwrap();
+        assert_eq!(reread.quick_action.shortcut, "Alt+Space");
+
+        let reset = svc
+            .reset_settings(Some(vec!["quickAction".to_string()]))
+            .unwrap();
+        assert_eq!(reset.quick_action.shortcut, "CmdOrCtrl+Shift+Space");
+    }
+
+    // A quickAction patch is a shallow section merge: it must not clobber
+    // sibling top-level sections (agent.defaultEnabledTools stays as set).
+    #[test]
+    fn update_quick_action_preserves_sibling_sections() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        // Seed a non-default sibling section so "preserved" is distinguishable
+        // from "reset to default".
+        svc.update_settings(UpdateSettingsRequest {
+            section: "agent".to_string(),
+            data: serde_json::json!({ "defaultEnabledTools": ["read", "grep"] }),
+        })
+        .unwrap();
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({ "shortcut": "Alt+Space" }),
+            })
+            .unwrap();
+        assert_eq!(updated.quick_action.shortcut, "Alt+Space");
+        assert_eq!(
+            updated.agent.default_enabled_tools,
+            vec!["read", "grep"],
+            "a quickAction patch must not clobber the agent section"
+        );
+
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
+        assert_eq!(written["quickAction"]["shortcut"], "Alt+Space");
+        assert_eq!(
+            written["agent"]["defaultEnabledTools"],
+            serde_json::json!(["read", "grep"])
+        );
+    }
+
+    // An empty quickAction patch is a shallow merge that leaves the existing
+    // shortcut value untouched (merge_json only overwrites keys present in the
+    // patch — it does not reset absent keys to their default).
+    #[test]
+    fn empty_quick_action_patch_preserves_existing_shortcut() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        svc.update_settings(UpdateSettingsRequest {
+            section: "quickAction".to_string(),
+            data: serde_json::json!({ "shortcut": "Alt+Space" }),
+        })
+        .unwrap();
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({}),
+            })
+            .unwrap();
+        assert_eq!(
+            updated.quick_action.shortcut, "Alt+Space",
+            "an empty patch must not snap the shortcut back to default"
+        );
     }
 
     // Test that successful saves leave no temp files behind (this also

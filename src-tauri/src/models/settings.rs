@@ -173,6 +173,27 @@ fn default_agent_enabled_tools() -> Vec<String> {
         .collect()
 }
 
+/// 快捷动作设置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickActionSettings {
+    /// 唤起快捷动作面板的全局快捷键(Tauri global-shortcut 加速键语法)。
+    #[serde(default = "default_quick_action_shortcut")]
+    pub shortcut: String,
+}
+
+impl Default for QuickActionSettings {
+    fn default() -> Self {
+        Self {
+            shortcut: default_quick_action_shortcut(),
+        }
+    }
+}
+
+fn default_quick_action_shortcut() -> String {
+    "CmdOrCtrl+Shift+Space".to_string()
+}
+
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -187,6 +208,8 @@ pub struct AppSettings {
     pub skills: SkillSettings,
     #[serde(default)]
     pub agent: AgentSettings,
+    #[serde(default)]
+    pub quick_action: QuickActionSettings,
 }
 
 /// 设置更新请求
@@ -210,4 +233,38 @@ pub struct ImportSettingsRequest {
     pub data: String,
     pub overwrite: Option<bool>,
     pub sections: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The hard-coded default accelerator stays in sync between the field
+    // default fn and the manual Default impl.
+    #[test]
+    fn quick_action_default_shortcut() {
+        assert_eq!(
+            QuickActionSettings::default().shortcut,
+            "CmdOrCtrl+Shift+Space"
+        );
+    }
+
+    // A `quickAction` section present but missing the `shortcut` field falls
+    // back to the default accelerator via serde(default) on the field.
+    #[test]
+    fn quick_action_missing_field_uses_default() {
+        let parsed: QuickActionSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(parsed.shortcut, "CmdOrCtrl+Shift+Space");
+    }
+
+    // The field serializes/deserializes under its camelCase JSON key.
+    #[test]
+    fn quick_action_uses_camel_case_key() {
+        let value = serde_json::to_value(QuickActionSettings::default()).unwrap();
+        assert_eq!(value["shortcut"], "CmdOrCtrl+Shift+Space");
+
+        let parsed: QuickActionSettings =
+            serde_json::from_value(serde_json::json!({ "shortcut": "Alt+Space" })).unwrap();
+        assert_eq!(parsed.shortcut, "Alt+Space");
+    }
 }
