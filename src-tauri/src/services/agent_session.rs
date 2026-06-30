@@ -1040,14 +1040,16 @@ mod tests {
     // exists on this type to invoke).
     //
     // VAL-SESSION-012 (data): a create+delete cycle against a DB that already
-    // contains agents / sessions / messages rows leaves all three table COUNTs
-    // unchanged.
+    // contains preset `agents` rows leaves that table's COUNT unchanged. The
+    // chat `sessions`/`messages` rows this assertion also covered are gone now
+    // that migration 060 dropped those tables, so only the preset invariant
+    // remains.
     #[tokio::test]
-    async fn create_delete_cycle_leaves_chat_and_preset_tables_unchanged() {
+    async fn create_delete_cycle_leaves_preset_agents_table_unchanged() {
         let (db, _guard) = create_test_database().await;
 
-        // Seed the chat/preset tables directly (no chat/preset service involved)
-        // so we can prove the agent_session path never touches them.
+        // Seed the preset table directly (no preset service involved) so we can
+        // prove the agent_session path never touches it.
         let now = AgentSessionService::current_timestamp();
         sqlx::query(
             "INSERT INTO agents (id, name, mcp_servers, skills, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -1062,39 +1064,11 @@ mod tests {
         .await
         .unwrap();
 
-        sqlx::query(
-            "INSERT INTO sessions (id, name, message_count, mcp_servers, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind("session-seed")
-        .bind("Seed Session")
-        .bind(0)
-        .bind("[]")
-        .bind(now)
-        .bind(now)
-        .execute(db.pool())
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "INSERT INTO messages (id, session_id, role, content, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind("message-seed")
-        .bind("session-seed")
-        .bind("user")
-        .bind("hello")
-        .bind(now)
-        .bind(now)
-        .execute(db.pool())
-        .await
-        .unwrap();
-
-        let agents_before = count_rows(&db, "agents").await;
-        let sessions_before = count_rows(&db, "sessions").await;
-        let messages_before = count_rows(&db, "messages").await;
         // agents = 1 user row + 2 builtin AgentDefinitions (builtin-chat /
         // builtin-coding) seeded by migration 058. The create+delete invariant
         // below compares before vs after, so it stays correct regardless.
-        assert_eq!((agents_before, sessions_before, messages_before), (3, 1, 1));
+        let agents_before = count_rows(&db, "agents").await;
+        assert_eq!(agents_before, 3);
 
         // Exercise the agent_session create+delete cycle ONLY.
         let service = AgentSessionService::new(db.clone());
@@ -1104,9 +1078,7 @@ mod tests {
             .unwrap();
         service.delete_session(created.id).await.unwrap();
 
-        // The three chat/preset tables are untouched.
+        // The preset table is untouched.
         assert_eq!(count_rows(&db, "agents").await, agents_before);
-        assert_eq!(count_rows(&db, "sessions").await, sessions_before);
-        assert_eq!(count_rows(&db, "messages").await, messages_before);
     }
 }

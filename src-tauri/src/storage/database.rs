@@ -339,7 +339,10 @@ mod tests {
         )
         .await;
 
-        // Chat-mode and /agents preset rows that migrations 046+ must never touch.
+        // Seed populated chat-mode tables plus an /agents preset row. The chat
+        // rows let us prove migration 060 drops the legacy `sessions`/`messages`
+        // tables even when non-empty; the preset row guards the agent_projects
+        // backfill against touching unrelated `agents` data.
         sqlx::query(
             "INSERT INTO sessions (id, name, message_count, created_at, updated_at) \
              VALUES ('chat1', 'chat', 0, 1, 1)",
@@ -454,14 +457,18 @@ mod tests {
             .unwrap();
         assert_eq!(fingerprint_after, fingerprint_before);
 
-        // Chat-mode and preset tables untouched. `agents` is checked separately
-        // to exclude the two builtin AgentDefinitions seeded by migration 058.
+        // Migration 060 drops the legacy chat-mode tables even though they were
+        // populated above; the preset `agents` table survives. `agents` is checked
+        // separately to exclude the two builtin AgentDefinitions seeded by 058.
         for table in ["sessions", "messages"] {
-            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
-                .fetch_one(pool)
-                .await
-                .unwrap();
-            assert_eq!(count, 1, "table {table} row count changed");
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            )
+            .bind(table)
+            .fetch_optional(pool)
+            .await
+            .unwrap();
+            assert_eq!(exists, None, "table {table} should be dropped by migration 060");
         }
         let user_agents: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM agents WHERE COALESCE(builtin, 0) = 0")
