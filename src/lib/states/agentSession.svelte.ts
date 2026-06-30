@@ -7,6 +7,7 @@
  */
 
 import type { UUID, AgentSession, CreateAgentSessionRequest } from "../types";
+import type { McpServerConfig } from "../types/chat";
 import type { AgentSessionField } from "../api/agentSession";
 import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
@@ -117,7 +118,7 @@ export const agentSessionActions = {
   async updateField(
     id: UUID,
     field: AgentSessionField,
-    value: string | number | string[] | null,
+    value: string | number | string[] | McpServerConfig[] | null,
   ): Promise<void> {
     const updated = await agentSessionApi.updateAgentSessionField(
       id,

@@ -10,6 +10,7 @@
   import { BUILTIN_TOOLS, type BuiltinTool } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
+  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { getAllModels } from "$lib/states/provider.svelte";
@@ -21,6 +22,7 @@
     SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
+  import type { McpServerConfig } from "$lib/types/chat";
 
   interface Props {
     session: AgentSession;
@@ -102,8 +104,72 @@
       });
   }
 
+  // ── MCP server 绑定（per-session）：勾选写入 session.mcpServers 并持久化。
+  //    可用 server 口径与聊天侧 Tools.svelte 一致：已启用 + ready + 至少一个工具。
+  //    executionMode=manual 的 server，其工具在后端走审批门控（auto 直跑）。
+  const executionModeOptions = $derived([
+    { value: "auto", label: t("chat.autoExecution") },
+    { value: "manual", label: t("chat.manualExecution") },
+  ]);
+  const availableServers = $derived(
+    mcpState.servers.filter(
+      (s) => s.enabled && s.status === "ready" && s.enabledTools.length > 0,
+    ),
+  );
+  const mcpServers = $derived(session.mcpServers ?? []);
+
+  function isMcpSelected(serverId: string): boolean {
+    return mcpServers.some((s) => s.serverId === serverId);
+  }
+  function mcpMode(serverId: string): "auto" | "manual" {
+    return (
+      (mcpServers.find((s) => s.serverId === serverId)?.executionMode as
+        | "auto"
+        | "manual") ?? "auto"
+    );
+  }
+  function persistMcp(next: McpServerConfig[]) {
+    agentSessionActions
+      .updateField(session.id, "mcpServers", next)
+      .catch((error) => {
+        console.error("Failed to update agent session MCP servers:", error);
+      });
+  }
+  function toggleMcp(
+    serverId: string,
+    enabledTools: string[],
+    selected: boolean,
+  ) {
+    if (selected) {
+      if (!mcpServers.some((s) => s.serverId === serverId)) {
+        persistMcp([
+          ...mcpServers,
+          { serverId, executionMode: "auto", enabledTools },
+        ]);
+      }
+    } else {
+      persistMcp(mcpServers.filter((s) => s.serverId !== serverId));
+    }
+  }
+  function setMcpMode(serverId: string, mode: "auto" | "manual") {
+    persistMcp(
+      mcpServers.map((s) =>
+        s.serverId === serverId ? { ...s, executionMode: mode } : s,
+      ),
+    );
+  }
+
   // 点击外部关闭弹窗：镜像 ChatInput 的 attachment 菜单关闭模式。触发按钮自身
   // 的点击通过 stopPropagation 不冒泡到 window，故不会刚开就被这里关掉。
+  // 打开工具菜单时 lazy-load 可用 MCP server（命中缓存即返回）。
+  $effect(() => {
+    if (toolsMenuOpen && !mcpState.initialized) {
+      mcpActions
+        .loadServers()
+        .catch((error) => console.error("Failed to load MCP servers:", error));
+    }
+  });
+
   $effect(() => {
     if (!toolsMenuOpen) return;
     const handler = () => (toolsMenuOpen = false);
@@ -607,7 +673,7 @@
           <!-- 向上展开（bottom-full）：输入框在底部，菜单浮于图标上方以免落屏外。
                stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
           <div
-            class="absolute bottom-full left-0 z-40 mb-2 w-56 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            class="absolute bottom-full left-0 z-40 mb-2 w-64 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
             role="menu"
             tabindex="-1"
             onclick={(event) => event.stopPropagation()}
@@ -644,6 +710,41 @@
                 />
               </div>
             {/each}
+
+            {#if availableServers.length > 0}
+              <div class="my-1 border-t border-[var(--hairline)]"></div>
+              <div
+                class="px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-base-content/40"
+              >
+                MCP
+              </div>
+              {#each availableServers as server (server.id)}
+                <div
+                  class="flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+                >
+                  <span class="min-w-0 truncate text-sm text-base-content">
+                    {server.displayName ?? server.name}
+                  </span>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    {#if isMcpSelected(server.id)}
+                      <Select
+                        options={executionModeOptions}
+                        selectedValue={mcpMode(server.id)}
+                        onSelect={(v) =>
+                          setMcpMode(server.id, v as "auto" | "manual")}
+                        size="sm"
+                        autoWidth
+                      />
+                    {/if}
+                    <Toggle
+                      checked={isMcpSelected(server.id)}
+                      onChange={(v) =>
+                        toggleMcp(server.id, server.enabledTools, v)}
+                    />
+                  </div>
+                </div>
+              {/each}
+            {/if}
           </div>
         {/if}
       </div>

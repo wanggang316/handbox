@@ -8,6 +8,7 @@
 
 import { apiCall } from "./index";
 import { listen } from "@tauri-apps/api/event";
+import type { McpServerConfig } from "../types/chat";
 import type {
   UUID,
   AgentSession,
@@ -74,6 +75,7 @@ export type AgentSessionField =
   | "maxTokens"
   | "workingDir"
   | "enabledTools"
+  | "mcpServers"
   | "toolExecutionMode";
 
 /**
@@ -85,7 +87,7 @@ export type AgentSessionField =
 export async function updateAgentSessionField(
   sessionId: UUID,
   fieldName: AgentSessionField,
-  value: string | number | string[] | null,
+  value: string | number | string[] | McpServerConfig[] | null,
 ): Promise<AgentSession> {
   return apiCall<AgentSession>("agent_session_update_field", {
     sessionId,
