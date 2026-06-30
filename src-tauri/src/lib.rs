@@ -347,10 +347,6 @@ async fn initialize_services(
         mcp_service_shared,
         storage_service.clone(),
     );
-    // Shared with the JobExecutor's `prompt` target (a fresh chat per run, sent
-    // non-streaming). Cloning the service is cheap (its repos / registries are
-    // `Arc`-backed), so the executor and the managed instance share state.
-    let message_service_shared = Arc::new(message_service.clone());
 
     let settings_service = SettingsService::new(storage_service.clone());
 
@@ -465,11 +461,6 @@ async fn initialize_services(
     // app_data_dir 等价；后台执行器无 Window，故直接传入）。
     let job_executor = JobExecutor::from_db(database_service.clone())
         .with_app_handle(app.clone())
-        .with_prompt_services(
-            session_service_shared,
-            message_service_shared,
-            provider_service_shared.clone(),
-        )
         .with_agent_services(
             Arc::new(agent_service.clone()),
             Arc::new(agent_session_service.clone()),
