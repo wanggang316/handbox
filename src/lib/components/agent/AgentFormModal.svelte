@@ -39,6 +39,11 @@
     generativeUi: boolean;
     // 关联的 GenUI id；空串表示未关联
     genuiId: string;
+    // ── 能力扩展字段（P2） ──
+    description: string;
+    builtinTools: string[];
+    workingDirMode: string;
+    toolExecutionMode: string;
   }
 
   let { open, agent, onClose, onSave }: Props = $props();
@@ -79,6 +84,35 @@
     { value: "manual", label: t("chat.manualExecution") },
   ]);
 
+  // ── 能力（Capability）：内置工具 / 工作目录 / 工具执行 ──
+  // coding-agent 内置工具名（与后端 builtinTools 取值对齐）。
+  const BUILTIN_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls"];
+  const workingDirModeOptions = [
+    { value: "required", label: "必需" },
+    { value: "optional", label: "可选" },
+    { value: "none", label: "无" },
+  ];
+  const toolExecutionModeOptions = [
+    { value: "auto", label: "自动" },
+    { value: "manual", label: "询问" },
+  ];
+
+  // 内置 Agent：名称只读、不可删除（由后端约束）。
+  const isBuiltin = $derived(agent?.builtin ?? false);
+
+  function isToolSelected(tool: string): boolean {
+    return formData.builtinTools.includes(tool);
+  }
+  function toggleBuiltinTool(tool: string, selected: boolean) {
+    if (selected) {
+      if (!formData.builtinTools.includes(tool)) {
+        formData.builtinTools = [...formData.builtinTools, tool];
+      }
+    } else {
+      formData.builtinTools = formData.builtinTools.filter((x) => x !== tool);
+    }
+  }
+
   const availableServers = $derived(
     mcpState.servers.filter(
       (s) => s.enabled && s.status === "ready" && s.enabledTools.length > 0
@@ -115,6 +149,10 @@
     mcpServers: [],
     generativeUi: false,
     genuiId: "",
+    description: "",
+    builtinTools: [],
+    workingDirMode: "optional",
+    toolExecutionMode: "auto",
   });
 
   let paramEnabled = $state<Record<ParamKey, boolean>>({
@@ -225,6 +263,10 @@
         mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
         generativeUi: agent.generativeUi ?? false,
         genuiId: agent.genuiId ?? "",
+        description: agent.description ?? "",
+        builtinTools: agent.builtinTools ? [...agent.builtinTools] : [],
+        workingDirMode: agent.workingDirMode ?? "optional",
+        toolExecutionMode: agent.toolExecutionMode ?? "auto",
       };
     } else {
       formData = {
@@ -234,6 +276,10 @@
         mcpServers: [],
         generativeUi: false,
         genuiId: "",
+        description: "",
+        builtinTools: [],
+        workingDirMode: "optional",
+        toolExecutionMode: "auto",
       };
     }
 
@@ -265,9 +311,19 @@
       <div class="flex flex-col gap-1.5">
         <span class={LABEL_CLASS}>{t("agent.form.nameLabel")}</span>
         <input
-          class={FIELD_CLASS}
+          class="{FIELD_CLASS} disabled:cursor-not-allowed disabled:opacity-60"
           placeholder={t("agent.form.namePlaceholder")}
           bind:value={formData.name}
+          disabled={isBuiltin}
+        />
+      </div>
+
+      <div class="flex flex-col gap-1.5">
+        <span class={LABEL_CLASS}>描述</span>
+        <input
+          class={FIELD_CLASS}
+          placeholder="一行简介，便于在列表中识别"
+          bind:value={formData.description}
         />
       </div>
 
@@ -344,6 +400,45 @@
           </p>
         </div>
       {/if}
+    </div>
+
+    <!-- 能力（Capability）：内置工具 / 工作目录 / 工具执行 -->
+    <div class="flex flex-col gap-3.5">
+      <span class={SECTION_CLASS}>能力</span>
+
+      <div class="flex flex-col gap-1.5">
+        <span class={LABEL_CLASS}>内置工具</span>
+        <div class="flex flex-wrap gap-x-4 gap-y-2">
+          {#each BUILTIN_TOOLS as tool (tool)}
+            <label class="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                class="h-3.5 w-3.5 accent-primary"
+                checked={isToolSelected(tool)}
+                onchange={(e) =>
+                  toggleBuiltinTool(tool, e.currentTarget.checked)}
+              />
+              <span class="font-mono text-sm text-base-content/85">{tool}</span>
+            </label>
+          {/each}
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-1.5">
+        <span class={LABEL_CLASS}>工作目录</span>
+        <Select
+          options={workingDirModeOptions}
+          bind:selectedValue={formData.workingDirMode}
+        />
+      </div>
+
+      <div class="flex flex-col gap-1.5">
+        <span class={LABEL_CLASS}>工具执行</span>
+        <Select
+          options={toolExecutionModeOptions}
+          bind:selectedValue={formData.toolExecutionMode}
+        />
+      </div>
     </div>
 
     <!-- 模型参数：可折叠分组，扁平 slider 行 -->

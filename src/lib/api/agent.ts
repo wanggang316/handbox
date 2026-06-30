@@ -90,7 +90,15 @@ export async function updateAgentField(
     | "skills"
     | "reasoning"
     | "generativeUi"
-    | "genuiId",
+    | "genuiId"
+    | "providerId"
+    | "icon"
+    | "description"
+    | "builtinTools"
+    | "workingDirMode"
+    | "toolExecutionMode"
+    | "thinkingLevel"
+    | "starters",
   value:
     | string
     | number

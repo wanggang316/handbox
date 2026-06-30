@@ -877,7 +877,10 @@ mod tests {
         let agents_before = count_rows(&db, "agents").await;
         let sessions_before = count_rows(&db, "sessions").await;
         let messages_before = count_rows(&db, "messages").await;
-        assert_eq!((agents_before, sessions_before, messages_before), (1, 1, 1));
+        // agents = 1 user row + 2 builtin AgentDefinitions (builtin-chat /
+        // builtin-coding) seeded by migration 058. The create+delete invariant
+        // below compares before vs after, so it stays correct regardless.
+        assert_eq!((agents_before, sessions_before, messages_before), (3, 1, 1));
 
         // Exercise the agent_session create+delete cycle ONLY.
         let service = AgentSessionService::new(db.clone());

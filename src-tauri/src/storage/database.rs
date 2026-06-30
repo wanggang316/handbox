@@ -454,14 +454,21 @@ mod tests {
             .unwrap();
         assert_eq!(fingerprint_after, fingerprint_before);
 
-        // Chat-mode and preset tables untouched.
-        for table in ["sessions", "messages", "agents"] {
+        // Chat-mode and preset tables untouched. `agents` is checked separately
+        // to exclude the two builtin AgentDefinitions seeded by migration 058.
+        for table in ["sessions", "messages"] {
             let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
                 .fetch_one(pool)
                 .await
                 .unwrap();
             assert_eq!(count, 1, "table {table} row count changed");
         }
+        let user_agents: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM agents WHERE COALESCE(builtin, 0) = 0")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(user_agents, 1, "table agents user-row count changed");
 
         // Re-running startup migrations is a no-op (sqlx applies each
         // migration exactly once): reopen the database and re-verify.

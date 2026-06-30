@@ -30,12 +30,18 @@ impl AgentRepository {
         let skills_json = serde_json::to_string(&agent.skills)
             .map_err(|e| AppError::validation_error(&format!("Invalid skills: {}", e)))?;
 
+        let builtin_tools_json = serde_json::to_string(&agent.builtin_tools)
+            .map_err(|e| AppError::validation_error(&format!("Invalid builtin tools: {}", e)))?;
+
+        let starters_json = serde_json::to_string(&agent.starters)
+            .map_err(|e| AppError::validation_error(&format!("Invalid starters: {}", e)))?;
+
         // 将空字符串转换为 NULL
         let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
         "#;
 
         sqlx::query(query)
@@ -52,6 +58,15 @@ impl AgentRepository {
             .bind(&skills_json)
             .bind(agent.generative_ui)
             .bind(&agent.genui_id)
+            .bind(&agent.provider_id)
+            .bind(&agent.icon)
+            .bind(&agent.description)
+            .bind(agent.builtin)
+            .bind(&builtin_tools_json)
+            .bind(&agent.working_dir_mode)
+            .bind(&agent.tool_execution_mode)
+            .bind(&agent.thinking_level)
+            .bind(&starters_json)
             .bind(agent.created_at)
             .bind(agent.updated_at)
             .execute(self.db.pool())
@@ -64,7 +79,7 @@ impl AgentRepository {
     /// 获取 Agent 列表
     pub async fn list_agents(&self, limit: i32, offset: i32) -> Result<Vec<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
             FROM agents ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -86,7 +101,7 @@ impl AgentRepository {
     /// 根据 ID 获取 Agent
     pub async fn get_agent_by_id(&self, agent_id: &UUID) -> Result<Option<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at
+            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
             FROM agents WHERE id = $1
         "#;
 
@@ -116,12 +131,18 @@ impl AgentRepository {
         let skills_json = serde_json::to_string(&agent.skills)
             .map_err(|e| AppError::validation_error(&format!("Invalid skills: {}", e)))?;
 
+        let builtin_tools_json = serde_json::to_string(&agent.builtin_tools)
+            .map_err(|e| AppError::validation_error(&format!("Invalid builtin tools: {}", e)))?;
+
+        let starters_json = serde_json::to_string(&agent.starters)
+            .map_err(|e| AppError::validation_error(&format!("Invalid starters: {}", e)))?;
+
         // 将空字符串转换为 NULL
         let model = agent.model.as_ref().filter(|s| !s.is_empty());
 
         let query = r#"
-            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, generative_ui = $11, genui_id = $12, updated_at = $13
-            WHERE id = $14
+            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, generative_ui = $11, genui_id = $12, provider_id = $13, icon = $14, description = $15, builtin = $16, builtin_tools = $17, working_dir_mode = $18, tool_execution_mode = $19, thinking_level = $20, starters = $21, updated_at = $22
+            WHERE id = $23
         "#;
 
         let result = sqlx::query(query)
@@ -137,6 +158,15 @@ impl AgentRepository {
             .bind(&skills_json)
             .bind(agent.generative_ui)
             .bind(&agent.genui_id)
+            .bind(&agent.provider_id)
+            .bind(&agent.icon)
+            .bind(&agent.description)
+            .bind(agent.builtin)
+            .bind(&builtin_tools_json)
+            .bind(&agent.working_dir_mode)
+            .bind(&agent.tool_execution_mode)
+            .bind(&agent.thinking_level)
+            .bind(&starters_json)
             .bind(agent.updated_at)
             .bind(&agent.id)
             .execute(self.db.pool())
@@ -284,6 +314,30 @@ impl AgentRepository {
         // Option<String> 显式解码：SQL NULL -> None（旧行 / 未关联）。
         let genui_id: Option<String> = row.try_get::<Option<String>, _>("genui_id")?;
 
+        // ── AgentDefinition 扩展列（migration 058），全部 NULL-safe 解码 ──
+        let provider_id: Option<String> = row.try_get::<Option<String>, _>("provider_id")?;
+        let icon: Option<String> = row.try_get::<Option<String>, _>("icon")?;
+        let description: Option<String> = row.try_get::<Option<String>, _>("description")?;
+        // builtin：SQL NULL（旧行）-> false；INTEGER 1 -> true。
+        let builtin: bool = row.try_get::<Option<bool>, _>("builtin")?.unwrap_or(false);
+        let builtin_tools_json: Option<String> = row.try_get("builtin_tools")?;
+        let builtin_tools: Vec<String> = if let Some(json) = builtin_tools_json {
+            serde_json::from_str(&json).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let working_dir_mode: Option<String> =
+            row.try_get::<Option<String>, _>("working_dir_mode")?;
+        let tool_execution_mode: Option<String> =
+            row.try_get::<Option<String>, _>("tool_execution_mode")?;
+        let thinking_level: Option<String> = row.try_get::<Option<String>, _>("thinking_level")?;
+        let starters_json: Option<String> = row.try_get("starters")?;
+        let starters: Vec<String> = if let Some(json) = starters_json {
+            serde_json::from_str(&json).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
         Ok(Agent {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
@@ -298,6 +352,15 @@ impl AgentRepository {
             skills,
             generative_ui,
             genui_id,
+            provider_id,
+            icon,
+            description,
+            builtin,
+            builtin_tools,
+            working_dir_mode,
+            tool_execution_mode,
+            thinking_level,
+            starters,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -352,6 +415,15 @@ mod tests {
             skills: vec!["code-analysis".to_string(), "refactoring".to_string()],
             generative_ui: Some(true),
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -368,8 +440,14 @@ mod tests {
         assert_eq!(fetched_agent.mcp_servers, agent.mcp_servers);
         assert_eq!(fetched_agent.skills, agent.skills);
 
-        // List
-        let agents = repo.list_agents(10, 0).await.unwrap();
+        // List (exclude the builtin AgentDefinitions seeded by migration 058)
+        let agents: Vec<_> = repo
+            .list_agents(10, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|a| !a.builtin)
+            .collect();
         assert_eq!(agents.len(), 1);
 
         // Update
@@ -412,6 +490,15 @@ mod tests {
             skills: vec![],
             generative_ui: None,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -430,6 +517,15 @@ mod tests {
             skills: vec![],
             generative_ui: None,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -448,6 +544,15 @@ mod tests {
             skills: vec![],
             generative_ui: None,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -494,6 +599,15 @@ mod tests {
             skills: vec![],
             generative_ui: None,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -523,6 +637,15 @@ mod tests {
             skills: vec![],
             generative_ui: None,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -556,6 +679,15 @@ mod tests {
             skills: vec![],
             generative_ui,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         }
@@ -614,7 +746,13 @@ mod tests {
         let fetched = repo.get_agent_by_id(&agent_id).await.unwrap().unwrap();
         assert_eq!(fetched.generative_ui, None);
 
-        let listed = repo.list_agents(10, 0).await.unwrap();
+        let listed: Vec<_> = repo
+            .list_agents(10, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|a| !a.builtin)
+            .collect();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].generative_ui, None);
     }

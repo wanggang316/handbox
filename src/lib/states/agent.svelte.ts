@@ -200,7 +200,15 @@ export const agentActions = {
       | "skills"
       | "reasoning"
       | "generativeUi"
-      | "genuiId",
+      | "genuiId"
+      | "providerId"
+      | "icon"
+      | "description"
+      | "builtinTools"
+      | "workingDirMode"
+      | "toolExecutionMode"
+      | "thinkingLevel"
+      | "starters",
     value:
       | number
       | boolean

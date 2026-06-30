@@ -20,6 +20,14 @@ pub enum AgentParameter {
     Skills(Vec<String>),
     GenerativeUi(Option<bool>),
     GenUiId(Option<UUID>),
+    ProviderId(Option<String>),
+    Icon(Option<String>),
+    Description(Option<String>),
+    BuiltinTools(Vec<String>),
+    WorkingDirMode(Option<String>),
+    ToolExecutionMode(Option<String>),
+    ThinkingLevel(Option<String>),
+    Starters(Vec<String>),
 }
 
 /// Agent 服务
@@ -67,6 +75,17 @@ impl AgentService {
             skills: skills.unwrap_or_default(),
             generative_ui,
             genui_id,
+            // AgentDefinition 扩展字段：create 路径默认空，由表单创建后经
+            // `agent_update_field` 逐字段补齐（与编辑路径一致）。用户创建恒为非内置。
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -103,6 +122,11 @@ impl AgentService {
     ) -> Result<Agent, AppError> {
         let mut agent = self.get_agent(agent_id).await?;
 
+        // 内置 AgentDefinition 不可改名（id 稳定，保留固定显示名）；其余字段可调。
+        if agent.builtin && matches!(parameter, AgentParameter::Name(_)) {
+            return Err(AppError::validation_error("Builtin agent cannot be renamed"));
+        }
+
         match parameter {
             AgentParameter::Name(name) => agent.name = name,
             AgentParameter::Model(model) => agent.model = Some(model),
@@ -116,6 +140,14 @@ impl AgentService {
             AgentParameter::Skills(skills) => agent.skills = skills,
             AgentParameter::GenerativeUi(v) => agent.generative_ui = v,
             AgentParameter::GenUiId(v) => agent.genui_id = v,
+            AgentParameter::ProviderId(v) => agent.provider_id = v,
+            AgentParameter::Icon(v) => agent.icon = v,
+            AgentParameter::Description(v) => agent.description = v,
+            AgentParameter::BuiltinTools(v) => agent.builtin_tools = v,
+            AgentParameter::WorkingDirMode(v) => agent.working_dir_mode = v,
+            AgentParameter::ToolExecutionMode(v) => agent.tool_execution_mode = v,
+            AgentParameter::ThinkingLevel(v) => agent.thinking_level = v,
+            AgentParameter::Starters(v) => agent.starters = v,
         }
 
         agent.updated_at = Self::current_timestamp();
@@ -183,7 +215,12 @@ impl AgentService {
     /// 删除 Agent
     pub async fn delete_agent(&self, agent_id: UUID) -> Result<(), AppError> {
         // 先检查 Agent 是否存在
-        self.get_agent(agent_id.clone()).await?;
+        let agent = self.get_agent(agent_id.clone()).await?;
+
+        // 内置 AgentDefinition（builtin-chat / builtin-coding）受保护，不可删除。
+        if agent.builtin {
+            return Err(AppError::validation_error("Builtin agent cannot be deleted"));
+        }
 
         // 删除 Agent
         self.repository.delete_agent(&agent_id).await
@@ -314,10 +351,16 @@ mod tests {
             .await
             .unwrap();
 
-        let agents = service
+        // Exclude the builtin AgentDefinitions seeded by migration 058. They
+        // carry earlier (migration-time) updated_at, so they sort after the
+        // two agents created during this test.
+        let agents: Vec<_> = service
             .list_agents(Some(10), Some(0))
             .await
-            .expect("list agents failed");
+            .expect("list agents failed")
+            .into_iter()
+            .filter(|a| !a.builtin)
+            .collect();
 
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].name, "Agent 2");

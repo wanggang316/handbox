@@ -1,6 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Plus, Bot, Pencil, Trash2, Play, LayoutTemplate } from "@lucide/svelte";
+  import {
+    Plus,
+    Bot,
+    Pencil,
+    Trash2,
+    Play,
+    Copy,
+    LayoutTemplate,
+  } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
@@ -135,9 +143,44 @@
           effectiveGenuiId
         );
       }
+
+      // 能力字段：后端仅支持逐字段更新，变更时下发。
+      if (data.description !== (editingAgent.description ?? "")) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "description",
+          data.description || null
+        );
+      }
+      if (
+        JSON.stringify(data.builtinTools ?? []) !==
+        JSON.stringify(editingAgent.builtinTools ?? [])
+      ) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "builtinTools",
+          data.builtinTools
+        );
+      }
+      if (data.workingDirMode !== (editingAgent.workingDirMode ?? "optional")) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "workingDirMode",
+          data.workingDirMode
+        );
+      }
+      if (
+        data.toolExecutionMode !== (editingAgent.toolExecutionMode ?? "auto")
+      ) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "toolExecutionMode",
+          data.toolExecutionMode
+        );
+      }
     } else {
-      // 创建新 Agent
-      await agentActions.createAgent({
+      // 创建新 Agent（后端 create 不接受能力字段，需创建后逐项写入）
+      const newAgent = await agentActions.createAgent({
         name: data.name,
         model: data.model || undefined,
         temperature: data.temperature,
@@ -151,6 +194,38 @@
         generativeUi: data.generativeUi,
         genuiId: effectiveGenuiId ?? undefined,
       });
+
+      // 仅对非默认能力字段做 create-then-update。
+      if (newAgent.id) {
+        if (data.description) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "description",
+            data.description
+          );
+        }
+        if (data.builtinTools.length > 0) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "builtinTools",
+            data.builtinTools
+          );
+        }
+        if (data.workingDirMode !== "optional") {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "workingDirMode",
+            data.workingDirMode
+          );
+        }
+        if (data.toolExecutionMode !== "auto") {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "toolExecutionMode",
+            data.toolExecutionMode
+          );
+        }
+      }
     }
   }
 
@@ -174,6 +249,71 @@
       goto(`/chat/${session.id}`);
     } catch (error) {
       console.error("Failed to create session from agent:", error);
+    }
+  }
+
+  async function handleCloneAgent(agent: Agent) {
+    try {
+      // 内置 Agent 可被克隆为自定义 Agent；create 不接受能力字段，需逐项写入。
+      const newAgent = await agentActions.createAgent({
+        name: `${agent.name} 副本`,
+        model: agent.model || undefined,
+        temperature: agent.temperature,
+        topP: agent.topP,
+        topK: agent.topK,
+        maxTokens: agent.maxTokens,
+        systemPrompt: agent.systemPrompt || undefined,
+        reasoning: undefined,
+        mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
+        skills: [],
+        generativeUi: agent.generativeUi ?? false,
+        genuiId: agent.genuiId || undefined,
+      });
+
+      if (newAgent.id) {
+        if (agent.builtinTools && agent.builtinTools.length > 0) {
+          await agentActions.updateAgentField(newAgent.id, "builtinTools", [
+            ...agent.builtinTools,
+          ]);
+        }
+        if (agent.workingDirMode) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "workingDirMode",
+            agent.workingDirMode
+          );
+        }
+        if (agent.toolExecutionMode) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "toolExecutionMode",
+            agent.toolExecutionMode
+          );
+        }
+        if (agent.description) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "description",
+            agent.description
+          );
+        }
+        if (agent.providerId) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "providerId",
+            agent.providerId
+          );
+        }
+        if (agent.thinkingLevel) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "thinkingLevel",
+            agent.thinkingLevel
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Failed to clone agent:", error);
     }
   }
 
@@ -307,9 +447,18 @@
                     <Bot size={20} />
                   </div>
                   <div class="min-w-0">
-                    <h3 class="truncate font-medium text-base-content">
-                      {agent.name}
-                    </h3>
+                    <div class="flex items-center gap-1.5">
+                      <h3 class="truncate font-medium text-base-content">
+                        {agent.name}
+                      </h3>
+                      {#if agent.builtin}
+                        <span
+                          class="shrink-0 rounded bg-base-content/10 px-1.5 py-0.5 text-[10px] font-medium text-base-content/55"
+                        >
+                          内置
+                        </span>
+                      {/if}
+                    </div>
                     <p class="truncate text-xs text-base-content/55">
                       {getModelName(agent)}
                     </p>
@@ -325,18 +474,27 @@
                   </button>
                   <button
                     class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
+                    onclick={() => handleCloneAgent(agent)}
+                    title="克隆"
+                  >
+                    <Copy size={14} />
+                  </button>
+                  <button
+                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
                     onclick={() => openEditModal(agent)}
                     title={t("common.edit")}
                   >
                     <Pencil size={14} />
                   </button>
-                  <button
-                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-error/10 hover:text-error"
-                    onclick={() => openDeleteConfirm(agent)}
-                    title={t("common.delete")}
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {#if !agent.builtin}
+                    <button
+                      class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-error/10 hover:text-error"
+                      onclick={() => openDeleteConfirm(agent)}
+                      title={t("common.delete")}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  {/if}
                 </div>
               </div>
 
