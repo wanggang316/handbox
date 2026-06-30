@@ -3,8 +3,8 @@
 use crate::models::{
     AppError, CreateWordRequest, ListWordsRequest, UpdateWordRequest,
 };
-use crate::services::{MessageService, WordService};
-use crate::storage::types::{Message, Word};
+use crate::services::WordService;
+use crate::storage::types::Word;
 use tauri::State;
 
 #[tauri::command]
@@ -57,19 +57,4 @@ pub async fn word_delete(
     word_service: State<'_, WordService>,
 ) -> Result<(), AppError> {
     word_service.delete_word(&word_id).await
-}
-
-#[tauri::command]
-pub async fn word_translation_history(
-    session_id: String,
-    limit: Option<i32>,
-    offset: Option<i32>,
-    message_service: State<'_, MessageService>,
-) -> Result<Vec<Message>, AppError> {
-    let limit = limit.unwrap_or(20);
-    let offset = offset.unwrap_or(0);
-
-    message_service
-        .get_messages(session_id, Some(limit), Some(offset))
-        .await
 }

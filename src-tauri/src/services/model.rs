@@ -5,7 +5,7 @@ use crate::models::AppError;
 use crate::services::model_runtime;
 use crate::services::Database;
 use crate::storage::types::{Model, Provider, UUID};
-use crate::storage::{ModelRepository, ProviderRepository, SessionRepository};
+use crate::storage::{ModelRepository, ProviderRepository};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -14,7 +14,6 @@ use std::sync::Arc;
 pub struct ModelService {
     model_repo: ModelRepository,
     provider_repo: ProviderRepository,
-    chat_repo: SessionRepository,
 }
 
 impl ModelService {
@@ -22,8 +21,7 @@ impl ModelService {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             model_repo: ModelRepository::new(Arc::clone(&db)),
-            provider_repo: ProviderRepository::new(Arc::clone(&db)),
-            chat_repo: SessionRepository::new(db),
+            provider_repo: ProviderRepository::new(db),
         }
     }
 
@@ -357,11 +355,6 @@ impl ModelService {
 
             Ok(result)
         }
-    }
-
-    /// 统计使用指定模型的聊天数量
-    pub async fn count_chats_using_model(&self, model_id: &str) -> Result<i32, AppError> {
-        self.chat_repo.count_chats_using_model(model_id).await
     }
 }
 

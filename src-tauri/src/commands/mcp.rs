@@ -70,21 +70,3 @@ pub async fn mcp_update_tool_enabled(
 ) -> Result<McpServer, AppError> {
     mcp_service.update_tool_enabled(request).await
 }
-
-/// 统计使用特定 MCP 服务器的聊天数量
-#[tauri::command]
-pub async fn mcp_count_chats_using_server(
-    server_id: String,
-    mcp_service: State<'_, McpService>,
-) -> Result<i32, AppError> {
-    mcp_service.count_chats_using_server(&server_id).await
-}
-
-/// 从所有聊天中移除 MCP 服务器引用
-#[tauri::command]
-pub async fn mcp_remove_server_from_chats(
-    server_id: String,
-    mcp_service: State<'_, McpService>,
-) -> Result<i32, AppError> {
-    mcp_service.remove_mcp_server_from_chats(&server_id).await
-}

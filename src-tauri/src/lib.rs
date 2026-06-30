@@ -18,8 +18,8 @@ use tauri::{AppHandle, Manager};
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    GenUiService, JobExecutor, JobScheduler, JobService, McpService, MessageService, ModelService,
-    ProviderService, SessionService, SettingsService, StorageService, UserSessionService,
+    GenUiService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
+    ProviderService, SettingsService, StorageService, UserSessionService,
     WordService,
 };
 use crate::storage::{Database, WordRepository};
@@ -151,17 +151,6 @@ pub fn run() {
             auth_get_user,
             auth_update_profile,
             auth_validate_token,
-            // Session 相关命令 (原 chat 相关命令)
-            session_create,
-            session_list,
-            session_get,
-            session_update_field,
-            session_update_model,
-            session_clear_model_parameters,
-            session_update_name,
-            session_delete,
-            session_generate_title,
-            session_create_from_agent,
             // Agent 相关命令
             agent_create,
             agent_list,
@@ -197,19 +186,6 @@ pub fn run() {
             agent_run_abort,
             agent_run_steer,
             agent_approval_respond,
-            // 消息相关命令
-            message_user_send,
-            message_user_send_stream,
-            message_list,
-            message_get,
-            message_update,
-            message_delete,
-            message_assistant_regenerate_stream,
-            message_user_resend_stream,
-            message_stop_stream,
-            // message_execute_mcp_call, // Temporarily removed
-            message_execute_tool_calls,
-            message_execute_tool_calls_stream,
             // 窗口管理命令
             open_settings_window,
             close_settings_window,
@@ -221,13 +197,11 @@ pub fn run() {
             provider_update,
             provider_delete,
             provider_toggle,
-            provider_count_chats,
             provider_list_with_models,
             // 模型相关命令
             model_list_by_provider,
             model_toggle,
             model_toggle_favorite,
-            model_count_chats,
             model_add,
             // MCP 管理命令
             mcp_list_servers,
@@ -237,8 +211,6 @@ pub fn run() {
             mcp_toggle_server,
             mcp_refresh_server,
             mcp_update_tool_enabled,
-            mcp_count_chats_using_server,
-            mcp_remove_server_from_chats,
             // Skill 管理命令
             skill_list,
             skill_set_disabled,
@@ -257,7 +229,6 @@ pub fn run() {
             word_get,
             word_update,
             word_delete,
-            word_translation_history,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
@@ -334,19 +305,6 @@ async fn initialize_services(
     let model_service = ModelService::new(database_service.clone());
 
     let mcp_service = McpService::new(database_service.clone());
-    let mcp_service_shared = Arc::new(mcp_service.clone());
-
-    let session_service =
-        SessionService::new(database_service.clone(), provider_service_shared.clone());
-    let session_service_shared = Arc::new(session_service.clone());
-
-    let message_service = MessageService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        session_service_shared.clone(),
-        mcp_service_shared,
-        storage_service.clone(),
-    );
 
     let settings_service = SettingsService::new(storage_service.clone());
 
@@ -476,8 +434,6 @@ async fn initialize_services(
 
     // 将服务注册到应用状态
     app.manage(storage_service);
-    app.manage(session_service);
-    app.manage(message_service);
     app.manage(provider_service);
     app.manage(model_service);
     app.manage(mcp_service);
