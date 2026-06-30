@@ -564,6 +564,11 @@ pub struct PermissionExtension {
     /// Emitter pushing `agent_approval_request` to the frontend. `None` →
     /// fail-closed (deny every dangerous tool); see the type-level doc.
     emitter: Option<ApprovalEmitter>,
+    /// Extra tool names (beyond the built-in `DANGEROUS_TOOLS`) that also require
+    /// approval: the `mcp__{serverId}__{tool}` names of this session's
+    /// manual-execution MCP servers. Auto-execution MCP tools are NOT listed here
+    /// and pass straight through like any non-dangerous built-in.
+    approval_tools: HashSet<String>,
 }
 
 impl PermissionExtension {
@@ -599,7 +604,17 @@ impl PermissionExtension {
             },
             session_id,
             emitter,
+            approval_tools: HashSet::new(),
         }
+    }
+
+    /// Builder: bind this session's manual-server MCP tool names (the
+    /// `mcp__server__tool` names) so they are approval-gated like the dangerous
+    /// built-ins. Used by `build_agent_session`; tests use the bare `new` (no MCP
+    /// approval tools), keeping the existing two-arg call sites unchanged.
+    pub fn with_approval_tools(mut self, approval_tools: HashSet<String>) -> Self {
+        self.approval_tools = approval_tools;
+        self
     }
 
     /// Request approval for one dangerous tool call and await the decision.
@@ -705,7 +720,11 @@ impl Extension for PermissionExtension {
         // Only the dangerous, side-effecting tools are approval-gated; read-only
         // / non-dangerous tools pass straight through (the sandbox judges their
         // paths separately, earlier in the chain).
-        if !DANGEROUS_TOOLS.contains(&event.tool_name.as_str()) {
+        // Dangerous built-ins (write/edit/bash) AND this session's manual-server
+        // MCP tools are approval-gated; everything else passes straight through.
+        if !DANGEROUS_TOOLS.contains(&event.tool_name.as_str())
+            && !self.approval_tools.contains(&event.tool_name)
+        {
             return Ok(HookDecision::Continue);
         }
         // Key the approval rendezvous off `self.session_id` (the HandBox UUID),

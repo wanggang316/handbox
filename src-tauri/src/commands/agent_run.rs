@@ -295,6 +295,22 @@ async fn assemble_and_drive(
                 server.enabled_tools = cfg.enabled_tools.clone();
             }
         }
+        // Manual-execution servers' tools require approval: collect their
+        // namespaced names into the config so PermissionExtension gates them.
+        let mut manual = std::collections::HashSet::new();
+        for server in &servers {
+            let is_manual = session_row
+                .mcp_servers
+                .iter()
+                .find(|c| c.server_id == server.id)
+                .is_some_and(|c| c.execution_mode == "manual");
+            if is_manual {
+                for tool in &server.enabled_tools {
+                    manual.insert(format!("mcp__{}__{}", server.id, tool));
+                }
+            }
+        }
+        config.mcp_approval_tools = manual;
         mcp.build_mcp_agent_tools(&servers)
     };
 

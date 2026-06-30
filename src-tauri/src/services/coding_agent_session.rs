@@ -21,6 +21,7 @@
 //! would otherwise persist session state under the user's `~/.hand`; for a
 //! sandboxed desktop app that state must stay inside the app's own data root.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -97,6 +98,10 @@ pub struct HandBoxAgentSessionConfig {
     /// [`select_enabled_tools`]). Following the legacy `agent_tools::build_tools`
     /// convention, an empty list means "no tool enabled" (not "all enabled").
     pub enabled_tools: Vec<String>,
+    /// Tool names requiring approval this session: the `mcp__server__tool` names
+    /// of manual-execution MCP servers. Populated by agent_run; empty default =
+    /// no MCP approval gating (the jobs/tests path).
+    pub mcp_approval_tools: HashSet<String>,
 }
 
 /// Construct a coding-agent [`AgentSession`] from a HandBox configuration.
@@ -227,10 +232,10 @@ pub fn build_agent_session(
     // `coding_agent_runtime::abort_run` / `deny_pending_for_session` use, so an
     // aborted turn parked on an approval await can actually be unblocked, and the
     // session's always-allow consent persists across turns.
-    session.register_extension(Arc::new(PermissionExtension::new(
-        config.session_id.clone(),
-        approval_emitter,
-    )));
+    session.register_extension(Arc::new(
+        PermissionExtension::new(config.session_id.clone(), approval_emitter)
+            .with_approval_tools(config.mcp_approval_tools.clone()),
+    ));
 
     Ok(session)
 }
@@ -375,6 +380,8 @@ pub fn config_from_rows(
         max_tokens: session.max_tokens.and_then(|t| u32::try_from(t).ok()),
         thinking_level: session.thinking_level.clone(),
         enabled_tools: session.enabled_tools.clone(),
+        // agent_run fills this from manual-server MCP bindings; empty otherwise.
+        mcp_approval_tools: HashSet::new(),
     })
 }
 
@@ -404,6 +411,7 @@ mod tests {
             max_tokens: None,
             thinking_level: None,
             enabled_tools: vec![],
+            mcp_approval_tools: HashSet::new(),
         }
     }
 
