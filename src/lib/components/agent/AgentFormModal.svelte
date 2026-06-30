@@ -1,15 +1,23 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Modal from "../ui/Modal.svelte";
-  import Input from "../ui/Input.svelte";
   import Button from "../ui/Button.svelte";
   import Select from "../ui/Select.svelte";
-  import TableGroup from "../ui/table/TableGroup.svelte";
-  import TableBaseRow from "../ui/table/TableBaseRow.svelte";
-  import SwitchRow from "../ui/table/SwitchRow.svelte";
-  import { Bot } from "@lucide/svelte";
+  import Toggle from "../ui/Toggle.svelte";
+  import LabeledSlider from "../ui/LabeledSlider.svelte";
+  import ChatModelSelectModal from "../chat/ChatModelSelectModal.svelte";
+  import { ChevronsUpDown, ChevronDown, ChevronRight } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
+  import type { McpServerConfig } from "$lib/types/chat";
+  import type { ModelWithProvider } from "$lib/types/provider";
+  import {
+    getAllModels,
+    getProviderIconById,
+    providerActions,
+    providerState,
+  } from "$lib/states/provider.svelte";
+  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
 
   interface Props {
@@ -27,7 +35,7 @@
     topK?: number;
     maxTokens?: number;
     systemPrompt: string;
-    skills: string;
+    mcpServers: McpServerConfig[];
     generativeUi: boolean;
     // 关联的 GenUI id；空串表示未关联
     genuiId: string;
@@ -35,22 +43,67 @@
 
   let { open, agent, onClose, onSave }: Props = $props();
 
-  // GenUI 下拉选项：首项为「未关联」，其余来自已保存的 GenUI 列表。
+  // 统一控件外观（Linear 阶梯）：控件底色上浮一阶到 surface-3，与 Modal 卡片
+  // (--bg-card) 拉开层次；hairline 细边框，hover 加深。扁平排布，不再套内层卡片。
+  const FIELD_CLASS =
+    "w-full rounded-md bg-[var(--surface-3)] border border-[var(--hairline)] px-2.5 py-2 " +
+    "text-sm text-base-content placeholder:text-base-content/35 transition-colors " +
+    "hover:border-[var(--hairline-strong)]";
+  const LABEL_CLASS = "text-[13px] font-medium text-base-content/70";
+  const SECTION_CLASS =
+    "text-[11px] font-semibold uppercase tracking-wider text-base-content/40";
+
+  // ── 模型参数：与聊天侧同一组字段，扁平绘制（label + toggle + slider）。 ──
+  type ParamKey = "temperature" | "topP" | "topK" | "maxTokens";
+  const PARAM_META: Array<{
+    key: ParamKey;
+    label: string;
+    min: number;
+    max: number;
+    step: number;
+    default: number;
+  }> = [
+    { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.1, default: 0.7 },
+    { key: "topP", label: "Top P", min: 0, max: 1, step: 0.05, default: 0.9 },
+    { key: "topK", label: "Top K", min: 0, max: 100, step: 1, default: 40 },
+    { key: "maxTokens", label: "Max Tokens", min: 256, max: 16384, step: 256, default: 4096 },
+  ];
+
   const genuiOptions = $derived([
     { value: "", label: "未关联" },
     ...genuiState.genuis.map((g) => ({ value: g.id ?? "", label: g.name })),
   ]);
 
+  const executionModeOptions = $derived([
+    { value: "auto", label: t("chat.autoExecution") },
+    { value: "manual", label: t("chat.manualExecution") },
+  ]);
+
+  const availableServers = $derived(
+    mcpState.servers.filter(
+      (s) => s.enabled && s.status === "ready" && s.enabledTools.length > 0
+    )
+  );
+
   onMount(() => {
     if (genuiState.genuis.length === 0) {
-      genuiActions.loadGenuis().catch((e) => console.error("Failed to load GenUIs:", e));
+      genuiActions
+        .loadGenuis()
+        .catch((e) => console.error("Failed to load GenUIs:", e));
+    }
+    if (providerState.providersWithModels.length === 0) {
+      providerActions
+        .loadProvidersWithModels()
+        .catch((e) => console.error("Failed to load models:", e));
+    }
+    if (!mcpState.initialized) {
+      mcpActions
+        .loadServers()
+        .catch((e) => console.error("Failed to load MCP servers:", e));
     }
   });
 
-  // 本地状态，因为 props 是只读的
   let localOpen = $state(false);
-
-  // 同步外部 open 状态到本地状态
   $effect(() => {
     localOpen = open;
   });
@@ -59,18 +112,92 @@
     name: "",
     model: "",
     systemPrompt: "",
-    skills: "",
+    mcpServers: [],
     generativeUi: false,
     genuiId: "",
   });
 
+  let paramEnabled = $state<Record<ParamKey, boolean>>({
+    temperature: false,
+    topP: false,
+    topK: false,
+    maxTokens: false,
+  });
+  let paramValues = $state<Record<ParamKey, number>>({
+    temperature: 0.7,
+    topP: 0.9,
+    topK: 40,
+    maxTokens: 4096,
+  });
+
+  let paramsOpen = $state(false);
+  let mcpOpen = $state(true);
+  let showModelModal = $state(false);
   let saving = $state(false);
+
+  const selectedModel = $derived<ModelWithProvider | null>(
+    formData.model
+      ? getAllModels().find((m) => m.id === formData.model) ?? null
+      : null
+  );
+  const providerIcon = $derived(
+    selectedModel?.provider_id
+      ? getProviderIconById(selectedModel.provider_id)
+      : undefined
+  );
+
+  function handleModelSelect(model: ModelWithProvider) {
+    formData.model = model.id;
+    showModelModal = false;
+  }
+
+  function isMcpSelected(serverId: string): boolean {
+    return formData.mcpServers.some((s) => s.serverId === serverId);
+  }
+  function mcpMode(serverId: string): "auto" | "manual" {
+    return (
+      formData.mcpServers.find((s) => s.serverId === serverId)?.executionMode ??
+      "auto"
+    );
+  }
+  function toggleMcp(serverId: string, selected: boolean) {
+    if (selected) {
+      if (!formData.mcpServers.some((s) => s.serverId === serverId)) {
+        const server = mcpState.servers.find((s) => s.id === serverId);
+        formData.mcpServers = [
+          ...formData.mcpServers,
+          {
+            serverId,
+            executionMode: "auto",
+            enabledTools: server?.enabledTools ?? [],
+          },
+        ];
+      }
+    } else {
+      formData.mcpServers = formData.mcpServers.filter(
+        (s) => s.serverId !== serverId
+      );
+    }
+  }
+  function setMcpMode(serverId: string, mode: "auto" | "manual") {
+    formData.mcpServers = formData.mcpServers.map((s) =>
+      s.serverId === serverId ? { ...s, executionMode: mode } : s
+    );
+  }
 
   async function handleSave() {
     if (!formData.name.trim()) {
       alert(t("agent.form.nameRequired"));
       return;
     }
+    formData.temperature = paramEnabled.temperature
+      ? paramValues.temperature
+      : undefined;
+    formData.topP = paramEnabled.topP ? paramValues.topP : undefined;
+    formData.topK = paramEnabled.topK ? paramValues.topK : undefined;
+    formData.maxTokens = paramEnabled.maxTokens
+      ? paramValues.maxTokens
+      : undefined;
 
     saving = true;
     try {
@@ -85,7 +212,6 @@
     }
   }
 
-  // 当 agent 变化时，更新表单数据
   $effect(() => {
     if (agent) {
       formData = {
@@ -96,7 +222,7 @@
         topK: agent.topK,
         maxTokens: agent.maxTokens,
         systemPrompt: agent.systemPrompt || "",
-        skills: agent.skills.join(", "),
+        mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
         generativeUi: agent.generativeUi ?? false,
         genuiId: agent.genuiId ?? "",
       };
@@ -105,166 +231,224 @@
         name: "",
         model: "",
         systemPrompt: "",
-        skills: "",
+        mcpServers: [],
         generativeUi: false,
         genuiId: "",
       };
     }
+
+    const source: Record<ParamKey, number | undefined | null> = {
+      temperature: agent?.temperature,
+      topP: agent?.topP,
+      topK: agent?.topK,
+      maxTokens: agent?.maxTokens,
+    };
+    for (const p of PARAM_META) {
+      const v = source[p.key];
+      const has = v !== undefined && v !== null;
+      paramEnabled[p.key] = has;
+      paramValues[p.key] = has ? (v as number) : p.default;
+    }
   });
 </script>
 
-<Modal bind:open={localOpen} title={agent ? t("agent.form.editTitle") : t("agent.form.createTitle")} onClose={onClose}>
-  <div class="w-[600px] max-h-[80vh] overflow-y-auto px-6 pt-16 pb-6 flex flex-col gap-5">
-    <!-- 基本信息 -->
-    <TableGroup>
-      <TableBaseRow label={t("agent.form.nameLabel")} layout="vertical">
-        <Input
+<Modal
+  bind:open={localOpen}
+  title={agent ? t("agent.form.editTitle") : t("agent.form.createTitle")}
+  {onClose}
+>
+  <div
+    class="flex w-[460px] max-h-[82vh] flex-col gap-5 overflow-y-auto px-6 pt-14 pb-0"
+  >
+    <!-- 基本字段：扁平 label + 控件 -->
+    <div class="flex flex-col gap-3.5">
+      <div class="flex flex-col gap-1.5">
+        <span class={LABEL_CLASS}>{t("agent.form.nameLabel")}</span>
+        <input
+          class={FIELD_CLASS}
           placeholder={t("agent.form.namePlaceholder")}
           bind:value={formData.name}
         />
-      </TableBaseRow>
-    </TableGroup>
+      </div>
 
-    <!-- 模型选择 -->
-    <TableGroup>
-      <TableBaseRow label={t("agent.form.modelLabel")} layout="vertical">
-        <Input
-          placeholder={t("agent.form.modelPlaceholder")}
-          bind:value={formData.model}
-        />
-        <p class="mt-1 text-xs text-base-content/50">
-          {t("agent.form.modelHint")}
-        </p>
-      </TableBaseRow>
-    </TableGroup>
+      <div class="flex flex-col gap-1.5">
+        <span class={LABEL_CLASS}>{t("agent.form.modelLabel")}</span>
+        <button
+          type="button"
+          class="{FIELD_CLASS} text-left"
+          onclick={() => (showModelModal = true)}
+        >
+          {#if selectedModel}
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex min-w-0 items-center gap-2">
+                {#if providerIcon}
+                  <img
+                    src={providerIcon}
+                    alt={selectedModel.providerName}
+                    class="h-4 w-4 shrink-0 rounded object-contain"
+                  />
+                {/if}
+                <span class="truncate text-base-content">{selectedModel.name}</span>
+                <span class="shrink-0 text-xs text-base-content/40">
+                  {selectedModel.providerName}
+                </span>
+              </div>
+              <ChevronsUpDown size={14} class="shrink-0 text-base-content/40" />
+            </div>
+          {:else if formData.model}
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate font-mono text-base-content/80">
+                {formData.model}
+              </span>
+              <ChevronsUpDown size={14} class="shrink-0 text-base-content/40" />
+            </div>
+          {:else}
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-base-content/40">{t("chat.selectModel")}</span>
+              <ChevronsUpDown size={14} class="shrink-0 text-base-content/40" />
+            </div>
+          {/if}
+        </button>
+      </div>
 
-    <!-- 系统提示词 -->
-    <TableGroup title={t("agent.form.systemPromptTitle")}>
-      <div class="px-6">
+      <div class="flex flex-col gap-1.5">
+        <span class={LABEL_CLASS}>{t("agent.form.systemPromptTitle")}</span>
         <textarea
           bind:value={formData.systemPrompt}
           placeholder={t("agent.systemPrompt.placeholder")}
           rows="4"
-          class="w-full px-3 py-2 border border-base-300 rounded-md resize-none
-                 focus:border-transparent
-                 font-mono text-sm text-base-content bg-base-300"
+          class="{FIELD_CLASS} resize-none font-mono leading-relaxed"
         ></textarea>
-        <div class="mt-1 text-xs text-base-content/50 text-right">
+        <div class="text-right text-xs text-base-content/35">
           {t("agent.form.charCount", { count: formData.systemPrompt.length })}
         </div>
       </div>
-    </TableGroup>
-
-    <!-- 技能 -->
-    <TableGroup title={t("agent.form.skillsTitle")}>
-      <TableBaseRow label={t("agent.form.skillsLabel")} layout="vertical">
-        <input
-          type="text"
-          bind:value={formData.skills}
-          placeholder={t("agent.form.skillsPlaceholder")}
-          class="w-full px-3 py-2 border border-base-300 rounded-md
-                 focus:border-transparent
-                 text-sm text-base-content bg-base-300"
-        />
-        <p class="mt-1 text-xs text-base-content/50">
-          {t("agent.form.skillsHint")}
-        </p>
-      </TableBaseRow>
-    </TableGroup>
+    </div>
 
     <!-- 生成式 UI -->
-    <TableGroup>
-      <SwitchRow
-        label="生成式 UI"
-        description="允许助手在回复中渲染交互式界面"
-        bind:checked={formData.generativeUi}
-      />
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex flex-col gap-0.5">
+          <span class={LABEL_CLASS}>生成式 UI</span>
+          <span class="text-xs text-base-content/45">
+            允许助手在回复中渲染交互式界面
+          </span>
+        </div>
+        <Toggle bind:checked={formData.generativeUi} />
+      </div>
       {#if formData.generativeUi}
-        <TableBaseRow label="关联 GenUI" layout="vertical">
-          <Select
-            options={genuiOptions}
-            bind:selectedValue={formData.genuiId}
-          />
-          <p class="mt-1 text-xs text-base-content/50">
+        <div class="flex flex-col gap-1.5">
+          <Select options={genuiOptions} bind:selectedValue={formData.genuiId} />
+          <p class="text-xs text-base-content/40">
             选择一份已保存的 GenUI 模板（可在 Agents 页的 GenUI 标签中创建与管理）。
           </p>
-        </TableBaseRow>
+        </div>
       {/if}
-    </TableGroup>
+    </div>
 
-    <!-- 模型参数 - 始终显示 -->
-    <TableGroup title={t("agent.form.modelParams")} collapsible defaultCollapsed={true}>
-      <div class="px-6 space-y-3">
-        <TableBaseRow label="Temperature">
-          <input
-            type="number"
-            step="0.1"
-            min="0"
-            max="2"
-            placeholder="0.7"
-            class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:border-transparent
-                   text-sm text-base-content bg-base-300"
-            bind:value={formData.temperature}
-          />
-        </TableBaseRow>
-
-        <TableBaseRow label="Top P">
-          <input
-            type="number"
-            step="0.1"
-            min="0"
-            max="1"
-            placeholder="0.9"
-            class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:border-transparent
-                   text-sm text-base-content bg-base-300"
-            bind:value={formData.topP}
-          />
-        </TableBaseRow>
-
-        <TableBaseRow label="Top K">
-          <input
-            type="number"
-            min="1"
-            placeholder="40"
-            class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:border-transparent
-                   text-sm text-base-content bg-base-300"
-            bind:value={formData.topK}
-          />
-        </TableBaseRow>
-
-        <TableBaseRow label="Max Tokens">
-          <input
-            type="number"
-            min="1"
-            placeholder="2048"
-            class="w-full px-3 py-2 border border-base-300 rounded-md
-                   focus:border-transparent
-                   text-sm text-base-content bg-base-300"
-            bind:value={formData.maxTokens}
-          />
-        </TableBaseRow>
-      </div>
-    </TableGroup>
-
-    <!-- MCP 服务器 - 始终显示 -->
-    <TableGroup title={t("agent.form.mcpServers")} collapsible defaultCollapsed={true}>
-      <div class="px-6">
-        <p class="text-sm text-base-content/60">
-          {t("agent.form.mcpComingSoon")}
-        </p>
-      </div>
-    </TableGroup>
-
-    <!-- 底部按钮 -->
-    <div class="flex items-center justify-end gap-3 pt-4 border-t border-base-300">
-      <Button
-        variant="ghost"
-        onclick={onClose}
-        disabled={saving}
+    <!-- 模型参数：可折叠分组，扁平 slider 行 -->
+    <div class="flex flex-col gap-3">
+      <button
+        type="button"
+        class="flex items-center gap-1.5 text-left {SECTION_CLASS} hover:text-base-content/60"
+        onclick={() => (paramsOpen = !paramsOpen)}
       >
+        {#if paramsOpen}
+          <ChevronDown size={13} />
+        {:else}
+          <ChevronRight size={13} />
+        {/if}
+        {t("agent.form.modelParams")}
+      </button>
+      {#if paramsOpen}
+        <div class="flex flex-col gap-3">
+          {#each PARAM_META as p (p.key)}
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-base-content/85">{p.label}</span>
+                <Toggle bind:checked={paramEnabled[p.key]} />
+              </div>
+              {#if paramEnabled[p.key]}
+                <LabeledSlider
+                  bind:value={paramValues[p.key]}
+                  min={p.min}
+                  max={p.max}
+                  step={p.step}
+                  showValue={true}
+                />
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
+    <!-- MCP 服务器：可折叠分组 -->
+    <div class="flex flex-col gap-3">
+      <button
+        type="button"
+        class="flex items-center gap-1.5 text-left {SECTION_CLASS} hover:text-base-content/60"
+        onclick={() => (mcpOpen = !mcpOpen)}
+      >
+        {#if mcpOpen}
+          <ChevronDown size={13} />
+        {:else}
+          <ChevronRight size={13} />
+        {/if}
+        {t("agent.form.mcpServers")}
+      </button>
+      {#if mcpOpen}
+        {#if availableServers.length === 0}
+          <div class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-4 text-center">
+            <p class="text-sm text-base-content/55">
+              {t("chat.noAvailableMcpServers")}
+            </p>
+            <p class="mt-0.5 text-xs text-base-content/40">
+              {t("chat.configureMcpInSettings")}
+            </p>
+          </div>
+        {:else}
+          <div class="flex flex-col gap-3">
+            {#each availableServers as server (server.id)}
+              <div class="flex flex-col gap-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-sm text-base-content/85">
+                    {server.displayName ?? server.name}
+                  </span>
+                  <Toggle
+                    checked={isMcpSelected(server.id)}
+                    onChange={(v) => toggleMcp(server.id, v)}
+                  />
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs text-base-content/40">
+                    {t("chat.enabledToolsCount", {
+                      count: server.enabledTools.length,
+                    })}
+                  </span>
+                  {#if isMcpSelected(server.id)}
+                    <Select
+                      options={executionModeOptions}
+                      selectedValue={mcpMode(server.id)}
+                      onSelect={(value) =>
+                        setMcpMode(server.id, value as "auto" | "manual")}
+                      size="sm"
+                      autoWidth={true}
+                    />
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+    </div>
+
+    <!-- 底部按钮：sticky 底栏，内容超长时始终可见 -->
+    <div
+      class="sticky bottom-0 -mx-6 mt-1 flex items-center justify-end gap-3 border-t border-[var(--hairline)] bg-[var(--bg-card)] px-6 pb-5 pt-4"
+    >
+      <Button variant="ghost" onclick={onClose} disabled={saving}>
         {t("common.cancel")}
       </Button>
       <Button
@@ -277,3 +461,10 @@
     </div>
   </div>
 </Modal>
+
+<!-- 模型选择 Modal（叠在表单之上） -->
+<ChatModelSelectModal
+  bind:open={showModelModal}
+  selectedModel={selectedModel ?? null}
+  onModelSelect={handleModelSelect}
+/>

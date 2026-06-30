@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Plus, Bot, Pencil, Trash2, Settings, Play, LayoutTemplate } from "@lucide/svelte";
+  import { Plus, Bot, Pencil, Trash2, Play, LayoutTemplate } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
@@ -24,8 +24,6 @@
     { value: "genui", label: "GenUI" },
   ];
 
-  let searchQuery = $state("");
-
   let showFormModal = $state(false);
   let editingAgent = $state<Agent | null>(null);
   let showDeleteConfirm = $state(false);
@@ -34,16 +32,6 @@
   // GenUI 删除确认
   let showGenuiDeleteConfirm = $state(false);
   let selectedGenui = $state<GenUi | null>(null);
-
-  const filteredAgents = $derived.by(() => {
-    if (!searchQuery) return agentState.agents;
-    const query = searchQuery.toLowerCase();
-    return agentState.agents.filter(
-      (a) =>
-        a.name.toLowerCase().includes(query) ||
-        a.skills.some((s) => s.toLowerCase().includes(query))
-    );
-  });
 
   function openCreateModal() {
     editingAgent = null;
@@ -118,11 +106,16 @@
         );
       }
 
-      const skills = data.skills
-        ? data.skills.split(",").map((s) => s.trim()).filter(Boolean)
-        : [];
-      if (JSON.stringify(skills) !== JSON.stringify(editingAgent.skills)) {
-        await agentActions.updateAgentField(editingAgent.id, "skills", skills);
+      // MCP 服务器变更（序列化比较，避免无意义写入）
+      if (
+        JSON.stringify(data.mcpServers ?? []) !==
+        JSON.stringify(editingAgent.mcpServers ?? [])
+      ) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "mcpServers",
+          data.mcpServers
+        );
       }
 
       // 生成式 UI: 显式比较布尔值，关闭时必须发送 false（不能被假值跳过）
@@ -153,10 +146,8 @@
         maxTokens: data.maxTokens,
         systemPrompt: data.systemPrompt || undefined,
         reasoning: undefined,
-        mcpServers: [],
-        skills: data.skills
-          ? data.skills.split(",").map((s) => s.trim()).filter(Boolean)
-          : [],
+        mcpServers: data.mcpServers,
+        skills: [],
         generativeUi: data.generativeUi,
         genuiId: effectiveGenuiId ?? undefined,
       });
@@ -236,14 +227,14 @@
 
     {#if activeTab === "agents"}
       <div class="pb-4">
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center justify-between">
           <div class="flex items-center gap-4">
             <h1 class="text-xl font-semibold text-base-content flex items-center gap-2">
               <Bot size={24} />
               Agents
             </h1>
             <span class="text-sm text-base-content/60">
-              {t("agent.manage.count", { count: filteredAgents.length })}
+              {t("agent.manage.count", { count: agentState.agents.length })}
             </span>
           </div>
           <Button
@@ -255,19 +246,6 @@
             <Plus size={16} />
             {t("agent.manage.newAgent")}
           </Button>
-        </div>
-
-        <div class="relative">
-          <input
-            type="text"
-            placeholder={t("agent.manage.searchPlaceholder")}
-            class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 text-sm"
-            bind:value={searchQuery}
-          />
-          <Settings
-            class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
-            size={16}
-          />
         </div>
       </div>
     {:else}
@@ -307,61 +285,53 @@
             class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
           ></div>
         </div>
-      {:else if filteredAgents.length === 0}
+      {:else if agentState.agents.length === 0}
         <div
           class="flex flex-col items-center justify-center h-full text-base-content/50"
         >
           <Bot size={48} class="mb-4 opacity-20" />
-          {#if searchQuery}
-            <p class="mb-2">{t("agent.manage.noMatch")}</p>
-            <button
-              class="text-primary hover:underline cursor-pointer"
-              onclick={() => (searchQuery = "")}
-            >
-              {t("agent.manage.clearSearch")}
-            </button>
-          {:else}
-            <p>{t("agent.manage.empty")}</p>
-            <p class="text-sm mt-2">{t("agent.manage.emptyHint")}</p>
-          {/if}
+          <p>{t("agent.manage.empty")}</p>
+          <p class="text-sm mt-2">{t("agent.manage.emptyHint")}</p>
         </div>
       {:else}
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {#each filteredAgents as agent (agent.id)}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {#each agentState.agents as agent (agent.id)}
             <div
-              class="bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors"
+              class="group rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] p-4 transition-all hover:border-base-content/20 hover:shadow-sm"
             >
-              <div class="flex items-start justify-between mb-3">
-                <div class="flex items-center gap-2">
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center text-primary"
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary"
                   >
                     <Bot size={20} />
                   </div>
-                  <div>
-                    <h3 class="font-medium text-base-content">{agent.name}</h3>
-                    <p class="text-xs text-base-content/60">
+                  <div class="min-w-0">
+                    <h3 class="truncate font-medium text-base-content">
+                      {agent.name}
+                    </h3>
+                    <p class="truncate text-xs text-base-content/55">
                       {getModelName(agent)}
                     </p>
                   </div>
                 </div>
-                <div class="flex items-center gap-1">
+                <div class="flex shrink-0 items-center gap-0.5">
                   <button
-                    class="p-1.5 rounded-lg hover:bg-success/10 text-base-content/60 hover:text-success transition-colors"
+                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-success/10 hover:text-success"
                     onclick={() => handleUseAgent(agent)}
                     title={t("agent.manage.use")}
                   >
                     <Play size={14} />
                   </button>
                   <button
-                    class="p-1.5 rounded-lg hover:bg-base-100 text-base-content/60 hover:text-base-content transition-colors"
+                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
                     onclick={() => openEditModal(agent)}
                     title={t("common.edit")}
                   >
                     <Pencil size={14} />
                   </button>
                   <button
-                    class="p-1.5 rounded-lg hover:bg-error/10 text-base-content/60 hover:text-error transition-colors"
+                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-error/10 hover:text-error"
                     onclick={() => openDeleteConfirm(agent)}
                     title={t("common.delete")}
                   >
@@ -371,31 +341,23 @@
               </div>
 
               {#if agent.systemPrompt}
-                <p class="text-sm text-base-content/70 line-clamp-2 mb-3">
+                <p class="mt-3 line-clamp-2 text-sm text-base-content/65">
                   {agent.systemPrompt}
                 </p>
               {/if}
 
-              {#if agent.skills.length > 0}
-                <div class="flex flex-wrap gap-1">
-                  {#each agent.skills as skill}
-                    <span
-                      class="px-2 py-0.5 text-xs rounded-full bg-info/20 text-info"
-                    >
-                      {skill}
-                    </span>
-                  {/each}
-                </div>
-              {/if}
-
               {#if getGenuiName(agent)}
-                <div class="mt-2 flex items-center gap-1 text-xs text-primary">
+                <div
+                  class="mt-3 inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                >
                   <LayoutTemplate size={12} />
                   {getGenuiName(agent)}
                 </div>
               {/if}
 
-              <div class="mt-3 pt-3 border-t border-base-300 text-xs text-base-content/50">
+              <div
+                class="mt-3 border-t border-[var(--hairline)] pt-2.5 text-xs text-base-content/45"
+              >
                 {new Date(agent.createdAt).toLocaleDateString("zh-CN")}
               </div>
             </div>
