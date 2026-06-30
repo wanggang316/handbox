@@ -65,6 +65,15 @@ pub struct HandBoxAgentSessionConfig {
     pub api_key: String,
     /// Working directory the agent's tools operate against (the `cwd`).
     pub working_dir: PathBuf,
+    /// Pure-dialog mode: the session selected NO working directory (its `cwd`
+    /// fell back to `app_data_dir`). A chat-class AgentDefinition
+    /// (`working_dir_mode: "none"`) degrades to this — and so does any session
+    /// with no workspace. When set, [`build_agent_session`] disables
+    /// workspace-scoped discovery (`no_context_files` / `no_skills`): there is no
+    /// project root to read `AGENTS.md` or `.hand/skills` from, so scanning the
+    /// app-sandbox fallback for them would be both pointless and surprising.
+    /// Derived from `session.working_dir.is_none()` in [`config_from_rows`].
+    pub pure_dialog: bool,
     /// Tauri per-app data directory. Becomes the session's `base_dir` so
     /// persistent state stays inside the app sandbox, not `~/.hand`.
     pub app_data_dir: PathBuf,
@@ -194,9 +203,12 @@ pub fn build_agent_session(
         // taken first); we leave it `false` to document the persisting intent.
         resume_session: Some(config.session_id.clone()),
         no_session: false,
-        no_context_files: false,
+        // Chat-class / workspace-less sessions run as pure dialog: with no project
+        // root there is nothing to read AGENTS.md or .hand/skills from, so disable
+        // both discoveries. Workspace sessions (a real cwd) keep them on.
+        no_context_files: config.pure_dialog,
         session_dir: None,
-        no_skills: false,
+        no_skills: config.pure_dialog,
         extra_skill_dirs: Vec::new(),
         // Sandbox: persist under the Tauri app data dir, never ~/.hand. The
         // resume path resolves `<base_dir>/sessions/<flattened-cwd>/<id>.jsonl`,
@@ -349,7 +361,10 @@ pub fn config_from_rows(
         .ok_or_else(|| AppError::validation_error("agent session has no model_id selected"))?;
 
     // No working dir selected → root the agent inside the app sandbox so the
-    // cwd is always an existing directory the agent can operate against.
+    // cwd is always an existing directory the agent can operate against, and run
+    // as pure dialog (no workspace-scoped context/skill discovery). Capture the
+    // "no workspace" bit BEFORE the fallback overwrites it.
+    let pure_dialog = session.working_dir.is_none();
     let working_dir = session
         .working_dir
         .as_deref()
@@ -367,6 +382,7 @@ pub fn config_from_rows(
         base_url: provider.base_url.clone(),
         api_key: provider.api_key.clone(),
         working_dir,
+        pure_dialog,
         app_data_dir,
         // The session's real creation time, lifted from the SQLite row so the
         // JSONL header timestamp equals createdAt (VAL-CASESS-007).
@@ -404,6 +420,9 @@ mod tests {
             base_url: String::new(),
             api_key: "sk-test-key".to_string(),
             working_dir,
+            // The helper always supplies a real working dir → workspace session.
+            // The pure-dialog degradation is exercised by dedicated tests below.
+            pure_dialog: false,
             app_data_dir,
             created_at: TEST_CREATED_AT,
             system_prompt: None,
@@ -845,6 +864,7 @@ mod tests {
             id: "sess-1".to_string(),
             name: "Run Session".to_string(),
             project_id: None,
+            agent_definition_id: None,
             model_id: model_id.map(str::to_string),
             provider_id: Some("prov-1".to_string()),
             system_prompt: Some("You are helpful.".to_string()),
@@ -896,6 +916,8 @@ mod tests {
         assert_eq!(config.base_url, "https://api.openai.com/v1");
         assert_eq!(config.api_key, "sk-row-key");
         assert_eq!(config.working_dir, PathBuf::from("/tmp/project"));
+        // A real working dir → workspace session, not pure dialog.
+        assert!(!config.pure_dialog);
         assert_eq!(config.app_data_dir, data.path());
         assert_eq!(config.enabled_tools, vec!["read_file".to_string()]);
         // created_at is lifted straight off the session row so the JSONL header
@@ -937,8 +959,13 @@ mod tests {
             .expect("rows assemble into a config");
 
         // No working_dir selected → cwd falls back to the app data dir (an
-        // existing directory inside the sandbox).
+        // existing directory inside the sandbox), and the session runs as pure
+        // dialog: build_agent_session then disables context-file / skill discovery.
         assert_eq!(config.working_dir, data.path());
+        assert!(
+            config.pure_dialog,
+            "a session with no working dir must run as pure dialog"
+        );
     }
 
     #[test]

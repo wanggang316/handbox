@@ -14,7 +14,8 @@ pub mod word;
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
 pub use agent_project::{AgentProject, CreateAgentProjectRequest};
 pub use agent_session::{
-    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UpdateAgentSessionRequest,
+    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, InstantiateAgentSessionRequest,
+    UpdateAgentSessionRequest,
 };
 pub use common::{Timestamp, UUID};
 pub use genui::{CreateGenUiRequest, GenUi, UpdateGenUiRequest};

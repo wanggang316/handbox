@@ -32,14 +32,15 @@ impl AgentSessionRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid mcp servers: {}", e)))?;
 
         let query = r#"
-            INSERT INTO agent_sessions (id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            INSERT INTO agent_sessions (id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         "#;
 
         sqlx::query(query)
             .bind(&session.id)
             .bind(&session.name)
             .bind(&session.project_id)
+            .bind(&session.agent_definition_id)
             .bind(&session.model_id)
             .bind(&session.provider_id)
             .bind(&session.system_prompt)
@@ -70,7 +71,7 @@ impl AgentSessionRepository {
         offset: i32,
     ) -> Result<Vec<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -97,7 +98,7 @@ impl AgentSessionRepository {
         session_id: &UUID,
     ) -> Result<Option<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions WHERE id = $1
         "#;
 
@@ -134,6 +135,9 @@ impl AgentSessionRepository {
         // `project_id` is likewise deliberately OMITTED: the project attachment is
         // write-once at `create_session` and must never be rewritten through the
         // generic update path (no "move session between projects" semantics).
+        // `agent_definition_id` is OMITTED for the same reason: the originating
+        // definition is a write-once provenance link set at instantiation; a session
+        // never gets re-pointed at a different definition through field edits.
         let query = r#"
             UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, mcp_servers = $10, tool_execution_mode = $11, updated_at = $12
             WHERE id = $13
@@ -435,6 +439,7 @@ impl AgentSessionRepository {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
             project_id: row.try_get::<Option<String>, _>("project_id")?,
+            agent_definition_id: row.try_get::<Option<String>, _>("agent_definition_id")?,
             model_id: row.try_get::<Option<String>, _>("model_id")?,
             provider_id: row.try_get::<Option<String>, _>("provider_id")?,
             system_prompt: row.try_get::<Option<String>, _>("system_prompt")?,
@@ -562,6 +567,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             project_id: None,
+            agent_definition_id: None,
             model_id: Some("gpt-4o".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a coding agent.".to_string()),
@@ -654,6 +660,7 @@ mod tests {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Fresh Session".to_string(),
             project_id: None,
+            agent_definition_id: None,
             model_id: None,
             provider_id: None,
             system_prompt: None,
@@ -674,6 +681,7 @@ mod tests {
         let assert_all_none = |s: &AgentSession| {
             assert_eq!(s.last_message_at, None, "NULL must not become Some(0)");
             assert_eq!(s.project_id, None);
+            assert_eq!(s.agent_definition_id, None, "NULL must not become Some(\"\")");
             assert_eq!(s.model_id, None);
             assert_eq!(s.provider_id, None);
             assert_eq!(s.system_prompt, None);
@@ -695,6 +703,46 @@ mod tests {
             .unwrap();
         let after = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
         assert_eq!(after.last_message_at, Some(now + 5));
+    }
+
+    /// P3: a session instantiated from a definition carries its
+    /// `agent_definition_id` back-link through create→get→list verbatim, and the
+    /// generic `update_session` path never rewrites it (write-once provenance,
+    /// same discipline as `project_id`).
+    #[tokio::test]
+    async fn test_agent_definition_id_round_trips_and_is_write_once() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        let mut session = sample_session(&uuid::Uuid::new_v4().to_string(), "From Coding", now);
+        session.agent_definition_id = Some("builtin-coding".to_string());
+        repo.create_session(&session).await.unwrap();
+
+        let fetched = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            fetched.agent_definition_id,
+            Some("builtin-coding".to_string())
+        );
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].agent_definition_id,
+            Some("builtin-coding".to_string())
+        );
+
+        // A field edit (even one that tries to null the link) must not rewrite it.
+        let mut edited = fetched;
+        edited.agent_definition_id = None;
+        edited.name = "renamed".to_string();
+        repo.update_session(&edited).await.unwrap();
+        let after = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(after.name, "renamed");
+        assert_eq!(
+            after.agent_definition_id,
+            Some("builtin-coding".to_string()),
+            "agent_definition_id is write-once and must survive a generic update"
+        );
     }
 
     #[tokio::test]

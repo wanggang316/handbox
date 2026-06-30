@@ -871,6 +871,10 @@ impl<R: Runtime> JobExecutor<R> {
         let request = CreateAgentSessionRequest {
             name: agent_session_name(&agent.name),
             project_id: project_id.map(str::to_string),
+            // The job session is instantiated from this agent definition — record
+            // the provenance back-link (P3). Jobs keep their own working_dir/tool
+            // wiring for now rather than routing through working_dir_mode.
+            agent_definition_id: Some(agent.id.clone()),
             model_id: Some(model_id),
             provider_id: Some(provider_id),
             system_prompt: agent.system_prompt.clone(),

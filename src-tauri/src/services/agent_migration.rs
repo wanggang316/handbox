@@ -428,6 +428,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             project_id: None,
+            agent_definition_id: None,
             model_id: Some("gpt-4o".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: None,

@@ -177,6 +177,7 @@ pub fn run() {
             genui_delete,
             // Agent Session（Agent 模式会话 CRUD）命令
             agent_session_create,
+            agent_session_create_from_definition,
             agent_session_list,
             agent_session_get,
             agent_session_rename,
