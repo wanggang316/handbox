@@ -20,6 +20,7 @@ pub mod job_scheduler;
 pub mod mcp;
 pub mod message;
 pub mod model;
+pub mod model_runtime;
 pub mod provider;
 pub mod quick_action;
 pub mod selection;

@@ -8,11 +8,11 @@
 //! M1 features that build on top of the session this returns.
 //!
 //! Reuse, not reinvention:
-//! - Model resolution goes through [`chat_engine::resolve_model`], so an agent
+//! - Model resolution goes through [`model_runtime::resolve_model`], so an agent
 //!   session sees exactly the same `model::Model` a chat request would for the
 //!   same provider/model/base_url triple (no divergent catalog logic).
 //! - Stream options (incl. the api key) come from
-//!   [`chat_engine::build_stream_options`]. The plaintext key rides inside
+//!   [`model_runtime::build_stream_options`]. The plaintext key rides inside
 //!   `SimpleStreamOptions.base.api_key`; this path deliberately does **not**
 //!   write an `auth.json`, set environment variables, or touch the keyring.
 //!
@@ -32,7 +32,7 @@ use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
 use crate::services::agent_permission::{ApprovalEmitter, PermissionExtension, SandboxExtension};
-use crate::services::chat_engine::{self, ChatOptions};
+use crate::services::model_runtime::{self, ChatOptions};
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
 /// HandBox-side inputs needed to construct a coding-agent session.
@@ -41,7 +41,7 @@ use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 /// directly. `provider_type` is the hand-ai provider tag (e.g. `"openai"`,
 /// `"anthropic"`, `"openai-compatible"`); `provider_id` is HandBox's own
 /// provider row id and is carried for diagnostics/traceability only — model
-/// resolution keys off `provider_type` to match `chat_engine`.
+/// resolution keys off `provider_type` to match `model_runtime`.
 #[derive(Debug, Clone)]
 pub struct HandBoxAgentSessionConfig {
     /// HandBox DB session id (UUID). Threaded into the [`PermissionExtension`]
@@ -54,12 +54,12 @@ pub struct HandBoxAgentSessionConfig {
     pub session_id: String,
     /// HandBox provider row id (diagnostics only).
     pub provider_id: String,
-    /// hand-ai provider tag consumed by [`chat_engine::resolve_model`].
+    /// hand-ai provider tag consumed by [`model_runtime::resolve_model`].
     pub provider_type: String,
     /// Model id selected for this session.
     pub model_id: String,
     /// Optional base-url override. Empty string means "use the catalog
-    /// template's base_url unchanged" (same contract as `chat_engine`).
+    /// template's base_url unchanged" (same contract as `model_runtime`).
     pub base_url: String,
     /// Plaintext provider api key. Injected via stream options only.
     pub api_key: String,
@@ -116,7 +116,7 @@ pub struct HandBoxAgentSessionConfig {
 /// Construct a coding-agent [`AgentSession`] from a HandBox configuration.
 ///
 /// Steps:
-/// 1. Resolve the model through `chat_engine` (no silent substitution — the
+/// 1. Resolve the model through `model_runtime` (no silent substitution — the
 ///    returned `model.id` equals the requested `model_id`).
 /// 2. Build stream options carrying the plaintext api key plus the
 ///    per-session sampling params (temperature / max_tokens / thinking_level);
@@ -145,7 +145,7 @@ pub fn build_agent_session(
     extra_tools: Vec<AgentTool>,
 ) -> Result<AgentSession, AppError> {
     let model =
-        chat_engine::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
+        model_runtime::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
 
     // Per-session sampling params are baked into the stream options HERE, at
     // construction time — not later by the drive feature. `drive_agent_run`
@@ -163,7 +163,7 @@ pub fn build_agent_session(
         ..ChatOptions::default()
     };
     let stream_options: SimpleStreamOptions =
-        chat_engine::build_stream_options(&chat_options, &config.api_key);
+        model_runtime::build_stream_options(&chat_options, &config.api_key);
 
     let mut tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
     // P1: append per-session MCP tools (namespaced `mcp__server__tool`) so the loop
@@ -440,7 +440,8 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         // cwd is the working_dir we passed.
         assert_eq!(session.cwd(), cwd.path());
@@ -510,7 +511,8 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
         // Construct (turn 1) — this is the single place the JSONL is seeded.
-        let _session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let _session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         let path = crate::services::agent_jsonl_store::session_path(
             data.path(),
@@ -603,7 +605,8 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
         // sample_config already sets enabled_tools = vec![].
 
-        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         assert!(
             session.tools().is_empty(),
             "an empty enabled_tools list must register no tools"
@@ -730,7 +733,8 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         // The plaintext key rides inside stream options' base.api_key — the
         // only place this construction path puts it.
@@ -754,7 +758,8 @@ mod tests {
         config.max_tokens = Some(1000);
         config.thinking_level = Some("high".to_string());
 
-        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         let opts = session.stream_options();
 
         // temperature / max_tokens ride on stream_options.base; the default is
@@ -787,7 +792,8 @@ mod tests {
         // sample_config sets temperature/max_tokens/thinking_level to None.
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         let opts = session.stream_options();
 
         assert_eq!(opts.base.temperature, None);
@@ -851,7 +857,8 @@ mod tests {
         config.model_id = "my-local-llm".to_string();
         config.base_url = "http://localhost:1234/v1".to_string();
 
-        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         assert_eq!(session.model().id, "my-local-llm");
         assert_eq!(session.model().base_url, "http://localhost:1234/v1");
     }

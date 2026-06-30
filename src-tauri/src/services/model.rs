@@ -2,10 +2,10 @@
 
 use crate::models::model::ModelResponse;
 use crate::models::AppError;
-use crate::services::chat_engine;
+use crate::services::model_runtime;
 use crate::services::Database;
 use crate::storage::types::{Model, Provider, UUID};
-use crate::storage::{SessionRepository, ModelRepository, ProviderRepository};
+use crate::storage::{ModelRepository, ProviderRepository, SessionRepository};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ impl ModelService {
     /// 从 hand-ai 静态目录获取模型并保存到数据库
     ///
     /// M2-T4 起，模型列表的真理源来自 hand-ai 的静态目录（`hand_ai_model::get_models`），
-    /// 经 `chat_engine::list_catalog_models` 适配为 `storage::types::Model`。
+    /// 经 `model_runtime::list_catalog_models` 适配为 `storage::types::Model`。
     /// 不再向 `/v1/models` 发起在线请求；网络/认证错误路径随之消失。
     /// 显式权衡：用户自定义的、不在 hand-ai 目录里的模型 id 将不再出现。
     ///
@@ -48,7 +48,7 @@ impl ModelService {
         );
 
         // hand-ai 目录读取：纯内存、同步、返回已映射好的 storage::types::Model
-        let catalog_models = chat_engine::list_catalog_models(&provider.provider_type);
+        let catalog_models = model_runtime::list_catalog_models(&provider.provider_type);
 
         // 目录未命中（DB 中 provider_type 拼写错误、新供应商尚未进入 hand-ai 发布等）
         // 单独走 WARN 路径，便于运维 grep；已落库的模型行保持不动。
@@ -146,7 +146,7 @@ impl ModelService {
     /// 为自定义供应商（openai-compatible / anthropic-compatible）手动添加模型。
     ///
     /// 自定义端点不在 hand-ai 目录中，因而无法通过 `fetch_and_sync_models`
-    /// 获得模型。此路径让用户手填 model id；`chat_engine` 在对话时按自定义
+    /// 获得模型。此路径让用户手填 model id；`model_runtime` 在对话时按自定义
     /// 类型的协议 + 供应商 base_url 合成 `Model` 模板（见 `resolve_model`）。
     /// 仅对自定义供应商开放：目录供应商的模型来自 hand-ai，禁止手动注入幽灵模型。
     pub async fn add_manual_model(
@@ -162,7 +162,7 @@ impl ModelService {
             .ok_or_else(|| AppError::validation_error("Provider not found"))?;
 
         // 仅自定义供应商可手动添加模型。
-        let supported_methods = chat_engine::custom_provider_supported_methods(
+        let supported_methods = model_runtime::custom_provider_supported_methods(
             &provider.provider_type,
         )
         .ok_or_else(|| {
