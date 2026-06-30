@@ -1,5 +1,5 @@
 use super::common::{Timestamp, UUID};
-use super::session::McpServerConfig;
+use super::mcp::McpServerConfig;
 use serde::{Deserialize, Serialize};
 
 /// Agent Session 实体 - Agent 模式下的会话实例

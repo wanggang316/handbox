@@ -1,23 +1,7 @@
 use super::common::{Timestamp, UUID};
-use crate::models::llm_types::{
-    LlmReasoningEffortConfig, LlmResponsesReasoning, LlmThinkingConfig,
-};
+use super::mcp::McpServerConfig;
+use crate::models::llm_types::SessionReasoningConfig;
 use serde::{Deserialize, Serialize};
-
-fn default_execution_mode() -> String {
-    "auto".to_string()
-}
-
-/// MCP 服务器配置
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerConfig {
-    pub server_id: String,
-    #[serde(default = "default_execution_mode")]
-    pub execution_mode: String,
-    #[serde(default)]
-    pub enabled_tools: Vec<String>,
-}
 
 /// Session 实体（Agent 的实例）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,43 +33,9 @@ pub struct Session {
     pub updated_at: Timestamp,
 }
 
-/// OpenRouter 推理配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct LlmOpenrouterReasoning {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exclude: Option<bool>,
-}
-
-/// Session 级推理配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionReasoningConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub responses: Option<LlmResponsesReasoning>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<LlmReasoningEffortConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<LlmThinkingConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub openrouter: Option<LlmOpenrouterReasoning>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn mcp_server_config_defaults() {
-        let json = r#"{"serverId": "test"}"#;
-        let config: McpServerConfig = serde_json::from_str(json).expect("deserialize");
-        assert_eq!(config.execution_mode, "auto");
-        assert!(config.enabled_tools.is_empty());
-    }
 
     #[test]
     fn session_serialization_roundtrip() {

@@ -1,5 +1,5 @@
-use super::session::SessionReasoningConfig;
 use super::common::{Timestamp, UUID};
+use crate::models::llm_types::SessionReasoningConfig;
 use crate::storage::types::McpServerConfig;
 use crate::models::llm_types::{LlmMessageRole, LlmToolFunction};
 

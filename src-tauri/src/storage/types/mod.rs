@@ -25,7 +25,7 @@ pub use job::{
 };
 pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,
-    McpServerStatus, McpTool,
+    McpServerConfig, McpServerStatus, McpTool,
 };
 pub use message::{
     Message, MessageAttachment, MessageConfig, MessageToolCall, MessageToolExecutionMode,
@@ -33,5 +33,8 @@ pub use message::{
 };
 pub use model::{Model, ModelModality};
 pub use provider::Provider;
-pub use session::{McpServerConfig, Session, SessionReasoningConfig};
+pub use session::Session;
+// `SessionReasoningConfig` now lives in `models::llm_types`; re-exported here so
+// existing `storage::types::SessionReasoningConfig` consumers keep resolving.
+pub use crate::models::llm_types::SessionReasoningConfig;
 pub use word::Word;

@@ -1,5 +1,6 @@
 use super::common::{Timestamp, UUID};
-use super::session::{SessionReasoningConfig, McpServerConfig};
+use super::mcp::McpServerConfig;
+use crate::models::llm_types::SessionReasoningConfig;
 use serde::{Deserialize, Serialize};
 
 // Agent 推理配置 - 复用 Session 的推理配置
