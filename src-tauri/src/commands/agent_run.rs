@@ -32,7 +32,7 @@ use crate::services::coding_agent_session::{build_agent_session, config_from_row
 use crate::services::skills::Skill;
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest,
-    AgentSessionService, CodingRunSink, ProviderService, SettingsService, SkillService,
+    AgentSessionService, CodingRunSink, McpService, ProviderService, SettingsService, SkillService,
 };
 use crate::storage::types::UUID;
 use hand_ai_model::Message;
@@ -148,6 +148,7 @@ pub async fn agent_run_stream(
     providers: State<'_, ProviderService>,
     skills: State<'_, Arc<SkillService>>,
     settings: State<'_, SettingsService>,
+    mcp: State<'_, McpService>,
 ) -> Result<(), AppError> {
     let session_id = request.session_id.clone();
 
@@ -165,7 +166,7 @@ pub async fn agent_run_stream(
     }
 
     // 从此处起，任何提前返回都必须先把占位移除。
-    match assemble_and_drive(request, &window, &sessions, &providers, &skills, &settings).await {
+    match assemble_and_drive(request, &window, &sessions, &providers, &skills, &settings, &mcp).await {
         Ok(handles) => {
             // 看护任务：驱动任务结束（即 closed 已发出）后把会话从注册表移除。
             // 与 closed 同步 —— 移除发生在终结信号之后，使下一轮可以发起。
@@ -198,6 +199,7 @@ async fn assemble_and_drive(
     providers: &ProviderService,
     skills: &SkillService,
     settings: &SettingsService,
+    mcp: &McpService,
 ) -> Result<crate::services::RunDriveHandles, AppError> {
     let session_id = request.session_id.clone();
 
@@ -272,7 +274,31 @@ async fn assemble_and_drive(
         }
     });
 
-    let mut session = build_agent_session(&config, Some(approval_emitter))?;
+    // P1: resolve this session's MCP server bindings into AgentTools and inject them
+    // into the loop. Per-binding `enabled_tools` overrides the server's global
+    // selection; failures degrade to no MCP tools rather than aborting the run.
+    let mcp_tools = if session_row.mcp_servers.is_empty() {
+        Vec::new()
+    } else {
+        let ids: Vec<String> = session_row
+            .mcp_servers
+            .iter()
+            .map(|c| c.server_id.clone())
+            .collect();
+        let mut servers = mcp.get_servers_by_ids(&ids).await.unwrap_or_default();
+        for server in &mut servers {
+            if let Some(cfg) = session_row
+                .mcp_servers
+                .iter()
+                .find(|c| c.server_id == server.id)
+            {
+                server.enabled_tools = cfg.enabled_tools.clone();
+            }
+        }
+        mcp.build_mcp_agent_tools(&servers)
+    };
+
+    let mut session = build_agent_session(&config, Some(approval_emitter), mcp_tools)?;
 
     // --- (3) 续聊上下文（M3: JSONL 为权威源）。
     //

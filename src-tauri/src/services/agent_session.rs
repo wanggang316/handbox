@@ -7,7 +7,9 @@
 
 use crate::models::AppError;
 use crate::services::Database;
-use crate::storage::types::{AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UUID};
+use crate::storage::types::{
+    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, McpServerConfig, UUID,
+};
 use crate::storage::{AgentProjectRepository, AgentSessionRepository};
 use std::sync::Arc;
 
@@ -22,6 +24,7 @@ pub enum AgentSessionParameter {
     MaxTokens(Option<i32>),
     WorkingDir(Option<String>),
     EnabledTools(Vec<String>),
+    McpServers(Vec<McpServerConfig>),
     ToolExecutionMode(Option<String>),
 }
 
@@ -115,6 +118,7 @@ impl AgentSessionService {
             max_tokens: request.max_tokens,
             working_dir,
             enabled_tools: request.enabled_tools.unwrap_or_default(),
+            mcp_servers: request.mcp_servers.unwrap_or_default(),
             tool_execution_mode: request.tool_execution_mode,
             message_count: 0,
             last_message_at: None,
@@ -182,6 +186,7 @@ impl AgentSessionService {
                 session.working_dir = Self::validate_working_dir(working_dir.as_deref())?;
             }
             AgentSessionParameter::EnabledTools(tools) => session.enabled_tools = tools,
+            AgentSessionParameter::McpServers(servers) => session.mcp_servers = servers,
             AgentSessionParameter::ToolExecutionMode(mode) => session.tool_execution_mode = mode,
         }
 
@@ -287,6 +292,7 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: None,
+            mcp_servers: None,
             tool_execution_mode: None,
         }
     }

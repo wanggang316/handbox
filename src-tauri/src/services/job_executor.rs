@@ -879,6 +879,8 @@ impl<R: Runtime> JobExecutor<R> {
             max_tokens: agent.max_tokens,
             working_dir: None,
             enabled_tools: None,
+            // P1: jobs don't bind MCP yet; P3 will inherit the template's mcp_servers.
+            mcp_servers: None,
             tool_execution_mode: None,
         };
         let session = match services.sessions.create_session(request).await {
@@ -920,7 +922,7 @@ impl<R: Runtime> JobExecutor<R> {
                 };
             }
         };
-        let coding_session = match build_agent_session(&config, None) {
+        let coding_session = match build_agent_session(&config, None, Vec::new()) {
             Ok(coding_session) => coding_session,
             Err(e) => {
                 tracing::warn!(

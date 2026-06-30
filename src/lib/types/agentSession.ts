@@ -10,6 +10,7 @@
  */
 
 import type { UUID, Timestamp } from "./index";
+import type { McpServerConfig } from "./chat";
 
 // ---------------------------------------------------------------------------
 // hand-agent / model Message（payload 的实际形状）
@@ -268,6 +269,8 @@ export interface AgentSession {
   maxTokens?: number;
   workingDir?: string;
   enabledTools: string[];
+  /** Per-session MCP server bindings injected into the agent loop as tools. */
+  mcpServers: McpServerConfig[];
   toolExecutionMode?: string;
   messageCount: number;
   lastMessageAt?: Timestamp;
@@ -305,6 +308,7 @@ export interface CreateAgentSessionRequest {
   maxTokens?: number;
   workingDir?: string;
   enabledTools?: string[];
+  mcpServers?: McpServerConfig[];
   toolExecutionMode?: string;
 }
 
@@ -319,6 +323,7 @@ export interface UpdateAgentSessionRequest {
   maxTokens?: number;
   workingDir?: string;
   enabledTools?: string[];
+  mcpServers?: McpServerConfig[];
   toolExecutionMode?: string;
 }
 

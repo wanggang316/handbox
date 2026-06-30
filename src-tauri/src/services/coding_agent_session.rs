@@ -128,6 +128,7 @@ pub struct HandBoxAgentSessionConfig {
 pub fn build_agent_session(
     config: &HandBoxAgentSessionConfig,
     approval_emitter: Option<ApprovalEmitter>,
+    extra_tools: Vec<AgentTool>,
 ) -> Result<AgentSession, AppError> {
     let model =
         chat_engine::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
@@ -150,7 +151,10 @@ pub fn build_agent_session(
     let stream_options: SimpleStreamOptions =
         chat_engine::build_stream_options(&chat_options, &config.api_key);
 
-    let tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
+    let mut tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
+    // P1: append per-session MCP tools (namespaced `mcp__server__tool`) so the loop
+    // calls them alongside the built-ins. Empty for sessions with no MCP bindings.
+    tools.extend(extra_tools);
 
     // M3: guarantee the JSONL file the `resume_session` branch will open exists,
     // named after the HandBox session UUID (header id == UUID). Idempotent — a
@@ -409,7 +413,7 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         // cwd is the working_dir we passed.
         assert_eq!(session.cwd(), cwd.path());
@@ -431,7 +435,7 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
         // Turn 1: construction creates the JSONL at the path the reader expects.
-        let session = build_agent_session(&config, None).expect("turn 1 constructs");
+        let session = build_agent_session(&config, None, Vec::new()).expect("turn 1 constructs");
         // Not an in-memory session: it has a real on-disk file.
         let file = session
             .session_file()
@@ -448,7 +452,7 @@ mod tests {
 
         // Turn 2: a fresh build for the same id resumes the SAME file (idempotent
         // ensure → resume), so there is exactly one JSONL for this session.
-        let session2 = build_agent_session(&config, None).expect("turn 2 resumes");
+        let session2 = build_agent_session(&config, None, Vec::new()).expect("turn 2 resumes");
         assert_eq!(session2.session_file().unwrap(), expected);
 
         let dir = crate::services::agent_jsonl_store::session_dir(data.path(), cwd.path());
@@ -479,7 +483,7 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
         // Construct (turn 1) — this is the single place the JSONL is seeded.
-        let _session = build_agent_session(&config, None).expect("construction succeeds");
+        let _session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         let path = crate::services::agent_jsonl_store::session_path(
             data.path(),
@@ -499,7 +503,7 @@ mod tests {
     /// Helper: the registered tool-name set a config produces, sorted for
     /// order-independent comparison.
     fn registered_tool_names(config: &HandBoxAgentSessionConfig) -> Vec<String> {
-        let session = build_agent_session(config, None).expect("construction succeeds");
+        let session = build_agent_session(config, None, Vec::new()).expect("construction succeeds");
         let mut names: Vec<String> = session.tools().iter().map(|t| t.name.clone()).collect();
         names.sort();
         names
@@ -572,7 +576,7 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
         // sample_config already sets enabled_tools = vec![].
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         assert!(
             session.tools().is_empty(),
             "an empty enabled_tools list must register no tools"
@@ -699,7 +703,7 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         // The plaintext key rides inside stream options' base.api_key — the
         // only place this construction path puts it.
@@ -723,7 +727,7 @@ mod tests {
         config.max_tokens = Some(1000);
         config.thinking_level = Some("high".to_string());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         let opts = session.stream_options();
 
         // temperature / max_tokens ride on stream_options.base; the default is
@@ -756,7 +760,7 @@ mod tests {
         // sample_config sets temperature/max_tokens/thinking_level to None.
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         let opts = session.stream_options();
 
         assert_eq!(opts.base.temperature, None);
@@ -786,7 +790,7 @@ mod tests {
 
         // And construction with a custom prompt succeeds (the prompt feeds
         // build_system_prompt inside AgentSession::new_with_skill_dirs).
-        build_agent_session(&config, None)
+        build_agent_session(&config, None, Vec::new())
             .expect("construction with a custom system prompt succeeds");
     }
 
@@ -799,7 +803,7 @@ mod tests {
 
         // `AgentSession` does not implement `Debug`, so `expect_err` (which
         // requires `T: Debug`) is unavailable — match on the Result instead.
-        match build_agent_session(&config, None) {
+        match build_agent_session(&config, None, Vec::new()) {
             Ok(_) => panic!("unknown model under a fixed-catalog provider must error"),
             Err(err) => assert!(
                 format!("{err}").contains("not registered under provider"),
@@ -820,7 +824,7 @@ mod tests {
         config.model_id = "my-local-llm".to_string();
         config.base_url = "http://localhost:1234/v1".to_string();
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session = build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         assert_eq!(session.model().id, "my-local-llm");
         assert_eq!(session.model().base_url, "http://localhost:1234/v1");
     }
@@ -841,6 +845,7 @@ mod tests {
             max_tokens: Some(1024),
             working_dir: working_dir.map(str::to_string),
             enabled_tools: vec!["read_file".to_string()],
+            mcp_servers: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,

@@ -1,4 +1,5 @@
 use super::common::{Timestamp, UUID};
+use super::session::McpServerConfig;
 use serde::{Deserialize, Serialize};
 
 /// Agent Session 实体 - Agent 模式下的会话实例
@@ -17,6 +18,8 @@ pub struct AgentSession {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Vec<String>, // JSON: Vec<String> (tool names)
+    /// Per-session MCP server bindings (JSON). Empty = no MCP tools injected.
+    pub mcp_servers: Vec<McpServerConfig>,
     pub tool_execution_mode: Option<String>,
     pub message_count: i32,
     pub last_message_at: Option<Timestamp>,
@@ -52,6 +55,7 @@ pub struct CreateAgentSessionRequest {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Option<Vec<String>>,
+    pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub tool_execution_mode: Option<String>,
 }
 
@@ -68,6 +72,7 @@ pub struct UpdateAgentSessionRequest {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Option<Vec<String>>,
+    pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub tool_execution_mode: Option<String>,
 }
 
@@ -89,6 +94,7 @@ mod tests {
             max_tokens: Some(2048),
             working_dir: Some("/tmp/project".to_string()),
             enabled_tools: vec!["read".to_string(), "write".to_string()],
+            mcp_servers: Vec::new(),
             tool_execution_mode: Some("auto".to_string()),
             message_count: 3,
             last_message_at: Some(2000),
@@ -133,6 +139,7 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: Vec::new(),
+            mcp_servers: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,

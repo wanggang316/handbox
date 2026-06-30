@@ -170,6 +170,7 @@ async fn seeded_runtime(
         max_tokens: Some(256),
         working_dir: None,
         enabled_tools,
+        mcp_servers: Vec::new(),
         tool_execution_mode: None,
         message_count: 0,
         last_message_at: None,

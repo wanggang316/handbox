@@ -28,10 +28,12 @@ impl AgentSessionRepository {
     pub async fn create_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
+        let mcp_servers_json = serde_json::to_string(&session.mcp_servers)
+            .map_err(|e| AppError::validation_error(&format!("Invalid mcp servers: {}", e)))?;
 
         let query = r#"
-            INSERT INTO agent_sessions (id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            INSERT INTO agent_sessions (id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         "#;
 
         sqlx::query(query)
@@ -46,6 +48,7 @@ impl AgentSessionRepository {
             .bind(session.max_tokens)
             .bind(&session.working_dir)
             .bind(&enabled_tools_json)
+            .bind(&mcp_servers_json)
             .bind(&session.tool_execution_mode)
             .bind(session.message_count)
             .bind(session.last_message_at)
@@ -67,7 +70,7 @@ impl AgentSessionRepository {
         offset: i32,
     ) -> Result<Vec<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -94,7 +97,7 @@ impl AgentSessionRepository {
         session_id: &UUID,
     ) -> Result<Option<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
             FROM agent_sessions WHERE id = $1
         "#;
 
@@ -117,6 +120,8 @@ impl AgentSessionRepository {
     pub async fn update_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
+        let mcp_servers_json = serde_json::to_string(&session.mcp_servers)
+            .map_err(|e| AppError::validation_error(&format!("Invalid mcp servers: {}", e)))?;
 
         // NOTE: `message_count` and `last_message_at` are deliberately OMITTED here.
         // Session-field edits go through a read-modify-write (`get_session` then
@@ -130,8 +135,8 @@ impl AgentSessionRepository {
         // write-once at `create_session` and must never be rewritten through the
         // generic update path (no "move session between projects" semantics).
         let query = r#"
-            UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, tool_execution_mode = $10, updated_at = $11
-            WHERE id = $12
+            UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, mcp_servers = $10, tool_execution_mode = $11, updated_at = $12
+            WHERE id = $13
         "#;
 
         let result = sqlx::query(query)
@@ -144,6 +149,7 @@ impl AgentSessionRepository {
             .bind(session.max_tokens)
             .bind(&session.working_dir)
             .bind(&enabled_tools_json)
+            .bind(&mcp_servers_json)
             .bind(&session.tool_execution_mode)
             .bind(session.updated_at)
             .bind(&session.id)
@@ -414,6 +420,14 @@ impl AgentSessionRepository {
             Vec::new()
         };
 
+        let mcp_servers_json: Option<String> = row.try_get("mcp_servers")?;
+        let mcp_servers: Vec<crate::storage::types::McpServerConfig> =
+            if let Some(json) = mcp_servers_json {
+                serde_json::from_str(&json).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
         let temperature: Option<f32> = row.try_get::<Option<f32>, _>("temperature")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
 
@@ -429,6 +443,7 @@ impl AgentSessionRepository {
             max_tokens,
             working_dir: row.try_get::<Option<String>, _>("working_dir")?,
             enabled_tools,
+            mcp_servers,
             tool_execution_mode: row.try_get::<Option<String>, _>("tool_execution_mode")?,
             message_count: row.try_get("message_count")?,
             last_message_at: row.try_get::<Option<i64>, _>("last_message_at")?,
@@ -555,6 +570,7 @@ mod tests {
             max_tokens: Some(2048),
             working_dir: Some("/tmp/project".to_string()),
             enabled_tools: vec!["read".to_string(), "write".to_string()],
+            mcp_servers: Vec::new(),
             tool_execution_mode: Some("auto".to_string()),
             message_count: 0,
             last_message_at: None,
@@ -646,6 +662,7 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: Vec::new(),
+            mcp_servers: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,

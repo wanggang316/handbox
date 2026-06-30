@@ -436,6 +436,7 @@ mod tests {
             max_tokens: None,
             working_dir: working_dir.map(str::to_string),
             enabled_tools: Vec::new(),
+            mcp_servers: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,

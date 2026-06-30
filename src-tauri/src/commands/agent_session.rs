@@ -222,6 +222,12 @@ fn parse_session_parameter(
             })?;
             AgentSessionParameter::EnabledTools(tools)
         }
+        "mcpServers" => {
+            let servers = serde_json::from_value(value).map_err(|e| {
+                AppError::validation_error(&format!("Invalid mcp_servers value: {}", e))
+            })?;
+            AgentSessionParameter::McpServers(servers)
+        }
         "toolExecutionMode" => AgentSessionParameter::ToolExecutionMode(parse_optional_string(
             &value,
             "tool_execution_mode",

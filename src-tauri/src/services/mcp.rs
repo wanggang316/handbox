@@ -13,6 +13,7 @@ use handbox_mcp::{
     validate_server_config, ConnectionConfig, McpClient, McpClientError, McpPrompt,
     McpPromptArgument, McpResource, McpTool, ProcessConfig, SseConfig, StreamableHttpConfig,
 };
+use hand_agent::{AgentTool, ToolResult};
 
 /// Service orchestrating MCP server lifecycle and metadata
 #[derive(Clone)]
@@ -646,6 +647,62 @@ impl McpService {
                 Ok(ConnectionConfig::Http(config))
             }
         }
+    }
+
+    /// Wrap each enabled tool of the given MCP servers into a `hand_agent::AgentTool`
+    /// so the unified agent loop can call MCP tools alongside the built-ins.
+    ///
+    /// Tool names are namespaced `mcp__{serverId}__{tool}` to avoid collisions with the
+    /// built-in `read`/`write`/… and across servers. The execute closure captures the
+    /// real server + tool name and dispatches per-server via `invoke_tool` (connect →
+    /// call → shutdown each time), bypassing the global `execute_tool` name lookup so
+    /// same-named tools on different servers stay distinct. `parameters` is the MCP
+    /// tool's `input_schema` verbatim (empty/non-object → schema validation skipped by
+    /// `AgentTool::compiled_schema`). Filtering is by `server.enabled_tools`; the caller
+    /// is responsible for narrowing that to a session's selection beforehand.
+    pub fn build_mcp_agent_tools(&self, servers: &[McpServer]) -> Vec<AgentTool> {
+        let mut tools = Vec::new();
+        for server in servers {
+            for tool in &server.tools {
+                if !server.enabled_tools.contains(&tool.name) {
+                    continue;
+                }
+                let svc = self.clone();
+                let server_owned = server.clone();
+                let real_name = tool.name.clone();
+                let namespaced = format!("mcp__{}__{}", server.id, tool.name);
+                let label = format!(
+                    "{} · {}",
+                    server.display_name.as_deref().unwrap_or(&server.name),
+                    tool.name
+                );
+                let description = tool.description.clone().unwrap_or_default();
+                let parameters = tool.input_schema.clone();
+
+                tools.push(AgentTool::simple(
+                    namespaced,
+                    description,
+                    parameters,
+                    label,
+                    move |_call_id, args| {
+                        let svc = svc.clone();
+                        let server = server_owned.clone();
+                        let real_name = real_name.clone();
+                        async move {
+                            match svc.invoke_tool(&server, &real_name, Some(args)).await {
+                                Ok(result) => {
+                                    ToolResult::text(McpService::format_tool_result(&result))
+                                }
+                                Err(e) => ToolResult::error(format!(
+                                    "MCP tool '{real_name}' failed: {e}"
+                                )),
+                            }
+                        }
+                    },
+                ));
+            }
+        }
+        tools
     }
 
     /// 执行工具调用（通过工具名称和参数）
