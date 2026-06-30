@@ -1,13 +1,9 @@
 <script lang="ts">
-  import { chatState, chatActions } from "$lib/states/chat.svelte";
-  import { messageStore } from "$lib/states";
   import { browser } from "$app/environment";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import ChatList from "$lib/components/ui/ChatList.svelte";
   import AgentProjectList from "$lib/components/agentsession/AgentProjectList.svelte";
   import MenuButton from "$lib/components/ui/MenuButton.svelte";
-  import { uiState } from "$lib/states/ui.svelte";
   import { t } from "$lib/i18n";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
   import {
@@ -23,69 +19,24 @@
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateState } from "$lib/states/update.svelte";
 
-  // 获取当前选中的聊天 ID
-  let currentChatId = $derived(
-    browser && $page.url ? $page.url.searchParams.get("id") || "" : ""
-  );
-
-  // 获取当前路由
-  let currentRoute = $derived(
-    browser && $page.url ? $page.url.pathname : ""
-  );
-
-  // 将真实聊天数据转换为 Menu 组件期望的格式
-  let chats = $derived(
-    chatState.chats
-      .filter((chat) => chat.id) // 过滤掉没有 id 的聊天
-      .map((chat) => ({
-        id: chat.id!,
-        title: chat.name,
-      }))
-  );
-
-  function handleChatClick(chat: any) {
-    console.log("Clicked chat:", chat);
-    // 使用 SvelteKit 的客户端路由导航，避免页面重新加载
-    goto(`/chat?id=${chat.id}`);
-  }
-
-  function handleWordsClick() {
-    console.log("Clicked words menu");
-    goto(`/words`);
-  }
-
-  function handleAgentClick() {
-    console.log("Clicked agent menu");
-    goto(`/agents`);
-  }
-
-  function handleJobsClick() {
-    goto(`/jobs`);
-  }
-
-  // 新建会话（Chat 模式专属操作，入口为 ChatList 标题右侧的加号）
-  function handleNewChat() {
-    goto(`/chat`);
-  }
+  // 当前路由（用于常驻入口的高亮）
+  let currentRoute = $derived(browser && $page.url ? $page.url.pathname : "");
 
   // 当前选中的 Agent 会话 ID（用于 AgentProjectList 高亮）
   let currentAgentSessionId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : ""
   );
 
-  // 切换到 Chat 模式：重复点击当前激活段为 no-op
-  function selectChatMode() {
-    if (uiState.appMode === "chat") return;
-    uiState.setAppMode("chat");
-    goto("/chat");
+  function handleWordsClick() {
+    goto(`/words`);
   }
 
-  // 切换到 Agent 模式：重复点击为 no-op；有上次会话则恢复
-  function selectAgentMode() {
-    if (uiState.appMode === "agent") return;
-    uiState.setAppMode("agent");
-    const lastId = uiState.lastAgentSessionId;
-    goto(lastId ? `/agent?id=${lastId}` : "/agent");
+  function handleAgentClick() {
+    goto(`/agents`);
+  }
+
+  function handleJobsClick() {
+    goto(`/jobs`);
   }
 
   // 从 authState 获取用户状态
@@ -162,132 +113,42 @@
     showUserMenu = false;
     await login();
   }
-
-  // 处理聊天重命名
-  async function handleChatRename(chat: any, newName: string) {
-    try {
-      await chatActions.renameChat(chat.id, newName);
-      console.log("Chat renamed successfully:", chat.id, newName);
-    } catch (error) {
-      console.error("Failed to rename chat:", error);
-      // 这里可以显示错误提示
-    }
-  }
-
-  // 处理聊天删除
-  async function handleChatDelete(chat: any) {
-    try {
-      await chatActions.deleteChat(chat.id);
-      console.log("Chat deleted successfully:", chat.id);
-
-      // 如果删除的是当前聊天，跳转到默认页面
-      if (currentChatId === chat.id) {
-        goto("/chat");
-      }
-    } catch (error) {
-      console.error("Failed to delete chat:", error);
-      // 这里可以显示错误提示
-    }
-  }
-
-  // 处理生成标题（接收ChatList组件生成的标题）
-  async function handleGenerateTitle(chat: any, newTitle: string) {
-    try {
-      await chatActions.renameChat(chat.id, newTitle);
-      console.log("Chat title updated successfully:", chat.id, newTitle);
-    } catch (error) {
-      console.error("Failed to update generated title:", error);
-      // 这里可以显示错误提示
-    }
-  }
-
 </script>
 
 <div
   class="h-full flex flex-col p-0 pt-12 overflow-hidden"
 >
-  <!-- 顶部固定区域 -->
-  <div class="flex-shrink-0 space-y-3 mb-3">
-    <!-- 全局入口：任务 -->
-    <div class="flex flex-col px-2 space-y-0.5">
-      <MenuButton
-        title={t("sidebar.jobs")}
-        icon={Clock}
-        iconSize={16}
-        isActive={currentRoute === "/jobs"}
-        buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-        onclick={() => handleJobsClick()}
-      />
-    </div>
-
-    <!-- Chat | Agent 模式分段控件 -->
-    <div class="px-2">
-      <div class="flex p-0.5 bg-base-300 rounded-md">
-        <button
-          class="flex-1 py-1 text-[12px] leading-[18px] rounded-[5px] font-normal transition-colors {uiState.appMode ===
-          'chat'
-            ? 'bg-base-100 text-base-content shadow-sm'
-            : 'text-base-content/60 hover:text-base-content'}"
-          aria-pressed={uiState.appMode === "chat"}
-          onclick={selectChatMode}
-        >
-          Chat
-        </button>
-        <button
-          class="flex-1 py-1 text-[12px] leading-[18px] rounded-[5px] font-normal transition-colors {uiState.appMode ===
-          'agent'
-            ? 'bg-base-100 text-base-content shadow-sm'
-            : 'text-base-content/60 hover:text-base-content'}"
-          aria-pressed={uiState.appMode === "agent"}
-          onclick={selectAgentMode}
-        >
-          Agent
-        </button>
-      </div>
-    </div>
+  <!-- 顶部固定区域：常驻入口（任务 / Agents / 单词本） -->
+  <div class="flex-shrink-0 flex flex-col px-2 space-y-0.5 mb-3">
+    <MenuButton
+      title={t("sidebar.jobs")}
+      icon={Clock}
+      iconSize={16}
+      isActive={currentRoute === "/jobs"}
+      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+      onclick={() => handleJobsClick()}
+    />
+    <MenuButton
+      title="Agents"
+      icon={Bot}
+      iconSize={16}
+      isActive={currentRoute === "/agents"}
+      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+      onclick={() => handleAgentClick()}
+    />
+    <MenuButton
+      title={t("sidebar.words")}
+      icon={BookOpen}
+      iconSize={16}
+      isActive={currentRoute === "/words"}
+      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+      onclick={() => handleWordsClick()}
+    />
   </div>
 
-  <!-- 中间可滚动区域 -->
+  <!-- 中间可滚动区域：Agent 会话列表（按项目分组） -->
   <div class="flex-1 min-h-0">
-    {#if uiState.appMode === "agent"}
-      <AgentProjectList activeId={currentAgentSessionId} />
-    {:else}
-      <div class="flex flex-col h-full">
-        <!-- Chat 模式专属入口：Agents、单词本 -->
-        <div class="flex-shrink-0 flex flex-col px-2 space-y-0.5 mb-3">
-          <MenuButton
-            title="Agents"
-            icon={Bot}
-            iconSize={16}
-            isActive={currentRoute === "/agents"}
-            buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-            onclick={() => handleAgentClick()}
-          />
-          <MenuButton
-            title={t("sidebar.words")}
-            icon={BookOpen}
-            iconSize={16}
-            isActive={currentRoute === "/words"}
-            buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-            onclick={() => handleWordsClick()}
-          />
-        </div>
-
-        <!-- 聊天列表（新建会话入口在列表标题右侧） -->
-        <div class="flex-1 min-h-0">
-          <ChatList
-            {chats}
-            activeId={currentChatId}
-            streamingChatId={messageStore.streamingChatId}
-            onChatClick={handleChatClick}
-            onNewChat={handleNewChat}
-            onRename={handleChatRename}
-            onDelete={handleChatDelete}
-            onGenerateTitle={handleGenerateTitle}
-          />
-        </div>
-      </div>
-    {/if}
+    <AgentProjectList activeId={currentAgentSessionId} />
   </div>
 
   <!-- 检测到更新：底部更新入口 -->

@@ -3,16 +3,11 @@
  */
 
 import type { BaseEntity, UUID, Timestamp } from "./index";
+// McpServerConfig / reasoning configs 已抽到中立的 llm.ts（删除 chat 后端后仍需）。
+import type { McpServerConfig, ChatReasoningConfig } from "./llm";
 
 // 消息角色
 export type MessageRole = "user" | "assistant" | "system";
-
-// MCP 服务器配置
-export interface McpServerConfig {
-  serverId: string;
-  executionMode: "auto" | "manual";
-  enabledTools: string[]; // List of enabled tool names for this server
-}
 
 // 消息配置 - 每条消息可以有独立的配置参数
 export interface MessageConfig {
@@ -66,37 +61,7 @@ export interface MessageAttachment {
   usage?: "input" | "output" | string;
 }
 
-// Reasoning/thinking support
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
-export type ReasoningSummary = "auto" | "concise" | "detailed";
-
-export interface ResponsesReasoningConfig {
-  effort?: ReasoningEffort | null;
-  summary?: ReasoningSummary | null;
-}
-
-export interface ReasoningEffortConfig {
-  effort?: ReasoningEffort | null;
-  includeReasoning?: boolean | null;
-}
-
-export interface ThinkingConfig {
-  includeThoughts?: boolean | null;
-  thinkingBudget?: number | null;
-}
-
-export interface OpenrouterReasoningConfig {
-  effort?: ReasoningEffort | null;
-  maxTokens?: number | null;
-  exclude?: boolean | null;
-}
-
-export interface ChatReasoningConfig {
-  responses?: ResponsesReasoningConfig;
-  reasoningEffort?: ReasoningEffortConfig;
-  thinking?: ThinkingConfig;
-  openrouter?: OpenrouterReasoningConfig;
-}
+// Reasoning/thinking 配置已抽到 ./llm（ChatReasoningConfig 等）。
 
 // 聊天实体
 export interface Chat extends BaseEntity {

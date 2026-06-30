@@ -9,7 +9,7 @@ import type {
   ReasoningEffortConfig,
   ThinkingConfig,
   OpenrouterReasoningConfig,
-} from "./chat";
+} from "./llm";
 
 // Agent 推理配置
 export interface AgentReasoningConfig {

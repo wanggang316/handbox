@@ -20,7 +20,7 @@
   import Tabs from "$lib/components/ui/Tabs.svelte";
   import AgentFormModal from "$lib/components/agent/AgentFormModal.svelte";
   import type { AgentFormData } from "$lib/components/agent/AgentFormModal.svelte";
-  import { createSessionFromAgent } from "$lib/api/chat";
+  import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
   // 当前激活的标签页：Agents / GenUI。返回链接通过 ?tab=genui 直接定位到 GenUI 列表。
   let activeTab = $state<"agents" | "genui">(
@@ -243,10 +243,12 @@
   async function handleUseAgent(agent: Agent) {
     if (!agent.id) return;
     try {
-      // 通过 Agent 创建 Session
-      const session = await createSessionFromAgent(agent.id);
-      // 跳转到聊天页面
-      goto(`/chat/${session.id}`);
+      // 从 AgentDefinition 实例化统一的 Agent Session（能力集 + 工作目录策略由后端裁决）
+      const session = await agentSessionActions.createSessionFromDefinition(
+        agent.id,
+      );
+      // 跳转到统一的 Agent 会话页
+      goto(`/agent?id=${session.id}`);
     } catch (error) {
       console.error("Failed to create session from agent:", error);
     }

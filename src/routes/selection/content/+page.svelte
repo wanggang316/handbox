@@ -19,9 +19,7 @@
   import { hideContentPanel, setContentPanelPinned } from "$lib/api/selection";
   import { settingsState } from "$lib/states/settings.svelte";
   import { t } from "$lib/i18n";
-  import * as agentApi from "$lib/api/agent";
-  import * as chatApi from "$lib/api/chat";
-  import * as messageApi from "$lib/api/message";
+  import { runAgentTextTurn } from "$lib/api/agentSession";
 
   const appWindow = getCurrentWindow();
 
@@ -230,42 +228,24 @@
     translation.error = null;
     translation.result = null;
 
+    // 划词翻译复用 words 页绑定的同一翻译会话（settings.translation.sessionId）。
+    const term = content.text;
     try {
-      let streamContent = "";
-      await messageApi.sendUserMessageStream({
-        chatId: sessionId,
-        content: content.text,
-        tempUserMessageId: `trans-${Date.now()}`,
+      // 一问一答：增量实时回灌预览，结束再解析结构化译文。
+      const finalContent = await runAgentTextTurn(sessionId, term, (partial) => {
+        translation.result = {
+          term,
+          translation: partial,
+          targetLanguage: "unknown",
+          phonetic: null,
+          explanation: null,
+        };
       });
-
-      const unlisten = await messageApi.listenToStreamEvents({
-        onChunk: (data) => {
-          streamContent = data.content;
-          translation.result = {
-            term: content.text,
-            translation: streamContent,
-            targetLanguage: "unknown",
-            phonetic: null,
-            explanation: null,
-          };
-        },
-        onEnd: (data) => {
-          const result = parseTranslationResponse(
-            data.finalContent,
-            content.text,
-          );
-          translation.result = result;
-          translation.isLoading = false;
-        },
-        onError: (error) => {
-          console.error("Translation failed:", error);
-          translation.error = t("selection.translationFailed");
-          translation.isLoading = false;
-        },
-      });
+      translation.result = parseTranslationResponse(finalContent, term);
     } catch (error) {
       console.error("Translation error:", error);
       translation.error = t("selection.translationFailed");
+    } finally {
       translation.isLoading = false;
     }
   }

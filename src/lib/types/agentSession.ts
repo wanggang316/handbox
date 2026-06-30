@@ -10,7 +10,7 @@
  */
 
 import type { UUID, Timestamp } from "./index";
-import type { McpServerConfig } from "./chat";
+import type { McpServerConfig } from "./llm";
 
 // ---------------------------------------------------------------------------
 // hand-agent / model Message（payload 的实际形状）
@@ -260,6 +260,11 @@ export interface AgentSession {
   id: UUID;
   /** 所属 Agent Project（可选；后端 `project_id: Option<UUID>` 序列化为 camelCase）。 */
   projectId?: UUID;
+  /**
+   * 实例化来源的 AgentDefinition id（创建时一次性写入的 provenance 链接，
+   * 后端 `agent_definition_id: Option<UUID>`）。update 路径永不重写。
+   */
+  agentDefinitionId?: UUID;
   name: string;
   modelId?: string;
   providerId?: string;
@@ -310,6 +315,21 @@ export interface CreateAgentSessionRequest {
   enabledTools?: string[];
   mcpServers?: McpServerConfig[];
   toolExecutionMode?: string;
+}
+
+/**
+ * 从 AgentDefinition 实例化会话的覆盖项（后端 `InstantiateAgentSessionRequest`）。
+ *
+ * 全部可选：缺省时由 definition 的快照决定。后端按 definition 的 `workingDirMode`
+ * 裁决工作目录策略（"none" 强制纯对话、"required" 缺工作上下文则报错、"optional"/
+ * NULL 透传），再以这里给出的字段覆盖快照。
+ */
+export interface InstantiateAgentSessionRequest {
+  name?: string;
+  projectId?: UUID;
+  workingDir?: string;
+  modelId?: string;
+  providerId?: string;
 }
 
 /** 更新 Agent Session 请求。 */

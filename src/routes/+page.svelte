@@ -21,7 +21,7 @@
       if (entered) return;
       entered = true;
       // replaceState：启动页不进历史栈，返回时不会再回到这里
-      goto("/chat", { replaceState: true });
+      goto("/agent", { replaceState: true });
     };
 
     const delay = (ms: number) =>

@@ -1,25 +1,39 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { BookPlus, BookCheck, Trash2, BookMinus } from "lucide-svelte";
+  import { BookPlus, BookMinus } from "lucide-svelte";
   import { t } from "$lib/i18n";
-  import {
-    createWord,
-    listWords,
-    deleteWord,
-    getTranslationHistory,
-  } from "$lib/api/word";
+  import { createWord, listWords, deleteWord } from "$lib/api/word";
   import * as agentApi from "$lib/api/agent";
-  import * as chatApi from "$lib/api/chat";
-  import * as messageApi from "$lib/api/message";
+  import {
+    createSessionFromDefinition,
+    updateAgentSessionField,
+    getAgentSession,
+    getAgentSessionMessages,
+    runAgentTextTurn,
+    agentMessageText,
+  } from "$lib/api/agentSession";
   import Select from "$lib/components/ui/Select.svelte";
   import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import { settingsState } from "$lib/states";
-  import { providerActions, providerState } from "$lib/states/provider.svelte";
-  import type { Word, Message } from "$lib/types";
+  import { providerState } from "$lib/states/provider.svelte";
+  import { normalizeError } from "$lib/utils/error";
+  import type { Word } from "$lib/types";
 
   type TabId = "lookup" | "learn";
+
+  /**
+   * 翻译历史的归一化条目（取代旧的 chat `Message`）。源自统一 Agent 会话的
+   * transcript（`getAgentSessionMessages` → `AgentSessionMessage.payload`），
+   * 每条把助手/用户内容块拍平为可读字符串供历史列表与「加入单词本」消费。
+   */
+  type HistoryEntry = {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    createdAt: number;
+  };
 
   type LookupResult = {
     term: string;
@@ -52,7 +66,7 @@
   let modelId = $state("");
 
   let lookupResult = $state<LookupResult | null>(null);
-  let translationHistory = $state<Message[]>([]);
+  let translationHistory = $state<HistoryEntry[]>([]);
 
   const selectedModel = $derived(
     (() => {
@@ -72,9 +86,13 @@
   );
 
   /**
-   * 创建或更新翻译 Session
-   * 从 Agent 实例化 Session，拷贝所有配置（system_prompt 等）
-   * 然后更新 model_id 和 provider_id
+   * 创建或更新翻译 Session（统一 Agent 引擎）。
+   *
+   * 已有会话：就地更新所选 model/provider（单字段更新，写回快照）。会话不存在
+   * （settings 里残留的旧 chat session id —— 迁移前遗留）时退回到「从 definition 实例化
+   * 一个新会话」并改写 settings.translation.sessionId，使旧 id 不会让翻译永久失效。
+   * 无会话：直接从所选 AgentDefinition 实例化（覆盖 model/provider），其余配置由
+   * definition 快照决定；translationAgent 的 workingDirMode 退化为纯对话。
    */
   async function createOrUpdateTranslationSession(): Promise<string | null> {
     if (!agentId || !modelId || !providerId) {
@@ -83,30 +101,35 @@
 
     try {
       isUpdatingSession = true;
-      const translation = settingsState.settings?.translation;
-      const currentSessionId = translation?.sessionId;
+      const currentSessionId = settingsState.settings?.translation?.sessionId;
 
       if (currentSessionId) {
-        // Session 已存在，只需更新模型
-        await chatApi.updateChatModel(currentSessionId, modelId, providerId);
-        return currentSessionId;
-      } else {
-        // 从 Agent 创建 Session，自动拷贝 Agent 的所有配置
-        const session = await chatApi.createSessionFromAgent(agentId);
-        if (!session.id) {
-          throw new Error("Failed to create session: no id returned");
+        try {
+          await updateAgentSessionField(currentSessionId, "modelId", modelId);
+          await updateAgentSessionField(
+            currentSessionId,
+            "providerId",
+            providerId
+          );
+          return currentSessionId;
+        } catch (error) {
+          // 旧 chat session id 残留（迁移前遗留）：落到下方实例化新会话。
+          if (normalizeError(error).code !== "NOT_FOUND") {
+            throw error;
+          }
         }
-        // 更新用户选择的模型
-        await chatApi.updateChatModel(session.id, modelId, providerId);
-
-        // 保存 sessionId 到设置
-        await settingsState.updateSettings({
-          section: "translation",
-          data: { sessionId: session.id },
-        });
-
-        return session.id;
       }
+
+      // 从 AgentDefinition 实例化新会话，覆盖用户所选 model/provider。
+      const session = await createSessionFromDefinition(agentId, {
+        modelId,
+        providerId,
+      });
+      await settingsState.updateSettings({
+        section: "translation",
+        data: { sessionId: session.id },
+      });
+      return session.id;
     } catch (error) {
       console.error("Failed to create/update translation session:", error);
       errorMessage = t("words.error.createSessionFailed");
@@ -172,48 +195,41 @@
           return;
         }
 
-        // 使用流式消息发送翻译请求
-        let streamContent = "";
-        await messageApi.sendUserMessageStream({
-          chatId: sessionId,
-          content: trimmed,
-          tempUserMessageId: `trans-${Date.now()}`,
-        });
-
-        // 监听流式事件
-        const unlisten = await messageApi.listenToStreamEvents({
-          onChunk: (data) => {
-            streamContent = data.content;
-            lookupResult = {
-              term: trimmed,
-              translation: streamContent,
-              sourceLanguage: "auto",
-              targetLanguage: "unknown",
-              phonetic: null,
-              explanation: null,
-              exists: false,
-            };
-          },
-          onEnd: (data) => {
-            // 解析翻译结果
-            const result = parseTranslationResponse(data.finalContent, trimmed);
-            lookupResult = {
-              term: trimmed,
-              translation: result.translation,
-              sourceLanguage: "auto",
-              targetLanguage: result.targetLanguage,
-              phonetic: result.phonetic,
-              explanation: result.explanation,
-              exists: false,
-            };
-            isLoading = false;
-          },
-          onError: (error) => {
-            console.error("Translation failed:", error);
-            errorMessage = t("words.error.translateFailed");
-            isLoading = false;
-          },
-        });
+        try {
+          // 一问一答：发词条、聚合助手回复（增量实时回灌预览，结束再解析结构化结果）。
+          const finalContent = await runAgentTextTurn(
+            sessionId,
+            trimmed,
+            (partial) => {
+              lookupResult = {
+                term: trimmed,
+                translation: partial,
+                sourceLanguage: "auto",
+                targetLanguage: "unknown",
+                phonetic: null,
+                explanation: null,
+                exists: false,
+              };
+            }
+          );
+          const result = parseTranslationResponse(finalContent, trimmed);
+          lookupResult = {
+            term: trimmed,
+            translation: result.translation,
+            sourceLanguage: "auto",
+            targetLanguage: result.targetLanguage,
+            phonetic: result.phonetic,
+            explanation: result.explanation,
+            exists: false,
+          };
+          // run 把本回合 user/assistant 追加进 transcript，刷新历史列表。
+          await loadTranslationHistory();
+        } catch (error) {
+          console.error("Translation failed:", error);
+          errorMessage = t("words.error.translateFailed");
+        } finally {
+          isLoading = false;
+        }
       }
     } catch (error) {
       console.error("Failed to lookup word:", error);
@@ -307,34 +323,58 @@
 
   async function loadTranslationHistory() {
     try {
-      const translation = settingsState.settings?.translation;
-      const sessionId = translation?.sessionId;
+      const sessionId = settingsState.settings?.translation?.sessionId;
       if (!sessionId) {
         translationHistory = [];
         return;
       }
 
-      const messages = await getTranslationHistory(sessionId, 50, 0);
-      // 只保留用户和助手的消息对，并倒序显示（最新的在前）
-      translationHistory = messages
-        .filter((msg) => msg.role === "user" || msg.role === "assistant")
-        .reverse();
+      // 统一 Agent 会话的 transcript（seq ASC，即时间正序）。拍平内容块取纯文本，
+      // 按 (user→assistant) 成对，再整体倒序使最新一对在前——模板按 index/index+1
+      // 配对渲染，故对内仍须 user 在前、assistant 紧随。
+      const messages = await getAgentSessionMessages(sessionId);
+      const chrono: HistoryEntry[] = messages
+        .filter(
+          (msg) =>
+            msg.payload.role === "user" || msg.payload.role === "assistant"
+        )
+        .map((msg) => ({
+          id: msg.id,
+          role: msg.payload.role as "user" | "assistant",
+          content: agentMessageText(msg.payload),
+          createdAt: msg.createdAt,
+        }));
+
+      const pairs: HistoryEntry[][] = [];
+      for (let i = 0; i < chrono.length; i++) {
+        if (chrono[i].role === "user" && chrono[i + 1]?.role === "assistant") {
+          pairs.push([chrono[i], chrono[i + 1]]);
+          i++;
+        }
+      }
+      translationHistory = pairs.reverse().flat();
     } catch (error) {
       console.error("Failed to load translation history:", error);
       translationHistory = [];
     }
   }
 
-  async function handleAddFromHistory(userMessage: Message, assistantMessage: Message) {
+  async function handleAddFromHistory(
+    userEntry: HistoryEntry,
+    assistantEntry: HistoryEntry
+  ) {
     try {
       isLoading = true;
       errorMessage = null;
 
       // 尝试解析助手消息的 JSON 响应
-      const parsed = parseTranslationResponse(assistantMessage.content, userMessage.content);
+      const parsed = parseTranslationResponse(
+        assistantEntry.content,
+        userEntry.content
+      );
 
       await createWord({
-        term: userMessage.content,
+        term: userEntry.content,
         translation: parsed.translation,
         language: parsed.targetLanguage || "auto",
         phonetic: parsed.phonetic,
@@ -348,16 +388,6 @@
       errorMessage = t("words.error.addWordFailed");
     } finally {
       isLoading = false;
-    }
-  }
-
-  async function handleDeleteHistory(messageId: string) {
-    try {
-      await messageApi.deleteMessage(messageId);
-      await loadTranslationHistory();
-    } catch (error) {
-      console.error("Failed to delete history:", error);
-      errorMessage = t("words.error.deleteHistoryFailed");
     }
   }
 
@@ -451,14 +481,16 @@
         agentId = agentOptions[0].value;
       }
 
-      // 如果已有 sessionId，从 session 加载配置
-      // 但如果 modelId 和 providerId 已经存在，跳过 getChat 调用
+      // 如果已有 sessionId，从 Agent 会话快照恢复 model/provider；
+      // model/provider 已就位则跳过。会话不存在（旧 chat id 残留）只记录并跳过，
+      // 配置回退到 agent 默认（handleAgentChange）。
       if (translation?.sessionId && (!modelId || !providerId)) {
         try {
           const t1 = performance.now();
-          const session = await chatApi.getChat(translation.sessionId);
-          console.log(`[Words] getChat: ${(performance.now() - t1).toFixed(2)}ms`);
-          // 恢复 modelId 和 providerId
+          const session = await getAgentSession(translation.sessionId);
+          console.log(
+            `[Words] getAgentSession: ${(performance.now() - t1).toFixed(2)}ms`
+          );
           if (session.modelId) {
             modelId = session.modelId;
           }
@@ -664,12 +696,6 @@
                           onclick={() => handleAddFromHistory(message, translationHistory[index + 1])}
                         />
                       {/if}
-                      <IconButton
-                        icon={Trash2}
-                        iconSize={16}
-                        title={t("common.delete")}
-                        onclick={() => handleDeleteHistory(message.id)}
-                      />
                     </div>
                   </div>
                 </div>

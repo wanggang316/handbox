@@ -6,8 +6,13 @@
  * run / timeline 由后续 feature 承担。
  */
 
-import type { UUID, AgentSession, CreateAgentSessionRequest } from "../types";
-import type { McpServerConfig } from "../types/chat";
+import type {
+  UUID,
+  AgentSession,
+  CreateAgentSessionRequest,
+  InstantiateAgentSessionRequest,
+} from "../types";
+import type { McpServerConfig } from "../types/llm";
 import type { AgentSessionField } from "../api/agentSession";
 import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
@@ -73,6 +78,35 @@ export const agentSessionActions = {
       return session;
     } catch (error) {
       console.error("Failed to create agent session:", error);
+      throw error;
+    } finally {
+      isLoading = false;
+    }
+  },
+
+  /**
+   * 从 AgentDefinition 实例化会话：插入列表顶部并设为当前。
+   *
+   * 统一的「用此 Agent」入口，取代 chat 侧的 `createSessionFromAgent`。
+   * 能力集快照与工作目录策略由后端按 definition 裁决；`overrides` 仅覆盖
+   * name/project/workingDir/model/provider。
+   */
+  async createSessionFromDefinition(
+    definitionId: UUID,
+    overrides?: InstantiateAgentSessionRequest,
+  ): Promise<AgentSession> {
+    try {
+      isLoading = true;
+      const session = await agentSessionApi.createSessionFromDefinition(
+        definitionId,
+        overrides,
+      );
+      const existing = Array.isArray(sessions) ? sessions : [];
+      sessions = [session, ...existing];
+      currentSession = session;
+      return session;
+    } catch (error) {
+      console.error("Failed to create agent session from definition:", error);
       throw error;
     } finally {
       isLoading = false;
