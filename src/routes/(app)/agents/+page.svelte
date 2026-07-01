@@ -85,20 +85,6 @@
           data.temperature ?? null
         );
       }
-      if (hasChanged(data.topP, editingAgent.topP)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "topP",
-          data.topP ?? null
-        );
-      }
-      if (hasChanged(data.topK, editingAgent.topK)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "topK",
-          data.topK ?? null
-        );
-      }
       if (hasChanged(data.maxTokens, editingAgent.maxTokens)) {
         await agentActions.updateAgentField(
           editingAgent.id,
@@ -184,8 +170,6 @@
         name: data.name,
         model: data.model || undefined,
         temperature: data.temperature,
-        topP: data.topP,
-        topK: data.topK,
         maxTokens: data.maxTokens,
         systemPrompt: data.systemPrompt || undefined,
         reasoning: undefined,

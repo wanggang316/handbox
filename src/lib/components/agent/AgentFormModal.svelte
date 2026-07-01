@@ -30,8 +30,6 @@
     name: string;
     model: string;
     temperature?: number;
-    topP?: number;
-    topK?: number;
     maxTokens?: number;
     systemPrompt: string;
     mcpServers: McpServerConfig[];
@@ -57,8 +55,9 @@
   const SECTION_CLASS =
     "text-[11px] font-semibold uppercase tracking-wider text-base-content/40";
 
-  // ── 模型参数：与聊天侧同一组字段，扁平绘制（label + toggle + slider）。 ──
-  type ParamKey = "temperature" | "topP" | "topK" | "maxTokens";
+  // ── 模型参数：会话/引擎实际消费的采样参数，扁平绘制（label + toggle + slider）。
+  //    仅 temperature / maxTokens —— top_p / top_k 会话层与引擎均不消费，故不在此暴露。 ──
+  type ParamKey = "temperature" | "maxTokens";
   const PARAM_META: Array<{
     key: ParamKey;
     label: string;
@@ -68,8 +67,6 @@
     default: number;
   }> = [
     { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.1, default: 0.7 },
-    { key: "topP", label: "Top P", min: 0, max: 1, step: 0.05, default: 0.9 },
-    { key: "topK", label: "Top K", min: 0, max: 100, step: 1, default: 40 },
     { key: "maxTokens", label: "Max Tokens", min: 256, max: 16384, step: 256, default: 4096 },
   ];
 
@@ -156,14 +153,10 @@
 
   let paramEnabled = $state<Record<ParamKey, boolean>>({
     temperature: false,
-    topP: false,
-    topK: false,
     maxTokens: false,
   });
   let paramValues = $state<Record<ParamKey, number>>({
     temperature: 0.7,
-    topP: 0.9,
-    topK: 40,
     maxTokens: 4096,
   });
 
@@ -230,8 +223,6 @@
     formData.temperature = paramEnabled.temperature
       ? paramValues.temperature
       : undefined;
-    formData.topP = paramEnabled.topP ? paramValues.topP : undefined;
-    formData.topK = paramEnabled.topK ? paramValues.topK : undefined;
     formData.maxTokens = paramEnabled.maxTokens
       ? paramValues.maxTokens
       : undefined;
@@ -255,8 +246,6 @@
         name: agent.name,
         model: agent.model || "",
         temperature: agent.temperature,
-        topP: agent.topP,
-        topK: agent.topK,
         maxTokens: agent.maxTokens,
         systemPrompt: agent.systemPrompt || "",
         mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
@@ -284,8 +273,6 @@
 
     const source: Record<ParamKey, number | undefined | null> = {
       temperature: agent?.temperature,
-      topP: agent?.topP,
-      topK: agent?.topK,
       maxTokens: agent?.maxTokens,
     };
     for (const p of PARAM_META) {
