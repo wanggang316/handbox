@@ -13,6 +13,7 @@
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Select from "$lib/components/ui/Select.svelte";
+  import AgentModelSelect from "./AgentModelSelect.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { t } from "$lib/i18n";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
@@ -665,6 +666,10 @@
           </div>
         {/if}
       </div>
+
+      <!-- 会话级模型选择器：选中即成对写入 modelId+providerId（handleModelSelect），
+           无需再去 Agent 定义里选。selectedModel 从会话反查，解析不到显示「选择模型」。 -->
+      <AgentModelSelect selected={selectedModel} onSelect={handleModelSelect} />
 
       <IconButton
         icon={Plus}

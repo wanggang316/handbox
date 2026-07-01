@@ -33,6 +33,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.autoExecution": "Auto",
   "agent.input.manualExecution": "Manual",
   "agent.input.selectModel": "Select model",
+  "agent.input.noAvailableModels": "No models available — configure a provider in settings",
   "agent.input.noAvailableMcpServers": "No available MCP servers",
   "agent.input.configureMcpInSettings":
     "Configure and enable MCP servers in the app settings",

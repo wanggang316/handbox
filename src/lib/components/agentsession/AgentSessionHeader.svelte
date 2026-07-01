@@ -29,8 +29,22 @@
     type OpenInTarget,
   } from "$lib/api/openIn";
   import { settingsState } from "$lib/states/settings.svelte";
+  import { getAllModels } from "$lib/states/provider.svelte";
 
   const session = $derived(agentSessionState.currentSession);
+
+  // 仅在会话模型能解析到真实目录模型时显示（modelId + providerId 齐全且命中已启用
+  // catalog）。半配置态（有 modelId 无 providerId、或模型已下架）一律不显示——避免
+  // Header 挂一个实际跑不起来的「幻影模型」（与组合框的发送门控口径一致）。
+  const resolvedModel = $derived.by(() => {
+    const s = session;
+    if (!s?.modelId || !s?.providerId) return null;
+    return (
+      getAllModels().find(
+        (m) => m.id === s.modelId && m.provider_id === s.providerId,
+      ) ?? null
+    );
+  });
 
   // ============================================
   // "Open in ..." 分体按钮 + 下拉
@@ -246,8 +260,8 @@
       <div
         class="flex items-center gap-3 text-xs text-base-content/50 mt-0.5"
       >
-        {#if session.modelId}
-          <span class="truncate">{session.modelId}</span>
+        {#if resolvedModel}
+          <span class="truncate">{resolvedModel.name}</span>
         {/if}
         {#if session.thinkingLevel && session.thinkingLevel !== "off"}
           <span class="flex items-center gap-1 shrink-0">

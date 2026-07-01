@@ -29,6 +29,7 @@ export const agentZh = {
   "agent.input.autoExecution": "自动执行",
   "agent.input.manualExecution": "手动执行",
   "agent.input.selectModel": "选择模型",
+  "agent.input.noAvailableModels": "暂无可用模型，请先在设置中配置供应商",
   "agent.input.noAvailableMcpServers": "暂无可用的 MCP 服务器",
   "agent.input.configureMcpInSettings": "请在应用设置中配置并开启 MCP 服务器",
   "agent.input.enabledToolsCount": "{count} enabled tools",
