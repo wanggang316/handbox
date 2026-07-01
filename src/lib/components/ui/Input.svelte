@@ -30,8 +30,8 @@
 </label>
 <input
   {id}
-  class="input"
-  class:has-error={!!error}
+  class="field w-full px-3 py-2 text-sm"
+  class:is-error={!!error}
   {type}
   {placeholder}
   {disabled}
@@ -47,11 +47,7 @@
 {/if}
 
 <style>
-.label { display:block; margin-bottom:.5rem; font-weight:500; }
-.required-marker { color: var(--error); margin-left:.125rem; }
-.input { width:100%; padding:.5rem .75rem; border:1px solid var(--base-300); border-radius:6px; background:var(--base-100); color:var(--base-content); }
-.input:focus{ border-color: var(--primary); }
-.input:disabled{ opacity:.5; cursor:not-allowed; }
-.input.has-error{ border-color: var(--error); }
-.error-message { margin-top:.375rem; color: var(--error); font-size:.8125rem; }
+.label { display:block; margin-bottom:.5rem; font-weight:500; font-size:.875rem; }
+.required-marker { color: var(--field-error); margin-left:.125rem; }
+.error-message { margin-top:.375rem; color: var(--field-error); font-size:.8125rem; }
 </style>

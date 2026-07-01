@@ -176,6 +176,16 @@ textarea.composer-input:focus-visible {
   --z-modal: 10060; /* modal / dialog 内容 */
   --z-popover: 10070; /* 浮层 / 下拉：需盖在 modal 之上 */
   --z-toast: 99999; /* 全局最上 */
+
+  /* 表单控件 component token：输入类外观（bg/border/focus/error）一处定义。消费短别名，
+     深色由 [data-theme="dark"] 的短别名重绑自动跟随，无需在此重复。 */
+  --field-bg: var(--base-200);
+  --field-border: var(--hairline);
+  --field-border-hover: var(--hairline-strong);
+  --field-focus: var(--primary);
+  --field-error: var(--error);
+  --field-text: var(--base-content);
+  --field-placeholder: color-mix(in oklch, var(--base-content) 35%, transparent);
 }
 
 /* 深色主题 */
@@ -667,4 +677,40 @@ pre.code-block--compact {
 @media (prefers-reduced-motion: reduce) {
   .dlg-overlay[data-state],
   .dlg-content[data-state] { animation: none; }
+}
+
+/* 表单输入基础皮肤：input / textarea / select 套用同一个 .field，外观（底色 / 边框 /
+   focus ring / error / disabled）改一处即全站生效；尺寸、宽度、字号由各组件用 Tailwind
+   叠加。focus 统一走 ring（box-shadow），比 border 变色更醒目、可访问。 */
+.field {
+  border-radius: 0.375rem;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--field-text);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.field::placeholder {
+  color: var(--field-placeholder);
+}
+.field:hover:not(:disabled):not(:focus):not(:focus-visible) {
+  border-color: var(--field-border-hover);
+}
+.field:focus,
+.field:focus-visible {
+  outline: none;
+  border-color: var(--field-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+}
+.field.is-error {
+  border-color: var(--field-error);
+}
+.field.is-error:focus,
+.field.is-error:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-error) 30%, transparent);
+}
+.field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
