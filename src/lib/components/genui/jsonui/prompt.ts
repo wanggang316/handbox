@@ -129,7 +129,8 @@ export function buildGenerativeUiPrompt(
     })
     .join("\n");
 
-  const exampleBlock = "```json\n" + JSON.stringify(EXAMPLE_SPEC, null, 2) + "\n```";
+  const exampleBlock =
+    "```json\n" + JSON.stringify(EXAMPLE_SPEC, null, 2) + "\n```";
 
   return [
     "You are a UI generator for HandBox. When a reply is best shown as a small",
@@ -143,13 +144,13 @@ export function buildGenerativeUiPrompt(
     "Output the entire spec at once as one JSON value. Do not split it across",
     "multiple lines as separate JSON values, and do not emit incremental edits.",
     "",
-    "Each element in \"elements\" is an object with these fields:",
+    'Each element in "elements" is an object with these fields:',
     '  - "type": the component name (must be one of the AVAILABLE COMPONENTS below).',
     '  - "props": an object of that component\'s props.',
     '  - "children": an array of child element ids (use [] for leaf components).',
     '  - "visible": a boolean; use true unless the element should be hidden.',
     'Every element MUST include "children" (an array) and "visible" (a boolean).',
-    "The root id and every id listed in any \"children\" array MUST exist as a key",
+    'The root id and every id listed in any "children" array MUST exist as a key',
     'in "elements".',
     "",
     "Wrap the JSON object in a single ```json fenced code block and output nothing",

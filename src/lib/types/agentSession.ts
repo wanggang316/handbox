@@ -59,8 +59,8 @@ export interface ThinkingContent {
 /**
  * 工具调用内容块（model crate `ToolCall`）。
  *
- * 命名为 `AgentToolCall` 以避免与 chat 模式的 `ToolCall`（types/chat.ts）在
- * 共享 barrel 中重名冲突 —— 二者形状不同（此为 agent/model 的内容块）。
+ * 命名为 `AgentToolCall`（而非裸 `ToolCall`）以在共享 barrel 中保持无歧义 ——
+ * 它是 agent/model 的内容块。
  */
 export interface AgentToolCall {
   id: string;

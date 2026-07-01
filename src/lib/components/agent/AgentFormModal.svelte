@@ -5,11 +5,10 @@
   import Select from "../ui/Select.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
-  import ChatModelSelectModal from "../chat/ChatModelSelectModal.svelte";
   import { ChevronsUpDown, ChevronDown, ChevronRight } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
-  import type { McpServerConfig } from "$lib/types/chat";
+  import type { McpServerConfig } from "$lib/types/llm";
   import type { ModelWithProvider } from "$lib/types/provider";
   import {
     getAllModels,
@@ -80,8 +79,8 @@
   ]);
 
   const executionModeOptions = $derived([
-    { value: "auto", label: t("chat.autoExecution") },
-    { value: "manual", label: t("chat.manualExecution") },
+    { value: "auto", label: t("agent.input.autoExecution") },
+    { value: "manual", label: t("agent.input.manualExecution") },
   ]);
 
   // ── 能力（Capability）：内置工具 / 工作目录 / 工具执行 ──
@@ -360,7 +359,7 @@
             </div>
           {:else}
             <div class="flex items-center justify-between gap-2">
-              <span class="text-base-content/40">{t("chat.selectModel")}</span>
+              <span class="text-base-content/40">{t("agent.input.selectModel")}</span>
               <ChevronsUpDown size={14} class="shrink-0 text-base-content/40" />
             </div>
           {/if}
@@ -496,10 +495,10 @@
         {#if availableServers.length === 0}
           <div class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-4 text-center">
             <p class="text-sm text-base-content/55">
-              {t("chat.noAvailableMcpServers")}
+              {t("agent.input.noAvailableMcpServers")}
             </p>
             <p class="mt-0.5 text-xs text-base-content/40">
-              {t("chat.configureMcpInSettings")}
+              {t("agent.input.configureMcpInSettings")}
             </p>
           </div>
         {:else}
@@ -517,7 +516,7 @@
                 </div>
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-xs text-base-content/40">
-                    {t("chat.enabledToolsCount", {
+                    {t("agent.input.enabledToolsCount", {
                       count: server.enabledTools.length,
                     })}
                   </span>
@@ -556,10 +555,3 @@
     </div>
   </div>
 </Modal>
-
-<!-- 模型选择 Modal（叠在表单之上） -->
-<ChatModelSelectModal
-  bind:open={showModelModal}
-  selectedModel={selectedModel ?? null}
-  onModelSelect={handleModelSelect}
-/>

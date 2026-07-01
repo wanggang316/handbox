@@ -8,7 +8,6 @@ import type {
   ListWordsRequest,
   UpdateWordRequest,
   Word,
-  Message,
 } from "../types";
 
 export async function createWord(request: CreateWordRequest): Promise<Word> {
@@ -29,16 +28,4 @@ export async function updateWord(request: UpdateWordRequest): Promise<Word> {
 
 export async function deleteWord(wordId: string): Promise<void> {
   return apiCall<void>("word_delete", { wordId });
-}
-
-export async function getTranslationHistory(
-  sessionId: string,
-  limit?: number,
-  offset?: number,
-): Promise<Message[]> {
-  return apiCall<Message[]>("word_translation_history", {
-    sessionId,
-    limit,
-    offset,
-  });
 }

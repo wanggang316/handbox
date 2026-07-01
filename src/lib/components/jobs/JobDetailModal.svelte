@@ -20,7 +20,6 @@
   import { cronToHuman } from "$lib/utils/cronReadable";
   import { formatDateTime, formatDuration } from "$lib/utils";
   import { listExecutions, listenJobExecuted, runNow } from "$lib/api/job";
-  import { getChat } from "$lib/api/chat";
   import { getAgentSession } from "$lib/api/agentSession";
   import { t } from "$lib/i18n";
   import type { Job, JobExecution, ExecutionStatus, Trigger } from "$lib/types";
@@ -103,11 +102,12 @@
     resultStates = { ...resultStates, [exec.id]: "checking" };
     try {
       if (targetKind === "prompt") {
-        await getChat(ref);
+        // Chat sessions have been removed; mark as missing
+        resultStates = { ...resultStates, [exec.id]: "missing" };
       } else if (targetKind === "agent") {
         await getAgentSession(ref);
+        resultStates = { ...resultStates, [exec.id]: "ok" };
       }
-      resultStates = { ...resultStates, [exec.id]: "ok" };
     } catch (e) {
       // 会话已删除 / 不可达：标记缺失，禁用跳转。
       console.error("Result target unreachable:", e);

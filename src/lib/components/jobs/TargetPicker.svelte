@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Bot } from "@lucide/svelte";
   import Select from "$lib/components/ui/Select.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import { t } from "$lib/i18n";
   import type { Agent, AgentTarget, JobTarget, PromptTarget } from "$lib/types";
   import type {
@@ -169,21 +168,8 @@
     <!-- Prompt：provider/model 级联（复用 chat 模型选择弹窗）+ prompt 文本 -->
     <div class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.modelLabel")}</span>
-      <div
-        class="flex items-center gap-2 rounded-md border px-1 py-1 {promptModelInvalid
-          ? 'border-error ring-1 ring-error'
-          : 'border-[var(--hairline)]'}"
-      >
-        <ChatModelSelectButton
-          selectedModel={selectedPromptModel}
-          onModelSelect={handleModelSelect}
-          variant="ghost"
-        />
-        {#if selectedPromptModel}
-          <span class="text-xs text-base-content/50">
-            {selectedPromptModel.providerName}
-          </span>
-        {/if}
+      <div class="text-xs text-base-content/50">
+        Not available (chat mode discontinued)
       </div>
       {#if promptModelInvalid}
         <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>

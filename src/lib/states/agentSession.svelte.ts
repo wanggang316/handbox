@@ -1,7 +1,7 @@
 /**
  * Agent Session 状态管理 - Svelte 5 runes
  *
- * 镜像 `states/chat.svelte.ts` 的约定：模块级 `$state` 变量 + getter/setter 暴露的
+ * 遵循本项目 store 约定：模块级 `$state` 变量 + getter/setter 暴露的
  * 状态对象 + 一个动作对象。仅负责 session 的 CRUD 与列表交互，
  * run / timeline 由后续 feature 承担。
  */

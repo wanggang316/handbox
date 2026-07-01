@@ -35,7 +35,6 @@ export interface BaseEntity {
 export * from "./agent";
 export * from "./genui";
 export * from "./llm";
-export * from "./chat";
 export * from "./provider";
 export * from "./settings";
 export * from "./mcp";

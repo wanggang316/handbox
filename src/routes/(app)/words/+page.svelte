@@ -14,7 +14,6 @@
     agentMessageText,
   } from "$lib/api/agentSession";
   import Select from "$lib/components/ui/Select.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import { settingsState } from "$lib/states";
   import { providerState } from "$lib/states/provider.svelte";
@@ -626,12 +625,9 @@
 
           <!-- 模型选择（Agent 选择后显示） -->
           {#if agentId}
-            <ChatModelSelectButton
-              {selectedModel}
-              variant="gray"
-              size="sm"
-              onModelSelect={(model) => handleModelSelect(model)}
-            />
+            <div class="text-xs text-base-content/50">
+              {selectedModel?.name ?? "No model"}
+            </div>
           {/if}
 
           <button

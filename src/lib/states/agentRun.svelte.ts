@@ -1,14 +1,13 @@
 /**
  * Agent 运行状态管理 - Svelte 5 runes
  *
- * 镜像 `states/message.svelte.ts` 的 reducer/listener 约定，但**按 sessionId 分键**：
+ * reducer/listener 约定，**按 sessionId 分键**：
  * 每个会话拥有独立的「已提交消息（transcript）」与「流式 view-model」，因此一个
  * 在后台流式的会话可以持续更新自身状态，而前台正在查看的是另一个会话（VAL-RUN-016）。
  *
  * 流式监听器在 store 单例构造时**一次性**建立（navigation-resilient）：store 单例在
- * 整个 app 生命周期只构造一次，监听器不随路由切换或 Chat<->Agent 模式切换而卸载
- * （VAL-MODE-006）。监听器只订阅 `agent_stream_*` 事件，与 chat 的 `message_stream_*`
- * 互不相干，因此切换不会影响 chat 流（VAL-MODE-007）。
+ * 整个 app 生命周期只构造一次，监听器不随路由切换而卸载（VAL-MODE-006），只订阅
+ * `agent_stream_*` 事件。
  *
  * 工具调用（toolcall）在 M2 消费：`tool_execution_start/update/end` 事件按 `toolCallId`
  * 分键 reduce 成 live tool-call view-model（VAL-TOOLS-001/002/003/004），由 timeline

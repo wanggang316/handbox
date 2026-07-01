@@ -26,7 +26,6 @@
   import { goto } from "$app/navigation";
   import { TableGroup, TableBaseRow } from "$lib/components/ui/table";
   import ShortcutRecorder from "$lib/components/quickaction/ShortcutRecorder.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import { settingsState, providerActions } from "$lib/states";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { normalizeError } from "$lib/utils/error";
@@ -76,9 +75,6 @@
     ),
   );
 
-  // The selected model passed to ChatModelSelectButton: only the resolved (=
-  // runnable) model, so a dangling/empty default shows the button placeholder
-  // instead of a stale name. The row-level placeholders handle the rest.
   const selectedModel = $derived<ModelWithProvider | null>(
     modelResolution.available ? modelResolution.model : null,
   );
@@ -213,10 +209,6 @@
     >
       {#if modelResolution.available || modelResolution.reason !== "empty-catalog"}
         <div class="flex items-center justify-between gap-3 mt-2">
-          <ChatModelSelectButton
-            {selectedModel}
-            onModelSelect={handleModelSelect}
-          />
           {#if !modelResolution.available}
             <span class="text-xs text-base-content/60">
               {modelResolution.reason === "dangling-default"

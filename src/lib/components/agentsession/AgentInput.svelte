@@ -5,7 +5,6 @@
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import Select from "$lib/components/ui/Select.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { BUILTIN_TOOLS, type BuiltinTool } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
@@ -22,7 +21,7 @@
     SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
-  import type { McpServerConfig } from "$lib/types/chat";
+  import type { McpServerConfig } from "$lib/types/llm";
 
   interface Props {
     session: AgentSession;
@@ -108,8 +107,8 @@
   //    可用 server 口径与聊天侧 Tools.svelte 一致：已启用 + ready + 至少一个工具。
   //    executionMode=manual 的 server，其工具在后端走审批门控（auto 直跑）。
   const executionModeOptions = $derived([
-    { value: "auto", label: t("chat.autoExecution") },
-    { value: "manual", label: t("chat.manualExecution") },
+    { value: "auto", label: t("agent.input.autoExecution") },
+    { value: "manual", label: t("agent.input.manualExecution") },
   ]);
   const availableServers = $derived(
     mcpState.servers.filter(
@@ -756,10 +755,6 @@
         size="sm"
         autoWidth
         onChange={handleThinkingChange}
-      />
-      <ChatModelSelectButton
-        {selectedModel}
-        onModelSelect={handleModelSelect}
       />
       {#if running}
         <CircleButton

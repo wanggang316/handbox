@@ -33,6 +33,13 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.toolNeedsWorkingDir": "{label} (needs a working directory)",
   "agent.input.stop": "Stop",
   "agent.input.send": "Send",
+  "agent.input.autoExecution": "Auto",
+  "agent.input.manualExecution": "Manual",
+  "agent.input.selectModel": "Select model",
+  "agent.input.noAvailableMcpServers": "No available MCP servers",
+  "agent.input.configureMcpInSettings":
+    "Configure and enable MCP servers in the app settings",
+  "agent.input.enabledToolsCount": "{count} enabled tools",
 
   // Timeline (AgentTimeline)
   "agent.timeline.compacting": "Compacting context…",

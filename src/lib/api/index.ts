@@ -64,8 +64,6 @@ export class AppError extends Error {
 export * from "./accessibility";
 export * from "./agent";
 export * from "./genui";
-export * from "./chat";
-export * from "./message";
 export * from "./provider";
 export * from "./model";
 export * from "./settings";

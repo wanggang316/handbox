@@ -2,10 +2,6 @@
  * Svelte 5 状态管理 - 统一导出
  */
 
-// 聊天相关
-export { chatState } from './chat.svelte';
-export { messageStore } from './message.svelte';
-
 // Agent Session 相关
 export { agentSessionState, agentSessionActions } from './agentSession.svelte';
 export { agentRunStore, type AgentRunState } from './agentRun.svelte';
