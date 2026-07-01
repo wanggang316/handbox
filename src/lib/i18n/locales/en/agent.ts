@@ -40,6 +40,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.configureMcpInSettings":
     "Configure and enable MCP servers in the app settings",
   "agent.input.enabledToolsCount": "{count} enabled tools",
+  "agent.input.selectAgent": "Select agent",
+  "agent.input.switchAgentFailed": "Failed to switch agent",
 
   // Timeline (AgentTimeline)
   "agent.timeline.compacting": "Compacting context…",

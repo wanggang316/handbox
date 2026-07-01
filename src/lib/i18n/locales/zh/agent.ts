@@ -35,6 +35,8 @@ export const agentZh = {
   "agent.input.noAvailableMcpServers": "暂无可用的 MCP 服务器",
   "agent.input.configureMcpInSettings": "请在应用设置中配置并开启 MCP 服务器",
   "agent.input.enabledToolsCount": "{count} enabled tools",
+  "agent.input.selectAgent": "选择 Agent",
+  "agent.input.switchAgentFailed": "切换 Agent 失败",
 
   // Timeline (AgentTimeline)
   "agent.timeline.compacting": "整理上下文中…",

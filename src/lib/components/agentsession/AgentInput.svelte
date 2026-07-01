@@ -1,6 +1,16 @@
 <script lang="ts">
-  import { ArrowUp, Square, Plus, X, SlidersHorizontal } from "@lucide/svelte";
+  import {
+    ArrowUp,
+    Square,
+    Plus,
+    X,
+    SlidersHorizontal,
+    Bot,
+    ChevronDown,
+    Check,
+  } from "@lucide/svelte";
   import { onDestroy, tick } from "svelte";
+  import { goto } from "$app/navigation";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
@@ -9,6 +19,7 @@
   import { BUILTIN_TOOLS, type BuiltinTool } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
+  import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
@@ -16,6 +27,7 @@
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import { listSkills } from "$lib/api/skill";
   import type {
+    Agent,
     AgentSession,
     AgentRunAttachment,
     SkillInfo,
@@ -178,9 +190,66 @@
 
   function toggleToolsMenu(event: MouseEvent) {
     event.stopPropagation();
+    agentMenuOpen = false;
     toolsMenuOpen = !toolsMenuOpen;
   }
 
+  // ── Agent 选择器（把 Agents 页的「使用」搬进输入框左下角）──────────────────
+  //    显示当前会话来源 Agent 名；点开向上弹出 AgentDefinition 列表，选中他者即
+  //    从该定义实例化一个新会话并跳转过去（等价于在 Agents 页点「使用」）。选中
+  //    当前会话自身来源的 Agent 为干净 no-op —— 不重复新建空会话。
+  let agentMenuOpen = $state(false);
+
+  // 当前会话来源 Agent（据 agentDefinitionId 从已加载列表反查；未加载/已删除/
+  // 无 provenance 时为 null，按钮回落到「选择 Agent」占位）。
+  const currentAgent = $derived<Agent | null>(
+    session.agentDefinitionId
+      ? (agentState.agents.find((a) => a.id === session.agentDefinitionId) ??
+          null)
+      : null,
+  );
+  const currentAgentLabel = $derived(
+    currentAgent?.name ?? t("agent.input.selectAgent"),
+  );
+
+  // 打开选择器时 lazy-load Agent 列表（/agent 路由本身不加载它；两个内置 Agent
+  // 恒被 seed，故 length===0 即「尚未加载」的可靠代理）。
+  $effect(() => {
+    if (agentMenuOpen && agentState.agents.length === 0) {
+      agentActions
+        .loadAgents()
+        .catch((error) => console.error("Failed to load agents:", error));
+    }
+  });
+
+  // 点击外部关闭（镜像工具菜单）。菜单内点击经 stopPropagation 不冒泡到 window。
+  $effect(() => {
+    if (!agentMenuOpen) return;
+    const handler = () => (agentMenuOpen = false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  });
+
+  function toggleAgentMenu(event: MouseEvent) {
+    event.stopPropagation();
+    toolsMenuOpen = false;
+    agentMenuOpen = !agentMenuOpen;
+  }
+
+  async function selectAgent(agent: Agent) {
+    agentMenuOpen = false;
+    if (!agent.id) return;
+    // 已是当前会话来源 Agent：干净 no-op（不重复新建空会话）。
+    if (agent.id === session.agentDefinitionId) return;
+    try {
+      const created =
+        await agentSessionActions.createSessionFromDefinition(agent.id);
+      await goto(`/agent?id=${created.id}`);
+    } catch (error) {
+      console.error("Failed to create session from agent:", error);
+      modelPrompt = t("agent.input.switchAgentFailed");
+    }
+  }
 
   // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
   const running = $derived(agentRunStore.isRunning(session.id));
@@ -642,6 +711,68 @@
 
   <div class="flex flex-row items-center justify-between gap-3 px-4 pt-0 pb-2">
     <div class="flex flex-row flex-wrap items-center gap-2">
+      <!-- Agent 选择器：当前会话来源 Agent + 向上弹出的切换列表。选中他者即从该
+           AgentDefinition 实例化新会话并跳转（把 Agents 页的「使用」搬进输入框）。 -->
+      <div class="relative">
+        <button
+          type="button"
+          class={`flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-2 transition-colors ${
+            agentMenuOpen
+              ? "bg-base-300 text-base-content"
+              : "text-base-content hover:bg-base-300"
+          }`}
+          aria-label={t("agent.input.selectAgent")}
+          aria-haspopup="menu"
+          aria-expanded={agentMenuOpen}
+          title={t("agent.input.selectAgent")}
+          onclick={toggleAgentMenu}
+        >
+          <Bot size={16} class="shrink-0" />
+          <span class="max-w-[140px] truncate text-sm">{currentAgentLabel}</span>
+          <ChevronDown size={14} class="shrink-0 opacity-60" />
+        </button>
+
+        {#if agentMenuOpen}
+          <!-- 向上展开（bottom-full）：输入框在底部，列表浮于按钮上方以免落屏外。
+               stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
+          <div
+            class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-64 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            role="menu"
+            tabindex="-1"
+            onclick={(event) => event.stopPropagation()}
+            onkeydown={() => {}}
+          >
+            {#if agentState.agents.length === 0}
+              <div class="px-2 py-1.5 text-xs text-base-content/50">
+                {t("common.loading")}
+              </div>
+            {:else}
+              {#each agentState.agents as agent (agent.id)}
+                {@const active = agent.id === session.agentDefinitionId}
+                <button
+                  type="button"
+                  role="menuitem"
+                  class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+                    active ? "bg-base-300/60" : ""
+                  }`}
+                  onclick={() => selectAgent(agent)}
+                >
+                  <Bot size={16} class="shrink-0 text-base-content/70" />
+                  <span
+                    class="min-w-0 flex-1 truncate text-sm text-base-content"
+                  >
+                    {agent.name}
+                  </span>
+                  {#if active}
+                    <Check size={14} class="shrink-0 text-primary" />
+                  {/if}
+                </button>
+              {/each}
+            {/if}
+          </div>
+        {/if}
+      </div>
+
       <IconButton
         icon={Plus}
         ariaLabel={t("agent.input.addImage")}
