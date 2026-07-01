@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Portal } from "bits-ui";
   import Modal from "$lib/components/ui/Modal.svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
@@ -316,76 +317,81 @@
     </div>
   </div>
 
-  <!-- Tooltip for model details -->
+  <!-- 模型详情浮窗：必须 Portal 到 <body>。它用 fixed + 视口坐标（getBoundingClientRect）
+       定位，而 Modal 的 Dialog.Content 带 transform 居中会成为 fixed 后代的 containing
+       block，留在 Content 内会让视口坐标被当作相对 Content 计算而错位。z 取 --z-popover
+       盖在 modal 内容之上。 -->
   {#if hoveredModel}
     {@const providerIcon = getProviderIconById(hoveredModel.provider_id)}
-    <div
-      class="fixed z-[9999] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-4 pt-4 pb-0 min-w-[280px] max-w-[380px]"
-      style="left: {tooltipPosition.x}px; top: {tooltipPosition.y}px;"
-    >
-      <div class="space-y-1">
-        <!-- 模型名称 - 大字体，带供应商图标 -->
-        <div class="flex items-center gap-2">
-          {#if providerIcon}
-            <img
-              src={providerIcon}
-              alt={hoveredModel.providerName}
-              class="h-3.5 w-3.5 rounded-md object-contain flex-shrink-0"
-            />
-          {/if}
-          <div class="text-base text-base-content flex items-center gap-2">
-            {hoveredModel.name}
-            {#if hoveredModel.support_image}
-              <EyeIcon size={14} class="text-info" aria-label={t("agent.modelSelect.supportsImageGeneration")} />
+    <Portal>
+      <div
+        class="fixed bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-4 pt-4 pb-0 min-w-[280px] max-w-[380px]"
+        style="left: {tooltipPosition.x}px; top: {tooltipPosition.y}px; z-index: var(--z-popover);"
+      >
+        <div class="space-y-1">
+          <!-- 模型名称 - 大字体，带供应商图标 -->
+          <div class="flex items-center gap-2">
+            {#if providerIcon}
+              <img
+                src={providerIcon}
+                alt={hoveredModel.providerName}
+                class="h-3.5 w-3.5 rounded-md object-contain flex-shrink-0"
+              />
+            {/if}
+            <div class="text-base text-base-content flex items-center gap-2">
+              {hoveredModel.name}
+              {#if hoveredModel.support_image}
+                <EyeIcon size={14} class="text-info" aria-label={t("agent.modelSelect.supportsImageGeneration")} />
+              {/if}
+            </div>
+          </div>
+
+          <!-- 模型 ID - tag 样式 -->
+          <div class="flex mb-2">
+            <span
+              class="inline-block px-2 py-1 text-xs bg-base-300 text-base-content/70 rounded-md break-all"
+            >
+              {hoveredModel.id}
+            </span>
+          </div>
+
+          <!-- 其他信息 -->
+          <div class="space-y-2 mb-4 text-xs">
+            {#if hoveredModel.display_context_length}
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">{t("agent.modelSelect.contextLength")}</span>
+                <span class="font-medium text-base-content">
+                  {hoveredModel.display_context_length}
+                </span>
+              </div>
+            {/if}
+            {#if hoveredModel.display_output_max_tokens}
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">{t("agent.modelSelect.maxOutputLength")}</span>
+                <span class="font-medium text-base-content">
+                  {hoveredModel.display_output_max_tokens}
+                </span>
+              </div>
+            {/if}
+            {#if hoveredModel.pricing?.input_text}
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">{t("agent.modelSelect.inputPrice")}</span>
+                <span class="font-medium text-base-content">
+                  {hoveredModel.pricing.input_text}
+                </span>
+              </div>
+            {/if}
+            {#if hoveredModel.pricing?.output_text}
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">{t("agent.modelSelect.outputPrice")}</span>
+                <span class="font-medium text-base-content">
+                  {hoveredModel.pricing.output_text}
+                </span>
+              </div>
             {/if}
           </div>
         </div>
-
-        <!-- 模型 ID - tag 样式 -->
-        <div class="flex mb-2">
-          <span
-            class="inline-block px-2 py-1 text-xs bg-base-300 text-base-content/70 rounded-md break-all"
-          >
-            {hoveredModel.id}
-          </span>
-        </div>
-
-        <!-- 其他信息 -->
-        <div class="space-y-2 mb-4 text-xs">
-          {#if hoveredModel.display_context_length}
-            <div class="flex justify-between items-center">
-              <span class="text-base-content/70">{t("agent.modelSelect.contextLength")}</span>
-              <span class="font-medium text-base-content">
-                {hoveredModel.display_context_length}
-              </span>
-            </div>
-          {/if}
-          {#if hoveredModel.display_output_max_tokens}
-            <div class="flex justify-between items-center">
-              <span class="text-base-content/70">{t("agent.modelSelect.maxOutputLength")}</span>
-              <span class="font-medium text-base-content">
-                {hoveredModel.display_output_max_tokens}
-              </span>
-            </div>
-          {/if}
-          {#if hoveredModel.pricing?.input_text}
-            <div class="flex justify-between items-center">
-              <span class="text-base-content/70">{t("agent.modelSelect.inputPrice")}</span>
-              <span class="font-medium text-base-content">
-                {hoveredModel.pricing.input_text}
-              </span>
-            </div>
-          {/if}
-          {#if hoveredModel.pricing?.output_text}
-            <div class="flex justify-between items-center">
-              <span class="text-base-content/70">{t("agent.modelSelect.outputPrice")}</span>
-              <span class="font-medium text-base-content">
-                {hoveredModel.pricing.output_text}
-              </span>
-            </div>
-          {/if}
-        </div>
       </div>
-    </div>
+    </Portal>
   {/if}
 </Modal>
