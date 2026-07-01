@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { BookPlus, BookMinus } from "lucide-svelte";
+  import { BookPlus, BookMinus } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import { createWord, listWords, deleteWord } from "$lib/api/word";
   import * as agentApi from "$lib/api/agent";
