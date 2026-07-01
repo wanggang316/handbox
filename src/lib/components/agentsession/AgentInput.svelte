@@ -124,11 +124,22 @@
     // 已是当前会话来源 Agent：干净 no-op（不重复新建空会话）。
     if (agent.id === session.agentDefinitionId) return;
     try {
+      // 当前会话「一句话都没说过」（无消息且无活跃 run）：就地把它重指到新
+      // Agent —— 复用现有会话，不新建（保留 id / URL，无需跳转）。否则从新定义
+      // 实例化一个新会话并跳转过去。不传 overrides：后端让新定义的 model/工作目录
+      // 策略优先，未定处再保留会话现值。
+      if (session.messageCount === 0 && !agentRunStore.isRunning(session.id)) {
+        await agentSessionActions.reinstantiateFromDefinition(
+          session.id,
+          agent.id,
+        );
+        return;
+      }
       const created =
         await agentSessionActions.createSessionFromDefinition(agent.id);
       await goto(`/agent?id=${created.id}`);
     } catch (error) {
-      console.error("Failed to create session from agent:", error);
+      console.error("Failed to switch agent:", error);
       modelPrompt = t("agent.input.switchAgentFailed");
     }
   }

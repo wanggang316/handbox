@@ -8,8 +8,8 @@
 use crate::models::AppError;
 use crate::services::Database;
 use crate::storage::types::{
-    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, InstantiateAgentSessionRequest,
-    McpServerConfig, UUID,
+    Agent, AgentSession, AgentSessionMessage, CreateAgentSessionRequest,
+    InstantiateAgentSessionRequest, McpServerConfig, UUID,
 };
 use crate::storage::{AgentProjectRepository, AgentRepository, AgentSessionRepository};
 use std::sync::Arc;
@@ -69,46 +69,9 @@ impl AgentSessionService {
         &self,
         request: CreateAgentSessionRequest,
     ) -> Result<AgentSession, AppError> {
-        let requested_project_id = request
-            .project_id
-            .as_deref()
-            .filter(|id| !id.is_empty())
-            .map(str::to_owned);
-
-        let (project_id, working_dir) = match requested_project_id {
-            Some(pid) => {
-                let project = self
-                    .projects
-                    .get_project_by_id(&pid)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::not_found(&format!("Agent project not found: {}", pid))
-                    })?;
-
-                // project.path 创建时已 canonical；此处复核它当前仍 canonicalize
-                // 回它自己且是目录：目录可能在创建 project 后被删除，或被换成
-                // 指向别处的 symlink（canonicalize 结果将不再等于自身）。
-                let still_canonical = std::fs::canonicalize(&project.path)
-                    .map(|c| c == std::path::Path::new(&project.path) && c.is_dir())
-                    .unwrap_or(false);
-                if !still_canonical {
-                    return Err(AppError::with_hint(
-                        "VALIDATION_ERROR",
-                        &format!(
-                            "project path is no longer a canonical existing directory: {}",
-                            project.path
-                        ),
-                        "项目目录已不存在或已被替换，请重新选择项目",
-                    ));
-                }
-
-                (Some(project.id), Some(project.path))
-            }
-            None => (
-                None,
-                Self::validate_working_dir(request.working_dir.as_deref())?,
-            ),
-        };
+        let (project_id, working_dir) = self
+            .resolve_project_and_working_dir(request.project_id.clone(), request.working_dir.clone())
+            .await?;
 
         let now = Self::current_timestamp();
         let session = AgentSession {
@@ -169,8 +132,84 @@ impl AgentSessionService {
                 AppError::not_found(&format!("Agent definition not found: {}", definition_id))
             })?;
 
-        // 工作目录策略裁决：在透传给 create_session 之前先按 mode 归一化。
-        // 空字符串与 None 等同「未提供」——create_session 的下游校验也是这样处理。
+        let request = Self::build_instantiation_request(&definition, overrides)?;
+        self.create_session(request).await
+    }
+
+    /// 将一个**已存在**会话就地重指到另一个 AgentDefinition —— 不新建会话行。
+    ///
+    /// 语义：调用方（前端）仅在会话**尚无任何消息**时走此路径——用户切换 Agent
+    /// 而当前会话「一句话都没说过」，没必要新建空会话，直接把它重指到新定义。
+    /// 按新定义重新快照能力集与默认参数、并改写 `agent_definition_id`（这是
+    /// provenance 链接在 create 之外**唯一**允许被重写的受控入口）；会话 id、
+    /// created_at、message_count、last_message_at、transcript 一律保留。
+    ///
+    /// 参数取舍：新定义未指定 model/provider（如内置 chat）时保留会话当前值；
+    /// 工作目录先沿用会话现有挂靠，再由新定义的 `working_dir_mode` 裁决
+    /// （mode="none" 清空；"required" 下现有目录即满足校验）。
+    pub async fn reinstantiate_from_definition(
+        &self,
+        session_id: UUID,
+        definition_id: UUID,
+        overrides: InstantiateAgentSessionRequest,
+    ) -> Result<AgentSession, AppError> {
+        let mut session = self.get_session(session_id).await?;
+
+        let definition = self
+            .definitions
+            .get_agent_by_id(&definition_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found(&format!("Agent definition not found: {}", definition_id))
+            })?;
+
+        // overrides 未显式指定工作目录时，默认沿用会话现有挂靠；随后交由
+        // build_instantiation_request 按新定义的 working_dir_mode 裁决。
+        let overrides = InstantiateAgentSessionRequest {
+            project_id: overrides.project_id.or_else(|| session.project_id.clone()),
+            working_dir: overrides.working_dir.or_else(|| session.working_dir.clone()),
+            ..overrides
+        };
+        let request = Self::build_instantiation_request(&definition, overrides)?;
+        let (project_id, working_dir) = self
+            .resolve_project_and_working_dir(request.project_id, request.working_dir)
+            .await?;
+
+        session.agent_definition_id = Some(definition.id.clone());
+        session.name = request.name;
+        session.project_id = project_id;
+        session.working_dir = working_dir;
+        // 新定义未定 model/provider 时保留会话现值。定义列可能是空串（内置 chat
+        // 的 model/provider seed 为 ""）而非 NULL，故空串按「未定」处理才不会用一个
+        // 空模型盖掉会话已选的真实模型。
+        let non_empty = |v: Option<String>| v.filter(|s| !s.is_empty());
+        session.model_id = non_empty(request.model_id).or(session.model_id);
+        session.provider_id = non_empty(request.provider_id).or(session.provider_id);
+        session.system_prompt = request.system_prompt;
+        session.thinking_level = request.thinking_level;
+        session.temperature = request.temperature;
+        session.max_tokens = request.max_tokens;
+        session.enabled_tools = request.enabled_tools.unwrap_or_default();
+        session.mcp_servers = request.mcp_servers.unwrap_or_default();
+        session.tool_execution_mode = request.tool_execution_mode;
+        session.updated_at = Self::current_timestamp();
+
+        self.repository.reinstantiate_session(&session).await?;
+        Ok(session)
+    }
+
+    /// 从 AgentDefinition + overrides 组装一次实例化的 `CreateAgentSessionRequest`。
+    ///
+    /// `working_dir_mode` 裁决工作目录策略（`"none"` 强制清空；`"required"` 要求
+    /// overrides 至少给 project/working_dir 其一，否则 `VALIDATION_ERROR`；
+    /// `"optional"`/NULL 原样透传），快照能力集（`enabled_tools←builtin_tools`、
+    /// `mcp_servers`）与默认参数，overrides 覆盖 name/project/workingDir/model/
+    /// provider。create 与 reinstantiate 共用此组装，杜绝两条路径漂移。
+    fn build_instantiation_request(
+        definition: &Agent,
+        overrides: InstantiateAgentSessionRequest,
+    ) -> Result<CreateAgentSessionRequest, AppError> {
+        // 空字符串与 None 等同「未提供」——create 的下游校验也是这样处理。
         let is_set = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.is_empty());
         let (project_id, working_dir) =
             match definition.working_dir_mode.as_deref().unwrap_or("optional") {
@@ -193,12 +232,14 @@ impl AgentSessionService {
             .filter(|n| !n.trim().is_empty())
             .unwrap_or_else(|| definition.name.clone());
 
-        let request = CreateAgentSessionRequest {
+        Ok(CreateAgentSessionRequest {
             name,
             project_id,
             agent_definition_id: Some(definition.id.clone()),
             model_id: overrides.model_id.or_else(|| definition.model.clone()),
-            provider_id: overrides.provider_id.or_else(|| definition.provider_id.clone()),
+            provider_id: overrides
+                .provider_id
+                .or_else(|| definition.provider_id.clone()),
             system_prompt: definition.system_prompt.clone(),
             thinking_level: definition.thinking_level.clone(),
             temperature: definition.temperature,
@@ -207,9 +248,55 @@ impl AgentSessionService {
             enabled_tools: Some(definition.builtin_tools.clone()),
             mcp_servers: Some(definition.mcp_servers.clone()),
             tool_execution_mode: definition.tool_execution_mode.clone(),
-        };
+        })
+    }
 
-        self.create_session(request).await
+    /// 解析 `project_id` 挂靠与 `working_dir`，返回 canonical 化后的
+    /// `(project_id, working_dir)`。project 优先：给定则按 id 解析并复核其 path
+    /// 仍 canonicalize 回自身且是目录；否则回落到直接校验 `working_dir`（绝对
+    /// 路径 + 已存在目录）。空字符串 / None 视为未设置。create 与 reinstantiate
+    /// 共用同一套校验，杜绝漂移。
+    async fn resolve_project_and_working_dir(
+        &self,
+        project_id: Option<String>,
+        working_dir: Option<String>,
+    ) -> Result<(Option<String>, Option<String>), AppError> {
+        let requested_project_id = project_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned);
+
+        match requested_project_id {
+            Some(pid) => {
+                let project = self
+                    .projects
+                    .get_project_by_id(&pid)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::not_found(&format!("Agent project not found: {}", pid))
+                    })?;
+
+                // project.path 创建时已 canonical；此处复核它当前仍 canonicalize
+                // 回它自己且是目录：目录可能在创建 project 后被删除，或被换成
+                // 指向别处的 symlink（canonicalize 结果将不再等于自身）。
+                let still_canonical = std::fs::canonicalize(&project.path)
+                    .map(|c| c == std::path::Path::new(&project.path) && c.is_dir())
+                    .unwrap_or(false);
+                if !still_canonical {
+                    return Err(AppError::with_hint(
+                        "VALIDATION_ERROR",
+                        &format!(
+                            "project path is no longer a canonical existing directory: {}",
+                            project.path
+                        ),
+                        "项目目录已不存在或已被替换，请重新选择项目",
+                    ));
+                }
+
+                Ok((Some(project.id), Some(project.path)))
+            }
+            None => Ok((None, Self::validate_working_dir(working_dir.as_deref())?)),
+        }
     }
 
     /// 获取 Agent Session 列表（按 updated_at 降序）
@@ -515,6 +602,112 @@ mod tests {
             )
             .await
             .expect_err("unknown definition must error");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 0);
+    }
+
+    // --- reinstantiate_from_definition: in-place re-point of an empty session ---
+
+    /// Re-pointing an existing session to another definition mutates it in place:
+    /// same id, no new row, provenance + capability set re-snapshotted from the new
+    /// definition. coding -> chat drops the seven tools and the working dir (chat is
+    /// none-mode) while preserving the session's model/provider (chat pins none) —
+    /// proving the row was reused, not recreated.
+    #[tokio::test]
+    async fn reinstantiate_repoints_in_place_from_coding_to_chat() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let work_dir = TempDir::new().unwrap();
+        let coding = service
+            .create_session_from_definition(
+                "builtin-coding".to_string(),
+                InstantiateAgentSessionRequest {
+                    working_dir: Some(work_dir.path().to_string_lossy().into_owned()),
+                    provider_id: Some("openai".to_string()),
+                    model_id: Some("gpt-4o".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("instantiate builtin-coding");
+        let session_id = coding.id.clone();
+
+        let chat = service
+            .reinstantiate_from_definition(
+                session_id.clone(),
+                "builtin-chat".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect("reinstantiate to builtin-chat");
+
+        // Same row, re-pointed — not a fresh session.
+        assert_eq!(chat.id, session_id, "session id is preserved (in place)");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 1, "no new row");
+        assert_eq!(chat.agent_definition_id.as_deref(), Some("builtin-chat"));
+        // Capability set re-snapshotted from the new (chat) definition.
+        assert!(chat.enabled_tools.is_empty(), "chat clears builtin tools");
+        assert_eq!(chat.working_dir, None, "none-mode chat drops working dir");
+        assert_eq!(chat.name, "通用对话", "name adopts the new definition");
+        // Model/provider preserved: builtin-chat pins none, so the session keeps its own.
+        assert_eq!(chat.model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(chat.provider_id.as_deref(), Some("openai"));
+
+        // The persisted row matches the returned session (read-back).
+        let reread = service.get_session(session_id).await.expect("get session");
+        assert_eq!(reread.agent_definition_id.as_deref(), Some("builtin-chat"));
+        assert!(reread.enabled_tools.is_empty());
+    }
+
+    /// An unknown definition id on reinstantiate is a NOT_FOUND and leaves the
+    /// existing session untouched (no partial re-point).
+    #[tokio::test]
+    async fn reinstantiate_unknown_definition_errors_and_preserves_session() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let session = service
+            .create_session_from_definition(
+                "builtin-chat".to_string(),
+                InstantiateAgentSessionRequest {
+                    provider_id: Some("openai".to_string()),
+                    model_id: Some("gpt-4o".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("instantiate builtin-chat");
+
+        let err = service
+            .reinstantiate_from_definition(
+                session.id.clone(),
+                "does-not-exist".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect_err("unknown definition must error");
+        assert_eq!(err.code, "NOT_FOUND");
+
+        let reread = service.get_session(session.id).await.expect("get session");
+        assert_eq!(reread.agent_definition_id.as_deref(), Some("builtin-chat"));
+        assert_eq!(count_rows(&db, "agent_sessions").await, 1);
+    }
+
+    /// Reinstantiating a session that doesn't exist is a NOT_FOUND — no ghost row.
+    #[tokio::test]
+    async fn reinstantiate_unknown_session_errors() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let err = service
+            .reinstantiate_from_definition(
+                "no-such-session".to_string(),
+                "builtin-chat".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect_err("unknown session must error");
         assert_eq!(err.code, "NOT_FOUND");
         assert_eq!(count_rows(&db, "agent_sessions").await, 0);
     }

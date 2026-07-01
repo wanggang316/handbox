@@ -55,6 +55,26 @@ export async function createSessionFromDefinition(
 }
 
 /**
+ * 将一个**已存在**会话就地重指到另一个 AgentDefinition —— 不新建会话行。
+ *
+ * 仅在会话**尚无任何消息**时调用：用户在输入框切换 Agent 而当前会话「一句话
+ * 都没说过」，直接把它重指到新定义（重新快照能力集、改写 provenance），保留
+ * 会话 id 与 transcript。语义同 `createSessionFromDefinition`，但复用现有 id。
+ * 后端签名: agent_session_reinstantiate_from_definition(sessionId, definitionId, overrides?)
+ */
+export async function reinstantiateSessionFromDefinition(
+  sessionId: UUID,
+  definitionId: UUID,
+  overrides?: InstantiateAgentSessionRequest,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_reinstantiate_from_definition", {
+    sessionId,
+    definitionId,
+    overrides,
+  });
+}
+
+/**
  * 获取 Agent Session 列表
  */
 export async function getAgentSessions(

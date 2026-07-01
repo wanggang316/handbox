@@ -173,6 +173,57 @@ impl AgentSessionRepository {
         Ok(())
     }
 
+    /// 就地重指会话到另一个 AgentDefinition 时的整行改写（`reinstantiate_from_definition`
+    /// 专用）。
+    ///
+    /// 与通用的 [`update_session`] 的关键区别：本方法**会**改写 `agent_definition_id`
+    /// 与 `project_id` —— 重实例化是这两个「create 时写死」字段在受控入口下的唯一
+    /// 例外（用户在尚无消息的会话上切换 Agent，等价于按新定义重建）。与 `update_session`
+    /// 一致，`message_count` / `last_message_at` 仍被刻意省略（保留既有 transcript
+    /// 计数，由 `append_message` 独家维护）。
+    pub async fn reinstantiate_session(&self, session: &AgentSession) -> Result<(), AppError> {
+        let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
+            .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
+        let mcp_servers_json = serde_json::to_string(&session.mcp_servers)
+            .map_err(|e| AppError::validation_error(&format!("Invalid mcp servers: {}", e)))?;
+
+        let query = r#"
+            UPDATE agent_sessions SET agent_definition_id = $1, name = $2, model_id = $3, provider_id = $4, system_prompt = $5, thinking_level = $6, temperature = $7, max_tokens = $8, project_id = $9, working_dir = $10, enabled_tools = $11, mcp_servers = $12, tool_execution_mode = $13, updated_at = $14
+            WHERE id = $15
+        "#;
+
+        let result = sqlx::query(query)
+            .bind(&session.agent_definition_id)
+            .bind(&session.name)
+            .bind(&session.model_id)
+            .bind(&session.provider_id)
+            .bind(&session.system_prompt)
+            .bind(&session.thinking_level)
+            .bind(session.temperature)
+            .bind(session.max_tokens)
+            .bind(&session.project_id)
+            .bind(&session.working_dir)
+            .bind(&enabled_tools_json)
+            .bind(&mcp_servers_json)
+            .bind(&session.tool_execution_mode)
+            .bind(session.updated_at)
+            .bind(&session.id)
+            .execute(self.db.pool())
+            .await
+            .map_err(|e| {
+                AppError::internal_error(&format!("Failed to reinstantiate agent session: {}", e))
+            })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Agent session not found: {}",
+                session.id
+            )));
+        }
+
+        Ok(())
+    }
+
     /// 重命名 Agent Session（同时刷新 updated_at）
     pub async fn rename_session(&self, session_id: &UUID, name: &str) -> Result<(), AppError> {
         let now = Self::now_ms();

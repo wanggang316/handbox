@@ -114,6 +114,32 @@ export const agentSessionActions = {
   },
 
   /**
+   * 就地把一个已存在会话重指到另一个 AgentDefinition（不新建会话）。
+   *
+   * 用于「当前会话尚无消息时切换 Agent」：复用现有会话 id，由后端重新快照能力集
+   * 与参数、改写 provenance。就地替换列表中对应项并同步当前会话（id 不变、不重排）。
+   */
+  async reinstantiateFromDefinition(
+    sessionId: UUID,
+    definitionId: UUID,
+    overrides?: InstantiateAgentSessionRequest,
+  ): Promise<AgentSession> {
+    const updated = await agentSessionApi.reinstantiateSessionFromDefinition(
+      sessionId,
+      definitionId,
+      overrides,
+    );
+    const index = sessions.findIndex((session) => session.id === sessionId);
+    if (index !== -1) {
+      sessions[index] = updated;
+    }
+    if (currentSession?.id === sessionId) {
+      currentSession = updated;
+    }
+    return updated;
+  },
+
+  /**
    * 重命名 Agent Session。
    */
   async renameSession(id: UUID, name: string): Promise<void> {

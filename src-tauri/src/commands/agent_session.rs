@@ -44,6 +44,23 @@ pub async fn agent_session_create_from_definition(
         .await
 }
 
+/// 将一个已存在的空会话就地重指到另一个 AgentDefinition（不新建会话行）
+///
+/// 前端仅在会话尚无任何消息时调用：用户在输入框切换 Agent 而当前会话「一句话
+/// 都没说过」，直接把它重指到新定义（重新快照能力集、改写 provenance），保留
+/// 会话 id 与 transcript。详见 [`AgentSessionService::reinstantiate_from_definition`]。
+#[tauri::command]
+pub async fn agent_session_reinstantiate_from_definition(
+    session_id: UUID,
+    definition_id: UUID,
+    overrides: Option<InstantiateAgentSessionRequest>,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<AgentSession, AppError> {
+    agent_session_service
+        .reinstantiate_from_definition(session_id, definition_id, overrides.unwrap_or_default())
+        .await
+}
+
 /// 获取 Agent Session 列表
 ///
 /// SQLite 提供配置行（含顺序：updated_at DESC）；JSONL 提供活动元数据
