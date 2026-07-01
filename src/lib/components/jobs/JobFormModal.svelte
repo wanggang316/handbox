@@ -245,7 +245,7 @@
           t.prompt.trim().length > 0
         );
       case "agent":
-        return t.agentId.length > 0;
+        return t.agentId.length > 0 && t.modelId.length > 0;
     }
   });
 

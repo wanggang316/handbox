@@ -236,7 +236,9 @@ impl AgentSessionService {
             name,
             project_id,
             agent_definition_id: Some(definition.id.clone()),
-            model_id: overrides.model_id.or_else(|| definition.model.clone()),
+            // 模型已与 AgentDefinition 解耦：会话不再从定义快照 model，仅取 overrides
+            // （实例化时由 UI 选）。provider 仍可由定义提供默认（内置行为空）。
+            model_id: overrides.model_id,
             provider_id: overrides
                 .provider_id
                 .or_else(|| definition.provider_id.clone()),

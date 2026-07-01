@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Bot } from "@lucide/svelte";
   import Select from "$lib/components/ui/Select.svelte";
+  import AgentModelSelect from "$lib/components/agentsession/AgentModelSelect.svelte";
   import { t } from "$lib/i18n";
   import type { Agent, AgentTarget, JobTarget, PromptTarget } from "$lib/types";
   import type {
@@ -60,7 +61,7 @@
           sessionStrategy: "new_session",
         };
       case "agent":
-        return { kind: "agent", agentId: "", initialMessage: "" };
+        return { kind: "agent", agentId: "", modelId: "", initialMessage: "" };
     }
   }
 
@@ -121,6 +122,30 @@
     setAgentTarget({ ...agentTarget, agentId: value });
   }
 
+  // 该 Job 运行 agent 所用模型（agent 定义不再携带模型）。选中即成对写入
+  // modelId（provider 在后端执行时按 model id 从目录解析）。展示名从
+  // providersWithModels 解析，解析不到 → 显示「选择模型」。
+  const selectedAgentModel = $derived.by((): ModelWithProvider | null => {
+    const tgt = agentTarget;
+    if (!tgt || !tgt.modelId) return null;
+    for (const provider of providersWithModels) {
+      const model = provider.models.find((m) => m.id === tgt.modelId);
+      if (model) {
+        return {
+          ...model,
+          providerName: provider.name,
+          providerType: provider.provider_type,
+        };
+      }
+    }
+    return null;
+  });
+
+  function handleAgentModelSelect(model: ModelWithProvider): void {
+    if (!agentTarget) return;
+    setAgentTarget({ ...agentTarget, modelId: model.id });
+  }
+
   function handleAgentMessageChange(value: string): void {
     if (!agentTarget) return;
     setAgentTarget({ ...agentTarget, initialMessage: value });
@@ -145,6 +170,11 @@
     showError &&
       target.kind === "agent" &&
       (!agentTarget || !agentTarget.agentId),
+  );
+  const agentModelInvalid = $derived(
+    showError &&
+      target.kind === "agent" &&
+      (!agentTarget || !agentTarget.modelId),
   );
 
   const inputClass =
@@ -228,6 +258,27 @@
         <span class="text-xs text-error">{t("jobs.target.agentRequired")}</span>
       {/if}
     </label>
+
+    <!-- 运行该 Agent 所用模型（Agent 定义已不含模型，改为每个 Job 各自选定）。 -->
+    <div class="flex flex-col gap-1 text-sm">
+      <span class="font-medium text-base-content/80"
+        >{t("jobs.target.modelLabel")}</span
+      >
+      <div
+        class="rounded-md border border-[var(--hairline)] bg-base-300 px-1 py-1 {agentModelInvalid
+          ? 'border-error ring-1 ring-error'
+          : ''}"
+      >
+        <AgentModelSelect
+          selected={selectedAgentModel}
+          onSelect={handleAgentModelSelect}
+          size="h-8"
+        />
+      </div>
+      {#if agentModelInvalid}
+        <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
+      {/if}
+    </div>
 
     <label class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.initialMessageLabel")}</span>

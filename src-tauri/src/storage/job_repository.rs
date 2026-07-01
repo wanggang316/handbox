@@ -721,6 +721,7 @@ mod tests {
             description: Some("a scheduled job".to_string()),
             target: JobTarget::Agent {
                 agent_id: "agent_1".to_string(),
+                model_id: "gpt-4".to_string(),
                 initial_message: "go".to_string(),
                 project_id: None,
             },

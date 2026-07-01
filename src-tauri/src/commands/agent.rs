@@ -24,7 +24,6 @@ fn optional_string(value: &serde_json::Value, field: &str) -> Result<Option<Stri
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentCreateRequest {
     pub name: String,
-    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -46,7 +45,6 @@ pub async fn agent_create(
     agent_service
         .create_agent(
             request.name,
-            request.model,
             request.temperature,
             request.top_p,
             request.top_k,
@@ -95,13 +93,6 @@ pub async fn agent_update_field(
                 .ok_or_else(|| AppError::validation_error("Invalid name value"))?
                 .to_string();
             AgentParameter::Name(name)
-        }
-        "model" => {
-            let model = value
-                .as_str()
-                .ok_or_else(|| AppError::validation_error("Invalid model value"))?
-                .to_string();
-            AgentParameter::Model(model)
         }
         "temperature" => {
             let temp_value = if value.is_null() {

@@ -108,7 +108,6 @@ export const agentZh = {
   "agent.form.createTitle": "新建 Agent",
   "agent.form.nameLabel": "名称",
   "agent.form.namePlaceholder": "输入 Agent 名称",
-  "agent.form.modelLabel": "模型",
   "agent.form.modelPlaceholder": "输入模型标识符 (例如: gpt-4, claude-3-5-sonnet-20241022)",
   "agent.form.modelHint": "模型标识符可以是任何字符串，不限于已配置的模型",
   "agent.form.systemPromptTitle": "系统提示词",
@@ -135,7 +134,6 @@ export const agentZh = {
   "agent.manage.empty": "还没有创建任何 Agent",
   "agent.manage.emptyHint": "点击上方按钮创建您的第一个 Agent",
   "agent.manage.use": "使用",
-  "agent.manage.modelUnset": "未设置",
   "agent.manage.deleteTitle": "删除 Agent",
   "agent.manage.deleteConfirm": "确定要删除这个 Agent 吗？此操作无法撤销。",
 };

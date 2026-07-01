@@ -9,7 +9,6 @@ use std::sync::Arc;
 /// Agent 参数类型
 pub enum AgentParameter {
     Name(String),
-    Model(String),
     Temperature(Option<f32>),
     TopP(Option<f32>),
     TopK(Option<i32>),
@@ -49,7 +48,6 @@ impl AgentService {
     pub async fn create_agent(
         &self,
         name: String,
-        model: Option<String>,
         temperature: Option<f32>,
         top_p: Option<f32>,
         top_k: Option<i32>,
@@ -66,7 +64,6 @@ impl AgentService {
         let agent = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name,
-            model,
             temperature,
             top_p,
             top_k,
@@ -131,7 +128,6 @@ impl AgentService {
 
         match parameter {
             AgentParameter::Name(name) => agent.name = name,
-            AgentParameter::Model(model) => agent.model = Some(model),
             AgentParameter::Temperature(temp) => agent.temperature = temp,
             AgentParameter::TopP(top_p) => agent.top_p = top_p,
             AgentParameter::TopK(top_k) => agent.top_k = top_k,
@@ -167,7 +163,6 @@ impl AgentService {
         &self,
         agent_id: UUID,
         name: Option<String>,
-        model: Option<String>,
         temperature: Option<Option<f32>>,
         top_p: Option<Option<f32>>,
         top_k: Option<Option<i32>>,
@@ -181,9 +176,6 @@ impl AgentService {
 
         if let Some(n) = name {
             agent.name = n;
-        }
-        if let Some(m) = model {
-            agent.model = Some(m);
         }
         if let Some(t) = temperature {
             agent.temperature = t;
@@ -268,7 +260,6 @@ mod tests {
         let agent = service
             .create_agent(
                 "Code Assistant".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
@@ -288,7 +279,6 @@ mod tests {
             .expect("agent creation failed");
 
         assert_eq!(agent.name, "Code Assistant");
-        assert_eq!(agent.model, Some("gpt-4o".to_string()));
         assert_eq!(agent.temperature, Some(0.7));
         assert_eq!(agent.top_p, Some(0.9));
         assert_eq!(agent.top_k, Some(40));
@@ -329,7 +319,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
             )
             .await
             .unwrap();
@@ -339,7 +328,6 @@ mod tests {
         service
             .create_agent(
                 "Agent 2".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -378,7 +366,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -433,7 +420,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
             )
             .await
             .unwrap();
@@ -442,7 +428,6 @@ mod tests {
             .update_agent(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                Some("gpt-4o".to_string()),
                 Some(Some(0.8)),
                 Some(Some(0.95)),
                 Some(Some(40)),
@@ -467,7 +452,6 @@ mod tests {
             .expect("update failed");
 
         assert_eq!(updated.name, "Updated Name");
-        assert_eq!(updated.model, Some("gpt-4o".to_string()));
         assert_eq!(updated.temperature, Some(0.8));
         assert_eq!(updated.top_p, Some(0.95));
         assert_eq!(updated.top_k, Some(40));
@@ -484,7 +468,6 @@ mod tests {
         let created = service
             .create_agent(
                 "To Delete".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -520,7 +503,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -571,7 +553,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
@@ -594,7 +575,6 @@ mod tests {
         let updated = service
             .update_agent(
                 created.id.clone(),
-                None,
                 None,
                 Some(None), // 清空 temperature
                 Some(None), // 清空 top_p
@@ -622,7 +602,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
@@ -641,7 +620,6 @@ mod tests {
             .update_agent(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                None,
                 None, // 不修改 temperature，保持原值
                 None, // 不修改 top_p，保持原值
                 None, // 不修改 top_k，保持原值
@@ -671,7 +649,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Generative Agent".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -710,7 +687,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
                 Some(true),
                 None,
             )
@@ -741,7 +717,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Original Name".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 None,
                 None,

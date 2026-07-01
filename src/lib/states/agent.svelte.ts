@@ -109,7 +109,6 @@ export const agentActions = {
    */
   async createAgent(config: {
     name: string;
-    model?: string;
     temperature?: number;
     topP?: number;
     topK?: number;
@@ -127,7 +126,6 @@ export const agentActions = {
 
       const agent = await agentApi.createAgent(
         config.name,
-        config.model,
         config.temperature,
         config.topP,
         config.topK,
@@ -190,7 +188,6 @@ export const agentActions = {
   async updateAgentField(
     agentId: UUID,
     fieldName:
-      | "model"
       | "temperature"
       | "topP"
       | "topK"

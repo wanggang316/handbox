@@ -5,17 +5,10 @@
   import Select from "../ui/Select.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
-  import { ChevronsUpDown, ChevronDown, ChevronRight } from "@lucide/svelte";
+  import { ChevronDown, ChevronRight } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
   import type { McpServerConfig } from "$lib/types/llm";
-  import type { ModelWithProvider } from "$lib/types/provider";
-  import {
-    getAllModels,
-    getProviderIconById,
-    providerActions,
-    providerState,
-  } from "$lib/states/provider.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
 
@@ -28,7 +21,6 @@
 
   export interface AgentFormData {
     name: string;
-    model: string;
     temperature?: number;
     maxTokens?: number;
     systemPrompt: string;
@@ -121,11 +113,6 @@
         .loadGenuis()
         .catch((e) => console.error("Failed to load GenUIs:", e));
     }
-    if (providerState.providersWithModels.length === 0) {
-      providerActions
-        .loadProvidersWithModels()
-        .catch((e) => console.error("Failed to load models:", e));
-    }
     if (!mcpState.initialized) {
       mcpActions
         .loadServers()
@@ -140,7 +127,6 @@
 
   let formData = $state<AgentFormData>({
     name: "",
-    model: "",
     systemPrompt: "",
     mcpServers: [],
     generativeUi: false,
@@ -162,24 +148,7 @@
 
   let paramsOpen = $state(false);
   let mcpOpen = $state(true);
-  let showModelModal = $state(false);
   let saving = $state(false);
-
-  const selectedModel = $derived<ModelWithProvider | null>(
-    formData.model
-      ? getAllModels().find((m) => m.id === formData.model) ?? null
-      : null
-  );
-  const providerIcon = $derived(
-    selectedModel?.provider_id
-      ? getProviderIconById(selectedModel.provider_id)
-      : undefined
-  );
-
-  function handleModelSelect(model: ModelWithProvider) {
-    formData.model = model.id;
-    showModelModal = false;
-  }
 
   function isMcpSelected(serverId: string): boolean {
     return formData.mcpServers.some((s) => s.serverId === serverId);
@@ -244,7 +213,6 @@
     if (agent) {
       formData = {
         name: agent.name,
-        model: agent.model || "",
         temperature: agent.temperature,
         maxTokens: agent.maxTokens,
         systemPrompt: agent.systemPrompt || "",
@@ -259,7 +227,6 @@
     } else {
       formData = {
         name: "",
-        model: "",
         systemPrompt: "",
         mcpServers: [],
         generativeUi: false,
@@ -311,46 +278,6 @@
           placeholder="一行简介，便于在列表中识别"
           bind:value={formData.description}
         />
-      </div>
-
-      <div class="flex flex-col gap-1.5">
-        <span class={LABEL_CLASS}>{t("agent.form.modelLabel")}</span>
-        <button
-          type="button"
-          class="{FIELD_CLASS} text-left"
-          onclick={() => (showModelModal = true)}
-        >
-          {#if selectedModel}
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex min-w-0 items-center gap-2">
-                {#if providerIcon}
-                  <img
-                    src={providerIcon}
-                    alt={selectedModel.providerName}
-                    class="h-4 w-4 shrink-0 rounded object-contain"
-                  />
-                {/if}
-                <span class="truncate text-base-content">{selectedModel.name}</span>
-                <span class="shrink-0 text-xs text-base-content/40">
-                  {selectedModel.providerName}
-                </span>
-              </div>
-              <ChevronsUpDown size={14} class="shrink-0 text-base-content/40" />
-            </div>
-          {:else if formData.model}
-            <div class="flex items-center justify-between gap-2">
-              <span class="truncate font-mono text-base-content/80">
-                {formData.model}
-              </span>
-              <ChevronsUpDown size={14} class="shrink-0 text-base-content/40" />
-            </div>
-          {:else}
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-base-content/40">{t("agent.input.selectModel")}</span>
-              <ChevronsUpDown size={14} class="shrink-0 text-base-content/40" />
-            </div>
-          {/if}
-        </button>
       </div>
 
       <div class="flex flex-col gap-1.5">

@@ -576,13 +576,20 @@ impl<R: Runtime> JobExecutor<R> {
         match &job.target {
             JobTarget::Agent {
                 agent_id,
+                model_id,
                 initial_message,
                 project_id,
             } => {
                 // The agent path takes the bound directly: only it knows the
                 // minted session id needed for the cooperative abort on timeout.
-                self.dispatch_agent(agent_id, initial_message, project_id.as_deref(), timeout)
-                    .await
+                self.dispatch_agent(
+                    agent_id,
+                    model_id,
+                    initial_message,
+                    project_id.as_deref(),
+                    timeout,
+                )
+                .await
             }
             JobTarget::Prompt {
                 provider_id,
@@ -853,6 +860,7 @@ impl<R: Runtime> JobExecutor<R> {
     async fn dispatch_agent(
         &self,
         agent_id: &str,
+        model_id: &str,
         initial_message: &str,
         project_id: Option<&str>,
         timeout: Option<Duration>,
@@ -879,17 +887,18 @@ impl<R: Runtime> JobExecutor<R> {
             }
         };
 
-        // 2. Resolve a usable provider for the template's model. The template
-        //    stores only a model id, so we find an enabled provider whose model
-        //    catalog still serves it. An unset model or a removed provider/model
-        //    is a model/config-class failure (VAL-TARGET-021), distinct from a
-        //    missing template — and still no session is created.
-        let provider_id = match self.resolve_agent_provider(&agent.model).await {
+        // 2. Resolve a usable provider for the job's model. The model is chosen
+        //    per job (the Agent definition no longer carries one), so we find an
+        //    enabled provider whose catalog still serves that model id. An unset
+        //    model (empty — e.g. a pre-model row) or a removed provider/model is a
+        //    model/config-class failure (VAL-TARGET-021), distinct from a missing
+        //    template — and still no session is created. The `agent` template is
+        //    still used below for its system prompt / sampling config.
+        let provider_id = match self.resolve_agent_provider(model_id).await {
             Ok(provider_id) => provider_id,
             Err(failure) => return DispatchOutcome::failed(agent_failure_message(failure)),
         };
-        // `resolve_agent_provider` only returns `Ok` when `agent.model` is set.
-        let model_id = agent.model.clone().unwrap_or_default();
+        let model_id = model_id.to_string();
 
         // 3. Load the resolved provider's row — `build_agent_session` needs the
         //    full record (type / base_url / key). A provider that vanished
@@ -1102,21 +1111,22 @@ impl<R: Runtime> JobExecutor<R> {
 
     /// Resolve a usable provider id for an agent template's `model`.
     ///
-    /// The agent template stores only a model id (no provider). We find an
-    /// enabled provider whose model catalog still serves that exact id, matching
-    /// how an agent session is launched from the UI (a model is always picked
-    /// together with its provider). Resolution is offline (DB catalog only):
-    /// `Err` carries the precise failure class for VAL-TARGET-021 — `NoModel`
-    /// when the template has no model set, `ModelRemoved` when no provider serves
-    /// it. An enabled provider is preferred; a match found only under a disabled
-    /// provider still surfaces as a config failure (the run could not proceed).
-    async fn resolve_agent_provider(&self, model: &Option<String>) -> Result<String, AgentFailure> {
+    /// The job stores a model id (no provider). We find an enabled provider whose
+    /// model catalog still serves that exact id, matching how an agent session is
+    /// launched from the UI (a model is always picked together with its provider).
+    /// Resolution is offline (DB catalog only): `Err` carries the precise failure
+    /// class for VAL-TARGET-021 — `NoModel` when the job has no model set (empty),
+    /// `ModelRemoved` when no provider serves it. An enabled provider is preferred;
+    /// a match found only under a disabled provider still surfaces as a config
+    /// failure (the run could not proceed).
+    async fn resolve_agent_provider(&self, model: &str) -> Result<String, AgentFailure> {
         let Some(services) = self.agent_services.as_ref() else {
             return Err(AgentFailure::ConfigError);
         };
-        let Some(model_id) = model.as_deref().map(str::trim).filter(|m| !m.is_empty()) else {
+        let model_id = model.trim();
+        if model_id.is_empty() {
             return Err(AgentFailure::NoModel);
-        };
+        }
 
         let providers = match services.providers.list_providers().await {
             Ok(providers) => providers,
@@ -1790,6 +1800,7 @@ mod tests {
         // `setup` builds the executor via `from_db` — no agent services.
         let target = JobTarget::Agent {
             agent_id: "agent_1".to_string(),
+            model_id: "gpt-4".to_string(),
             initial_message: "go".to_string(),
             project_id: None,
         };
@@ -2614,12 +2625,11 @@ mod tests {
 
     /// Seed an `agents` template row (the thing `JobTarget::Agent.agent_id`
     /// references). Returns the agent id.
-    async fn seed_agent(env: &TestEnv, model: Option<&str>) -> String {
+    async fn seed_agent(env: &TestEnv) -> String {
         let service = AgentService::new(env.db.clone());
         let agent = service
             .create_agent(
                 format!("agent-{}", uuid::Uuid::new_v4()),
-                model.map(str::to_string),
                 Some(0.5),
                 None,
                 None,
@@ -2666,9 +2676,10 @@ mod tests {
         repo.create_models(&[model]).await.expect("seed model");
     }
 
-    fn agent_target(agent_id: &str, initial_message: &str) -> JobTarget {
+    fn agent_target(agent_id: &str, model_id: &str, initial_message: &str) -> JobTarget {
         JobTarget::Agent {
             agent_id: agent_id.to_string(),
+            model_id: model_id.to_string(),
             initial_message: initial_message.to_string(),
             project_id: None,
         }
@@ -2680,7 +2691,7 @@ mod tests {
     #[tokio::test]
     async fn agent_missing_template_fails_before_session() {
         let env = with_agent_services(setup().await);
-        let target = agent_target("ghost-agent", "go");
+        let target = agent_target("ghost-agent", "some-model", "go");
         let job = make_job("job_a_missing", target).await;
         seed_job(&env, &job).await;
 
@@ -2711,8 +2722,9 @@ mod tests {
     #[tokio::test]
     async fn agent_template_without_model_fails_with_model_class_error() {
         let env = with_agent_services(setup().await);
-        let agent_id = seed_agent(&env, None).await;
-        let job = make_job("job_a_nomodel", agent_target(&agent_id, "go")).await;
+        let agent_id = seed_agent(&env).await;
+        // Empty model on the target → the "no model selected" class (VAL-TARGET-021).
+        let job = make_job("job_a_nomodel", agent_target(&agent_id, "", "go")).await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
@@ -2737,8 +2749,9 @@ mod tests {
     async fn agent_model_served_by_no_provider_fails_with_model_class_error() {
         let env = with_agent_services(setup().await);
         // A model id that no provider in the (empty) catalog serves.
-        let agent_id = seed_agent(&env, Some("gone-model")).await;
-        let job = make_job("job_a_modelgone", agent_target(&agent_id, "go")).await;
+        let agent_id = seed_agent(&env).await;
+        let job =
+            make_job("job_a_modelgone", agent_target(&agent_id, "gone-model", "go")).await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
@@ -2763,8 +2776,8 @@ mod tests {
         let env = with_agent_services(setup().await);
         seed_provider(&env, "prov_off", "openai", false, "sk-live-abcd").await;
         seed_model(&env, "prov_off", "shared-model").await;
-        let agent_id = seed_agent(&env, Some("shared-model")).await;
-        let job = make_job("job_a_off", agent_target(&agent_id, "go")).await;
+        let agent_id = seed_agent(&env).await;
+        let job = make_job("job_a_off", agent_target(&agent_id, "shared-model", "go")).await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
@@ -2788,7 +2801,7 @@ mod tests {
 
         let resolved = env
             .executor
-            .resolve_agent_provider(&Some("live-model".to_string()))
+            .resolve_agent_provider("live-model")
             .await
             .expect("an enabled provider serving the model resolves");
         assert_eq!(resolved, "prov_on");
@@ -2801,7 +2814,7 @@ mod tests {
         let env = setup().await;
         let err = env
             .executor
-            .resolve_agent_provider(&Some("m".to_string()))
+            .resolve_agent_provider("m")
             .await
             .expect_err("unwired resolver fails");
         assert_eq!(err, AgentFailure::ConfigError);

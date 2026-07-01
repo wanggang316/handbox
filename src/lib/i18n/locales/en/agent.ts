@@ -115,7 +115,6 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.createTitle": "New Agent",
   "agent.form.nameLabel": "Name",
   "agent.form.namePlaceholder": "Enter an Agent name",
-  "agent.form.modelLabel": "Model",
   "agent.form.modelPlaceholder":
     "Enter a model identifier (e.g. gpt-4, claude-3-5-sonnet-20241022)",
   "agent.form.modelHint":
@@ -146,7 +145,6 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.manage.empty": "No Agents created yet",
   "agent.manage.emptyHint": "Click the button above to create your first Agent",
   "agent.manage.use": "Use",
-  "agent.manage.modelUnset": "Not set",
   "agent.manage.deleteTitle": "Delete Agent",
   "agent.manage.deleteConfirm":
     "Are you sure you want to delete this Agent? This action cannot be undone.",

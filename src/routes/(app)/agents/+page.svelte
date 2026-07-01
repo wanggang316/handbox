@@ -70,10 +70,6 @@
       // 更新现有 Agent
       await agentActions.updateAgentName(editingAgent.id, data.name);
 
-      if (data.model !== editingAgent.model) {
-        await agentActions.updateAgentField(editingAgent.id, "model", data.model);
-      }
-
       // Helper function to compare optional values
       const hasChanged = <T,>(a: T | undefined, b: T | undefined) =>
         a !== b && !(a === undefined && b === undefined);
@@ -168,7 +164,6 @@
       // 创建新 Agent（后端 create 不接受能力字段，需创建后逐项写入）
       const newAgent = await agentActions.createAgent({
         name: data.name,
-        model: data.model || undefined,
         temperature: data.temperature,
         maxTokens: data.maxTokens,
         systemPrompt: data.systemPrompt || undefined,
@@ -243,7 +238,6 @@
       // 内置 Agent 可被克隆为自定义 Agent；create 不接受能力字段，需逐项写入。
       const newAgent = await agentActions.createAgent({
         name: `${agent.name} 副本`,
-        model: agent.model || undefined,
         temperature: agent.temperature,
         topP: agent.topP,
         topK: agent.topK,
@@ -301,10 +295,6 @@
     } catch (error) {
       console.error("Failed to clone agent:", error);
     }
-  }
-
-  function getModelName(agent: Agent): string {
-    return agent.model || t("agent.manage.modelUnset");
   }
 
   function getGenuiName(agent: Agent): string | null {
@@ -445,9 +435,11 @@
                         </span>
                       {/if}
                     </div>
-                    <p class="truncate text-xs text-base-content/55">
-                      {getModelName(agent)}
-                    </p>
+                    {#if agent.description}
+                      <p class="truncate text-xs text-base-content/55">
+                        {agent.description}
+                      </p>
+                    {/if}
                   </div>
                 </div>
                 <div class="flex shrink-0 items-center gap-0.5">

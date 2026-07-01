@@ -448,18 +448,8 @@
     agentId = value;
     const agent = await agentApi.getAgent(value);
     selectedAgent = agent;
-
-    // 如果 Agent 有配置的模型，使用 Agent 的模型
-    if (agent.model) {
-      for (const provider of providerState.providersWithModels) {
-        const model = provider.models.find((m) => m.id === agent.model);
-        if (model) {
-          providerId = provider.id ?? "";
-          modelId = agent.model;
-          break;
-        }
-      }
-    }
+    // The Agent no longer carries a model — the model is chosen separately on
+    // this page (modelId / providerId), so selecting an Agent doesn't touch it.
     await saveConfig();
   }
 

@@ -12,7 +12,6 @@ pub type AgentReasoningConfig = SessionReasoningConfig;
 pub struct Agent {
     pub id: UUID,
     pub name: String,
-    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -58,7 +57,6 @@ pub struct Agent {
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentRequest {
     pub name: String,
-    pub model: Option<String>,
     pub provider_id: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -84,7 +82,6 @@ pub struct CreateAgentRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAgentRequest {
     pub name: Option<String>,
-    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -106,7 +103,6 @@ mod tests {
         let agent = Agent {
             id: "agent_1".to_string(),
             name: "Code Assistant".to_string(),
-            model: Some("gpt-4".to_string()),
             temperature: Some(0.7),
             top_p: Some(0.9),
             top_k: Some(40),
@@ -150,7 +146,6 @@ mod tests {
         let agent = Agent {
             id: "agent_1".to_string(),
             name: "Code Assistant".to_string(),
-            model: None,
             temperature: None,
             top_p: None,
             top_k: None,
@@ -191,7 +186,6 @@ mod tests {
         let req: CreateAgentRequest =
             serde_json::from_str(json).expect("deserialize");
         assert_eq!(req.name, "Test Agent");
-        assert!(req.model.is_none());
         assert!(req.skills.is_none());
     }
 }

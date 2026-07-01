@@ -346,6 +346,7 @@ mod tests {
     fn agent_target() -> JobTarget {
         JobTarget::Agent {
             agent_id: "agent_1".to_string(),
+            model_id: "gpt-4".to_string(),
             initial_message: "go".to_string(),
             project_id: None,
         }
@@ -468,6 +469,7 @@ mod tests {
         let (service, _tmp) = create_service().await;
         let target = JobTarget::Agent {
             agent_id: "".to_string(),
+            model_id: "gpt-4".to_string(),
             initial_message: "go".to_string(),
             project_id: None,
         };
