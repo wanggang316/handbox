@@ -33,13 +33,26 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.autoExecution": "Auto",
   "agent.input.manualExecution": "Manual",
   "agent.input.selectModel": "Select model",
-  "agent.input.noAvailableModels": "No models available — configure a provider in settings",
   "agent.input.noAvailableMcpServers": "No available MCP servers",
   "agent.input.configureMcpInSettings":
     "Configure and enable MCP servers in the app settings",
   "agent.input.enabledToolsCount": "{count} enabled tools",
   "agent.input.selectAgent": "Select agent",
   "agent.input.switchAgentFailed": "Failed to switch agent",
+
+  // Model select modal (ModelSelectModal)
+  "agent.modelSelect.searchModelPlaceholder": "Search models...",
+  "agent.modelSelect.loadingModels": "Loading models...",
+  "agent.modelSelect.modelCount": "{count} models found",
+  "agent.modelSelect.allProviders": "All providers",
+  "agent.modelSelect.favorites": "Favorites",
+  "agent.modelSelect.noMatchingModels": "No matching models found",
+  "agent.modelSelect.adjustSearchHint": "Try adjusting your search or clearing the filters",
+  "agent.modelSelect.supportsImageGeneration": "Supports image generation",
+  "agent.modelSelect.contextLength": "Context length",
+  "agent.modelSelect.maxOutputLength": "Max output length",
+  "agent.modelSelect.inputPrice": "Input price",
+  "agent.modelSelect.outputPrice": "Output price",
 
   // Timeline (AgentTimeline)
   "agent.timeline.compacting": "Compacting context…",
@@ -115,10 +128,6 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.createTitle": "New Agent",
   "agent.form.nameLabel": "Name",
   "agent.form.namePlaceholder": "Enter an Agent name",
-  "agent.form.modelPlaceholder":
-    "Enter a model identifier (e.g. gpt-4, claude-3-5-sonnet-20241022)",
-  "agent.form.modelHint":
-    "The model identifier can be any string, not limited to configured models",
   "agent.form.systemPromptTitle": "System prompt",
   "agent.form.charCount": "{count} chars",
   "agent.form.skillsTitle": "Skills",

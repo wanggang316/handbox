@@ -2,10 +2,11 @@
   import {
     ArrowUp,
     Square,
-    Plus,
+    Paperclip,
     X,
     Bot,
     ChevronDown,
+    ChevronsUpDown,
     Check,
   } from "@lucide/svelte";
   import { onDestroy, tick } from "svelte";
@@ -13,14 +14,14 @@
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
   import Select from "$lib/components/ui/Select.svelte";
-  import AgentModelSelect from "./AgentModelSelect.svelte";
+  import ModelSelectModal from "./ModelSelectModal.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { t } from "$lib/i18n";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
-  import { getAllModels } from "$lib/states/provider.svelte";
+  import { getAllModels, getProviderIconById } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import { listSkills } from "$lib/api/skill";
   import type {
@@ -75,6 +76,11 @@
         ) ?? null)
       : null,
   );
+  const selectedModelIcon = $derived(
+    selectedModel ? getProviderIconById(selectedModel.provider_id) : undefined,
+  );
+  // 模型选择 Modal（系统既有的搜索/收藏/分组模型选择器）开合。
+  let modelModalOpen = $state(false);
 
   const thinkingLevel = $derived(session.thinkingLevel ?? "off");
 
@@ -531,6 +537,13 @@
   onchange={handleAttachmentChange}
 />
 
+<!-- 系统既有的模型选择 Modal（搜索/收藏/分组）。选中即成对写入 modelId+providerId。 -->
+<ModelSelectModal
+  bind:open={modelModalOpen}
+  {selectedModel}
+  onModelSelect={handleModelSelect}
+/>
+
 <div
   class="flex flex-col bg-base-300 rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
 >
@@ -605,6 +618,14 @@
 
   <div class="flex flex-row items-center justify-between gap-3 px-4 pt-0 pb-2">
     <div class="flex flex-row flex-wrap items-center gap-2">
+      <!-- 附件（图片上传）：最左侧的附件图标。 -->
+      <IconButton
+        icon={Paperclip}
+        ariaLabel={t("agent.input.addImage")}
+        title={t("agent.input.uploadImage")}
+        onclick={handleAddAttachment}
+      />
+
       <!-- Agent 选择器：当前会话来源 Agent + 向上弹出的切换列表。选中他者即从该
            AgentDefinition 实例化新会话并跳转（把 Agents 页的「使用」搬进输入框）。 -->
       <div class="relative">
@@ -667,18 +688,34 @@
         {/if}
       </div>
 
-      <!-- 会话级模型选择器：选中即成对写入 modelId+providerId（handleModelSelect），
-           无需再去 Agent 定义里选。selectedModel 从会话反查，解析不到显示「选择模型」。 -->
-      <AgentModelSelect selected={selectedModel} onSelect={handleModelSelect} />
-
-      <IconButton
-        icon={Plus}
-        ariaLabel={t("agent.input.addImage")}
-        title={t("agent.input.uploadImage")}
-        onclick={handleAddAttachment}
-      />
     </div>
     <div class="flex flex-row items-center gap-3">
+      <!-- 会话级模型选择器：打开系统既有的模型选择 Modal（搜索/收藏/分组）。选中即
+           成对写入 modelId+providerId（handleModelSelect）；解析不到显示「选择模型」。 -->
+      <button
+        type="button"
+        class="flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-2 text-sm text-base-content transition-colors hover:bg-base-300"
+        aria-label={t("agent.input.selectModel")}
+        title={selectedModel?.name ?? t("agent.input.selectModel")}
+        onclick={() => (modelModalOpen = true)}
+      >
+        {#if selectedModel}
+          {#if selectedModelIcon}
+            <img
+              src={selectedModelIcon}
+              alt={selectedModel.providerName}
+              class="h-4 w-4 shrink-0 rounded object-contain"
+            />
+          {/if}
+          <span class="max-w-[160px] truncate">{selectedModel.name}</span>
+        {:else}
+          <span class="max-w-[160px] truncate text-warning"
+            >{t("agent.input.selectModel")}</span
+          >
+        {/if}
+        <ChevronsUpDown size={13} class="shrink-0 opacity-60" />
+      </button>
+
       <Select
         value={thinkingLevel}
         options={thinkingLevelOptions}

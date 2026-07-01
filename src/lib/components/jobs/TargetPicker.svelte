@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Bot } from "@lucide/svelte";
   import Select from "$lib/components/ui/Select.svelte";
-  import AgentModelSelect from "$lib/components/agentsession/AgentModelSelect.svelte";
+  import ModelSelectModal from "$lib/components/agentsession/ModelSelectModal.svelte";
   import { t } from "$lib/i18n";
   import type { Agent, AgentTarget, JobTarget, PromptTarget } from "$lib/types";
   import type {
@@ -146,6 +146,9 @@
     setAgentTarget({ ...agentTarget, modelId: model.id });
   }
 
+  // 模型选择 Modal（系统既有的搜索/收藏/分组选择器）开合。
+  let agentModelModalOpen = $state(false);
+
   function handleAgentMessageChange(value: string): void {
     if (!agentTarget) return;
     setAgentTarget({ ...agentTarget, initialMessage: value });
@@ -259,26 +262,36 @@
       {/if}
     </label>
 
-    <!-- 运行该 Agent 所用模型（Agent 定义已不含模型，改为每个 Job 各自选定）。 -->
+    <!-- 运行该 Agent 所用模型（Agent 定义已不含模型，改为每个 Job 各自选定）。
+         点击打开系统既有的模型选择 Modal。 -->
     <div class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80"
         >{t("jobs.target.modelLabel")}</span
       >
-      <div
-        class="rounded-md border border-[var(--hairline)] bg-base-300 px-1 py-1 {agentModelInvalid
+      <button
+        type="button"
+        onclick={() => (agentModelModalOpen = true)}
+        class="{inputClass} flex items-center justify-between gap-2 text-left {agentModelInvalid
           ? 'border-error ring-1 ring-error'
           : ''}"
       >
-        <AgentModelSelect
-          selected={selectedAgentModel}
-          onSelect={handleAgentModelSelect}
-          size="h-8"
-        />
-      </div>
+        {#if selectedAgentModel}
+          <span class="truncate text-base-content">{selectedAgentModel.name}</span
+          >
+        {:else}
+          <span class="text-base-content/50">{t("agent.input.selectModel")}</span>
+        {/if}
+      </button>
       {#if agentModelInvalid}
         <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
       {/if}
     </div>
+
+    <ModelSelectModal
+      bind:open={agentModelModalOpen}
+      selectedModel={selectedAgentModel}
+      onModelSelect={handleAgentModelSelect}
+    />
 
     <label class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.initialMessageLabel")}</span>
