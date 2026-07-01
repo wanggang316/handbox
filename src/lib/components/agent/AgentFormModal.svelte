@@ -2,7 +2,11 @@
   import { onMount } from "svelte";
   import Modal from "../ui/Modal.svelte";
   import Button from "../ui/Button.svelte";
+  import FormField from "../ui/FormField.svelte";
+  import Input from "../ui/Input.svelte";
+  import Textarea from "../ui/Textarea.svelte";
   import Select from "../ui/Select.svelte";
+  import Checkbox from "../ui/Checkbox.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
   import { ChevronDown, ChevronRight } from "@lucide/svelte";
@@ -37,12 +41,6 @@
 
   let { open, agent, onClose, onSave }: Props = $props();
 
-  // 统一控件外观（Linear 阶梯）：控件底色上浮一阶到 surface-3，与 Modal 卡片
-  // (--bg-card) 拉开层次；hairline 细边框，hover 加深。扁平排布，不再套内层卡片。
-  const FIELD_CLASS =
-    "w-full rounded-md bg-[var(--surface-3)] border border-[var(--hairline)] px-2.5 py-2 " +
-    "text-sm text-base-content placeholder:text-base-content/35 transition-colors " +
-    "hover:border-[var(--hairline-strong)]";
   const LABEL_CLASS = "text-[13px] font-medium text-base-content/70";
   const SECTION_CLASS =
     "text-[11px] font-semibold uppercase tracking-wider text-base-content/40";
@@ -261,37 +259,31 @@
   >
     <!-- 基本字段：扁平 label + 控件 -->
     <div class="flex flex-col gap-3.5">
-      <div class="flex flex-col gap-1.5">
-        <span class={LABEL_CLASS}>{t("agent.form.nameLabel")}</span>
-        <input
-          class="{FIELD_CLASS} disabled:cursor-not-allowed disabled:opacity-60"
-          placeholder={t("agent.form.namePlaceholder")}
+      <FormField label={t("agent.form.nameLabel")}>
+        <Input
           bind:value={formData.name}
+          placeholder={t("agent.form.namePlaceholder")}
           disabled={isBuiltin}
         />
-      </div>
+      </FormField>
 
-      <div class="flex flex-col gap-1.5">
-        <span class={LABEL_CLASS}>描述</span>
-        <input
-          class={FIELD_CLASS}
-          placeholder="一行简介，便于在列表中识别"
+      <FormField label="描述">
+        <Input
           bind:value={formData.description}
+          placeholder="一行简介，便于在列表中识别"
         />
-      </div>
+      </FormField>
 
-      <div class="flex flex-col gap-1.5">
-        <span class={LABEL_CLASS}>{t("agent.form.systemPromptTitle")}</span>
-        <textarea
+      <FormField label={t("agent.form.systemPromptTitle")}>
+        <Textarea
           bind:value={formData.systemPrompt}
           placeholder={t("agent.systemPrompt.placeholder")}
-          rows="4"
-          class="{FIELD_CLASS} resize-none font-mono leading-relaxed"
-        ></textarea>
+          rows={4}
+        />
         <div class="text-right text-xs text-base-content/35">
           {t("agent.form.charCount", { count: formData.systemPrompt.length })}
         </div>
-      </div>
+      </FormField>
     </div>
 
     <!-- 生成式 UI -->
@@ -319,39 +311,32 @@
     <div class="flex flex-col gap-3.5">
       <span class={SECTION_CLASS}>能力</span>
 
-      <div class="flex flex-col gap-1.5">
-        <span class={LABEL_CLASS}>内置工具</span>
+      <FormField label="内置工具">
         <div class="flex flex-wrap gap-x-4 gap-y-2">
           {#each BUILTIN_TOOLS as tool (tool)}
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                class="h-3.5 w-3.5 accent-primary"
-                checked={isToolSelected(tool)}
-                onchange={(e) =>
-                  toggleBuiltinTool(tool, e.currentTarget.checked)}
-              />
-              <span class="font-mono text-sm text-base-content/85">{tool}</span>
-            </label>
+            <Checkbox
+              checked={isToolSelected(tool)}
+              onCheckedChange={(v) => toggleBuiltinTool(tool, v)}
+            >
+              <span class="font-mono text-base-content/85">{tool}</span>
+            </Checkbox>
           {/each}
         </div>
-      </div>
+      </FormField>
 
-      <div class="flex flex-col gap-1.5">
-        <span class={LABEL_CLASS}>工作目录</span>
+      <FormField label="工作目录">
         <Select
           options={workingDirModeOptions}
           bind:selectedValue={formData.workingDirMode}
         />
-      </div>
+      </FormField>
 
-      <div class="flex flex-col gap-1.5">
-        <span class={LABEL_CLASS}>工具执行</span>
+      <FormField label="工具执行">
         <Select
           options={toolExecutionModeOptions}
           bind:selectedValue={formData.toolExecutionMode}
         />
-      </div>
+      </FormField>
     </div>
 
     <!-- 模型参数：可折叠分组，扁平 slider 行 -->
