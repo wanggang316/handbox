@@ -39,6 +39,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.enabledToolsCount": "{count} enabled tools",
   "agent.input.selectAgent": "Select agent",
   "agent.input.switchAgentFailed": "Failed to switch agent",
+  "agent.input.selectWorkingDir": "Select working directory",
+  "agent.input.workingDirFailed": "Failed to set working directory",
 
   // Model select modal (ModelSelectModal)
   "agent.modelSelect.searchModelPlaceholder": "Search models...",

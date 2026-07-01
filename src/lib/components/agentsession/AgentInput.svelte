@@ -8,6 +8,7 @@
     ChevronDown,
     ChevronsUpDown,
     Check,
+    FolderOpen,
   } from "@lucide/svelte";
   import { onDestroy, tick } from "svelte";
   import { goto } from "$app/navigation";
@@ -102,10 +103,27 @@
     currentAgent?.name ?? t("agent.input.selectAgent"),
   );
 
-  // 打开选择器时 lazy-load Agent 列表（/agent 路由本身不加载它；两个内置 Agent
-  // 恒被 seed，故 length===0 即「尚未加载」的可靠代理）。
+  // 是否显示「工作目录」选择：仅当会话来源 Agent 的 workingDirMode ≠ "none"
+  // （required / optional / 旧定义 NULL 均需要工作目录，只有纯对话 "none" 不需要）。
+  const showWorkingDir = $derived(
+    !!currentAgent && currentAgent.workingDirMode !== "none",
+  );
+  // 工作目录展示名：取路径末段（basename）便于在紧凑工具栏里显示；未设置为 null。
+  const workingDirName = $derived.by(() => {
+    const dir = session.workingDir;
+    if (!dir) return null;
+    const parts = dir.split("/").filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : dir;
+  });
+
+  // lazy-load Agent 列表（/agent 路由本身不加载它；两个内置 Agent 恒被 seed，故
+  // length===0 即「尚未加载」的可靠代理）。打开选择器时、或会话已有来源 Agent 时
+  // （后者用于解析 workingDirMode 以决定是否显示工作目录选择）都触发加载。
   $effect(() => {
-    if (agentMenuOpen && agentState.agents.length === 0) {
+    if (
+      (agentMenuOpen || session.agentDefinitionId) &&
+      agentState.agents.length === 0
+    ) {
       agentActions
         .loadAgents()
         .catch((error) => console.error("Failed to load agents:", error));
@@ -148,6 +166,24 @@
     } catch (error) {
       console.error("Failed to switch agent:", error);
       modelPrompt = t("agent.input.switchAgentFailed");
+    }
+  }
+
+  // 选择 / 更换会话工作目录：打开系统目录选择对话框，选中即持久化到 session.workingDir
+  // （后端校验为已存在的绝对目录）。用户取消（返回非字符串）为干净 no-op。
+  async function pickWorkingDir() {
+    try {
+      const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+      const picked = await openDialog({ directory: true });
+      if (typeof picked !== "string") return;
+      modelPrompt = null;
+      await agentSessionActions.updateField(session.id, "workingDir", picked);
+    } catch (error) {
+      console.error("Failed to set working directory:", error);
+      modelPrompt =
+        error instanceof Error
+          ? error.message
+          : t("agent.input.workingDirFailed");
     }
   }
 
@@ -621,6 +657,7 @@
       <!-- 附件（图片上传）：最左侧的附件图标。 -->
       <IconButton
         icon={Paperclip}
+        iconSize={16}
         ariaLabel={t("agent.input.addImage")}
         title={t("agent.input.uploadImage")}
         onclick={handleAddAttachment}
@@ -688,6 +725,26 @@
         {/if}
       </div>
 
+      <!-- 工作目录选择：仅当来源 Agent 的 workingDirMode ≠ "none" 时出现。点击打开
+           系统目录选择框，选中即持久化到 session.workingDir。显示已选目录末段或占位。 -->
+      {#if showWorkingDir}
+        <button
+          type="button"
+          class="flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-2 text-sm text-base-content transition-colors hover:bg-base-300"
+          aria-label={t("agent.input.selectWorkingDir")}
+          title={session.workingDir ?? t("agent.input.selectWorkingDir")}
+          onclick={pickWorkingDir}
+        >
+          <FolderOpen size={16} class="shrink-0 opacity-70" />
+          {#if workingDirName}
+            <span class="max-w-[140px] truncate">{workingDirName}</span>
+          {:else}
+            <span class="max-w-[140px] truncate text-warning"
+              >{t("agent.input.selectWorkingDir")}</span
+            >
+          {/if}
+        </button>
+      {/if}
     </div>
     <div class="flex flex-row items-center gap-3">
       <!-- 会话级模型选择器：打开系统既有的模型选择 Modal（搜索/收藏/分组）。选中即

@@ -34,6 +34,8 @@ export const agentZh = {
   "agent.input.enabledToolsCount": "{count} enabled tools",
   "agent.input.selectAgent": "选择 Agent",
   "agent.input.switchAgentFailed": "切换 Agent 失败",
+  "agent.input.selectWorkingDir": "选择工作目录",
+  "agent.input.workingDirFailed": "设置工作目录失败",
 
   // Model select modal (ModelSelectModal)
   "agent.modelSelect.searchModelPlaceholder": "搜索模型...",
