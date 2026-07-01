@@ -714,3 +714,58 @@ pre.code-block--compact {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Checkbox / Radio 皮肤：bits-ui 的 Checkbox.Root / RadioGroup.Item 会带
+   data-state="checked|unchecked|indeterminate"，据此上色；与 .field 共用同一组 token。 */
+.checkbox-box {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--primary-content);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.checkbox-box[data-state="checked"],
+.checkbox-box[data-state="indeterminate"] {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.checkbox-box:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+}
+
+.radio-dot {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.radio-dot[data-state="checked"] {
+  border-color: var(--primary);
+}
+.radio-dot[data-state="checked"]::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--primary);
+}
+.radio-dot:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+}
