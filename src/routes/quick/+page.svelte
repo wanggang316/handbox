@@ -32,6 +32,8 @@
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { providerActions, getAllModels } from "$lib/states/provider.svelte";
+  import { settingsState } from "$lib/states/settings.svelte";
+  import { resolveQuickActionModel } from "$lib/quickaction/resolveModel";
   import { runAgentStream } from "$lib/api/agentSession";
 
   let composer = $state<QuickInput | null>(null);
@@ -156,38 +158,31 @@
     sending = true;
     runError = null;
     try {
-      const session =
-        await agentSessionActions.createSessionFromDefinition(agentId);
-      const id = session.id;
-      if (!id) {
-        runError = t("quickaction.runFailed");
+      // 模型已与 AgentDefinition 解耦：会话不再从 Agent 快照模型。快捷动作改用
+      // 「默认模型」(设置里配置,由 resolveQuickActionModel 对照 catalog 解析),
+      // 并在实例化时作为 override 成对写入 modelId+providerId。先确保 catalog 已加载。
+      if (getAllModels().length === 0) {
+        await providerActions.loadProvidersWithModels();
+      }
+      const resolved = resolveQuickActionModel(
+        settingsState.settings?.quickAction,
+        getAllModels(),
+      );
+      if (!resolved.available) {
+        // catalog 空 / 未选默认 / 默认已下架:提示去设置里配置默认模型。
+        runError = t("quickaction.model.unavailable");
         value = text;
         focusInput();
         return;
       }
 
-      // AgentDefinition 可能仅存 model 字符串而无 provider(如内置通用对话)。按 model
-      // id 在已启用 catalog 中解析出 provider 并持久化——既让本次发送可用,也让「在对话中
-      // 继续」后主窗口(从磁盘重载会话)同样带着 provider 可直接发送。
-      let providerId = session.providerId ?? null;
-      if (session.modelId && !providerId) {
-        if (getAllModels().length === 0) {
-          await providerActions.loadProvidersWithModels();
-        }
-        const match = getAllModels().find((m) => m.id === session.modelId);
-        if (match) {
-          await agentSessionActions.updateField(
-            id,
-            "providerId",
-            match.provider_id,
-          );
-          providerId = match.provider_id;
-        }
-      }
-
-      if (!session.modelId || !providerId) {
-        // 解析不到可用 provider(model 已下架,或 Agent 未配置可用模型)。
-        runError = t("quickaction.model.unavailable");
+      const session = await agentSessionActions.createSessionFromDefinition(
+        agentId,
+        { modelId: resolved.modelId, providerId: resolved.providerId },
+      );
+      const id = session.id;
+      if (!id) {
+        runError = t("quickaction.runFailed");
         value = text;
         focusInput();
         return;
