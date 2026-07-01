@@ -1,3 +1,7 @@
+// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
+// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+#![allow(clippy::unused_unit)]
+
 use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Manager};
@@ -44,7 +48,7 @@ tauri_panel! {
 pub fn init_panel(app_handle: &AppHandle) {
     tracing::info!("Setting up selection panels");
 
-    let window = app_handle.get_webview_window(PANEL_LABEL.into()).unwrap();
+    let window = app_handle.get_webview_window(PANEL_LABEL).unwrap();
     let panel = window.to_panel::<SelectionContentPanel>().unwrap();
     panel.set_level(PanelLevel::Floating.value());
     panel.set_collection_behavior(
@@ -85,7 +89,7 @@ pub fn init_panel(app_handle: &AppHandle) {
             let h = handle_for_resign.clone();
             let h2 = h.clone();
             let _ = h.run_on_main_thread(move || {
-                if let Some(window) = h2.get_webview_window(PANEL_LABEL.into()) {
+                if let Some(window) = h2.get_webview_window(PANEL_LABEL) {
                     let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
                     let _ = window.hide();
                 }
@@ -106,7 +110,7 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
     let _ = handle.run_on_main_thread(move || {
         tracing::info!("Showing content panel: {}", PANEL_LABEL);
 
-        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             let _ = window.set_position(LogicalPosition::new(x - 20.0, y - 250.0));
             let _ = window.show();
         }
@@ -121,7 +125,7 @@ pub fn hide_panel(handle: &AppHandle) {
 
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
             let _ = window.hide();
         }

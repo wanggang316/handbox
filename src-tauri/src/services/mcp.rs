@@ -473,7 +473,7 @@ impl McpService {
                 );
                 Vec::new()
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         };
 
         // Handle resources - ignore "Method not found" error (-32601)
@@ -488,7 +488,7 @@ impl McpService {
                 );
                 Vec::new()
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         };
 
         Ok((tools, prompts, resources))
@@ -552,6 +552,8 @@ impl McpService {
         McpClient::connect(config).await
     }
 
+    // McpClientError 来自外部 crate handbox-mcp，无法在此重构其体积。
+    #[allow(clippy::result_large_err)]
     fn validate_server_configuration(server: &McpServer) -> Result<(), McpClientError> {
         match server.connection_type {
             crate::storage::types::McpConnectionType::Stdio => {
@@ -585,6 +587,7 @@ impl McpService {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn build_connection_config(server: &McpServer) -> Result<ConnectionConfig, McpClientError> {
         match server.connection_type {
             crate::storage::types::McpConnectionType::Stdio => {
@@ -704,7 +707,7 @@ impl McpService {
             if let Some(tool) = server.tools.iter().find(|t| t.name == tool_name) {
                 let arguments = Self::parse_tool_arguments(arguments);
 
-                match self.invoke_tool(&server, &tool.name, arguments).await {
+                match self.invoke_tool(server, &tool.name, arguments).await {
                     Ok(result) => return Ok(Self::format_tool_result(&result)),
                     Err(error) => {
                         tracing::error!(

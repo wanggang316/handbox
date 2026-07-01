@@ -40,7 +40,7 @@ pub async fn open_settings_window(app: AppHandle, path: Option<String>) -> Resul
 
         // 导航到指定路径
         window
-            .eval(&format!("window.location.href = '{}'", url_path))
+            .eval(format!("window.location.href = '{}'", url_path))
             .map_err(map_window_error("跳转到设置页面失败"))?;
     } else {
         // 如果窗口不存在，创建新窗口

@@ -7,7 +7,9 @@ use crate::models::AppError;
 /// MCP connection type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum McpConnectionType {
+    #[default]
     Stdio,
     Sse,
     Http,
@@ -51,11 +53,6 @@ impl From<&str> for McpConnectionType {
     }
 }
 
-impl Default for McpConnectionType {
-    fn default() -> Self {
-        McpConnectionType::Stdio
-    }
-}
 
 /// MCP server status enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

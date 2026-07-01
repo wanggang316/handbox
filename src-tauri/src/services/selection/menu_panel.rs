@@ -1,3 +1,7 @@
+// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
+// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+#![allow(clippy::unused_unit)]
+
 use crate::services::selection::settings_panel::hide_panel as hide_settings_panel;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::LogicalPosition;
@@ -27,7 +31,7 @@ tauri_panel! {
 pub fn init_panel(app_handle: &AppHandle) {
     tracing::info!("Setting up selection panels");
 
-    let window = app_handle.get_webview_window(PANEL_LABEL.into()).unwrap();
+    let window = app_handle.get_webview_window(PANEL_LABEL).unwrap();
     let panel = window.to_panel::<SelectionMenuPanel>().unwrap();
     panel.set_level(PanelLevel::Floating.value());
     panel.set_collection_behavior(
@@ -106,7 +110,7 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
 
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             const PANEL_WIDTH: f64 = 320.0;
             const PANEL_HEIGHT: f64 = 36.0;
             const VERTICAL_GAP: f64 = 20.0;
@@ -129,7 +133,7 @@ pub fn hide_panel(handle: &AppHandle) {
 
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             // 先移到屏幕外，避免下次显示时在旧位置闪烁
             let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
             if window.is_visible().unwrap_or(true) {

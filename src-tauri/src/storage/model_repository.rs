@@ -471,7 +471,7 @@ impl ModelRepository {
                 AppError::internal_error(&format!("Failed to get model {}: {}", model_id, e))
             })?;
 
-        Ok(row.map(|r| self.row_to_model(r)).transpose()?)
+        row.map(|r| self.row_to_model(r)).transpose()
     }
 
     /// 更新模型启用状态

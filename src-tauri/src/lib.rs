@@ -80,7 +80,7 @@ pub fn run() {
             // 创建选择面板 (NSPanel) - 必须在setup中同步创建
             #[cfg(target_os = "macos")]
             {
-                if let Err(e) = setup_selection(&app.handle()) {
+                if let Err(e) = setup_selection(app.handle()) {
                     tracing::error!("Failed to setup selection panels: {e}");
                     eprintln!("Failed to setup selection panels: {e}");
                     // 不退出应用，因为选择面板是可选功能

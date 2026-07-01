@@ -545,6 +545,7 @@ impl ModelResponse {
         keys
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_component_and_props(
         key: &str,
         param: &LlmModelParameter,

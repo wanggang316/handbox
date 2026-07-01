@@ -297,6 +297,7 @@ impl UserSessionService {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[tokio::test]

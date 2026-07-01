@@ -44,6 +44,8 @@ impl AgentService {
     }
 
     /// 创建 Agent
+    // 参数逐一对应可编辑的 Agent 字段；聚合成 struct 只会平移参数表而非缩短它。
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_agent(
         &self,
         name: String,
@@ -160,6 +162,7 @@ impl AgentService {
     /// 注意：本方法刻意不含 `generative_ui` 参数（与 `create_agent` 不同）。该字段
     /// 通过 `update_agent_parameter(AgentParameter::GenerativeUi)`（对应前端
     /// `agent_update_field` 的 "generativeUi" 路径）单独更新，不走批量更新——并非遗漏。
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_agent(
         &self,
         agent_id: UUID,

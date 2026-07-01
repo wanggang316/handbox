@@ -225,40 +225,37 @@ fn trigger_selection_logic(handle: &AppHandle) {
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-            match get_ax_selected_text() {
-                Some(text) => {
-                    tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
-                    let app_info = get_frontmost_app_info();
-                    tracing::info!("-----> frontmost app info: {:?}", app_info);
-                    if let Some(ref info) = app_info {
-                        if is_selection_blacklisted(&handle_clone, info) {
-                            tracing::info!("-----> selection blocked by blacklist");
-                            return;
-                        }
+            if let Some(text) = get_ax_selected_text() {
+                tracing::info!("-----> text: {}, x: {}, y: {}", text, x, y);
+                let app_info = get_frontmost_app_info();
+                tracing::info!("-----> frontmost app info: {:?}", app_info);
+                if let Some(ref info) = app_info {
+                    if is_selection_blacklisted(&handle_clone, info) {
+                        tracing::info!("-----> selection blocked by blacklist");
+                        return;
                     }
-                    let app_info_payload = app_info.map(|info| {
-                        serde_json::json!({
-                            "name": info.name,
-                            "bundle_id": info.bundle_id,
-                            "pid": info.pid,
-                        })
-                    });
-
-                    let _ = handle_clone.emit(
-                        "global-selection",
-                        serde_json::json!({
-                            "text": text,
-                            "x": x,
-                            "y": y,
-                            "app_info": app_info_payload.unwrap_or_else(|| {
-                                serde_json::json!({ "name": "Unknown", "bundle_id": "unknown.app", "pid": 0 })
-                            })
-                        }),
-                    );
-
-                    show_menu_panel(&handle_clone.clone(), x as f64, y as f64);
                 }
-                _ => (),
+                let app_info_payload = app_info.map(|info| {
+                    serde_json::json!({
+                        "name": info.name,
+                        "bundle_id": info.bundle_id,
+                        "pid": info.pid,
+                    })
+                });
+
+                let _ = handle_clone.emit(
+                    "global-selection",
+                    serde_json::json!({
+                        "text": text,
+                        "x": x,
+                        "y": y,
+                        "app_info": app_info_payload.unwrap_or_else(|| {
+                            serde_json::json!({ "name": "Unknown", "bundle_id": "unknown.app", "pid": 0 })
+                        })
+                    }),
+                );
+
+                show_menu_panel(&handle_clone.clone(), x as f64, y as f64);
             }
         });
     }

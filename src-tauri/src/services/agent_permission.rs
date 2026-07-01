@@ -2110,7 +2110,7 @@ mod tests {
     #[tokio::test]
     async fn illegal_args_never_reach_the_hook_so_no_request_is_emitted() {
         let (emitter, recorded) = recording_emitter();
-        let ext = PermissionExtension::new("illegal-args-session".to_string(), Some(emitter));
+        let _ext = PermissionExtension::new("illegal-args-session".to_string(), Some(emitter));
 
         // Upstream: invalid args → Immediate error in `prepare_tool_call`, BEFORE
         // `before_tool_call`. So for an illegal-arg dangerous call the hook is

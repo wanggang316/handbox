@@ -206,7 +206,9 @@ impl ModelService {
         };
 
         // INSERT OR REPLACE — re-adding the same id is idempotent.
-        self.model_repo.create_models(&[model.clone()]).await?;
+        self.model_repo
+            .create_models(std::slice::from_ref(&model))
+            .await?;
 
         tracing::info!(
             "Manually added model '{}' to custom provider '{}'",
@@ -361,7 +363,7 @@ impl ModelService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::types::{Model, UUID};
+    use crate::storage::types::Model;
 
     /// 创建一个测试用的 Model，包含 chat_methods
     fn create_test_model_with_chat_methods(id: &str, provider_id: &str) -> Model {
