@@ -276,9 +276,7 @@
         label={t("agent.approval.deny")}
         size="h-8"
         fontSize="text-sm"
-        bgColor="bg-base-300"
-        textColor="text-base-content/80"
-        hoverColor="hover:bg-base-300/80"
+        variant="secondary"
         onclick={() => onRespond(request, "deny")}
       />
       <RoundButton
@@ -286,9 +284,7 @@
         label={t("agent.approval.allowOnce")}
         size="h-8"
         fontSize="text-sm"
-        bgColor="bg-base-300"
-        textColor="text-base-content/80"
-        hoverColor="hover:bg-base-300/80"
+        variant="secondary"
         onclick={() => onRespond(request, "allow_once")}
       />
       <RoundButton
@@ -296,9 +292,7 @@
         label={t("agent.approval.allowAlways")}
         size="h-8"
         fontSize="text-sm"
-        bgColor="bg-primary"
-        textColor="text-primary-content"
-        hoverColor="hover:bg-primary/90"
+        variant="primary"
         onclick={() => onRespond(request, "allow_always")}
       />
     </div>
