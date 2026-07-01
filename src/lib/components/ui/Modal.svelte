@@ -48,16 +48,28 @@
       style="z-index: var(--z-overlay); background-color: var(--overlay);"
     />
 
-    <!-- 窗口拖拽区：置于 overlay 之上、content 之下（10055 介于 --z-overlay/--z-modal），
-         使 modal 打开时顶部仍可拖动窗口（backdrop 会盖住根布局的 TitleBar）。 -->
-    <div style="position: relative; z-index: 10055;">
-      <TitleBar showToggleButton={false} />
-    </div>
+    <!-- 窗口拖拽区：**仅在 open 时渲染**。bits-ui 的 Portal 会 eagerly mount 其“裸子节点”
+         （Overlay/Content 各自有 presence 门控，裸节点没有），故若不加 {#if open}，每个
+         “已挂载但关闭”的 Modal 都会把这条 `fixed; top:0; height:50px; z-9999` 顶部拖拽条
+         注入 <body>——含多个关闭态 Modal 的页面（agents 3 个 / jobs 3 个）顶部工具栏会被
+         数条拖拽条盖住而“打不开”。置于 overlay 之上、content 之下（10055 介于
+         --z-overlay/--z-modal），使 modal 打开时顶部仍可拖动窗口（backdrop 会盖住根布局
+         的 TitleBar）。 -->
+    {#if open}
+      <div style="position: relative; z-index: 10055;">
+        <TitleBar showToggleButton={false} />
+      </div>
+    {/if}
 
+    <!-- 居中用 `transform: translate(-50%,-50%)`（内联），**不用** Tailwind 的
+         `-translate-x/y-1/2`：后者在 Tailwind v4 里写的是独立的 `translate:` 属性，会与
+         下面 keyframe 动的 `transform:` 属性**叠加**，导致开场动画期间双倍偏移、动画结束
+         （open 态非 forwards）transform 归零后又“跳”回中心。让居中与动画用同一个
+         `transform` 属性即可消除跳变：开场/退场 keyframe 也都基于 translate(-50%,…)。 -->
     <Dialog.Content
       interactOutsideBehavior={closeOnBackdropClick ? "close" : "ignore"}
-      class="dlg-content fixed left-1/2 top-1/2 max-h-[90vh] max-w-[90vw] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] shadow-2xl outline-none"
-      style="z-index: var(--z-modal);"
+      class="dlg-content fixed left-1/2 top-1/2 max-h-[90vh] max-w-[90vw] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] shadow-2xl outline-none"
+      style="z-index: var(--z-modal); transform: translate(-50%, -50%);"
     >
       <!-- macOS 风红灯关闭 + 标题（保持原 Linear overlay 观感）。红灯经 open=false 关闭。 -->
       {#if showCloseButton || title}
