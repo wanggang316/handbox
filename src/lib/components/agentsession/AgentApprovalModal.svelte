@@ -127,16 +127,15 @@
     onRespond(request, "deny");
   }
 
-  // 焦点陷阱（VAL-CAPERM-021）现由底层 `Modal`（bits-ui `Dialog.Content` 的 FocusScope）
-  // 统一提供：待决期间 Tab/Shift+Tab 在弹窗内循环、绝不跳到背后已禁用的输入区，且打开时
-  // 自动把焦点落到内容里第一个可聚焦控件（拒绝按钮，最安全的默认）。故此处不再手写。
+  // 焦点陷阱（VAL-CAPERM-021）由底层 `Modal`（bits-ui `Dialog.Content` 的 FocusScope）提供：
+  // 待决期间 Tab/Shift+Tab 在弹窗内循环、绝不跳到背后已禁用的输入区，打开时焦点自动落到
+  // 第一个可聚焦控件（拒绝按钮，最安全的默认）。
 </script>
 
 <Modal open={true} showCloseButton={false} onClose={handleClose}>
   <!--
-    审批内容根：焦点陷阱由外层 `Modal`(bits-ui Dialog) 统一提供，待决期间 Tab 在弹窗内
-    循环、绝不跳到背后已禁用的输入区/发送。`aria-labelledby` 把内容关联到标题，配合
-    Dialog 的 role="dialog"/aria-modal 让屏幕阅读器把它读作一个有名字的模态对话框。
+    审批内容根。`aria-labelledby` 把内容关联到标题，配合 Dialog 的 role="dialog"/aria-modal
+    让屏幕阅读器把它读作一个有名字的模态对话框。
   -->
   <div
     aria-labelledby="agent-approval-title"
