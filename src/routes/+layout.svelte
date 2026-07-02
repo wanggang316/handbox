@@ -2,6 +2,10 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
+  import { afterNavigate, goto } from "$app/navigation";
+  import { listen } from "@tauri-apps/api/event";
+  import { isTauriEnvironment } from "$lib/utils/tauri";
+  import { navigationState } from "$lib/states/navigation.svelte";
   import { uiState } from "$lib/states/ui.svelte";
   import { providerActions } from "$lib/states/provider.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
@@ -11,11 +15,30 @@
 
   let { children } = $props();
 
+  // 记录主界面路由：设置页的「返回应用」据此回跳。
+  afterNavigate((nav) => {
+    const path = nav.to?.url.pathname;
+    if (path) navigationState.remember(path);
+  });
+
   onMount(() => {
     if (!browser) {
       return () => {
         cleanupAuth();
       };
+    }
+
+    // 设置在主窗口内渲染：原生菜单（⌘,）与其他 webview 窗口经
+    // open_settings_window 命令定向 emit 本事件，这里承接并导航。
+    let unlistenSettingsNavigate: (() => void) | undefined;
+    if (isTauriEnvironment()) {
+      listen<string>("settings:navigate", (event) => {
+        goto(event.payload);
+      })
+        .then((fn) => (unlistenSettingsNavigate = fn))
+        .catch((error) => {
+          console.error("Failed to listen settings:navigate:", error);
+        });
     }
 
     const allowedThemes = new Set<Theme>(["light", "dark", "system"]);
@@ -85,6 +108,7 @@
     });
 
     return () => {
+      unlistenSettingsNavigate?.();
       mediaQuery.removeEventListener("change", handleSystemThemeChange);
       window.removeEventListener("storage", handleStorageChange);
       cleanupAuth();

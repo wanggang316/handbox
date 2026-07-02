@@ -189,8 +189,6 @@ pub fn run() {
             agent_approval_respond,
             // 窗口管理命令
             open_settings_window,
-            close_settings_window,
-            toggle_settings_window,
             // 供应商相关命令
             provider_list,
             provider_get,

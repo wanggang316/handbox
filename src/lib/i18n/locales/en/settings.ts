@@ -16,6 +16,11 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.autoScrollDesc": "Auto-scroll to the bottom on new messages",
 
   // Sidebar
+  "settings.sidebar.backToApp": "Back to app",
+  "settings.sidebar.search": "Search settings...",
+  "settings.sidebar.group.personal": "Personal",
+  "settings.sidebar.group.features": "Features",
+  "settings.sidebar.group.other": "Other",
   "settings.sidebar.account": "Account",
   "settings.sidebar.general": "General",
   "settings.sidebar.quicktools": "Quick Tools",

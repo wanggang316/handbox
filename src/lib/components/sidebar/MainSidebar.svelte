@@ -15,7 +15,6 @@
     Download,
     Clock,
   } from "@lucide/svelte";
-  import { openSettingsWindow } from "$lib/api/window";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateState } from "$lib/states/update.svelte";
 
@@ -53,10 +52,9 @@
   let userMenuY = $state(0);
   let userMenuTrigger: HTMLDivElement | null = null;
 
+  // 设置页在主窗口内渲染，直接路由跳转。
   function openSettings(path?: string) {
-    openSettingsWindow(path).catch((err) => {
-      console.error("Failed to open settings window:", err);
-    });
+    goto(path ? `/settings${path}` : "/settings");
   }
 
   function handleUserClick(event: MouseEvent | KeyboardEvent) {
