@@ -8,7 +8,6 @@ pub mod model;
 pub mod provider;
 pub mod settings;
 pub mod user;
-pub mod word;
 
 // 重新导出常用类型
 pub use error::*;
@@ -18,4 +17,3 @@ pub use model::*;
 pub use provider::*;
 pub use settings::*;
 pub use user::*;
-pub use word::*;

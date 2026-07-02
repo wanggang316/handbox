@@ -20,9 +20,8 @@ use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
     GenUiService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
     ProviderService, SettingsService, StorageService, UserSessionService,
-    WordService,
 };
-use crate::storage::{Database, WordRepository};
+use crate::storage::Database;
 use crate::utils::logger;
 use std::sync::Arc;
 
@@ -223,11 +222,6 @@ pub fn run() {
             settings_test_mcp_server,
             settings_system_info,
             // 单词相关命令
-            word_create,
-            word_list,
-            word_get,
-            word_update,
-            word_delete,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
@@ -334,8 +328,6 @@ async fn initialize_services(
         }
     }
 
-    let word_repo = Arc::new(WordRepository::new(database_service.clone()));
-    let word_service = WordService::new(word_repo, settings_service.clone());
 
     // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());
@@ -437,7 +429,6 @@ async fn initialize_services(
     app.manage(model_service);
     app.manage(mcp_service);
     app.manage(settings_service);
-    app.manage(word_service);
     app.manage(user_session_service);
     app.manage(agent_service);
     app.manage(genui_service);

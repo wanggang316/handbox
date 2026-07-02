@@ -18,8 +18,17 @@
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { hideContentPanel, setContentPanelPinned } from "$lib/api/selection";
   import { settingsState } from "$lib/states/settings.svelte";
+  import {
+    providerActions,
+    getAllModels,
+  } from "$lib/states/provider.svelte";
+  import { resolveQuickActionModel } from "$lib/quickaction/resolveModel";
   import { t } from "$lib/i18n";
-  import { runAgentTextTurn } from "$lib/api/agentSession";
+  import {
+    runAgentTextTurn,
+    createSessionFromDefinition,
+    updateAgentSessionField,
+  } from "$lib/api/agentSession";
 
   const appWindow = getCurrentWindow();
 
@@ -152,21 +161,53 @@
     }
   }
 
+  // 翻译会话的 system prompt：约束模型只回 JSON，与 parseTranslationResponse
+  // 的字段契约一致（解析失败时按纯文本回落，不会硬失败）。
+  const TRANSLATION_PROMPT =
+    'You are a translation assistant. Translate the user\'s input between Chinese and English (auto-detect the source and translate to the other language). Reply with ONLY a JSON object and no other text: {"translation": "<translated text>", "targetLanguage": "<zh|en>", "phonetic": "<pronunciation, or null>", "explanation": "<brief usage note in Chinese, or null>"}';
+
   /**
-   * 获取翻译 Session ID，如果没有则创建
+   * 获取翻译 Session：settings 已绑定则复用；否则用 builtin-chat 定义 +
+   * quick-action 默认模型自举一个并写回 settings（本处是唯一创建点）。
+   * 无可用默认模型时返回 null，上层提示去设置配置。
    */
   async function getOrCreateTranslationSession(): Promise<string | null> {
     try {
-      const settings = settingsState.settings;
-      const translation = settings?.translation;
-      const currentSessionId = translation?.sessionId;
-
+      const currentSessionId = settingsState.settings?.translation?.sessionId;
       if (currentSessionId) {
         return currentSessionId;
       }
 
-      // 没有 sessionId，返回 null
-      return null;
+      if (getAllModels().length === 0) {
+        await providerActions.loadProvidersWithModels(false);
+      }
+      const resolved = resolveQuickActionModel(
+        settingsState.settings?.quickAction,
+        getAllModels(),
+      );
+      if (!resolved.available) {
+        return null;
+      }
+
+      const session = await createSessionFromDefinition("builtin-chat", {
+        modelId: resolved.modelId,
+        providerId: resolved.providerId,
+      });
+      // JSON 输出契约挂在会话 system prompt 上；失败不阻塞（回落纯文本解析）。
+      try {
+        await updateAgentSessionField(
+          session.id,
+          "systemPrompt",
+          TRANSLATION_PROMPT,
+        );
+      } catch (error) {
+        console.warn("Failed to set translation system prompt:", error);
+      }
+      await settingsState.updateSettings({
+        section: "translation",
+        data: { sessionId: session.id },
+      });
+      return session.id;
     } catch (error) {
       console.error("Failed to get translation session:", error);
       return null;

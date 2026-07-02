@@ -21,7 +21,6 @@ pub mod quick_action;
 pub mod settings;
 pub mod skill;
 pub mod window;
-pub mod word;
 
 // 重新导出所有命令
 pub use accessibility::*;
@@ -46,4 +45,3 @@ pub use quick_action::*;
 pub use settings::*;
 pub use skill::*;
 pub use window::*;
-pub use word::*;

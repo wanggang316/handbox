@@ -7,7 +7,6 @@
   import { t } from "$lib/i18n";
   import UserSidebar from "$lib/components/sidebar/UserSidebar.svelte";
   import {
-    BookOpen,
     Bot,
     Settings,
     User,
@@ -25,10 +24,6 @@
   let currentAgentSessionId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : ""
   );
-
-  function handleWordsClick() {
-    goto(`/words`);
-  }
 
   function handleAgentClick() {
     goto(`/agents`);
@@ -133,14 +128,6 @@
       isActive={currentRoute === "/agents"}
       buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
       onclick={() => handleAgentClick()}
-    />
-    <MenuButton
-      title={t("sidebar.words")}
-      icon={BookOpen}
-      iconSize={16}
-      isActive={currentRoute === "/words"}
-      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
-      onclick={() => handleWordsClick()}
     />
   </div>
 

@@ -71,7 +71,6 @@ export * from "./window";
 export * from "./mcp";
 export * from "./skill";
 export * from "./auth";
-export * from "./word";
 export * from "./selection";
 export * from "./agentSession";
 export * from "./agentProject";

@@ -27,7 +27,6 @@ pub mod skill_service;
 pub mod skills;
 pub mod storage;
 pub mod user_session;
-pub mod word;
 
 // 重新导出服务
 pub use crate::storage::Database;
@@ -55,4 +54,3 @@ pub use settings::SettingsService;
 pub use skill_service::SkillService;
 pub use storage::StorageService;
 pub use user_session::UserSessionService;
-pub use word::WordService;

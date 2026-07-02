@@ -7,7 +7,6 @@ pub mod job;
 pub mod mcp;
 pub mod model;
 pub mod provider;
-pub mod word;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
 pub use agent_project::{AgentProject, CreateAgentProjectRequest};
@@ -30,4 +29,3 @@ pub use provider::Provider;
 // `SessionReasoningConfig` now lives in `models::llm_types`; re-exported here so
 // existing `storage::types::SessionReasoningConfig` consumers keep resolving.
 pub use crate::models::llm_types::SessionReasoningConfig;
-pub use word::Word;
