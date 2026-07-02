@@ -784,6 +784,11 @@ pre.code-block--compact {
 .modal-title-input::placeholder {
   color: color-mix(in oklch, var(--base-content) 30%, transparent);
 }
+/* 标题式输入不要全局键盘焦点环（光标即指示，环会破坏无边框观感）。
+   type+class 特异性高于上方 input:focus-visible 全局规则，稳定覆盖。 */
+input.modal-title-input:focus-visible {
+  outline: none;
+}
 .modal-title-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
