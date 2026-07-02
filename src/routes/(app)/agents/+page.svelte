@@ -410,91 +410,81 @@
           <p class="text-sm mt-2">{t("agent.manage.emptyHint")}</p>
         </div>
       {:else}
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- 列表：一行一个 Agent（图标 + 名称/描述 + 徽标 + 日期 + hover 操作） -->
+        <div
+          class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)]"
+        >
           {#each agentState.agents as agent (agent.id)}
             <div
-              class="group rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] p-4 transition-all hover:border-base-content/20 hover:shadow-sm"
+              class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-200/60"
             >
-              <div class="flex items-start justify-between gap-3">
-                <div class="flex items-center gap-3 min-w-0">
-                  <div
-                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary"
-                  >
-                    <Bot size={20} />
-                  </div>
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-1.5">
-                      <h3 class="truncate font-medium text-base-content">
-                        {agent.name}
-                      </h3>
-                      {#if agent.builtin}
-                        <span
-                          class="shrink-0 rounded bg-base-content/10 px-1.5 py-0.5 text-[10px] font-medium text-base-content/55"
-                        >
-                          内置
-                        </span>
-                      {/if}
-                    </div>
-                    {#if agent.description}
-                      <p class="truncate text-xs text-base-content/55">
-                        {agent.description}
-                      </p>
-                    {/if}
-                  </div>
-                </div>
-                <div class="flex shrink-0 items-center gap-0.5">
-                  <button
-                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-success/10 hover:text-success"
-                    onclick={() => handleUseAgent(agent)}
-                    title={t("agent.manage.use")}
-                  >
-                    <Play size={14} />
-                  </button>
-                  <button
-                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
-                    onclick={() => handleCloneAgent(agent)}
-                    title="克隆"
-                  >
-                    <Copy size={14} />
-                  </button>
-                  <button
-                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
-                    onclick={() => openEditModal(agent)}
-                    title={t("common.edit")}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  {#if !agent.builtin}
-                    <button
-                      class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-error/10 hover:text-error"
-                      onclick={() => openDeleteConfirm(agent)}
-                      title={t("common.delete")}
+              <div
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary"
+              >
+                <Bot size={18} />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <h3 class="truncate text-sm font-medium text-base-content">
+                    {agent.name}
+                  </h3>
+                  {#if agent.builtin}
+                    <span
+                      class="shrink-0 rounded bg-base-content/10 px-1.5 py-0.5 text-[10px] font-medium text-base-content/55"
                     >
-                      <Trash2 size={14} />
-                    </button>
+                      内置
+                    </span>
+                  {/if}
+                  {#if getGenuiName(agent)}
+                    <span
+                      class="inline-flex shrink-0 items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
+                    >
+                      <LayoutTemplate size={10} />
+                      {getGenuiName(agent)}
+                    </span>
                   {/if}
                 </div>
-              </div>
-
-              {#if agent.systemPrompt}
-                <p class="mt-3 line-clamp-2 text-sm text-base-content/65">
-                  {agent.systemPrompt}
+                <p class="truncate text-xs text-base-content/55">
+                  {agent.description || agent.systemPrompt || ""}
                 </p>
-              {/if}
-
-              {#if getGenuiName(agent)}
-                <div
-                  class="mt-3 inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                >
-                  <LayoutTemplate size={12} />
-                  {getGenuiName(agent)}
-                </div>
-              {/if}
-
-              <div
-                class="mt-3 border-t border-[var(--hairline)] pt-2.5 text-xs text-base-content/45"
-              >
+              </div>
+              <div class="hidden shrink-0 text-xs text-base-content/40 sm:block">
                 {new Date(agent.createdAt).toLocaleDateString("zh-CN")}
+              </div>
+              <!-- 操作：hover / 键盘聚焦时显现 -->
+              <div
+                class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+              >
+                <button
+                  class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-success/10 hover:text-success"
+                  onclick={() => handleUseAgent(agent)}
+                  title={t("agent.manage.use")}
+                >
+                  <Play size={14} />
+                </button>
+                <button
+                  class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
+                  onclick={() => handleCloneAgent(agent)}
+                  title="克隆"
+                >
+                  <Copy size={14} />
+                </button>
+                <button
+                  class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
+                  onclick={() => openEditModal(agent)}
+                  title={t("common.edit")}
+                >
+                  <Pencil size={14} />
+                </button>
+                {#if !agent.builtin}
+                  <button
+                    class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-error/10 hover:text-error"
+                    onclick={() => openDeleteConfirm(agent)}
+                    title={t("common.delete")}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                {/if}
               </div>
             </div>
           {/each}
