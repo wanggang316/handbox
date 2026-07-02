@@ -80,8 +80,8 @@
     target = next;
   }
 
-  // 把当前 (providerId, modelId) 解析为 ChatModelSelectButton 需要的
-  // ModelWithProvider；解析不到（模型已删/未加载）返回 null → 显示「选择模型」。
+  // 把当前 (providerId, modelId) 解析为 ModelWithProvider（供展示名与弹窗回显）；
+  // 解析不到（模型已删/未加载）返回 null → 显示「选择模型」。
   const selectedPromptModel = $derived.by((): ModelWithProvider | null => {
     const t = promptTarget;
     if (!t || !t.providerId || !t.modelId) return null;
@@ -146,7 +146,8 @@
     setAgentTarget({ ...agentTarget, modelId: model.id });
   }
 
-  // 模型选择 Modal（系统既有的搜索/收藏/分组选择器）开合。
+  // 模型选择 Modal（系统既有的搜索/收藏/分组选择器）开合，两种目标各一。
+  let promptModelModalOpen = $state(false);
   let agentModelModalOpen = $state(false);
 
   function handleAgentMessageChange(value: string): void {
@@ -198,16 +199,32 @@
   </Select>
 
   {#if promptTarget}
-    <!-- Prompt：provider/model 级联（复用 chat 模型选择弹窗）+ prompt 文本 -->
+    <!-- Prompt：模型（弹窗选择，成对写入 provider/model）+ prompt 文本 -->
     <div class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.modelLabel")}</span>
-      <div class="text-xs text-base-content/50">
-        Not available (chat mode discontinued)
-      </div>
+      <button
+        type="button"
+        onclick={() => (promptModelModalOpen = true)}
+        class="{inputClass} flex items-center justify-between gap-2 text-left {promptModelInvalid
+          ? 'border-error ring-1 ring-error'
+          : ''}"
+      >
+        {#if selectedPromptModel}
+          <span class="truncate text-base-content">{selectedPromptModel.name}</span>
+        {:else}
+          <span class="text-base-content/50">{t("agent.input.selectModel")}</span>
+        {/if}
+      </button>
       {#if promptModelInvalid}
         <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
       {/if}
     </div>
+
+    <ModelSelectModal
+      bind:open={promptModelModalOpen}
+      selectedModel={selectedPromptModel}
+      onModelSelect={handleModelSelect}
+    />
 
     <label class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.promptLabel")}</span>
