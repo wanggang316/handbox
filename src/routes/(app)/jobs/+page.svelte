@@ -178,7 +178,7 @@
   });
 </script>
 
-<div class="h-full flex flex-col">
+<div class="h-full flex flex-col bg-[var(--bg-canvas)]">
   <div class="flex-shrink-0 border-b border-base-300 px-6 pb-4 pt-12">
     <div class="mx-auto w-full max-w-3xl">
     <PageHeader

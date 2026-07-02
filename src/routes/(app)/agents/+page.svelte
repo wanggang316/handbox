@@ -338,7 +338,7 @@
   });
 </script>
 
-<div class="h-full flex flex-col">
+<div class="h-full flex flex-col bg-[var(--bg-canvas)]">
   <div class="flex-shrink-0 border-b border-base-300 px-6 pt-12">
     <div class="mx-auto w-full max-w-3xl">
     <Tabs value={activeTab} items={tabItems} onChange={(v) => (activeTab = v as "agents" | "genui")} />
@@ -406,11 +406,11 @@
       {:else}
         <!-- 列表：一行一个 Agent（图标 + 名称/描述 + 徽标 + 日期 + hover 操作） -->
         <div
-          class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)]"
+          class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-panel)]"
         >
           {#each agentState.agents as agent (agent.id)}
             <div
-              class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-200/60"
+              class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-300/40"
             >
               <div
                 class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary"

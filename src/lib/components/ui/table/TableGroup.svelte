@@ -52,7 +52,7 @@
 
   {#if !collapsible || !isCollapsed}
     <div
-      class="table-group bg-[var(--bg-card)] rounded-xl border border-[var(--hairline)] overflow-hidden {showDivider
+      class="table-group bg-[var(--bg-panel)] rounded-xl border border-[var(--hairline)] overflow-hidden {showDivider
         ? 'show-divider'
         : ''}"
     >

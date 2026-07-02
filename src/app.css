@@ -169,6 +169,11 @@ textarea.composer-input:focus-visible {
   --bg-page: var(--color-base-200);
   --bg-card: var(--color-base-100);
 
+  /* 列表/表单页的层级对：canvas = 页面画布（衬底），panel = 其上的列表/表单面板。
+     浅色画布加灰、面板提亮；深色反向（画布最深、面板上浮），故深色块需显式覆写。 */
+  --bg-canvas: var(--color-base-200);
+  --bg-panel: var(--color-base-100);
+
   /* Z-index 语义层级。overlay 类经 bits-ui Portal 渲染到 <body>、脱离父级 stacking
      context，故只需一条有序 scale。取高位以与其余未收敛的旧 z 值（~10020）共存。 */
   --z-dropdown: 10030; /* 就地下拉 */
@@ -240,6 +245,10 @@ textarea.composer-input:focus-visible {
   --error: var(--color-error-dark);
   --error-content: var(--color-error-content-dark);
   --overlay: var(--color-overlay-dark);
+
+  /* canvas/panel 深色反向配对：画布取最深（8%），面板上浮一阶（15%）。 */
+  --bg-canvas: var(--color-base-100-dark);
+  --bg-panel: var(--color-base-200-dark);
 
   /* Linear 扩展阶梯（短别名）— 深色。这些 consumer 全部走 var(--hairline) 等短别名，
      故此处只重绑短别名；对应的 --color-* 不在此重绑，因为 Tailwind utility 在 build 时

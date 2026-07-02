@@ -50,7 +50,7 @@
 </script>
 
 <div
-  class="bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors flex flex-col cursor-pointer"
+  class="bg-[var(--bg-panel)] border border-[var(--hairline)] rounded-lg p-4 hover:bg-base-300/40 transition-colors flex flex-col cursor-pointer"
   role="button"
   tabindex="0"
   aria-label={t("jobs.view.aria", { name: job.name })}

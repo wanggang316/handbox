@@ -27,7 +27,7 @@
   </div>
 
   <main
-    class="flex-1 overflow-auto bg-[color:var(--bg-card)] border-l border-[var(--hairline)] rounded-tl-xl rounded-bl-xl"
+    class="flex-1 overflow-auto bg-[color:var(--bg-canvas)] border-l border-[var(--hairline)] rounded-tl-xl rounded-bl-xl"
   >
     <!-- 内容列限宽：设置内容不随窗口拉满（对齐 Linear/Codex 的设置页阅读宽度） -->
     <div class="mx-auto w-full max-w-3xl">
