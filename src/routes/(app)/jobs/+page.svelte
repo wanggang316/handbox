@@ -179,7 +179,8 @@
 </script>
 
 <div class="h-full flex flex-col">
-  <div class="flex-shrink-0 p-4 border-b border-base-300 mt-12">
+  <div class="flex-shrink-0 border-b border-base-300 px-6 pb-4 pt-12">
+    <div class="mx-auto w-full max-w-3xl">
     <PageHeader
       title={t("jobs.title")}
       meta={t("jobs.count", { n: filteredJobs.length })}
@@ -209,9 +210,11 @@
         />
       </div>
     </PageHeader>
+    </div>
   </div>
 
-  <div class="flex-1 min-h-0 overflow-y-auto p-4">
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+    <div class="mx-auto w-full max-w-3xl">
     {#if jobStore.isLoading}
       <div class="flex items-center justify-center h-full">
         <div
@@ -247,7 +250,7 @@
         {/if}
       </div>
     {:else}
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         {#each filteredJobs as job (job.id)}
           <JobCard
             {job}
@@ -259,6 +262,7 @@
         {/each}
       </div>
     {/if}
+    </div>
   </div>
 </div>
 

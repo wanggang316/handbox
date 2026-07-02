@@ -339,7 +339,8 @@
 </script>
 
 <div class="h-full flex flex-col">
-  <div class="flex-shrink-0 px-4 pt-12 border-b border-base-300">
+  <div class="flex-shrink-0 border-b border-base-300 px-6 pt-12">
+    <div class="mx-auto w-full max-w-3xl">
     <Tabs value={activeTab} items={tabItems} onChange={(v) => (activeTab = v as "agents" | "genui")} />
 
     {#if activeTab === "agents"}
@@ -382,9 +383,11 @@
         </PageHeader>
       </div>
     {/if}
+    </div>
   </div>
 
-  <div class="flex-1 min-h-0 overflow-y-auto p-4">
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+    <div class="mx-auto w-full max-w-3xl">
     {#if activeTab === "agents"}
       {#if agentState.isLoading}
         <div class="flex items-center justify-center h-full">
@@ -556,6 +559,7 @@
         </div>
       {/if}
     {/if}
+    </div>
   </div>
 </div>
 
