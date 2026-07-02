@@ -1,10 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Modal from "../ui/Modal.svelte";
-  import Button from "../ui/Button.svelte";
-  import TableGroup from "../ui/table/TableGroup.svelte";
-  import TableBaseRow from "../ui/table/TableBaseRow.svelte";
-  import Input from "../ui/Input.svelte";
+  import FormModal from "../ui/FormModal.svelte";
   import Textarea from "../ui/Textarea.svelte";
   import Select from "../ui/Select.svelte";
   import Checkbox from "../ui/Checkbox.svelte";
@@ -41,10 +37,6 @@
   }
 
   let { open, agent, onClose, onSave }: Props = $props();
-
-  const LABEL_CLASS = "text-[13px] font-medium text-base-content/70";
-  const SECTION_CLASS =
-    "text-[11px] font-semibold uppercase tracking-wider text-base-content/40";
 
   // ── 模型参数：会话/引擎实际消费的采样参数，扁平绘制（label + toggle + slider）。
   //    仅 temperature / maxTokens —— top_p / top_k 会话层与引擎均不消费，故不在此暴露。 ──
@@ -83,6 +75,11 @@
     { value: "auto", label: "自动" },
     { value: "manual", label: "询问" },
   ];
+
+  // 折叠区标题：与 .form-section-label 同观感；按钮需 flex 排布 chevron，
+  // 而该类是无层级 CSS（display: block 会压过 .flex），故用等效 utilities。
+  const SECTION_TOGGLE_CLASS =
+    "flex items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-base-content/45 transition-colors hover:text-base-content/70";
 
   // 内置 Agent：名称只读、不可删除（由后端约束）。
   const isBuiltin = $derived(agent?.builtin ?? false);
@@ -250,85 +247,53 @@
   });
 </script>
 
-<Modal
+<FormModal
   bind:open={localOpen}
+  size="lg"
   title={agent ? t("agent.form.editTitle") : t("agent.form.createTitle")}
   {onClose}
+  {saving}
+  submitLabel={saving
+    ? t("common.saving")
+    : agent
+      ? t("common.save")
+      : t("common.create")}
+  submitDisabled={saving || !formData.name.trim()}
+  onSubmit={handleSave}
 >
-  <div
-    class="flex w-[460px] max-h-[82vh] flex-col gap-5 overflow-y-auto px-6 pt-14 pb-0"
-  >
-    <!-- 基本信息：左右结构行式卡片（label 左 + 控件右，行间分割线） -->
-    <TableGroup>
-      <TableBaseRow label={t("agent.form.nameLabel")}>
-        <div class="w-52 max-w-full">
-          <Input
-            bind:value={formData.name}
-            placeholder={t("agent.form.namePlaceholder")}
-            disabled={isBuiltin}
-          />
-        </div>
-      </TableBaseRow>
-      <TableBaseRow label="描述">
-        <div class="w-52 max-w-full">
-          <Input bind:value={formData.description} placeholder="一行简介" />
-        </div>
-      </TableBaseRow>
-    </TableGroup>
+  <!-- 主区：大标题式名称 + 一行描述 + 系统提示词 -->
+  <div class="flex flex-col gap-1">
+    <input
+      class="modal-title-input"
+      bind:value={formData.name}
+      placeholder={t("agent.form.namePlaceholder")}
+      disabled={isBuiltin}
+    />
+    <input
+      class="w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
+      bind:value={formData.description}
+      placeholder="一行简介，便于在列表中识别"
+    />
+  </div>
 
-    <!-- 系统提示：大文本域，垂直（Linear 的 Guidance 大框同样垂直） -->
-    <div class="flex flex-col gap-1.5">
-      <span class={LABEL_CLASS}>{t("agent.form.systemPromptTitle")}</span>
-      <Textarea
-        bind:value={formData.systemPrompt}
-        placeholder={t("agent.systemPrompt.placeholder")}
-        rows={5}
-      />
-      <div class="text-right text-xs text-base-content/35">
-        {t("agent.form.charCount", { count: formData.systemPrompt.length })}
-      </div>
+  <div class="mt-6 flex flex-col gap-2.5">
+    <span class="form-section-label">{t("agent.form.systemPromptTitle")}</span>
+    <Textarea
+      bind:value={formData.systemPrompt}
+      placeholder={t("agent.systemPrompt.placeholder")}
+      rows={10}
+    />
+    <div class="text-right text-xs text-base-content/35">
+      {t("agent.form.charCount", { count: formData.systemPrompt.length })}
     </div>
+  </div>
 
-    <!-- 生成式 UI / 能力：左右结构行式卡片 -->
-    <TableGroup>
-      <TableBaseRow
-        label="生成式 UI"
-        description="允许助手在回复中渲染交互式界面"
-      >
-        <Toggle bind:checked={formData.generativeUi} />
-      </TableBaseRow>
-      {#if formData.generativeUi}
-        <TableBaseRow label="GenUI 模板" description="选择一份已保存的模板">
-          <Select
-            options={genuiOptions}
-            bind:selectedValue={formData.genuiId}
-            autoWidth={true}
-            size="sm"
-          />
-        </TableBaseRow>
-      {/if}
-      <TableBaseRow label="工作目录">
-        <Select
-          options={workingDirModeOptions}
-          bind:selectedValue={formData.workingDirMode}
-          autoWidth={true}
-          size="sm"
-        />
-      </TableBaseRow>
-      <TableBaseRow label="工具执行">
-        <Select
-          options={toolExecutionModeOptions}
-          bind:selectedValue={formData.toolExecutionMode}
-          autoWidth={true}
-          size="sm"
-        />
-      </TableBaseRow>
-    </TableGroup>
-
-    <!-- 内置工具：数量多，label 顶 + 多选纵向展开 -->
-    <TableGroup>
-      <TableBaseRow label="内置工具" layout="vertical">
-        <div class="flex flex-wrap gap-x-4 gap-y-2 pt-2">
+  {#snippet aside()}
+    <!-- 配置栏：能力 / 生成式 UI / 模型参数 / MCP 服务器，紧凑纵排 -->
+    <div class="flex flex-col gap-6 pt-1">
+      <div class="flex flex-col gap-2.5">
+        <span class="form-section-label">能力</span>
+        <div class="flex flex-wrap gap-x-3 gap-y-2">
           {#each BUILTIN_TOOLS as tool (tool)}
             <Checkbox
               checked={isToolSelected(tool)}
@@ -338,121 +303,141 @@
             </Checkbox>
           {/each}
         </div>
-      </TableBaseRow>
-    </TableGroup>
-
-    <!-- 模型参数：可折叠分组，扁平 slider 行 -->
-    <div class="flex flex-col gap-3">
-      <button
-        type="button"
-        class="flex items-center gap-1.5 text-left {SECTION_CLASS} hover:text-base-content/60"
-        onclick={() => (paramsOpen = !paramsOpen)}
-      >
-        {#if paramsOpen}
-          <ChevronDown size={13} />
-        {:else}
-          <ChevronRight size={13} />
-        {/if}
-        {t("agent.form.modelParams")}
-      </button>
-      {#if paramsOpen}
-        <div class="flex flex-col gap-3">
-          {#each PARAM_META as p (p.key)}
-            <div class="flex flex-col gap-2">
-              <div class="flex items-center justify-between">
-                <span class="text-sm text-base-content/85">{p.label}</span>
-                <Toggle bind:checked={paramEnabled[p.key]} />
-              </div>
-              {#if paramEnabled[p.key]}
-                <LabeledSlider
-                  bind:value={paramValues[p.key]}
-                  min={p.min}
-                  max={p.max}
-                  step={p.step}
-                  showValue={true}
-                />
-              {/if}
-            </div>
-          {/each}
+        <div class="flex flex-col gap-1">
+          <span class="text-xs text-base-content/70">工作目录</span>
+          <Select
+            options={workingDirModeOptions}
+            bind:selectedValue={formData.workingDirMode}
+            size="sm"
+          />
         </div>
-      {/if}
-    </div>
+        <div class="flex flex-col gap-1">
+          <span class="text-xs text-base-content/70">工具执行</span>
+          <Select
+            options={toolExecutionModeOptions}
+            bind:selectedValue={formData.toolExecutionMode}
+            size="sm"
+          />
+        </div>
+      </div>
 
-    <!-- MCP 服务器：可折叠分组 -->
-    <div class="flex flex-col gap-3">
-      <button
-        type="button"
-        class="flex items-center gap-1.5 text-left {SECTION_CLASS} hover:text-base-content/60"
-        onclick={() => (mcpOpen = !mcpOpen)}
-      >
-        {#if mcpOpen}
-          <ChevronDown size={13} />
-        {:else}
-          <ChevronRight size={13} />
-        {/if}
-        {t("agent.form.mcpServers")}
-      </button>
-      {#if mcpOpen}
-        {#if availableServers.length === 0}
-          <div class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-4 text-center">
-            <p class="text-sm text-base-content/55">
-              {t("agent.input.noAvailableMcpServers")}
-            </p>
-            <p class="mt-0.5 text-xs text-base-content/40">
-              {t("agent.input.configureMcpInSettings")}
-            </p>
+      <div class="flex flex-col gap-2.5">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex flex-col gap-0.5">
+            <span class="form-section-label">生成式 UI</span>
+            <span class="text-xs text-base-content/50">
+              允许助手在回复中渲染交互式界面
+            </span>
           </div>
-        {:else}
+          <Toggle bind:checked={formData.generativeUi} />
+        </div>
+        {#if formData.generativeUi}
+          <div class="flex flex-col gap-1">
+            <Select
+              options={genuiOptions}
+              bind:selectedValue={formData.genuiId}
+              size="sm"
+            />
+            <span class="text-xs text-base-content/50">选择一份已保存的模板</span>
+          </div>
+        {/if}
+      </div>
+
+      <div class="flex flex-col gap-3">
+        <button
+          type="button"
+          class={SECTION_TOGGLE_CLASS}
+          onclick={() => (paramsOpen = !paramsOpen)}
+        >
+          {#if paramsOpen}
+            <ChevronDown size={13} />
+          {:else}
+            <ChevronRight size={13} />
+          {/if}
+          {t("agent.form.modelParams")}
+        </button>
+        {#if paramsOpen}
           <div class="flex flex-col gap-3">
-            {#each availableServers as server (server.id)}
-              <div class="flex flex-col gap-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="truncate text-sm text-base-content/85">
-                    {server.displayName ?? server.name}
-                  </span>
-                  <Toggle
-                    checked={isMcpSelected(server.id)}
-                    onChange={(v) => toggleMcp(server.id, v)}
+            {#each PARAM_META as p (p.key)}
+              <div class="flex flex-col gap-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm text-base-content/85">{p.label}</span>
+                  <Toggle bind:checked={paramEnabled[p.key]} />
+                </div>
+                {#if paramEnabled[p.key]}
+                  <LabeledSlider
+                    bind:value={paramValues[p.key]}
+                    min={p.min}
+                    max={p.max}
+                    step={p.step}
+                    showValue={true}
                   />
-                </div>
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-xs text-base-content/40">
-                    {t("agent.input.enabledToolsCount", {
-                      count: server.enabledTools.length,
-                    })}
-                  </span>
-                  {#if isMcpSelected(server.id)}
-                    <Select
-                      options={executionModeOptions}
-                      selectedValue={mcpMode(server.id)}
-                      onSelect={(value) =>
-                        setMcpMode(server.id, value as "auto" | "manual")}
-                      size="sm"
-                      autoWidth={true}
-                    />
-                  {/if}
-                </div>
+                {/if}
               </div>
             {/each}
           </div>
         {/if}
-      {/if}
-    </div>
+      </div>
 
-    <!-- 底部按钮：sticky 底栏，内容超长时始终可见 -->
-    <div
-      class="sticky bottom-0 -mx-6 mt-1 flex items-center justify-end gap-3 border-t border-[var(--hairline)] bg-[var(--bg-card)] px-6 pb-5 pt-4"
-    >
-      <Button variant="ghost" onclick={onClose} disabled={saving}>
-        {t("common.cancel")}
-      </Button>
-      <Button
-        variant="primary"
-        onclick={handleSave}
-        disabled={saving || !formData.name.trim()}
-      >
-        {saving ? t("common.saving") : agent ? t("common.save") : t("common.create")}
-      </Button>
+      <div class="flex flex-col gap-3">
+        <button
+          type="button"
+          class={SECTION_TOGGLE_CLASS}
+          onclick={() => (mcpOpen = !mcpOpen)}
+        >
+          {#if mcpOpen}
+            <ChevronDown size={13} />
+          {:else}
+            <ChevronRight size={13} />
+          {/if}
+          {t("agent.form.mcpServers")}
+        </button>
+        {#if mcpOpen}
+          {#if availableServers.length === 0}
+            <div class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-4 text-center">
+              <p class="text-sm text-base-content/55">
+                {t("agent.input.noAvailableMcpServers")}
+              </p>
+              <p class="mt-0.5 text-xs text-base-content/40">
+                {t("agent.input.configureMcpInSettings")}
+              </p>
+            </div>
+          {:else}
+            <div class="flex flex-col gap-3">
+              {#each availableServers as server (server.id)}
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="truncate text-sm text-base-content/85">
+                      {server.displayName ?? server.name}
+                    </span>
+                    <Toggle
+                      checked={isMcpSelected(server.id)}
+                      onChange={(v) => toggleMcp(server.id, v)}
+                    />
+                  </div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs text-base-content/40">
+                      {t("agent.input.enabledToolsCount", {
+                        count: server.enabledTools.length,
+                      })}
+                    </span>
+                    {#if isMcpSelected(server.id)}
+                      <Select
+                        options={executionModeOptions}
+                        selectedValue={mcpMode(server.id)}
+                        onSelect={(value) =>
+                          setMcpMode(server.id, value as "auto" | "manual")}
+                        size="sm"
+                        autoWidth={true}
+                      />
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {/if}
+      </div>
     </div>
-  </div>
-</Modal>
+  {/snippet}
+</FormModal>
