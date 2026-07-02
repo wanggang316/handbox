@@ -769,3 +769,30 @@ pre.code-block--compact {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
 }
+
+/* FormModal 内的功能化表单元素：大标题式名称输入（无边框）与分区小标题，
+   三个创建/编辑弹窗（Agent / Job / MCP）共用同一套观感。 */
+.modal-title-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--base-content);
+}
+.modal-title-input::placeholder {
+  color: color-mix(in oklch, var(--base-content) 30%, transparent);
+}
+.modal-title-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.form-section-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--base-content) 45%, transparent);
+}

@@ -1,9 +1,5 @@
 <script lang="ts">
-  import { AlertCircle, Info } from "@lucide/svelte";
-  import Modal from "$lib/components/ui/Modal.svelte";
-  import Button from "$lib/components/ui/Button.svelte";
-  import Textarea from "$lib/components/ui/Textarea.svelte";
-  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
+  import FormModal from "$lib/components/ui/FormModal.svelte";
   import ScheduleEditor from "$lib/components/jobs/ScheduleEditor.svelte";
   import TargetPicker from "$lib/components/jobs/TargetPicker.svelte";
   import {
@@ -298,77 +294,67 @@
   function handleClose(): void {
     if (saving) return;
     localOpen = false;
+    onClose();
   }
 </script>
 
-<Modal
+<FormModal
   bind:open={localOpen}
+  size="lg"
   title={job ? t("jobs.form.editTitle") : t("jobs.form.createTitle")}
-  closeOnBackdropClick={true}
-  onClose={onClose}
+  onClose={handleClose}
+  {saving}
+  hint={t("jobs.form.appClosedNotice")}
+  error={saveError}
+  submitLabel={saving
+    ? t("jobs.form.saving")
+    : job
+      ? t("jobs.form.save")
+      : t("jobs.form.createAction")}
+  onSubmit={handleSave}
 >
-  <div
-    class="w-[600px] max-h-[80vh] overflow-y-auto px-6 pt-16 pb-6 flex flex-col gap-5"
-  >
-    <!-- 应用关闭期间不执行 提示 (JOBMGMT-027) -->
-    <div
-      class="flex items-start gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-sm text-base-content/80"
-    >
-      <Info size={16} class="mt-0.5 flex-shrink-0 text-info" />
-      <span>{t("jobs.form.appClosedNotice")}</span>
-    </div>
+  <!-- 主区：大标题式名称 + 描述 + 任务目标（要跑什么） -->
+  <div class="flex flex-col gap-1">
+    <input
+      class="modal-title-input"
+      bind:value={form.name}
+      placeholder={t("jobs.form.namePlaceholder")}
+      aria-invalid={nameError != null}
+    />
+    {#if nameError}
+      <span class="text-xs text-error">{nameError}</span>
+    {/if}
+    <input
+      class="w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
+      bind:value={form.description}
+      placeholder={t("jobs.form.descriptionPlaceholder")}
+    />
+  </div>
 
-    <!-- 基本信息 -->
-    <TableGroup title={t("jobs.form.sectionBasic")}>
-      <div class="flex flex-col gap-3 px-6 py-4">
-        <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">{t("jobs.form.name")}</span>
-          <input
-            type="text"
-            bind:value={form.name}
-            placeholder={t("jobs.form.namePlaceholder")}
-            aria-invalid={nameError != null}
-            class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {nameError
-              ? 'border-error ring-1 ring-error'
-              : 'border-[var(--hairline)]'}"
-          />
-          {#if nameError}
-            <span class="text-xs text-error">{nameError}</span>
-          {/if}
-        </label>
+  <div class="mt-6 flex flex-col gap-2.5">
+    <span class="form-section-label">{t("jobs.form.sectionTarget")}</span>
+    <TargetPicker
+      bind:target={form.target}
+      {providersWithModels}
+      {agents}
+      {agentsLoading}
+      showError={showValidation}
+    />
+  </div>
 
-        <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">{t("jobs.form.descriptionOptional")}</span>
-          <Textarea bind:value={form.description} placeholder={t("jobs.form.descriptionPlaceholder")} rows={3} />
-        </label>
-      </div>
-    </TableGroup>
-
-    <!-- 调度 -->
-    <TableGroup title={t("jobs.form.sectionSchedule")}>
-      <div class="px-6 py-4">
+  {#snippet aside()}
+    <!-- 配置栏：调度 + 高级（超时/重试），紧凑纵排 -->
+    <div class="flex flex-col gap-6 pt-1">
+      <div class="flex flex-col gap-2.5">
+        <span class="form-section-label">{t("jobs.form.sectionSchedule")}</span>
         <ScheduleEditor bind:cron={form.cronExpr} />
       </div>
-    </TableGroup>
 
-    <!-- 目标 -->
-    <TableGroup title={t("jobs.form.sectionTarget")}>
-      <div class="px-6 py-4">
-        <TargetPicker
-          bind:target={form.target}
-          {providersWithModels}
-          {agents}
-          {agentsLoading}
-          showError={showValidation}
-        />
-      </div>
-    </TableGroup>
+      <div class="flex flex-col gap-3">
+        <span class="form-section-label">{t("jobs.form.sectionAdvanced")}</span>
 
-    <!-- 高级（健壮性）：超时 / 重试。留空采用具名默认。 -->
-    <TableGroup title={t("jobs.form.sectionAdvanced")}>
-      <div class="flex flex-col gap-3 px-6 py-4">
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">{t("jobs.form.execTimeout")}</span>
+          <span class="text-xs text-base-content/70">{t("jobs.form.execTimeout")}</span>
           <input
             type="number"
             min="0"
@@ -376,9 +362,8 @@
             bind:value={form.execTimeoutSecs}
             placeholder={t("jobs.form.execTimeoutPlaceholder", { n: DEFAULT_EXEC_TIMEOUT_SECS })}
             aria-invalid={execTimeoutError != null}
-            class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {execTimeoutError
-              ? 'border-error ring-1 ring-error'
-              : 'border-[var(--hairline)]'}"
+            class="field w-full px-2.5 py-1.5 text-sm"
+            class:is-error={execTimeoutError != null}
           />
           {#if execTimeoutError}
             <span class="text-xs text-error">{execTimeoutError}</span>
@@ -388,7 +373,7 @@
         </label>
 
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">{t("jobs.form.maxRetries")}</span>
+          <span class="text-xs text-base-content/70">{t("jobs.form.maxRetries")}</span>
           <input
             type="number"
             min="0"
@@ -396,9 +381,8 @@
             bind:value={form.maxRetries}
             placeholder={t("jobs.form.maxRetriesPlaceholder", { n: DEFAULT_MAX_RETRIES })}
             aria-invalid={maxRetriesError != null}
-            class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {maxRetriesError
-              ? 'border-error ring-1 ring-error'
-              : 'border-[var(--hairline)]'}"
+            class="field w-full px-2.5 py-1.5 text-sm"
+            class:is-error={maxRetriesError != null}
           />
           {#if maxRetriesError}
             <span class="text-xs text-error">{maxRetriesError}</span>
@@ -408,7 +392,7 @@
         </label>
 
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-base-content/80">{t("jobs.form.retryDelay")}</span>
+          <span class="text-xs text-base-content/70">{t("jobs.form.retryDelay")}</span>
           <input
             type="number"
             min="0"
@@ -416,9 +400,8 @@
             bind:value={form.retryDelaySecs}
             placeholder={t("jobs.form.retryDelayPlaceholder", { n: DEFAULT_RETRY_DELAY_SECS })}
             aria-invalid={retryDelayError != null}
-            class="w-full rounded-md border bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary {retryDelayError
-              ? 'border-error ring-1 ring-error'
-              : 'border-[var(--hairline)]'}"
+            class="field w-full px-2.5 py-1.5 text-sm"
+            class:is-error={retryDelayError != null}
           />
           {#if retryDelayError}
             <span class="text-xs text-error">{retryDelayError}</span>
@@ -427,24 +410,6 @@
           {/if}
         </label>
       </div>
-    </TableGroup>
-
-    <!-- 保存错误 -->
-    {#if saveError}
-      <div class="flex items-start gap-2 text-sm text-error">
-        <AlertCircle size={16} class="mt-0.5 flex-shrink-0" />
-        <span>{saveError}</span>
-      </div>
-    {/if}
-
-    <!-- 底部按钮 -->
-    <div class="flex items-center justify-end gap-3 pt-4 border-t border-base-300">
-      <Button variant="ghost" onclick={handleClose} disabled={saving}>
-        {t("common.cancel")}
-      </Button>
-      <Button variant="primary" onclick={handleSave} disabled={saving}>
-        {saving ? t("jobs.form.saving") : job ? t("jobs.form.save") : t("jobs.form.createAction")}
-      </Button>
     </div>
-  </div>
-</Modal>
+  {/snippet}
+</FormModal>
