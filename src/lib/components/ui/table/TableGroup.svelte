@@ -31,9 +31,9 @@
   {#if title}
     <button
       type="button"
-      class="flex items-center justify-between my-1 mx-2 text-xs {collapsible
-        ? 'cursor-pointer text-base-content/80 hover:text-base-content'
-        : 'text-base-content/80 cursor-default'}"
+      class="flex items-center justify-between mb-2 mx-1 text-sm font-medium {collapsible
+        ? 'cursor-pointer text-base-content/90 hover:text-base-content'
+        : 'text-base-content cursor-default'}"
       onclick={toggleCollapse}
       onmouseenter={() => (isHovering = true)}
       onmouseleave={() => (isHovering = false)}

@@ -10,6 +10,10 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.theme.dark": "Dark",
   "settings.general.language": "Language",
   "settings.general.autoScroll": "Auto-scroll chat view",
+  "settings.general.section": "General",
+  "settings.general.appearanceDesc": "Choose the light or dark color scheme",
+  "settings.general.languageDesc": "Interface display language",
+  "settings.general.autoScrollDesc": "Auto-scroll to the bottom on new messages",
 
   // Sidebar
   "settings.sidebar.account": "Account",

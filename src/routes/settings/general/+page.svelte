@@ -76,9 +76,10 @@
 </script>
 
 <div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
-  <TableGroup>
+  <TableGroup title={t("settings.general.section")}>
     <SelectRow
       label={t("settings.general.appearance")}
+      description={t("settings.general.appearanceDesc")}
       options={themeOptions}
       bind:selectedValue={theme}
       onSelect={(value) => handleThemeChange(value)}
@@ -86,6 +87,7 @@
 
     <SelectRow
       label={t("settings.general.language")}
+      description={t("settings.general.languageDesc")}
       options={languageOptions}
       bind:selectedValue={language}
       onSelect={(value) => handleLanguageChange(value)}
@@ -93,8 +95,8 @@
 
     <SwitchRow
       label={t("settings.general.autoScroll")}
+      description={t("settings.general.autoScrollDesc")}
       bind:checked={autoScroll}
-      description=""
       onChange={handleAutoScrollChange}
     />
   </TableGroup>
