@@ -121,7 +121,7 @@
   }
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-6">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-6">
   <TableGroup>
     <SwitchRow
       label={t("settings.quicktools.showToolbarOnSelection")}

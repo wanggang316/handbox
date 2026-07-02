@@ -95,11 +95,10 @@
   }
 </script>
 
-<div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <!-- 头部：标题 + 刷新 -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-base font-medium text-base-content">{t("settings.skills.title")}</h1>
       <p class="text-xs text-base-content/60 mt-0.5">
         {t("settings.skills.description")}
       </p>

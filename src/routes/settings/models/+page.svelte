@@ -58,7 +58,7 @@
   }
 </script>
 
-<div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
 
   <!-- 加载状态 -->
   {#if providerState.isLoading}

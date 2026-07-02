@@ -42,9 +42,8 @@
   }
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <div class="flex flex-col gap-y-1">
-    <h2 class="text-base font-medium text-base-content">{t("settings.agentTools.title")}</h2>
     <p class="text-sm text-base-content/60">
       {t("settings.agentTools.description")}
     </p>

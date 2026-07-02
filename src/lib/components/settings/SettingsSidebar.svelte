@@ -1,62 +1,18 @@
 <script lang="ts">
-  import {
-    User,
-    Palette,
-    Brain,
-    Zap,
-    Sparkles,
-    Keyboard,
-    Info,
-    MousePointerClick,
-    LayoutGrid,
-    Wrench,
-    ArrowLeft,
-    Search,
-  } from "@lucide/svelte";
+  import { ArrowLeft, Search } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import Menu from "$lib/components/ui/Menu.svelte";
   import { t } from "$lib/i18n";
   import { navigationState } from "$lib/states/navigation.svelte";
+  import { getSettingsNavGroups } from "./settingsNav";
   import type { Snippet } from "svelte";
 
   let { footer }: { footer?: Snippet } = $props();
 
-  type Item = { id: string; title: string; icon: any; url: string };
-  type Group = { id: string; title: string; items: Item[] };
-
   let searchQuery = $state("");
 
-  const groups: Group[] = $derived([
-    {
-      id: "personal",
-      title: t("settings.sidebar.group.personal"),
-      items: [
-        { id: "account", title: t("settings.sidebar.account"), icon: User, url: "/settings/account" },
-        { id: "general", title: t("settings.sidebar.general"), icon: Palette, url: "/settings/general" },
-        { id: "shortcuts", title: t("settings.sidebar.shortcuts"), icon: Keyboard, url: "/settings/shortcuts" },
-      ],
-    },
-    {
-      id: "features",
-      title: t("settings.sidebar.group.features"),
-      items: [
-        { id: "quicktools", title: t("settings.sidebar.quicktools"), icon: MousePointerClick, url: "/settings/quicktools" },
-        { id: "models", title: t("settings.sidebar.models"), icon: Brain, url: "/settings/models" },
-        { id: "agent-tools", title: t("settings.sidebar.agentTools"), icon: Wrench, url: "/settings/agent-tools" },
-        { id: "mcp", title: "MCP", icon: Zap, url: "/settings/mcp" },
-        { id: "skills", title: t("settings.sidebar.skills"), icon: Sparkles, url: "/settings/skills" },
-      ],
-    },
-    {
-      id: "other",
-      title: t("settings.sidebar.group.other"),
-      items: [
-        { id: "components", title: t("settings.sidebar.components"), icon: LayoutGrid, url: "/settings/components" },
-        { id: "about", title: t("settings.sidebar.about"), icon: Info, url: "/settings/about" },
-      ],
-    },
-  ]);
+  const groups = $derived(getSettingsNavGroups());
 
   const allItems = $derived(groups.flatMap((g) => g.items));
 

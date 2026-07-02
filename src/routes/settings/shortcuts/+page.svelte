@@ -171,7 +171,7 @@
   }
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <TableGroup title={t("quickaction.shortcut.title")}>
     <TableBaseRow
       label={t("quickaction.shortcut.label")}

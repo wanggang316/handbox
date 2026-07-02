@@ -27,9 +27,8 @@
   ];
 </script>
 
-<div class="max-w-2xl space-y-8 p-6">
+<div class="max-w-2xl space-y-8 p-6 pt-2">
   <header class="space-y-1">
-    <h1 class="text-xl font-medium text-base-content">UI 组件</h1>
     <p class="text-sm text-base-content/70">
       标准化表单控件预览——统一 --field-* token 与 .field 皮肤，明暗主题一致。
     </p>

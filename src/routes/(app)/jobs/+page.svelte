@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Plus, Clock, Search, AlertCircle } from "@lucide/svelte";
+  import PageHeader from "$lib/components/ui/PageHeader.svelte";
   import { listenJobExecuted } from "$lib/api/job";
   import { jobStore } from "$lib/stores/jobStore.svelte";
   import JobCard from "$lib/components/jobs/JobCard.svelte";
@@ -179,39 +180,35 @@
 
 <div class="h-full flex flex-col">
   <div class="flex-shrink-0 p-4 border-b border-base-300 mt-12">
-    <div class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-4">
-        <h1 class="text-xl font-semibold text-base-content flex items-center gap-2">
-          <Clock size={24} />
-          {t("jobs.title")}
-        </h1>
-        <span class="text-sm text-base-content/60">
-          {t("jobs.count", { n: filteredJobs.length })}
-        </span>
-      </div>
-      <Button
-        variant="primary"
-        size="sm"
-        onclick={handleCreate}
-        customClass="flex items-center gap-2"
-      >
-        <Plus size={16} />
-        {t("jobs.create")}
-      </Button>
-    </div>
+    <PageHeader
+      title={t("jobs.title")}
+      meta={t("jobs.count", { n: filteredJobs.length })}
+    >
+      {#snippet actions()}
+        <Button
+          variant="primary"
+          size="sm"
+          onclick={handleCreate}
+          customClass="flex items-center gap-2"
+        >
+          <Plus size={16} />
+          {t("jobs.create")}
+        </Button>
+      {/snippet}
 
-    <div class="relative">
-      <input
-        type="text"
-        placeholder={t("jobs.searchPlaceholder")}
-        class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
-        bind:value={searchQuery}
-      />
-      <Search
-        class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
-        size={16}
-      />
-    </div>
+      <div class="relative">
+        <input
+          type="text"
+          placeholder={t("jobs.searchPlaceholder")}
+          class="field h-9 w-full pl-10 pr-4 text-sm"
+          bind:value={searchQuery}
+        />
+        <Search
+          class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
+          size={16}
+        />
+      </div>
+    </PageHeader>
   </div>
 
   <div class="flex-1 min-h-0 overflow-y-auto p-4">

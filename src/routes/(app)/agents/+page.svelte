@@ -10,6 +10,7 @@
     LayoutTemplate,
   } from "@lucide/svelte";
   import { goto } from "$app/navigation";
+  import PageHeader from "$lib/components/ui/PageHeader.svelte";
   import { page } from "$app/stores";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
@@ -343,52 +344,42 @@
 
     {#if activeTab === "agents"}
       <div class="pb-4">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <h1 class="text-xl font-semibold text-base-content flex items-center gap-2">
-              <Bot size={24} />
-              Agents
-            </h1>
-            <span class="text-sm text-base-content/60">
-              {t("agent.manage.count", { count: agentState.agents.length })}
-            </span>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onclick={openCreateModal}
-            customClass="flex items-center gap-2"
-          >
-            <Plus size={16} />
-            {t("agent.manage.newAgent")}
-          </Button>
-        </div>
+        <PageHeader
+          title="Agents"
+          meta={t("agent.manage.count", { count: agentState.agents.length })}
+        >
+          {#snippet actions()}
+            <Button
+              variant="primary"
+              size="sm"
+              onclick={openCreateModal}
+              customClass="flex items-center gap-2"
+            >
+              <Plus size={16} />
+              {t("agent.manage.newAgent")}
+            </Button>
+          {/snippet}
+        </PageHeader>
       </div>
     {:else}
       <div class="pb-4">
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center gap-4">
-            <h1 class="text-xl font-semibold text-base-content flex items-center gap-2">
-              <LayoutTemplate size={24} />
-              GenUI
-            </h1>
-            <span class="text-sm text-base-content/60">
-              共 {genuiState.genuis.length} 个模板
-            </span>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onclick={openGenuiCreate}
-            customClass="flex items-center gap-2"
-          >
-            <Plus size={16} />
-            新建 GenUI
-          </Button>
-        </div>
-        <p class="text-sm text-base-content/60">
-          具名、可复用的 JSON-Render UI 模板，可在 Agent 表单中关联使用。
-        </p>
+        <PageHeader
+          title="GenUI"
+          meta={`共 ${genuiState.genuis.length} 个模板`}
+          description="具名、可复用的 JSON-Render UI 模板，可在 Agent 表单中关联使用。"
+        >
+          {#snippet actions()}
+            <Button
+              variant="primary"
+              size="sm"
+              onclick={openGenuiCreate}
+              customClass="flex items-center gap-2"
+            >
+              <Plus size={16} />
+              新建 GenUI
+            </Button>
+          {/snippet}
+        </PageHeader>
       </div>
     {/if}
   </div>
