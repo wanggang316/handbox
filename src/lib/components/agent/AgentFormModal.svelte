@@ -142,7 +142,6 @@
   });
 
   let paramsOpen = $state(false);
-  let mcpOpen = $state(true);
   let saving = $state(false);
 
   function isMcpSelected(serverId: string): boolean {
@@ -294,49 +293,104 @@
   {#snippet aside()}
     <!-- 配置栏：能力 / 生成式 UI / 模型参数 / MCP 服务器，紧凑纵排 -->
     <div class="flex flex-col gap-6 pt-1">
-      <div class="flex flex-col gap-3">
-        <span class="form-section-label">
-          {t("agent.form.sectionCapabilities")}
-        </span>
-        <!-- 内置工具：chip 式多选（选中高亮），比零散 checkbox 更整齐直观 -->
-        <div class="flex flex-wrap gap-1.5">
-          {#each BUILTIN_TOOLS as tool (tool)}
-            <button
-              type="button"
-              aria-pressed={isToolSelected(tool)}
-              class="rounded-md border px-2 py-1 font-mono text-xs transition-colors {isToolSelected(
-                tool,
-              )
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-[var(--hairline)] text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
-              onclick={() => toggleBuiltinTool(tool, !isToolSelected(tool))}
+      <!-- 工具：内置工具 / 执行方式 / MCP 服务器——所有工具面配置归一组 -->
+      <div class="flex flex-col gap-3.5">
+        <span class="form-section-label">{t("agent.form.sectionTools")}</span>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="text-xs text-base-content/70">
+            {t("agent.form.builtinTools")}
+          </span>
+          <!-- chip 式多选（选中高亮） -->
+          <div class="flex flex-wrap gap-1.5">
+            {#each BUILTIN_TOOLS as tool (tool)}
+              <button
+                type="button"
+                aria-pressed={isToolSelected(tool)}
+                class="rounded-md border px-2 py-1 font-mono text-xs transition-colors {isToolSelected(
+                  tool,
+                )
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-[var(--hairline)] text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
+                onclick={() => toggleBuiltinTool(tool, !isToolSelected(tool))}
+              >
+                {tool}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1">
+          <span class="text-xs text-base-content/70">
+            {t("agent.form.toolExecution")}
+          </span>
+          <Select
+            options={toolExecutionModeOptions}
+            bind:selectedValue={formData.toolExecutionMode}
+            size="sm"
+          />
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="text-xs text-base-content/70">
+            {t("agent.form.mcpServers")}
+          </span>
+          {#if availableServers.length === 0}
+            <div
+              class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-3 text-center"
             >
-              {tool}
-            </button>
-          {/each}
+              <p class="text-xs text-base-content/55">
+                {t("agent.input.noAvailableMcpServers")}
+              </p>
+              <p class="mt-0.5 text-xs text-base-content/40">
+                {t("agent.input.configureMcpInSettings")}
+              </p>
+            </div>
+          {:else}
+            <div class="flex flex-col gap-3">
+              {#each availableServers as server (server.id)}
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="truncate text-sm text-base-content/85">
+                      {server.displayName ?? server.name}
+                    </span>
+                    <Toggle
+                      checked={isMcpSelected(server.id)}
+                      onChange={(v) => toggleMcp(server.id, v)}
+                    />
+                  </div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs text-base-content/40">
+                      {t("agent.input.enabledToolsCount", {
+                        count: server.enabledTools.length,
+                      })}
+                    </span>
+                    {#if isMcpSelected(server.id)}
+                      <Select
+                        options={executionModeOptions}
+                        selectedValue={mcpMode(server.id)}
+                        onSelect={(value) =>
+                          setMcpMode(server.id, value as "auto" | "manual")}
+                        size="sm"
+                        autoWidth={true}
+                      />
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div class="flex flex-col gap-1">
-            <span class="text-xs text-base-content/70">
-              {t("agent.form.workingDir")}
-            </span>
-            <Select
-              options={workingDirModeOptions}
-              bind:selectedValue={formData.workingDirMode}
-              size="sm"
-            />
-          </div>
-          <div class="flex flex-col gap-1">
-            <span class="text-xs text-base-content/70">
-              {t("agent.form.toolExecution")}
-            </span>
-            <Select
-              options={toolExecutionModeOptions}
-              bind:selectedValue={formData.toolExecutionMode}
-              size="sm"
-            />
-          </div>
-        </div>
+      </div>
+
+      <!-- 工作目录：运行环境配置，独立于工具组 -->
+      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-4">
+        <span class="form-section-label">{t("agent.form.workingDir")}</span>
+        <Select
+          options={workingDirModeOptions}
+          bind:selectedValue={formData.workingDirMode}
+          size="sm"
+        />
       </div>
 
       <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-4">
@@ -401,65 +455,6 @@
         {/if}
       </div>
 
-      <div class="flex flex-col gap-3 border-t border-[var(--hairline)] pt-4">
-        <button
-          type="button"
-          class={SECTION_TOGGLE_CLASS}
-          onclick={() => (mcpOpen = !mcpOpen)}
-        >
-          {#if mcpOpen}
-            <ChevronDown size={13} />
-          {:else}
-            <ChevronRight size={13} />
-          {/if}
-          {t("agent.form.mcpServers")}
-        </button>
-        {#if mcpOpen}
-          {#if availableServers.length === 0}
-            <div class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-4 text-center">
-              <p class="text-sm text-base-content/55">
-                {t("agent.input.noAvailableMcpServers")}
-              </p>
-              <p class="mt-0.5 text-xs text-base-content/40">
-                {t("agent.input.configureMcpInSettings")}
-              </p>
-            </div>
-          {:else}
-            <div class="flex flex-col gap-3">
-              {#each availableServers as server (server.id)}
-                <div class="flex flex-col gap-1">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="truncate text-sm text-base-content/85">
-                      {server.displayName ?? server.name}
-                    </span>
-                    <Toggle
-                      checked={isMcpSelected(server.id)}
-                      onChange={(v) => toggleMcp(server.id, v)}
-                    />
-                  </div>
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-xs text-base-content/40">
-                      {t("agent.input.enabledToolsCount", {
-                        count: server.enabledTools.length,
-                      })}
-                    </span>
-                    {#if isMcpSelected(server.id)}
-                      <Select
-                        options={executionModeOptions}
-                        selectedValue={mcpMode(server.id)}
-                        onSelect={(value) =>
-                          setMcpMode(server.id, value as "auto" | "manual")}
-                        size="sm"
-                        autoWidth={true}
-                      />
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        {/if}
-      </div>
     </div>
   {/snippet}
 </FormModal>
