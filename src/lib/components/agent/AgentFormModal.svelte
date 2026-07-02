@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import Modal from "../ui/Modal.svelte";
   import Button from "../ui/Button.svelte";
-  import FormField from "../ui/FormField.svelte";
+  import TableGroup from "../ui/table/TableGroup.svelte";
+  import TableBaseRow from "../ui/table/TableBaseRow.svelte";
   import Input from "../ui/Input.svelte";
   import Textarea from "../ui/Textarea.svelte";
   import Select from "../ui/Select.svelte";
@@ -257,62 +258,77 @@
   <div
     class="flex w-[460px] max-h-[82vh] flex-col gap-5 overflow-y-auto px-6 pt-14 pb-0"
   >
-    <!-- 基本字段：扁平 label + 控件 -->
-    <div class="flex flex-col gap-3.5">
-      <FormField label={t("agent.form.nameLabel")}>
-        <Input
-          bind:value={formData.name}
-          placeholder={t("agent.form.namePlaceholder")}
-          disabled={isBuiltin}
-        />
-      </FormField>
-
-      <FormField label="描述">
-        <Input
-          bind:value={formData.description}
-          placeholder="一行简介，便于在列表中识别"
-        />
-      </FormField>
-
-      <FormField label={t("agent.form.systemPromptTitle")}>
-        <Textarea
-          bind:value={formData.systemPrompt}
-          placeholder={t("agent.systemPrompt.placeholder")}
-          rows={4}
-        />
-        <div class="text-right text-xs text-base-content/35">
-          {t("agent.form.charCount", { count: formData.systemPrompt.length })}
+    <!-- 基本信息：左右结构行式卡片（label 左 + 控件右，行间分割线） -->
+    <TableGroup>
+      <TableBaseRow label={t("agent.form.nameLabel")}>
+        <div class="w-52 max-w-full">
+          <Input
+            bind:value={formData.name}
+            placeholder={t("agent.form.namePlaceholder")}
+            disabled={isBuiltin}
+          />
         </div>
-      </FormField>
-    </div>
-
-    <!-- 生成式 UI -->
-    <div class="flex flex-col gap-3">
-      <div class="flex items-center justify-between gap-3">
-        <div class="flex flex-col gap-0.5">
-          <span class={LABEL_CLASS}>生成式 UI</span>
-          <span class="text-xs text-base-content/45">
-            允许助手在回复中渲染交互式界面
-          </span>
+      </TableBaseRow>
+      <TableBaseRow label="描述">
+        <div class="w-52 max-w-full">
+          <Input bind:value={formData.description} placeholder="一行简介" />
         </div>
-        <Toggle bind:checked={formData.generativeUi} />
+      </TableBaseRow>
+    </TableGroup>
+
+    <!-- 系统提示：大文本域，垂直（Linear 的 Guidance 大框同样垂直） -->
+    <div class="flex flex-col gap-1.5">
+      <span class={LABEL_CLASS}>{t("agent.form.systemPromptTitle")}</span>
+      <Textarea
+        bind:value={formData.systemPrompt}
+        placeholder={t("agent.systemPrompt.placeholder")}
+        rows={5}
+      />
+      <div class="text-right text-xs text-base-content/35">
+        {t("agent.form.charCount", { count: formData.systemPrompt.length })}
       </div>
-      {#if formData.generativeUi}
-        <div class="flex flex-col gap-1.5">
-          <Select options={genuiOptions} bind:selectedValue={formData.genuiId} />
-          <p class="text-xs text-base-content/40">
-            选择一份已保存的 GenUI 模板（可在 Agents 页的 GenUI 标签中创建与管理）。
-          </p>
-        </div>
-      {/if}
     </div>
 
-    <!-- 能力（Capability）：内置工具 / 工作目录 / 工具执行 -->
-    <div class="flex flex-col gap-3.5">
-      <span class={SECTION_CLASS}>能力</span>
+    <!-- 生成式 UI / 能力：左右结构行式卡片 -->
+    <TableGroup>
+      <TableBaseRow
+        label="生成式 UI"
+        description="允许助手在回复中渲染交互式界面"
+      >
+        <Toggle bind:checked={formData.generativeUi} />
+      </TableBaseRow>
+      {#if formData.generativeUi}
+        <TableBaseRow label="GenUI 模板" description="选择一份已保存的模板">
+          <Select
+            options={genuiOptions}
+            bind:selectedValue={formData.genuiId}
+            autoWidth={true}
+            size="sm"
+          />
+        </TableBaseRow>
+      {/if}
+      <TableBaseRow label="工作目录">
+        <Select
+          options={workingDirModeOptions}
+          bind:selectedValue={formData.workingDirMode}
+          autoWidth={true}
+          size="sm"
+        />
+      </TableBaseRow>
+      <TableBaseRow label="工具执行">
+        <Select
+          options={toolExecutionModeOptions}
+          bind:selectedValue={formData.toolExecutionMode}
+          autoWidth={true}
+          size="sm"
+        />
+      </TableBaseRow>
+    </TableGroup>
 
-      <FormField label="内置工具">
-        <div class="flex flex-wrap gap-x-4 gap-y-2">
+    <!-- 内置工具：数量多，label 顶 + 多选纵向展开 -->
+    <TableGroup>
+      <TableBaseRow label="内置工具" layout="vertical">
+        <div class="flex flex-wrap gap-x-4 gap-y-2 pt-2">
           {#each BUILTIN_TOOLS as tool (tool)}
             <Checkbox
               checked={isToolSelected(tool)}
@@ -322,22 +338,8 @@
             </Checkbox>
           {/each}
         </div>
-      </FormField>
-
-      <FormField label="工作目录">
-        <Select
-          options={workingDirModeOptions}
-          bind:selectedValue={formData.workingDirMode}
-        />
-      </FormField>
-
-      <FormField label="工具执行">
-        <Select
-          options={toolExecutionModeOptions}
-          bind:selectedValue={formData.toolExecutionMode}
-        />
-      </FormField>
-    </div>
+      </TableBaseRow>
+    </TableGroup>
 
     <!-- 模型参数：可折叠分组，扁平 slider 行 -->
     <div class="flex flex-col gap-3">
