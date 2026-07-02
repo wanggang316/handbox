@@ -48,7 +48,13 @@
 </script>
 
 <Modal bind:open {title} {onClose}>
-  <div class="{width} max-w-[92vw] max-h-[86vh] flex flex-col">
+  <!-- lg 双栏取固定高：主区可用 flex-1 填满（如大 textarea），右栏独立滚动；
+       md 单栏随内容自适应。 -->
+  <div
+    class="{width} max-w-[92vw] {size === 'lg'
+      ? 'h-[min(680px,86vh)]'
+      : 'max-h-[86vh]'} flex flex-col"
+  >
     <!-- 主体：主内容区 + 可选右侧配置栏；pt 给 Modal 的红灯/标题行留足位
          （标题行 py-4 + 行高 ≈56px，取 64px 避免首个控件顶进 header）。 -->
     <div class="flex flex-1 min-h-0 pt-16">

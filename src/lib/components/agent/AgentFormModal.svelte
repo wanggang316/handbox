@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import FormModal from "../ui/FormModal.svelte";
-  import Textarea from "../ui/Textarea.svelte";
   import Select from "../ui/Select.svelte";
-  import Checkbox from "../ui/Checkbox.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
   import { ChevronDown, ChevronRight } from "@lucide/svelte";
@@ -54,7 +52,7 @@
   ];
 
   const genuiOptions = $derived([
-    { value: "", label: "未关联" },
+    { value: "", label: t("agent.form.genuiNone") },
     ...genuiState.genuis.map((g) => ({ value: g.id ?? "", label: g.name })),
   ]);
 
@@ -66,15 +64,16 @@
   // ── 能力（Capability）：内置工具 / 工作目录 / 工具执行 ──
   // coding-agent 内置工具名（与后端 builtinTools 取值对齐）。
   const BUILTIN_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls"];
-  const workingDirModeOptions = [
-    { value: "required", label: "必需" },
-    { value: "optional", label: "可选" },
-    { value: "none", label: "无" },
-  ];
-  const toolExecutionModeOptions = [
-    { value: "auto", label: "自动" },
-    { value: "manual", label: "询问" },
-  ];
+  // $derived so labels track language switch.
+  const workingDirModeOptions = $derived([
+    { value: "required", label: t("agent.form.workingDirRequired") },
+    { value: "optional", label: t("agent.form.workingDirOptional") },
+    { value: "none", label: t("agent.form.workingDirNone") },
+  ]);
+  const toolExecutionModeOptions = $derived([
+    { value: "auto", label: t("agent.input.autoExecution") },
+    { value: "manual", label: t("agent.input.manualExecution") },
+  ]);
 
   // 折叠区标题：与 .form-section-label 同观感；按钮需 flex 排布 chevron，
   // 而该类是无层级 CSS（display: block 会压过 .flex），故用等效 utilities。
@@ -261,72 +260,93 @@
   submitDisabled={saving || !formData.name.trim()}
   onSubmit={handleSave}
 >
-  <!-- 主区：大标题式名称 + 一行描述 + 系统提示词 -->
-  <div class="flex flex-col gap-1">
-    <input
-      class="modal-title-input"
-      bind:value={formData.name}
-      placeholder={t("agent.form.namePlaceholder")}
-      disabled={isBuiltin}
-    />
-    <input
-      class="w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
-      bind:value={formData.description}
-      placeholder="一行简介，便于在列表中识别"
-    />
-  </div>
+  <!-- 主区：大标题式名称 + 一行描述 + 系统提示词（填满剩余高度，主编辑面） -->
+  <div class="flex h-full flex-col">
+    <div class="flex shrink-0 flex-col gap-1">
+      <input
+        class="modal-title-input"
+        bind:value={formData.name}
+        placeholder={t("agent.form.namePlaceholder")}
+        disabled={isBuiltin}
+      />
+      <input
+        class="w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
+        bind:value={formData.description}
+        placeholder={t("agent.form.descriptionPlaceholder")}
+      />
+    </div>
 
-  <div class="mt-6 flex flex-col gap-2.5">
-    <span class="form-section-label">{t("agent.form.systemPromptTitle")}</span>
-    <Textarea
-      bind:value={formData.systemPrompt}
-      placeholder={t("agent.systemPrompt.placeholder")}
-      rows={10}
-    />
-    <div class="text-right text-xs text-base-content/35">
-      {t("agent.form.charCount", { count: formData.systemPrompt.length })}
+    <div class="mt-6 flex min-h-0 flex-1 flex-col gap-2.5">
+      <div class="flex items-baseline justify-between">
+        <span class="form-section-label">{t("agent.form.systemPromptTitle")}</span>
+        <span class="text-xs text-base-content/35">
+          {t("agent.form.charCount", { count: formData.systemPrompt.length })}
+        </span>
+      </div>
+      <textarea
+        class="field min-h-0 w-full flex-1 resize-none px-3 py-2.5 font-mono text-sm leading-relaxed"
+        bind:value={formData.systemPrompt}
+        placeholder={t("agent.systemPrompt.placeholder")}
+      ></textarea>
     </div>
   </div>
 
   {#snippet aside()}
     <!-- 配置栏：能力 / 生成式 UI / 模型参数 / MCP 服务器，紧凑纵排 -->
     <div class="flex flex-col gap-6 pt-1">
-      <div class="flex flex-col gap-2.5">
-        <span class="form-section-label">能力</span>
-        <div class="flex flex-wrap gap-x-3 gap-y-2">
+      <div class="flex flex-col gap-3">
+        <span class="form-section-label">
+          {t("agent.form.sectionCapabilities")}
+        </span>
+        <!-- 内置工具：chip 式多选（选中高亮），比零散 checkbox 更整齐直观 -->
+        <div class="flex flex-wrap gap-1.5">
           {#each BUILTIN_TOOLS as tool (tool)}
-            <Checkbox
-              checked={isToolSelected(tool)}
-              onCheckedChange={(v) => toggleBuiltinTool(tool, v)}
+            <button
+              type="button"
+              aria-pressed={isToolSelected(tool)}
+              class="rounded-md border px-2 py-1 font-mono text-xs transition-colors {isToolSelected(
+                tool,
+              )
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-[var(--hairline)] text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
+              onclick={() => toggleBuiltinTool(tool, !isToolSelected(tool))}
             >
-              <span class="font-mono text-base-content/85">{tool}</span>
-            </Checkbox>
+              {tool}
+            </button>
           {/each}
         </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-base-content/70">工作目录</span>
-          <Select
-            options={workingDirModeOptions}
-            bind:selectedValue={formData.workingDirMode}
-            size="sm"
-          />
-        </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-base-content/70">工具执行</span>
-          <Select
-            options={toolExecutionModeOptions}
-            bind:selectedValue={formData.toolExecutionMode}
-            size="sm"
-          />
+        <div class="grid grid-cols-2 gap-3">
+          <div class="flex flex-col gap-1">
+            <span class="text-xs text-base-content/70">
+              {t("agent.form.workingDir")}
+            </span>
+            <Select
+              options={workingDirModeOptions}
+              bind:selectedValue={formData.workingDirMode}
+              size="sm"
+            />
+          </div>
+          <div class="flex flex-col gap-1">
+            <span class="text-xs text-base-content/70">
+              {t("agent.form.toolExecution")}
+            </span>
+            <Select
+              options={toolExecutionModeOptions}
+              bind:selectedValue={formData.toolExecutionMode}
+              size="sm"
+            />
+          </div>
         </div>
       </div>
 
-      <div class="flex flex-col gap-2.5">
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex flex-col gap-0.5">
-            <span class="form-section-label">生成式 UI</span>
+      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-4">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex min-w-0 flex-col gap-0.5">
+            <span class="text-sm text-base-content/85">
+              {t("agent.form.generativeUi")}
+            </span>
             <span class="text-xs text-base-content/50">
-              允许助手在回复中渲染交互式界面
+              {t("agent.form.generativeUiDesc")}
             </span>
           </div>
           <Toggle bind:checked={formData.generativeUi} />
@@ -338,12 +358,14 @@
               bind:selectedValue={formData.genuiId}
               size="sm"
             />
-            <span class="text-xs text-base-content/50">选择一份已保存的模板</span>
+            <span class="text-xs text-base-content/50">
+              {t("agent.form.genuiHint")}
+            </span>
           </div>
         {/if}
       </div>
 
-      <div class="flex flex-col gap-3">
+      <div class="flex flex-col gap-3 border-t border-[var(--hairline)] pt-4">
         <button
           type="button"
           class={SECTION_TOGGLE_CLASS}
@@ -379,7 +401,7 @@
         {/if}
       </div>
 
-      <div class="flex flex-col gap-3">
+      <div class="flex flex-col gap-3 border-t border-[var(--hairline)] pt-4">
         <button
           type="button"
           class={SECTION_TOGGLE_CLASS}

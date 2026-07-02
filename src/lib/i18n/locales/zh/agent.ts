@@ -132,6 +132,17 @@ export const agentZh = {
   "agent.form.modelParams": "模型参数",
   "agent.form.mcpServers": "MCP 服务器",
   "agent.form.mcpComingSoon": "MCP 服务器配置即将推出，敬请期待...",
+  "agent.form.descriptionPlaceholder": "一行简介，便于在列表中识别",
+  "agent.form.sectionCapabilities": "能力",
+  "agent.form.workingDir": "工作目录",
+  "agent.form.toolExecution": "工具执行",
+  "agent.form.workingDirRequired": "必需",
+  "agent.form.workingDirOptional": "可选",
+  "agent.form.workingDirNone": "无",
+  "agent.form.generativeUi": "生成式 UI",
+  "agent.form.generativeUiDesc": "允许助手在回复中渲染交互式界面",
+  "agent.form.genuiHint": "选择一份已保存的模板",
+  "agent.form.genuiNone": "未关联",
 
   // Agent session landing page (agent/+page.svelte)
   "agent.page.startConversation": "开始与 {name} 对话",

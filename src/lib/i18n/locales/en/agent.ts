@@ -138,6 +138,17 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.skillsHint": "Separate multiple skill tags with commas",
   "agent.form.modelParams": "Model parameters",
   "agent.form.mcpServers": "MCP servers",
+  "agent.form.descriptionPlaceholder": "One-line summary shown in the list",
+  "agent.form.sectionCapabilities": "Capabilities",
+  "agent.form.workingDir": "Working directory",
+  "agent.form.toolExecution": "Tool execution",
+  "agent.form.workingDirRequired": "Required",
+  "agent.form.workingDirOptional": "Optional",
+  "agent.form.workingDirNone": "None",
+  "agent.form.generativeUi": "Generative UI",
+  "agent.form.generativeUiDesc": "Let the assistant render interactive UI in replies",
+  "agent.form.genuiHint": "Pick a saved template",
+  "agent.form.genuiNone": "Not linked",
   "agent.form.mcpComingSoon": "MCP server configuration is coming soon...",
 
   // Agent session landing page (agent/+page.svelte)
