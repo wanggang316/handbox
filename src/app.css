@@ -48,7 +48,7 @@
   /* Linear extended ladder — not mapped to daisyUI vocab; consumed via var(...) */
   --color-surface-3: oklch(91% 0 0);
   --color-surface-4: oklch(88% 0 0);
-  --color-hairline: oklch(90% 0 0);
+  --color-hairline: oklch(92.5% 0 0);
   --color-hairline-strong: oklch(85% 0 0);
   /* 命名约定：subtle 比 tertiary 对比度更高（更醒目）；tertiary 是最弱的辅助文字 */
   --color-ink-subtle: oklch(45% 0.01 250);
@@ -170,9 +170,10 @@ textarea.composer-input:focus-visible {
   --bg-card: var(--color-base-100);
 
   /* 列表/表单页的层级对：canvas = 页面画布（衬底），panel = 其上的列表/表单面板。
-     浅色画布加灰、面板提亮；深色反向（画布最深、面板上浮），故深色块需显式覆写。 */
-  --bg-canvas: var(--color-base-200);
-  --bg-panel: var(--color-base-100);
+     浅色三档：sidebar(--bg-page 97%) < canvas(98.2%) < panel(纯白)——画布须比
+     sidebar 浅以免同色。深色反向（画布最深、面板上浮），深色块显式覆写。 */
+  --bg-canvas: oklch(98.2% 0 0);
+  --bg-panel: oklch(100% 0 0);
 
   /* Z-index 语义层级。overlay 类经 bits-ui Portal 渲染到 <body>、脱离父级 stacking
      context，故只需一条有序 scale。取高位以与其余未收敛的旧 z 值（~10020）共存。 */
