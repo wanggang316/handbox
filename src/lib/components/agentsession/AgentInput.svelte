@@ -8,13 +8,12 @@
     ChevronDown,
     ChevronsUpDown,
     Check,
-    FolderOpen,
+    Folder,
   } from "@lucide/svelte";
   import { onDestroy, tick } from "svelte";
+  import { fly } from "svelte/transition";
   import { goto } from "$app/navigation";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import IconButton from "$lib/components/ui/IconButton.svelte";
-  import Select from "$lib/components/ui/Select.svelte";
   import ModelSelectModal from "./ModelSelectModal.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { t } from "$lib/i18n";
@@ -108,7 +107,7 @@
   const showWorkingDir = $derived(
     !!currentAgent && currentAgent.workingDirMode !== "none",
   );
-  // 工作目录展示名：取路径末段（basename）便于在紧凑工具栏里显示；未设置为 null。
+  // 工作目录展示名：取路径末段（basename）便于在紧凑按钮里显示；未设置为 null。
   const workingDirName = $derived.by(() => {
     const dir = session.workingDir;
     if (!dir) return null;
@@ -580,13 +579,40 @@
   onModelSelect={handleModelSelect}
 />
 
+<!-- 工作目录选择：置于 composer 上方左侧，仅当来源 Agent 的 workingDirMode ≠ "none"
+     时出现。点击打开系统目录选择框，选中即持久化到 session.workingDir。 -->
+{#if showWorkingDir}
+  <div class="mx-auto flex w-full max-w-[800px] pb-1">
+    <button
+      type="button"
+      class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-base-content/55 hover:bg-base-300/50 hover:text-base-content transition-colors"
+      aria-label={t("agent.input.selectWorkingDir")}
+      title={session.workingDir ?? t("agent.input.selectWorkingDir")}
+      onclick={pickWorkingDir}
+    >
+      <Folder size={13} class="shrink-0" />
+      {#if workingDirName}
+        <span class="max-w-[220px] truncate">{workingDirName}</span>
+      {:else}
+        <span class="max-w-[220px] truncate text-warning"
+          >{t("agent.input.selectWorkingDir")}</span
+        >
+      {/if}
+    </button>
+  </div>
+{/if}
+
 <div
-  class="flex flex-col bg-base-300 rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
+  class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
 >
   <!-- relative 容器锚定浮层；浮层向上弹（bottom-full）以免落屏外/被时间线裁切。 -->
   <div class="relative">
     {#if slashOpen}
-      <div class="absolute bottom-full left-3 z-30 mb-1">
+      <!-- fly 提供与 Agent 菜单一致的轻微位移 + 淡入淡出开合动画。 -->
+      <div
+        class="absolute bottom-full left-3 z-30 mb-1"
+        transition:fly={{ y: -4, duration: 130 }}
+      >
         <SkillSlashPopover
           items={slashCandidates}
           highlightedIndex={effectiveHighlight}
@@ -654,14 +680,16 @@
 
   <div class="flex flex-row items-center justify-between gap-3 px-4 pt-0 pb-2">
     <div class="flex flex-row flex-wrap items-center gap-2">
-      <!-- 附件（图片上传）：最左侧的附件图标。 -->
-      <IconButton
-        icon={Paperclip}
-        iconSize={16}
-        ariaLabel={t("agent.input.addImage")}
+      <!-- 附件（图片上传）：最左侧的附件图标，与其余触发器共用安静 hover。 -->
+      <button
+        type="button"
+        class="flex h-7 w-7 items-center justify-center rounded-md text-base-content transition-colors hover:bg-base-300/60"
+        aria-label={t("agent.input.addImage")}
         title={t("agent.input.uploadImage")}
         onclick={handleAddAttachment}
-      />
+      >
+        <Paperclip size={16} />
+      </button>
 
       <!-- Agent 选择器：当前会话来源 Agent + 向上弹出的切换列表。选中他者即从该
            AgentDefinition 实例化新会话并跳转（把 Agents 页的「使用」搬进输入框）。 -->
@@ -670,8 +698,8 @@
           type="button"
           class={`flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-2 transition-colors ${
             agentMenuOpen
-              ? "bg-base-300 text-base-content"
-              : "text-base-content hover:bg-base-300"
+              ? "bg-base-300/60 text-base-content"
+              : "text-base-content hover:bg-base-300/60"
           }`}
           aria-label={t("agent.input.selectAgent")}
           aria-haspopup="menu"
@@ -686,8 +714,10 @@
 
         {#if agentMenuOpen}
           <!-- 向上展开（bottom-full）：输入框在底部，列表浮于按钮上方以免落屏外。
+               fly 提供轻微位移 + 淡入淡出的开合动画。
                stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
           <div
+            transition:fly={{ y: -4, duration: 130 }}
             class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-64 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
             role="menu"
             tabindex="-1"
@@ -724,34 +754,13 @@
           </div>
         {/if}
       </div>
-
-      <!-- 工作目录选择：仅当来源 Agent 的 workingDirMode ≠ "none" 时出现。点击打开
-           系统目录选择框，选中即持久化到 session.workingDir。显示已选目录末段或占位。 -->
-      {#if showWorkingDir}
-        <button
-          type="button"
-          class="flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-2 text-sm text-base-content transition-colors hover:bg-base-300"
-          aria-label={t("agent.input.selectWorkingDir")}
-          title={session.workingDir ?? t("agent.input.selectWorkingDir")}
-          onclick={pickWorkingDir}
-        >
-          <FolderOpen size={16} class="shrink-0 opacity-70" />
-          {#if workingDirName}
-            <span class="max-w-[140px] truncate">{workingDirName}</span>
-          {:else}
-            <span class="max-w-[140px] truncate text-warning"
-              >{t("agent.input.selectWorkingDir")}</span
-            >
-          {/if}
-        </button>
-      {/if}
     </div>
     <div class="flex flex-row items-center gap-3">
       <!-- 会话级模型选择器：打开系统既有的模型选择 Modal（搜索/收藏/分组）。选中即
            成对写入 modelId+providerId（handleModelSelect）；解析不到显示「选择模型」。 -->
       <button
         type="button"
-        class="flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-2 text-sm text-base-content transition-colors hover:bg-base-300"
+        class="flex h-7 items-center gap-1.5 rounded-md px-2 py-1 text-sm text-base-content/80 hover:bg-base-300/60 transition-colors"
         aria-label={t("agent.input.selectModel")}
         title={selectedModel?.name ?? t("agent.input.selectModel")}
         onclick={() => (modelModalOpen = true)}
@@ -773,18 +782,28 @@
         <ChevronsUpDown size={13} class="shrink-0 opacity-60" />
       </button>
 
-      <Select
-        value={thinkingLevel}
-        options={thinkingLevelOptions}
-        size="sm"
-        autoWidth
-        onChange={handleThinkingChange}
-      />
+      <!-- 推理等级：原生 select 套安静触发器样式，与模型触发器同高、同 hover。 -->
+      <div class="relative">
+        <select
+          value={thinkingLevel}
+          onchange={(event) => handleThinkingChange(event.currentTarget.value)}
+          class="h-7 cursor-pointer appearance-none rounded-md bg-transparent pl-2 pr-6 py-1 text-sm text-base-content/80 hover:bg-base-300/60 transition-colors"
+        >
+          {#each thinkingLevelOptions as opt (opt.value)}
+            <option value={opt.value}>{opt.label}</option>
+          {/each}
+        </select>
+        <ChevronsUpDown
+          size={13}
+          class="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-base-content/80 opacity-60"
+        />
+      </div>
       {#if running}
         <CircleButton
           icon={Square}
           iconSize={16}
           size="w-8 h-8"
+          customClass="enabled:hover:opacity-90"
           ariaLabel={t("agent.input.stop")}
           onclick={handleStop}
         />
@@ -793,6 +812,7 @@
           icon={ArrowUp}
           iconSize={18}
           size="w-8 h-8"
+          customClass="enabled:hover:opacity-90"
           ariaLabel={t("agent.input.send")}
           disabled={awaitingApproval}
           onclick={sendAgentRun}
