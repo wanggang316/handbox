@@ -414,9 +414,9 @@
               class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-300/40"
             >
               <div
-                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary"
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-base-200 text-base-content/60"
               >
-                <Bot size={18} />
+                <Bot size={16} />
               </div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
@@ -432,7 +432,7 @@
                   {/if}
                   {#if getGenuiName(agent)}
                     <span
-                      class="inline-flex shrink-0 items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
+                      class="inline-flex shrink-0 items-center gap-1 rounded-md bg-base-200 px-1.5 py-0.5 text-[10px] text-base-content/60"
                     >
                       <LayoutTemplate size={10} />
                       {getGenuiName(agent)}
@@ -443,7 +443,7 @@
                   {agent.description || agent.systemPrompt || ""}
                 </p>
               </div>
-              <div class="hidden shrink-0 text-xs text-base-content/40 sm:block">
+              <div class="hidden shrink-0 text-[11px] text-base-content/35 sm:block">
                 {new Date(agent.createdAt).toLocaleDateString("zh-CN")}
               </div>
               <!-- 操作：hover / 键盘聚焦时显现 -->

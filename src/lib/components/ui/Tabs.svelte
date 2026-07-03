@@ -8,23 +8,16 @@
   let { value = '', items = [], onChange = () => {} }: Props = $props();
 </script>
 
-<div class="tabs" role="tablist">
+<!-- Codex 式分段 tab：选中为灰底胶囊，无下划线/底部边框 -->
+<div class="flex items-center gap-1" role="tablist">
   {#each items as item (item.value)}
     <button
       role="tab"
-      class="tab"
-      class:active={value === item.value}
       aria-selected={value === item.value}
+      class="rounded-md px-2.5 py-1 text-sm transition-colors {value === item.value
+        ? 'bg-base-200 font-medium text-base-content'
+        : 'text-base-content/55 hover:text-base-content/85'}"
       onclick={() => onChange(item.value)}
     >{item.label}</button>
   {/each}
 </div>
-
-<style>
-.tabs { display: flex; border-bottom: 1px solid var(--base-300); margin-bottom: 1rem; }
-.tab { padding: .75rem 1rem; background: none; border: none; border-bottom: 2px solid transparent; color: color-mix(in oklch, var(--base-content) 80%, transparent); cursor: pointer; }
-.tab:hover { color: var(--base-content); }
-.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-</style>
-
-
