@@ -121,9 +121,8 @@
 
   <!-- 加载状态 -->
   {#if skillState.isLoading && skillState.skills.length === 0}
-    <div class="flex items-center justify-center py-8">
+    <div class="flex items-center justify-center py-10">
       <Spinner size={28} />
-      <span class="ml-2 text-sm text-base-content/70">{t("settings.skills.loading")}</span>
     </div>
   {/if}
 
