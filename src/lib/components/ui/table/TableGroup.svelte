@@ -20,9 +20,13 @@
 
   let isCollapsed = $state(defaultCollapsed);
   let isHovering = $state(false);
+  // 折叠动画仅在用户实际点击后启用：组件挂载也会播放 intro transition，
+  // 若一开始就带时长，切换设置页时所有分组卡都会滑入一遍（观感拖沓卡顿）。
+  let hasToggled = $state(false);
 
   function toggleCollapse() {
     if (collapsible) {
+      hasToggled = true;
       isCollapsed = !isCollapsed;
     }
   }
@@ -55,7 +59,7 @@
 
   {#if !collapsible || !isCollapsed}
     <div
-      transition:slide={{ duration: 160 }}
+      transition:slide={{ duration: hasToggled ? 160 : 0 }}
       class="table-group bg-[var(--bg-panel)] rounded-xl border border-[var(--hairline)] overflow-hidden {showDivider
         ? 'show-divider'
         : ''}"
