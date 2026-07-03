@@ -110,7 +110,7 @@
       aria-invalid={invalid ? "true" : undefined}
       aria-describedby={describedby}
       class:is-error={invalid}
-      class="field appearance-none {autoWidth
+      class="field field--soft appearance-none {autoWidth
         ? 'w-auto min-w-fit'
         : 'w-full'} {sizeClasses[size]} {hasIcon
         ? size === 'sm'

@@ -169,11 +169,11 @@ textarea.composer-input:focus-visible {
   --bg-page: var(--color-base-200);
   --bg-card: var(--color-base-100);
 
-  /* 列表/表单页的层级对：canvas = 页面画布（衬底），panel = 其上的列表/表单面板。
-     浅色三档：sidebar(--bg-page 97%) < canvas(98.2%) < panel(纯白)——画布须比
-     sidebar 浅以免同色。深色反向（画布最深、面板上浮），深色块显式覆写。 */
-  --bg-canvas: oklch(98.2% 0 0);
-  --bg-panel: oklch(100% 0 0);
+  /* 列表/表单页的层级对：canvas = 页面画布，panel = 其上的列表/表单面板。
+     浅色两者同为内容白（Codex 式：层次靠 hairline 边框与行分割线，不靠底色差）；
+     深色面板上浮一阶，深色块显式覆写。 */
+  --bg-canvas: var(--color-base-100);
+  --bg-panel: var(--color-base-100);
 
   /* Z-index 语义层级。overlay 类经 bits-ui Portal 渲染到 <body>、脱离父级 stacking
      context，故只需一条有序 scale。取高位以与其余未收敛的旧 z 值（~10020）共存。 */
@@ -723,6 +723,15 @@ pre.code-block--compact {
 .field:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* 灰底无边框变体（Codex 式 select / 触发器）：结构由底色承担、不描边。 */
+.field--soft {
+  border-color: transparent;
+  background: var(--base-200);
+}
+.field--soft:hover:not(:disabled):not(:focus):not(:focus-visible) {
+  border-color: transparent;
+  background: var(--base-300);
 }
 
 /* Checkbox / Radio 皮肤：bits-ui 的 Checkbox.Root / RadioGroup.Item 会带

@@ -32,7 +32,7 @@
     <!-- 内容列限宽：设置内容不随窗口拉满（对齐 Linear/Codex 的设置页阅读宽度） -->
     <div class="mx-auto w-full max-w-3xl">
       {#if currentTitle}
-        <div class="px-6 pr-8 pt-12">
+        <div class="px-6 pb-2 pr-8 pt-14">
           <PageHeader title={currentTitle} />
         </div>
       {/if}

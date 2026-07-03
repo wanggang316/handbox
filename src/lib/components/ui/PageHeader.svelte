@@ -20,7 +20,7 @@
 <header class="flex flex-col gap-3">
   <div class="flex items-center justify-between gap-4">
     <div class="flex min-w-0 items-baseline gap-2.5">
-      <h1 class="truncate text-xl font-semibold text-base-content">{title}</h1>
+      <h1 class="truncate text-2xl font-semibold text-base-content">{title}</h1>
       {#if meta}
         <span class="shrink-0 text-sm text-base-content/50">{meta}</span>
       {/if}

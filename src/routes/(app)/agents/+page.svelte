@@ -339,55 +339,56 @@
 </script>
 
 <div class="h-full flex flex-col bg-[var(--bg-canvas)]">
-  <div class="flex-shrink-0 border-b border-base-300 px-6 pt-12">
+  <div class="flex-shrink-0 px-6 pb-1 pt-12">
     <div class="mx-auto w-full max-w-3xl">
     <Tabs value={activeTab} items={tabItems} onChange={(v) => (activeTab = v as "agents" | "genui")} />
 
-    {#if activeTab === "agents"}
-      <div class="pb-4">
-        <PageHeader
-          title="Agents"
-          meta={t("agent.manage.count", { count: agentState.agents.length })}
-        >
-          {#snippet actions()}
-            <Button
-              variant="primary"
-              size="sm"
-              onclick={openCreateModal}
-              customClass="flex items-center gap-2"
-            >
-              <Plus size={16} />
-              {t("agent.manage.newAgent")}
-            </Button>
-          {/snippet}
-        </PageHeader>
-      </div>
-    {:else}
-      <div class="pb-4">
-        <PageHeader
-          title="GenUI"
-          meta={`共 ${genuiState.genuis.length} 个模板`}
-          description="具名、可复用的 JSON-Render UI 模板，可在 Agent 表单中关联使用。"
-        >
-          {#snippet actions()}
-            <Button
-              variant="primary"
-              size="sm"
-              onclick={openGenuiCreate}
-              customClass="flex items-center gap-2"
-            >
-              <Plus size={16} />
-              新建 GenUI
-            </Button>
-          {/snippet}
-        </PageHeader>
-      </div>
-    {/if}
     </div>
   </div>
 
-  <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
     <div class="mx-auto w-full max-w-3xl">
+      <!-- 页头随内容滚动（Codex 式），顶部只固定 Tabs -->
+      {#if activeTab === "agents"}
+        <div class="pb-5 pt-6">
+          <PageHeader
+            title="Agents"
+            meta={t("agent.manage.count", { count: agentState.agents.length })}
+          >
+            {#snippet actions()}
+              <Button
+                variant="primary"
+                size="sm"
+                onclick={openCreateModal}
+                customClass="flex items-center gap-2"
+              >
+                <Plus size={16} />
+                {t("agent.manage.newAgent")}
+              </Button>
+            {/snippet}
+          </PageHeader>
+        </div>
+      {:else}
+        <div class="pb-5 pt-6">
+          <PageHeader
+            title="GenUI"
+            meta={`共 ${genuiState.genuis.length} 个模板`}
+            description="具名、可复用的 JSON-Render UI 模板，可在 Agent 表单中关联使用。"
+          >
+            {#snippet actions()}
+              <Button
+                variant="primary"
+                size="sm"
+                onclick={openGenuiCreate}
+                customClass="flex items-center gap-2"
+              >
+                <Plus size={16} />
+                新建 GenUI
+              </Button>
+            {/snippet}
+          </PageHeader>
+        </div>
+      {/if}
     {#if activeTab === "agents"}
       {#if agentState.isLoading}
         <div class="flex items-center justify-center h-full">

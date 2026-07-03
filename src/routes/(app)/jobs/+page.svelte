@@ -179,8 +179,10 @@
 </script>
 
 <div class="h-full flex flex-col bg-[var(--bg-canvas)]">
-  <div class="flex-shrink-0 border-b border-base-300 px-6 pb-4 pt-12">
+  <!-- 页头随内容滚动（Codex 式） -->
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-12">
     <div class="mx-auto w-full max-w-3xl">
+    <div class="pb-5 pt-2">
     <PageHeader
       title={t("jobs.title")}
       meta={t("jobs.count", { n: filteredJobs.length })}
@@ -201,7 +203,7 @@
         <input
           type="text"
           placeholder={t("jobs.searchPlaceholder")}
-          class="field h-9 w-full pl-10 pr-4 text-sm"
+          class="field h-10 w-full pl-10 pr-4 text-sm"
           bind:value={searchQuery}
         />
         <Search
@@ -211,10 +213,6 @@
       </div>
     </PageHeader>
     </div>
-  </div>
-
-  <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-    <div class="mx-auto w-full max-w-3xl">
     {#if jobStore.isLoading}
       <div class="flex items-center justify-center h-full">
         <div
