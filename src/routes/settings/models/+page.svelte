@@ -61,8 +61,9 @@
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
 
-  <!-- 加载状态 -->
-  {#if providerState.isLoading}
+  <!-- 加载状态：仅真正的首次加载显示（store 已有数据时直接渲染列表，
+       后台刷新静默完成，避免「列表→spinner→列表」的闪动）。 -->
+  {#if providerState.isLoading && providerState.providers.length === 0}
     <div class="flex items-center justify-center py-8">
       <Spinner size={28} />
       <span class="ml-2 text-sm text-base-content/70">{t("provider.loadingProviders")}</span>
