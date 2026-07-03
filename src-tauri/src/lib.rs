@@ -13,7 +13,8 @@ pub mod utils;
 use crate::tray::setup_tray;
 
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+use tauri::Manager;
 
 use crate::commands::*;
 use crate::services::{
@@ -98,6 +99,21 @@ pub fn run() {
                     std::process::exit(1);
                 }
             });
+
+            // 主窗口以 visible:false 启动、由前端首帧绘制完成后 show()（消除启动
+            // 黑屏/白屏闪）。此处兜底：前端若启动失败（JS 异常/资源缺失），4 秒后
+            // 强制显示窗口，避免"应用无窗口可见"。
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                    if let Some(w) = handle.get_webview_window("main") {
+                        if !w.is_visible().unwrap_or(true) {
+                            let _ = w.show();
+                        }
+                    }
+                });
+            }
 
             Ok(())
         })

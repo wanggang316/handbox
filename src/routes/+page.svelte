@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { isTauriEnvironment } from "$lib/utils/tauri";
   import { settingsState } from "$lib/states/settings.svelte";
   import { t } from "$lib/i18n";
 
@@ -14,6 +16,19 @@
 
   onMount(() => {
     if (!browser) return;
+
+    // 主窗口以 visible:false 启动：等启动页首帧真正绘制（双 rAF）后再显示窗口，
+    // 消除「系统暗色黑屏 → HTML 白屏 → 启动页」的启动闪。Rust 侧有 4s 兜底 show。
+    if (isTauriEnvironment()) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const w = getCurrentWindow();
+          w.show()
+            .then(() => w.setFocus())
+            .catch((e) => console.error("Failed to show main window:", e));
+        }),
+      );
+    }
 
     let entered = false;
     const enter = () => {

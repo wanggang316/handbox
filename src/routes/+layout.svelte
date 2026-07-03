@@ -4,6 +4,7 @@
   import { browser } from "$app/environment";
   import { afterNavigate, goto } from "$app/navigation";
   import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { isTauriEnvironment } from "$lib/utils/tauri";
   import { navigationState } from "$lib/states/navigation.svelte";
   import { uiState } from "$lib/states/ui.svelte";
@@ -80,14 +81,22 @@
     };
     window.addEventListener("storage", handleStorageChange);
 
-    providerActions.loadProviderConfigs().catch((error) => {
-      console.error("Failed to load provider configs:", error);
-    });
+    // 重预加载只在主窗口跑：4 个隐藏辅助窗口（划词×3 / quick action）各 boot 一份
+    // 同一 SPA，若全都预载 providers/auth，冷启动期是 5 份重复 IPC 抢主窗口首屏资源。
+    // settings 仍全窗口加载（轻量本地读，主题/划词翻译依赖）。
+    const isMainWindow =
+      !isTauriEnvironment() || getCurrentWindow().label === "main";
 
-    // 预加载 providers with models，这样子页面就不需要重复加载
-    providerActions.loadProvidersWithModels(false).catch((error) => {
-      console.error("Failed to load providers:", error);
-    });
+    if (isMainWindow) {
+      providerActions.loadProviderConfigs().catch((error) => {
+        console.error("Failed to load provider configs:", error);
+      });
+
+      // 预加载 providers with models，这样子页面就不需要重复加载
+      providerActions.loadProvidersWithModels(false).catch((error) => {
+        console.error("Failed to load providers:", error);
+      });
+    }
 
     // 预加载 settings，这样子页面就不需要重复加载；
     // 加载完成后用后端持久化的语言做权威回填。
@@ -103,9 +112,11 @@
         console.error("Failed to load settings:", error);
       });
 
-    initAuth().catch((error) => {
-      console.error("Failed to initialize auth:", error);
-    });
+    if (isMainWindow) {
+      initAuth().catch((error) => {
+        console.error("Failed to initialize auth:", error);
+      });
+    }
 
     return () => {
       unlistenSettingsNavigate?.();
