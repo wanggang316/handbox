@@ -6,6 +6,7 @@
   import { jobStore } from "$lib/stores/jobStore.svelte";
   import JobCard from "$lib/components/jobs/JobCard.svelte";
   import Button from "$lib/components/ui/Button.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import JobFormModal from "$lib/components/jobs/JobFormModal.svelte";
   import JobDetailModal from "$lib/components/jobs/JobDetailModal.svelte";
@@ -215,9 +216,7 @@
     </div>
     {#if jobStore.isLoading}
       <div class="flex items-center justify-center h-full">
-        <div
-          class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
-        ></div>
+        <Spinner size={28} />
       </div>
     {:else if jobStore.error}
       <div class="flex flex-col items-center justify-center h-full text-base-content/50">

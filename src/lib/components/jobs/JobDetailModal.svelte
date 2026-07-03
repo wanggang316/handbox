@@ -16,6 +16,7 @@
   } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import Modal from "$lib/components/ui/Modal.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import StatusLabel from "$lib/components/ui/StatusLabel.svelte";
   import { cronToHuman } from "$lib/utils/cronReadable";
   import { formatDateTime, formatDuration } from "$lib/utils";
@@ -320,9 +321,7 @@
       <div class="flex-1 min-h-0 overflow-y-auto px-6 py-3">
         {#if loading}
           <div class="flex items-center justify-center py-10">
-            <div
-              class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"
-            ></div>
+            <Spinner size={28} />
           </div>
         {:else if loadError}
           <div

@@ -18,6 +18,7 @@
   import type { Agent, GenUi } from "$lib/types";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import Tabs from "$lib/components/ui/Tabs.svelte";
   import AgentFormModal from "$lib/components/agent/AgentFormModal.svelte";
   import type { AgentFormData } from "$lib/components/agent/AgentFormModal.svelte";
@@ -392,9 +393,7 @@
     {#if activeTab === "agents"}
       {#if agentState.isLoading}
         <div class="flex items-center justify-center h-full">
-          <div
-            class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
-          ></div>
+          <Spinner size={28} />
         </div>
       {:else if agentState.agents.length === 0}
         <div
@@ -489,9 +488,7 @@
       <!-- GenUI 标签页 -->
       {#if genuiState.isLoading}
         <div class="flex items-center justify-center h-full">
-          <div
-            class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
-          ></div>
+          <Spinner size={28} />
         </div>
       {:else if genuiState.genuis.length === 0}
         <div

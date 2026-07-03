@@ -13,8 +13,8 @@
     RotateCcw,
     MessageCirclePlus,
     ChevronDown,
-    Loader2,
   } from "@lucide/svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { hideContentPanel, setContentPanelPinned } from "$lib/api/selection";
   import { settingsState } from "$lib/states/settings.svelte";
@@ -369,7 +369,7 @@
       <!-- 翻译模式 -->
       {#if translation.isLoading}
         <div class="flex items-center justify-center py-8">
-          <Loader2 class="size-5 animate-spin text-primary" />
+          <Spinner size={28} />
           <span class="ml-2 text-sm text-base-content/60">{t("selection.translating")}</span>
         </div>
       {:else if translation.error}

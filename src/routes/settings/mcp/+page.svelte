@@ -15,11 +15,11 @@
   } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
   import {
-    LoaderCircle,
     Puzzle,
     ChevronsUpDown,
     Settings2,
   } from "@lucide/svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import { t } from "$lib/i18n";
 
   let showFormModal = $state(false);
@@ -96,7 +96,7 @@
   <!-- 加载状态 -->
   {#if mcpState.isLoading}
     <div class="flex items-center justify-center py-8">
-      <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
+      <Spinner size={28} />
       <span class="ml-2 text-sm text-base-content/70"
         >{t("provider.loadingMcpServers")}</span
       >

@@ -3,6 +3,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import Button from "$lib/components/ui/Button.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import { skillState, skillActions } from "$lib/states/skill.svelte";
   import type { SkillInfo, SkillScope } from "$lib/types";
@@ -121,7 +122,7 @@
   <!-- 加载状态 -->
   {#if skillState.isLoading && skillState.skills.length === 0}
     <div class="flex items-center justify-center py-8">
-      <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
+      <Spinner size={28} />
       <span class="ml-2 text-sm text-base-content/70">{t("settings.skills.loading")}</span>
     </div>
   {/if}
