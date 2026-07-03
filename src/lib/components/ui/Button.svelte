@@ -35,7 +35,10 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    /* transition: opacity 0.2s, background-color 0.2s; */
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease,
+      opacity 0.15s ease;
   }
   .btn:disabled {
     opacity: 0.6;

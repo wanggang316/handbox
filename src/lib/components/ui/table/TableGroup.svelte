@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ChevronUp, ChevronDown } from "@lucide/svelte";
+  import { slide } from "svelte/transition";
+  import { ChevronDown } from "@lucide/svelte";
 
   interface Props {
     title?: string;
@@ -40,18 +41,21 @@
       disabled={!collapsible}
     >
       <span>{title}</span>
-      {#if collapsible && isHovering}
-        {#if isCollapsed}
-          <ChevronDown size={16} />
-        {:else}
-          <ChevronUp size={16} />
-        {/if}
+      {#if collapsible}
+        <!-- 常驻单 chevron：hover 淡入、展开时旋转指上（替代双 icon 切换） -->
+        <ChevronDown
+          size={16}
+          class="transition duration-150 {isHovering
+            ? 'opacity-100'
+            : 'opacity-0'} {isCollapsed ? '' : 'rotate-180'}"
+        />
       {/if}
     </button>
   {/if}
 
   {#if !collapsible || !isCollapsed}
     <div
+      transition:slide={{ duration: 160 }}
       class="table-group bg-[var(--bg-panel)] rounded-xl border border-[var(--hairline)] overflow-hidden {showDivider
         ? 'show-divider'
         : ''}"
