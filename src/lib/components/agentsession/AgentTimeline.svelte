@@ -156,7 +156,16 @@
     }
   }
 
-  // 已提交消息数量变化时滚动。
+  // 会话切换 / transcript 就位：DOM 更新后（绘制前）同步贴底。组件实例跨会话
+  // 复用，滚动容器保留上一会话的滚动位；若只靠下方延时滚动，会先以旧滚动位
+  // 露出一帧、约 100ms 后才跳底（二段跳）。
+  $effect(() => {
+    void sessionId;
+    void runState.messages.length;
+    scrollToBottom();
+  });
+
+  // 已提交消息数量变化时滚动（延时兜底晚到布局：markdown/图片撑高后再贴一次底）。
   $effect(() => {
     if (runState.messages.length > 0) {
       setTimeout(scrollToBottom, 100);

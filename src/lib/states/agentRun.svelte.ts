@@ -79,6 +79,13 @@ export interface AgentRunState {
    * 本轮对话续行、仍恰好一次终结（VAL-CARUN-019）。
    */
   isCompacting: boolean;
+  /**
+   * 该会话的已提交 transcript 是否至少成功还原过一次（`loadTranscript`）。
+   * 会话页据此区分「尚未加载（居中 Spinner）」与「确为空会话（引导空态）」，
+   * 避免首开有历史的会话时先闪一帧引导空态再换成 timeline。
+   * 状态按 sessionId 常驻本 store 单例，重访会话首帧直出缓存、不再回到 Spinner。
+   */
+  hydrated: boolean;
 }
 
 function createEmptyRunState(): AgentRunState {
@@ -90,6 +97,7 @@ function createEmptyRunState(): AgentRunState {
     error: null,
     toolCalls: {},
     isCompacting: false,
+    hydrated: false,
   };
 }
 
@@ -622,6 +630,8 @@ class AgentRunStore {
       }
       const state = this.ensureState(sessionId);
       state.messages = messages;
+      // 首次还原完成：会话页据此从 Spinner 切到真实内容（空会话则切引导空态）。
+      state.hydrated = true;
       // 无活跃 run 时丢弃残留 live tool-call，使卡片纯从配对的已提交 toolResult 重建。
       if (!state.isRunning) {
         state.toolCalls = {};
