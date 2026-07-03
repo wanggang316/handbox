@@ -30,6 +30,7 @@
   } from "$lib/api/openIn";
   import { settingsState } from "$lib/states/settings.svelte";
   import { getAllModels } from "$lib/states/provider.svelte";
+  import { uiState } from "$lib/states/ui.svelte";
 
   const session = $derived(agentSessionState.currentSession);
 
@@ -249,8 +250,12 @@
 </script>
 
 {#if session}
+  <!-- 侧栏收起时主内容顶到窗口左缘：给头部让出红绿灯 + 侧栏开关的位置
+       （toggle 位于 left:100px，按钮宽约 30px），padding 过渡与侧栏动画同步。 -->
   <header
-    class="flex items-center gap-3 px-4 py-2.5 border-b border-base-300 shrink-0"
+    class="flex items-center gap-3 px-4 py-2.5 border-b border-base-300 shrink-0 transition-[padding-left] duration-200 {uiState.sidebarOpen
+      ? ''
+      : 'pl-[136px]'}"
   >
     <Bot size={18} class="opacity-60 shrink-0" />
     <div class="flex flex-col min-w-0">
