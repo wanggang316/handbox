@@ -47,13 +47,24 @@
   // Gate concurrent register/persist round-trips.
   let busy = $state(false);
 
+  // Pull the configured hotkey from the settings store; skip while unloaded.
+  function syncFromSettings(): void {
+    if (!settingsState.settings) return;
+    const configured = settingsState.settings.quickAction?.shortcut;
+    if (configured) {
+      shortcut = configured;
+    }
+  }
+
+  // Root layout preloads settings: sync now so the first frame shows the real
+  // hotkey instead of flashing the default accelerator.
+  syncFromSettings();
+
   onMount(async () => {
     try {
+      // Cold start / deep link fallback: ensure settings are loaded, re-sync.
       await settingsState.loadSettings();
-      const configured = settingsState.settings?.quickAction?.shortcut;
-      if (configured) {
-        shortcut = configured;
-      }
+      syncFromSettings();
     } catch (error) {
       console.error("加载快捷键设置失败:", error);
     }

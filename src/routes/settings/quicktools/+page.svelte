@@ -21,13 +21,21 @@
   let disabledApps: DisabledApp[] = [];
   let isLoadingApps: boolean = false;
 
+  // 从 settings 回填本地状态；store 未就绪时跳过
+  function syncFromSettings(): void {
+    if (!settingsState.settings?.quickTools) return;
+    showToolbarOnSelection =
+      settingsState.settings.quickTools.showToolbarOnSelection;
+  }
+
+  // 根布局已预加载 settings：同步回填，首帧即真实值，避免开关闪烁
+  syncFromSettings();
+
   onMount(async () => {
     try {
+      // 兜底冷启动/深链：确保 settings 加载完成后再同步一次
       await settingsState.loadSettings();
-      if (settingsState.settings?.quickTools) {
-        showToolbarOnSelection =
-          settingsState.settings.quickTools.showToolbarOnSelection;
-      }
+      syncFromSettings();
 
       // 检查当前权限状态
       permissionGranted = await checkAccessibilityPermission();

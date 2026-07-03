@@ -8,16 +8,25 @@
   // 全局默认启用的工具集（coding-agent 注册名）。无 agent 段时视为全开默认。
   let enabledTools = $state<string[]>([...BUILTIN_TOOL_IDS]);
 
-  onMount(async () => {
-    try {
-      await settingsState.loadSettings();
-      enabledTools =
-        settingsState.settings?.agent?.defaultEnabledTools ?? [
-          ...BUILTIN_TOOL_IDS,
-        ];
-    } catch (error) {
-      console.error("加载 Agent 工具设置失败:", error);
-    }
+  // 从 settings 回填本地状态；store 未就绪时跳过
+  function syncFromSettings(): void {
+    if (!settingsState.settings) return;
+    enabledTools = settingsState.settings.agent?.defaultEnabledTools ?? [
+      ...BUILTIN_TOOL_IDS,
+    ];
+  }
+
+  // 根布局已预加载 settings：同步回填，首帧即真实值，避免开关闪烁
+  syncFromSettings();
+
+  // 兜底冷启动/深链：确保 settings 加载完成后再同步一次
+  onMount(() => {
+    settingsState
+      .loadSettings()
+      .then(syncFromSettings)
+      .catch((error) => {
+        console.error("加载 Agent 工具设置失败:", error);
+      });
   });
 
   function isEnabled(toolId: string): boolean {
