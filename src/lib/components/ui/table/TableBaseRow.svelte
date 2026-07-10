@@ -3,7 +3,8 @@
 
   interface Props {
     label?: string;
-    icon?: any; // Lucide图标组件
+    description?: string; // 左侧 label 下的副标题（Linear 式设置行）
+    icon?: any; // Lucide 图标组件
     layout?: "horizontal" | "vertical";
     py?: string;
     rightContent?: any; // 标题行右边的内容
@@ -14,6 +15,7 @@
 
   let {
     label,
+    description,
     icon,
     layout = "horizontal",
     py = "4",
@@ -26,20 +28,31 @@
   const errorId = `tblrow-${Math.random().toString(36).slice(2)}-error`;
 </script>
 
+{#snippet labelHeader()}
+  <div class="flex min-w-0 flex-col gap-0.5">
+    <div class="flex items-center gap-2">
+      {#if icon}
+        {@render icon({ class: "w-4 h-4 text-base-content/70" })}
+      {/if}
+      <div class="text-sm text-base-content">{label}</div>
+      {#if helpText}
+        <InfoTooltip content={helpText} />
+      {/if}
+    </div>
+    {#if description}
+      <div class="text-[13px] leading-snug text-base-content/55">
+        {description}
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
 <div class="px-6 py-{py}">
   {#if label}
     {#if layout === "vertical"}
-      <div class="space-y-0">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            {#if icon}
-              {@render icon({ class: "w-4 h-4 text-base-content/70" })}
-            {/if}
-            <div class="text-sm text-base-content">{label}</div>
-            {#if helpText}
-              <InfoTooltip content={helpText} />
-            {/if}
-          </div>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between gap-4">
+          {@render labelHeader()}
           {#if rightContent}
             <div>
               {@render rightContent?.()}
@@ -54,25 +67,17 @@
         {/if}
       </div>
     {:else}
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          {#if icon}
-            {@render icon({ class: "w-4 h-4 text-base-content/70" })}
-          {/if}
-          <div class="text-sm text-base-content">{label}</div>
-          {#if helpText}
-            <InfoTooltip content={helpText} />
-          {/if}
-        </div>
+      <div class="flex items-center justify-between gap-4">
+        {@render labelHeader()}
         {#if error}
-          <div class="flex flex-col items-end flex-1 ml-4">
-            <div class="flex justify-end w-full">
+          <div class="flex flex-col items-end">
+            <div class="flex justify-end">
               {@render children?.()}
             </div>
             <p id={errorId} class="text-xs text-error mt-1">{error}</p>
           </div>
         {:else}
-          <div class="flex justify-end flex-1 ml-4">
+          <div class="flex justify-end">
             {@render children?.()}
           </div>
         {/if}

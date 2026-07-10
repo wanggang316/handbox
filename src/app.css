@@ -48,7 +48,7 @@
   /* Linear extended ladder — not mapped to daisyUI vocab; consumed via var(...) */
   --color-surface-3: oklch(91% 0 0);
   --color-surface-4: oklch(88% 0 0);
-  --color-hairline: oklch(90% 0 0);
+  --color-hairline: oklch(92.5% 0 0);
   --color-hairline-strong: oklch(85% 0 0);
   /* 命名约定：subtle 比 tertiary 对比度更高（更醒目）；tertiary 是最弱的辅助文字 */
   --color-ink-subtle: oklch(45% 0.01 250);
@@ -168,6 +168,30 @@ textarea.composer-input:focus-visible {
   /* 浅色：page 略灰 (97%) → card 最亮 (99%)；深色：page 最深 (8%) → card 上浮 (15%) */
   --bg-page: var(--color-base-200);
   --bg-card: var(--color-base-100);
+
+  /* 列表/表单页的层级对：canvas = 页面画布，panel = 其上的列表/表单面板。
+     浅色两者同为内容白（Codex 式：层次靠 hairline 边框与行分割线，不靠底色差）；
+     深色面板上浮一阶，深色块显式覆写。 */
+  --bg-canvas: var(--color-base-100);
+  --bg-panel: var(--color-base-100);
+
+  /* Z-index 语义层级。overlay 类经 bits-ui Portal 渲染到 <body>、脱离父级 stacking
+     context，故只需一条有序 scale。取高位以与其余未收敛的旧 z 值（~10020）共存。 */
+  --z-dropdown: 10030; /* 就地下拉 */
+  --z-overlay: 10050; /* modal / dialog 背景遮罩 */
+  --z-modal: 10060; /* modal / dialog 内容 */
+  --z-popover: 10070; /* 浮层 / 下拉：需盖在 modal 之上 */
+  --z-toast: 99999; /* 全局最上 */
+
+  /* 表单控件 component token：输入类外观（bg/border/focus/error）一处定义。消费短别名，
+     深色由 [data-theme="dark"] 的短别名重绑自动跟随，无需在此重复。 */
+  --field-bg: var(--base-200);
+  --field-border: var(--hairline);
+  --field-border-hover: var(--hairline-strong);
+  --field-focus: var(--primary);
+  --field-error: var(--error);
+  --field-text: var(--base-content);
+  --field-placeholder: color-mix(in oklch, var(--base-content) 35%, transparent);
 }
 
 /* 深色主题 */
@@ -222,6 +246,10 @@ textarea.composer-input:focus-visible {
   --error: var(--color-error-dark);
   --error-content: var(--color-error-content-dark);
   --overlay: var(--color-overlay-dark);
+
+  /* canvas/panel 深色反向配对：画布取最深（8%），面板上浮一阶（15%）。 */
+  --bg-canvas: var(--color-base-100-dark);
+  --bg-panel: var(--color-base-200-dark);
 
   /* Linear 扩展阶梯（短别名）— 深色。这些 consumer 全部走 var(--hairline) 等短别名，
      故此处只重绑短别名；对应的 --color-* 不在此重绑，因为 Tailwind utility 在 build 时
@@ -624,4 +652,172 @@ pre.code-block--compact {
    black-on-black; flip them to white so they stay legible. */
 [data-theme="dark"] img[src*="models.dev/logos"] {
   filter: brightness(0) invert(1);
+}
+
+/* Dialog (bits-ui) 进出场动效：Overlay/Content 上带 data-state="open|closed"，关闭时
+   Presence 层等动画结束再卸载，故两态各挂一段动画（含退场）。 */
+.dlg-overlay[data-state="open"] {
+  animation: dlgFadeIn 0.22s ease-out;
+}
+.dlg-overlay[data-state="closed"] {
+  animation: dlgFadeOut 0.18s ease-in forwards;
+}
+.dlg-content[data-state="open"] {
+  animation: dlgContentIn 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.dlg-content[data-state="closed"] {
+  animation: dlgContentOut 0.18s ease-in forwards;
+}
+@keyframes dlgFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dlgFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes dlgContentIn {
+  from { opacity: 0; transform: translate(-50%, calc(-50% - 24px)); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+@keyframes dlgContentOut {
+  from { opacity: 1; transform: translate(-50%, -50%); }
+  to { opacity: 0; transform: translate(-50%, calc(-50% - 24px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dlg-overlay[data-state],
+  .dlg-content[data-state] { animation: none; }
+}
+
+/* 表单输入基础皮肤：input / textarea / select 套用同一个 .field，外观（底色 / 边框 /
+   focus ring / error / disabled）改一处即全站生效；尺寸、宽度、字号由各组件用 Tailwind
+   叠加。focus 统一走 ring（box-shadow），比 border 变色更醒目、可访问。 */
+.field {
+  border-radius: 0.375rem;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--field-text);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.field::placeholder {
+  color: var(--field-placeholder);
+}
+.field:hover:not(:disabled):not(:focus):not(:focus-visible) {
+  border-color: var(--field-border-hover);
+}
+.field:focus,
+.field:focus-visible {
+  outline: none;
+  border-color: var(--field-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+}
+.field.is-error {
+  border-color: var(--field-error);
+}
+.field.is-error:focus,
+.field.is-error:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-error) 30%, transparent);
+}
+.field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* 灰底无边框变体（Codex 式 select / 触发器）：结构由底色承担、不描边。 */
+.field--soft {
+  border-color: transparent;
+  background: var(--base-200);
+}
+.field--soft:hover:not(:disabled):not(:focus):not(:focus-visible) {
+  border-color: transparent;
+  background: var(--base-300);
+}
+
+/* Checkbox / Radio 皮肤：bits-ui 的 Checkbox.Root / RadioGroup.Item 会带
+   data-state="checked|unchecked|indeterminate"，据此上色；与 .field 共用同一组 token。 */
+.checkbox-box {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--primary-content);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.checkbox-box[data-state="checked"],
+.checkbox-box[data-state="indeterminate"] {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.checkbox-box:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+}
+
+.radio-dot {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.radio-dot[data-state="checked"] {
+  border-color: var(--primary);
+}
+.radio-dot[data-state="checked"]::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--primary);
+}
+.radio-dot:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+}
+
+/* FormModal 内的功能化表单元素：大标题式名称输入（无边框）与分区小标题，
+   三个创建/编辑弹窗（Agent / Job / MCP）共用同一套观感。 */
+.modal-title-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--base-content);
+}
+.modal-title-input::placeholder {
+  color: color-mix(in oklch, var(--base-content) 30%, transparent);
+}
+/* 标题式输入不要全局键盘焦点环（光标即指示，环会破坏无边框观感）。
+   type+class 特异性高于上方 input:focus-visible 全局规则，稳定覆盖。 */
+input.modal-title-input:focus-visible {
+  outline: none;
+}
+.modal-title-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.form-section-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--base-content) 45%, transparent);
 }

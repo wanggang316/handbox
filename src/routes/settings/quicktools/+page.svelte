@@ -1,3 +1,12 @@
+<script lang="ts" module>
+  import type { DisabledApp as DisabledAppCache } from "$lib/api/selection";
+
+  // 跨挂载缓存：权限探测与禁用应用列表都是异步的，缓存上次结果让重访首帧直出，
+  // 异步刷新静默纠偏。null 表示从未探测过（本会话首次）。
+  let cachedPermission: boolean | null = null;
+  let cachedApps: DisabledAppCache[] | null = null;
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import { TableGroup, SwitchRow } from "$lib/components/ui/table";
@@ -16,21 +25,33 @@
     import IconButton from "$lib/components/ui/IconButton.svelte";
 
   let showToolbarOnSelection: boolean = false;
-  let permissionGranted: boolean = false;
+  // 权限/禁用应用是异步探测的：用模块级缓存让重访首帧直出上次结果，避免
+  // 「警告条闪现又消失」「列表先空后填」。首次访问乐观按已授权画（警告延迟出现
+  // 好过对多数已授权用户闪一下警告）。
+  let permissionGranted: boolean = cachedPermission ?? true;
   let isCheckingPermission: boolean = false;
-  let disabledApps: DisabledApp[] = [];
+  let disabledApps: DisabledApp[] = cachedApps ?? [];
   let isLoadingApps: boolean = false;
+
+  // 从 settings 回填本地状态；store 未就绪时跳过
+  function syncFromSettings(): void {
+    if (!settingsState.settings?.quickTools) return;
+    showToolbarOnSelection =
+      settingsState.settings.quickTools.showToolbarOnSelection;
+  }
+
+  // 根布局已预加载 settings：同步回填，首帧即真实值，避免开关闪烁
+  syncFromSettings();
 
   onMount(async () => {
     try {
+      // 兜底冷启动/深链：确保 settings 加载完成后再同步一次
       await settingsState.loadSettings();
-      if (settingsState.settings?.quickTools) {
-        showToolbarOnSelection =
-          settingsState.settings.quickTools.showToolbarOnSelection;
-      }
+      syncFromSettings();
 
       // 检查当前权限状态
       permissionGranted = await checkAccessibilityPermission();
+      cachedPermission = permissionGranted;
       console.log("[QuickTools] 初始化: permissionGranted =", permissionGranted);
 
       // 加载禁用的应用列表
@@ -41,9 +62,11 @@
   });
 
   async function loadDisabledApps() {
-    isLoadingApps = true;
+    // 有缓存时静默刷新（不闪 spinner），仅冷启动首次显示加载态。
+    isLoadingApps = cachedApps === null;
     try {
       disabledApps = await getDisabledApps();
+      cachedApps = disabledApps;
       console.log("[QuickTools] 禁用的应用:", disabledApps);
     } catch (error) {
       console.error("加载禁用应用列表失败:", error);
@@ -64,6 +87,7 @@
         const granted = await requestAccessibilityPermission();
         console.log("[QuickTools] requestAccessibilityPermission 返回:", granted);
         permissionGranted = granted;
+        cachedPermission = granted;
 
         if (granted) {
           // 权限已授予，保存设置
@@ -100,6 +124,7 @@
 
   async function handleRefreshPermission() {
     permissionGranted = await checkAccessibilityPermission();
+    cachedPermission = permissionGranted;
     // 如果权限已授予且之前尝试开启过，自动开启功能
     if (permissionGranted && !showToolbarOnSelection) {
       showToolbarOnSelection = true;
@@ -121,7 +146,7 @@
   }
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-6">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-6">
   <TableGroup>
     <SwitchRow
       label={t("settings.quicktools.showToolbarOnSelection")}

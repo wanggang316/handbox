@@ -20,6 +20,8 @@ export type SessionStrategy = "new_session";
 export interface AgentTarget {
   kind: "agent";
   agentId: UUID;
+  // 运行该 Agent 所用模型（Agent 定义不再携带模型，改为每个 Job 各自选定）。
+  modelId: string;
   initialMessage: string;
   projectId?: UUID;
 }

@@ -32,6 +32,13 @@ pub enum JobTarget {
     /// Send an initial message to an Agent (optionally scoped to a project).
     Agent {
         agent_id: UUID,
+        /// Model to run the agent with. The Agent definition no longer carries a
+        /// model (it's chosen per run), so an agent-targeted job stores its own —
+        /// mirroring `Prompt`. `#[serde(default)]` keeps pre-existing rows (which
+        /// lack it) deserializable; an empty model then fails the run cleanly as a
+        /// config error at dispatch, prompting the user to pick one.
+        #[serde(default)]
+        model_id: String,
         initial_message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_id: Option<UUID>,
@@ -175,6 +182,7 @@ mod tests {
     fn job_target_agent_roundtrip() {
         let target = JobTarget::Agent {
             agent_id: "agent_1".to_string(),
+            model_id: "gpt-4".to_string(),
             initial_message: "hello".to_string(),
             project_id: Some("project_1".to_string()),
         };
@@ -182,6 +190,7 @@ mod tests {
 
         let json = serde_json::to_value(&target).expect("serialize");
         assert_eq!(json["kind"], "agent");
+        assert_eq!(json["modelId"], "gpt-4");
         assert_eq!(json["initialMessage"], "hello");
         assert_eq!(json["projectId"], "project_1");
     }
@@ -204,7 +213,9 @@ mod tests {
 
     #[test]
     fn job_target_optional_fields_default() {
-        // Agent with no project.
+        // Agent with no project and no model (a pre-existing row from before the
+        // model was stored on the target): model_id defaults to "" and project is
+        // None, keeping old rows deserializable.
         let agent = JobTarget::from_db_parts(
             "agent",
             r#"{"agentId":"ag1","initialMessage":"hi"}"#,
@@ -214,6 +225,7 @@ mod tests {
             agent,
             JobTarget::Agent {
                 agent_id: "ag1".to_string(),
+                model_id: String::new(),
                 initial_message: "hi".to_string(),
                 project_id: None,
             }
@@ -225,6 +237,7 @@ mod tests {
         let targets = vec![
             JobTarget::Agent {
                 agent_id: "ag1".to_string(),
+                model_id: "m-agent".to_string(),
                 initial_message: "go".to_string(),
                 project_id: None,
             },

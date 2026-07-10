@@ -62,7 +62,7 @@
   }
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <!-- 软件更新 -->
   <div class="rounded-xl overflow-hidden">
     <TableGroup title={t("settings.about.softwareUpdate")}>

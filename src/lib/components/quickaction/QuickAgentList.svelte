@@ -44,11 +44,6 @@
         <Bot size={15} class="text-[var(--base-content)]/70" />
       </span>
       <span class="min-w-0 flex-1 truncate text-left text-[14px]">{agent.name}</span>
-      {#if agent.model}
-        <span class="shrink-0 truncate text-[11px] text-[var(--base-content)]/45">
-          {agent.model}
-        </span>
-      {/if}
     </button>
   {/each}
 </div>

@@ -10,8 +10,17 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.theme.dark": "Dark",
   "settings.general.language": "Language",
   "settings.general.autoScroll": "Auto-scroll chat view",
+  "settings.general.section": "General",
+  "settings.general.appearanceDesc": "Choose the light or dark color scheme",
+  "settings.general.languageDesc": "Interface display language",
+  "settings.general.autoScrollDesc": "Auto-scroll to the bottom on new messages",
 
   // Sidebar
+  "settings.sidebar.backToApp": "Back to app",
+  "settings.sidebar.search": "Search settings...",
+  "settings.sidebar.group.personal": "Personal",
+  "settings.sidebar.group.features": "Features",
+  "settings.sidebar.group.other": "Other",
   "settings.sidebar.account": "Account",
   "settings.sidebar.general": "General",
   "settings.sidebar.quicktools": "Quick Tools",

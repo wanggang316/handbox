@@ -1,9 +1,9 @@
 //! LIVE backend integration verification for Agent mode (Stage-3 probe).
 //!
 //! This is NOT a unit test and NOT part of the contract suite. It is an
-//! `#[ignore]`-d live probe that drives the real Agent backend end to end
-//! against the user's *already configured* provider key, proving the live
-//! agent path runs: a plain streaming turn plus a `web_fetch` tool turn.
+//! `#[ignore]`-d live probe that drives the real unified agent engine end to
+//! end against the user's *already configured* provider key, proving the live
+//! agent path runs: a plain streaming turn plus a built-in tool turn (`ls`).
 //!
 //! Why `#[ignore]`: it hits the network + a real LLM API and reads the user's
 //! app DB, so it must never run in normal `cargo test`. Run it explicitly:
@@ -15,27 +15,33 @@
 //!
 //! SECURITY: the provider API key is read read-only from the app DB and is
 //! NEVER printed/logged anywhere. The user's real DB is opened read-only
-//! (`?mode=ro`) and never written; all agent-session writes go to a throwaway
-//! temp DB.
+//! (`?mode=ro`) and never written; all agent-session transcript writes go to a
+//! throwaway temp dir (`app_data_dir`), never the app's real data root.
 //!
-//! The live path is exercised through `AgentRuntime`'s public surface
-//! (`new` + `start_run` + `RunSink`), seeded with the real provider row and an
-//! `AgentSession` in a temp DB. That drives `chat_engine::resolve_model` /
-//! `build_stream_options` / `shared_client` / `agent_tools::build_tools` /
-//! `hand_agent::run_agent_loop` exactly as production does. For the tool turn,
-//! if the (cheap) model does not emit a `web_fetch` call, the test falls back
-//! to invoking the `web_fetch` `AgentTool` directly — still a real, live
-//! network proof.
+//! The live path is exercised through the SAME assembly production uses:
+//! `config_from_rows` maps an in-memory provider + session row to a
+//! `HandBoxAgentSessionConfig`, `build_agent_session` constructs the engine
+//! `hand_coding_agent::AgentSession` (model resolution, stream options, tool
+//! selection, JSONL persistence, sandbox + approval extensions), and
+//! `drive_agent_run` streams one turn's events onto a `CodingRunSink`. No SQLite
+//! round-trip: the rows are the exact shape the repository would return, so we
+//! feed them straight in. For the tool turn we enable the `ls` built-in and ask
+//! the model to list a workspace holding a uniquely-named marker file; if the
+//! (cheap) model does not emit an `ls` call we invoke the `ls` `AgentTool`
+//! directly — still a real proof the enabled built-in exists and executes. (The
+//! old `web_fetch` built-in was retired; web search now flows through MCP.)
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
-use handbox_lib::services::agent_runtime::{AgentRuntime, RunSink};
-use handbox_lib::services::{agent_tools, Database};
+use handbox_lib::services::coding_agent_runtime::{drive_agent_run, CodingRunSink};
+use handbox_lib::services::coding_agent_session::{build_agent_session, config_from_rows};
 use handbox_lib::storage::types::{AgentSession, Provider};
-use handbox_lib::storage::{AgentSessionRepository, ProviderRepository};
 
-use hand_agent::{AgentTool, CancellationToken, ToolExecuteCtx, ToolResult};
+use hand_agent::{CancellationToken, ToolExecuteCtx, ToolResult};
 use hand_ai_model::ToolResultContent;
+use hand_coding_agent::tools::create_default_tools;
+use hand_coding_agent::AgentSession as EngineSession;
 use tempfile::TempDir;
 
 fn now_ms() -> i64 {
@@ -128,21 +134,27 @@ fn cheapest_model_id(provider_type: &str) -> Option<String> {
     Some(models[0].id.clone())
 }
 
-/// A throwaway temp DB seeded with the real provider row + an `AgentSession`
-/// selecting `model_id` and enabling the given tools. Returns the runtime, the
-/// session id, and the TempDir guard (kept alive for the DB file).
-async fn seeded_runtime(
+/// Assemble a ready-to-drive engine `AgentSession` the way production does —
+/// `config_from_rows` → `build_agent_session` — from an in-memory provider +
+/// session row, WITHOUT the SQLite round-trip (the rows are the same shape the
+/// repository returns, so the drive path is identical).
+///
+/// `working_dir == None` yields a pure-dialog session (no workspace, hence no
+/// context/skill discovery and no cwd-rooted tools); `Some(dir)` roots the agent
+/// there so the sandboxed file tools (`ls`, …) operate against it. Returns the
+/// engine session, the HandBox session id, and the `TempDir` used as the
+/// session's `app_data_dir` (the JSONL transcript root) — keep it alive for the
+/// duration of the run.
+fn seeded_session(
     live: &LiveProvider,
     model_id: &str,
+    working_dir: Option<PathBuf>,
     enabled_tools: Vec<String>,
-) -> (AgentRuntime, String, TempDir) {
+) -> (EngineSession, String, TempDir) {
     let temp_dir = TempDir::new().unwrap();
-    let db_path = temp_dir.path().join("agent_live.db");
-    let db = Arc::new(Database::new(&db_path).await.unwrap());
 
-    let provider_id = uuid::Uuid::new_v4().to_string();
     let provider = Provider {
-        id: provider_id.clone(),
+        id: uuid::Uuid::new_v4().to_string(),
         name: format!("Live {}", live.provider_type),
         provider_type: live.provider_type.clone(),
         base_url: live.base_url.clone(),
@@ -151,37 +163,39 @@ async fn seeded_runtime(
         created_at: now_ms(),
         updated_at: now_ms(),
     };
-    ProviderRepository::new(Arc::clone(&db))
-        .create_provider(&provider)
-        .await
-        .unwrap();
 
     let session_id = uuid::Uuid::new_v4().to_string();
-    let session = AgentSession {
+    let row = AgentSession {
         id: session_id.clone(),
         name: "Live Probe".to_string(),
         project_id: None,
+        agent_definition_id: None,
         model_id: Some(model_id.to_string()),
-        provider_id: Some(provider_id),
+        provider_id: Some(provider.id.clone()),
         system_prompt: Some("You are a terse assistant.".to_string()),
         thinking_level: None,
         temperature: Some(0.0),
         // Keep it cheap.
         max_tokens: Some(256),
-        working_dir: None,
+        working_dir: working_dir.map(|p| p.to_string_lossy().into_owned()),
         enabled_tools,
+        mcp_servers: Vec::new(),
         tool_execution_mode: None,
         message_count: 0,
         last_message_at: None,
         created_at: now_ms(),
         updated_at: now_ms(),
     };
-    AgentSessionRepository::new(Arc::clone(&db))
-        .create_session(&session)
-        .await
-        .unwrap();
 
-    (AgentRuntime::new(db), session_id, temp_dir)
+    // The exact production assembly: rows → config → engine session. The temp
+    // dir is the `app_data_dir`, so the JSONL transcript this session persists
+    // lands under it and never touches the app's real data root.
+    let config = config_from_rows(&row, &provider, temp_dir.path().to_path_buf())
+        .expect("config_from_rows should succeed for a live-probe session");
+    let session = build_agent_session(&config, None, Vec::new())
+        .expect("build_agent_session should construct the engine session");
+
+    (session, session_id, temp_dir)
 }
 
 /// A capturing sink: records every `{ sessionId, event }`, the terminal
@@ -194,11 +208,11 @@ struct CapturingSink {
 }
 
 impl CapturingSink {
-    fn into_run_sink(self) -> RunSink {
+    fn into_coding_sink(self) -> CodingRunSink {
         let events = Arc::clone(&self.events);
         let closed = Arc::clone(&self.closed);
         let errors = Arc::clone(&self.errors);
-        RunSink::new(
+        CodingRunSink::new(
             Arc::new(move |v| events.lock().unwrap().push(v)),
             Arc::new(move |v| closed.lock().unwrap().push(v)),
         )
@@ -293,7 +307,7 @@ fn tool_result_text(result: &ToolResult) -> Option<String> {
 
 #[tokio::test]
 #[ignore = "LIVE: hits the network + real LLM API + reads the user's app DB"]
-async fn live_agent_plain_turn_and_web_fetch_tool() {
+async fn live_agent_plain_turn_and_ls_tool() {
     let Some(live) = read_live_provider().await else {
         eprintln!("[agent_live] no configured provider with a key; skipping");
         return;
@@ -313,20 +327,22 @@ async fn live_agent_plain_turn_and_web_fetch_tool() {
 
     // ---------------------------------------------------------------------
     // Turn 1 (plain): real streaming + final assistant message + usage.
+    // A pure-dialog session (no working dir, no tools) exercises the plain
+    // `drive_agent_run` path (`send_message_with_images(text, None)`).
     // ---------------------------------------------------------------------
     {
-        let (runtime, session_id, _guard) = seeded_runtime(&live, &model_id, vec![]).await;
+        let (session, session_id, _guard) = seeded_session(&live, &model_id, None, vec![]);
         let sink = CapturingSink::default();
-        runtime
-            .start_run(
-                session_id.clone(),
-                "Reply with exactly the word: HELLO".to_string(),
-                vec![],
-                vec![],
-                sink.clone().into_run_sink(),
-            )
-            .await
-            .expect("turn 1 start_run should succeed");
+        // Non-blocking: spawns the driver task; events arrive on `sink`. The
+        // handles (abort/steer/join) are unused here — dropping them detaches
+        // the background task, which we then await via the closed signal.
+        let _handles = drive_agent_run(
+            session,
+            session_id.clone(),
+            "Reply with exactly the word: HELLO".to_string(),
+            vec![],
+            sink.clone().into_coding_sink(),
+        );
 
         wait_for_closed(&sink).await;
 
@@ -386,27 +402,34 @@ async fn live_agent_plain_turn_and_web_fetch_tool() {
     }
 
     // ---------------------------------------------------------------------
-    // Turn 2 (tool): web_fetch of https://example.com. If the model emits a
-    // tool call we assert the live ToolExecutionStart/End + non-empty result;
-    // otherwise we directly invoke the web_fetch tool (still a live network
-    // proof, as the brief permits).
+    // Turn 2 (tool): the `ls` built-in over a real workspace. We seed a
+    // uniquely-named marker file so a correct listing must mention it (proving
+    // the tool listed OUR cwd, not some ambient path). If the model drives the
+    // tool we assert the live ToolExecutionStart/End round-trip; otherwise we
+    // invoke the `ls` `AgentTool` directly for a deterministic proof that the
+    // enabled built-in exists and executes.
     // ---------------------------------------------------------------------
     {
-        let (runtime, session_id, _guard) =
-            seeded_runtime(&live, &model_id, vec!["web_fetch".to_string()]).await;
+        let work = TempDir::new().unwrap();
+        let marker = format!("live_marker_{}.txt", uuid::Uuid::new_v4());
+        std::fs::write(work.path().join(&marker), b"live probe marker")
+            .expect("seed marker file in the workspace");
+
+        let (session, session_id, _guard) = seeded_session(
+            &live,
+            &model_id,
+            Some(work.path().to_path_buf()),
+            vec!["ls".to_string()],
+        );
         let sink = CapturingSink::default();
-        runtime
-            .start_run(
-                session_id.clone(),
-                "Use the web_fetch tool to fetch https://example.com \
-                 and tell me the page title."
-                    .to_string(),
-                vec![],
-                vec![],
-                sink.clone().into_run_sink(),
-            )
-            .await
-            .expect("turn 2 start_run should succeed");
+        let _handles = drive_agent_run(
+            session,
+            session_id.clone(),
+            "Use the ls tool to list the current directory, then tell me the file names."
+                .to_string(),
+            vec![],
+            sink.clone().into_coding_sink(),
+        );
 
         wait_for_closed(&sink).await;
 
@@ -430,77 +453,75 @@ async fn live_agent_plain_turn_and_web_fetch_tool() {
                 .and_then(|e| e.get("toolName"))
                 .and_then(|n| n.as_str())
                 .unwrap_or("");
-            assert_eq!(start_name, "web_fetch", "tool_execution_start is web_fetch");
-            assert_eq!(end_name, "web_fetch", "tool_execution_end is web_fetch");
+            assert_eq!(start_name, "ls", "tool_execution_start is ls");
+            assert_eq!(end_name, "ls", "tool_execution_end is ls");
 
-            // The tool result content is non-empty (the real fetched text).
-            let result = end.get("event").and_then(|e| e.get("result"));
-            let fetched_len = result
+            // The tool result lists the workspace — it must be a non-error
+            // result and must mention the seeded marker file.
+            let result_text: String = end
+                .get("event")
+                .and_then(|e| e.get("result"))
                 .and_then(|r| r.get("content"))
                 .and_then(|c| c.as_array())
                 .map(|blocks| {
                     blocks
                         .iter()
                         .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                        .map(|s| s.len())
-                        .sum::<usize>()
+                        .collect::<String>()
                 })
-                .unwrap_or(0);
+                .unwrap_or_default();
             let is_error = end
                 .get("event")
                 .and_then(|e| e.get("isError"))
                 .and_then(|b| b.as_bool())
                 .unwrap_or(false);
             println!(
-                "[agent_live][turn2:model-driven] tool=web_fetch isError={} \
-                 fetched_text_len={}",
-                is_error, fetched_len
+                "[agent_live][turn2:model-driven] tool=ls isError={} result_len={}",
+                is_error,
+                result_text.len()
             );
-            assert!(!is_error, "live web_fetch tool result must not be an error");
+            assert!(!is_error, "live ls tool result must not be an error");
             assert!(
-                fetched_len > 0,
-                "live web_fetch tool result content must be non-empty"
+                result_text.contains(&marker),
+                "live ls result must list the seeded marker file {marker:?}"
             );
         } else {
-            // Model did not call the tool reliably — exercise the web_fetch
-            // AgentTool directly for a guaranteed live network proof.
+            // Model did not call the tool reliably — exercise the `ls`
+            // AgentTool directly for a guaranteed proof that the enabled
+            // built-in exists and executes against the workspace.
             println!(
-                "[agent_live][turn2] model did not emit a web_fetch call \
-                 (event types: {:?}); invoking web_fetch tool directly",
+                "[agent_live][turn2] model did not emit an ls call \
+                 (event types: {:?}); invoking ls tool directly",
                 events.iter().filter_map(event_type).collect::<Vec<_>>()
             );
 
-            let tools: Vec<AgentTool> = agent_tools::build_tools(&["web_fetch".to_string()], None);
-            let web_fetch = tools
+            let ls = create_default_tools(work.path())
                 .into_iter()
-                .find(|t| t.name == "web_fetch")
-                .expect("web_fetch tool must be built");
+                .find(|t| t.name == "ls")
+                .expect("ls built-in must be present in the default tool set");
 
             let ctx = ToolExecuteCtx {
-                tool_call_id: "live-direct-1".to_string(),
-                args: serde_json::json!({ "url": "https://example.com" }),
+                tool_call_id: "live-direct-ls".to_string(),
+                // Empty args → list the tool's cwd (the workspace).
+                args: serde_json::json!({}),
                 cancel: CancellationToken::new(),
                 on_update: Arc::new(|_| {}),
             };
-            let result = (web_fetch.execute)(ctx)
+            let result = (ls.execute)(ctx)
                 .await
-                .expect("web_fetch execute must not return Err");
+                .expect("ls execute must not return Err");
 
-            let fetched = tool_result_text(&result).unwrap_or_default();
-            let snippet: String = fetched.chars().take(120).collect();
+            let listing = tool_result_text(&result).unwrap_or_default();
+            let snippet: String = listing.chars().take(120).collect();
             println!(
-                "[agent_live][turn2:direct] fetched_text_len={} snippet={:?}",
-                fetched.len(),
+                "[agent_live][turn2:direct] listing_len={} snippet={:?}",
+                listing.len(),
                 snippet
             );
             assert!(
-                fetched.len() > 0,
-                "direct web_fetch of https://example.com returned empty text"
-            );
-            // example.com's body mentions "example" in its readable text.
-            assert!(
-                fetched.to_ascii_lowercase().contains("example"),
-                "fetched text should reference 'example' (got: {snippet:?})"
+                listing.contains(&marker),
+                "direct ls of the workspace must list the seeded marker file \
+                 {marker:?} (got: {snippet:?})"
             );
         }
     }

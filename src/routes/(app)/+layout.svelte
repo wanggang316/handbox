@@ -8,7 +8,6 @@
   import MainSidebar from "$lib/components/sidebar/MainSidebar.svelte";
   import TitleBar from "$lib/components/ui/TitleBar.svelte";
   import { uiState } from "$lib/states/ui.svelte";
-  import { chatActions } from "$lib/states/chat.svelte";
   import { updateState } from "$lib/states/update.svelte";
   import UpdateDialog from "$lib/components/update/UpdateDialog.svelte";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
@@ -90,9 +89,6 @@
   }
 
   onMount(() => {
-    // 全局初始化聊天状态
-    chatActions.initialize();
-
     // 恢复侧边栏状态
     restoreSidebarState();
 
@@ -114,26 +110,26 @@
         console.error("Failed to init update checker:", error);
       });
 
-    // Quick Action continue-in-chat 交接：浮层 ⌘↵ 调用后端，后端把本（主）窗口前置
-    // 并广播 `quick-action-open-chat`（payload = 裸 chat-id 字符串）。无论主窗口当前
-    // 停在哪个路由，都导航到该会话 `/chat?id=<chatId>`（浮层创建的是真实持久化的 chat
-    // 会话）。在 onMount 即注册，使冷启动（窗口刚被前置首挂）时抵达的 navigate 事件也
-    // 能被接住。
-    let openChatUnlisten: (() => void) | null = null;
-    let openChatStale = false; // 卸载早于 listen 解析时，丢弃迟到的 unlisten。
+    // Quick Action continue-in-agent 交接：浮层 ⌘↵ 调用后端，后端把本（主）窗口前置
+    // 并广播 `quick-action-open-agent`（payload = 裸 session-id 字符串）。无论主窗口当前
+    // 停在哪个路由，都导航到该会话 `/agent?id=<sessionId>`（浮层创建的是真实持久化的
+    // agent 会话）。在 onMount 即注册，使冷启动（窗口刚被前置首挂）时抵达的 navigate
+    // 事件也能被接住。
+    let openAgentUnlisten: (() => void) | null = null;
+    let openAgentStale = false; // 卸载早于 listen 解析时，丢弃迟到的 unlisten。
     if (isTauriEnvironment()) {
-      listen<string>("quick-action-open-chat", (event) => {
-        void goto(`/chat?id=${event.payload}`);
+      listen<string>("quick-action-open-agent", (event) => {
+        void goto(`/agent?id=${event.payload}`);
       })
         .then((unlisten) => {
-          if (openChatStale) {
+          if (openAgentStale) {
             unlisten();
             return;
           }
-          openChatUnlisten = unlisten;
+          openAgentUnlisten = unlisten;
         })
         .catch((error) => {
-          console.error("Failed to listen for quick-action open-chat:", error);
+          console.error("Failed to listen for quick-action open-agent:", error);
         });
     }
 
@@ -146,8 +142,8 @@
         window.removeEventListener("keydown", handleKeydown);
         window.removeEventListener("resize", handleResize);
         updateUnlisten?.();
-        openChatStale = true;
-        openChatUnlisten?.();
+        openAgentStale = true;
+        openAgentUnlisten?.();
       };
     }
   });

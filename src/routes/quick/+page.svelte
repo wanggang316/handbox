@@ -1,19 +1,20 @@
 <!--
-  Quick Action 浮层 composer 宿主页(基于 chat Agent 的两步式 Raycast 浮层)。
+  Quick Action 浮层 composer 宿主页(基于统一 Agent 引擎的两步式 Raycast 浮层)。
 
   一张铺满 frameless / transparent NSPanel 的圆角主题卡片,内含 QuickInput composer。
   NSPanel 隐藏窗口而非销毁 webview,故每次召唤(窗口重新获得焦点)都重置为全新空白
   状态并重新聚焦输入框——保证「一次召唤 = 一个全新一回合文档」。
 
   两步式交互(用户确认的 Raycast UX):
-  1. 选择步:输入即过滤 chat Agent 列表(agentState.agents);↑↓ 移动高亮、↵ / 点击
-     选中。无 Agent 时引导去应用创建。
+  1. 选择步:输入即过滤可运行的 Agent 列表(agentState.agents 中 working_dir_mode!=required
+     者——浮层无工作目录);↑↓ 移动高亮、↵ / 点击选中。无 Agent 时引导去应用创建。
   2. 消息步:选中 Agent 后输入框切到「给 <Agent> 发消息…」;↵ 发送 → 经
-     `createSessionFromAgent` 建一个真实 chat 会话(已带 Agent 的模型),再用
-     `messageStore.sendMessage` 走与主对话完全一致的流式管线渲染回复。Backspace(空
-     输入)取消已选 Agent 回到选择步。
-  3. answered 步:一回合已发送 → 输入禁用,仅展示 transcript;⌘↵「在对话中继续」把这
-     个已持久化的会话交给主窗口(/chat?id=)继续。这是个一回合文档,要继续就打开 app。
+     `createSessionFromDefinition` 从该 AgentDefinition 实例化一个真实 agent 会话(快照
+     其能力集与模型/供应商),再用 `runAgentStream` 驱动一回合 —— 与主窗口 `/agent` 完全
+     一致的统一引擎。Backspace(空输入)取消已选 Agent 回到选择步。
+  3. answered 步:一回合已发送 → 输入禁用,仅展示 transcript(AgentTimeline);⌘↵
+     「在对话中继续」把这个已持久化的会话交给主窗口(/agent?id=)继续。这是个一回合
+     文档,要继续就打开 app。
 
   无模型选择(Agent 自带模型)、无 New(+)、无停止/续问。Esc 任意时刻关闭浮层。
 -->
@@ -24,15 +25,16 @@
   import { Bot } from "@lucide/svelte";
   import QuickInput from "$lib/components/quickaction/QuickInput.svelte";
   import QuickAgentList from "$lib/components/quickaction/QuickAgentList.svelte";
-  import QuickTranscript from "$lib/components/quickaction/QuickTranscript.svelte";
+  import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
   import type { Agent, UUID } from "$lib/types";
   import { isTauriEnvironment } from "$lib/utils/tauri";
   import { t } from "$lib/i18n";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
-  import { chatState } from "$lib/states/chat.svelte";
-  import { messageStore } from "$lib/states/message.svelte";
+  import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { providerActions, getAllModels } from "$lib/states/provider.svelte";
-  import { createSessionFromAgent, updateChatModel } from "$lib/api/chat";
+  import { settingsState } from "$lib/states/settings.svelte";
+  import { resolveQuickActionModel } from "$lib/quickaction/resolveModel";
+  import { runAgentStream } from "$lib/api/agentSession";
 
   let composer = $state<QuickInput | null>(null);
 
@@ -42,8 +44,8 @@
   let highlightIndex = $state(0);
   // 已选 Agent;null 表示仍在选择步。
   let selectedAgent = $state<Agent | null>(null);
-  // 已发送一回合的 chat 会话 id;null 表示尚未发送(选择步 / 消息步)。
-  let chatId = $state<UUID | null>(null);
+  // 已发起一回合 run 的 agent 会话 id;null 表示尚未发送(选择步 / 消息步)。
+  let sessionId = $state<UUID | null>(null);
   // 发送在途闸:防止消息步重复 Enter 建出第二个会话。
   let sending = $state(false);
   // ⌘↵ 交接在途闸:幂等,双击 ⌘↵ 第二次早返回。
@@ -51,25 +53,30 @@
   // 发送失败的兜底提示(footer 渲染)。
   let runError = $state<string | null>(null);
 
-  // 选择步:按搜索词过滤 Agent(大小写不敏感的子串匹配);消息步 / answered 步不使用。
+  // 选择步候选基集:仅「可在浮层中运行」的 Agent。浮层不提供工作目录,故排除
+  // working_dir_mode=required 的 Agent(如内置 Coding);未设置 / none / optional 均纳入。
+  const runnableAgents = $derived(
+    agentState.agents.filter((a) => a.workingDirMode !== "required"),
+  );
+
+  // 选择步:按搜索词过滤可运行 Agent(大小写不敏感的子串匹配);消息步 / answered 步不使用。
   const filteredAgents = $derived.by(() => {
     const query = value.trim().toLowerCase();
-    const all = agentState.agents;
-    if (!query) return all;
-    return all.filter((a) => a.name.toLowerCase().includes(query));
+    if (!query) return runnableAgents;
+    return runnableAgents.filter((a) => a.name.toLowerCase().includes(query));
   });
 
   // 选择步是否应展示内容区:Agent 已加载出来,或加载结束(以便展示空态 / 无匹配)。
   // 加载中且尚无 Agent 时不展示,使召唤瞬间仅有一条干净的输入条。
   const showPickerContent = $derived(
     selectedAgent === null &&
-      (agentState.agents.length > 0 || !agentState.isLoading),
+      (runnableAgents.length > 0 || !agentState.isLoading),
   );
-  const hasContent = $derived(chatId !== null || showPickerContent);
+  const hasContent = $derived(sessionId !== null || showPickerContent);
 
   // answered 步(已发送)输入禁用;⌘↵ 仅 answered 步可用。
-  const isAnswered = $derived(chatId !== null);
-  const canContinue = $derived(chatId !== null);
+  const isAnswered = $derived(sessionId !== null);
+  const canContinue = $derived(sessionId !== null);
 
   const placeholder = $derived(
     selectedAgent
@@ -90,7 +97,7 @@
   /** 重置为全新空白状态(每次召唤 = 一个一回合文档)。 */
   function resetOverlay(): void {
     selectedAgent = null;
-    chatId = null;
+    sessionId = null;
     value = "";
     highlightIndex = 0;
     runError = null;
@@ -135,9 +142,10 @@
   }
 
   /**
-   * 消息步发送:建一个真实 chat 会话(已带 Agent 的模型/系统提示词),再走
-   * `messageStore.sendMessage` 的流式管线。设 chatState.currentChat 供该管线与
-   * QuickTranscript 读取(浮层 webview 独立单例,不影响主窗口)。
+   * 消息步发送:从选中的 AgentDefinition 实例化一个真实 agent 会话(快照其能力集与
+   * 模型/供应商),随即用 `runAgentStream` 驱动一回合 —— 与主窗口 `/agent` 完全一致的
+   * 统一引擎。流式回复经 navigation-resilient 的 `agentRunStore` 落入按 sessionId 分键
+   * 的 view-model,由 `AgentTimeline` 渲染(浮层 webview 独立单例,不影响主窗口)。
    *
    * 发送失败:回退到消息步,回填文本以便重试,展示 runError。
    */
@@ -150,40 +158,45 @@
     sending = true;
     runError = null;
     try {
-      let chat = await createSessionFromAgent(agentId);
-
-      // Agent 仅存 model 字符串,新建会话的 provider_id 为空。按 model id 在已启用
-      // catalog 中解析出 provider 并持久化——既让本次发送可用,也让「在对话中继续」后
-      // 主窗口(从磁盘重载会话)同样带着 provider 可直接发送。
-      if (chat.id && chat.modelId && !chat.providerId) {
-        if (getAllModels().length === 0) {
-          await providerActions.loadProvidersWithModels();
-        }
-        const match = getAllModels().find((m) => m.id === chat.modelId);
-        if (match) {
-          chat = await updateChatModel(chat.id, match.id, match.provider_id);
-        }
+      // 模型已与 AgentDefinition 解耦：会话不再从 Agent 快照模型。快捷动作改用
+      // 「默认模型」(设置里配置,由 resolveQuickActionModel 对照 catalog 解析),
+      // 并在实例化时作为 override 成对写入 modelId+providerId。先确保 catalog 已加载。
+      if (getAllModels().length === 0) {
+        await providerActions.loadProvidersWithModels();
       }
-
-      if (!chat.modelId || !chat.providerId) {
-        // 解析不到可用 provider(model 已下架,或 Agent 存了无效 model)。
+      const resolved = resolveQuickActionModel(
+        settingsState.settings?.quickAction,
+        getAllModels(),
+      );
+      if (!resolved.available) {
+        // catalog 空 / 未选默认 / 默认已下架:提示去设置里配置默认模型。
         runError = t("quickaction.model.unavailable");
         value = text;
         focusInput();
         return;
       }
 
-      chatState.currentChat = chat;
-      chatId = chat.id ?? null;
+      const session = await agentSessionActions.createSessionFromDefinition(
+        agentId,
+        { modelId: resolved.modelId, providerId: resolved.providerId },
+      );
+      const id = session.id;
+      if (!id) {
+        runError = t("quickaction.runFailed");
+        value = text;
+        focusInput();
+        return;
+      }
+
+      sessionId = id;
       value = "";
-      await messageStore.sendMessage(text, []);
+      await runAgentStream(id, text, [], []);
     } catch (error) {
       console.error("quick: failed to send message", error);
       runError =
         error instanceof Error ? error.message : t("quickaction.runFailed");
       // 回退到消息步,保留已选 Agent,回填文本重试。
-      chatId = null;
-      chatState.currentChat = null;
+      sessionId = null;
       value = text;
       focusInput();
     } finally {
@@ -193,22 +206,22 @@
 
   /**
    * ⌘↵「在对话中继续」:把这个已持久化的会话交给主窗口。后端
-   * `quick_action_continue_in_chat` 据 chatId 前置主窗口并广播 `quick-action-open-chat`,
-   * 主窗口 `(app)/+layout.svelte` 监听后 goto `/chat?id=<chatId>`。随后隐藏浮层;
+   * `quick_action_continue_in_agent` 据 sessionId 前置主窗口并广播 `quick-action-open-agent`,
+   * 主窗口 `(app)/+layout.svelte` 监听后 goto `/agent?id=<sessionId>`。随后隐藏浮层;
    * 下次召唤经 focus 监听重置为全新空白状态。
    */
   async function handleContinue(): Promise<void> {
-    if (chatId === null) return;
+    if (sessionId === null) return;
     if (continuing) return;
     if (!isTauriEnvironment()) return;
 
-    const id = chatId;
+    const id = sessionId;
     continuing = true;
     try {
-      await invoke("quick_action_continue_in_chat", { chatId: id });
+      await invoke("quick_action_continue_in_agent", { sessionId: id });
       await invoke("quick_action_hide");
     } catch (error) {
-      console.error("quick: failed to continue in chat", error);
+      console.error("quick: failed to continue in agent", error);
     } finally {
       continuing = false;
     }
@@ -224,7 +237,7 @@
     focusInput();
 
     // 浮层是 (app) group 外的独立路由,不会跑主布局的 initialize;自行按需加载
-    // Agent 列表(选择步数据源)与供应商(transcript 的模型图标)。
+    // Agent 列表(选择步数据源)与供应商(实例化会话的 provider 解析)。
     agentActions.loadAgents().catch((error) => {
       console.error("quick: failed to load agents", error);
     });
@@ -306,11 +319,11 @@
     onDeselect={deselectAgent}
   >
     {#snippet children()}
-      {#if chatId !== null}
-        <QuickTranscript {chatId} />
+      {#if sessionId !== null}
+        <AgentTimeline {sessionId} />
       {:else if selectedAgent === null}
-        {#if agentState.agents.length === 0}
-          <!-- 尚无 Agent:引导去应用创建。 -->
+        {#if runnableAgents.length === 0}
+          <!-- 尚无可运行 Agent:引导去应用创建。 -->
           <div class="flex flex-col items-center justify-center gap-3 px-6 py-9 text-center">
             <Bot size={26} class="text-[var(--base-content)]/35" />
             <div class="flex flex-col gap-1">

@@ -1,12 +1,18 @@
 /**
  * Agent Session 状态管理 - Svelte 5 runes
  *
- * 镜像 `states/chat.svelte.ts` 的约定：模块级 `$state` 变量 + getter/setter 暴露的
+ * 遵循本项目 store 约定：模块级 `$state` 变量 + getter/setter 暴露的
  * 状态对象 + 一个动作对象。仅负责 session 的 CRUD 与列表交互，
  * run / timeline 由后续 feature 承担。
  */
 
-import type { UUID, AgentSession, CreateAgentSessionRequest } from "../types";
+import type {
+  UUID,
+  AgentSession,
+  CreateAgentSessionRequest,
+  InstantiateAgentSessionRequest,
+} from "../types";
+import type { McpServerConfig } from "../types/llm";
 import type { AgentSessionField } from "../api/agentSession";
 import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
@@ -79,6 +85,61 @@ export const agentSessionActions = {
   },
 
   /**
+   * 从 AgentDefinition 实例化会话：插入列表顶部并设为当前。
+   *
+   * 统一的「用此 Agent」入口，取代 chat 侧的 `createSessionFromAgent`。
+   * 能力集快照与工作目录策略由后端按 definition 裁决；`overrides` 仅覆盖
+   * name/project/workingDir/model/provider。
+   */
+  async createSessionFromDefinition(
+    definitionId: UUID,
+    overrides?: InstantiateAgentSessionRequest,
+  ): Promise<AgentSession> {
+    try {
+      isLoading = true;
+      const session = await agentSessionApi.createSessionFromDefinition(
+        definitionId,
+        overrides,
+      );
+      const existing = Array.isArray(sessions) ? sessions : [];
+      sessions = [session, ...existing];
+      currentSession = session;
+      return session;
+    } catch (error) {
+      console.error("Failed to create agent session from definition:", error);
+      throw error;
+    } finally {
+      isLoading = false;
+    }
+  },
+
+  /**
+   * 就地把一个已存在会话重指到另一个 AgentDefinition（不新建会话）。
+   *
+   * 用于「当前会话尚无消息时切换 Agent」：复用现有会话 id，由后端重新快照能力集
+   * 与参数、改写 provenance。就地替换列表中对应项并同步当前会话（id 不变、不重排）。
+   */
+  async reinstantiateFromDefinition(
+    sessionId: UUID,
+    definitionId: UUID,
+    overrides?: InstantiateAgentSessionRequest,
+  ): Promise<AgentSession> {
+    const updated = await agentSessionApi.reinstantiateSessionFromDefinition(
+      sessionId,
+      definitionId,
+      overrides,
+    );
+    const index = sessions.findIndex((session) => session.id === sessionId);
+    if (index !== -1) {
+      sessions[index] = updated;
+    }
+    if (currentSession?.id === sessionId) {
+      currentSession = updated;
+    }
+    return updated;
+  },
+
+  /**
    * 重命名 Agent Session。
    */
   async renameSession(id: UUID, name: string): Promise<void> {
@@ -117,7 +178,7 @@ export const agentSessionActions = {
   async updateField(
     id: UUID,
     field: AgentSessionField,
-    value: string | number | string[] | null,
+    value: string | number | string[] | McpServerConfig[] | null,
   ): Promise<void> {
     const updated = await agentSessionApi.updateAgentSessionField(
       id,

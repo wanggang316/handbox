@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from "$lib/i18n";
+  import { getFormField } from "./FormField.svelte";
 
   interface Props {
     value: string;
@@ -31,6 +32,12 @@
     showCharCount = false,
   }: Props = $props();
 
+  // FormField 内时接管 id / aria / error 态；独立使用时行为不变。
+  const ff = getFormField();
+  const controlId = $derived(ff ? ff.id : id);
+  const invalid = $derived(ff ? ff.invalid : false);
+  const describedby = $derived(ff ? ff.describedby : undefined);
+
   function handleInput(event: Event) {
     const target = event.target as HTMLTextAreaElement;
     value = target.value;
@@ -39,7 +46,7 @@
 
 <div class="space-y-2">
   <textarea
-    {id}
+    id={controlId}
     {name}
     {placeholder}
     {rows}
@@ -50,13 +57,13 @@
     {required}
     {value}
     oninput={handleInput}
-    class="w-full px-3 py-2 border border-[var(--hairline)] rounded-md resize-none
-           focus:border-transparent
-           font-mono text-sm text-base-content bg-base-300
+    aria-invalid={invalid ? "true" : undefined}
+    aria-describedby={describedby}
+    class="field w-full px-3 py-2 resize-none font-mono text-sm
            scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200
            hover:scrollbar-thumb-base-300/80
-           disabled:opacity-50 disabled:cursor-not-allowed
            readonly:opacity-80"
+    class:is-error={invalid}
   ></textarea>
 
   {#if showCharCount}

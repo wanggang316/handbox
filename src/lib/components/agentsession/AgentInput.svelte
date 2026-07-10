@@ -1,21 +1,31 @@
 <script lang="ts">
-  import { ArrowUp, Square, Plus, X, SlidersHorizontal } from "@lucide/svelte";
+  import {
+    ArrowUp,
+    Square,
+    Paperclip,
+    X,
+    Bot,
+    ChevronDown,
+    ChevronsUpDown,
+    Check,
+    Folder,
+  } from "@lucide/svelte";
   import { onDestroy, tick } from "svelte";
+  import { fly } from "svelte/transition";
+  import { goto } from "$app/navigation";
   import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import IconButton from "$lib/components/ui/IconButton.svelte";
-  import Toggle from "$lib/components/ui/Toggle.svelte";
-  import Select from "$lib/components/ui/Select.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import ModelSelectModal from "./ModelSelectModal.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
-  import { BUILTIN_TOOLS, type BuiltinTool } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
+  import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
-  import { getAllModels } from "$lib/states/provider.svelte";
+  import { getAllModels, getProviderIconById } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import { listSkills } from "$lib/api/skill";
   import type {
+    Agent,
     AgentSession,
     AgentRunAttachment,
     SkillInfo,
@@ -66,56 +76,115 @@
         ) ?? null)
       : null,
   );
+  const selectedModelIcon = $derived(
+    selectedModel ? getProviderIconById(selectedModel.provider_id) : undefined,
+  );
+  // 模型选择 Modal（系统既有的搜索/收藏/分组模型选择器）开合。
+  let modelModalOpen = $state(false);
 
   const thinkingLevel = $derived(session.thinkingLevel ?? "off");
 
-  // 内置工具开关（per-session）：勾选写入 session.enabledTools 并持久化；
-  // 开关 id == coding-agent 注册名（read/write/edit/bash/grep/find/ls），
-  // 后端 build_agent_session 按这些名做实际 gating。工具列表/标签来自共享常量
-  // BUILTIN_TOOLS（与设置页同一真源）。
-  // 这 7 个工具都在工作目录内操作（含 bash），故全部 `requiresWorkingDir`：
-  // 会话无 working_dir 时开关置灰禁用、点击无效、hover 给说明 title。
-  const hasWorkingDir = $derived(!!session.workingDir);
-  const enabledTools = $derived(session.enabledTools ?? []);
+  // ── Agent 选择器（把 Agents 页的「使用」搬进输入框左下角）──────────────────
+  //    显示当前会话来源 Agent 名；点开向上弹出 AgentDefinition 列表，选中他者即
+  //    从该定义实例化一个新会话并跳转过去（等价于在 Agents 页点「使用」）。选中
+  //    当前会话自身来源的 Agent 为干净 no-op —— 不重复新建空会话。
+  let agentMenuOpen = $state(false);
 
-  // 工具收成弹窗（per-component 本地 UI 态）：图标按钮点击切换，点击外部关闭。
-  let toolsMenuOpen = $state(false);
+  // 当前会话来源 Agent（据 agentDefinitionId 从已加载列表反查；未加载/已删除/
+  // 无 provenance 时为 null，按钮回落到「选择 Agent」占位）。
+  const currentAgent = $derived<Agent | null>(
+    session.agentDefinitionId
+      ? (agentState.agents.find((a) => a.id === session.agentDefinitionId) ??
+          null)
+      : null,
+  );
+  const currentAgentLabel = $derived(
+    currentAgent?.name ?? t("agent.input.selectAgent"),
+  );
 
-  function isToolEnabled(toolId: string): boolean {
-    return enabledTools.includes(toolId);
-  }
+  // 是否显示「工作目录」选择：仅当会话来源 Agent 的 workingDirMode ≠ "none"
+  // （required / optional / 旧定义 NULL 均需要工作目录，只有纯对话 "none" 不需要）。
+  const showWorkingDir = $derived(
+    !!currentAgent && currentAgent.workingDirMode !== "none",
+  );
+  // 工作目录展示名：取路径末段（basename）便于在紧凑按钮里显示；未设置为 null。
+  const workingDirName = $derived.by(() => {
+    const dir = session.workingDir;
+    if (!dir) return null;
+    const parts = dir.split("/").filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : dir;
+  });
 
-  function isToolDisabled(tool: BuiltinTool): boolean {
-    return tool.requiresWorkingDir && !hasWorkingDir;
-  }
-
-  function toggleTool(tool: BuiltinTool) {
-    if (isToolDisabled(tool)) return;
-    const current = enabledTools;
-    const next = current.includes(tool.id)
-      ? current.filter((id) => id !== tool.id)
-      : [...current, tool.id];
-    agentSessionActions
-      .updateField(session.id, "enabledTools", next)
-      .catch((error) => {
-        console.error("Failed to update agent session enabled tools:", error);
-      });
-  }
-
-  // 点击外部关闭弹窗：镜像 ChatInput 的 attachment 菜单关闭模式。触发按钮自身
-  // 的点击通过 stopPropagation 不冒泡到 window，故不会刚开就被这里关掉。
+  // lazy-load Agent 列表（/agent 路由本身不加载它；两个内置 Agent 恒被 seed，故
+  // length===0 即「尚未加载」的可靠代理）。打开选择器时、或会话已有来源 Agent 时
+  // （后者用于解析 workingDirMode 以决定是否显示工作目录选择）都触发加载。
   $effect(() => {
-    if (!toolsMenuOpen) return;
-    const handler = () => (toolsMenuOpen = false);
+    if (
+      (agentMenuOpen || session.agentDefinitionId) &&
+      agentState.agents.length === 0
+    ) {
+      agentActions
+        .loadAgents()
+        .catch((error) => console.error("Failed to load agents:", error));
+    }
+  });
+
+  // 点击外部关闭（镜像工具菜单）。菜单内点击经 stopPropagation 不冒泡到 window。
+  $effect(() => {
+    if (!agentMenuOpen) return;
+    const handler = () => (agentMenuOpen = false);
     window.addEventListener("click", handler);
     return () => window.removeEventListener("click", handler);
   });
 
-  function toggleToolsMenu(event: MouseEvent) {
+  function toggleAgentMenu(event: MouseEvent) {
     event.stopPropagation();
-    toolsMenuOpen = !toolsMenuOpen;
+    agentMenuOpen = !agentMenuOpen;
   }
 
+  async function selectAgent(agent: Agent) {
+    agentMenuOpen = false;
+    if (!agent.id) return;
+    // 已是当前会话来源 Agent：干净 no-op（不重复新建空会话）。
+    if (agent.id === session.agentDefinitionId) return;
+    try {
+      // 当前会话「一句话都没说过」（无消息且无活跃 run）：就地把它重指到新
+      // Agent —— 复用现有会话，不新建（保留 id / URL，无需跳转）。否则从新定义
+      // 实例化一个新会话并跳转过去。不传 overrides：后端让新定义的 model/工作目录
+      // 策略优先，未定处再保留会话现值。
+      if (session.messageCount === 0 && !agentRunStore.isRunning(session.id)) {
+        await agentSessionActions.reinstantiateFromDefinition(
+          session.id,
+          agent.id,
+        );
+        return;
+      }
+      const created =
+        await agentSessionActions.createSessionFromDefinition(agent.id);
+      await goto(`/agent?id=${created.id}`);
+    } catch (error) {
+      console.error("Failed to switch agent:", error);
+      modelPrompt = t("agent.input.switchAgentFailed");
+    }
+  }
+
+  // 选择 / 更换会话工作目录：打开系统目录选择对话框，选中即持久化到 session.workingDir
+  // （后端校验为已存在的绝对目录）。用户取消（返回非字符串）为干净 no-op。
+  async function pickWorkingDir() {
+    try {
+      const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+      const picked = await openDialog({ directory: true });
+      if (typeof picked !== "string") return;
+      modelPrompt = null;
+      await agentSessionActions.updateField(session.id, "workingDir", picked);
+    } catch (error) {
+      console.error("Failed to set working directory:", error);
+      modelPrompt =
+        error instanceof Error
+          ? error.message
+          : t("agent.input.workingDirFailed");
+    }
+  }
 
   // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
   const running = $derived(agentRunStore.isRunning(session.id));
@@ -503,13 +572,47 @@
   onchange={handleAttachmentChange}
 />
 
+<!-- 系统既有的模型选择 Modal（搜索/收藏/分组）。选中即成对写入 modelId+providerId。 -->
+<ModelSelectModal
+  bind:open={modelModalOpen}
+  {selectedModel}
+  onModelSelect={handleModelSelect}
+/>
+
+<!-- 工作目录选择：置于 composer 上方左侧，仅当来源 Agent 的 workingDirMode ≠ "none"
+     时出现。点击打开系统目录选择框，选中即持久化到 session.workingDir。 -->
+{#if showWorkingDir}
+  <div class="mx-auto flex w-full max-w-[800px] pb-1">
+    <button
+      type="button"
+      class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-base-content/55 hover:bg-base-300/50 hover:text-base-content transition-colors"
+      aria-label={t("agent.input.selectWorkingDir")}
+      title={session.workingDir ?? t("agent.input.selectWorkingDir")}
+      onclick={pickWorkingDir}
+    >
+      <Folder size={13} class="shrink-0" />
+      {#if workingDirName}
+        <span class="max-w-[220px] truncate">{workingDirName}</span>
+      {:else}
+        <span class="max-w-[220px] truncate text-warning"
+          >{t("agent.input.selectWorkingDir")}</span
+        >
+      {/if}
+    </button>
+  </div>
+{/if}
+
 <div
-  class="flex flex-col bg-base-300 rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
+  class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
 >
   <!-- relative 容器锚定浮层；浮层向上弹（bottom-full）以免落屏外/被时间线裁切。 -->
   <div class="relative">
     {#if slashOpen}
-      <div class="absolute bottom-full left-3 z-30 mb-1">
+      <!-- fly 提供与 Agent 菜单一致的轻微位移 + 淡入淡出开合动画。 -->
+      <div
+        class="absolute bottom-full left-3 z-30 mb-1"
+        transition:fly={{ y: -4, duration: 130 }}
+      >
         <SkillSlashPopover
           items={slashCandidates}
           highlightedIndex={effectiveHighlight}
@@ -577,94 +680,130 @@
 
   <div class="flex flex-row items-center justify-between gap-3 px-4 pt-0 pb-2">
     <div class="flex flex-row flex-wrap items-center gap-2">
-      <IconButton
-        icon={Plus}
-        ariaLabel={t("agent.input.addImage")}
+      <!-- 附件（图片上传）：最左侧的附件图标，与其余触发器共用安静 hover。 -->
+      <button
+        type="button"
+        class="flex h-7 w-7 items-center justify-center rounded-md text-base-content transition-colors hover:bg-base-300/60"
+        aria-label={t("agent.input.addImage")}
         title={t("agent.input.uploadImage")}
         onclick={handleAddAttachment}
-      />
+      >
+        <Paperclip size={16} />
+      </button>
 
-      <!-- 内置工具收成图标 + 向上弹出菜单（per-session enabledTools；FS 工具无
-           working_dir 时置灰）。relative 容器锚定向上弹的 popover。 -->
+      <!-- Agent 选择器：当前会话来源 Agent + 向上弹出的切换列表。选中他者即从该
+           AgentDefinition 实例化新会话并跳转（把 Agents 页的「使用」搬进输入框）。 -->
       <div class="relative">
         <button
           type="button"
-          class={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-            toolsMenuOpen
-              ? "bg-base-300 text-base-content"
-              : "text-base-content hover:bg-base-300"
+          class={`flex h-7 items-center gap-1.5 rounded-md pl-1.5 pr-2 transition-colors ${
+            agentMenuOpen
+              ? "bg-base-300/60 text-base-content"
+              : "text-base-content hover:bg-base-300/60"
           }`}
-          aria-label={t("agent.input.tools")}
+          aria-label={t("agent.input.selectAgent")}
           aria-haspopup="menu"
-          aria-expanded={toolsMenuOpen}
-          title={t("agent.input.tools")}
-          onclick={toggleToolsMenu}
+          aria-expanded={agentMenuOpen}
+          title={t("agent.input.selectAgent")}
+          onclick={toggleAgentMenu}
         >
-          <SlidersHorizontal size={18} />
+          <Bot size={16} class="shrink-0" />
+          <span class="max-w-[140px] truncate text-sm">{currentAgentLabel}</span>
+          <ChevronDown size={14} class="shrink-0 opacity-60" />
         </button>
 
-        {#if toolsMenuOpen}
-          <!-- 向上展开（bottom-full）：输入框在底部，菜单浮于图标上方以免落屏外。
+        {#if agentMenuOpen}
+          <!-- 向上展开（bottom-full）：输入框在底部，列表浮于按钮上方以免落屏外。
+               fly 提供轻微位移 + 淡入淡出的开合动画。
                stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
           <div
-            class="absolute bottom-full left-0 z-40 mb-2 w-56 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            transition:fly={{ y: -4, duration: 130 }}
+            class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-64 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
             role="menu"
             tabindex="-1"
             onclick={(event) => event.stopPropagation()}
             onkeydown={() => {}}
           >
-            {#if !hasWorkingDir}
-              <div
-                class="px-2 py-1.5 text-xs text-base-content/50"
-              >
-                {t("agent.input.workingDirRequired")}
+            {#if agentState.agents.length === 0}
+              <div class="px-2 py-1.5 text-xs text-base-content/50">
+                {t("common.loading")}
               </div>
-            {/if}
-            {#each BUILTIN_TOOLS as tool (tool.id)}
-              {@const ToolIcon = tool.icon}
-              {@const disabled = isToolDisabled(tool)}
-              <div
-                class={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 ${
-                  disabled ? "opacity-50" : ""
-                }`}
-                title={disabled
-                  ? t("agent.input.toolNeedsWorkingDir", { label: t(tool.labelKey) })
-                  : t(tool.labelKey)}
-              >
-                <span
-                  class="flex min-w-0 items-center gap-2 text-sm text-base-content"
+            {:else}
+              {#each agentState.agents as agent (agent.id)}
+                {@const active = agent.id === session.agentDefinitionId}
+                <button
+                  type="button"
+                  role="menuitem"
+                  class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+                    active ? "bg-base-300/60" : ""
+                  }`}
+                  onclick={() => selectAgent(agent)}
                 >
-                  <ToolIcon size={16} class="shrink-0 text-base-content/70" />
-                  <span class="truncate">{t(tool.labelKey)}</span>
-                </span>
-                <Toggle
-                  checked={isToolEnabled(tool.id)}
-                  {disabled}
-                  onChange={() => toggleTool(tool)}
-                />
-              </div>
-            {/each}
+                  <Bot size={16} class="shrink-0 text-base-content/70" />
+                  <span
+                    class="min-w-0 flex-1 truncate text-sm text-base-content"
+                  >
+                    {agent.name}
+                  </span>
+                  {#if active}
+                    <Check size={14} class="shrink-0 text-primary" />
+                  {/if}
+                </button>
+              {/each}
+            {/if}
           </div>
         {/if}
       </div>
     </div>
     <div class="flex flex-row items-center gap-3">
-      <Select
-        value={thinkingLevel}
-        options={thinkingLevelOptions}
-        size="sm"
-        autoWidth
-        onChange={handleThinkingChange}
-      />
-      <ChatModelSelectButton
-        {selectedModel}
-        onModelSelect={handleModelSelect}
-      />
+      <!-- 会话级模型选择器：打开系统既有的模型选择 Modal（搜索/收藏/分组）。选中即
+           成对写入 modelId+providerId（handleModelSelect）；解析不到显示「选择模型」。 -->
+      <button
+        type="button"
+        class="flex h-7 items-center gap-1.5 rounded-md px-2 py-1 text-sm text-base-content/80 hover:bg-base-300/60 transition-colors"
+        aria-label={t("agent.input.selectModel")}
+        title={selectedModel?.name ?? t("agent.input.selectModel")}
+        onclick={() => (modelModalOpen = true)}
+      >
+        {#if selectedModel}
+          {#if selectedModelIcon}
+            <img
+              src={selectedModelIcon}
+              alt={selectedModel.providerName}
+              class="h-4 w-4 shrink-0 rounded object-contain"
+            />
+          {/if}
+          <span class="max-w-[160px] truncate">{selectedModel.name}</span>
+        {:else}
+          <span class="max-w-[160px] truncate text-warning"
+            >{t("agent.input.selectModel")}</span
+          >
+        {/if}
+        <ChevronsUpDown size={13} class="shrink-0 opacity-60" />
+      </button>
+
+      <!-- 推理等级：原生 select 套安静触发器样式，与模型触发器同高、同 hover。 -->
+      <div class="relative">
+        <select
+          value={thinkingLevel}
+          onchange={(event) => handleThinkingChange(event.currentTarget.value)}
+          class="h-7 cursor-pointer appearance-none rounded-md bg-transparent pl-2 pr-6 py-1 text-sm text-base-content/80 hover:bg-base-300/60 transition-colors"
+        >
+          {#each thinkingLevelOptions as opt (opt.value)}
+            <option value={opt.value}>{opt.label}</option>
+          {/each}
+        </select>
+        <ChevronsUpDown
+          size={13}
+          class="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-base-content/80 opacity-60"
+        />
+      </div>
       {#if running}
         <CircleButton
           icon={Square}
           iconSize={16}
           size="w-8 h-8"
+          customClass="enabled:hover:opacity-90"
           ariaLabel={t("agent.input.stop")}
           onclick={handleStop}
         />
@@ -673,6 +812,7 @@
           icon={ArrowUp}
           iconSize={18}
           size="w-8 h-8"
+          customClass="enabled:hover:opacity-90"
           ariaLabel={t("agent.input.send")}
           disabled={awaitingApproval}
           onclick={sendAgentRun}

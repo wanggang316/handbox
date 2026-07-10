@@ -8,8 +8,17 @@ export const settingsZh = {
   "settings.general.theme.dark": "深色主题",
   "settings.general.language": "语言",
   "settings.general.autoScroll": "聊天界面自动下滑",
+  "settings.general.section": "通用",
+  "settings.general.appearanceDesc": "选择界面的明暗配色方案",
+  "settings.general.languageDesc": "界面显示语言",
+  "settings.general.autoScrollDesc": "有新消息时自动滚动到底部",
 
   // 侧边栏
+  "settings.sidebar.backToApp": "返回应用",
+  "settings.sidebar.search": "搜索设置…",
+  "settings.sidebar.group.personal": "个人",
+  "settings.sidebar.group.features": "功能",
+  "settings.sidebar.group.other": "其他",
   "settings.sidebar.account": "账户",
   "settings.sidebar.general": "通用",
   "settings.sidebar.quicktools": "快捷工具",

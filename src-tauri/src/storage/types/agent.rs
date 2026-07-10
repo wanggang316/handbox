@@ -1,5 +1,6 @@
 use super::common::{Timestamp, UUID};
-use super::session::{SessionReasoningConfig, McpServerConfig};
+use super::mcp::McpServerConfig;
+use crate::models::llm_types::SessionReasoningConfig;
 use serde::{Deserialize, Serialize};
 
 // Agent 推理配置 - 复用 Session 的推理配置
@@ -11,7 +12,6 @@ pub type AgentReasoningConfig = SessionReasoningConfig;
 pub struct Agent {
     pub id: UUID,
     pub name: String,
-    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -25,16 +25,39 @@ pub struct Agent {
     /// 关联的 GenUI（具名 JSON-Render spec）id。`None` 表示未关联（旧行 / NULL 列）；
     /// 引用的 GenUI 被删除后由仓储层置空，悬挂 id 在前端表单中显示为「未关联」。
     pub genui_id: Option<UUID>,
+    // ── AgentDefinition 扩展（migration 058）：能力集 + 运行策略 + 展示 ──
+    /// 选定的 provider id。`None`（旧行 / 内置行）表示实例化时再由 UI 选择。
+    pub provider_id: Option<String>,
+    /// lucide 图标名（列表/选择器展示用）。
+    pub icon: Option<String>,
+    /// 一句话描述。
+    pub description: Option<String>,
+    /// 是否为内置 AgentDefinition（`builtin-chat` / `builtin-coding`）。内置行在
+    /// service 层受保护：不可删除、不可改名。NULL/0 旧行解码为 `false`。
+    pub builtin: bool,
+    /// 启用的内置工具名（coding-agent 注册名：read/write/edit/bash/grep/find/ls）。
+    /// 空集 = 纯对话（不注册任何内置工具）。NULL 列解码为空 `Vec`。
+    pub builtin_tools: Vec<String>,
+    /// 工作目录策略：`"required"` | `"optional"` | `"none"`。`None` 旧行按 optional 处理。
+    pub working_dir_mode: Option<String>,
+    /// 工具执行默认策略：`"auto"` | `"manual"`。`None` 旧行按 auto 处理。
+    pub tool_execution_mode: Option<String>,
+    /// coding-agent thinking level。`None` 走引擎默认。
+    pub thinking_level: Option<String>,
+    /// 启动提示语（starter prompts）。NULL 列解码为空 `Vec`。
+    pub starters: Vec<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
 
-/// 创建 Agent 请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 创建 Agent（AgentDefinition）请求。`Default` 让调用方只填关心的字段
+/// （`CreateAgentRequest { name, ..Default::default() }`），新增字段零签名扰动。
+/// `builtin` 不在请求里——用户创建的 agent 恒为非内置；内置行只由 migration seed。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentRequest {
     pub name: String,
-    pub model: Option<String>,
+    pub provider_id: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -45,6 +68,13 @@ pub struct CreateAgentRequest {
     pub skills: Option<Vec<String>>,
     pub generative_ui: Option<bool>,
     pub genui_id: Option<UUID>,
+    pub icon: Option<String>,
+    pub description: Option<String>,
+    pub builtin_tools: Option<Vec<String>>,
+    pub working_dir_mode: Option<String>,
+    pub tool_execution_mode: Option<String>,
+    pub thinking_level: Option<String>,
+    pub starters: Option<Vec<String>>,
 }
 
 /// 更新 Agent 请求
@@ -52,7 +82,6 @@ pub struct CreateAgentRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAgentRequest {
     pub name: Option<String>,
-    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -74,7 +103,6 @@ mod tests {
         let agent = Agent {
             id: "agent_1".to_string(),
             name: "Code Assistant".to_string(),
-            model: Some("gpt-4".to_string()),
             temperature: Some(0.7),
             top_p: Some(0.9),
             top_k: Some(40),
@@ -89,6 +117,15 @@ mod tests {
             skills: vec!["code-analysis".to_string(), "refactoring".to_string()],
             generative_ui: Some(true),
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: 1000,
             updated_at: 2000,
         };
@@ -109,7 +146,6 @@ mod tests {
         let agent = Agent {
             id: "agent_1".to_string(),
             name: "Code Assistant".to_string(),
-            model: None,
             temperature: None,
             top_p: None,
             top_k: None,
@@ -120,6 +156,15 @@ mod tests {
             skills: vec![],
             generative_ui: Some(true),
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: 1000,
             updated_at: 2000,
         };
@@ -141,7 +186,6 @@ mod tests {
         let req: CreateAgentRequest =
             serde_json::from_str(json).expect("deserialize");
         assert_eq!(req.name, "Test Agent");
-        assert!(req.model.is_none());
         assert!(req.skills.is_none());
     }
 }

@@ -12,9 +12,7 @@ import { commonZh } from "./zh/common";
 import { sidebarZh } from "./zh/sidebar";
 import { settingsZh } from "./zh/settings";
 import { agentZh } from "./zh/agent";
-import { chatZh } from "./zh/chat";
 import { jobsZh } from "./zh/jobs";
-import { wordsZh } from "./zh/words";
 import { updateZh } from "./zh/update";
 import { selectionZh } from "./zh/selection";
 import { uiZh } from "./zh/ui";
@@ -25,9 +23,7 @@ import { commonEn } from "./en/common";
 import { sidebarEn } from "./en/sidebar";
 import { settingsEn } from "./en/settings";
 import { agentEn } from "./en/agent";
-import { chatEn } from "./en/chat";
 import { jobsEn } from "./en/jobs";
-import { wordsEn } from "./en/words";
 import { updateEn } from "./en/update";
 import { selectionEn } from "./en/selection";
 import { uiEn } from "./en/ui";
@@ -40,9 +36,7 @@ const zh = {
   ...sidebarZh,
   ...settingsZh,
   ...agentZh,
-  ...chatZh,
   ...jobsZh,
-  ...wordsZh,
   ...updateZh,
   ...selectionZh,
   ...uiZh,
@@ -55,9 +49,7 @@ const en = {
   ...sidebarEn,
   ...settingsEn,
   ...agentEn,
-  ...chatEn,
   ...jobsEn,
-  ...wordsEn,
   ...updateEn,
   ...selectionEn,
   ...uiEn,

@@ -8,24 +8,23 @@ use crate::models::{
 };
 use crate::services::Database;
 use crate::storage::types::{McpServer, McpServerStatus};
-use crate::storage::{SessionRepository, McpRepository};
+use crate::storage::McpRepository;
 use handbox_mcp::{
     validate_server_config, ConnectionConfig, McpClient, McpClientError, McpPrompt,
     McpPromptArgument, McpResource, McpTool, ProcessConfig, SseConfig, StreamableHttpConfig,
 };
+use hand_agent::{AgentTool, ToolResult};
 
 /// Service orchestrating MCP server lifecycle and metadata
 #[derive(Clone)]
 pub struct McpService {
     repository: McpRepository,
-    chat_repository: SessionRepository,
 }
 
 impl McpService {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
-            repository: McpRepository::new(db.clone()),
-            chat_repository: SessionRepository::new(db),
+            repository: McpRepository::new(db),
         }
     }
 
@@ -281,20 +280,6 @@ impl McpService {
         Ok(server)
     }
 
-    /// Count chats using a specific MCP server
-    pub async fn count_chats_using_server(&self, server_id: &str) -> Result<i32, AppError> {
-        self.chat_repository
-            .count_chats_using_mcp_server(server_id)
-            .await
-    }
-
-    /// Remove MCP server references from all chats
-    pub async fn remove_mcp_server_from_chats(&self, server_id: &str) -> Result<i32, AppError> {
-        self.chat_repository
-            .remove_mcp_server_from_chats(server_id)
-            .await
-    }
-
     /// Update server status and metadata based on connection type
     ///
     /// Returns Ok if connection succeeds, Err if connection fails
@@ -488,7 +473,7 @@ impl McpService {
                 );
                 Vec::new()
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         };
 
         // Handle resources - ignore "Method not found" error (-32601)
@@ -503,7 +488,7 @@ impl McpService {
                 );
                 Vec::new()
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         };
 
         Ok((tools, prompts, resources))
@@ -567,6 +552,8 @@ impl McpService {
         McpClient::connect(config).await
     }
 
+    // McpClientError 来自外部 crate handbox-mcp，无法在此重构其体积。
+    #[allow(clippy::result_large_err)]
     fn validate_server_configuration(server: &McpServer) -> Result<(), McpClientError> {
         match server.connection_type {
             crate::storage::types::McpConnectionType::Stdio => {
@@ -600,6 +587,7 @@ impl McpService {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn build_connection_config(server: &McpServer) -> Result<ConnectionConfig, McpClientError> {
         match server.connection_type {
             crate::storage::types::McpConnectionType::Stdio => {
@@ -648,6 +636,62 @@ impl McpService {
         }
     }
 
+    /// Wrap each enabled tool of the given MCP servers into a `hand_agent::AgentTool`
+    /// so the unified agent loop can call MCP tools alongside the built-ins.
+    ///
+    /// Tool names are namespaced `mcp__{serverId}__{tool}` to avoid collisions with the
+    /// built-in `read`/`write`/… and across servers. The execute closure captures the
+    /// real server + tool name and dispatches per-server via `invoke_tool` (connect →
+    /// call → shutdown each time), bypassing the global `execute_tool` name lookup so
+    /// same-named tools on different servers stay distinct. `parameters` is the MCP
+    /// tool's `input_schema` verbatim (empty/non-object → schema validation skipped by
+    /// `AgentTool::compiled_schema`). Filtering is by `server.enabled_tools`; the caller
+    /// is responsible for narrowing that to a session's selection beforehand.
+    pub fn build_mcp_agent_tools(&self, servers: &[McpServer]) -> Vec<AgentTool> {
+        let mut tools = Vec::new();
+        for server in servers {
+            for tool in &server.tools {
+                if !server.enabled_tools.contains(&tool.name) {
+                    continue;
+                }
+                let svc = self.clone();
+                let server_owned = server.clone();
+                let real_name = tool.name.clone();
+                let namespaced = format!("mcp__{}__{}", server.id, tool.name);
+                let label = format!(
+                    "{} · {}",
+                    server.display_name.as_deref().unwrap_or(&server.name),
+                    tool.name
+                );
+                let description = tool.description.clone().unwrap_or_default();
+                let parameters = tool.input_schema.clone();
+
+                tools.push(AgentTool::simple(
+                    namespaced,
+                    description,
+                    parameters,
+                    label,
+                    move |_call_id, args| {
+                        let svc = svc.clone();
+                        let server = server_owned.clone();
+                        let real_name = real_name.clone();
+                        async move {
+                            match svc.invoke_tool(&server, &real_name, Some(args)).await {
+                                Ok(result) => {
+                                    ToolResult::text(McpService::format_tool_result(&result))
+                                }
+                                Err(e) => ToolResult::error(format!(
+                                    "MCP tool '{real_name}' failed: {e}"
+                                )),
+                            }
+                        }
+                    },
+                ));
+            }
+        }
+        tools
+    }
+
     /// 执行工具调用（通过工具名称和参数）
     pub async fn execute_tool(&self, tool_name: &str, arguments: &str) -> Result<String, AppError> {
         // 获取活跃的 MCP 服务器
@@ -663,7 +707,7 @@ impl McpService {
             if let Some(tool) = server.tools.iter().find(|t| t.name == tool_name) {
                 let arguments = Self::parse_tool_arguments(arguments);
 
-                match self.invoke_tool(&server, &tool.name, arguments).await {
+                match self.invoke_tool(server, &tool.name, arguments).await {
                     Ok(result) => return Ok(Self::format_tool_result(&result)),
                     Err(error) => {
                         tracing::error!(

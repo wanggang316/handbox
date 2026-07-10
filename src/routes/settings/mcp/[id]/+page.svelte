@@ -12,7 +12,6 @@
   import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { updateToolEnabled } from "$lib/api";
-  import { countChatsUsingServer, removeMcpServerFromChats } from "$lib/api/mcp";
   import type { McpServer } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
   import {
@@ -29,10 +28,8 @@
   let activeTab = $state("tools");
   let isRefreshing = $state(false);
   let showDeleteConfirm = $state(false);
-  let showDisableConfirm = $state(false);
   let showEditModal = $state(false);
   let confirmModalRef: any;
-  let relatedChatsCount = $state(0);
 
   // 记录每个项目的展开状态
   let expandedTools = $state<Record<string, boolean>>({});
@@ -84,33 +81,7 @@
     }
   });
 
-  async function handleToggleBefore(enabled: boolean, previous: boolean) {
-    if (!server) return true;
-
-    if (!enabled && previous && server.enabled) {
-      try {
-        const count = await countChatsUsingServer(server.id);
-        relatedChatsCount = count;
-        if (count > 0) {
-          showDisableConfirm = true;
-          return false;
-        }
-      } catch (error) {
-        console.error("Failed to count related chats:", error);
-        // 如果检查失败，允许继续执行禁用操作
-        return true;
-      }
-    }
-
-    return true;
-  }
-
   async function handleToggle(enabled: boolean) {
-    if (!server) return;
-    await performToggle(enabled);
-  }
-
-  async function performToggle(enabled: boolean) {
     if (!server) return;
 
     // 乐观更新UI
@@ -118,7 +89,7 @@
     formData.enabled = enabled;
 
     try {
-      console.log("performToggle", server.id, enabled);
+      console.log("handleToggle", server.id, enabled);
       await mcpActions.toggleServer({ serverId: server.id, enabled });
       console.log(
         `MCP server ${enabled ? "enabled" : "disabled"} successfully`
@@ -128,32 +99,6 @@
       // 发生错误时回滚UI状态
       formData.enabled = previousState;
     }
-  }
-
-  async function handleDisableWithoutRemove() {
-    await performToggle(false);
-    showDisableConfirm = false;
-  }
-
-  async function handleDisableAndRemove() {
-    if (!server) return;
-
-    try {
-      // 先移除会话中的 MCP 配置
-      await removeMcpServerFromChats(server.id);
-      // 再关闭 MCP 服务器
-      await performToggle(false);
-      showDisableConfirm = false;
-    } catch (error) {
-      console.error("Failed to disable and remove MCP server:", error);
-    }
-  }
-
-  function handleCancelDisable() {
-    if (server) {
-      formData.enabled = server.enabled;
-    }
-    showDisableConfirm = false;
   }
 
   async function handleRefresh() {
@@ -312,7 +257,6 @@
               />
               <Toggle
                 checked={formData.enabled}
-                onChangeBefore={handleToggleBefore}
                 onChange={handleToggle}
               />
             </div>
@@ -587,41 +531,3 @@
   onCancel={() => {}}
 />
 
-<!-- 禁用确认弹窗 -->
-<ConfirmModal
-  open={showDisableConfirm}
-  title={t("provider.disableMcpTitle")}
-  message={relatedChatsCount > 0
-    ? t("provider.disableMcpWithChats", {
-        count: relatedChatsCount,
-        name: server?.displayName || server?.name || "",
-      })
-    : t("provider.disableMcpConfirm", {
-        name: server?.displayName || server?.name || "",
-      })}
-  actions={relatedChatsCount > 0
-    ? [
-        {
-          label: t("provider.disableAndRemove"),
-          style: "primary",
-          onClick: handleDisableAndRemove
-        },
-        {
-          label: t("provider.disableMcpOnly"),
-          style: "danger",
-          onClick: handleDisableWithoutRemove
-        },
-        {
-          label: t("common.cancel"),
-          style: "secondary",
-          onClick: handleCancelDisable
-        }
-      ]
-    : undefined}
-  confirmText={t("provider.closeAction")}
-  cancelText={t("common.cancel")}
-  confirmButtonStyle="danger"
-  onClose={() => (showDisableConfirm = false)}
-  onConfirm={handleDisableWithoutRemove}
-  onCancel={handleCancelDisable}
-/>

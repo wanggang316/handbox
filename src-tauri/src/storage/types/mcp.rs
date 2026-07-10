@@ -7,7 +7,9 @@ use crate::models::AppError;
 /// MCP connection type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum McpConnectionType {
+    #[default]
     Stdio,
     Sse,
     Http,
@@ -51,11 +53,6 @@ impl From<&str> for McpConnectionType {
     }
 }
 
-impl Default for McpConnectionType {
-    fn default() -> Self {
-        McpConnectionType::Stdio
-    }
-}
 
 /// MCP server status enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -143,4 +140,37 @@ pub struct McpServer {
     pub last_error: Option<McpErrorDetail>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+fn default_execution_mode() -> String {
+    "auto".to_string()
+}
+
+// Moved from `storage::types::session` so the agent stack can bind MCP servers
+// without depending on the chat-session module. serde repr is unchanged from
+// the original definition — DB/wire compatibility preserved.
+/// Per-binding MCP server config: which server, how its tools execute, and the
+/// optional allowlist of enabled tools. Embedded in agent definitions and
+/// agent sessions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerConfig {
+    pub server_id: String,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
+    #[serde(default)]
+    pub enabled_tools: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_server_config_defaults() {
+        let json = r#"{"serverId": "test"}"#;
+        let config: McpServerConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.execution_mode, "auto");
+        assert!(config.enabled_tools.is_empty());
+    }
 }

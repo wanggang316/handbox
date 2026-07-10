@@ -87,7 +87,7 @@
   }
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <!-- 错误提示 -->
   {#if errorMessage}
     <div class="p-4 bg-error/10 border border-error/20 rounded-lg">

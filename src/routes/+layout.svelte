@@ -2,6 +2,11 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
+  import { afterNavigate, goto } from "$app/navigation";
+  import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { isTauriEnvironment } from "$lib/utils/tauri";
+  import { navigationState } from "$lib/states/navigation.svelte";
   import { uiState } from "$lib/states/ui.svelte";
   import { providerActions } from "$lib/states/provider.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
@@ -11,11 +16,30 @@
 
   let { children } = $props();
 
+  // 记录主界面路由：设置页的「返回应用」据此回跳。
+  afterNavigate((nav) => {
+    const path = nav.to?.url.pathname;
+    if (path) navigationState.remember(path);
+  });
+
   onMount(() => {
     if (!browser) {
       return () => {
         cleanupAuth();
       };
+    }
+
+    // 设置在主窗口内渲染：原生菜单（⌘,）与其他 webview 窗口经
+    // open_settings_window 命令定向 emit 本事件，这里承接并导航。
+    let unlistenSettingsNavigate: (() => void) | undefined;
+    if (isTauriEnvironment()) {
+      listen<string>("settings:navigate", (event) => {
+        goto(event.payload);
+      })
+        .then((fn) => (unlistenSettingsNavigate = fn))
+        .catch((error) => {
+          console.error("Failed to listen settings:navigate:", error);
+        });
     }
 
     const allowedThemes = new Set<Theme>(["light", "dark", "system"]);
@@ -57,14 +81,22 @@
     };
     window.addEventListener("storage", handleStorageChange);
 
-    providerActions.loadProviderConfigs().catch((error) => {
-      console.error("Failed to load provider configs:", error);
-    });
+    // 重预加载只在主窗口跑：4 个隐藏辅助窗口（划词×3 / quick action）各 boot 一份
+    // 同一 SPA，若全都预载 providers/auth，冷启动期是 5 份重复 IPC 抢主窗口首屏资源。
+    // settings 仍全窗口加载（轻量本地读，主题/划词翻译依赖）。
+    const isMainWindow =
+      !isTauriEnvironment() || getCurrentWindow().label === "main";
 
-    // 预加载 providers with models，这样子页面就不需要重复加载
-    providerActions.loadProvidersWithModels(false).catch((error) => {
-      console.error("Failed to load providers:", error);
-    });
+    if (isMainWindow) {
+      providerActions.loadProviderConfigs().catch((error) => {
+        console.error("Failed to load provider configs:", error);
+      });
+
+      // 预加载 providers with models，这样子页面就不需要重复加载
+      providerActions.loadProvidersWithModels(false).catch((error) => {
+        console.error("Failed to load providers:", error);
+      });
+    }
 
     // 预加载 settings，这样子页面就不需要重复加载；
     // 加载完成后用后端持久化的语言做权威回填。
@@ -80,11 +112,14 @@
         console.error("Failed to load settings:", error);
       });
 
-    initAuth().catch((error) => {
-      console.error("Failed to initialize auth:", error);
-    });
+    if (isMainWindow) {
+      initAuth().catch((error) => {
+        console.error("Failed to initialize auth:", error);
+      });
+    }
 
     return () => {
+      unlistenSettingsNavigate?.();
       mediaQuery.removeEventListener("change", handleSystemThemeChange);
       window.removeEventListener("storage", handleStorageChange);
       cleanupAuth();

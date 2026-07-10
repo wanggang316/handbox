@@ -127,63 +127,17 @@
     onRespond(request, "deny");
   }
 
-  // 焦点陷阱（VAL-CAPERM-021）：审批是安全关键的强制决策点，待决期间键盘焦点必须
-  // 困在弹窗内——Tab/Shift+Tab 在弹窗内的可聚焦控件间循环，绝不跳到背后已禁用的
-  // 输入区/发送按钮。共享 `Modal` 只设置了「打开即聚焦 backdrop」的初始焦点，未做
-  // Tab 循环，故在此对审批内容补焦点陷阱（不改共享组件）。初始焦点落在第一个动作
-  // 按钮（拒绝，最安全的默认），用户无需移动鼠标即可键盘操作。
-  function trapFocus(node: HTMLElement) {
-    const FOCUSABLE =
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-    function focusable(): HTMLElement[] {
-      return Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-        (el) => el.offsetParent !== null || el === document.activeElement,
-      );
-    }
-
-    function onKeydown(event: KeyboardEvent) {
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (items.length === 0) {
-        // 无可聚焦项：吞掉 Tab 以免焦点逃逸到背后的输入区。
-        event.preventDefault();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey) {
-        if (active === first || !node.contains(active)) {
-          event.preventDefault();
-          last.focus();
-        }
-      } else if (active === last || !node.contains(active)) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    node.addEventListener("keydown", onKeydown);
-    // 初始焦点：第一个动作按钮（拒绝）。tick 由 action 挂载时机保证 DOM 已就绪。
-    focusable()[0]?.focus();
-
-    return {
-      destroy() {
-        node.removeEventListener("keydown", onKeydown);
-      },
-    };
-  }
+  // 焦点陷阱（VAL-CAPERM-021）由底层 `Modal`（bits-ui `Dialog.Content` 的 FocusScope）提供：
+  // 待决期间 Tab/Shift+Tab 在弹窗内循环、绝不跳到背后已禁用的输入区，打开时焦点自动落到
+  // 第一个可聚焦控件（拒绝按钮，最安全的默认）。
 </script>
 
 <Modal open={true} showCloseButton={false} onClose={handleClose}>
   <!--
-    审批内容根：挂焦点陷阱（VAL-CAPERM-021），待决期间 Tab 在弹窗内循环、绝不跳到
-    背后已禁用的输入区/发送。`aria-labelledby` 把内容关联到标题，配合外层 `Modal` 的
-    role="dialog"/aria-modal 让屏幕阅读器把它读作一个有名字的模态对话框。
+    审批内容根。`aria-labelledby` 把内容关联到标题，配合 Dialog 的 role="dialog"/aria-modal
+    让屏幕阅读器把它读作一个有名字的模态对话框。
   -->
   <div
-    use:trapFocus
     aria-labelledby="agent-approval-title"
     class="w-[560px] max-w-[90vw] flex flex-col"
   >
@@ -276,9 +230,7 @@
         label={t("agent.approval.deny")}
         size="h-8"
         fontSize="text-sm"
-        bgColor="bg-base-300"
-        textColor="text-base-content/80"
-        hoverColor="hover:bg-base-300/80"
+        variant="secondary"
         onclick={() => onRespond(request, "deny")}
       />
       <RoundButton
@@ -286,9 +238,7 @@
         label={t("agent.approval.allowOnce")}
         size="h-8"
         fontSize="text-sm"
-        bgColor="bg-base-300"
-        textColor="text-base-content/80"
-        hoverColor="hover:bg-base-300/80"
+        variant="secondary"
         onclick={() => onRespond(request, "allow_once")}
       />
       <RoundButton
@@ -296,9 +246,7 @@
         label={t("agent.approval.allowAlways")}
         size="h-8"
         fontSize="text-sm"
-        bgColor="bg-primary"
-        textColor="text-primary-content"
-        hoverColor="hover:bg-primary/90"
+        variant="primary"
         onclick={() => onRespond(request, "allow_always")}
       />
     </div>

@@ -1,3 +1,7 @@
+// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
+// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+#![allow(clippy::unused_unit)]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]
@@ -37,7 +41,7 @@ tauri_panel! {
 }
 
 pub fn init_panel(app_handle: &AppHandle) {
-    let window = app_handle.get_webview_window(PANEL_LABEL.into()).unwrap();
+    let window = app_handle.get_webview_window(PANEL_LABEL).unwrap();
     let panel = window.to_panel::<SelectionSettingsPanel>().unwrap();
     panel.set_level(PanelLevel::Floating.value());
     panel.set_collection_behavior(
@@ -75,7 +79,7 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
     SETTINGS_PANEL_VISIBLE.store(true, Ordering::Relaxed);
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             let _ = window.set_position(LogicalPosition::new(x, y));
             if !window.is_visible().unwrap_or(true) {
                 tracing::info!("Settings panel is not visible, showing {} x: {}, y: {}", PANEL_LABEL, x, y);
@@ -89,7 +93,7 @@ pub fn hide_panel(handle: &AppHandle) {
     SETTINGS_PANEL_VISIBLE.store(false, Ordering::Relaxed);
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
             if window.is_visible().unwrap_or(true) {
                 let _ = window.hide();
@@ -101,7 +105,7 @@ pub fn hide_panel(handle: &AppHandle) {
 pub fn become_key_window(handle: &AppHandle) {
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
-        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL.into()) {
+        if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             if let Ok(panel) = window.to_panel::<SelectionSettingsPanel>() {
                 panel.make_key_and_order_front();
                 // panel.show_and_make_key();

@@ -4,6 +4,7 @@
   import { goto } from "$app/navigation";
   import { ArrowLeft } from "@lucide/svelte";
   import GenUiEditor from "$lib/components/genui/GenUiEditor.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import { genuiActions } from "$lib/states/genui.svelte";
   import type { GenUi } from "$lib/types";
 
@@ -35,9 +36,7 @@
 
 {#if isLoading}
   <div class="h-full flex items-center justify-center">
-    <div
-      class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
-    ></div>
+    <Spinner size={28} />
   </div>
 {:else if genui}
   {#key genui.id}

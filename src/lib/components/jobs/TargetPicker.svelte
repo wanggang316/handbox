@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Bot } from "@lucide/svelte";
   import Select from "$lib/components/ui/Select.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
+  import ModelSelectModal from "$lib/components/agentsession/ModelSelectModal.svelte";
   import { t } from "$lib/i18n";
   import type { Agent, AgentTarget, JobTarget, PromptTarget } from "$lib/types";
   import type {
@@ -61,7 +61,7 @@
           sessionStrategy: "new_session",
         };
       case "agent":
-        return { kind: "agent", agentId: "", initialMessage: "" };
+        return { kind: "agent", agentId: "", modelId: "", initialMessage: "" };
     }
   }
 
@@ -80,8 +80,8 @@
     target = next;
   }
 
-  // 把当前 (providerId, modelId) 解析为 ChatModelSelectButton 需要的
-  // ModelWithProvider；解析不到（模型已删/未加载）返回 null → 显示「选择模型」。
+  // 把当前 (providerId, modelId) 解析为 ModelWithProvider（供展示名与弹窗回显）；
+  // 解析不到（模型已删/未加载）返回 null → 显示「选择模型」。
   const selectedPromptModel = $derived.by((): ModelWithProvider | null => {
     const t = promptTarget;
     if (!t || !t.providerId || !t.modelId) return null;
@@ -122,6 +122,34 @@
     setAgentTarget({ ...agentTarget, agentId: value });
   }
 
+  // 该 Job 运行 agent 所用模型（agent 定义不再携带模型）。选中即成对写入
+  // modelId（provider 在后端执行时按 model id 从目录解析）。展示名从
+  // providersWithModels 解析，解析不到 → 显示「选择模型」。
+  const selectedAgentModel = $derived.by((): ModelWithProvider | null => {
+    const tgt = agentTarget;
+    if (!tgt || !tgt.modelId) return null;
+    for (const provider of providersWithModels) {
+      const model = provider.models.find((m) => m.id === tgt.modelId);
+      if (model) {
+        return {
+          ...model,
+          providerName: provider.name,
+          providerType: provider.provider_type,
+        };
+      }
+    }
+    return null;
+  });
+
+  function handleAgentModelSelect(model: ModelWithProvider): void {
+    if (!agentTarget) return;
+    setAgentTarget({ ...agentTarget, modelId: model.id });
+  }
+
+  // 模型选择 Modal（系统既有的搜索/收藏/分组选择器）开合，两种目标各一。
+  let promptModelModalOpen = $state(false);
+  let agentModelModalOpen = $state(false);
+
   function handleAgentMessageChange(value: string): void {
     if (!agentTarget) return;
     setAgentTarget({ ...agentTarget, initialMessage: value });
@@ -147,6 +175,11 @@
       target.kind === "agent" &&
       (!agentTarget || !agentTarget.agentId),
   );
+  const agentModelInvalid = $derived(
+    showError &&
+      target.kind === "agent" &&
+      (!agentTarget || !agentTarget.modelId),
+  );
 
   const inputClass =
     "w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary";
@@ -166,29 +199,32 @@
   </Select>
 
   {#if promptTarget}
-    <!-- Prompt：provider/model 级联（复用 chat 模型选择弹窗）+ prompt 文本 -->
+    <!-- Prompt：模型（弹窗选择，成对写入 provider/model）+ prompt 文本 -->
     <div class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.modelLabel")}</span>
-      <div
-        class="flex items-center gap-2 rounded-md border px-1 py-1 {promptModelInvalid
+      <button
+        type="button"
+        onclick={() => (promptModelModalOpen = true)}
+        class="{inputClass} flex items-center justify-between gap-2 text-left {promptModelInvalid
           ? 'border-error ring-1 ring-error'
-          : 'border-[var(--hairline)]'}"
+          : ''}"
       >
-        <ChatModelSelectButton
-          selectedModel={selectedPromptModel}
-          onModelSelect={handleModelSelect}
-          variant="ghost"
-        />
         {#if selectedPromptModel}
-          <span class="text-xs text-base-content/50">
-            {selectedPromptModel.providerName}
-          </span>
+          <span class="truncate text-base-content">{selectedPromptModel.name}</span>
+        {:else}
+          <span class="text-base-content/50">{t("agent.input.selectModel")}</span>
         {/if}
-      </div>
+      </button>
       {#if promptModelInvalid}
         <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
       {/if}
     </div>
+
+    <ModelSelectModal
+      bind:open={promptModelModalOpen}
+      selectedModel={selectedPromptModel}
+      onModelSelect={handleModelSelect}
+    />
 
     <label class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.promptLabel")}</span>
@@ -242,6 +278,37 @@
         <span class="text-xs text-error">{t("jobs.target.agentRequired")}</span>
       {/if}
     </label>
+
+    <!-- 运行该 Agent 所用模型（Agent 定义已不含模型，改为每个 Job 各自选定）。
+         点击打开系统既有的模型选择 Modal。 -->
+    <div class="flex flex-col gap-1 text-sm">
+      <span class="font-medium text-base-content/80"
+        >{t("jobs.target.modelLabel")}</span
+      >
+      <button
+        type="button"
+        onclick={() => (agentModelModalOpen = true)}
+        class="{inputClass} flex items-center justify-between gap-2 text-left {agentModelInvalid
+          ? 'border-error ring-1 ring-error'
+          : ''}"
+      >
+        {#if selectedAgentModel}
+          <span class="truncate text-base-content">{selectedAgentModel.name}</span
+          >
+        {:else}
+          <span class="text-base-content/50">{t("agent.input.selectModel")}</span>
+        {/if}
+      </button>
+      {#if agentModelInvalid}
+        <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
+      {/if}
+    </div>
+
+    <ModelSelectModal
+      bind:open={agentModelModalOpen}
+      selectedModel={selectedAgentModel}
+      onModelSelect={handleAgentModelSelect}
+    />
 
     <label class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.initialMessageLabel")}</span>

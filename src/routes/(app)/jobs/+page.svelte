@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Plus, Clock, Search, AlertCircle } from "@lucide/svelte";
+  import PageHeader from "$lib/components/ui/PageHeader.svelte";
   import { listenJobExecuted } from "$lib/api/job";
   import { jobStore } from "$lib/stores/jobStore.svelte";
   import JobCard from "$lib/components/jobs/JobCard.svelte";
   import Button from "$lib/components/ui/Button.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import JobFormModal from "$lib/components/jobs/JobFormModal.svelte";
   import JobDetailModal from "$lib/components/jobs/JobDetailModal.svelte";
@@ -177,49 +179,44 @@
   });
 </script>
 
-<div class="h-full flex flex-col">
-  <div class="flex-shrink-0 p-4 border-b border-base-300 mt-12">
-    <div class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-4">
-        <h1 class="text-xl font-semibold text-base-content flex items-center gap-2">
-          <Clock size={24} />
-          {t("jobs.title")}
-        </h1>
-        <span class="text-sm text-base-content/60">
-          {t("jobs.count", { n: filteredJobs.length })}
-        </span>
+<div class="h-full flex flex-col bg-[var(--bg-canvas)]">
+  <!-- 页头随内容滚动（Codex 式） -->
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-12">
+    <div class="mx-auto w-full max-w-3xl">
+    <div class="pb-5 pt-2">
+    <PageHeader
+      title={t("jobs.title")}
+      meta={t("jobs.count", { n: filteredJobs.length })}
+    >
+      {#snippet actions()}
+        <Button
+          variant="primary"
+          size="sm"
+          onclick={handleCreate}
+          customClass="flex items-center gap-2"
+        >
+          <Plus size={16} />
+          {t("jobs.create")}
+        </Button>
+      {/snippet}
+
+      <div class="relative">
+        <input
+          type="text"
+          placeholder={t("jobs.searchPlaceholder")}
+          class="field h-10 w-full pl-10 pr-4 text-sm"
+          bind:value={searchQuery}
+        />
+        <Search
+          class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
+          size={16}
+        />
       </div>
-      <Button
-        variant="primary"
-        size="sm"
-        onclick={handleCreate}
-        customClass="flex items-center gap-2"
-      >
-        <Plus size={16} />
-        {t("jobs.create")}
-      </Button>
+    </PageHeader>
     </div>
-
-    <div class="relative">
-      <input
-        type="text"
-        placeholder={t("jobs.searchPlaceholder")}
-        class="w-full h-9 pl-10 pr-4 bg-base-200 rounded-lg text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
-        bind:value={searchQuery}
-      />
-      <Search
-        class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/50"
-        size={16}
-      />
-    </div>
-  </div>
-
-  <div class="flex-1 min-h-0 overflow-y-auto p-4">
     {#if jobStore.isLoading}
       <div class="flex items-center justify-center h-full">
-        <div
-          class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"
-        ></div>
+        <Spinner size={28} />
       </div>
     {:else if jobStore.error}
       <div class="flex flex-col items-center justify-center h-full text-base-content/50">
@@ -250,7 +247,7 @@
         {/if}
       </div>
     {:else}
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         {#each filteredJobs as job (job.id)}
           <JobCard
             {job}
@@ -262,6 +259,7 @@
         {/each}
       </div>
     {/if}
+    </div>
   </div>
 </div>
 

@@ -23,29 +23,7 @@
         "transparent": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": {
-          "x": 15,
-          "y": 27
-        }
-      },
-      {
-        "label": "settings",
-        "title": "Settings - handbox",
-        "url": "/settings",
-        "width": 800,
-        "height": 600,
-        "minWidth": 800,
-        "minHeight": 600,
-        "maxWidth": 1200,
-        "maxHeight": 800,
-        "decorations": true,
-        "transparent": false,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
         "visible": false,
-        "resizable": true,
-        "maximizable": false,
-        "minimizable": false,
         "trafficLightPosition": {
           "x": 15,
           "y": 27

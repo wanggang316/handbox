@@ -30,18 +30,20 @@ impl AgentRepository {
         let skills_json = serde_json::to_string(&agent.skills)
             .map_err(|e| AppError::validation_error(&format!("Invalid skills: {}", e)))?;
 
-        // 将空字符串转换为 NULL
-        let model = agent.model.as_ref().filter(|s| !s.is_empty());
+        let builtin_tools_json = serde_json::to_string(&agent.builtin_tools)
+            .map_err(|e| AppError::validation_error(&format!("Invalid builtin tools: {}", e)))?;
+
+        let starters_json = serde_json::to_string(&agent.starters)
+            .map_err(|e| AppError::validation_error(&format!("Invalid starters: {}", e)))?;
 
         let query = r#"
-            INSERT INTO agents (id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            INSERT INTO agents (id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
         "#;
 
         sqlx::query(query)
             .bind(&agent.id)
             .bind(&agent.name)
-            .bind(model)
             .bind(agent.temperature)
             .bind(agent.top_p)
             .bind(agent.top_k)
@@ -52,6 +54,15 @@ impl AgentRepository {
             .bind(&skills_json)
             .bind(agent.generative_ui)
             .bind(&agent.genui_id)
+            .bind(&agent.provider_id)
+            .bind(&agent.icon)
+            .bind(&agent.description)
+            .bind(agent.builtin)
+            .bind(&builtin_tools_json)
+            .bind(&agent.working_dir_mode)
+            .bind(&agent.tool_execution_mode)
+            .bind(&agent.thinking_level)
+            .bind(&starters_json)
             .bind(agent.created_at)
             .bind(agent.updated_at)
             .execute(self.db.pool())
@@ -64,7 +75,7 @@ impl AgentRepository {
     /// 获取 Agent 列表
     pub async fn list_agents(&self, limit: i32, offset: i32) -> Result<Vec<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at
+            SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
             FROM agents ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -86,7 +97,7 @@ impl AgentRepository {
     /// 根据 ID 获取 Agent
     pub async fn get_agent_by_id(&self, agent_id: &UUID) -> Result<Option<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, model, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, created_at, updated_at
+            SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
             FROM agents WHERE id = $1
         "#;
 
@@ -116,17 +127,19 @@ impl AgentRepository {
         let skills_json = serde_json::to_string(&agent.skills)
             .map_err(|e| AppError::validation_error(&format!("Invalid skills: {}", e)))?;
 
-        // 将空字符串转换为 NULL
-        let model = agent.model.as_ref().filter(|s| !s.is_empty());
+        let builtin_tools_json = serde_json::to_string(&agent.builtin_tools)
+            .map_err(|e| AppError::validation_error(&format!("Invalid builtin tools: {}", e)))?;
+
+        let starters_json = serde_json::to_string(&agent.starters)
+            .map_err(|e| AppError::validation_error(&format!("Invalid starters: {}", e)))?;
 
         let query = r#"
-            UPDATE agents SET name = $1, model = $2, temperature = $3, top_p = $4, top_k = $5, reasoning = $6, max_tokens = $7, system_prompt = $8, mcp_servers = $9, skills = $10, generative_ui = $11, genui_id = $12, updated_at = $13
-            WHERE id = $14
+            UPDATE agents SET name = $1, temperature = $2, top_p = $3, top_k = $4, reasoning = $5, max_tokens = $6, system_prompt = $7, mcp_servers = $8, skills = $9, generative_ui = $10, genui_id = $11, provider_id = $12, icon = $13, description = $14, builtin = $15, builtin_tools = $16, working_dir_mode = $17, tool_execution_mode = $18, thinking_level = $19, starters = $20, updated_at = $21
+            WHERE id = $22
         "#;
 
         let result = sqlx::query(query)
             .bind(&agent.name)
-            .bind(model)
             .bind(agent.temperature)
             .bind(agent.top_p)
             .bind(agent.top_k)
@@ -137,6 +150,15 @@ impl AgentRepository {
             .bind(&skills_json)
             .bind(agent.generative_ui)
             .bind(&agent.genui_id)
+            .bind(&agent.provider_id)
+            .bind(&agent.icon)
+            .bind(&agent.description)
+            .bind(agent.builtin)
+            .bind(&builtin_tools_json)
+            .bind(&agent.working_dir_mode)
+            .bind(&agent.tool_execution_mode)
+            .bind(&agent.thinking_level)
+            .bind(&starters_json)
             .bind(agent.updated_at)
             .bind(&agent.id)
             .execute(self.db.pool())
@@ -163,24 +185,6 @@ impl AgentRepository {
         }
 
         Ok(())
-    }
-
-    /// 统计使用指定模型的 Agent 数量
-    pub async fn count_agents_using_model(&self, model: &str) -> Result<i32, AppError> {
-        let query = r#"
-            SELECT COUNT(*) as count
-            FROM agents
-            WHERE model = $1
-        "#;
-
-        let row = sqlx::query(query)
-            .bind(model)
-            .fetch_one(self.db.pool())
-            .await
-            .map_err(|e| AppError::internal_error(&format!("Failed to count agents: {}", e)))?;
-
-        let count: i32 = row.try_get("count")?;
-        Ok(count)
     }
 
     /// 从所有 Agent 中移除指定 MCP 服务器的引用
@@ -284,10 +288,33 @@ impl AgentRepository {
         // Option<String> 显式解码：SQL NULL -> None（旧行 / 未关联）。
         let genui_id: Option<String> = row.try_get::<Option<String>, _>("genui_id")?;
 
+        // ── AgentDefinition 扩展列（migration 058），全部 NULL-safe 解码 ──
+        let provider_id: Option<String> = row.try_get::<Option<String>, _>("provider_id")?;
+        let icon: Option<String> = row.try_get::<Option<String>, _>("icon")?;
+        let description: Option<String> = row.try_get::<Option<String>, _>("description")?;
+        // builtin：SQL NULL（旧行）-> false；INTEGER 1 -> true。
+        let builtin: bool = row.try_get::<Option<bool>, _>("builtin")?.unwrap_or(false);
+        let builtin_tools_json: Option<String> = row.try_get("builtin_tools")?;
+        let builtin_tools: Vec<String> = if let Some(json) = builtin_tools_json {
+            serde_json::from_str(&json).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let working_dir_mode: Option<String> =
+            row.try_get::<Option<String>, _>("working_dir_mode")?;
+        let tool_execution_mode: Option<String> =
+            row.try_get::<Option<String>, _>("tool_execution_mode")?;
+        let thinking_level: Option<String> = row.try_get::<Option<String>, _>("thinking_level")?;
+        let starters_json: Option<String> = row.try_get("starters")?;
+        let starters: Vec<String> = if let Some(json) = starters_json {
+            serde_json::from_str(&json).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
         Ok(Agent {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            model: row.try_get("model").ok(),
             temperature,
             top_p,
             top_k,
@@ -298,6 +325,15 @@ impl AgentRepository {
             skills,
             generative_ui,
             genui_id,
+            provider_id,
+            icon,
+            description,
+            builtin,
+            builtin_tools,
+            working_dir_mode,
+            tool_execution_mode,
+            thinking_level,
+            starters,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -330,7 +366,6 @@ mod tests {
         let agent = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Code Assistant".to_string(),
-            model: Some("gpt-4o".to_string()),
             temperature: Some(0.7),
             top_p: Some(0.9),
             top_k: Some(40),
@@ -352,6 +387,15 @@ mod tests {
             skills: vec!["code-analysis".to_string(), "refactoring".to_string()],
             generative_ui: Some(true),
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -368,8 +412,14 @@ mod tests {
         assert_eq!(fetched_agent.mcp_servers, agent.mcp_servers);
         assert_eq!(fetched_agent.skills, agent.skills);
 
-        // List
-        let agents = repo.list_agents(10, 0).await.unwrap();
+        // List (exclude the builtin AgentDefinitions seeded by migration 058)
+        let agents: Vec<_> = repo
+            .list_agents(10, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|a| !a.builtin)
+            .collect();
         assert_eq!(agents.len(), 1);
 
         // Update
@@ -389,84 +439,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_count_agents_using_model() {
-        let (db, _temp_dir) = create_test_db().await;
-        let repo = AgentRepository::new(Arc::new(db));
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-
-        let agent1 = Agent {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "Agent 1".to_string(),
-            model: Some("model1".to_string()),
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            reasoning: None,
-            max_tokens: None,
-            system_prompt: None,
-            mcp_servers: vec![],
-            skills: vec![],
-            generative_ui: None,
-            genui_id: None,
-            created_at: now,
-            updated_at: now,
-        };
-
-        let agent2 = Agent {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "Agent 2".to_string(),
-            model: Some("model1".to_string()),
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            reasoning: None,
-            max_tokens: None,
-            system_prompt: None,
-            mcp_servers: vec![],
-            skills: vec![],
-            generative_ui: None,
-            genui_id: None,
-            created_at: now,
-            updated_at: now,
-        };
-
-        let agent3 = Agent {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "Agent 3".to_string(),
-            model: Some("model2".to_string()),
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            reasoning: None,
-            max_tokens: None,
-            system_prompt: None,
-            mcp_servers: vec![],
-            skills: vec![],
-            generative_ui: None,
-            genui_id: None,
-            created_at: now,
-            updated_at: now,
-        };
-
-        repo.create_agent(&agent1).await.unwrap();
-        repo.create_agent(&agent2).await.unwrap();
-        repo.create_agent(&agent3).await.unwrap();
-
-        let count1 = repo.count_agents_using_model("model1").await.unwrap();
-        assert_eq!(count1, 2);
-
-        let count2 = repo.count_agents_using_model("model2").await.unwrap();
-        assert_eq!(count2, 1);
-
-        let count3 = repo.count_agents_using_model("model3").await.unwrap();
-        assert_eq!(count3, 0);
-    }
-
-    #[tokio::test]
     async fn test_remove_mcp_server_from_agents() {
         let (db, _temp_dir) = create_test_db().await;
         let repo = AgentRepository::new(Arc::new(db));
@@ -479,7 +451,6 @@ mod tests {
         let agent1 = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Agent 1".to_string(),
-            model: None,
             temperature: None,
             top_p: None,
             top_k: None,
@@ -494,6 +465,15 @@ mod tests {
             skills: vec![],
             generative_ui: None,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -501,7 +481,6 @@ mod tests {
         let agent2 = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "Agent 2".to_string(),
-            model: None,
             temperature: None,
             top_p: None,
             top_k: None,
@@ -523,6 +502,15 @@ mod tests {
             skills: vec![],
             generative_ui: None,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -545,7 +533,6 @@ mod tests {
         Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name: "GenUI Agent".to_string(),
-            model: None,
             temperature: None,
             top_p: None,
             top_k: None,
@@ -556,6 +543,15 @@ mod tests {
             skills: vec![],
             generative_ui,
             genui_id: None,
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         }
@@ -614,7 +610,13 @@ mod tests {
         let fetched = repo.get_agent_by_id(&agent_id).await.unwrap().unwrap();
         assert_eq!(fetched.generative_ui, None);
 
-        let listed = repo.list_agents(10, 0).await.unwrap();
+        let listed: Vec<_> = repo
+            .list_agents(10, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|a| !a.builtin)
+            .collect();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].generative_ui, None);
     }

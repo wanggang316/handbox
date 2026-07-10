@@ -23,22 +23,28 @@
   let language = $state<Language>("zh-CN");
   let autoScroll = $state<boolean>(true);
 
-  // 加载设置
-  onMount(async () => {
-    try {
-      await settingsState.loadSettings();
-      if (settingsState.settings?.general) {
-        theme = settingsState.settings.general.theme;
-        language = settingsState.settings.general.language;
-        autoScroll = settingsState.settings.general.autoScroll;
+  // 从 settings 回填本地状态并应用主题/语言；store 未就绪时跳过
+  function syncFromSettings(): void {
+    if (!settingsState.settings?.general) return;
+    theme = settingsState.settings.general.theme;
+    language = settingsState.settings.general.language;
+    autoScroll = settingsState.settings.general.autoScroll;
 
-        uiState.setTheme(theme);
-        uiState.setLanguage(language);
-      }
+    uiState.setTheme(theme);
+    uiState.setLanguage(language);
+  }
 
-    } catch (error) {
-      console.error("加载通用设置失败:", error);
-    }
+  // 根布局已预加载 settings：同步回填，首帧即真实值，避免默认值闪烁
+  syncFromSettings();
+
+  // 兜底冷启动/深链：确保 settings 加载完成后再同步一次
+  onMount(() => {
+    settingsState
+      .loadSettings()
+      .then(syncFromSettings)
+      .catch((error) => {
+        console.error("加载通用设置失败:", error);
+      });
   });
 
   // 更新设置的通用函数
@@ -75,10 +81,11 @@
 
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
-  <TableGroup>
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
+  <TableGroup title={t("settings.general.section")}>
     <SelectRow
       label={t("settings.general.appearance")}
+      description={t("settings.general.appearanceDesc")}
       options={themeOptions}
       bind:selectedValue={theme}
       onSelect={(value) => handleThemeChange(value)}
@@ -86,6 +93,7 @@
 
     <SelectRow
       label={t("settings.general.language")}
+      description={t("settings.general.languageDesc")}
       options={languageOptions}
       bind:selectedValue={language}
       onSelect={(value) => handleLanguageChange(value)}
@@ -93,8 +101,8 @@
 
     <SwitchRow
       label={t("settings.general.autoScroll")}
+      description={t("settings.general.autoScrollDesc")}
       bind:checked={autoScroll}
-      description=""
       onChange={handleAutoScrollChange}
     />
   </TableGroup>

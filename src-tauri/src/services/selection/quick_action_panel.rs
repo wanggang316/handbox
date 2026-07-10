@@ -9,6 +9,10 @@
 //! 可见性标志在派发到主线程之前先行写入（进程级 `AtomicBool`），使其他线程能
 //! 快速、无锁地感知状态。
 
+// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
+// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+#![allow(clippy::unused_unit)]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::LogicalPosition;
 #[cfg(target_os = "macos")]

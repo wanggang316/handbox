@@ -29,19 +29,13 @@
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import ModelInfoModal from "$lib/components/settings/ModelInfoModal.svelte";
-  import { countChatsUsingProvider } from "$lib/api/provider";
-  import { countChatsUsingModel } from "$lib/api/model";
   import { t } from "$lib/i18n";
 
   let providerId = $state("");
   let showDeleteConfirm = $state(false);
-  let showDisableConfirm = $state(false);
-  let showModelDisableConfirm = $state(false);
   let showEditModal = $state(false);
   let showModelInfo = $state(false);
   let selectedModel = $state<Model | null>(null);
-  let modelToDisable = $state<Model | null>(null);
-  let relatedChatsCount = $state(0);
 
   let confirmModalRef: any;
 
@@ -145,37 +139,8 @@
     }
   });
 
-  async function handleToggleProviderBefore(
-    enabled: boolean,
-    previous: boolean
-  ) {
-    if (!currentProvider || !currentProvider.id) return true;
-
-    if (!enabled && previous && currentProvider.enabled) {
-      try {
-        const count = await countChatsUsingProvider(currentProvider.id);
-        relatedChatsCount = count;
-        if (count > 0) {
-          showDisableConfirm = true;
-          return false;
-        }
-      } catch (error) {
-        console.error("Failed to count related chats:", error);
-        // 如果检查失败，允许继续执行禁用操作
-        return true;
-      }
-    }
-
-    return true;
-  }
-
   async function handleToggleProvider(enabled: boolean) {
     if (!currentProvider || !currentProvider.id) return;
-    await performProviderToggle(enabled);
-  }
-
-  async function performProviderToggle(enabled: boolean) {
-    if (!currentProvider) return;
 
     // 乐观更新UI
     const previousState = formData.enabled;
@@ -200,41 +165,7 @@
     }
   }
 
-  async function confirmDisableProvider() {
-    await performProviderToggle(false);
-    showDisableConfirm = false;
-  }
-
-  function cancelDisableProvider() {
-    if (currentProvider) {
-      formData.enabled = currentProvider.enabled;
-    }
-    showDisableConfirm = false;
-    // 保持当前 UI 状态不变
-  }
-
   async function handleToggleModel(model: Model, enabled: boolean) {
-    if (!currentProvider) return;
-
-    // 如果是禁用操作，需要检查关联的聊天
-    if (!enabled && model.enabled) {
-      try {
-        const count = await countChatsUsingModel(model.id);
-        relatedChatsCount = count;
-        modelToDisable = model;
-        showModelDisableConfirm = true;
-      } catch (error) {
-        console.error("Failed to count related chats:", error);
-        // 如果检查失败，仍然允许禁用
-        performModelToggle(model, enabled);
-      }
-    } else {
-      // 启用操作直接执行
-      performModelToggle(model, enabled);
-    }
-  }
-
-  async function performModelToggle(model: Model, enabled: boolean) {
     if (!currentProvider || !currentProvider.id) return;
 
     try {
@@ -242,19 +173,6 @@
     } catch (error) {
       console.error("Failed to toggle model:", error);
     }
-  }
-
-  async function confirmDisableModel() {
-    if (modelToDisable) {
-      await performModelToggle(modelToDisable, false);
-      showModelDisableConfirm = false;
-      modelToDisable = null;
-    }
-  }
-
-  function cancelDisableModel() {
-    showModelDisableConfirm = false;
-    modelToDisable = null;
   }
 
   async function handleDelete() {
@@ -376,7 +294,6 @@
 
             <Toggle
               checked={formData.enabled}
-              onChangeBefore={handleToggleProviderBefore}
               onChange={handleToggleProvider}
             />
           </div>
@@ -560,42 +477,3 @@
   onCancel={() => {}}
 />
 
-<!-- 禁用供应商确认弹窗 -->
-<ConfirmModal
-  open={showDisableConfirm}
-  title={t("provider.disableProviderTitle")}
-  message={relatedChatsCount > 0
-    ? t("provider.disableProviderWithChats", {
-        count: relatedChatsCount,
-        name: currentProvider?.name ?? "",
-      })
-    : t("provider.disableProviderConfirm", {
-        name: currentProvider?.name ?? "",
-      })}
-  confirmText={t("provider.closeAction")}
-  cancelText={t("common.cancel")}
-  confirmButtonStyle="danger"
-  onClose={() => (showDisableConfirm = false)}
-  onConfirm={confirmDisableProvider}
-  onCancel={cancelDisableProvider}
-/>
-
-<!-- 禁用模型确认弹窗 -->
-<ConfirmModal
-  open={showModelDisableConfirm}
-  title={t("provider.disableModelTitle")}
-  message={relatedChatsCount > 0
-    ? t("provider.disableModelWithChats", {
-        count: relatedChatsCount,
-        name: modelToDisable?.name ?? "",
-      })
-    : t("provider.disableModelConfirm", {
-        name: modelToDisable?.name ?? "",
-      })}
-  confirmText={t("provider.disableAction")}
-  cancelText={t("common.cancel")}
-  confirmButtonStyle="danger"
-  onClose={() => (showModelDisableConfirm = false)}
-  onConfirm={confirmDisableModel}
-  onCancel={cancelDisableModel}
-/>

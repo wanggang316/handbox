@@ -29,8 +29,23 @@
     type OpenInTarget,
   } from "$lib/api/openIn";
   import { settingsState } from "$lib/states/settings.svelte";
+  import { getAllModels } from "$lib/states/provider.svelte";
+  import { uiState } from "$lib/states/ui.svelte";
 
   const session = $derived(agentSessionState.currentSession);
+
+  // 仅在会话模型能解析到真实目录模型时显示（modelId + providerId 齐全且命中已启用
+  // catalog）。半配置态（有 modelId 无 providerId、或模型已下架）一律不显示——避免
+  // Header 挂一个实际跑不起来的「幻影模型」（与组合框的发送门控口径一致）。
+  const resolvedModel = $derived.by(() => {
+    const s = session;
+    if (!s?.modelId || !s?.providerId) return null;
+    return (
+      getAllModels().find(
+        (m) => m.id === s.modelId && m.provider_id === s.providerId,
+      ) ?? null
+    );
+  });
 
   // ============================================
   // "Open in ..." 分体按钮 + 下拉
@@ -235,8 +250,12 @@
 </script>
 
 {#if session}
+  <!-- 侧栏收起时主内容顶到窗口左缘：给头部让出红绿灯 + 侧栏开关的位置
+       （toggle 位于 left:100px，按钮宽约 30px），padding 过渡与侧栏动画同步。 -->
   <header
-    class="flex items-center gap-3 px-4 py-2.5 border-b border-base-300 shrink-0"
+    class="flex items-center gap-3 px-4 py-2.5 border-b border-base-300 shrink-0 transition-[padding-left] duration-200 {uiState.sidebarOpen
+      ? ''
+      : 'pl-[136px]'}"
   >
     <Bot size={18} class="opacity-60 shrink-0" />
     <div class="flex flex-col min-w-0">
@@ -246,8 +265,8 @@
       <div
         class="flex items-center gap-3 text-xs text-base-content/50 mt-0.5"
       >
-        {#if session.modelId}
-          <span class="truncate">{session.modelId}</span>
+        {#if resolvedModel}
+          <span class="truncate">{resolvedModel.name}</span>
         {/if}
         {#if session.thinkingLevel && session.thinkingLevel !== "off"}
           <span class="flex items-center gap-1 shrink-0">

@@ -3,6 +3,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import Button from "$lib/components/ui/Button.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import { skillState, skillActions } from "$lib/states/skill.svelte";
   import type { SkillInfo, SkillScope } from "$lib/types";
@@ -95,11 +96,10 @@
   }
 </script>
 
-<div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <!-- 头部：标题 + 刷新 -->
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-base font-medium text-base-content">{t("settings.skills.title")}</h1>
       <p class="text-xs text-base-content/60 mt-0.5">
         {t("settings.skills.description")}
       </p>
@@ -121,9 +121,8 @@
 
   <!-- 加载状态 -->
   {#if skillState.isLoading && skillState.skills.length === 0}
-    <div class="flex items-center justify-center py-8">
-      <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
-      <span class="ml-2 text-sm text-base-content/70">{t("settings.skills.loading")}</span>
+    <div class="flex items-center justify-center py-10">
+      <Spinner size={28} />
     </div>
   {/if}
 
@@ -140,22 +139,22 @@
         {@const hasError = skill.diagnostics.length > 0}
         {@const expanded = expandedBodies[skillKey(skill)]}
         <div class="w-full px-6 py-4">
-          <div class="flex items-start justify-between gap-3 mb-1">
+          <div class="flex items-start justify-between gap-3">
             <div class="flex flex-1 min-w-0 flex-col gap-1">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-sm font-medium text-base-content break-all">
                   {skill.name}
                 </span>
                 <span
-                  class="px-2 py-0.5 text-xs rounded-full shrink-0 {hasError
+                  class="rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 {hasError
                     ? 'bg-error/10 text-error'
-                    : 'bg-primary/10 text-primary'}"
+                    : 'bg-base-200 text-base-content/55'}"
                 >
                   {getScopeLabel(skill.scope)}
                 </span>
               </div>
               {#if skill.description}
-                <p class="text-xs text-base-content/70 break-words">
+                <p class="text-xs text-base-content/70 break-words line-clamp-2">
                   {skill.description}
                 </p>
               {/if}
@@ -172,11 +171,12 @@
               {/if}
               <button
                 type="button"
-                class="flex items-center gap-1 shrink-0 text-xs text-base-content/60 hover:text-base-content hover:bg-base-300 rounded px-2 py-1 transition-colors"
+                class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
+                title={t("settings.skills.openDir")}
+                aria-label={t("settings.skills.openDir")}
                 onclick={() => handleOpenDir(skill)}
               >
-                <FolderOpen size={14} />
-                <span>{t("settings.skills.openDir")}</span>
+                <FolderOpen size={15} />
               </button>
             </div>
           </div>

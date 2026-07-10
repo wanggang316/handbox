@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
+  import { slide } from "svelte/transition";
   import { goto } from "$app/navigation";
   import {
     ChevronRight,
@@ -651,24 +652,27 @@
             </span>
             <ChevronRight
               size={14}
-              class="flex-shrink-0 text-base-content/40 transition-transform {collapsed
+              class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
                 ? ''
                 : 'rotate-90'}"
             />
           </div>
         {/if}
         {#if !collapsed}
-          {#if group.sessions.length === 0}
-            <div
-              class="pl-7 pr-2 py-0.5 text-[12px] leading-[18px] text-base-content/40"
-            >
-              {t("agent.list.noChats")}
-            </div>
-          {:else}
-            {#each group.sessions as session (session.id)}
-              {@render sessionRow(session)}
-            {/each}
-          {/if}
+          <!-- 会话列表容器：展开/收起走 slide 过渡；wrapper 自带 space-y 维持行距 -->
+          <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
+            {#if group.sessions.length === 0}
+              <div
+                class="pl-7 pr-2 py-0.5 text-[12px] leading-[18px] text-base-content/40"
+              >
+                {t("agent.list.noChats")}
+              </div>
+            {:else}
+              {#each group.sessions as session (session.id)}
+                {@render sessionRow(session)}
+              {/each}
+            {/if}
+          </div>
         {/if}
       {/each}
 
@@ -687,15 +691,17 @@
           <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
           <ChevronRight
             size={14}
-            class="flex-shrink-0 text-base-content/40 transition-transform {ungroupedCollapsed
+            class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {ungroupedCollapsed
               ? ''
               : 'rotate-90'}"
           />
         </button>
         {#if !ungroupedCollapsed}
-          {#each grouped.ungrouped as session (session.id)}
-            {@render sessionRow(session)}
-          {/each}
+          <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
+            {#each grouped.ungrouped as session (session.id)}
+              {@render sessionRow(session)}
+            {/each}
+          </div>
         {/if}
       {/if}
     {/if}

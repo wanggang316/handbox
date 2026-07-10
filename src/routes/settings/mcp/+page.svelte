@@ -6,7 +6,6 @@
   import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import IconButton from "$lib/components/ui/IconButton.svelte";
-  import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import type {
     CreateMcpServerRequest,
@@ -15,21 +14,17 @@
     UpdateMcpServerRequest,
   } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
-  import { countChatsUsingServer, removeMcpServerFromChats } from "$lib/api/mcp";
   import {
-    LoaderCircle,
     Puzzle,
     ChevronsUpDown,
     Settings2,
   } from "@lucide/svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import { t } from "$lib/i18n";
 
   let showFormModal = $state(false);
   let editingServer = $state<McpServer | null>(null);
   let expandedTools = $state<Record<string, boolean>>({});
-  let showDisableConfirm = $state(false);
-  let serverToDisable = $state<McpServer | null>(null);
-  let relatedChatsCount = $state(0);
 
   onMount(() => {
     if (!mcpState.initialized) {
@@ -83,39 +78,8 @@
     }
   }
 
-  async function handleToggleServerBefore(
-    server: McpServer,
-    enabled: boolean,
-    previous: boolean
-  ) {
-    // 仅在从启用切换到禁用时提示
-    if (!enabled && previous && server.enabled) {
-      try {
-        const count = await countChatsUsingServer(server.id);
-        relatedChatsCount = count;
-        if (count > 0) {
-          serverToDisable = server;
-          showDisableConfirm = true;
-          return false;
-        }
-        serverToDisable = null;
-      } catch (error) {
-        console.error("Failed to count related chats:", error);
-        // 如果检查失败，允许继续禁用
-        serverToDisable = null;
-        return true;
-      }
-    }
-
-    serverToDisable = null;
-    return true;
-  }
 
   async function handleToggleServer(server: McpServer, enabled: boolean) {
-    await performToggle(server, enabled);
-  }
-
-  async function performToggle(server: McpServer, enabled: boolean) {
     try {
       await mcpActions.toggleServer({ serverId: server.id, enabled });
     } catch (error) {
@@ -123,44 +87,16 @@
     }
   }
 
-  async function handleDisableWithoutRemove() {
-    if (serverToDisable) {
-      await performToggle(serverToDisable, false);
-      showDisableConfirm = false;
-      serverToDisable = null;
-    }
-  }
-
-  async function handleDisableAndRemove() {
-    if (!serverToDisable) return;
-
-    try {
-      // 先移除会话中的 MCP 配置
-      await removeMcpServerFromChats(serverToDisable.id);
-      // 再关闭 MCP 服务器
-      await performToggle(serverToDisable, false);
-      showDisableConfirm = false;
-      serverToDisable = null;
-    } catch (error) {
-      console.error("Failed to disable and remove MCP server:", error);
-    }
-  }
-
-  function handleCancelDisable() {
-    showDisableConfirm = false;
-    serverToDisable = null;
-  }
-
   function handleEditServer(server: McpServer, event: MouseEvent) {
     goto(`/settings/mcp/${server.id}`);
   }
 </script>
 
-<div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <!-- 加载状态 -->
   {#if mcpState.isLoading}
     <div class="flex items-center justify-center py-8">
-      <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
+      <Spinner size={28} />
       <span class="ml-2 text-sm text-base-content/70"
         >{t("provider.loadingMcpServers")}</span
       >
@@ -187,8 +123,6 @@
             <div class="flex items-center gap-2">
               <Toggle
                 checked={server.enabled}
-                onChangeBefore={(next, previous) =>
-                  handleToggleServerBefore(server, next, previous)}
                 onChange={(enabled) => handleToggleServer(server, enabled)}
               />
               <IconButton
@@ -291,41 +225,3 @@
   onSave={handleSaveServer}
 />
 
-<!-- 禁用确认弹窗 -->
-<ConfirmModal
-  open={showDisableConfirm}
-  title={t("provider.disableMcpTitle")}
-  message={relatedChatsCount > 0
-    ? t("provider.disableMcpWithChats", {
-        count: relatedChatsCount,
-        name: serverToDisable?.displayName || serverToDisable?.name || "",
-      })
-    : t("provider.disableMcpConfirm", {
-        name: serverToDisable?.displayName || serverToDisable?.name || "",
-      })}
-  actions={relatedChatsCount > 0
-    ? [
-        {
-          label: t("provider.disableAndRemove"),
-          style: "primary",
-          onClick: handleDisableAndRemove
-        },
-        {
-          label: t("provider.disableMcpOnly"),
-          style: "danger",
-          onClick: handleDisableWithoutRemove
-        },
-        {
-          label: t("common.cancel"),
-          style: "secondary",
-          onClick: handleCancelDisable
-        }
-      ]
-    : undefined}
-  confirmText={t("provider.closeAction")}
-  cancelText={t("common.cancel")}
-  confirmButtonStyle="danger"
-  onClose={() => (showDisableConfirm = false)}
-  onConfirm={handleDisableWithoutRemove}
-  onCancel={handleCancelDisable}
-/>

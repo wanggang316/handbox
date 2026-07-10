@@ -1,4 +1,5 @@
 use super::common::{Timestamp, UUID};
+use super::mcp::McpServerConfig;
 use serde::{Deserialize, Serialize};
 
 /// Agent Session 实体 - Agent 模式下的会话实例
@@ -9,6 +10,10 @@ pub struct AgentSession {
     pub name: String,
     /// 所属 Agent Project（可选）。仅在创建时写入，之后不可经 update 改写。
     pub project_id: Option<UUID>,
+    /// 实例化此会话的 AgentDefinition id（可选）。`create_session_from_definition`
+    /// 写入回指；直接经 `create_session` 创建或旧会话为 `None`。与 `project_id`
+    /// 同为创建时一次性写入，generic update 路径绝不改写。
+    pub agent_definition_id: Option<UUID>,
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
@@ -17,6 +22,8 @@ pub struct AgentSession {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Vec<String>, // JSON: Vec<String> (tool names)
+    /// Per-session MCP server bindings (JSON). Empty = no MCP tools injected.
+    pub mcp_servers: Vec<McpServerConfig>,
     pub tool_execution_mode: Option<String>,
     pub message_count: i32,
     pub last_message_at: Option<Timestamp>,
@@ -44,6 +51,9 @@ pub struct CreateAgentSessionRequest {
     /// 可选：挂靠到某个 Agent Project。提供时 working_dir 取 project.path
     /// （覆盖请求中的 working_dir），项目不存在 / 目录已失效则拒绝创建。
     pub project_id: Option<UUID>,
+    /// 可选：实例化来源 AgentDefinition id。由 `create_session_from_definition`
+    /// 填充；直接调 `create_session` 的前端路径留空。
+    pub agent_definition_id: Option<UUID>,
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
     pub system_prompt: Option<String>,
@@ -52,7 +62,29 @@ pub struct CreateAgentSessionRequest {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Option<Vec<String>>,
+    pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub tool_execution_mode: Option<String>,
+}
+
+/// 从 AgentDefinition 实例化会话的请求。
+///
+/// definition 提供能力集（builtin_tools / mcp_servers）与默认参数（model /
+/// provider / system_prompt / sampling / thinking_level / tool_execution_mode）；
+/// 本请求只携带实例化时才确定的覆盖项。`Default` 让前端只填关心的字段。
+///
+/// - `name`：留空则取 definition.name。
+/// - `project_id` / `working_dir`：受 definition.working_dir_mode 约束
+///   （`required` 必须二选一、`none` 一律忽略、`optional` 有则用无则空）。
+/// - `model_id` / `provider_id`：覆盖 definition 的同名默认（内置 chat 定义
+///   provider 为空，必须在此选定）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstantiateAgentSessionRequest {
+    pub name: Option<String>,
+    pub project_id: Option<UUID>,
+    pub working_dir: Option<String>,
+    pub model_id: Option<String>,
+    pub provider_id: Option<String>,
 }
 
 /// 更新 Agent Session 请求
@@ -68,6 +100,7 @@ pub struct UpdateAgentSessionRequest {
     pub max_tokens: Option<i32>,
     pub working_dir: Option<String>,
     pub enabled_tools: Option<Vec<String>>,
+    pub mcp_servers: Option<Vec<McpServerConfig>>,
     pub tool_execution_mode: Option<String>,
 }
 
@@ -81,6 +114,7 @@ mod tests {
             id: "agent_session_1".to_string(),
             name: "Coding Session".to_string(),
             project_id: Some("project_1".to_string()),
+            agent_definition_id: Some("builtin-coding".to_string()),
             model_id: Some("gpt-4".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: Some("You are a coding agent.".to_string()),
@@ -89,6 +123,7 @@ mod tests {
             max_tokens: Some(2048),
             working_dir: Some("/tmp/project".to_string()),
             enabled_tools: vec!["read".to_string(), "write".to_string()],
+            mcp_servers: Vec::new(),
             tool_execution_mode: Some("auto".to_string()),
             message_count: 3,
             last_message_at: Some(2000),
@@ -100,6 +135,7 @@ mod tests {
         // Verify camelCase field naming on the wire.
         assert!(json.contains("\"modelId\""));
         assert!(json.contains("\"projectId\""));
+        assert!(json.contains("\"agentDefinitionId\""));
         assert!(json.contains("\"enabledTools\""));
         // VAL-DEPRECATE-007 (inverted from VAL-PERSIST-010): the deprecated
         // enabledSkills key must be ABSENT from the wire JSON.
@@ -111,6 +147,7 @@ mod tests {
         assert_eq!(session.id, deserialized.id);
         assert_eq!(session.name, deserialized.name);
         assert_eq!(session.project_id, deserialized.project_id);
+        assert_eq!(session.agent_definition_id, deserialized.agent_definition_id);
         assert_eq!(session.enabled_tools, deserialized.enabled_tools);
         assert_eq!(session.message_count, deserialized.message_count);
     }
@@ -125,6 +162,7 @@ mod tests {
             id: "agent_session_2".to_string(),
             name: "Fresh Session".to_string(),
             project_id: None,
+            agent_definition_id: None,
             model_id: None,
             provider_id: None,
             system_prompt: None,
@@ -133,6 +171,7 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: Vec::new(),
+            mcp_servers: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,

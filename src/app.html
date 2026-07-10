@@ -5,6 +5,23 @@
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>HandBox</title>
+    <script>
+      // Pre-CSS 主题涂底：在任何样式/JS 就绪前按持久化主题设置底色与 data-theme，
+      // 消除「系统暗色 + 应用浅色」时启动黑屏/白屏闪（webview 默认底随系统、HTML 默认白）。
+      (function () {
+        try {
+          var t = localStorage.getItem("theme") || "system";
+          if (t === "system")
+            t = window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          document.documentElement.dataset.theme = t;
+          document.documentElement.style.backgroundColor =
+            t === "dark" ? "#131316" : "#FCFCFC";
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {}
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

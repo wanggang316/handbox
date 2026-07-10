@@ -32,11 +32,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::models::{AppError, UserMessageSendRequest};
+use crate::models::AppError;
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::{
     agent_jsonl_store, drive_agent_run, AgentService, AgentSessionService, CodingRunSink,
-    MessageService, ProviderService, SessionService,
+    ProviderService,
 };
 use crate::storage::job_repository::{FailureCountUpdate, DEFAULT_EXECUTION_HISTORY_LIMIT};
 use crate::storage::types::{
@@ -106,32 +106,17 @@ pub struct JobExecutor<R: Runtime = Wry> {
     /// no-op and the existing executor tests are untouched; the app wiring
     /// injects a real handle via [`JobExecutor::with_app_handle`].
     app_handle: Option<AppHandle<R>>,
-    /// Collaborators for the `prompt` target: create a fresh chat, send the
-    /// prompt non-streaming, and pre-validate the provider. `None` in the unit
-    /// wiring (`from_db`) so the bare unit wiring keeps building; the app
-    /// injects real handles via [`JobExecutor::with_prompt_services`]. When
-    /// absent, a `prompt` dispatch fails with a stable "not configured" error
-    /// rather than panicking — the same shape as any other prompt failure.
-    prompt_services: Option<PromptServices>,
-    /// Collaborators for the `agent` target: resolve the agent template, mint a
-    /// fresh isolated agent session from it, and drive one run to completion.
-    /// `None` in the unit wiring (`from_db`) so the bare unit wiring keeps
-    /// building; the app injects real handles via
-    /// [`JobExecutor::with_agent_services`]. When absent, an `agent` dispatch
-    /// fails with a stable "not configured" error rather than panicking — the
-    /// same shape as any other agent failure.
+    /// Collaborators for both `prompt` and `agent` targets: resolve the agent template,
+    /// mint a fresh isolated agent session from it, and drive one run to completion.
+    /// The `prompt` target reuses this engine as a pure-dialog agent (no tools,
+    /// no working dir). `None` in the unit wiring (`from_db`) so the bare unit
+    /// wiring keeps building; the app injects real handles via
+    /// [`JobExecutor::with_agent_services`]. When absent, any dispatch fails with
+    /// a stable "not configured" error rather than panicking — the same shape as
+    /// any other failure.
     agent_services: Option<AgentServices>,
 }
 
-/// The three services the `prompt` target needs, bundled so the field stays a
-/// single `Option`. All are `Arc`-shared with the app-managed instances (cheap
-/// clones); none is generic over the Tauri `Runtime`.
-#[derive(Clone)]
-struct PromptServices {
-    sessions: Arc<SessionService>,
-    messages: Arc<MessageService>,
-    providers: Arc<ProviderService>,
-}
 
 /// The collaborators the `agent` target needs, bundled so the field stays a
 /// single `Option`. All are `Arc`-shared (cheap clones); none is generic over
@@ -172,7 +157,6 @@ impl<R: Runtime> Clone for JobExecutor<R> {
             executions: self.executions.clone(),
             in_flight: self.in_flight.clone(),
             app_handle: self.app_handle.clone(),
-            prompt_services: self.prompt_services.clone(),
             agent_services: self.agent_services.clone(),
         }
     }
@@ -187,7 +171,6 @@ impl<R: Runtime> JobExecutor<R> {
             executions,
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             app_handle: None,
-            prompt_services: None,
             agent_services: None,
         }
     }
@@ -209,24 +192,6 @@ impl<R: Runtime> JobExecutor<R> {
         self
     }
 
-    /// Inject the collaborators the `prompt` target needs (a fresh chat per run,
-    /// a non-streaming send, and provider pre-validation). Consuming builder used
-    /// by the app wiring with `Arc`s shared with the managed services; without it
-    /// (bare unit wiring) a `prompt` dispatch fails cleanly rather than
-    /// running.
-    pub fn with_prompt_services(
-        mut self,
-        sessions: Arc<SessionService>,
-        messages: Arc<MessageService>,
-        providers: Arc<ProviderService>,
-    ) -> Self {
-        self.prompt_services = Some(PromptServices {
-            sessions,
-            messages,
-            providers,
-        });
-        self
-    }
 
     /// Inject the collaborators the `agent` target needs (resolve the template,
     /// mint a fresh session, drive one run to completion through the coding-agent
@@ -611,13 +576,20 @@ impl<R: Runtime> JobExecutor<R> {
         match &job.target {
             JobTarget::Agent {
                 agent_id,
+                model_id,
                 initial_message,
                 project_id,
             } => {
                 // The agent path takes the bound directly: only it knows the
                 // minted session id needed for the cooperative abort on timeout.
-                self.dispatch_agent(agent_id, initial_message, project_id.as_deref(), timeout)
-                    .await
+                self.dispatch_agent(
+                    agent_id,
+                    model_id,
+                    initial_message,
+                    project_id.as_deref(),
+                    timeout,
+                )
+                .await
             }
             JobTarget::Prompt {
                 provider_id,
@@ -640,14 +612,21 @@ impl<R: Runtime> JobExecutor<R> {
         }
     }
 
-    /// Run a `prompt` target: create a fresh chat, send the prompt text through
-    /// `MessageService::send_user_message` (non-streaming), and persist a user
-    /// message plus an assistant reply. On success the outcome's `result_ref`
-    /// points at the chat; on failure it still points at the chat IF one was
-    /// created, so a partial transcript stays reachable (VAL-TARGET-023).
+    /// Run a `prompt` target: mint a fresh isolated agent session as a pure-dialog
+    /// (no tools, no working dir), send the prompt as an initial message, drive
+    /// one run to completion through the coding-agent engine, then classify the
+    /// outcome from the persisted JSONL transcript. The session acts like a
+    /// one-shot headless chat: distinct from a legacy chat (no persistent `chats`
+    /// table), identical orchestration to the `agent` target.
+    ///
+    /// On success the outcome's `result_ref` points at the minted session; on
+    /// failure it still points at the session IF one was created, so a partial
+    /// transcript stays reachable (VAL-TARGET-023). The final assistant message's
+    /// text (if present) is extracted as `stdout` for backward compatibility with
+    /// the legacy chat path (VAL-TARGET-034).
     ///
     /// SECURITY: the provider is pre-validated (deleted / disabled / missing key)
-    /// and every error is run through [`sanitize_send_error`] /
+    /// and every error is run through [`sanitize_agent_dispatch_error`] /
     /// [`provider_failure_message`] before it is persisted, so no raw upstream
     /// URL, `Authorization` header, or API key fragment can reach the
     /// `job_executions.error` column or any window — raw detail goes to
@@ -659,8 +638,8 @@ impl<R: Runtime> JobExecutor<R> {
         model_id: &str,
         prompt: &str,
     ) -> DispatchOutcome {
-        let Some(services) = self.prompt_services.as_ref() else {
-            // No prompt collaborators wired (bare unit wiring): fail
+        let Some(services) = self.agent_services.as_ref() else {
+            // No agent collaborators wired (bare unit wiring): fail
             // cleanly with a stable, non-leaking message rather than panic.
             return DispatchOutcome::failed(PROMPT_NOT_CONFIGURED.to_string());
         };
@@ -682,75 +661,147 @@ impl<R: Runtime> JobExecutor<R> {
             return DispatchOutcome::failed(provider_failure_message(failure));
         }
 
-        // 2. Create a fresh, isolated chat for this run (never reused — two jobs
-        //    in the same tick get distinct chats, VAL-TARGET-034). No `Window`
-        //    is required, so this works headless (VAL-TARGET-033).
-        let chat = match services
-            .sessions
-            .create_chat(
-                prompt_chat_name(job_name),
-                None,
-                None,
-                None,
-                None,
-                Some(false), // non-streaming: send_user_message returns the full reply
-                Some(model_id.to_string()),
-                Some(provider_id.to_string()),
-                None,
-                None,
-            )
-            .await
-        {
-            Ok(chat) => chat,
+        // 2. Load the resolved provider's row — `build_agent_session` needs the
+        //    full record (type / base_url / key).
+        let provider = match services.providers.get_provider(&provider_id.to_string()).await {
+            Ok(provider) => provider,
             Err(e) => {
                 tracing::warn!(
-                    "[job_executor] prompt chat creation failed (provider={}): {}",
+                    "[job_executor] prompt provider load failed (provider={}): {}",
                     provider_id,
                     e
                 );
-                // No chat exists, so there is nothing to reference.
-                return DispatchOutcome::failed(sanitize_send_error(&e));
+                return DispatchOutcome::failed(provider_failure_message(ProviderFailure::Deleted));
             }
         };
 
-        // 3. Send the prompt. `send_user_message` persists the `user` message
-        //    first, then the `assistant` reply; a failure after the user message
-        //    is saved leaves a partial chat (user, no assistant) that the outcome
-        //    still references (VAL-TARGET-023).
-        let request = UserMessageSendRequest {
-            chat_id: chat.id.clone(),
-            content: prompt.to_string(),
-            temp_user_message_id: String::new(),
-            attachments: None,
+        // 3. Mint a fresh, isolated SQLite session as a pure-dialog (no tools,
+        //    no working dir). Two jobs in the same tick get distinct sessions.
+        let request = CreateAgentSessionRequest {
+            name: prompt_session_name(job_name),
+            model_id: Some(model_id.to_string()),
+            provider_id: Some(provider_id.to_string()),
+            // Pure-dialog: no tools, no working dir, no system prompt.
+            working_dir: None,
+            enabled_tools: Some(vec![]),
+            system_prompt: None,
+            mcp_servers: None,
+            tool_execution_mode: None,
+            agent_definition_id: None,
+            project_id: None,
+            thinking_level: None,
+            temperature: None,
+            max_tokens: None,
         };
-
-        match services.messages.send_user_message(request).await {
-            Ok(response) => DispatchOutcome {
-                status: ExecutionStatus::Success,
-                stdout: Some(response.content),
-                stderr: None,
-                exit_code: None,
-                error: None,
-                // The run's result is the chat it produced.
-                result_ref: Some(chat.id),
-            },
+        let session = match services.sessions.create_session(request).await {
+            Ok(session) => session,
             Err(e) => {
                 tracing::warn!(
-                    "[job_executor] prompt send failed (chat={}, provider={}): {}",
-                    chat.id,
+                    "[job_executor] prompt session creation failed (provider={}): {}",
                     provider_id,
                     e
                 );
-                DispatchOutcome {
+                // No session exists, so there is nothing to reference.
+                return DispatchOutcome::failed(sanitize_agent_dispatch_error(&e));
+            }
+        };
+        // Every post-creation outcome references the minted session so its
+        // (possibly partial) transcript stays reachable.
+        let result_ref = Some(session.id.clone());
+
+        // 4. Construct the coding-agent session from the minted row + provider.
+        //    Headless: no approval emitter, so the dangerous-tool gate fails
+        //    CLOSED — the safe default for an unattended job run. Pure-dialog
+        //    has no tools, so the gate is never reached.
+        let config = match config_from_rows(&session, &provider, services.app_data_dir.clone()) {
+            Ok(config) => config,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] prompt session config assembly failed (session={}): {}",
+                    session.id,
+                    e
+                );
+                return DispatchOutcome {
                     status: ExecutionStatus::Failed,
                     stdout: None,
                     stderr: None,
                     exit_code: None,
-                    error: Some(sanitize_send_error(&e)),
-                    // The (possibly partial) chat is still reachable.
-                    result_ref: Some(chat.id),
+                    error: Some(sanitize_agent_dispatch_error(&e)),
+                    result_ref,
+                };
+            }
+        };
+        let coding_session = match build_agent_session(&config, None, Vec::new()) {
+            Ok(coding_session) => coding_session,
+            Err(e) => {
+                tracing::warn!(
+                    "[job_executor] prompt session construction failed (session={}): {}",
+                    session.id,
+                    e
+                );
+                return DispatchOutcome {
+                    status: ExecutionStatus::Failed,
+                    stdout: None,
+                    stderr: None,
+                    exit_code: None,
+                    error: Some(sanitize_agent_dispatch_error(&e)),
+                    result_ref,
+                };
+            }
+        };
+
+        // 5. Build a oneshot-signalling sink and drive ONE run to completion.
+        let (sink, signal) = oneshot_run_sink();
+        let handles = drive_agent_run(
+            coding_session,
+            session.id.clone(),
+            prompt.to_string(),
+            Vec::new(),
+            sink,
+        );
+
+        // Block until the turn ends.
+        let run_error = signal.await.unwrap_or(None);
+        drop(handles);
+
+        // 6. Classify the terminal outcome.
+        if let Some(envelope_error) = run_error {
+            // Run-level error envelope (e.g. provider/model removed). Already
+            // sanitized by the driver.
+            return DispatchOutcome {
+                status: ExecutionStatus::Failed,
+                stdout: None,
+                stderr: None,
+                exit_code: None,
+                error: Some(envelope_error),
+                result_ref,
+            };
+        }
+
+        // Read the persisted JSONL transcript to detect an in-band error
+        // terminal turn and extract the final assistant message's text.
+        let transcript = self.read_agent_transcript(services, &session);
+        match classify_agent_transcript(transcript.as_ref()) {
+            AgentRunResult::Success => {
+                // Extract the final assistant message's text as stdout.
+                let stdout = extract_final_assistant_message(transcript.as_ref().ok());
+                DispatchOutcome {
+                    status: ExecutionStatus::Success,
+                    stdout,
+                    stderr: None,
+                    exit_code: None,
+                    error: None,
+                    result_ref,
                 }
             }
+            AgentRunResult::InBandError => DispatchOutcome {
+                status: ExecutionStatus::Failed,
+                stdout: None,
+                stderr: None,
+                exit_code: None,
+                error: Some(AGENT_IN_BAND_ERROR.to_string()),
+                result_ref,
+            },
         }
     }
 
@@ -809,6 +860,7 @@ impl<R: Runtime> JobExecutor<R> {
     async fn dispatch_agent(
         &self,
         agent_id: &str,
+        model_id: &str,
         initial_message: &str,
         project_id: Option<&str>,
         timeout: Option<Duration>,
@@ -835,17 +887,18 @@ impl<R: Runtime> JobExecutor<R> {
             }
         };
 
-        // 2. Resolve a usable provider for the template's model. The template
-        //    stores only a model id, so we find an enabled provider whose model
-        //    catalog still serves it. An unset model or a removed provider/model
-        //    is a model/config-class failure (VAL-TARGET-021), distinct from a
-        //    missing template — and still no session is created.
-        let provider_id = match self.resolve_agent_provider(&agent.model).await {
+        // 2. Resolve a usable provider for the job's model. The model is chosen
+        //    per job (the Agent definition no longer carries one), so we find an
+        //    enabled provider whose catalog still serves that model id. An unset
+        //    model (empty — e.g. a pre-model row) or a removed provider/model is a
+        //    model/config-class failure (VAL-TARGET-021), distinct from a missing
+        //    template — and still no session is created. The `agent` template is
+        //    still used below for its system prompt / sampling config.
+        let provider_id = match self.resolve_agent_provider(model_id).await {
             Ok(provider_id) => provider_id,
             Err(failure) => return DispatchOutcome::failed(agent_failure_message(failure)),
         };
-        // `resolve_agent_provider` only returns `Ok` when `agent.model` is set.
-        let model_id = agent.model.clone().unwrap_or_default();
+        let model_id = model_id.to_string();
 
         // 3. Load the resolved provider's row — `build_agent_session` needs the
         //    full record (type / base_url / key). A provider that vanished
@@ -871,6 +924,10 @@ impl<R: Runtime> JobExecutor<R> {
         let request = CreateAgentSessionRequest {
             name: agent_session_name(&agent.name),
             project_id: project_id.map(str::to_string),
+            // The job session is instantiated from this agent definition — record
+            // the provenance back-link (P3). Jobs keep their own working_dir/tool
+            // wiring for now rather than routing through working_dir_mode.
+            agent_definition_id: Some(agent.id.clone()),
             model_id: Some(model_id),
             provider_id: Some(provider_id),
             system_prompt: agent.system_prompt.clone(),
@@ -879,6 +936,8 @@ impl<R: Runtime> JobExecutor<R> {
             max_tokens: agent.max_tokens,
             working_dir: None,
             enabled_tools: None,
+            // P1: jobs don't bind MCP yet; P3 will inherit the template's mcp_servers.
+            mcp_servers: None,
             tool_execution_mode: None,
         };
         let session = match services.sessions.create_session(request).await {
@@ -920,7 +979,7 @@ impl<R: Runtime> JobExecutor<R> {
                 };
             }
         };
-        let coding_session = match build_agent_session(&config, None) {
+        let coding_session = match build_agent_session(&config, None, Vec::new()) {
             Ok(coding_session) => coding_session,
             Err(e) => {
                 tracing::warn!(
@@ -1052,21 +1111,22 @@ impl<R: Runtime> JobExecutor<R> {
 
     /// Resolve a usable provider id for an agent template's `model`.
     ///
-    /// The agent template stores only a model id (no provider). We find an
-    /// enabled provider whose model catalog still serves that exact id, matching
-    /// how an agent session is launched from the UI (a model is always picked
-    /// together with its provider). Resolution is offline (DB catalog only):
-    /// `Err` carries the precise failure class for VAL-TARGET-021 — `NoModel`
-    /// when the template has no model set, `ModelRemoved` when no provider serves
-    /// it. An enabled provider is preferred; a match found only under a disabled
-    /// provider still surfaces as a config failure (the run could not proceed).
-    async fn resolve_agent_provider(&self, model: &Option<String>) -> Result<String, AgentFailure> {
+    /// The job stores a model id (no provider). We find an enabled provider whose
+    /// model catalog still serves that exact id, matching how an agent session is
+    /// launched from the UI (a model is always picked together with its provider).
+    /// Resolution is offline (DB catalog only): `Err` carries the precise failure
+    /// class for VAL-TARGET-021 — `NoModel` when the job has no model set (empty),
+    /// `ModelRemoved` when no provider serves it. An enabled provider is preferred;
+    /// a match found only under a disabled provider still surfaces as a config
+    /// failure (the run could not proceed).
+    async fn resolve_agent_provider(&self, model: &str) -> Result<String, AgentFailure> {
         let Some(services) = self.agent_services.as_ref() else {
             return Err(AgentFailure::ConfigError);
         };
-        let Some(model_id) = model.as_deref().map(str::trim).filter(|m| !m.is_empty()) else {
+        let model_id = model.trim();
+        if model_id.is_empty() {
             return Err(AgentFailure::NoModel);
-        };
+        }
 
         let providers = match services.providers.list_providers().await {
             Ok(providers) => providers,
@@ -1296,40 +1356,9 @@ fn provider_failure_message(failure: ProviderFailure) -> String {
     }
 }
 
-/// Sanitize an `AppError` from chat creation / `send_user_message` into a stable
-/// message safe to persist in `job_executions.error` and surface in the UI.
-///
-/// SECURITY (mirrors `sanitize_agent_error`): the raw `AppError.message` can
-/// carry an upstream URL, an `Authorization: Bearer …` header, or a raw provider
-/// payload (chat_engine's `client_err_to_app_err` forwards `Display` verbatim),
-/// so it is NEVER echoed. We key off the stable `AppError.code` plus a narrow
-/// content sniff to tell a *model-resolution* failure (the model id is not
-/// registered under the provider) apart from a generic config failure
-/// (VAL-TARGET-035). The raw message is the caller's responsibility to `tracing`
-/// — it never flows through this function's output.
-fn sanitize_send_error(err: &AppError) -> String {
-    match err.code.as_str() {
-        "AUTH_ERROR" => "the provider rejected the request (authentication failed)".to_string(),
-        "NETWORK_ERROR" => "the request to the provider failed (network error)".to_string(),
-        "RATE_LIMIT" => "the provider rate-limited the request".to_string(),
-        // A post-provider-validation `VALIDATION_ERROR` is, in practice, a
-        // model-resolution failure: the model id is not registered under the
-        // provider (chat_engine's `resolve_model`). Sniff the known marker so
-        // the model class is distinct from the provider class (VAL-TARGET-035).
-        "VALIDATION_ERROR" if is_model_resolution_error(&err.message) => {
-            "the selected model is not available for this provider".to_string()
-        }
-        "VALIDATION_ERROR" => {
-            "the prompt could not be sent (invalid provider or model configuration)".to_string()
-        }
-        // INTERNAL_ERROR (incl. empty/aborted stream) and anything else.
-        _ => "the prompt run failed to complete".to_string(),
-    }
-}
-
 /// Whether a `VALIDATION_ERROR` message describes a model-resolution failure
 /// (model id not registered under the provider). Matches the markers emitted by
-/// `chat_engine::resolve_model_template` and hand-ai's `ProviderNotFound`. Only
+/// `model_runtime::resolve_model_template` and hand-ai's `ProviderNotFound`. Only
 /// the *shape* is inspected; the message itself is never propagated.
 fn is_model_resolution_error(message: &str) -> bool {
     let lower = message.to_lowercase();
@@ -1340,9 +1369,9 @@ fn is_model_resolution_error(message: &str) -> bool {
         || lower.contains("no provider is configured for model")
 }
 
-/// Name for the fresh chat created per prompt run: the job name plus a unix-ms
+/// Name for the fresh session created per prompt run: the job name plus a unix-ms
 /// suffix so concurrent runs of the same job stay visually distinct.
-fn prompt_chat_name(job_name: &str) -> String {
+fn prompt_session_name(job_name: &str) -> String {
     format!("{} · {}", job_name, current_timestamp())
 }
 
@@ -1396,8 +1425,8 @@ fn agent_failure_message(failure: AgentFailure) -> String {
 }
 
 /// Sanitize an `AppError` from agent session creation / `start_run` into a
-/// stable message safe to persist and surface. Mirrors [`sanitize_send_error`]:
-/// the raw `AppError.message` can carry an upstream URL, an `Authorization`
+/// stable message safe to persist and surface. SECURITY invariant: the raw
+/// `AppError.message` can carry an upstream URL, an `Authorization`
 /// header, or a raw provider payload, so it is NEVER echoed. We key off the
 /// stable `AppError.code` plus a narrow content sniff to keep a model-resolution
 /// failure distinct from a generic config failure. Raw detail is the caller's
@@ -1471,6 +1500,26 @@ fn classify_agent_transcript(
         }
         None => AgentRunResult::Success,
     }
+}
+
+/// Extract the final assistant message's text content from a transcript for use
+/// as `stdout` in a prompt job's success outcome. The transcript is
+/// already-deserialized; we search for the last assistant message and flatten
+/// its content field into a single string. If no assistant message exists or
+/// content is absent, returns `None`.
+fn extract_final_assistant_message(
+    transcript: Option<&Vec<crate::storage::types::AgentSessionMessage>>,
+) -> Option<String> {
+    let messages = transcript?;
+    let last_assistant = messages.iter().rev().find(|m| m.role == "assistant")?;
+
+    // The assistant payload's "content" field is the serialized message text.
+    // Hand-agent persists it as a string in the JSON.
+    last_assistant
+        .payload
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Type alias for a sink callback (`Arc<dyn Fn(Value) + Send + Sync>`), matching
@@ -1655,40 +1704,6 @@ mod tests {
         }
     }
 
-    /// Wire REAL prompt collaborators (SessionService / MessageService /
-    /// ProviderService) onto the env's executor, all sharing the env's temp DB.
-    /// `StorageService` is rooted at the env temp dir. Returns a NEW `TestEnv`
-    /// whose executor can dispatch `prompt` targets end-to-end (offline: a model
-    /// that does not resolve fails the send AFTER the user message is saved).
-    fn with_prompt_services(env: TestEnv) -> TestEnv {
-        use crate::services::{McpService, ProviderService, SessionService, StorageService};
-
-        let provider_service = Arc::new(ProviderService::new(env.db.clone()));
-        let session_service = Arc::new(SessionService::new(
-            env.db.clone(),
-            provider_service.clone(),
-        ));
-        let mcp_service = Arc::new(McpService::new(env.db.clone()));
-        let storage_service = Arc::new(
-            StorageService::new(env._temp_dir.path().to_path_buf()).expect("storage service"),
-        );
-        let message_service = Arc::new(crate::services::MessageService::new(
-            env.db.clone(),
-            provider_service.clone(),
-            session_service.clone(),
-            mcp_service,
-            storage_service,
-        ));
-
-        let executor = env.executor.clone().with_prompt_services(
-            session_service,
-            message_service,
-            provider_service,
-        );
-
-        TestEnv { executor, ..env }
-    }
-
     /// Seed an enabled provider with a non-empty key directly into the DB so the
     /// executor's pre-flight passes and the send reaches the model-resolution
     /// step. `provider_type` controls catalog resolution.
@@ -1709,24 +1724,6 @@ mod tests {
             .expect("seed provider");
     }
 
-    /// Read the (role, content) of every `messages` row for a chat, oldest-first.
-    async fn read_chat_messages(env: &TestEnv, chat_id: &str) -> Vec<(String, String)> {
-        let rows = sqlx::query(
-            "SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC, id ASC",
-        )
-        .bind(chat_id)
-        .fetch_all(env.db.pool())
-        .await
-        .unwrap();
-        rows.into_iter()
-            .map(|r| {
-                (
-                    r.try_get::<String, _>("role").unwrap(),
-                    r.try_get::<String, _>("content").unwrap(),
-                )
-            })
-            .collect()
-    }
 
     /// Build an enabled `Job` with the given target and a future `next_run_at`.
     async fn make_job(id: &str, target: JobTarget) -> Job {
@@ -1803,6 +1800,7 @@ mod tests {
         // `setup` builds the executor via `from_db` — no agent services.
         let target = JobTarget::Agent {
             agent_id: "agent_1".to_string(),
+            model_id: "gpt-4".to_string(),
             initial_message: "go".to_string(),
             project_id: None,
         };
@@ -1823,13 +1821,13 @@ mod tests {
         assert_eq!(rows[0].status, "failed");
     }
 
-    // Without the prompt collaborators wired (the bare `from_db` unit harness),
+    // Without the agent collaborators wired (the bare `from_db` unit harness),
     // a prompt target fails cleanly with a stable "not configured" message —
     // it never panics and never leaks any provider detail.
     #[tokio::test]
     async fn prompt_target_without_services_fails_cleanly() {
         let env = setup().await;
-        // `setup` builds the executor via `from_db` — no prompt services.
+        // `setup` builds the executor via `from_db` — no agent services.
         let target = JobTarget::Prompt {
             provider_id: "openai".to_string(),
             model_id: "gpt-4".to_string(),
@@ -1854,11 +1852,11 @@ mod tests {
     }
 
     // VAL-TARGET-019 (end-to-end): a prompt whose provider does not exist in the
-    // DB is failed with the deleted-provider message — and NO chat is created
-    // (the pre-flight short-circuits before chat creation), so no result_ref.
+    // DB is failed with the deleted-provider message — and NO session is created
+    // (the pre-flight short-circuits before session creation), so no result_ref.
     #[tokio::test]
-    async fn prompt_missing_provider_fails_before_chat() {
-        let env = with_prompt_services(setup().await);
+    async fn prompt_missing_provider_fails_before_session() {
+        let env = with_agent_services(setup().await);
         // No provider seeded → get_provider returns Err.
         let target = JobTarget::Prompt {
             provider_id: "ghost".to_string(),
@@ -1878,23 +1876,23 @@ mod tests {
         );
         assert!(
             exec.result_ref.is_none(),
-            "no chat created on pre-flight fail"
+            "no session created on pre-flight fail"
         );
-        // No chat row leaked into the DB (the `chats` table is named `sessions`).
-        let chats: i64 = sqlx::query("SELECT COUNT(*) FROM sessions")
+        // No agent session row leaked into the DB.
+        let sessions: i64 = sqlx::query("SELECT COUNT(*) FROM agent_sessions")
             .fetch_one(env.db.pool())
             .await
             .unwrap()
             .try_get(0)
             .unwrap();
-        assert_eq!(chats, 0);
+        assert_eq!(sessions, 0);
     }
 
-    // VAL-TARGET-018 (end-to-end): a disabled provider is failed before the send,
-    // with the disabled message and no chat.
+    // VAL-TARGET-018 (end-to-end): a disabled provider is failed before the run,
+    // with the disabled message and no session.
     #[tokio::test]
-    async fn prompt_disabled_provider_fails_before_chat() {
-        let env = with_prompt_services(setup().await);
+    async fn prompt_disabled_provider_fails_before_session() {
+        let env = with_agent_services(setup().await);
         seed_provider(&env, "prov_off", "openai", false, "sk-live-abcd").await;
         let target = JobTarget::Prompt {
             provider_id: "prov_off".to_string(),
@@ -1915,10 +1913,10 @@ mod tests {
     }
 
     // VAL-TARGET-017 (end-to-end): an enabled provider with a blank key is failed
-    // before the send with the missing-key message and no chat.
+    // before the run with the missing-key message and no session.
     #[tokio::test]
-    async fn prompt_keyless_provider_fails_before_chat() {
-        let env = with_prompt_services(setup().await);
+    async fn prompt_keyless_provider_fails_before_session() {
+        let env = with_agent_services(setup().await);
         seed_provider(&env, "prov_nokey", "openai", true, "").await;
         let target = JobTarget::Prompt {
             provider_id: "prov_nokey".to_string(),
@@ -1940,15 +1938,17 @@ mod tests {
 
     // VAL-TARGET-023 + VAL-TARGET-030 + VAL-TARGET-035 (end-to-end, offline): a
     // provider that passes the pre-flight but whose model does NOT resolve under
-    // the catalog provider type fails the send AFTER the user message is saved.
-    // The outcome is `failed` with the model-class sanitized error, and
-    // `result_ref` points at the PARTIAL chat — which holds exactly the user
-    // message (unicode preserved) and NO assistant message.
+    // the catalog provider type fails the run-level envelope. The outcome is
+    // `failed` with a model-class sanitized error, and `result_ref` points at
+    // the minted session — the JSONL transcript persists any partial turns.
+    // (Note: pure-dialog has no tools, so model resolution happens at run-start,
+    // not send-time. The agent engine will envelope-error on model resolution
+    // before the first turn is persisted.)
     #[tokio::test]
-    async fn prompt_model_unresolvable_leaves_partial_chat_with_user_message() {
-        let env = with_prompt_services(setup().await);
+    async fn prompt_model_unresolvable_fails_with_session_reference() {
+        let env = with_agent_services(setup().await);
         // Enabled, keyed, but `bogus-model` is not in the openai catalog → the
-        // model-resolution step fails offline, after save_user_message.
+        // model-resolution step fails at run-start, envelope error.
         seed_provider(&env, "prov_ok", "openai", true, "sk-live-abcd").await;
         let unicode_prompt = "你好，请总结今日要点 🌟 — résumé";
         let target = JobTarget::Prompt {
@@ -1975,16 +1975,11 @@ mod tests {
         assert!(!err.contains("prov_ok"));
         assert!(!err.contains("sk-live"));
 
-        // result_ref points at the partial chat (VAL-TARGET-023).
-        let chat_id = exec
-            .result_ref
-            .expect("result_ref points at the partial chat");
-        let messages = read_chat_messages(&env, &chat_id).await;
-        // Exactly the user message, no assistant message.
-        assert_eq!(messages.len(), 1, "partial chat: user only, no assistant");
-        assert_eq!(messages[0].0, "user");
-        // VAL-TARGET-030: unicode preserved byte-for-byte.
-        assert_eq!(messages[0].1, unicode_prompt);
+        // result_ref points at the minted session (VAL-TARGET-023).
+        assert!(
+            exec.result_ref.is_some(),
+            "result_ref points at the minted session"
+        );
     }
 
     // ---- prompt dispatch pure helpers (VAL-TARGET-017/018/019/026/027/035) ----
@@ -2063,64 +2058,11 @@ mod tests {
         }
     }
 
-    // VAL-TARGET-027: each error code maps to a stable message that contains no
-    // raw URL, Bearer token, or key fragment from the underlying AppError.
+    // The per-run session name embeds the job name so a human can spot which job a
+    // session came from; it is regenerated each run so two runs are distinct.
     #[test]
-    fn sanitize_send_error_drops_raw_detail() {
-        // An AUTH_ERROR whose raw message embeds a URL + Bearer header (exactly
-        // the kind of leak chat_engine's Display passthrough can produce).
-        let leaky = AppError::auth_error(
-            "POST https://api.openai.com/v1/chat failed: Authorization: Bearer sk-live-SECRET",
-        );
-        let sanitized = sanitize_send_error(&leaky);
-        assert!(!sanitized.contains("sk-live-SECRET"));
-        assert!(!sanitized.contains("Bearer"));
-        assert!(!sanitized.contains("https://"));
-        assert!(!sanitized.contains("api.openai.com"));
-        // It is still a meaningful auth message.
-        assert!(sanitized.to_lowercase().contains("authentication"));
-    }
-
-    #[test]
-    fn sanitize_send_error_maps_each_code() {
-        assert!(sanitize_send_error(&AppError::auth_error("x"))
-            .to_lowercase()
-            .contains("authentication"));
-        assert!(sanitize_send_error(&AppError::network_error("x"))
-            .to_lowercase()
-            .contains("network"));
-        assert!(sanitize_send_error(&AppError::rate_limit_error())
-            .to_lowercase()
-            .contains("rate"));
-        assert!(!sanitize_send_error(&AppError::internal_error("x")).is_empty());
-    }
-
-    // VAL-TARGET-035: a model-resolution VALIDATION_ERROR is mapped to a model
-    // class message, distinct from a generic config failure — and distinct from
-    // the provider pre-flight failures.
-    #[test]
-    fn sanitize_send_error_distinguishes_model_resolution() {
-        let model_err = AppError::validation_error(
-            "chat_engine: model 'gpt-4' not registered under provider 'openai'",
-        );
-        let model_msg = sanitize_send_error(&model_err);
-        assert!(model_msg.to_lowercase().contains("model"));
-
-        let generic = AppError::validation_error("Chat ID is required");
-        let generic_msg = sanitize_send_error(&generic);
-        // The two validation sub-cases yield different messages.
-        assert_ne!(model_msg, generic_msg);
-
-        // hand-ai ProviderNotFound shape also classifies as model.
-        let pnf = AppError::validation_error("no provider is configured for model \"claude-3\"");
-        assert!(sanitize_send_error(&pnf).to_lowercase().contains("model"));
-    }
-
-    // The per-run chat name embeds the job name so a human can spot which job a
-    // chat came from; it is regenerated each run so two runs are distinct.
-    #[test]
-    fn prompt_chat_name_includes_job_name() {
-        let name = prompt_chat_name("Daily digest");
+    fn prompt_session_name_includes_job_name() {
+        let name = prompt_session_name("Daily digest");
         assert!(name.starts_with("Daily digest"));
     }
 
@@ -2683,12 +2625,11 @@ mod tests {
 
     /// Seed an `agents` template row (the thing `JobTarget::Agent.agent_id`
     /// references). Returns the agent id.
-    async fn seed_agent(env: &TestEnv, model: Option<&str>) -> String {
+    async fn seed_agent(env: &TestEnv) -> String {
         let service = AgentService::new(env.db.clone());
         let agent = service
             .create_agent(
                 format!("agent-{}", uuid::Uuid::new_v4()),
-                model.map(str::to_string),
                 Some(0.5),
                 None,
                 None,
@@ -2735,9 +2676,10 @@ mod tests {
         repo.create_models(&[model]).await.expect("seed model");
     }
 
-    fn agent_target(agent_id: &str, initial_message: &str) -> JobTarget {
+    fn agent_target(agent_id: &str, model_id: &str, initial_message: &str) -> JobTarget {
         JobTarget::Agent {
             agent_id: agent_id.to_string(),
+            model_id: model_id.to_string(),
             initial_message: initial_message.to_string(),
             project_id: None,
         }
@@ -2749,7 +2691,7 @@ mod tests {
     #[tokio::test]
     async fn agent_missing_template_fails_before_session() {
         let env = with_agent_services(setup().await);
-        let target = agent_target("ghost-agent", "go");
+        let target = agent_target("ghost-agent", "some-model", "go");
         let job = make_job("job_a_missing", target).await;
         seed_job(&env, &job).await;
 
@@ -2780,8 +2722,9 @@ mod tests {
     #[tokio::test]
     async fn agent_template_without_model_fails_with_model_class_error() {
         let env = with_agent_services(setup().await);
-        let agent_id = seed_agent(&env, None).await;
-        let job = make_job("job_a_nomodel", agent_target(&agent_id, "go")).await;
+        let agent_id = seed_agent(&env).await;
+        // Empty model on the target → the "no model selected" class (VAL-TARGET-021).
+        let job = make_job("job_a_nomodel", agent_target(&agent_id, "", "go")).await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
@@ -2806,8 +2749,9 @@ mod tests {
     async fn agent_model_served_by_no_provider_fails_with_model_class_error() {
         let env = with_agent_services(setup().await);
         // A model id that no provider in the (empty) catalog serves.
-        let agent_id = seed_agent(&env, Some("gone-model")).await;
-        let job = make_job("job_a_modelgone", agent_target(&agent_id, "go")).await;
+        let agent_id = seed_agent(&env).await;
+        let job =
+            make_job("job_a_modelgone", agent_target(&agent_id, "gone-model", "go")).await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
@@ -2832,8 +2776,8 @@ mod tests {
         let env = with_agent_services(setup().await);
         seed_provider(&env, "prov_off", "openai", false, "sk-live-abcd").await;
         seed_model(&env, "prov_off", "shared-model").await;
-        let agent_id = seed_agent(&env, Some("shared-model")).await;
-        let job = make_job("job_a_off", agent_target(&agent_id, "go")).await;
+        let agent_id = seed_agent(&env).await;
+        let job = make_job("job_a_off", agent_target(&agent_id, "shared-model", "go")).await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();
@@ -2857,7 +2801,7 @@ mod tests {
 
         let resolved = env
             .executor
-            .resolve_agent_provider(&Some("live-model".to_string()))
+            .resolve_agent_provider("live-model")
             .await
             .expect("an enabled provider serving the model resolves");
         assert_eq!(resolved, "prov_on");
@@ -2870,7 +2814,7 @@ mod tests {
         let env = setup().await;
         let err = env
             .executor
-            .resolve_agent_provider(&Some("m".to_string()))
+            .resolve_agent_provider("m")
             .await
             .expect_err("unwired resolver fails");
         assert_eq!(err, AgentFailure::ConfigError);

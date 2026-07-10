@@ -147,6 +147,12 @@ pub struct LlmConfig {
     pub custom_providers: Vec<ProviderConfig>,
 }
 
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LlmConfig {
     /// 创建新的配置管理器
     pub fn new() -> Self {
@@ -345,7 +351,7 @@ static GLOBAL_LLM_CONFIG: OnceLock<LlmConfig> = OnceLock::new();
 
 /// 获取全局 LLM 配置实例
 pub fn get_global_llm_config() -> &'static LlmConfig {
-    GLOBAL_LLM_CONFIG.get_or_init(|| LlmConfig::load())
+    GLOBAL_LLM_CONFIG.get_or_init(LlmConfig::load)
 }
 
 /// 安装全局 LLM 配置实例（应在使用前由启动流程调用）

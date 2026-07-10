@@ -26,7 +26,6 @@
   import { goto } from "$app/navigation";
   import { TableGroup, TableBaseRow } from "$lib/components/ui/table";
   import ShortcutRecorder from "$lib/components/quickaction/ShortcutRecorder.svelte";
-  import ChatModelSelectButton from "$lib/components/chat/ChatModelSelectButton.svelte";
   import { settingsState, providerActions } from "$lib/states";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { normalizeError } from "$lib/utils/error";
@@ -48,13 +47,24 @@
   // Gate concurrent register/persist round-trips.
   let busy = $state(false);
 
+  // Pull the configured hotkey from the settings store; skip while unloaded.
+  function syncFromSettings(): void {
+    if (!settingsState.settings) return;
+    const configured = settingsState.settings.quickAction?.shortcut;
+    if (configured) {
+      shortcut = configured;
+    }
+  }
+
+  // Root layout preloads settings: sync now so the first frame shows the real
+  // hotkey instead of flashing the default accelerator.
+  syncFromSettings();
+
   onMount(async () => {
     try {
+      // Cold start / deep link fallback: ensure settings are loaded, re-sync.
       await settingsState.loadSettings();
-      const configured = settingsState.settings?.quickAction?.shortcut;
-      if (configured) {
-        shortcut = configured;
-      }
+      syncFromSettings();
     } catch (error) {
       console.error("加载快捷键设置失败:", error);
     }
@@ -76,9 +86,6 @@
     ),
   );
 
-  // The selected model passed to ChatModelSelectButton: only the resolved (=
-  // runnable) model, so a dangling/empty default shows the button placeholder
-  // instead of a stale name. The row-level placeholders handle the rest.
   const selectedModel = $derived<ModelWithProvider | null>(
     modelResolution.available ? modelResolution.model : null,
   );
@@ -175,7 +182,7 @@
   }
 </script>
 
-<div class="mt-8 p-6 pr-8 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
   <TableGroup title={t("quickaction.shortcut.title")}>
     <TableBaseRow
       label={t("quickaction.shortcut.label")}
@@ -213,10 +220,6 @@
     >
       {#if modelResolution.available || modelResolution.reason !== "empty-catalog"}
         <div class="flex items-center justify-between gap-3 mt-2">
-          <ChatModelSelectButton
-            {selectedModel}
-            onModelSelect={handleModelSelect}
-          />
           {#if !modelResolution.available}
             <span class="text-xs text-base-content/60">
               {modelResolution.reason === "dangling-default"

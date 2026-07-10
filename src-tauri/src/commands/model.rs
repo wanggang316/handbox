@@ -41,15 +41,6 @@ pub async fn model_toggle_favorite(
         .await
 }
 
-/// 统计使用指定模型的聊天数量
-#[tauri::command]
-pub async fn model_count_chats(
-    model_id: String,
-    model_service: State<'_, ModelService>,
-) -> Result<i32, AppError> {
-    model_service.count_chats_using_model(&model_id).await
-}
-
 /// 为自定义供应商手动添加模型（自定义端点的模型不在 hand-ai 目录中）。
 #[tauri::command]
 pub async fn model_add(

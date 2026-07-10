@@ -17,6 +17,7 @@
   import AgentInput from "$lib/components/agentsession/AgentInput.svelte";
   import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
   import AgentApprovalModal from "$lib/components/agentsession/AgentApprovalModal.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import type {
     AgentApprovalRequest,
     ApprovalDecision,
@@ -154,7 +155,13 @@
       AgentTimeline 消费 `agentRunStore.runStateFor(sessionId)` 这一稳定 getter；
       工具卡片留给 M2（toolResult / toolcall 块当前仅占位）。
     -->
-    {#if isEmpty}
+    {#if isEmpty && !runState?.hydrated}
+      <!-- 无缓存首开：transcript 还原在途。容器结构保持稳定，仅居中 Spinner；
+           重访会话由 store 内按 sessionId 常驻的缓存直出，不再经过此分支。 -->
+      <div class="flex-1 flex items-center justify-center">
+        <Spinner size={28} />
+      </div>
+    {:else if isEmpty}
       <div
         class="flex-1 flex flex-col items-center justify-center text-base-content/40"
       >

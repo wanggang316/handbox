@@ -9,7 +9,6 @@ use std::sync::Arc;
 /// Agent 参数类型
 pub enum AgentParameter {
     Name(String),
-    Model(String),
     Temperature(Option<f32>),
     TopP(Option<f32>),
     TopK(Option<i32>),
@@ -20,6 +19,14 @@ pub enum AgentParameter {
     Skills(Vec<String>),
     GenerativeUi(Option<bool>),
     GenUiId(Option<UUID>),
+    ProviderId(Option<String>),
+    Icon(Option<String>),
+    Description(Option<String>),
+    BuiltinTools(Vec<String>),
+    WorkingDirMode(Option<String>),
+    ToolExecutionMode(Option<String>),
+    ThinkingLevel(Option<String>),
+    Starters(Vec<String>),
 }
 
 /// Agent 服务
@@ -36,10 +43,11 @@ impl AgentService {
     }
 
     /// 创建 Agent
+    // 参数逐一对应可编辑的 Agent 字段；聚合成 struct 只会平移参数表而非缩短它。
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_agent(
         &self,
         name: String,
-        model: Option<String>,
         temperature: Option<f32>,
         top_p: Option<f32>,
         top_k: Option<i32>,
@@ -56,7 +64,6 @@ impl AgentService {
         let agent = Agent {
             id: uuid::Uuid::new_v4().to_string(),
             name,
-            model,
             temperature,
             top_p,
             top_k,
@@ -67,6 +74,17 @@ impl AgentService {
             skills: skills.unwrap_or_default(),
             generative_ui,
             genui_id,
+            // AgentDefinition 扩展字段：create 路径默认空，由表单创建后经
+            // `agent_update_field` 逐字段补齐（与编辑路径一致）。用户创建恒为非内置。
+            provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
             created_at: now,
             updated_at: now,
         };
@@ -103,9 +121,13 @@ impl AgentService {
     ) -> Result<Agent, AppError> {
         let mut agent = self.get_agent(agent_id).await?;
 
+        // 内置 AgentDefinition 不可改名（id 稳定，保留固定显示名）；其余字段可调。
+        if agent.builtin && matches!(parameter, AgentParameter::Name(_)) {
+            return Err(AppError::validation_error("Builtin agent cannot be renamed"));
+        }
+
         match parameter {
             AgentParameter::Name(name) => agent.name = name,
-            AgentParameter::Model(model) => agent.model = Some(model),
             AgentParameter::Temperature(temp) => agent.temperature = temp,
             AgentParameter::TopP(top_p) => agent.top_p = top_p,
             AgentParameter::TopK(top_k) => agent.top_k = top_k,
@@ -116,6 +138,14 @@ impl AgentService {
             AgentParameter::Skills(skills) => agent.skills = skills,
             AgentParameter::GenerativeUi(v) => agent.generative_ui = v,
             AgentParameter::GenUiId(v) => agent.genui_id = v,
+            AgentParameter::ProviderId(v) => agent.provider_id = v,
+            AgentParameter::Icon(v) => agent.icon = v,
+            AgentParameter::Description(v) => agent.description = v,
+            AgentParameter::BuiltinTools(v) => agent.builtin_tools = v,
+            AgentParameter::WorkingDirMode(v) => agent.working_dir_mode = v,
+            AgentParameter::ToolExecutionMode(v) => agent.tool_execution_mode = v,
+            AgentParameter::ThinkingLevel(v) => agent.thinking_level = v,
+            AgentParameter::Starters(v) => agent.starters = v,
         }
 
         agent.updated_at = Self::current_timestamp();
@@ -128,11 +158,11 @@ impl AgentService {
     /// 注意：本方法刻意不含 `generative_ui` 参数（与 `create_agent` 不同）。该字段
     /// 通过 `update_agent_parameter(AgentParameter::GenerativeUi)`（对应前端
     /// `agent_update_field` 的 "generativeUi" 路径）单独更新，不走批量更新——并非遗漏。
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_agent(
         &self,
         agent_id: UUID,
         name: Option<String>,
-        model: Option<String>,
         temperature: Option<Option<f32>>,
         top_p: Option<Option<f32>>,
         top_k: Option<Option<i32>>,
@@ -146,9 +176,6 @@ impl AgentService {
 
         if let Some(n) = name {
             agent.name = n;
-        }
-        if let Some(m) = model {
-            agent.model = Some(m);
         }
         if let Some(t) = temperature {
             agent.temperature = t;
@@ -183,7 +210,12 @@ impl AgentService {
     /// 删除 Agent
     pub async fn delete_agent(&self, agent_id: UUID) -> Result<(), AppError> {
         // 先检查 Agent 是否存在
-        self.get_agent(agent_id.clone()).await?;
+        let agent = self.get_agent(agent_id.clone()).await?;
+
+        // 内置 AgentDefinition（builtin-chat / builtin-coding）受保护，不可删除。
+        if agent.builtin {
+            return Err(AppError::validation_error("Builtin agent cannot be deleted"));
+        }
 
         // 删除 Agent
         self.repository.delete_agent(&agent_id).await
@@ -228,7 +260,6 @@ mod tests {
         let agent = service
             .create_agent(
                 "Code Assistant".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
@@ -248,7 +279,6 @@ mod tests {
             .expect("agent creation failed");
 
         assert_eq!(agent.name, "Code Assistant");
-        assert_eq!(agent.model, Some("gpt-4o".to_string()));
         assert_eq!(agent.temperature, Some(0.7));
         assert_eq!(agent.top_p, Some(0.9));
         assert_eq!(agent.top_k, Some(40));
@@ -289,7 +319,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
             )
             .await
             .unwrap();
@@ -309,15 +338,20 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
             )
             .await
             .unwrap();
 
-        let agents = service
+        // Exclude the builtin AgentDefinitions seeded by migration 058. They
+        // carry earlier (migration-time) updated_at, so they sort after the
+        // two agents created during this test.
+        let agents: Vec<_> = service
             .list_agents(Some(10), Some(0))
             .await
-            .expect("list agents failed");
+            .expect("list agents failed")
+            .into_iter()
+            .filter(|a| !a.builtin)
+            .collect();
 
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].name, "Agent 2");
@@ -332,7 +366,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -387,7 +420,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
             )
             .await
             .unwrap();
@@ -396,7 +428,6 @@ mod tests {
             .update_agent(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                Some("gpt-4o".to_string()),
                 Some(Some(0.8)),
                 Some(Some(0.95)),
                 Some(Some(40)),
@@ -421,7 +452,6 @@ mod tests {
             .expect("update failed");
 
         assert_eq!(updated.name, "Updated Name");
-        assert_eq!(updated.model, Some("gpt-4o".to_string()));
         assert_eq!(updated.temperature, Some(0.8));
         assert_eq!(updated.top_p, Some(0.95));
         assert_eq!(updated.top_k, Some(40));
@@ -438,7 +468,6 @@ mod tests {
         let created = service
             .create_agent(
                 "To Delete".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -474,7 +503,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -525,7 +553,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
@@ -548,7 +575,6 @@ mod tests {
         let updated = service
             .update_agent(
                 created.id.clone(),
-                None,
                 None,
                 Some(None), // 清空 temperature
                 Some(None), // 清空 top_p
@@ -576,7 +602,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Test Agent".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 Some(0.9),
                 Some(40),
@@ -595,7 +620,6 @@ mod tests {
             .update_agent(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                None,
                 None, // 不修改 temperature，保持原值
                 None, // 不修改 top_p，保持原值
                 None, // 不修改 top_k，保持原值
@@ -625,7 +649,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Generative Agent".to_string(),
-                None,
                 None,
                 None,
                 None,
@@ -664,7 +687,6 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
                 Some(true),
                 None,
             )
@@ -695,7 +717,6 @@ mod tests {
         let created = service
             .create_agent(
                 "Original Name".to_string(),
-                Some("gpt-4o".to_string()),
                 Some(0.7),
                 None,
                 None,

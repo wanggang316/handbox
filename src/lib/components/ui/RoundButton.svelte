@@ -77,7 +77,7 @@
 </script>
 
 <button
-  class="{size} {colors.bg} {colors.text} {rounded} {fontSize} {hoverClass} flex items-center justify-center gap-1.5 disabled:bg-base-300 {customClass}"
+  class="{size} {colors.bg} {colors.text} {rounded} {fontSize} {hoverClass} flex items-center justify-center gap-1.5 transition disabled:bg-base-300 {customClass}"
   class:opacity-50={inactive}
   class:cursor-not-allowed={inactive}
   class:pointer-events-none={inactive}

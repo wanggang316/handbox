@@ -20,7 +20,7 @@ pub fn get_frontmost_app_info() -> Option<FrontmostAppInfo> {
         .bundleIdentifier()
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unknown.app".to_string());
-    let pid = app.processIdentifier() as i32;
+    let pid = app.processIdentifier();
 
     Some(FrontmostAppInfo {
         name,

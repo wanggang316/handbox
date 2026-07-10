@@ -16,11 +16,11 @@
   } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import Modal from "$lib/components/ui/Modal.svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import StatusLabel from "$lib/components/ui/StatusLabel.svelte";
   import { cronToHuman } from "$lib/utils/cronReadable";
   import { formatDateTime, formatDuration } from "$lib/utils";
   import { listExecutions, listenJobExecuted, runNow } from "$lib/api/job";
-  import { getChat } from "$lib/api/chat";
   import { getAgentSession } from "$lib/api/agentSession";
   import { t } from "$lib/i18n";
   import type { Job, JobExecution, ExecutionStatus, Trigger } from "$lib/types";
@@ -103,11 +103,12 @@
     resultStates = { ...resultStates, [exec.id]: "checking" };
     try {
       if (targetKind === "prompt") {
-        await getChat(ref);
+        // Chat sessions have been removed; mark as missing
+        resultStates = { ...resultStates, [exec.id]: "missing" };
       } else if (targetKind === "agent") {
         await getAgentSession(ref);
+        resultStates = { ...resultStates, [exec.id]: "ok" };
       }
-      resultStates = { ...resultStates, [exec.id]: "ok" };
     } catch (e) {
       // 会话已删除 / 不可达：标记缺失，禁用跳转。
       console.error("Result target unreachable:", e);
@@ -320,9 +321,7 @@
       <div class="flex-1 min-h-0 overflow-y-auto px-6 py-3">
         {#if loading}
           <div class="flex items-center justify-center py-10">
-            <div
-              class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"
-            ></div>
+            <Spinner size={28} />
           </div>
         {:else if loadError}
           <div

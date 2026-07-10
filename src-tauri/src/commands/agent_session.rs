@@ -13,7 +13,10 @@
 
 use crate::models::AppError;
 use crate::services::{abort_run, agent_jsonl_store, AgentSessionParameter, AgentSessionService};
-use crate::storage::types::{AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UUID};
+use crate::storage::types::{
+    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, InstantiateAgentSessionRequest,
+    UUID,
+};
 use tauri::{AppHandle, Manager, State};
 
 /// 创建新的 Agent Session
@@ -23,6 +26,39 @@ pub async fn agent_session_create(
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<AgentSession, AppError> {
     agent_session_service.create_session(request).await
+}
+
+/// 从一个 AgentDefinition 实例化 Agent Session
+///
+/// 统一收口：`/agent` 路由经此创建任意定义（含内置 chat / coding）的会话——
+/// definition 提供能力集与默认参数，`overrides` 携带实例化时才确定的工作目录 /
+/// 模型 / provider / 名称。详见 [`AgentSessionService::create_session_from_definition`]。
+#[tauri::command]
+pub async fn agent_session_create_from_definition(
+    definition_id: UUID,
+    overrides: Option<InstantiateAgentSessionRequest>,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<AgentSession, AppError> {
+    agent_session_service
+        .create_session_from_definition(definition_id, overrides.unwrap_or_default())
+        .await
+}
+
+/// 将一个已存在的空会话就地重指到另一个 AgentDefinition（不新建会话行）
+///
+/// 前端仅在会话尚无任何消息时调用：用户在输入框切换 Agent 而当前会话「一句话
+/// 都没说过」，直接把它重指到新定义（重新快照能力集、改写 provenance），保留
+/// 会话 id 与 transcript。详见 [`AgentSessionService::reinstantiate_from_definition`]。
+#[tauri::command]
+pub async fn agent_session_reinstantiate_from_definition(
+    session_id: UUID,
+    definition_id: UUID,
+    overrides: Option<InstantiateAgentSessionRequest>,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<AgentSession, AppError> {
+    agent_session_service
+        .reinstantiate_from_definition(session_id, definition_id, overrides.unwrap_or_default())
+        .await
 }
 
 /// 获取 Agent Session 列表
@@ -221,6 +257,12 @@ fn parse_session_parameter(
                 AppError::validation_error(&format!("Invalid enabled_tools value: {}", e))
             })?;
             AgentSessionParameter::EnabledTools(tools)
+        }
+        "mcpServers" => {
+            let servers = serde_json::from_value(value).map_err(|e| {
+                AppError::validation_error(&format!("Invalid mcp_servers value: {}", e))
+            })?;
+            AgentSessionParameter::McpServers(servers)
         }
         "toolExecutionMode" => AgentSessionParameter::ToolExecutionMode(parse_optional_string(
             &value,

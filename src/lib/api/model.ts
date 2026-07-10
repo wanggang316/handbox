@@ -78,13 +78,6 @@ export async function getAvailableModels(): Promise<Model[]> {
 }
 
 /**
- * 统计使用指定模型的聊天数量
- */
-export async function countChatsUsingModel(modelId: string): Promise<number> {
-	return apiCall<number>('model_count_chats', { modelId });
-}
-
-/**
  * 为自定义供应商手动添加模型。
  *
  * 自定义端点（openai-compatible / anthropic-compatible）不在 hand-ai 目录中，

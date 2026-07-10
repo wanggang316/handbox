@@ -26,13 +26,6 @@
   }
 </script>
 
-<TableBaseRow {label} {helpText}>
-  <div class="flex flex-col items-end">
-    {#if description}
-      <div class="text-xs text-base-content/70 mb-1 text-right">
-        {description}
-      </div>
-    {/if}
-    <Toggle bind:checked {disabled} onChange={handleToggleChange} />
-  </div>
+<TableBaseRow {label} {description} {helpText}>
+  <Toggle bind:checked {disabled} onChange={handleToggleChange} />
 </TableBaseRow>

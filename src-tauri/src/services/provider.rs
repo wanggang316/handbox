@@ -3,7 +3,7 @@
 use crate::models::{AddProviderRequest, AppError};
 use crate::services::{Database, ModelService};
 use crate::storage::types::{Model, Provider, Timestamp, UUID};
-use crate::storage::{SessionRepository, ProviderRepository};
+use crate::storage::ProviderRepository;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -12,7 +12,6 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ProviderService {
     provider_repo: ProviderRepository,
-    chat_repo: SessionRepository,
     model_service: ModelService,
 }
 
@@ -21,7 +20,6 @@ impl ProviderService {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
-            chat_repo: SessionRepository::new(Arc::clone(&db)),
             model_service: ModelService::new(Arc::clone(&db)),
         }
     }
@@ -193,11 +191,6 @@ impl ProviderService {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64
-    }
-
-    /// 统计使用指定供应商的聊天数量
-    pub async fn count_chats_using_provider(&self, provider_id: &str) -> Result<i32, AppError> {
-        self.chat_repo.count_chats_using_provider(provider_id).await
     }
 }
 

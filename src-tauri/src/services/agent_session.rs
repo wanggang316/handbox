@@ -7,8 +7,11 @@
 
 use crate::models::AppError;
 use crate::services::Database;
-use crate::storage::types::{AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UUID};
-use crate::storage::{AgentProjectRepository, AgentSessionRepository};
+use crate::storage::types::{
+    Agent, AgentSession, AgentSessionMessage, CreateAgentSessionRequest,
+    InstantiateAgentSessionRequest, McpServerConfig, UUID,
+};
+use crate::storage::{AgentProjectRepository, AgentRepository, AgentSessionRepository};
 use std::sync::Arc;
 
 /// Agent Session 可更新参数类型（镜像 `AgentParameter`，按字段更新）
@@ -22,6 +25,7 @@ pub enum AgentSessionParameter {
     MaxTokens(Option<i32>),
     WorkingDir(Option<String>),
     EnabledTools(Vec<String>),
+    McpServers(Vec<McpServerConfig>),
     ToolExecutionMode(Option<String>),
 }
 
@@ -32,13 +36,17 @@ pub struct AgentSessionService {
     /// 直接持有 project 仓储层（而非 `AgentProjectService`）：create 挂靠
     /// project 时只需按 id 解析一行，轻依赖即可，避免 service 间环状耦合。
     projects: AgentProjectRepository,
+    /// 直接持有 agent（AgentDefinition）仓储层：`create_session_from_definition`
+    /// 实例化时按 id 解析一行定义即可，同样取轻依赖而非整个 `AgentService`。
+    definitions: AgentRepository,
 }
 
 impl AgentSessionService {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             repository: AgentSessionRepository::new(Arc::clone(&db)),
-            projects: AgentProjectRepository::new(db),
+            projects: AgentProjectRepository::new(Arc::clone(&db)),
+            definitions: AgentRepository::new(db),
         }
     }
 
@@ -61,13 +69,206 @@ impl AgentSessionService {
         &self,
         request: CreateAgentSessionRequest,
     ) -> Result<AgentSession, AppError> {
-        let requested_project_id = request
-            .project_id
+        let (project_id, working_dir) = self
+            .resolve_project_and_working_dir(request.project_id.clone(), request.working_dir.clone())
+            .await?;
+
+        let now = Self::current_timestamp();
+        let session = AgentSession {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: request.name,
+            project_id,
+            agent_definition_id: request.agent_definition_id,
+            model_id: request.model_id,
+            provider_id: request.provider_id,
+            system_prompt: request.system_prompt,
+            thinking_level: request.thinking_level,
+            temperature: request.temperature,
+            max_tokens: request.max_tokens,
+            working_dir,
+            enabled_tools: request.enabled_tools.unwrap_or_default(),
+            mcp_servers: request.mcp_servers.unwrap_or_default(),
+            tool_execution_mode: request.tool_execution_mode,
+            message_count: 0,
+            last_message_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.repository.create_session(&session).await?;
+        Ok(session)
+    }
+
+    /// 从一个 AgentDefinition 实例化会话。
+    ///
+    /// 取定义的**能力集**与默认参数做一次性快照，再叠加 `overrides` 里实例化时
+    /// 才确定的字段，最终复用 [`create_session`] 落库（同一套 working_dir /
+    /// project 校验与 canonical 化）：
+    /// - `enabled_tools ← definition.builtin_tools`（空集 = 纯对话，不注册内置工具）
+    /// - `mcp_servers ← definition.mcp_servers`
+    /// - `system_prompt` / `temperature` / `max_tokens` / `thinking_level` /
+    ///   `tool_execution_mode` 取自定义
+    /// - `model_id` / `provider_id`：`overrides` 优先，否则取定义默认（内置 chat
+    ///   定义 provider 为空，必须由 `overrides.provider_id` 选定）
+    /// - `name`：`overrides` 优先（去空白后非空），否则取 `definition.name`
+    ///
+    /// `working_dir_mode` 决定工作目录策略，在委托 `create_session` 之前先行裁决：
+    /// - `"none"`：强制纯对话——忽略传入的 `project_id` / `working_dir`（均置空）。
+    /// - `"required"`：`project_id` 或 `working_dir` 至少给其一（非空），否则
+    ///   `VALIDATION_ERROR`；具体路径有效性仍由 `create_session` 校验。
+    /// - `"optional"`（含旧定义 / NULL）：原样透传，有则用、无则空。
+    ///
+    /// 落库的会话带 `agent_definition_id = Some(definition_id)` 回指其来源定义。
+    pub async fn create_session_from_definition(
+        &self,
+        definition_id: UUID,
+        overrides: InstantiateAgentSessionRequest,
+    ) -> Result<AgentSession, AppError> {
+        let definition = self
+            .definitions
+            .get_agent_by_id(&definition_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found(&format!("Agent definition not found: {}", definition_id))
+            })?;
+
+        let request = Self::build_instantiation_request(&definition, overrides)?;
+        self.create_session(request).await
+    }
+
+    /// 将一个**已存在**会话就地重指到另一个 AgentDefinition —— 不新建会话行。
+    ///
+    /// 语义：调用方（前端）仅在会话**尚无任何消息**时走此路径——用户切换 Agent
+    /// 而当前会话「一句话都没说过」，没必要新建空会话，直接把它重指到新定义。
+    /// 按新定义重新快照能力集与默认参数、并改写 `agent_definition_id`（这是
+    /// provenance 链接在 create 之外**唯一**允许被重写的受控入口）；会话 id、
+    /// created_at、message_count、last_message_at、transcript 一律保留。
+    ///
+    /// 参数取舍：新定义未指定 model/provider（如内置 chat）时保留会话当前值；
+    /// 工作目录先沿用会话现有挂靠，再由新定义的 `working_dir_mode` 裁决
+    /// （mode="none" 清空；"required" 下现有目录即满足校验）。
+    pub async fn reinstantiate_from_definition(
+        &self,
+        session_id: UUID,
+        definition_id: UUID,
+        overrides: InstantiateAgentSessionRequest,
+    ) -> Result<AgentSession, AppError> {
+        let mut session = self.get_session(session_id).await?;
+
+        let definition = self
+            .definitions
+            .get_agent_by_id(&definition_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found(&format!("Agent definition not found: {}", definition_id))
+            })?;
+
+        // overrides 未显式指定工作目录时，默认沿用会话现有挂靠；随后交由
+        // build_instantiation_request 按新定义的 working_dir_mode 裁决。
+        let overrides = InstantiateAgentSessionRequest {
+            project_id: overrides.project_id.or_else(|| session.project_id.clone()),
+            working_dir: overrides.working_dir.or_else(|| session.working_dir.clone()),
+            ..overrides
+        };
+        let request = Self::build_instantiation_request(&definition, overrides)?;
+        let (project_id, working_dir) = self
+            .resolve_project_and_working_dir(request.project_id, request.working_dir)
+            .await?;
+
+        session.agent_definition_id = Some(definition.id.clone());
+        session.name = request.name;
+        session.project_id = project_id;
+        session.working_dir = working_dir;
+        // 新定义未定 model/provider 时保留会话现值。定义列可能是空串（内置 chat
+        // 的 model/provider seed 为 ""）而非 NULL，故空串按「未定」处理才不会用一个
+        // 空模型盖掉会话已选的真实模型。
+        let non_empty = |v: Option<String>| v.filter(|s| !s.is_empty());
+        session.model_id = non_empty(request.model_id).or(session.model_id);
+        session.provider_id = non_empty(request.provider_id).or(session.provider_id);
+        session.system_prompt = request.system_prompt;
+        session.thinking_level = request.thinking_level;
+        session.temperature = request.temperature;
+        session.max_tokens = request.max_tokens;
+        session.enabled_tools = request.enabled_tools.unwrap_or_default();
+        session.mcp_servers = request.mcp_servers.unwrap_or_default();
+        session.tool_execution_mode = request.tool_execution_mode;
+        session.updated_at = Self::current_timestamp();
+
+        self.repository.reinstantiate_session(&session).await?;
+        Ok(session)
+    }
+
+    /// 从 AgentDefinition + overrides 组装一次实例化的 `CreateAgentSessionRequest`。
+    ///
+    /// `working_dir_mode` 裁决工作目录策略（`"none"` 强制清空；`"required"` 要求
+    /// overrides 至少给 project/working_dir 其一，否则 `VALIDATION_ERROR`；
+    /// `"optional"`/NULL 原样透传），快照能力集（`enabled_tools←builtin_tools`、
+    /// `mcp_servers`）与默认参数，overrides 覆盖 name/project/workingDir/model/
+    /// provider。create 与 reinstantiate 共用此组装，杜绝两条路径漂移。
+    fn build_instantiation_request(
+        definition: &Agent,
+        overrides: InstantiateAgentSessionRequest,
+    ) -> Result<CreateAgentSessionRequest, AppError> {
+        // 空字符串与 None 等同「未提供」——create 的下游校验也是这样处理。
+        let is_set = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.is_empty());
+        let (project_id, working_dir) =
+            match definition.working_dir_mode.as_deref().unwrap_or("optional") {
+                "none" => (None, None),
+                "required" => {
+                    if !is_set(&overrides.project_id) && !is_set(&overrides.working_dir) {
+                        return Err(AppError::with_hint(
+                            "VALIDATION_ERROR",
+                            "this agent definition requires a working directory",
+                            "该 Agent 需要选择工作目录或项目后才能创建会话",
+                        ));
+                    }
+                    (overrides.project_id, overrides.working_dir)
+                }
+                _ => (overrides.project_id, overrides.working_dir),
+            };
+
+        let name = overrides
+            .name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| definition.name.clone());
+
+        Ok(CreateAgentSessionRequest {
+            name,
+            project_id,
+            agent_definition_id: Some(definition.id.clone()),
+            // 模型已与 AgentDefinition 解耦：会话不再从定义快照 model，仅取 overrides
+            // （实例化时由 UI 选）。provider 仍可由定义提供默认（内置行为空）。
+            model_id: overrides.model_id,
+            provider_id: overrides
+                .provider_id
+                .or_else(|| definition.provider_id.clone()),
+            system_prompt: definition.system_prompt.clone(),
+            thinking_level: definition.thinking_level.clone(),
+            temperature: definition.temperature,
+            max_tokens: definition.max_tokens,
+            working_dir,
+            enabled_tools: Some(definition.builtin_tools.clone()),
+            mcp_servers: Some(definition.mcp_servers.clone()),
+            tool_execution_mode: definition.tool_execution_mode.clone(),
+        })
+    }
+
+    /// 解析 `project_id` 挂靠与 `working_dir`，返回 canonical 化后的
+    /// `(project_id, working_dir)`。project 优先：给定则按 id 解析并复核其 path
+    /// 仍 canonicalize 回自身且是目录；否则回落到直接校验 `working_dir`（绝对
+    /// 路径 + 已存在目录）。空字符串 / None 视为未设置。create 与 reinstantiate
+    /// 共用同一套校验，杜绝漂移。
+    async fn resolve_project_and_working_dir(
+        &self,
+        project_id: Option<String>,
+        working_dir: Option<String>,
+    ) -> Result<(Option<String>, Option<String>), AppError> {
+        let requested_project_id = project_id
             .as_deref()
             .filter(|id| !id.is_empty())
             .map(str::to_owned);
 
-        let (project_id, working_dir) = match requested_project_id {
+        match requested_project_id {
             Some(pid) => {
                 let project = self
                     .projects
@@ -94,36 +295,10 @@ impl AgentSessionService {
                     ));
                 }
 
-                (Some(project.id), Some(project.path))
+                Ok((Some(project.id), Some(project.path)))
             }
-            None => (
-                None,
-                Self::validate_working_dir(request.working_dir.as_deref())?,
-            ),
-        };
-
-        let now = Self::current_timestamp();
-        let session = AgentSession {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: request.name,
-            project_id,
-            model_id: request.model_id,
-            provider_id: request.provider_id,
-            system_prompt: request.system_prompt,
-            thinking_level: request.thinking_level,
-            temperature: request.temperature,
-            max_tokens: request.max_tokens,
-            working_dir,
-            enabled_tools: request.enabled_tools.unwrap_or_default(),
-            tool_execution_mode: request.tool_execution_mode,
-            message_count: 0,
-            last_message_at: None,
-            created_at: now,
-            updated_at: now,
-        };
-
-        self.repository.create_session(&session).await?;
-        Ok(session)
+            None => Ok((None, Self::validate_working_dir(working_dir.as_deref())?)),
+        }
     }
 
     /// 获取 Agent Session 列表（按 updated_at 降序）
@@ -182,6 +357,7 @@ impl AgentSessionService {
                 session.working_dir = Self::validate_working_dir(working_dir.as_deref())?;
             }
             AgentSessionParameter::EnabledTools(tools) => session.enabled_tools = tools,
+            AgentSessionParameter::McpServers(servers) => session.mcp_servers = servers,
             AgentSessionParameter::ToolExecutionMode(mode) => session.tool_execution_mode = mode,
         }
 
@@ -279,6 +455,7 @@ mod tests {
         CreateAgentSessionRequest {
             name: name.to_string(),
             project_id: None,
+            agent_definition_id: None,
             model_id: Some("gpt-4o".to_string()),
             provider_id: Some("openai".to_string()),
             system_prompt: None,
@@ -287,6 +464,7 @@ mod tests {
             max_tokens: None,
             working_dir: None,
             enabled_tools: None,
+            mcp_servers: None,
             tool_execution_mode: None,
         }
     }
@@ -297,6 +475,243 @@ mod tests {
             .await
             .unwrap();
         row.try_get::<i64, _>("count").unwrap()
+    }
+
+    // --- P3: create_session_from_definition (instantiate from AgentDefinition) ---
+
+    /// builtin-coding (migration 058 seed) instantiates with the full seven-tool
+    /// capability set snapshotted into `enabled_tools`, its manual tool-execution
+    /// policy, the provided working dir (required mode), and an
+    /// `agent_definition_id` back-link.
+    #[tokio::test]
+    async fn from_definition_builtin_coding_snapshots_capability_set() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        let work_dir = TempDir::new().unwrap();
+        let canonical = std::fs::canonicalize(work_dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        let overrides = InstantiateAgentSessionRequest {
+            working_dir: Some(work_dir.path().to_string_lossy().into_owned()),
+            provider_id: Some("openai".to_string()),
+            model_id: Some("gpt-4o".to_string()),
+            ..Default::default()
+        };
+        let session = service
+            .create_session_from_definition("builtin-coding".to_string(), overrides)
+            .await
+            .expect("instantiate builtin-coding");
+
+        assert_eq!(
+            session.enabled_tools,
+            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+        );
+        assert_eq!(session.tool_execution_mode.as_deref(), Some("manual"));
+        assert_eq!(session.working_dir, Some(canonical));
+        assert_eq!(
+            session.agent_definition_id.as_deref(),
+            Some("builtin-coding")
+        );
+        // name defaults to the definition name when no override is given.
+        assert_eq!(session.name, "Coding");
+    }
+
+    /// builtin-coding is `working_dir_mode: "required"`: instantiating it without
+    /// a working dir (and without a project) is a VALIDATION_ERROR and writes no row.
+    #[tokio::test]
+    async fn from_definition_required_mode_without_dir_is_rejected() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let err = service
+            .create_session_from_definition(
+                "builtin-coding".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect_err("required mode must reject a missing working dir");
+        assert_eq!(err.code, "VALIDATION_ERROR");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 0);
+    }
+
+    /// builtin-chat is `working_dir_mode: "none"`: it degrades to pure dialog —
+    /// zero builtin tools, and any supplied working dir is IGNORED (forced null).
+    #[tokio::test]
+    async fn from_definition_builtin_chat_is_pure_dialog() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        // Even a perfectly valid working dir is dropped for a "none"-mode definition.
+        let work_dir = TempDir::new().unwrap();
+        let overrides = InstantiateAgentSessionRequest {
+            working_dir: Some(work_dir.path().to_string_lossy().into_owned()),
+            provider_id: Some("openai".to_string()),
+            model_id: Some("gpt-4o".to_string()),
+            ..Default::default()
+        };
+        let session = service
+            .create_session_from_definition("builtin-chat".to_string(), overrides)
+            .await
+            .expect("instantiate builtin-chat");
+
+        assert!(
+            session.enabled_tools.is_empty(),
+            "chat-class registers no builtin tools"
+        );
+        assert_eq!(
+            session.working_dir, None,
+            "none-mode definition must ignore any provided working dir"
+        );
+        assert_eq!(session.agent_definition_id.as_deref(), Some("builtin-chat"));
+    }
+
+    /// `overrides` win over the definition defaults for the fields the UI fills in
+    /// at instantiation: name, model, provider.
+    #[tokio::test]
+    async fn from_definition_overrides_take_precedence() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        let overrides = InstantiateAgentSessionRequest {
+            name: Some("My Chat".to_string()),
+            model_id: Some("claude-opus-4-8".to_string()),
+            provider_id: Some("anthropic".to_string()),
+            ..Default::default()
+        };
+        let session = service
+            .create_session_from_definition("builtin-chat".to_string(), overrides)
+            .await
+            .expect("instantiate with overrides");
+
+        assert_eq!(session.name, "My Chat");
+        assert_eq!(session.model_id.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(session.provider_id.as_deref(), Some("anthropic"));
+    }
+
+    /// An unknown definition id is a NOT_FOUND, not a silent empty session.
+    #[tokio::test]
+    async fn from_definition_unknown_id_errors() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let err = service
+            .create_session_from_definition(
+                "does-not-exist".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect_err("unknown definition must error");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 0);
+    }
+
+    // --- reinstantiate_from_definition: in-place re-point of an empty session ---
+
+    /// Re-pointing an existing session to another definition mutates it in place:
+    /// same id, no new row, provenance + capability set re-snapshotted from the new
+    /// definition. coding -> chat drops the seven tools and the working dir (chat is
+    /// none-mode) while preserving the session's model/provider (chat pins none) —
+    /// proving the row was reused, not recreated.
+    #[tokio::test]
+    async fn reinstantiate_repoints_in_place_from_coding_to_chat() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let work_dir = TempDir::new().unwrap();
+        let coding = service
+            .create_session_from_definition(
+                "builtin-coding".to_string(),
+                InstantiateAgentSessionRequest {
+                    working_dir: Some(work_dir.path().to_string_lossy().into_owned()),
+                    provider_id: Some("openai".to_string()),
+                    model_id: Some("gpt-4o".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("instantiate builtin-coding");
+        let session_id = coding.id.clone();
+
+        let chat = service
+            .reinstantiate_from_definition(
+                session_id.clone(),
+                "builtin-chat".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect("reinstantiate to builtin-chat");
+
+        // Same row, re-pointed — not a fresh session.
+        assert_eq!(chat.id, session_id, "session id is preserved (in place)");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 1, "no new row");
+        assert_eq!(chat.agent_definition_id.as_deref(), Some("builtin-chat"));
+        // Capability set re-snapshotted from the new (chat) definition.
+        assert!(chat.enabled_tools.is_empty(), "chat clears builtin tools");
+        assert_eq!(chat.working_dir, None, "none-mode chat drops working dir");
+        assert_eq!(chat.name, "通用对话", "name adopts the new definition");
+        // Model/provider preserved: builtin-chat pins none, so the session keeps its own.
+        assert_eq!(chat.model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(chat.provider_id.as_deref(), Some("openai"));
+
+        // The persisted row matches the returned session (read-back).
+        let reread = service.get_session(session_id).await.expect("get session");
+        assert_eq!(reread.agent_definition_id.as_deref(), Some("builtin-chat"));
+        assert!(reread.enabled_tools.is_empty());
+    }
+
+    /// An unknown definition id on reinstantiate is a NOT_FOUND and leaves the
+    /// existing session untouched (no partial re-point).
+    #[tokio::test]
+    async fn reinstantiate_unknown_definition_errors_and_preserves_session() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let session = service
+            .create_session_from_definition(
+                "builtin-chat".to_string(),
+                InstantiateAgentSessionRequest {
+                    provider_id: Some("openai".to_string()),
+                    model_id: Some("gpt-4o".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("instantiate builtin-chat");
+
+        let err = service
+            .reinstantiate_from_definition(
+                session.id.clone(),
+                "does-not-exist".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect_err("unknown definition must error");
+        assert_eq!(err.code, "NOT_FOUND");
+
+        let reread = service.get_session(session.id).await.expect("get session");
+        assert_eq!(reread.agent_definition_id.as_deref(), Some("builtin-chat"));
+        assert_eq!(count_rows(&db, "agent_sessions").await, 1);
+    }
+
+    /// Reinstantiating a session that doesn't exist is a NOT_FOUND — no ghost row.
+    #[tokio::test]
+    async fn reinstantiate_unknown_session_errors() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+
+        let err = service
+            .reinstantiate_from_definition(
+                "no-such-session".to_string(),
+                "builtin-chat".to_string(),
+                InstantiateAgentSessionRequest::default(),
+            )
+            .await
+            .expect_err("unknown session must error");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(count_rows(&db, "agent_sessions").await, 0);
     }
 
     // --- VAL-SESSION-003: valid existing absolute dir is stored canonicalized ---
@@ -820,14 +1235,16 @@ mod tests {
     // exists on this type to invoke).
     //
     // VAL-SESSION-012 (data): a create+delete cycle against a DB that already
-    // contains agents / sessions / messages rows leaves all three table COUNTs
-    // unchanged.
+    // contains preset `agents` rows leaves that table's COUNT unchanged. The
+    // chat `sessions`/`messages` rows this assertion also covered are gone now
+    // that migration 060 dropped those tables, so only the preset invariant
+    // remains.
     #[tokio::test]
-    async fn create_delete_cycle_leaves_chat_and_preset_tables_unchanged() {
+    async fn create_delete_cycle_leaves_preset_agents_table_unchanged() {
         let (db, _guard) = create_test_database().await;
 
-        // Seed the chat/preset tables directly (no chat/preset service involved)
-        // so we can prove the agent_session path never touches them.
+        // Seed the preset table directly (no preset service involved) so we can
+        // prove the agent_session path never touches it.
         let now = AgentSessionService::current_timestamp();
         sqlx::query(
             "INSERT INTO agents (id, name, mcp_servers, skills, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -842,36 +1259,11 @@ mod tests {
         .await
         .unwrap();
 
-        sqlx::query(
-            "INSERT INTO sessions (id, name, message_count, mcp_servers, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind("session-seed")
-        .bind("Seed Session")
-        .bind(0)
-        .bind("[]")
-        .bind(now)
-        .bind(now)
-        .execute(db.pool())
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "INSERT INTO messages (id, session_id, role, content, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind("message-seed")
-        .bind("session-seed")
-        .bind("user")
-        .bind("hello")
-        .bind(now)
-        .bind(now)
-        .execute(db.pool())
-        .await
-        .unwrap();
-
+        // agents = 1 user row + 2 builtin AgentDefinitions (builtin-chat /
+        // builtin-coding) seeded by migration 058. The create+delete invariant
+        // below compares before vs after, so it stays correct regardless.
         let agents_before = count_rows(&db, "agents").await;
-        let sessions_before = count_rows(&db, "sessions").await;
-        let messages_before = count_rows(&db, "messages").await;
-        assert_eq!((agents_before, sessions_before, messages_before), (1, 1, 1));
+        assert_eq!(agents_before, 3);
 
         // Exercise the agent_session create+delete cycle ONLY.
         let service = AgentSessionService::new(db.clone());
@@ -881,9 +1273,7 @@ mod tests {
             .unwrap();
         service.delete_session(created.id).await.unwrap();
 
-        // The three chat/preset tables are untouched.
+        // The preset table is untouched.
         assert_eq!(count_rows(&db, "agents").await, agents_before);
-        assert_eq!(count_rows(&db, "sessions").await, sessions_before);
-        assert_eq!(count_rows(&db, "messages").await, messages_before);
     }
 }

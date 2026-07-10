@@ -1,48 +1,55 @@
 <script lang="ts">
-  import { User, Palette, Brain, Zap, Sparkles, Keyboard, Info, MousePointerClick, LayoutGrid, Wrench } from '@lucide/svelte';
-  import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
-  import Menu from '$lib/components/ui/Menu.svelte';
-  import { t } from '$lib/i18n';
-  import type { Snippet } from 'svelte';
+  import { ArrowLeft } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/stores";
+  import Menu from "$lib/components/ui/Menu.svelte";
+  import { t } from "$lib/i18n";
+  import { navigationState } from "$lib/states/navigation.svelte";
+  import { getSettingsNavGroups } from "./settingsNav";
+  import type { Snippet } from "svelte";
 
   let { footer }: { footer?: Snippet } = $props();
 
-  type Item = { id: string; title: string; icon: any, url: string, isActive?: boolean };
+  const groups = $derived(getSettingsNavGroups());
 
-  const baseItems: Item[] = $derived([
-    { id: 'account', title: t('settings.sidebar.account'), icon: User, url: '/settings/account' },
-    { id: 'general', title: t('settings.sidebar.general'), icon: Palette, url: '/settings/general' },
-    { id: 'quicktools', title: t('settings.sidebar.quicktools'), icon: MousePointerClick, url: '/settings/quicktools' },
-    { id: 'models', title: t('settings.sidebar.models'), icon: Brain, url: '/settings/models' },
-    { id: 'agent-tools', title: t('settings.sidebar.agentTools'), icon: Wrench, url: '/settings/agent-tools' },
-    { id: 'mcp', title: 'MCP', icon: Zap, url: '/settings/mcp' },
-    { id: 'skills', title: t('settings.sidebar.skills'), icon: Sparkles, url: '/settings/skills' },
-    { id: 'components', title: t('settings.sidebar.components'), icon: LayoutGrid, url: '/settings/components' },
-    { id: 'shortcuts', title: t('settings.sidebar.shortcuts'), icon: Keyboard, url: '/settings/shortcuts' },
-    { id: 'about', title: t('settings.sidebar.about'), icon: Info, url: '/settings/about' },
-  ]);
-
-  const defaultItem = $derived(baseItems.find(i => i.id === 'account'));
+  const allItems = $derived(groups.flatMap((g) => g.items));
 
   const currentItemId = $derived(
-    baseItems.find(i => $page.url.pathname.startsWith(i.url))?.id || defaultItem?.id || ''
+    allItems.find((i) => $page.url.pathname.startsWith(i.url))?.id ?? "account"
   );
 
   function navTo(id: string) {
-    goto(baseItems.find(i => i.id === id)?.url || defaultItem?.url || '/settings/account');
+    const target = allItems.find((i) => i.id === id);
+    if (target) goto(target.url);
   }
 </script>
 
 <div class="h-full flex flex-col p-0 pt-10 overflow-hidden">
-  <div class="flex-1 overflow-y-auto p-0">
-    <Menu 
-      title=""
-      items={baseItems}
-      onItemClick={(item) => navTo(item.id)}
-      containerClass="h-full"
-      activeId={currentItemId}
-    />
+  <!-- 返回应用：设置在主窗口内渲染，回到进入设置前的主界面路由 -->
+  <div class="px-2 pb-1">
+    <button
+      type="button"
+      class="flex w-full items-center gap-2 rounded-lg p-2 text-[13px] text-base-content/70 hover:text-base-content hover:bg-base-300 transition-colors"
+      onclick={() => goto(navigationState.backTarget)}
+    >
+      <ArrowLeft size={15} />
+      {t("settings.sidebar.backToApp")}
+    </button>
+  </div>
+
+  <!-- 分组导航 -->
+  <div class="flex-1 overflow-y-auto pb-2">
+    {#each groups as group (group.id)}
+      <div class="pt-3 first:pt-1">
+        <div class="px-4 pb-1 text-xs text-base-content/45">{group.title}</div>
+        <Menu
+          title=""
+          items={group.items}
+          onItemClick={(item) => navTo(item.id)}
+          activeId={currentItemId}
+        />
+      </div>
+    {/each}
   </div>
   {@render footer?.()}
 </div>

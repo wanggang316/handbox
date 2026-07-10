@@ -8,11 +8,11 @@
 //! M1 features that build on top of the session this returns.
 //!
 //! Reuse, not reinvention:
-//! - Model resolution goes through [`chat_engine::resolve_model`], so an agent
+//! - Model resolution goes through [`model_runtime::resolve_model`], so an agent
 //!   session sees exactly the same `model::Model` a chat request would for the
 //!   same provider/model/base_url triple (no divergent catalog logic).
 //! - Stream options (incl. the api key) come from
-//!   [`chat_engine::build_stream_options`]. The plaintext key rides inside
+//!   [`model_runtime::build_stream_options`]. The plaintext key rides inside
 //!   `SimpleStreamOptions.base.api_key`; this path deliberately does **not**
 //!   write an `auth.json`, set environment variables, or touch the keyring.
 //!
@@ -21,6 +21,7 @@
 //! would otherwise persist session state under the user's `~/.hand`; for a
 //! sandboxed desktop app that state must stay inside the app's own data root.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -31,7 +32,7 @@ use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
 use crate::services::agent_permission::{ApprovalEmitter, PermissionExtension, SandboxExtension};
-use crate::services::chat_engine::{self, ChatOptions};
+use crate::services::model_runtime::{self, ChatOptions};
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
 /// HandBox-side inputs needed to construct a coding-agent session.
@@ -40,7 +41,7 @@ use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 /// directly. `provider_type` is the hand-ai provider tag (e.g. `"openai"`,
 /// `"anthropic"`, `"openai-compatible"`); `provider_id` is HandBox's own
 /// provider row id and is carried for diagnostics/traceability only — model
-/// resolution keys off `provider_type` to match `chat_engine`.
+/// resolution keys off `provider_type` to match `model_runtime`.
 #[derive(Debug, Clone)]
 pub struct HandBoxAgentSessionConfig {
     /// HandBox DB session id (UUID). Threaded into the [`PermissionExtension`]
@@ -53,17 +54,26 @@ pub struct HandBoxAgentSessionConfig {
     pub session_id: String,
     /// HandBox provider row id (diagnostics only).
     pub provider_id: String,
-    /// hand-ai provider tag consumed by [`chat_engine::resolve_model`].
+    /// hand-ai provider tag consumed by [`model_runtime::resolve_model`].
     pub provider_type: String,
     /// Model id selected for this session.
     pub model_id: String,
     /// Optional base-url override. Empty string means "use the catalog
-    /// template's base_url unchanged" (same contract as `chat_engine`).
+    /// template's base_url unchanged" (same contract as `model_runtime`).
     pub base_url: String,
     /// Plaintext provider api key. Injected via stream options only.
     pub api_key: String,
     /// Working directory the agent's tools operate against (the `cwd`).
     pub working_dir: PathBuf,
+    /// Pure-dialog mode: the session selected NO working directory (its `cwd`
+    /// fell back to `app_data_dir`). A chat-class AgentDefinition
+    /// (`working_dir_mode: "none"`) degrades to this — and so does any session
+    /// with no workspace. When set, [`build_agent_session`] disables
+    /// workspace-scoped discovery (`no_context_files` / `no_skills`): there is no
+    /// project root to read `AGENTS.md` or `.hand/skills` from, so scanning the
+    /// app-sandbox fallback for them would be both pointless and surprising.
+    /// Derived from `session.working_dir.is_none()` in [`config_from_rows`].
+    pub pure_dialog: bool,
     /// Tauri per-app data directory. Becomes the session's `base_dir` so
     /// persistent state stays inside the app sandbox, not `~/.hand`.
     pub app_data_dir: PathBuf,
@@ -97,12 +107,16 @@ pub struct HandBoxAgentSessionConfig {
     /// [`select_enabled_tools`]). Following the legacy `agent_tools::build_tools`
     /// convention, an empty list means "no tool enabled" (not "all enabled").
     pub enabled_tools: Vec<String>,
+    /// Tool names requiring approval this session: the `mcp__server__tool` names
+    /// of manual-execution MCP servers. Populated by agent_run; empty default =
+    /// no MCP approval gating (the jobs/tests path).
+    pub mcp_approval_tools: HashSet<String>,
 }
 
 /// Construct a coding-agent [`AgentSession`] from a HandBox configuration.
 ///
 /// Steps:
-/// 1. Resolve the model through `chat_engine` (no silent substitution — the
+/// 1. Resolve the model through `model_runtime` (no silent substitution — the
 ///    returned `model.id` equals the requested `model_id`).
 /// 2. Build stream options carrying the plaintext api key plus the
 ///    per-session sampling params (temperature / max_tokens / thinking_level);
@@ -128,9 +142,10 @@ pub struct HandBoxAgentSessionConfig {
 pub fn build_agent_session(
     config: &HandBoxAgentSessionConfig,
     approval_emitter: Option<ApprovalEmitter>,
+    extra_tools: Vec<AgentTool>,
 ) -> Result<AgentSession, AppError> {
     let model =
-        chat_engine::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
+        model_runtime::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
 
     // Per-session sampling params are baked into the stream options HERE, at
     // construction time — not later by the drive feature. `drive_agent_run`
@@ -148,9 +163,12 @@ pub fn build_agent_session(
         ..ChatOptions::default()
     };
     let stream_options: SimpleStreamOptions =
-        chat_engine::build_stream_options(&chat_options, &config.api_key);
+        model_runtime::build_stream_options(&chat_options, &config.api_key);
 
-    let tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
+    let mut tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
+    // P1: append per-session MCP tools (namespaced `mcp__server__tool`) so the loop
+    // calls them alongside the built-ins. Empty for sessions with no MCP bindings.
+    tools.extend(extra_tools);
 
     // M3: guarantee the JSONL file the `resume_session` branch will open exists,
     // named after the HandBox session UUID (header id == UUID). Idempotent — a
@@ -185,9 +203,12 @@ pub fn build_agent_session(
         // taken first); we leave it `false` to document the persisting intent.
         resume_session: Some(config.session_id.clone()),
         no_session: false,
-        no_context_files: false,
+        // Chat-class / workspace-less sessions run as pure dialog: with no project
+        // root there is nothing to read AGENTS.md or .hand/skills from, so disable
+        // both discoveries. Workspace sessions (a real cwd) keep them on.
+        no_context_files: config.pure_dialog,
         session_dir: None,
-        no_skills: false,
+        no_skills: config.pure_dialog,
         extra_skill_dirs: Vec::new(),
         // Sandbox: persist under the Tauri app data dir, never ~/.hand. The
         // resume path resolves `<base_dir>/sessions/<flattened-cwd>/<id>.jsonl`,
@@ -223,10 +244,10 @@ pub fn build_agent_session(
     // `coding_agent_runtime::abort_run` / `deny_pending_for_session` use, so an
     // aborted turn parked on an approval await can actually be unblocked, and the
     // session's always-allow consent persists across turns.
-    session.register_extension(Arc::new(PermissionExtension::new(
-        config.session_id.clone(),
-        approval_emitter,
-    )));
+    session.register_extension(Arc::new(
+        PermissionExtension::new(config.session_id.clone(), approval_emitter)
+            .with_approval_tools(config.mcp_approval_tools.clone()),
+    ));
 
     Ok(session)
 }
@@ -340,7 +361,10 @@ pub fn config_from_rows(
         .ok_or_else(|| AppError::validation_error("agent session has no model_id selected"))?;
 
     // No working dir selected → root the agent inside the app sandbox so the
-    // cwd is always an existing directory the agent can operate against.
+    // cwd is always an existing directory the agent can operate against, and run
+    // as pure dialog (no workspace-scoped context/skill discovery). Capture the
+    // "no workspace" bit BEFORE the fallback overwrites it.
+    let pure_dialog = session.working_dir.is_none();
     let working_dir = session
         .working_dir
         .as_deref()
@@ -358,6 +382,7 @@ pub fn config_from_rows(
         base_url: provider.base_url.clone(),
         api_key: provider.api_key.clone(),
         working_dir,
+        pure_dialog,
         app_data_dir,
         // The session's real creation time, lifted from the SQLite row so the
         // JSONL header timestamp equals createdAt (VAL-CASESS-007).
@@ -371,6 +396,8 @@ pub fn config_from_rows(
         max_tokens: session.max_tokens.and_then(|t| u32::try_from(t).ok()),
         thinking_level: session.thinking_level.clone(),
         enabled_tools: session.enabled_tools.clone(),
+        // agent_run fills this from manual-server MCP bindings; empty otherwise.
+        mcp_approval_tools: HashSet::new(),
     })
 }
 
@@ -393,6 +420,9 @@ mod tests {
             base_url: String::new(),
             api_key: "sk-test-key".to_string(),
             working_dir,
+            // The helper always supplies a real working dir → workspace session.
+            // The pure-dialog degradation is exercised by dedicated tests below.
+            pure_dialog: false,
             app_data_dir,
             created_at: TEST_CREATED_AT,
             system_prompt: None,
@@ -400,6 +430,7 @@ mod tests {
             max_tokens: None,
             thinking_level: None,
             enabled_tools: vec![],
+            mcp_approval_tools: HashSet::new(),
         }
     }
 
@@ -409,7 +440,8 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         // cwd is the working_dir we passed.
         assert_eq!(session.cwd(), cwd.path());
@@ -431,7 +463,7 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
         // Turn 1: construction creates the JSONL at the path the reader expects.
-        let session = build_agent_session(&config, None).expect("turn 1 constructs");
+        let session = build_agent_session(&config, None, Vec::new()).expect("turn 1 constructs");
         // Not an in-memory session: it has a real on-disk file.
         let file = session
             .session_file()
@@ -448,7 +480,7 @@ mod tests {
 
         // Turn 2: a fresh build for the same id resumes the SAME file (idempotent
         // ensure → resume), so there is exactly one JSONL for this session.
-        let session2 = build_agent_session(&config, None).expect("turn 2 resumes");
+        let session2 = build_agent_session(&config, None, Vec::new()).expect("turn 2 resumes");
         assert_eq!(session2.session_file().unwrap(), expected);
 
         let dir = crate::services::agent_jsonl_store::session_dir(data.path(), cwd.path());
@@ -479,7 +511,8 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
         // Construct (turn 1) — this is the single place the JSONL is seeded.
-        let _session = build_agent_session(&config, None).expect("construction succeeds");
+        let _session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         let path = crate::services::agent_jsonl_store::session_path(
             data.path(),
@@ -499,7 +532,7 @@ mod tests {
     /// Helper: the registered tool-name set a config produces, sorted for
     /// order-independent comparison.
     fn registered_tool_names(config: &HandBoxAgentSessionConfig) -> Vec<String> {
-        let session = build_agent_session(config, None).expect("construction succeeds");
+        let session = build_agent_session(config, None, Vec::new()).expect("construction succeeds");
         let mut names: Vec<String> = session.tools().iter().map(|t| t.name.clone()).collect();
         names.sort();
         names
@@ -572,7 +605,8 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
         // sample_config already sets enabled_tools = vec![].
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         assert!(
             session.tools().is_empty(),
             "an empty enabled_tools list must register no tools"
@@ -699,7 +733,8 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
         // The plaintext key rides inside stream options' base.api_key — the
         // only place this construction path puts it.
@@ -723,7 +758,8 @@ mod tests {
         config.max_tokens = Some(1000);
         config.thinking_level = Some("high".to_string());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         let opts = session.stream_options();
 
         // temperature / max_tokens ride on stream_options.base; the default is
@@ -756,7 +792,8 @@ mod tests {
         // sample_config sets temperature/max_tokens/thinking_level to None.
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         let opts = session.stream_options();
 
         assert_eq!(opts.base.temperature, None);
@@ -786,7 +823,7 @@ mod tests {
 
         // And construction with a custom prompt succeeds (the prompt feeds
         // build_system_prompt inside AgentSession::new_with_skill_dirs).
-        build_agent_session(&config, None)
+        build_agent_session(&config, None, Vec::new())
             .expect("construction with a custom system prompt succeeds");
     }
 
@@ -799,7 +836,7 @@ mod tests {
 
         // `AgentSession` does not implement `Debug`, so `expect_err` (which
         // requires `T: Debug`) is unavailable — match on the Result instead.
-        match build_agent_session(&config, None) {
+        match build_agent_session(&config, None, Vec::new()) {
             Ok(_) => panic!("unknown model under a fixed-catalog provider must error"),
             Err(err) => assert!(
                 format!("{err}").contains("not registered under provider"),
@@ -820,7 +857,8 @@ mod tests {
         config.model_id = "my-local-llm".to_string();
         config.base_url = "http://localhost:1234/v1".to_string();
 
-        let session = build_agent_session(&config, None).expect("construction succeeds");
+        let session =
+            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         assert_eq!(session.model().id, "my-local-llm");
         assert_eq!(session.model().base_url, "http://localhost:1234/v1");
     }
@@ -833,6 +871,7 @@ mod tests {
             id: "sess-1".to_string(),
             name: "Run Session".to_string(),
             project_id: None,
+            agent_definition_id: None,
             model_id: model_id.map(str::to_string),
             provider_id: Some("prov-1".to_string()),
             system_prompt: Some("You are helpful.".to_string()),
@@ -841,6 +880,7 @@ mod tests {
             max_tokens: Some(1024),
             working_dir: working_dir.map(str::to_string),
             enabled_tools: vec!["read_file".to_string()],
+            mcp_servers: Vec::new(),
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
@@ -883,6 +923,8 @@ mod tests {
         assert_eq!(config.base_url, "https://api.openai.com/v1");
         assert_eq!(config.api_key, "sk-row-key");
         assert_eq!(config.working_dir, PathBuf::from("/tmp/project"));
+        // A real working dir → workspace session, not pure dialog.
+        assert!(!config.pure_dialog);
         assert_eq!(config.app_data_dir, data.path());
         assert_eq!(config.enabled_tools, vec!["read_file".to_string()]);
         // created_at is lifted straight off the session row so the JSONL header
@@ -924,8 +966,13 @@ mod tests {
             .expect("rows assemble into a config");
 
         // No working_dir selected → cwd falls back to the app data dir (an
-        // existing directory inside the sandbox).
+        // existing directory inside the sandbox), and the session runs as pure
+        // dialog: build_agent_session then disables context-file / skill discovery.
         assert_eq!(config.working_dir, data.path());
+        assert!(
+            config.pure_dialog,
+            "a session with no working dir must run as pure dialog"
+        );
     }
 
     #[test]

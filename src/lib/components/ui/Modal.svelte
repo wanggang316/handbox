@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { Dialog } from "bits-ui";
   import TrafficLightsRedButton from "./TrafficLightsRedButton.svelte";
   import TitleBar from "./TitleBar.svelte";
 
@@ -21,144 +21,65 @@
     children,
   }: Props = $props();
 
-  let closing = $state(false);
-  let modalElement = $state<HTMLDivElement>();
-
-  export function handleClose() {
-    closing = true;
-    setTimeout(() => {
-      closing = false;
-      onClose();
-    }, 250);
-  }
-
-  function handleBackdropClick(e: MouseEvent) {
-    if (closeOnBackdropClick && e.target === e.currentTarget) {
-      handleClose();
-    }
-  }
-
+  // 所有关闭路径（Escape / 点击外部 / 红灯 / 程序化）都经 bind:open 收敛为 open=false；
+  // 捕捉 true→false 迁移触发一次 onClose。
+  let wasOpen = false;
   $effect(() => {
-    if (open && modalElement) {
-      tick().then(() => modalElement?.focus());
-    }
+    if (wasOpen && !open) onClose();
+    wasOpen = open;
   });
+
+  // 供调用方经 bind:this 程序化关闭。
+  export function handleClose() {
+    open = false;
+  }
 </script>
 
-{#if open}
-  <div
-    bind:this={modalElement}
-    class="fixed inset-0 flex items-center justify-center z-[10010] animate-backdrop"
-    style="background-color: var(--overlay);"
-    class:animate-backdrop-close={closing}
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-    onclick={handleBackdropClick}
-    onkeydown={(e) => {
-      if (e.key === "Escape") handleClose();
-    }}
-  >
-    <TitleBar showToggleButton={false} />
-    <!-- 外层容器：不裁切，允许下拉菜单溢出，负责动画 -->
-    <div class="relative animate-modal" class:animate-modal-close={closing}>
-      <!-- 背景层：surface-1 lift + hairline 边框 (Linear modal spec) -->
-      <div
-        class="bg-[var(--bg-card)] max-w-[90vw] max-h-[90vh] rounded-xl shadow-2xl overflow-hidden relative pointer-events-none border border-[var(--hairline)]"
-        style="z-index: 1;"
-      >
-        <!-- 预留内容空间 -->
-        <div class="px-0 py-0 invisible">
-          {#if children}
-            {@render children()}
-          {/if}
-        </div>
+<Dialog.Root bind:open>
+  <Dialog.Portal>
+    <Dialog.Overlay
+      class="dlg-overlay fixed inset-0"
+      style="z-index: var(--z-overlay); background-color: var(--overlay);"
+    />
+
+    <!-- bits-ui Portal 会立即把裸子节点 mount 到 <body>（不做 open 门控，只有
+         Overlay/Content 自带 presence），故 TitleBar 必须 {#if open}——否则关闭态的
+         Modal 也会往 <body> 注入这条 fixed 顶部拖拽条。打开时它位于 backdrop 之上
+         （z 介于 --z-overlay/--z-modal），使 modal 打开时顶部仍可拖动窗口。 -->
+    {#if open}
+      <div style="position: relative; z-index: 10055;">
+        <TitleBar showToggleButton={false} />
       </div>
+    {/if}
 
-      <!-- 内容层：独立于背景层，不受裁切影响 -->
-      <div
-        class="absolute inset-0 max-w-4xl bg-transparent"
-        style="z-index: 2;"
-      >
-        <!-- Overlay 标题视图 -->
-        {#if showCloseButton || title}
-          <div class="absolute top-0 left-0 z-20 flex items-center px-5 py-4">
-            {#if showCloseButton}
-              <TrafficLightsRedButton onClick={handleClose} />
-            {/if}
-            {#if title}
-              <h3 class="ml-4 text-base font-medium text-base-content/80">
-                {title}
-              </h3>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- 内容区域：不受背景层裁切影响 -->
-        <div class="px-0 py-0">
-          {#if children}
-            {@render children()}
+    <!-- 居中与入场/退场动画统一用 transform：不用 Tailwind 的 -translate-x/y-1/2，
+         因其在 Tailwind v4 下写的是独立的 translate 属性，会与 keyframe 的 transform 叠加。 -->
+    <Dialog.Content
+      interactOutsideBehavior={closeOnBackdropClick ? "close" : "ignore"}
+      class="dlg-content fixed left-1/2 top-1/2 max-h-[90vh] max-w-[90vw] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] shadow-2xl outline-none"
+      style="z-index: var(--z-modal); transform: translate(-50%, -50%);"
+    >
+      {#if showCloseButton || title}
+        <div class="absolute left-0 top-0 z-10 flex items-center px-5 py-4">
+          {#if showCloseButton}
+            <TrafficLightsRedButton onClick={() => (open = false)} />
           {/if}
+          <Dialog.Title
+            class={title
+              ? "ml-4 text-base font-medium text-base-content/80"
+              : "sr-only"}
+          >
+            {title || "对话框"}
+          </Dialog.Title>
         </div>
-      </div>
-    </div>
-  </div>
-{/if}
+      {:else}
+        <Dialog.Title class="sr-only">对话框</Dialog.Title>
+      {/if}
 
-<style>
-  .animate-backdrop {
-    animation: backdropFadeIn 0.25s ease-out;
-  }
-
-  .animate-backdrop-close {
-    animation: backdropFadeOut 0.25s ease-out;
-  }
-
-  .animate-modal {
-    animation: modalSlideIn 0.25s ease-out;
-  }
-
-  .animate-modal-close {
-    animation: modalSlideOut 0.25s ease-out;
-  }
-
-  @keyframes backdropFadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-
-  @keyframes backdropFadeOut {
-    from {
-      opacity: 1;
-    }
-    to {
-      opacity: 0;
-    }
-  }
-
-  @keyframes modalSlideIn {
-    from {
-      opacity: 0;
-      transform: translateY(-30px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes modalSlideOut {
-    from {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    to {
-      opacity: 0;
-      transform: translateY(-30px);
-    }
-  }
-</style>
+      <!-- 不加 overflow-hidden：避免裁切内部下拉 / Select。 -->
+      {#if children}
+        {@render children()}
+      {/if}
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>

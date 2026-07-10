@@ -8,11 +8,14 @@
 
 import { apiCall } from "./index";
 import { listen } from "@tauri-apps/api/event";
+import type { McpServerConfig } from "../types/llm";
+import type { AgentMessage } from "../types/agentSession";
 import type {
   UUID,
   AgentSession,
   AgentSessionMessage,
   CreateAgentSessionRequest,
+  InstantiateAgentSessionRequest,
   AgentRunAttachment,
   AgentStreamEventPayload,
   AgentStreamErrorPayload,
@@ -30,6 +33,45 @@ export async function createAgentSession(
   request: CreateAgentSessionRequest,
 ): Promise<AgentSession> {
   return apiCall<AgentSession>("agent_session_create", { request });
+}
+
+/**
+ * 从一个 AgentDefinition 实例化 Agent Session。
+ *
+ * 统一的「用此 Agent」入口：后端 `agent_session_create_from_definition` 快照
+ * definition 的能力集（enabledTools←builtinTools、mcpServers←definition）、按其
+ * workingDirMode 裁决工作目录策略，再以 `overrides` 覆盖（name/project/workingDir/
+ * model/provider）。chat-class（workingDirMode="none" 或无目录）退化为纯对话。
+ * 后端签名: agent_session_create_from_definition(definitionId, overrides?)
+ */
+export async function createSessionFromDefinition(
+  definitionId: UUID,
+  overrides?: InstantiateAgentSessionRequest,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_create_from_definition", {
+    definitionId,
+    overrides,
+  });
+}
+
+/**
+ * 将一个**已存在**会话就地重指到另一个 AgentDefinition —— 不新建会话行。
+ *
+ * 仅在会话**尚无任何消息**时调用：用户在输入框切换 Agent 而当前会话「一句话
+ * 都没说过」，直接把它重指到新定义（重新快照能力集、改写 provenance），保留
+ * 会话 id 与 transcript。语义同 `createSessionFromDefinition`，但复用现有 id。
+ * 后端签名: agent_session_reinstantiate_from_definition(sessionId, definitionId, overrides?)
+ */
+export async function reinstantiateSessionFromDefinition(
+  sessionId: UUID,
+  definitionId: UUID,
+  overrides?: InstantiateAgentSessionRequest,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_reinstantiate_from_definition", {
+    sessionId,
+    definitionId,
+    overrides,
+  });
 }
 
 /**
@@ -74,6 +116,7 @@ export type AgentSessionField =
   | "maxTokens"
   | "workingDir"
   | "enabledTools"
+  | "mcpServers"
   | "toolExecutionMode";
 
 /**
@@ -85,7 +128,7 @@ export type AgentSessionField =
 export async function updateAgentSessionField(
   sessionId: UUID,
   fieldName: AgentSessionField,
-  value: string | number | string[] | null,
+  value: string | number | string[] | McpServerConfig[] | null,
 ): Promise<AgentSession> {
   return apiCall<AgentSession>("agent_session_update_field", {
     sessionId,
@@ -235,4 +278,109 @@ export async function listenToAgentStreamEvents(
   return () => {
     unlisten.forEach((fn) => fn());
   };
+}
+
+/**
+ * 提取一条 Agent 消息的纯文本（拼接所有 text 块；忽略 thinking / toolcall / image）。
+ *
+ * `user` 为纯字符串时直接返回；为内容块数组时拼接 text 块。`assistant` 拼接 text 块
+ * （跳过 thinking / toolcall）。`toolResult` 不含可读译文，返回空串。供「一问一答」
+ * 类消费（翻译、单词本历史）从 transcript / message_end 取助手回复正文。
+ */
+export function agentMessageText(message: AgentMessage): string {
+  if (message.role === "user") {
+    if (typeof message.content === "string") return message.content;
+    return message.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("");
+  }
+  if (message.role === "assistant") {
+    return message.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("");
+  }
+  return "";
+}
+
+/**
+ * 跑一回合 Agent 并把助手回复聚合成完整文本（「一问一答」便捷封装）。
+ *
+ * 用于翻译 / 划词等单轮、非交互式消费：它们不需要 timeline / 工具卡片 / 审批，只要
+ * 「发一句、拿整段回复」。本封装在调用 `runAgentStream` **之前**先挂上一次性流式监听
+ * （避免漏掉早到事件），按 `sessionId` 过滤本会话的事件，累积 `text_delta` 增量（经
+ * `onDelta` 实时回流给调用方做流式展示），在 `agent_stream_closed` 以 message_end 的
+ * 助手正文（缺失则回退到累积增量）resolve，在 `agent_stream_error` reject，无论成败都
+ * 解除监听。
+ *
+ * 注意：会话须为纯对话能力集（无内置工具 / 无 MCP），否则模型可能走工具循环而非直接
+ * 作答——翻译类 AgentDefinition 的 workingDirMode 退化为纯对话即满足。
+ */
+export async function runAgentTextTurn(
+  sessionId: UUID,
+  input: string,
+  onDelta?: (text: string) => void,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let accumulated = "";
+    let finalText: string | null = null;
+    let settled = false;
+    let unlisten: (() => void) | null = null;
+
+    const cleanup = () => {
+      if (unlisten) {
+        unlisten();
+        unlisten = null;
+      }
+    };
+    const finish = (run: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      run();
+    };
+
+    listenToAgentStreamEvents({
+      onEvent: (payload) => {
+        if (payload.sessionId !== sessionId) return;
+        const { event } = payload;
+        if (
+          event.type === "message_update" &&
+          event.assistantMessageEvent.type === "text_delta"
+        ) {
+          accumulated += event.assistantMessageEvent.delta;
+          onDelta?.(accumulated);
+        } else if (
+          event.type === "message_end" &&
+          event.message.role === "assistant"
+        ) {
+          finalText = agentMessageText(event.message);
+        }
+      },
+      onError: (payload) => {
+        if (payload.sessionId !== sessionId) return;
+        finish(() =>
+          reject(new Error(payload.error?.message ?? "Agent run error")),
+        );
+      },
+      onClosed: (payload) => {
+        if (payload.sessionId !== sessionId) return;
+        finish(() => resolve(finalText ?? accumulated));
+      },
+    })
+      .then((fn) => {
+        if (settled) {
+          // run 在监听器解析前就已终结（极端时序）：直接解绑，prior finish 已 settle。
+          fn();
+          return;
+        }
+        unlisten = fn;
+        // 监听就绪后再启动 run，避免漏掉早到的 text_delta / closed。
+        runAgentStream(sessionId, input).catch((error) => {
+          finish(() => reject(error));
+        });
+      })
+      .catch((error) => {
+        finish(() => reject(error));
+      });
+  });
 }

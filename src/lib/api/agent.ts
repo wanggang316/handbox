@@ -16,7 +16,6 @@ import type {
  */
 export async function createAgent(
   name: string,
-  model?: string,
   temperature?: number,
   topP?: number,
   topK?: number,
@@ -30,7 +29,6 @@ export async function createAgent(
 ): Promise<Agent> {
   const request = {
     name,
-    model,
     temperature,
     top_p: topP,
     top_k: topK,
@@ -80,7 +78,6 @@ export async function updateAgentField(
   agentId: UUID,
   fieldName:
     | "name"
-    | "model"
     | "temperature"
     | "topP"
     | "topK"
@@ -90,7 +87,15 @@ export async function updateAgentField(
     | "skills"
     | "reasoning"
     | "generativeUi"
-    | "genuiId",
+    | "genuiId"
+    | "providerId"
+    | "icon"
+    | "description"
+    | "builtinTools"
+    | "workingDirMode"
+    | "toolExecutionMode"
+    | "thinkingLevel"
+    | "starters",
   value:
     | string
     | number

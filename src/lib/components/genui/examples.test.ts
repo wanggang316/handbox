@@ -1,6 +1,6 @@
 /**
  * Guards the curated GenUI starter templates: every example must round-trip
- * through the same `explainSpec` pipeline the editor and chat use, so a typo in
+ * through the same `explainSpec` pipeline the editor uses, so a typo in
  * a spec (bad enum, missing required prop, dangling child id) fails CI rather
  * than silently shipping a template that won't render.
  *
@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { explainSpec } from "../chat/renderers/jsonui/resolveSpec";
+import { explainSpec } from "./jsonui/resolveSpec";
 import { genuiExamples } from "./examples";
 
 describe("genuiExamples", () => {

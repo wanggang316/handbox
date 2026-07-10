@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { getFormField } from "./FormField.svelte";
+
   interface Props {
     label?: string;
     placeholder?: string;
-    type?: 'text' | 'password' | 'url' | 'number';
+    type?: "text" | "password" | "url" | "number";
     value?: string | number;
     onInput?: (v: string) => void;
     disabled?: boolean;
@@ -11,47 +13,68 @@
   }
 
   let {
-    label = '',
-    placeholder = '',
-    type = 'text',
-    value = $bindable(''),
+    label = "",
+    placeholder = "",
+    type = "text",
+    value = $bindable(""),
     onInput = () => {},
     disabled = false,
     required = false,
-    error = '',
+    error = "",
   }: Props = $props();
 
-  const id = `inp-${Math.random().toString(36).slice(2)}`;
-  const errorId = `${id}-error`;
+  // 在 FormField 内时，id / aria / error 态由容器统一提供，控件不再自渲染 label / error。
+  const ff = getFormField();
+  const autoId = `inp-${Math.random().toString(36).slice(2)}`;
+  const ownErrorId = `${autoId}-error`;
+
+  const controlId = $derived(ff ? ff.id : autoId);
+  const invalid = $derived(ff ? ff.invalid : !!error);
+  const describedby = $derived(
+    ff ? ff.describedby : error ? ownErrorId : undefined,
+  );
+  const showOwnLabel = $derived(!ff && !!label);
+  const showOwnError = $derived(!ff && !!error);
 </script>
 
-<label class="label" for={id}>
-  {label}{#if required}<span class="required-marker" aria-hidden="true">*</span>{/if}
-</label>
+{#if showOwnLabel}
+  <label class="label" for={controlId}>
+    {label}{#if required}<span class="required-marker" aria-hidden="true">*</span
+      >{/if}
+  </label>
+{/if}
 <input
-  {id}
-  class="input"
-  class:has-error={!!error}
+  id={controlId}
+  class="field w-full px-3 py-2 text-sm"
+  class:is-error={invalid}
   {type}
   {placeholder}
   {disabled}
   {required}
-  aria-required={required ? 'true' : undefined}
-  aria-invalid={error ? 'true' : undefined}
-  aria-describedby={error ? errorId : undefined}
+  aria-required={required ? "true" : undefined}
+  aria-invalid={invalid ? "true" : undefined}
+  aria-describedby={describedby}
   bind:value
   oninput={(e) => onInput((e.currentTarget as HTMLInputElement).value)}
 />
-{#if error}
-  <p id={errorId} class="error-message">{error}</p>
+{#if showOwnError}
+  <p id={ownErrorId} class="error-message">{error}</p>
 {/if}
 
 <style>
-.label { display:block; margin-bottom:.5rem; font-weight:500; }
-.required-marker { color: var(--error); margin-left:.125rem; }
-.input { width:100%; padding:.5rem .75rem; border:1px solid var(--base-300); border-radius:6px; background:var(--base-100); color:var(--base-content); }
-.input:focus{ border-color: var(--primary); }
-.input:disabled{ opacity:.5; cursor:not-allowed; }
-.input.has-error{ border-color: var(--error); }
-.error-message { margin-top:.375rem; color: var(--error); font-size:.8125rem; }
+  .label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+  }
+  .required-marker {
+    color: var(--field-error);
+    margin-left: 0.125rem;
+  }
+  .error-message {
+    margin-top: 0.375rem;
+    color: var(--field-error);
+    font-size: 0.8125rem;
+  }
 </style>

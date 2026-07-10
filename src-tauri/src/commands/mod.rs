@@ -14,16 +14,13 @@ pub mod image;
 pub mod job;
 pub mod llm_config;
 pub mod mcp;
-pub mod message;
 pub mod model;
 pub mod open_in;
 pub mod provider;
 pub mod quick_action;
-pub mod session;
 pub mod settings;
 pub mod skill;
 pub mod window;
-pub mod word;
 
 // 重新导出所有命令
 pub use accessibility::*;
@@ -32,8 +29,6 @@ pub use agent_project::*;
 pub use agent_run::*;
 pub use agent_session::*;
 pub use auth::*;
-// 导出 session 命令，同时保留 chat 别名以保持向后兼容
-pub use session::*;
 pub use clipboard::*;
 pub use debug::*;
 pub use selection::*;
@@ -43,7 +38,6 @@ pub use image::*;
 pub use job::*;
 pub use llm_config::*;
 pub use mcp::*;
-pub use message::*;
 pub use model::*;
 pub use open_in::*;
 pub use provider::*;
@@ -51,4 +45,3 @@ pub use quick_action::*;
 pub use settings::*;
 pub use skill::*;
 pub use window::*;
-pub use word::*;

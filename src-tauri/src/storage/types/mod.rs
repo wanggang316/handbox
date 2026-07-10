@@ -5,16 +5,14 @@ pub mod common;
 pub mod genui;
 pub mod job;
 pub mod mcp;
-pub mod message;
 pub mod model;
 pub mod provider;
-pub mod session;
-pub mod word;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
 pub use agent_project::{AgentProject, CreateAgentProjectRequest};
 pub use agent_session::{
-    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, UpdateAgentSessionRequest,
+    AgentSession, AgentSessionMessage, CreateAgentSessionRequest, InstantiateAgentSessionRequest,
+    UpdateAgentSessionRequest,
 };
 pub use common::{Timestamp, UUID};
 pub use genui::{CreateGenUiRequest, GenUi, UpdateGenUiRequest};
@@ -24,13 +22,10 @@ pub use job::{
 };
 pub use mcp::{
     McpConnectionType, McpErrorDetail, McpPrompt, McpPromptArgument, McpResource, McpServer,
-    McpServerStatus, McpTool,
-};
-pub use message::{
-    Message, MessageAttachment, MessageConfig, MessageToolCall, MessageToolExecutionMode,
-    MessageToolExecutionStatus,
+    McpServerConfig, McpServerStatus, McpTool,
 };
 pub use model::{Model, ModelModality};
 pub use provider::Provider;
-pub use session::{McpServerConfig, Session, SessionReasoningConfig};
-pub use word::Word;
+// `SessionReasoningConfig` now lives in `models::llm_types`; re-exported here so
+// existing `storage::types::SessionReasoningConfig` consumers keep resolving.
+pub use crate::models::llm_types::SessionReasoningConfig;

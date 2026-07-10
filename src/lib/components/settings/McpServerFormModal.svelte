@@ -1,11 +1,7 @@
 <script lang="ts">
-  import Modal from "$lib/components/ui/Modal.svelte";
-  import RoundButton from "$lib/components/ui/RoundButton.svelte";
+  import FormModal from "$lib/components/ui/FormModal.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
-  import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
-  import TextRow from "$lib/components/ui/table/TextRow.svelte";
-  import TextareaRow from "$lib/components/ui/table/TextareaRow.svelte";
-  import SelectRow from "$lib/components/ui/table/SelectRow.svelte";
+  import { Trash2 } from "@lucide/svelte";
   import { showAppError } from "$lib/utils";
   import { t } from "$lib/i18n";
   import type {
@@ -41,8 +37,6 @@
     onSave,
   }: Props = $props();
 
-  // 使用Svelte 5的$state替代传统状态
-  let modalRef: Modal;
   let isSubmitting = $state(false);
   let errors = $state<Record<string, string>>({});
   let envEntries = $state<EnvEntry[]>([]);
@@ -77,6 +71,13 @@
   const BLANK_ENTRY = (): EnvEntry => ({ key: "", value: "" });
   const BLANK_HEADER = (): HeaderEntry => ({ key: "", value: "" });
 
+  // 传输方式分段控件的选项
+  const CONNECTION_OPTIONS = [
+    { value: "stdio", labelKey: "provider.connectionStdio" },
+    { value: "sse", labelKey: "provider.connectionSse" },
+    { value: "http", labelKey: "provider.connectionHttp" },
+  ] as const;
+
   // 表单数据
   let formData = $state<FormState>({ ...EMPTY_FORM });
 
@@ -84,12 +85,12 @@
   const isEditMode = $derived(server !== null);
 
   // 检查是否可以保存
-  const canSave = $derived(() => {
+  const canSave = $derived.by(() => {
     const hasName = formData.name.trim();
     const hasValidConnection = formData.connectionType === 'stdio'
       ? formData.command.trim()
       : formData.endpoint.trim();
-    return hasName && hasValidConnection && !isSubmitting;
+    return Boolean(hasName && hasValidConnection) && !isSubmitting;
   });
 
   function buildEnvEntries(source: Record<string, string>): EnvEntry[] {
@@ -133,8 +134,9 @@
     }
   });
 
+  // 置 open = false 即触发 Modal 关闭动画
   function closeModal() {
-    modalRef?.handleClose();
+    open = false;
   }
 
   function onModalClose() {
@@ -293,197 +295,194 @@
   }
 </script>
 
-<Modal
-  bind:this={modalRef}
-  {open}
+<FormModal
+  bind:open={open}
+  size="md"
+  title={isEditMode ? t("provider.editMcpTitle") : t("provider.addMcpTitle")}
   onClose={onModalClose}
-  showCloseButton={false}
+  saving={isSubmitting}
+  submitLabel={isSubmitting ? t("common.saving") : t("common.save")}
+  submitDisabled={isSubmitting || !canSave}
+  onSubmit={handleConfirm}
 >
-  <!-- 弹窗容器 -->
-  <div class="w-lg max-w-lg h-[90vh] max-h-[100vh] flex flex-col">
-    <!-- 头部 -->
-    <div class="flex items-center justify-between px-6 py-4">
-      <h2 class="font-normal text-base-content">
-        {isEditMode ? t("provider.editMcpTitle") : t("provider.addMcpTitle")}
-      </h2>
-      <div class="flex items-center gap-2">
-        <Toggle bind:checked={formData.enabled} />
+  <!-- 名称区：大标题式唯一名称 + 次行显示名称 -->
+  <div class="flex flex-col gap-1">
+    <input
+      class="modal-title-input"
+      bind:value={formData.name}
+      placeholder={t("provider.mcpNamePlaceholder")}
+      aria-invalid={!!errors.name}
+    />
+    {#if errors.name}
+      <span class="text-xs text-error">{errors.name}</span>
+    {/if}
+    <input
+      class="w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
+      bind:value={formData.displayName}
+      placeholder={t("provider.mcpDisplayNamePlaceholder")}
+    />
+  </div>
+
+  <!-- 启用行 -->
+  <div class="mt-4 flex items-center justify-between">
+    <span class="text-sm text-base-content/80">{t("common.enabled")}</span>
+    <Toggle bind:checked={formData.enabled} />
+  </div>
+
+  <!-- 传输方式分段控件 -->
+  <div class="mt-5 flex rounded-lg border border-[var(--hairline)] p-0.5">
+    {#each CONNECTION_OPTIONS as option (option.value)}
+      <button
+        type="button"
+        class="flex-1 cursor-pointer rounded-md py-1.5 text-center text-sm {formData.connectionType ===
+        option.value
+          ? 'bg-base-300 text-base-content'
+          : 'text-base-content/60 hover:text-base-content'}"
+        onclick={() => (formData.connectionType = option.value)}
+      >
+        {t(option.labelKey)}
+      </button>
+    {/each}
+  </div>
+
+  {#if formData.connectionType === 'stdio'}
+    <div class="mt-5 flex flex-col gap-4">
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-base-content/70">{t("provider.mcpCommand")}</span>
+        <input
+          class="field w-full px-2.5 py-1.5 text-sm"
+          class:is-error={!!errors.command}
+          bind:value={formData.command}
+          placeholder={t("provider.mcpCommandPlaceholder")}
+          aria-invalid={!!errors.command}
+        />
+        {#if errors.command}
+          <span class="text-xs text-error">{errors.command}</span>
+        {/if}
+      </label>
+
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-base-content/70">{t("provider.mcpArgs")}</span>
+        <textarea
+          class="field w-full px-2.5 py-1.5 text-sm"
+          rows={3}
+          bind:value={formData.argsText}
+          placeholder={t("provider.mcpArgsPlaceholder")}
+        ></textarea>
+      </label>
+
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-base-content/70">{t("provider.mcpWorkingDir")}</span>
+        <input
+          class="field w-full px-2.5 py-1.5 text-sm"
+          bind:value={formData.workingDir}
+          placeholder={t("provider.optional")}
+        />
+      </label>
+
+      <!-- 环境变量 key/value 列表 -->
+      <div class="flex flex-col gap-2">
+        <span class="form-section-label">{t("provider.envVars")}</span>
+        {#each envEntries as entry, index (index)}
+          <div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+            <input
+              class="field px-2.5 py-1.5 text-sm"
+              placeholder={t("provider.envKeyPlaceholder")}
+              value={entry.key}
+              oninput={(e) => updateEnvEntry(index, "key", e.currentTarget.value)}
+            />
+            <input
+              class="field px-2.5 py-1.5 text-sm"
+              placeholder={t("provider.envValuePlaceholder")}
+              value={entry.value}
+              oninput={(e) => updateEnvEntry(index, "value", e.currentTarget.value)}
+            />
+            <button
+              type="button"
+              class="cursor-pointer p-1 text-base-content/40 transition-colors hover:text-error"
+              title={t("common.delete")}
+              aria-label={t("common.delete")}
+              onclick={() => removeEnvEntry(index)}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        {/each}
+        <button
+          type="button"
+          class="w-full cursor-pointer rounded-md border border-dashed border-[var(--hairline)] py-1.5 text-sm text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content"
+          onclick={addEnvEntry}
+        >
+          + {t("provider.addEntry")}
+        </button>
       </div>
     </div>
-
-    <div class="flex-1 min-h-0 px-6 py-2 space-y-4 overflow-y-auto">
-      <!-- 基本信息 -->
-      <TableGroup>
-        <TextRow
-          label={t("provider.mcpName")}
-          bind:value={formData.name}
-          placeholder={t("provider.mcpNamePlaceholder")}
+  {:else}
+    <div class="mt-5 flex flex-col gap-4">
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-base-content/70">{t("provider.mcpEndpoint")}</span>
+        <input
+          class="field w-full px-2.5 py-1.5 text-sm"
+          class:is-error={!!errors.endpoint}
+          bind:value={formData.endpoint}
+          placeholder={t("provider.mcpEndpointPlaceholder")}
+          aria-invalid={!!errors.endpoint}
         />
-        <TextRow
-          label={t("provider.mcpDisplayName")}
-          bind:value={formData.displayName}
-          placeholder={t("provider.mcpDisplayNamePlaceholder")}
-        />
-
-        <SelectRow
-          label={t("provider.connectionType")}
-          bind:selectedValue={formData.connectionType}
-          options={[
-            { value: "stdio", label: t("provider.connectionStdio") },
-            { value: "sse", label: t("provider.connectionSse") },
-            { value: "http", label: t("provider.connectionHttp") }
-          ]}
-        />
-
-        {#if formData.connectionType === 'stdio'}
-          <TextRow
-            label={t("provider.mcpCommand")}
-            bind:value={formData.command}
-            placeholder={t("provider.mcpCommandPlaceholder")}
-          />
-          <TextareaRow
-            label={t("provider.mcpArgs")}
-            bind:value={formData.argsText}
-            placeholder={t("provider.mcpArgsPlaceholder")}
-            rows={3}
-          />
-          <TextRow
-            label={t("provider.mcpWorkingDir")}
-            bind:value={formData.workingDir}
-            placeholder={t("provider.optional")}
-            layout="vertical"
-          />
-        {:else}
-          <TextRow
-            label={t("provider.mcpEndpoint")}
-            bind:value={formData.endpoint}
-            placeholder={t("provider.mcpEndpointPlaceholder")}
-          />
-          <TextRow
-            label={t("provider.mcpTimeout")}
-            bind:value={formData.timeoutMs}
-            placeholder={t("provider.mcpTimeoutPlaceholder")}
-          />
+        {#if errors.endpoint}
+          <span class="text-xs text-error">{errors.endpoint}</span>
         {/if}
-      </TableGroup>
+      </label>
 
-      <!-- 环境变量 (只对 stdio 连接显示) -->
-      {#if formData.connectionType === 'stdio'}
-        <TableGroup>
-          <div class="p-4 space-y-3">
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-base-content/80">{t("provider.envVars")}</span>
-              <button
-                class="text-primary text-sm hover:text-primary/80"
-                type="button"
-                onclick={addEnvEntry}
-              >
-                {t("provider.addEntry")}
-              </button>
-            </div>
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-base-content/70">{t("provider.mcpTimeout")}</span>
+        <input
+          class="field w-full px-2.5 py-1.5 text-sm"
+          class:is-error={!!errors.timeoutMs}
+          bind:value={formData.timeoutMs}
+          placeholder={t("provider.mcpTimeoutPlaceholder")}
+          aria-invalid={!!errors.timeoutMs}
+        />
+        {#if errors.timeoutMs}
+          <span class="text-xs text-error">{errors.timeoutMs}</span>
+        {/if}
+      </label>
 
-            <div class="space-y-2">
-              {#each envEntries as entry, index (index)}
-                <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
-                  <input
-                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder={t("provider.envKeyPlaceholder")}
-                    value={entry.key}
-                    oninput={(e) =>
-                      updateEnvEntry(index, "key", e.currentTarget.value)}
-                  />
-                  <input
-                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder={t("provider.envValuePlaceholder")}
-                    value={entry.value}
-                    oninput={(e) =>
-                      updateEnvEntry(index, "value", e.currentTarget.value)}
-                  />
-                  <button
-                    class="text-error text-sm hover:text-error/80 px-2"
-                    type="button"
-                    onclick={() => removeEnvEntry(index)}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </div>
-              {/each}
-            </div>
+      <!-- HTTP 头部 key/value 列表 -->
+      <div class="flex flex-col gap-2">
+        <span class="form-section-label">{t("provider.httpHeaders")}</span>
+        {#each headerEntries as entry, index (index)}
+          <div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+            <input
+              class="field px-2.5 py-1.5 text-sm"
+              placeholder={t("provider.headerKeyPlaceholder")}
+              value={entry.key}
+              oninput={(e) => updateHeaderEntry(index, "key", e.currentTarget.value)}
+            />
+            <input
+              class="field px-2.5 py-1.5 text-sm"
+              placeholder={t("provider.headerValuePlaceholder")}
+              value={entry.value}
+              oninput={(e) => updateHeaderEntry(index, "value", e.currentTarget.value)}
+            />
+            <button
+              type="button"
+              class="cursor-pointer p-1 text-base-content/40 transition-colors hover:text-error"
+              title={t("common.delete")}
+              aria-label={t("common.delete")}
+              onclick={() => removeHeaderEntry(index)}
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
-        </TableGroup>
-      {/if}
-
-      <!-- HTTP 头部 (只对 SSE/HTTP 连接显示) -->
-      {#if formData.connectionType === 'sse' || formData.connectionType === 'http'}
-        <TableGroup>
-          <div class="p-4 space-y-3">
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-base-content/80">{t("provider.httpHeaders")}</span>
-              <button
-                class="text-primary text-sm hover:text-primary/80"
-                type="button"
-                onclick={addHeaderEntry}
-              >
-                {t("provider.addEntry")}
-              </button>
-            </div>
-
-            <div class="space-y-2">
-              {#each headerEntries as entry, index (index)}
-                <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
-                  <input
-                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder={t("provider.headerKeyPlaceholder")}
-                    value={entry.key}
-                    oninput={(e) =>
-                      updateHeaderEntry(index, "key", e.currentTarget.value)}
-                  />
-                  <input
-                    class="w-full px-3 py-2 text-sm bg-base-300 border border-[var(--hairline)] rounded-lg focus:border-primary"
-                    placeholder={t("provider.headerValuePlaceholder")}
-                    value={entry.value}
-                    oninput={(e) =>
-                      updateHeaderEntry(index, "value", e.currentTarget.value)}
-                  />
-                  <button
-                    class="text-error text-sm hover:text-error/80 px-2"
-                    type="button"
-                    onclick={() => removeHeaderEntry(index)}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </div>
-              {/each}
-            </div>
-          </div>
-        </TableGroup>
-      {/if}
-
-      <!-- 错误提示 -->
-      {#if Object.keys(errors).length > 0}
-        <div class="bg-error/10 border border-error/20 rounded-lg p-3">
-          {#each Object.entries(errors) as [, message]}
-            <p class="text-xs text-error">{message}</p>
-          {/each}
-        </div>
-      {/if}
+        {/each}
+        <button
+          type="button"
+          class="w-full cursor-pointer rounded-md border border-dashed border-[var(--hairline)] py-1.5 text-sm text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content"
+          onclick={addHeaderEntry}
+        >
+          + {t("provider.addEntry")}
+        </button>
+      </div>
     </div>
-
-    <!-- 底部按钮 -->
-    <div class="flex items-center justify-end gap-3 px-6 py-3">
-      <RoundButton
-        customClass="w-18"
-        label={t("common.cancel")}
-        variant="secondary"
-        onclick={closeModal}
-      />
-      <RoundButton
-        customClass="w-18"
-        label={isSubmitting ? t("common.saving") : t("common.save")}
-        onclick={handleConfirm}
-        disabled={isSubmitting || !canSave}
-        loading={isSubmitting}
-      />
-    </div>
-  </div>
-</Modal>
+  {/if}
+</FormModal>

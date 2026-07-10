@@ -1,14 +1,13 @@
 /**
  * Agent 运行状态管理 - Svelte 5 runes
  *
- * 镜像 `states/message.svelte.ts` 的 reducer/listener 约定，但**按 sessionId 分键**：
+ * reducer/listener 约定，**按 sessionId 分键**：
  * 每个会话拥有独立的「已提交消息（transcript）」与「流式 view-model」，因此一个
  * 在后台流式的会话可以持续更新自身状态，而前台正在查看的是另一个会话（VAL-RUN-016）。
  *
  * 流式监听器在 store 单例构造时**一次性**建立（navigation-resilient）：store 单例在
- * 整个 app 生命周期只构造一次，监听器不随路由切换或 Chat<->Agent 模式切换而卸载
- * （VAL-MODE-006）。监听器只订阅 `agent_stream_*` 事件，与 chat 的 `message_stream_*`
- * 互不相干，因此切换不会影响 chat 流（VAL-MODE-007）。
+ * 整个 app 生命周期只构造一次，监听器不随路由切换而卸载（VAL-MODE-006），只订阅
+ * `agent_stream_*` 事件。
  *
  * 工具调用（toolcall）在 M2 消费：`tool_execution_start/update/end` 事件按 `toolCallId`
  * 分键 reduce 成 live tool-call view-model（VAL-TOOLS-001/002/003/004），由 timeline
@@ -80,6 +79,13 @@ export interface AgentRunState {
    * 本轮对话续行、仍恰好一次终结（VAL-CARUN-019）。
    */
   isCompacting: boolean;
+  /**
+   * 该会话的已提交 transcript 是否至少成功还原过一次（`loadTranscript`）。
+   * 会话页据此区分「尚未加载（居中 Spinner）」与「确为空会话（引导空态）」，
+   * 避免首开有历史的会话时先闪一帧引导空态再换成 timeline。
+   * 状态按 sessionId 常驻本 store 单例，重访会话首帧直出缓存、不再回到 Spinner。
+   */
+  hydrated: boolean;
 }
 
 function createEmptyRunState(): AgentRunState {
@@ -91,6 +97,7 @@ function createEmptyRunState(): AgentRunState {
     error: null,
     toolCalls: {},
     isCompacting: false,
+    hydrated: false,
   };
 }
 
@@ -623,6 +630,8 @@ class AgentRunStore {
       }
       const state = this.ensureState(sessionId);
       state.messages = messages;
+      // 首次还原完成：会话页据此从 Spinner 切到真实内容（空会话则切引导空态）。
+      state.hydrated = true;
       // 无活跃 run 时丢弃残留 live tool-call，使卡片纯从配对的已提交 toolResult 重建。
       if (!state.isRunning) {
         state.toolCalls = {};

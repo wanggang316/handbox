@@ -3,12 +3,12 @@
   import { ArrowLeft, Save, Trash2 } from "@lucide/svelte";
   import { Renderer, JsonUIProvider } from "@json-render/svelte";
   import type { Spec } from "@json-render/core";
-  import { uiRegistry } from "$lib/components/chat/renderers/jsonui/registry";
-  import { uiCatalog } from "$lib/components/chat/renderers/jsonui/catalog";
+  import { uiRegistry } from "$lib/components/genui/jsonui/registry";
+  import { uiCatalog } from "$lib/components/genui/jsonui/catalog";
   import {
     explainSpec,
     type SpecDiagnosticStage,
-  } from "$lib/components/chat/renderers/jsonui/resolveSpec";
+  } from "$lib/components/genui/jsonui/resolveSpec";
   import Button from "$lib/components/ui/Button.svelte";
   import Input from "$lib/components/ui/Input.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
@@ -23,7 +23,7 @@
 
   let { genui = null }: Props = $props();
 
-  // 新建时的起始 spec：与 chat 渲染同一套 catalog，编辑左侧 JSON 右侧实时预览。
+  // 新建时的起始 spec：用 GenUI 的 catalog，编辑左侧 JSON 右侧实时预览。
   const seedSpec: Spec = {
     root: "card",
     elements: {
@@ -69,7 +69,7 @@
     loadedExampleId = ex.id;
   }
 
-  // 走与聊天相同的 resolveSpec 校验管线；非法时报告失败阶段与原因。
+  // 走 GenUI 的 resolveSpec 校验管线；非法时报告失败阶段与原因。
   const result = $derived(explainSpec(specInput));
   const spec = $derived(result.ok ? result.spec : null);
   const error = $derived(result.ok ? null : result);

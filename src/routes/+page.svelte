@@ -2,37 +2,50 @@
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { isTauriEnvironment } from "$lib/utils/tauri";
   import { settingsState } from "$lib/states/settings.svelte";
-  import { providerActions } from "$lib/states/provider.svelte";
   import { t } from "$lib/i18n";
 
-  // 启动页停留到「主界面关键数据就绪」为止，而非一个固定时长：
+  // 启动页停留到「首屏必需数据就绪」为止，而非一个固定时长：
   // 加载快 → 一闪而过；加载慢 → 多停一会。
   // MIN_VISIBLE：最短展示，避免画面一闪而过显得突兀。
   // MAX_WAIT：兜底超时，避免某个 IPC 卡死时永远停在启动页。
   const MIN_VISIBLE = 400;
-  const MAX_WAIT = 8000;
+  const MAX_WAIT = 3000;
 
   onMount(() => {
     if (!browser) return;
+
+    // 主窗口以 visible:false 启动：等启动页首帧真正绘制（双 rAF）后再显示窗口，
+    // 消除「系统暗色黑屏 → HTML 白屏 → 启动页」的启动闪。Rust 侧有 4s 兜底 show。
+    if (isTauriEnvironment()) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const w = getCurrentWindow();
+          w.show()
+            .then(() => w.setFocus())
+            .catch((e) => console.error("Failed to show main window:", e));
+        }),
+      );
+    }
 
     let entered = false;
     const enter = () => {
       if (entered) return;
       entered = true;
       // replaceState：启动页不进历史栈，返回时不会再回到这里
-      goto("/chat", { replaceState: true });
+      goto("/agent", { replaceState: true });
     };
 
     const delay = (ms: number) =>
       new Promise((resolve) => setTimeout(resolve, ms));
 
-    // 与 root layout 的预加载对齐；两个方法均幂等，重复调用不会重载已有数据。
-    // allSettled：任一加载失败也不阻塞进入主界面（主界面自带各自的兜底加载态）。
-    const ready = Promise.allSettled([
-      settingsState.loadSettings(),
-      providerActions.loadProvidersWithModels(false),
-    ]);
+    // 只等首屏必需的 settings（主题/语言，避免进入后闪一下主题）。
+    // providers / 模型目录由 root layout 在后台预加载（见 +layout.svelte），
+    // 不阻塞进入主界面——各页面自带兜底加载态。
+    // allSettled：加载失败也不阻塞进入主界面。
+    const ready = Promise.allSettled([settingsState.loadSettings()]);
 
     // 就绪且至少展示 MIN_VISIBLE，或到达 MAX_WAIT 兜底，二者先到先进入。
     Promise.race([Promise.all([ready, delay(MIN_VISIBLE)]), delay(MAX_WAIT)]).then(

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { ChevronsUpDown } from "@lucide/svelte";
+  import { getFormField } from "./FormField.svelte";
 
   interface Option {
     value: string;
@@ -62,6 +63,13 @@
 
   const id = `select-${Math.random().toString(36).slice(2, 11)}`;
 
+  // FormField 内时接管 id / aria / error 态，并抑制自渲 label（容器统一提供）。
+  const ff = getFormField();
+  const controlId = $derived(ff ? ff.id : id);
+  const invalid = $derived(ff ? ff.invalid : false);
+  const describedby = $derived(ff ? ff.describedby : undefined);
+  const showOwnLabel = $derived(!ff && !!label);
+
   function handleChange(e: Event) {
     const target = e.currentTarget as HTMLSelectElement;
     const newValue = target.value;
@@ -87,19 +95,22 @@
 </script>
 
 <div class="inline-flex flex-col gap-1 {className}">
-  {#if label}
-    <label for={id} class="text-sm font-medium text-base-content/80">
+  {#if showOwnLabel}
+    <label for={controlId} class="text-sm font-medium text-base-content/80">
       {label}
     </label>
   {/if}
 
   <div class="relative {autoWidth ? 'inline-flex' : 'w-full'}">
     <select
-      {id}
+      id={controlId}
       value={internalValue}
       {disabled}
       onchange={handleChange}
-      class="appearance-none {autoWidth
+      aria-invalid={invalid ? "true" : undefined}
+      aria-describedby={describedby}
+      class:is-error={invalid}
+      class="field field--soft appearance-none {autoWidth
         ? 'w-auto min-w-fit'
         : 'w-full'} {sizeClasses[size]} {hasIcon
         ? size === 'sm'
@@ -107,7 +118,7 @@
           : 'pr-8'
         : size === 'sm'
           ? 'pr-2'
-          : 'pr-3'} rounded-md border border-[var(--hairline)] bg-base-300 text-base-content hover:bg-base-300/80 focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          : 'pr-3'} cursor-pointer"
     >
       {#if placeholder}
         <option value="" disabled selected>{placeholder}</option>

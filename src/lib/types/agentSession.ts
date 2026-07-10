@@ -10,6 +10,7 @@
  */
 
 import type { UUID, Timestamp } from "./index";
+import type { McpServerConfig } from "./llm";
 
 // ---------------------------------------------------------------------------
 // hand-agent / model Message（payload 的实际形状）
@@ -58,8 +59,8 @@ export interface ThinkingContent {
 /**
  * 工具调用内容块（model crate `ToolCall`）。
  *
- * 命名为 `AgentToolCall` 以避免与 chat 模式的 `ToolCall`（types/chat.ts）在
- * 共享 barrel 中重名冲突 —— 二者形状不同（此为 agent/model 的内容块）。
+ * 命名为 `AgentToolCall`（而非裸 `ToolCall`）以在共享 barrel 中保持无歧义 ——
+ * 它是 agent/model 的内容块。
  */
 export interface AgentToolCall {
   id: string;
@@ -259,6 +260,11 @@ export interface AgentSession {
   id: UUID;
   /** 所属 Agent Project（可选；后端 `project_id: Option<UUID>` 序列化为 camelCase）。 */
   projectId?: UUID;
+  /**
+   * 实例化来源的 AgentDefinition id（创建时一次性写入的 provenance 链接，
+   * 后端 `agent_definition_id: Option<UUID>`）。update 路径永不重写。
+   */
+  agentDefinitionId?: UUID;
   name: string;
   modelId?: string;
   providerId?: string;
@@ -268,6 +274,8 @@ export interface AgentSession {
   maxTokens?: number;
   workingDir?: string;
   enabledTools: string[];
+  /** Per-session MCP server bindings injected into the agent loop as tools. */
+  mcpServers: McpServerConfig[];
   toolExecutionMode?: string;
   messageCount: number;
   lastMessageAt?: Timestamp;
@@ -305,7 +313,23 @@ export interface CreateAgentSessionRequest {
   maxTokens?: number;
   workingDir?: string;
   enabledTools?: string[];
+  mcpServers?: McpServerConfig[];
   toolExecutionMode?: string;
+}
+
+/**
+ * 从 AgentDefinition 实例化会话的覆盖项（后端 `InstantiateAgentSessionRequest`）。
+ *
+ * 全部可选：缺省时由 definition 的快照决定。后端按 definition 的 `workingDirMode`
+ * 裁决工作目录策略（"none" 强制纯对话、"required" 缺工作上下文则报错、"optional"/
+ * NULL 透传），再以这里给出的字段覆盖快照。
+ */
+export interface InstantiateAgentSessionRequest {
+  name?: string;
+  projectId?: UUID;
+  workingDir?: string;
+  modelId?: string;
+  providerId?: string;
 }
 
 /** 更新 Agent Session 请求。 */
@@ -319,6 +343,7 @@ export interface UpdateAgentSessionRequest {
   maxTokens?: number;
   workingDir?: string;
   enabledTools?: string[];
+  mcpServers?: McpServerConfig[];
   toolExecutionMode?: string;
 }
 

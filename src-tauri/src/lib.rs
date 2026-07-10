@@ -13,16 +13,16 @@ pub mod utils;
 use crate::tray::setup_tray;
 
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+use tauri::Manager;
 
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    GenUiService, JobExecutor, JobScheduler, JobService, McpService, MessageService, ModelService,
-    ProviderService, SessionService, SettingsService, StorageService, UserSessionService,
-    WordService,
+    GenUiService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
+    ProviderService, SettingsService, StorageService, UserSessionService,
 };
-use crate::storage::{Database, WordRepository};
+use crate::storage::Database;
 use crate::utils::logger;
 use std::sync::Arc;
 
@@ -80,7 +80,7 @@ pub fn run() {
             // 创建选择面板 (NSPanel) - 必须在setup中同步创建
             #[cfg(target_os = "macos")]
             {
-                if let Err(e) = setup_selection(&app.handle()) {
+                if let Err(e) = setup_selection(app.handle()) {
                     tracing::error!("Failed to setup selection panels: {e}");
                     eprintln!("Failed to setup selection panels: {e}");
                     // 不退出应用，因为选择面板是可选功能
@@ -99,6 +99,21 @@ pub fn run() {
                     std::process::exit(1);
                 }
             });
+
+            // 主窗口以 visible:false 启动、由前端首帧绘制完成后 show()（消除启动
+            // 黑屏/白屏闪）。此处兜底：前端若启动失败（JS 异常/资源缺失），4 秒后
+            // 强制显示窗口，避免"应用无窗口可见"。
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                    if let Some(w) = handle.get_webview_window("main") {
+                        if !w.is_visible().unwrap_or(true) {
+                            let _ = w.show();
+                        }
+                    }
+                });
+            }
 
             Ok(())
         })
@@ -151,17 +166,6 @@ pub fn run() {
             auth_get_user,
             auth_update_profile,
             auth_validate_token,
-            // Session 相关命令 (原 chat 相关命令)
-            session_create,
-            session_list,
-            session_get,
-            session_update_field,
-            session_update_model,
-            session_clear_model_parameters,
-            session_update_name,
-            session_delete,
-            session_generate_title,
-            session_create_from_agent,
             // Agent 相关命令
             agent_create,
             agent_list,
@@ -177,6 +181,8 @@ pub fn run() {
             genui_delete,
             // Agent Session（Agent 模式会话 CRUD）命令
             agent_session_create,
+            agent_session_create_from_definition,
+            agent_session_reinstantiate_from_definition,
             agent_session_list,
             agent_session_get,
             agent_session_rename,
@@ -196,23 +202,8 @@ pub fn run() {
             agent_run_abort,
             agent_run_steer,
             agent_approval_respond,
-            // 消息相关命令
-            message_user_send,
-            message_user_send_stream,
-            message_list,
-            message_get,
-            message_update,
-            message_delete,
-            message_assistant_regenerate_stream,
-            message_user_resend_stream,
-            message_stop_stream,
-            // message_execute_mcp_call, // Temporarily removed
-            message_execute_tool_calls,
-            message_execute_tool_calls_stream,
             // 窗口管理命令
             open_settings_window,
-            close_settings_window,
-            toggle_settings_window,
             // 供应商相关命令
             provider_list,
             provider_get,
@@ -220,13 +211,11 @@ pub fn run() {
             provider_update,
             provider_delete,
             provider_toggle,
-            provider_count_chats,
             provider_list_with_models,
             // 模型相关命令
             model_list_by_provider,
             model_toggle,
             model_toggle_favorite,
-            model_count_chats,
             model_add,
             // MCP 管理命令
             mcp_list_servers,
@@ -236,8 +225,6 @@ pub fn run() {
             mcp_toggle_server,
             mcp_refresh_server,
             mcp_update_tool_enabled,
-            mcp_count_chats_using_server,
-            mcp_remove_server_from_chats,
             // Skill 管理命令
             skill_list,
             skill_set_disabled,
@@ -251,12 +238,6 @@ pub fn run() {
             settings_test_mcp_server,
             settings_system_info,
             // 单词相关命令
-            word_create,
-            word_list,
-            word_get,
-            word_update,
-            word_delete,
-            word_translation_history,
             // LLM 配置相关命令
             get_provider_configs,
             get_provider_config_by_type,
@@ -333,23 +314,6 @@ async fn initialize_services(
     let model_service = ModelService::new(database_service.clone());
 
     let mcp_service = McpService::new(database_service.clone());
-    let mcp_service_shared = Arc::new(mcp_service.clone());
-
-    let session_service =
-        SessionService::new(database_service.clone(), provider_service_shared.clone());
-    let session_service_shared = Arc::new(session_service.clone());
-
-    let message_service = MessageService::new(
-        database_service.clone(),
-        provider_service_shared.clone(),
-        session_service_shared.clone(),
-        mcp_service_shared,
-        storage_service.clone(),
-    );
-    // Shared with the JobExecutor's `prompt` target (a fresh chat per run, sent
-    // non-streaming). Cloning the service is cheap (its repos / registries are
-    // `Arc`-backed), so the executor and the managed instance share state.
-    let message_service_shared = Arc::new(message_service.clone());
 
     let settings_service = SettingsService::new(storage_service.clone());
 
@@ -380,8 +344,6 @@ async fn initialize_services(
         }
     }
 
-    let word_repo = Arc::new(WordRepository::new(database_service.clone()));
-    let word_service = WordService::new(word_repo, settings_service.clone());
 
     // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());
@@ -464,11 +426,6 @@ async fn initialize_services(
     // app_data_dir 等价；后台执行器无 Window，故直接传入）。
     let job_executor = JobExecutor::from_db(database_service.clone())
         .with_app_handle(app.clone())
-        .with_prompt_services(
-            session_service_shared,
-            message_service_shared,
-            provider_service_shared.clone(),
-        )
         .with_agent_services(
             Arc::new(agent_service.clone()),
             Arc::new(agent_session_service.clone()),
@@ -484,13 +441,10 @@ async fn initialize_services(
 
     // 将服务注册到应用状态
     app.manage(storage_service);
-    app.manage(session_service);
-    app.manage(message_service);
     app.manage(provider_service);
     app.manage(model_service);
     app.manage(mcp_service);
     app.manage(settings_service);
-    app.manage(word_service);
     app.manage(user_session_service);
     app.manage(agent_service);
     app.manage(genui_service);

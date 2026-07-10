@@ -274,3 +274,32 @@ impl FromStr for LlmModelParameter {
         })
     }
 }
+
+// Moved from `storage::types::session` so the agent stack can depend on the
+// reasoning config without pulling in the chat-session module. serde repr is
+// unchanged from the original definition — DB/wire compatibility preserved.
+/// OpenRouter 推理配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmOpenrouterReasoning {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<bool>,
+}
+
+/// Session 级推理配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionReasoningConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub responses: Option<LlmResponsesReasoning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<LlmReasoningEffortConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<LlmThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openrouter: Option<LlmOpenrouterReasoning>,
+}

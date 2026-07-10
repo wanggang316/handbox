@@ -4,10 +4,6 @@
 
 import type { Theme, Language } from "../types";
 
-// 应用模式：聊天 vs Agent
-export type AppMode = "chat" | "agent";
-
-const APP_MODE_KEY = "appMode";
 const LAST_AGENT_SESSION_ID_KEY = "lastAgentSessionId";
 const LANGUAGE_KEY = "language";
 
@@ -15,11 +11,6 @@ const SUPPORTED_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
   "zh-CN",
   "en-US",
 ]);
-
-function loadPersistedAppMode(): AppMode {
-  if (typeof localStorage === "undefined") return "chat";
-  return localStorage.getItem(APP_MODE_KEY) === "agent" ? "agent" : "chat";
-}
 
 function loadPersistedLanguage(): Language {
   if (typeof localStorage === "undefined") return "zh-CN";
@@ -53,7 +44,6 @@ interface UIStateData {
   theme: Theme;
   language: Language;
   globalLoading: boolean;
-  appMode: AppMode;
   lastAgentSessionId: string | null;
 }
 
@@ -67,7 +57,6 @@ class UIState {
     theme: "system",
     language: loadPersistedLanguage(),
     globalLoading: false,
-    appMode: loadPersistedAppMode(),
     lastAgentSessionId: loadPersistedLastAgentSessionId(),
   });
 
@@ -102,10 +91,6 @@ class UIState {
 
   get globalLoading() {
     return this.state.globalLoading;
-  }
-
-  get appMode() {
-    return this.state.appMode;
   }
 
   get lastAgentSessionId() {
@@ -293,20 +278,6 @@ class UIState {
 
     if (typeof document !== "undefined") {
       document.documentElement.lang = lang;
-    }
-  }
-
-  /**
-   * 设置应用模式（chat / agent），并持久化到 localStorage。
-   */
-  setAppMode(mode: AppMode): void {
-    this.state.appMode = mode;
-
-    if (typeof localStorage !== "undefined") {
-      const current = localStorage.getItem(APP_MODE_KEY);
-      if (current !== mode) {
-        localStorage.setItem(APP_MODE_KEY, mode);
-      }
     }
   }
 

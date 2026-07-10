@@ -8,7 +8,8 @@
     providerConfigs,
     getProviderIcon,
   } from "$lib/states/provider.svelte";
-  import { LoaderCircle, Cpu } from "@lucide/svelte";
+  import { Cpu } from "@lucide/svelte";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
   import { TableGroup } from "$lib/components/ui/table";
   import StatusLabelRow from "$lib/components/ui/table/StatusLabelRow.svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
@@ -58,13 +59,13 @@
   }
 </script>
 
-<div class="p-6 pr-8 pt-14 flex flex-col gap-y-4">
+<div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
 
-  <!-- 加载状态 -->
-  {#if providerState.isLoading}
-    <div class="flex items-center justify-center py-8">
-      <LoaderCircle class="h-6 w-6 animate-spin text-base-content/60" />
-      <span class="ml-2 text-sm text-base-content/70">{t("provider.loadingProviders")}</span>
+  <!-- 加载状态：仅真正的首次加载显示（store 已有数据时直接渲染列表，
+       后台刷新静默完成，避免「列表→spinner→列表」的闪动）。 -->
+  {#if providerState.isLoading && providerState.providers.length === 0}
+    <div class="flex items-center justify-center py-10">
+      <Spinner size={28} />
     </div>
   {/if}
 

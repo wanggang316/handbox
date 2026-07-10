@@ -6,10 +6,24 @@ use crate::storage::types::{Agent, AgentReasoningConfig, UUID};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+/// 把一个 JSON 值解析为可空字符串字段：`null` -> `None`，字符串 -> `Some`，
+/// 其余类型 -> 校验错误。供 `agent_update_field` 的可空字符串分支复用。
+fn optional_string(value: &serde_json::Value, field: &str) -> Result<Option<String>, AppError> {
+    if value.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(
+            value
+                .as_str()
+                .ok_or_else(|| AppError::validation_error(&format!("Invalid {} value", field)))?
+                .to_string(),
+        ))
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentCreateRequest {
     pub name: String,
-    pub model: Option<String>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub top_k: Option<i32>,
@@ -31,7 +45,6 @@ pub async fn agent_create(
     agent_service
         .create_agent(
             request.name,
-            request.model,
             request.temperature,
             request.top_p,
             request.top_k,
@@ -80,13 +93,6 @@ pub async fn agent_update_field(
                 .ok_or_else(|| AppError::validation_error("Invalid name value"))?
                 .to_string();
             AgentParameter::Name(name)
-        }
-        "model" => {
-            let model = value
-                .as_str()
-                .ok_or_else(|| AppError::validation_error("Invalid model value"))?
-                .to_string();
-            AgentParameter::Model(model)
         }
         "temperature" => {
             let temp_value = if value.is_null() {
@@ -203,6 +209,28 @@ pub async fn agent_update_field(
                 )
             };
             AgentParameter::GenUiId(v)
+        }
+        "providerId" => AgentParameter::ProviderId(optional_string(&value, "providerId")?),
+        "icon" => AgentParameter::Icon(optional_string(&value, "icon")?),
+        "description" => AgentParameter::Description(optional_string(&value, "description")?),
+        "builtinTools" => {
+            let tools = serde_json::from_value(value).map_err(|e| {
+                AppError::validation_error(&format!("Invalid builtinTools value: {}", e))
+            })?;
+            AgentParameter::BuiltinTools(tools)
+        }
+        "workingDirMode" => {
+            AgentParameter::WorkingDirMode(optional_string(&value, "workingDirMode")?)
+        }
+        "toolExecutionMode" => {
+            AgentParameter::ToolExecutionMode(optional_string(&value, "toolExecutionMode")?)
+        }
+        "thinkingLevel" => AgentParameter::ThinkingLevel(optional_string(&value, "thinkingLevel")?),
+        "starters" => {
+            let starters = serde_json::from_value(value).map_err(|e| {
+                AppError::validation_error(&format!("Invalid starters value: {}", e))
+            })?;
+            AgentParameter::Starters(starters)
         }
         _ => {
             return Err(AppError::validation_error(&format!(
