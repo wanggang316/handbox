@@ -16,6 +16,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.4.0] - 2026-07-11
+
+### Added
+- Choose the model for an agent session right in the composer, independent of
+  the agent's saved default.
+- Pick which agent to talk to from the composer toolbar, and switch agents
+  without leaving an empty session behind.
+- Set the working folder for an agent session from the composer.
+- Bind specific MCP servers to a session so their tools are available in the
+  conversation; tools that run actions on your behalf now ask for approval
+  first.
+- Quick Action sends using the default model you set in Settings → Shortcuts.
+
+### Changed
+- Chat and Agents are now one experience: every conversation — and every
+  scheduled prompt job — runs through the agent engine. Rich Generative UI
+  replies are unchanged.
+- Settings now open inside the main window instead of a separate window.
+- A refreshed, more consistent interface across Agents, Jobs and Settings —
+  cleaner page headers, calmer use of color, standardized form controls, and
+  smoother collapse and hover animations.
+- Faster, flicker-free startup: the launch screen no longer flashes from black
+  to white, and pages paint their real content on the first frame instead of
+  showing default values that then jump to the loaded ones.
+
+### Fixed
+- The agent session header no longer overlaps the window controls when the
+  sidebar is hidden.
+- Prompt-based scheduled jobs can pick their model again.
+
+### Removed
+- The standalone Chat feature has been removed — start an Agent session instead.
+- The Vocabulary feature has been removed.
+- The agent form no longer exposes the top-p and top-k sampling sliders.
+
+
 ## [0.3.1] - 2026-06-25
 
 ### Added
