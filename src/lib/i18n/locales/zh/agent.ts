@@ -104,12 +104,12 @@ export const agentZh = {
 
   // Project / session list (AgentProjectList)
   "agent.list.renamePlaceholder": "输入新名称",
-  "agent.list.heading": "Agent 会话",
+  "agent.list.heading": "会话",
   "agent.list.pickProjectDir": "选择项目目录",
   "agent.list.loadFailed": "列表加载失败",
   "agent.list.emptyHint": "点击 + 选择项目目录开始",
   "agent.list.noChats": "No chats",
-  "agent.list.ungrouped": "未分组",
+  "agent.list.ungrouped": "对话",
   "agent.list.newSession": "新建会话",
   "agent.list.newSessionInProject": "在项目 {name} 中新建会话",
   "agent.list.copyPath": "复制路径",

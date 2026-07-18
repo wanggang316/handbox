@@ -8,7 +8,7 @@
     Folder,
     FolderOpen,
     Hash,
-    Inbox,
+    MessagesSquare,
     PencilLine,
     Plus,
     Trash2,
@@ -540,7 +540,9 @@
 <div class="flex flex-col h-full">
   <!-- 标题 + 新建项目按钮 -->
   <div class="flex items-center justify-between pb-2 pl-4 pr-2 flex-shrink-0">
-    <span class="text-sm text-base-content/70">{t("agent.list.heading")}</span>
+    <span class="text-[11px] leading-[16px] font-medium text-base-content/45"
+      >{t("agent.list.heading")}</span
+    >
     <button
       class="p-1 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-300"
       title={t("agent.list.pickProjectDir")}
@@ -687,7 +689,7 @@
           onclick={(event) =>
             handleGroupHeaderClick(event, UNGROUPED_COLLAPSE_KEY)}
         >
-          <Inbox size={14} class="flex-shrink-0 text-base-content/60" />
+          <MessagesSquare size={14} class="flex-shrink-0 text-base-content/60" />
           <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
           <ChevronRight
             size={14}
