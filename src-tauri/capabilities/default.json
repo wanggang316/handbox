@@ -34,6 +34,7 @@
     "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-set-position",
+    "core:window:allow-set-theme",
     "core:event:allow-listen",
     "core:event:allow-emit",
     "core:menu:default",

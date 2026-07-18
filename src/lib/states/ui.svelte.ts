@@ -3,6 +3,7 @@
  */
 
 import type { Theme, Language } from "../types";
+import { isTauriEnvironment } from "../utils/tauri";
 
 const LAST_AGENT_SESSION_ID_KEY = "lastAgentSessionId";
 const LANGUAGE_KEY = "language";
@@ -242,6 +243,27 @@ class UIState {
         document.documentElement.setAttribute("data-theme", newTheme);
       }
     }
+
+    // 同步原生窗口 appearance：仅改 data-theme 只影响 webview 内容，NSWindow 仍跟随
+    // 系统外观，于是「应用 light + 系统 dark」时 macOS 会按 dark 画出窗口外边框与
+    // 标题栏 overlay。将窗口主题对齐到应用主题即可消除这条深色细边；system 传 null
+    // 表示交还系统跟随。
+    this.syncNativeWindowTheme(newTheme);
+  }
+
+  /**
+   * 将原生窗口外观对齐到应用主题（system → null，交还系统跟随）。
+   * 仅在 Tauri 环境执行，失败静默——纯样式同步不应影响主题切换本身。
+   */
+  private syncNativeWindowTheme(theme: Theme): void {
+    if (!isTauriEnvironment()) return;
+    import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) =>
+        getCurrentWindow().setTheme(theme === "system" ? null : theme),
+      )
+      .catch((error) => {
+        console.error("Failed to sync native window theme:", error);
+      });
   }
 
   /**
