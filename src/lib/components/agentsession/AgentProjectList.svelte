@@ -628,7 +628,7 @@
         {@const collapsed = agentProjectCollapse.isCollapsed(bucket.key)}
         <!-- 桶组头：Agent（Bot 图标 + 名称 + hover「+」直建）或 Chats（MessagesSquare，无直建）。 -->
         <div
-          class="group/bucket w-full flex items-center gap-1.5 py-0.5 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-medium text-base-content/80 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+          class="group/bucket w-full flex items-center gap-1.5 py-0.5 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/55 hover:text-base-content hover:bg-base-300 cursor-default select-none"
           role="button"
           tabindex="0"
           aria-expanded={!collapsed}
