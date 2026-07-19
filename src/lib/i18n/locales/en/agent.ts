@@ -115,7 +115,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.heading": "Sessions",
   "agent.list.pickProjectDir": "Choose a project directory",
   "agent.list.loadFailed": "Failed to load list",
-  "agent.list.emptyHint": "Click + to choose a project directory and start",
+  "agent.list.emptyHint": "No sessions yet — start one from Agents",
   "agent.list.noChats": "No chats",
   "agent.list.ungrouped": "Chats",
   "agent.list.newSession": "New session",

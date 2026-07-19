@@ -107,7 +107,7 @@ export const agentZh = {
   "agent.list.heading": "会话",
   "agent.list.pickProjectDir": "选择项目目录",
   "agent.list.loadFailed": "列表加载失败",
-  "agent.list.emptyHint": "点击 + 选择项目目录开始",
+  "agent.list.emptyHint": "还没有会话——从 Agents 开始一个",
   "agent.list.noChats": "No chats",
   "agent.list.ungrouped": "对话",
   "agent.list.newSession": "新建会话",

@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { slide } from "svelte/transition";
   import { goto } from "$app/navigation";
   import {
+    Bot,
     ChevronRight,
     Copy,
     Folder,
@@ -21,19 +22,19 @@
     agentSessionState,
     agentSessionActions,
   } from "$lib/states/agentSession.svelte";
-  import {
-    agentProjectCollapse,
-    UNGROUPED_COLLAPSE_KEY,
-  } from "$lib/states/agentProjectCollapse.svelte";
+  import { agentState, agentActions } from "$lib/states/agent.svelte";
+  import { agentProjectCollapse } from "$lib/states/agentProjectCollapse.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
-  import { settingsState } from "$lib/states";
   import { t } from "$lib/i18n";
-  import { BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
-  import { groupSessions, sessionActivityKey } from "$lib/utils/agentGrouping";
-  import type { AgentProjectGroup } from "$lib/utils/agentGrouping";
+  import {
+    groupSessionsByAgent,
+    sessionActivityKey,
+  } from "$lib/utils/agentGrouping";
+  import type { AgentSessionBucket } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
   import { normalizeError } from "$lib/utils/error";
-  import type { AgentSession, CreateAgentSessionRequest } from "$lib/types";
+  import { onMount } from "svelte";
+  import type { AgentSession } from "$lib/types";
   import type { AgentProject } from "$lib/types/agentProject";
 
   interface Props {
@@ -42,31 +43,41 @@
 
   let { activeId = "" }: Props = $props();
 
-  // 分组与排序完全交给 foundation selectors，组件内不重新实现。
-  const grouped = $derived(
-    groupSessions(agentProjectState.projects, agentSessionState.sessions),
+  // 分组与排序完全交给 foundation selector（Agent → Project → Session），
+  // 组件内不重新实现。
+  const buckets = $derived(
+    groupSessionsByAgent(
+      agentState.agents,
+      agentProjectState.projects,
+      agentSessionState.sessions,
+    ),
   );
-  const isEmpty = $derived(
-    grouped.groups.length === 0 && grouped.ungrouped.length === 0,
-  );
+  const isEmpty = $derived(buckets.length === 0);
 
-  // 初次挂载且 store 无数据时显示加载占位，待两路数据都拉完再渲染，
-  // 避免闪现空态或「会话先到、项目未到」造成的未分组桶误现；
+  // 项目子组折叠 key：同一 Project 可能挂在多个 Agent 桶下，需按 桶+项目 复合
+  // 记忆折叠态，避免在 A 桶折叠 X 项目会连带折叠 B 桶下的 X。
+  function projectCollapseKey(bucketKey: string, projectId: string): string {
+    return `${bucketKey}::${projectId}`;
+  }
+
+  // 初次挂载且 store 无数据时显示加载占位，待三路数据都拉完再渲染，
+  // 避免闪现空态或「会话先到、Agent/项目未到」造成的误归桶；
   // store 已有数据（模式切换重挂载）则立即渲染并在后台刷新。
   let initialLoadDone = $state(
     agentProjectState.projects.length > 0 ||
       agentSessionState.sessions.length > 0,
   );
 
-  // 任一路加载失败即置位：projects 拉取失败而 sessions 成功时若照常渲染，
-  // 全部会话会被错误归入「未分组」桶（伪呈现），故失败时不进入分组渲染，
-  // 改显示错误条 + 重试。
+  // 任一路加载失败即置位：Agent / projects 拉取失败而 sessions 成功时若照常渲染，
+  // 会话会被错误归入「Chats」桶（伪呈现），故失败时不进入分组渲染，改显示
+  // 错误条 + 重试。
   let loadError = $state(false);
 
-  // 每次挂载重拉项目与会话，保证侧栏数据新鲜（重试按钮复用同一逻辑）。
-  // 两个 action 内部已记录错误，这里捕获 settled 结果用于失败可见化。
+  // 每次挂载重拉 Agent / 项目 / 会话，保证侧栏数据新鲜（重试按钮复用同一逻辑）。
+  // 各 action 内部已记录错误，这里捕获 settled 结果用于失败可见化。
   async function loadSidebarData() {
     const results = await Promise.allSettled([
+      agentActions.loadAgents(),
       agentProjectActions.loadProjects(),
       agentSessionActions.loadSessions(),
     ]);
@@ -78,28 +89,39 @@
     loadSidebarData();
   });
 
-  // active session 所属分组的折叠 key（未分组桶用保留 key；
-  // 无 active / 数据未就绪 / 未匹配时为 undefined）。
-  const activeGroupId = $derived.by(() => {
+  // active session 所在位置（桶 key + 可选项目折叠 key）；无 active / 数据未就绪 /
+  // 未匹配时为 undefined。
+  const activeLocation = $derived.by(() => {
     if (!activeId) return undefined;
-    for (const group of grouped.groups) {
-      if (group.sessions.some((s) => s.id === activeId)) {
-        return group.project.id;
+    for (const bucket of buckets) {
+      for (const child of bucket.children) {
+        if (child.kind === "session" && child.session.id === activeId) {
+          return { bucketKey: bucket.key, projectKey: undefined };
+        }
+        if (
+          child.kind === "project" &&
+          child.sessions.some((s) => s.id === activeId)
+        ) {
+          return {
+            bucketKey: bucket.key,
+            projectKey: projectCollapseKey(bucket.key, child.project.id),
+          };
+        }
       }
-    }
-    if (grouped.ungrouped.some((s) => s.id === activeId)) {
-      return UNGROUPED_COLLAPSE_KEY;
     }
     return undefined;
   });
 
-  // 打开 / 切换到某 session 时自动展开其所属分组（含未分组桶）。
-  // 折叠态的读取放进 untrack：本 effect 只跟踪 activeGroupId 的变化，
+  // 打开 / 切换到某 session 时自动展开其所属桶与项目子组。
+  // 折叠态的读取放进 untrack：本 effect 只跟踪 activeLocation 的变化，
   // 手动折叠 active 组是合法操作，不会被这里立即弹回。
   $effect(() => {
-    const groupId = activeGroupId;
-    if (groupId !== undefined) {
-      untrack(() => agentProjectCollapse.expand(groupId));
+    const loc = activeLocation;
+    if (loc) {
+      untrack(() => {
+        agentProjectCollapse.expand(loc.bucketKey);
+        if (loc.projectKey) agentProjectCollapse.expand(loc.projectKey);
+      });
     }
   });
 
@@ -112,8 +134,6 @@
   // ============================================
   // 统一一个 contextMenu state、按 kind 区分目标：同屏天然只有一个菜单
   // （再次右键直接覆盖旧菜单），项目菜单与 session 菜单天然互斥。
-  // 未分组桶组头刻意不挂 oncontextmenu —— 右键它不弹任何自定义菜单
-  // （冒泡到 window 只会关闭已开菜单），也绝不会误弹 session 菜单。
   interface SessionContextMenu {
     kind: "session";
     session: AgentSession;
@@ -162,7 +182,7 @@
   }
 
   // ============================================
-  // 内联重命名
+  // 内联重命名（session）
   // ============================================
   // 输入态按 session id 存（renamingSessionId 定位目标行）：keyed each 重排时
   // 输入框随行移动、内容保留，提交始终写回 renamingSessionId 指向的会话。
@@ -190,8 +210,6 @@
 
   // 确认重命名：纯空白或未变更不写入。先收起输入框再提交，使 Enter 与 blur
   // 的双触发在第二次进入时因 renamingSessionId 已清空而天然幂等。
-  // rename 经 store 原位替换且排序键只看消息活动（lastMessageAt/createdAt），
-  // 提交后该行保持原位（GROUP-023）。
   async function confirmRename() {
     const id = renamingSessionId;
     const next = renameValue.trim();
@@ -220,7 +238,7 @@
   }
 
   // ============================================
-  // 复制 ID / 删除
+  // 复制 ID / 删除（session）
   // ============================================
   async function handleCopyId() {
     if (contextMenu?.kind !== "session") return;
@@ -234,8 +252,7 @@
   }
 
   // 一键删除，无确认。后端 agent_session_delete 先 abort 再删；删除成功后
-  // 清理该会话的运行状态并立 tombstone，拦截 abort 收尾产生的迟到流事件
-  // （GROUP-018：不重建已删条目、无 NOT_FOUND console 噪音）。
+  // 清理该会话的运行状态并立 tombstone，拦截 abort 收尾产生的迟到流事件。
   async function handleDelete() {
     if (contextMenu?.kind !== "session") {
       contextMenu = null;
@@ -270,8 +287,6 @@
     renameProjectValue = project.name;
     contextMenu = null;
 
-    // 等输入框挂载后聚焦并全选（input[data-project-id] 定位，
-    // 组头按钮此时已被输入行替换，选择器不会撞上按钮）。
     setTimeout(() => {
       const input = document.querySelector(
         `input[data-project-id="${project.id}"]`,
@@ -337,11 +352,10 @@
     }
   }
 
-  // 删除项目：confirm 文案带该组真实 session 数（confirm 前从 store 取
-  // 快照）；取消 = 全保留零副作用。确认后 store 联动移除该组会话并清
-  // currentSession（后端先 abort 后级联），随后逐会话清运行状态 + 立
-  // tombstone（同 session 删除路径，拦截 abort 收尾的迟到流事件）；
-  // 若 active session 属于该项目则回 Agent 落地页（/agent 无 id 即落地态）。
+  // 删除项目：confirm 文案带该项目真实 session 数（confirm 前从 store 取快照，
+  // 跨所有 Agent 统计）；取消 = 全保留零副作用。确认后 store 联动移除该项目会话
+  // 并清 currentSession（后端先 abort 后级联），随后逐会话清运行状态 + 立
+  // tombstone；若 active session 属于该项目则回 Agent 落地页。
   async function handleProjectDelete() {
     if (contextMenu?.kind !== "project") {
       contextMenu = null;
@@ -374,14 +388,16 @@
       }
     } catch (error) {
       console.error("Failed to delete agent project:", error);
-      const normalized = normalizeError(error, t("agent.list.deleteProjectFailed"));
+      const normalized = normalizeError(
+        error,
+        t("agent.list.deleteProjectFailed"),
+      );
       createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
 
-  // 组头整行（文件夹图标 / 名称 / 空白）单击切换折叠；组头上的内嵌控件
-  // （hover「+」直建 session 等）标记 data-group-control 即可豁免，
-  // 不会误触 toggle。
+  // 组头整行单击切换折叠；组头上的内嵌控件（hover「+」直建 session 等）
+  // 标记 data-group-control 即可豁免，不会误触 toggle。
   function handleGroupHeaderClick(event: MouseEvent, groupId: string) {
     if (
       event.target instanceof Element &&
@@ -392,9 +408,9 @@
     agentProjectCollapse.toggle(groupId);
   }
 
-  // 组头是 role="button" 的 div（HTML 禁止 button 嵌套，而控件槽里的
-  // hover「+」是真按钮）：Enter / Space 保持原生按钮的折叠切换语义；
-  // 焦点落在槽内控件上时交还控件自身处理（豁免规则同 click）。
+  // 组头是 role="button" 的 div（HTML 禁止 button 嵌套，而控件槽里的 hover「+」
+  // 是真按钮）：Enter / Space 保持折叠切换语义；焦点落在槽内控件上时交还控件
+  // 自身处理（豁免规则同 click）。
   function handleGroupHeaderKeydown(event: KeyboardEvent, groupId: string) {
     if (event.key !== "Enter" && event.key !== " ") return;
     if (
@@ -407,110 +423,75 @@
     agentProjectCollapse.toggle(groupId);
   }
 
-  // 顶部「+」建项目 / 组头「+」直建会话 / 删除项目共用的失败提示
-  // （非阻塞内联错误条，优先展示 AppError 的 hint，下一次实际尝试时清除）。
+  // 直建会话失败 / 删除项目失败共用的非阻塞内联错误条（优先展示 AppError 的 hint，
+  // 下一次实际尝试时清除）。
   let createErrorMessage = $state<string | null>(null);
 
-  // 「+」：选择项目目录并创建项目（后端为 get-or-create by canonical path）。
-  // 取消选择器（返回非 string）= 静默 no-op，不碰任何状态。去重命中与
-  // 新建走同一条路：store 按 id 原位替换/插入且保留服务端返回值（不改写
-  // 已有显示名/时间戳），随后展开该组并滚动组头进视口。
-  async function handleCreateProject() {
-    let dir: string | null = null;
-    try {
-      const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-      const picked = await openDialog({ directory: true });
-      if (typeof picked !== "string") return;
-      dir = picked;
-    } catch (error) {
-      console.error("Failed to open directory picker:", error);
-      return;
-    }
-
+  // Agent 组头 hover「+」：以该 Agent 定义直建一个会话（无项目）。
+  // createSessionFromDefinition 由后端按 definition 裁决能力集 / 工作目录策略。
+  async function handleCreateSessionForAgent(
+    event: MouseEvent,
+    bucket: AgentSessionBucket,
+  ) {
+    event.stopPropagation();
+    const agentId = bucket.agent?.id;
+    if (!agentId) return; // 「Chats」桶无来源 Agent，不提供直建入口。
+    contextMenu = null;
     createErrorMessage = null;
     try {
-      const project = await agentProjectActions.createProject(dir);
-      agentProjectCollapse.expand(project.id);
-      await tick();
-      document
-        .querySelector(`[data-project-id="${project.id}"]`)
-        ?.scrollIntoView({ block: "nearest" });
+      const session =
+        await agentSessionActions.createSessionFromDefinition(agentId);
+      agentProjectCollapse.expand(bucket.key);
+      goto(`/agent?id=${session.id}`);
     } catch (error) {
-      console.error("Failed to create agent project:", error);
-      const normalized = normalizeError(error, t("agent.list.createProjectFailed"));
+      console.error("Failed to create agent session:", error);
+      const normalized = normalizeError(
+        error,
+        t("agent.list.createSessionFailed"),
+      );
       createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
 
-  // 组头 hover「+」：零弹窗在该项目下直建「未命名」session。
-  //
-  // 继承源 = 组内排序首位 session：groupSessions 已按活动键
-  // coalesce(lastMessageAt, createdAt) 降序排好，首位即活动键最大者
-  // （绝不看 updatedAt）。只复制持久化配置字段 —— modelId+providerId
-  // 二元组同源同取、thinkingLevel、enabledTools、systemPrompt、
-  // temperature、maxTokens、toolExecutionMode；不带 workingDir（后端以
-  // project.path 覆盖），不带任何内容性状态（name/transcript/计数）。
-  // 继承源正在流式中也只读 store 里已落库的配置快照，新 session 无任何
-  // 运行态（agentRun state 按 session id 隔离）。空项目无继承源 →
-  // 配置全部留空走默认，不报错。
-  //
-  // 成功：createSession 内部 prepend + 设 current，显式展开该组后 goto
-  // （折叠组直建也可见，VAL-CREATE-008）。
-  // 失败（项目目录已删 VALIDATION_ERROR / 项目刚被删 NOT_FOUND）：走
-  // 共用内联错误条、不跳转；store 只在成功后插入，无幽灵行。
-  // 连点安全：两次点击各自独立建出两条「未命名」（不去重）；store 在
-  // 每次完成时基于最新列表 prepend，两次 await 互不覆盖，currentSession
-  // 由最后完成者持有。
+  // Agent > 项目子组 hover「+」：以该 Agent 定义直建一个挂到该项目的会话
+  // （agentDefinitionId + projectId 同时归属）。工作目录由后端以 project.path 覆盖。
   async function handleCreateSessionInProject(
     event: MouseEvent,
-    group: AgentProjectGroup,
+    bucket: AgentSessionBucket,
+    project: AgentProject,
   ) {
-    // 槽内控件已被 handleGroupHeaderClick 豁免；stopPropagation 再加一道
-    // 保险，确保不触发折叠切换。
     event.stopPropagation();
+    const agentId = bucket.agent?.id;
+    if (!agentId) return;
     contextMenu = null;
     createErrorMessage = null;
-
-    const source = group.sessions.at(0);
-    const request: CreateAgentSessionRequest = {
-      name: t("agent.list.untitledSession"),
-      projectId: group.project.id,
-      modelId: source?.modelId,
-      providerId: source?.providerId,
-      systemPrompt: source?.systemPrompt,
-      thinkingLevel: source?.thinkingLevel,
-      temperature: source?.temperature,
-      maxTokens: source?.maxTokens,
-      // 无 source 继承时取全局默认（设置页可改）；设置未加载时兜底全 7 个。
-      enabledTools: source
-        ? [...source.enabledTools]
-        : (settingsState.settings?.agent?.defaultEnabledTools ?? [
-            ...BUILTIN_TOOL_IDS,
-          ]),
-      toolExecutionMode: source?.toolExecutionMode,
-    };
-
     try {
-      const session = await agentSessionActions.createSession(request);
-      // 显式展开（镜像 handleCreateProject）：直建发生在当前 active 组时，
-      // activeGroupId 这个 $derived 重算为同值，Svelte 5 同值不触发下游
-      // 反应，上方自动展开的 $effect 不会重跑，必须在此显式 expand。
-      agentProjectCollapse.expand(group.project.id);
+      const session = await agentSessionActions.createSessionFromDefinition(
+        agentId,
+        { projectId: project.id },
+      );
+      agentProjectCollapse.expand(bucket.key);
+      agentProjectCollapse.expand(projectCollapseKey(bucket.key, project.id));
       goto(`/agent?id=${session.id}`);
     } catch (error) {
-      console.error("Failed to create agent session:", error);
-      createErrorMessage =
-        error instanceof Error
-          ? error.message
-          : t("agent.list.createSessionFailed");
+      console.error("Failed to create agent session in project:", error);
+      const normalized = normalizeError(
+        error,
+        t("agent.list.createSessionFailed"),
+      );
+      createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
 </script>
 
-{#snippet sessionRow(session: AgentSession)}
+{#snippet sessionRow(
+  session: AgentSession,
+  rowIndent: string,
+  inputIndent: string,
+)}
   {#if renamingSessionId === session.id}
     <!-- 重命名输入框：随 keyed each 行移动；Enter 提交 / blur 提交 / Esc 取消 -->
-    <div class="pl-5 pr-2">
+    <div class="{inputIndent} pr-2">
       <input
         data-session-id={session.id}
         class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
@@ -522,7 +503,7 @@
     </div>
   {:else}
     <button
-      class="w-full flex items-center gap-2 py-0.5 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {session.id ===
+      class="w-full flex items-center gap-2 py-0.5 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
@@ -537,39 +518,98 @@
   {/if}
 {/snippet}
 
-<div class="flex flex-col h-full">
-  <!-- 标题 + 新建项目按钮 -->
-  <div class="flex items-center justify-between pb-2 pl-4 pr-2 flex-shrink-0">
-    <span class="text-[11px] leading-[16px] font-medium text-base-content/45"
-      >{t("agent.list.heading")}</span
+<!-- 项目子组：组头（可折叠）+ 会话列表；宿主桶通过 bucket 传入以支持直建归属。 -->
+{#snippet projectGroup(
+  bucket: AgentSessionBucket,
+  project: AgentProject,
+  sessions: AgentSession[],
+)}
+  {@const key = projectCollapseKey(bucket.key, project.id)}
+  {@const collapsed = agentProjectCollapse.isCollapsed(key)}
+  {#if renamingProjectId === project.id}
+    <!-- 项目重命名输入行：替换组头按钮，输入框包在 data-group-control 豁免区内。 -->
+    <div class="w-full flex items-center gap-1.5 py-0.5 pl-6 pr-2 text-[12px] leading-[18px]">
+      {#if collapsed}
+        <Folder size={14} class="flex-shrink-0 text-base-content/60" />
+      {:else}
+        <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
+      {/if}
+      <span data-group-control class="flex-1 min-w-0">
+        <input
+          data-project-id={project.id}
+          class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
+          bind:value={renameProjectValue}
+          onkeydown={handleProjectRenameKeydown}
+          onblur={confirmProjectRename}
+          placeholder={t("agent.list.renamePlaceholder")}
+        />
+      </span>
+    </div>
+  {:else}
+    <div
+      data-project-id={project.id}
+      class="group/proj w-full flex items-center gap-1.5 py-0.5 pl-6 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/75 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+      role="button"
+      tabindex="0"
+      aria-expanded={!collapsed}
+      onclick={(event) => handleGroupHeaderClick(event, key)}
+      onkeydown={(event) => handleGroupHeaderKeydown(event, key)}
+      oncontextmenu={(event) => handleProjectContextMenu(event, project)}
     >
-    <button
-      class="p-1 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-300"
-      title={t("agent.list.pickProjectDir")}
-      aria-label={t("agent.list.pickProjectDir")}
-      onclick={handleCreateProject}
-    >
-      <Plus size={16} />
-    </button>
-  </div>
+      {#if collapsed}
+        <Folder size={14} class="flex-shrink-0 text-base-content/60" />
+      {:else}
+        <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
+      {/if}
+      <span class="truncate flex-1">{project.name}</span>
+      <!-- 右侧控件槽：hover「+」直建该 Agent + 项目的 session。 -->
+      <span data-group-control class="flex items-center flex-shrink-0">
+        <button
+          class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+          title={t("agent.list.newSession")}
+          aria-label={t("agent.list.newSessionInProject", {
+            name: project.name,
+          })}
+          onclick={(event) => handleCreateSessionInProject(event, bucket, project)}
+        >
+          <Plus size={14} />
+        </button>
+      </span>
+      <ChevronRight
+        size={14}
+        class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
+          ? ''
+          : 'rotate-90'}"
+      />
+    </div>
+  {/if}
+  {#if !collapsed}
+    <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
+      {#each sessions as session (session.id)}
+        {@render sessionRow(session, "pl-11", "pl-9")}
+      {/each}
+    </div>
+  {/if}
+{/snippet}
 
-  <!-- 建项目 / 直建会话 / 删除项目失败的非阻塞错误条（下一次实际尝试时自动清除） -->
+<div class="flex flex-col h-full">
+  <!-- 直建会话 / 删除项目失败的非阻塞错误条（下一次实际尝试时自动清除） -->
   {#if createErrorMessage}
     <div
-      class="mx-2 mb-1 px-2 py-1 rounded-md bg-error/10 text-error text-[12px] leading-[18px] flex-shrink-0"
+      class="mx-2 mt-2 mb-1 px-2 py-1 rounded-md bg-error/10 text-error text-[12px] leading-[18px] flex-shrink-0"
     >
       {createErrorMessage}
     </div>
   {/if}
 
-  <!-- 项目分组列表 -->
-  <div class="flex-1 overflow-y-auto space-y-0.5 px-2">
+  <!-- Agent 分组列表（Agent → Project → Session；无来源 Agent 归入垫底的 Chats 桶） -->
+  <div class="flex-1 overflow-y-auto space-y-0.5 px-2 pt-2">
     {#if !initialLoadDone}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
         {t("common.loading")}
       </div>
     {:else if loadError}
-      <!-- 部分加载失败：不进入分组渲染（避免会话被伪归入「未分组」桶） -->
+      <!-- 部分加载失败：不进入分组渲染（避免会话被伪归入「Chats」桶） -->
       <div class="px-2 py-1 text-[12px] leading-[18px] text-error">
         {t("agent.list.loadFailed")}
       </div>
@@ -584,128 +624,56 @@
         {t("agent.list.emptyHint")}
       </div>
     {:else}
-      {#each grouped.groups as group (group.project.id)}
-        {@const collapsed = agentProjectCollapse.isCollapsed(group.project.id)}
-        {#if renamingProjectId === group.project.id}
-          <!-- 项目重命名输入行：替换组头按钮（同 session 重命名的结构），
-               输入框包在 data-group-control 豁免区内 —— 即便未来此行恢复
-               折叠点击，点击输入框/选中文本也不会触发 toggle（GROUP-025）。 -->
-          <div
-            class="w-full flex items-center gap-1.5 py-0.5 px-2 text-[12px] leading-[18px]"
-          >
-            {#if collapsed}
-              <Folder size={14} class="flex-shrink-0 text-base-content/60" />
-            {:else}
-              <FolderOpen
-                size={14}
-                class="flex-shrink-0 text-base-content/60"
-              />
-            {/if}
-            <span data-group-control class="flex-1 min-w-0">
-              <input
-                data-project-id={group.project.id}
-                class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
-                bind:value={renameProjectValue}
-                onkeydown={handleProjectRenameKeydown}
-                onblur={confirmProjectRename}
-                placeholder={t("agent.list.renamePlaceholder")}
-              />
-            </span>
-          </div>
-        {:else}
-          <!-- 组头宿主是 role="button" 的 div 而非 <button>：控件槽里的
-               hover「+」是真按钮，HTML 禁止 button 嵌套。click/Enter/Space
-               切换折叠的语义由 handleGroupHeaderClick / Keydown 保持。 -->
-          <div
-            data-project-id={group.project.id}
-            class="group w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300 cursor-default select-none"
-            role="button"
-            tabindex="0"
-            aria-expanded={!collapsed}
-            onclick={(event) => handleGroupHeaderClick(event, group.project.id)}
-            onkeydown={(event) =>
-              handleGroupHeaderKeydown(event, group.project.id)}
-            oncontextmenu={(event) =>
-              handleProjectContextMenu(event, group.project)}
-          >
-            {#if collapsed}
-              <Folder size={14} class="flex-shrink-0 text-base-content/60" />
-            {:else}
-              <FolderOpen
-                size={14}
-                class="flex-shrink-0 text-base-content/60"
-              />
-            {/if}
-            <span class="truncate flex-1">{group.project.name}</span>
-            <!-- 右侧控件槽：hover「+」直建 session；在 data-group-control
-                 豁免区内，点击不会误触折叠。未分组桶组头无此槽。 -->
+      {#each buckets as bucket (bucket.key)}
+        {@const collapsed = agentProjectCollapse.isCollapsed(bucket.key)}
+        <!-- 桶组头：Agent（Bot 图标 + 名称 + hover「+」直建）或 Chats（MessagesSquare，无直建）。 -->
+        <div
+          class="group/bucket w-full flex items-center gap-1.5 py-0.5 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-medium text-base-content/80 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+          role="button"
+          tabindex="0"
+          aria-expanded={!collapsed}
+          onclick={(event) => handleGroupHeaderClick(event, bucket.key)}
+          onkeydown={(event) => handleGroupHeaderKeydown(event, bucket.key)}
+        >
+          {#if bucket.agent}
+            <Bot size={14} class="flex-shrink-0 text-base-content/60" />
+            <span class="truncate flex-1">{bucket.agent.name}</span>
             <span data-group-control class="flex items-center flex-shrink-0">
               <button
-                class="p-0.5 rounded text-base-content/50 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+                class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/bucket:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
                 title={t("agent.list.newSession")}
-                aria-label={t("agent.list.newSessionInProject", {
-                  name: group.project.name,
-                })}
-                onclick={(event) =>
-                  handleCreateSessionInProject(event, group)}
+                aria-label={t("agent.list.newSession")}
+                onclick={(event) => handleCreateSessionForAgent(event, bucket)}
               >
                 <Plus size={14} />
               </button>
             </span>
-            <ChevronRight
+          {:else}
+            <MessagesSquare
               size={14}
-              class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
-                ? ''
-                : 'rotate-90'}"
+              class="flex-shrink-0 text-base-content/60"
             />
-          </div>
-        {/if}
-        {#if !collapsed}
-          <!-- 会话列表容器：展开/收起走 slide 过渡；wrapper 自带 space-y 维持行距 -->
-          <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
-            {#if group.sessions.length === 0}
-              <div
-                class="pl-7 pr-2 py-0.5 text-[12px] leading-[18px] text-base-content/40"
-              >
-                {t("agent.list.noChats")}
-              </div>
-            {:else}
-              {#each group.sessions as session (session.id)}
-                {@render sessionRow(session)}
-              {/each}
-            {/if}
-          </div>
-        {/if}
-      {/each}
-
-      <!-- 未分组桶：仅非空时渲染，固定在最底部 -->
-      {#if grouped.ungrouped.length > 0}
-        {@const ungroupedCollapsed = agentProjectCollapse.isCollapsed(
-          UNGROUPED_COLLAPSE_KEY,
-        )}
-        <button
-          class="w-full flex items-center gap-1.5 py-0.5 px-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/80 hover:text-base-content hover:bg-base-300"
-          aria-expanded={!ungroupedCollapsed}
-          onclick={(event) =>
-            handleGroupHeaderClick(event, UNGROUPED_COLLAPSE_KEY)}
-        >
-          <MessagesSquare size={14} class="flex-shrink-0 text-base-content/60" />
-          <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
+            <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
+          {/if}
           <ChevronRight
             size={14}
-            class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {ungroupedCollapsed
+            class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
               ? ''
               : 'rotate-90'}"
           />
-        </button>
-        {#if !ungroupedCollapsed}
+        </div>
+        {#if !collapsed}
           <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
-            {#each grouped.ungrouped as session (session.id)}
-              {@render sessionRow(session)}
+            {#each bucket.children as child (child.kind === "project" ? `p:${child.project.id}` : `s:${child.session.id}`)}
+              {#if child.kind === "project"}
+                {@render projectGroup(bucket, child.project, child.sessions)}
+              {:else}
+                {@render sessionRow(child.session, "pl-8", "pl-6")}
+              {/if}
             {/each}
           </div>
         {/if}
-      {/if}
+      {/each}
     {/if}
   </div>
 </div>
