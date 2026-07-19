@@ -5,6 +5,7 @@
   import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
   import { ChevronDown, ChevronRight } from "@lucide/svelte";
+  import { AGENT_ICONS } from "$lib/utils/agentIcons";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
   import type { McpServerConfig } from "$lib/types/llm";
@@ -20,6 +21,8 @@
 
   export interface AgentFormData {
     name: string;
+    // Lucide kebab-case 图标名；空串表示用默认图标
+    icon: string;
     temperature?: number;
     maxTokens?: number;
     systemPrompt: string;
@@ -122,6 +125,7 @@
 
   let formData = $state<AgentFormData>({
     name: "",
+    icon: "",
     systemPrompt: "",
     mcpServers: [],
     generativeUi: false,
@@ -207,6 +211,7 @@
     if (agent) {
       formData = {
         name: agent.name,
+        icon: agent.icon ?? "",
         temperature: agent.temperature,
         maxTokens: agent.maxTokens,
         systemPrompt: agent.systemPrompt || "",
@@ -221,6 +226,7 @@
     } else {
       formData = {
         name: "",
+        icon: "",
         systemPrompt: "",
         mcpServers: [],
         generativeUi: false,
@@ -291,8 +297,31 @@
   </div>
 
   {#snippet aside()}
-    <!-- 配置栏：能力 / 生成式 UI / 模型参数 / MCP 服务器，紧凑纵排 -->
+    <!-- 配置栏：图标 / 能力 / 生成式 UI / 模型参数 / MCP 服务器，紧凑纵排 -->
     <div class="flex flex-col gap-6 pt-1">
+      <!-- 图标：精选 Lucide 图标网格；再次点选中项可清除（回退默认图标） -->
+      <div class="flex flex-col gap-2">
+        <span class="form-section-label">{t("agent.form.iconLabel")}</span>
+        <div class="flex flex-wrap gap-1.5">
+          {#each AGENT_ICONS as opt (opt.name)}
+            {@const Icon = opt.Icon}
+            <button
+              type="button"
+              aria-pressed={formData.icon === opt.name}
+              title={opt.name}
+              class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {formData.icon ===
+              opt.name
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-[var(--hairline)] text-base-content/55 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
+              onclick={() =>
+                (formData.icon = formData.icon === opt.name ? "" : opt.name)}
+            >
+              <Icon size={16} />
+            </button>
+          {/each}
+        </div>
+      </div>
+
       <!-- 工具：内置工具 / 执行方式 / MCP 服务器——所有工具面配置归一组 -->
       <div class="flex flex-col gap-3.5">
         <span class="form-section-label">{t("agent.form.sectionTools")}</span>

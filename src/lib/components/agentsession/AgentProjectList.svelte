@@ -3,7 +3,6 @@
   import { slide } from "svelte/transition";
   import { goto } from "$app/navigation";
   import {
-    Bot,
     ChevronRight,
     Copy,
     Folder,
@@ -14,6 +13,7 @@
     Plus,
     Trash2,
   } from "@lucide/svelte";
+  import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import {
     agentProjectState,
     agentProjectActions,
@@ -636,7 +636,8 @@
           onkeydown={(event) => handleGroupHeaderKeydown(event, bucket.key)}
         >
           {#if bucket.agent}
-            <Bot size={14} class="flex-shrink-0 text-base-content/60" />
+            {@const BucketIcon = resolveAgentIcon(bucket.agent.icon)}
+            <BucketIcon size={14} class="flex-shrink-0 text-base-content/60" />
             <span class="truncate flex-1">{bucket.agent.name}</span>
             <span data-group-control class="flex items-center flex-shrink-0">
               <button

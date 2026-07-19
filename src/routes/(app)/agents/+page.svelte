@@ -14,6 +14,7 @@
   import { page } from "$app/stores";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
+  import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import { t } from "$lib/i18n";
   import type { Agent, GenUi } from "$lib/types";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
@@ -71,6 +72,15 @@
     if (editingAgent?.id) {
       // 更新现有 Agent
       await agentActions.updateAgentName(editingAgent.id, data.name);
+
+      // 图标：空串归一为 null（清除自定义图标，回退默认）。
+      if ((data.icon || null) !== (editingAgent.icon ?? null)) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "icon",
+          data.icon || null
+        );
+      }
 
       // Helper function to compare optional values
       const hasChanged = <T,>(a: T | undefined, b: T | undefined) =>
@@ -178,6 +188,9 @@
 
       // 仅对非默认能力字段做 create-then-update。
       if (newAgent.id) {
+        if (data.icon) {
+          await agentActions.updateAgentField(newAgent.id, "icon", data.icon);
+        }
         if (data.description) {
           await agentActions.updateAgentField(
             newAgent.id,
@@ -253,6 +266,9 @@
       });
 
       if (newAgent.id) {
+        if (agent.icon) {
+          await agentActions.updateAgentField(newAgent.id, "icon", agent.icon);
+        }
         if (agent.builtinTools && agent.builtinTools.length > 0) {
           await agentActions.updateAgentField(newAgent.id, "builtinTools", [
             ...agent.builtinTools,
@@ -409,13 +425,14 @@
           class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-panel)]"
         >
           {#each agentState.agents as agent (agent.id)}
+            {@const AgentIcon = resolveAgentIcon(agent.icon)}
             <div
               class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-300/40"
             >
               <div
                 class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-base-200 text-base-content/60"
               >
-                <Bot size={16} />
+                <AgentIcon size={16} />
               </div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">

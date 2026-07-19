@@ -146,6 +146,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.modelParams": "Model parameters",
   "agent.form.mcpServers": "MCP servers",
   "agent.form.descriptionPlaceholder": "One-line summary shown in the list",
+  "agent.form.iconLabel": "Icon",
   "agent.form.sectionTools": "Tools",
   "agent.form.builtinTools": "Built-in tools",
   "agent.form.workingDir": "Working directory",

@@ -138,6 +138,7 @@ export const agentZh = {
   "agent.form.mcpServers": "MCP 服务器",
   "agent.form.mcpComingSoon": "MCP 服务器配置即将推出，敬请期待...",
   "agent.form.descriptionPlaceholder": "一行简介，便于在列表中识别",
+  "agent.form.iconLabel": "图标",
   "agent.form.sectionTools": "工具",
   "agent.form.builtinTools": "内置工具",
   "agent.form.workingDir": "工作目录",
