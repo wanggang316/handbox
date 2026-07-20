@@ -394,7 +394,6 @@
           <PageHeader
             title="GenUI"
             meta={`共 ${genuiState.genuis.length} 个模板`}
-            description="具名、可复用的 JSON-Render UI 模板，可在 Agent 表单中关联使用。"
           >
             {#snippet actions()}
               <Button
@@ -514,60 +513,44 @@
           <p class="text-sm mt-2">点击右上角「新建 GenUI」创建第一个模板</p>
         </div>
       {:else}
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- 列表：一行一个 GenUI（图标 + 名称 + hover 操作），与 Agents 列表一致 -->
+        <div
+          class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-panel)]"
+        >
           {#each genuiState.genuis as genui (genui.id)}
-            <button
-              type="button"
-              class="text-left bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors"
-              onclick={() => openGenuiEditor(genui)}
+            <div
+              class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-300/40"
             >
-              <div class="flex items-start justify-between mb-3">
-                <div class="flex items-center gap-2">
-                  <div
-                    class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center text-primary"
-                  >
-                    <LayoutTemplate size={20} />
-                  </div>
-                  <div>
-                    <h3 class="font-medium text-base-content">{genui.name}</h3>
-                    <p class="text-xs text-base-content/60">
-                      {genui.spec.length} 字符
-                    </p>
-                  </div>
-                </div>
-                <div class="flex items-center gap-1">
-                  <span
-                    class="p-1.5 rounded-lg hover:bg-base-100 text-base-content/60 hover:text-base-content transition-colors"
-                    title={t("common.edit")}
-                  >
-                    <Pencil size={14} />
-                  </span>
-                  <span
-                    role="button"
-                    tabindex="0"
-                    class="p-1.5 rounded-lg hover:bg-error/10 text-base-content/60 hover:text-error transition-colors"
-                    title={t("common.delete")}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      openGenuiDeleteConfirm(genui);
-                    }}
-                    onkeydown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openGenuiDeleteConfirm(genui);
-                      }
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </span>
-                </div>
+              <div
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-base-200 text-base-content/60"
+              >
+                <LayoutTemplate size={16} />
               </div>
-
-              <div class="mt-3 pt-3 border-t border-base-300 text-xs text-base-content/50">
-                {new Date(genui.updatedAt).toLocaleDateString("zh-CN")}
+              <div class="min-w-0 flex-1">
+                <h3 class="truncate text-sm font-medium text-base-content">
+                  {genui.name}
+                </h3>
               </div>
-            </button>
+              <!-- 操作：hover / 键盘聚焦时显现 -->
+              <div
+                class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+              >
+                <button
+                  class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
+                  onclick={() => openGenuiEditor(genui)}
+                  title={t("common.edit")}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-error/10 hover:text-error"
+                  onclick={() => openGenuiDeleteConfirm(genui)}
+                  title={t("common.delete")}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
           {/each}
         </div>
       {/if}
