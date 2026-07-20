@@ -503,7 +503,7 @@
     </div>
   {:else}
     <button
-      class="w-full flex items-center gap-2 py-0.5 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {session.id ===
+      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
@@ -511,7 +511,7 @@
       oncontextmenu={(event) => handleSessionContextMenu(event, session)}
     >
       <span class="truncate flex-1">{session.name}</span>
-      <span class="flex-shrink-0 text-[11px] text-base-content/40">
+      <span class="flex-shrink-0 text-[11px] text-base-content/45">
         {formatRelativeTime(sessionActivityKey(session))}
       </span>
     </button>
@@ -548,7 +548,7 @@
   {:else}
     <div
       data-project-id={project.id}
-      class="group/proj w-full flex items-center gap-1.5 py-0.5 pl-6 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/75 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+      class="group/proj w-full flex items-center gap-1.5 py-1 pl-6 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/75 hover:text-base-content hover:bg-base-300 cursor-default select-none"
       role="button"
       tabindex="0"
       aria-expanded={!collapsed}
@@ -602,8 +602,9 @@
     </div>
   {/if}
 
-  <!-- Agent 分组列表（Agent → Project → Session；无来源 Agent 归入垫底的 Chats 桶） -->
-  <div class="flex-1 overflow-y-auto space-y-0.5 px-2 pt-2">
+  <!-- Agent 分组列表（Agent → Project → Session；无来源 Agent 归入垫底的 Chats 桶）。
+       组间用 space-y-1.5 分隔、组内紧凑，形成清晰的分组节奏。 -->
+  <div class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-2">
     {#if !initialLoadDone}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
         {t("common.loading")}
@@ -626,54 +627,57 @@
     {:else}
       {#each buckets as bucket (bucket.key)}
         {@const collapsed = agentProjectCollapse.isCollapsed(bucket.key)}
-        <!-- 桶组头：Agent（Bot 图标 + 名称 + hover「+」直建）或 Chats（MessagesSquare，无直建）。 -->
-        <div
-          class="group/bucket w-full flex items-center gap-1.5 py-0.5 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/55 hover:text-base-content hover:bg-base-300 cursor-default select-none"
-          role="button"
-          tabindex="0"
-          aria-expanded={!collapsed}
-          onclick={(event) => handleGroupHeaderClick(event, bucket.key)}
-          onkeydown={(event) => handleGroupHeaderKeydown(event, bucket.key)}
-        >
-          {#if bucket.agent}
-            {@const BucketIcon = resolveAgentIcon(bucket.agent.icon)}
-            <BucketIcon size={14} class="flex-shrink-0 text-base-content/60" />
-            <span class="truncate flex-1">{bucket.agent.name}</span>
-            <span data-group-control class="flex items-center flex-shrink-0">
-              <button
-                class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/bucket:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
-                title={t("agent.list.newSession")}
-                aria-label={t("agent.list.newSession")}
-                onclick={(event) => handleCreateSessionForAgent(event, bucket)}
-              >
-                <Plus size={14} />
-              </button>
-            </span>
-          {:else}
-            <MessagesSquare
+        <!-- 一个 Agent 分组（组头 + 子节点）作为一个整体，组内 space-y-0.5 紧凑排布。 -->
+        <div class="space-y-0.5">
+          <!-- 桶组头：Agent（Bot 图标 + 名称 + hover「+」直建）或 Chats（MessagesSquare，无直建）。 -->
+          <div
+            class="group/bucket w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/55 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+            role="button"
+            tabindex="0"
+            aria-expanded={!collapsed}
+            onclick={(event) => handleGroupHeaderClick(event, bucket.key)}
+            onkeydown={(event) => handleGroupHeaderKeydown(event, bucket.key)}
+          >
+            {#if bucket.agent}
+              {@const BucketIcon = resolveAgentIcon(bucket.agent.icon)}
+              <BucketIcon size={14} class="flex-shrink-0 text-base-content/60" />
+              <span class="truncate flex-1">{bucket.agent.name}</span>
+              <span data-group-control class="flex items-center flex-shrink-0">
+                <button
+                  class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/bucket:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+                  title={t("agent.list.newSession")}
+                  aria-label={t("agent.list.newSession")}
+                  onclick={(event) => handleCreateSessionForAgent(event, bucket)}
+                >
+                  <Plus size={14} />
+                </button>
+              </span>
+            {:else}
+              <MessagesSquare
+                size={14}
+                class="flex-shrink-0 text-base-content/60"
+              />
+              <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
+            {/if}
+            <ChevronRight
               size={14}
-              class="flex-shrink-0 text-base-content/60"
+              class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
+                ? ''
+                : 'rotate-90'}"
             />
-            <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
-          {/if}
-          <ChevronRight
-            size={14}
-            class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
-              ? ''
-              : 'rotate-90'}"
-          />
-        </div>
-        {#if !collapsed}
-          <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
-            {#each bucket.children as child (child.kind === "project" ? `p:${child.project.id}` : `s:${child.session.id}`)}
-              {#if child.kind === "project"}
-                {@render projectGroup(bucket, child.project, child.sessions)}
-              {:else}
-                {@render sessionRow(child.session, "pl-8", "pl-6")}
-              {/if}
-            {/each}
           </div>
-        {/if}
+          {#if !collapsed}
+            <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
+              {#each bucket.children as child (child.kind === "project" ? `p:${child.project.id}` : `s:${child.session.id}`)}
+                {#if child.kind === "project"}
+                  {@render projectGroup(bucket, child.project, child.sessions)}
+                {:else}
+                  {@render sessionRow(child.session, "pl-8", "pl-6")}
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        </div>
       {/each}
     {/if}
   </div>
