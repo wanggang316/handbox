@@ -410,7 +410,9 @@
         </div>
       {/if}
     {#if activeTab === "agents"}
-      {#if agentState.isLoading}
+      <!-- Spinner 仅在冷启动（列表为空）时顶替内容；已有缓存则立即渲染、后台刷新
+           不 blank，避免每次导航都闪一下 spinner（感知为切换延迟）。 -->
+      {#if agentState.isLoading && agentState.agents.length === 0}
         <div class="flex items-center justify-center h-full">
           <Spinner size={28} />
         </div>
