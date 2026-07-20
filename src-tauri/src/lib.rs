@@ -186,6 +186,7 @@ pub fn run() {
             agent_session_list,
             agent_session_get,
             agent_session_rename,
+            agent_session_generate_title,
             agent_session_update_field,
             agent_session_delete,
             agent_session_messages,

@@ -22,6 +22,7 @@ pub mod model_runtime;
 pub mod provider;
 pub mod quick_action;
 pub mod selection;
+pub mod title_gen;
 pub mod settings;
 pub mod skill_service;
 pub mod skills;
