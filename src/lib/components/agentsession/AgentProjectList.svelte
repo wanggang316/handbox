@@ -259,7 +259,9 @@
         error,
         t("agent.list.generateTitleFailed"),
       );
-      createErrorMessage = normalized.hint ?? normalized.message;
+      // 展示具体 message（真实原因），而非通用 hint —— 否则「应用内部错误，请
+      // 重新启动应用」这类兜底 hint 会遮盖掉实际失败原因。
+      createErrorMessage = `${t("agent.list.generateTitleFailed")}: ${normalized.message}`;
     } finally {
       generatingTitleId = null;
     }

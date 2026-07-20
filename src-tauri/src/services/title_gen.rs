@@ -15,6 +15,15 @@ use crate::services::model_runtime::{self, ChatOptions};
 /// System prompt: produce a bare, short title in the user's own language.
 const TITLE_SYSTEM_PROMPT: &str = "You write an extremely short title (at most 6 words, or 16 Chinese characters) that captures what the user wants, based on their first message. Reply with ONLY the title text: no surrounding quotes, no trailing punctuation, no prefix like \"Title:\", no explanation. Use the same language as the user's message.";
 
+/// Output token cap for the title call. Deliberately generous (not ~64): a
+/// reasoning model spends part of its output budget on thinking before it
+/// emits the title, so a tight cap truncates mid-thought and yields an empty
+/// title. 2048 leaves ample room for brief reasoning on a trivial title task
+/// plus the short title, while a non-reasoning model still stops early (the cap
+/// is never reached, so no extra cost). It also stays within providers that
+/// require max_tokens and bound it (e.g. Anthropic-compatible endpoints).
+const MAX_OUTPUT_TOKENS: u32 = 2048;
+
 /// Max characters of the source message fed to the model — a guard so a giant
 /// first message can't blow the context window or run up cost for a title.
 const MAX_SOURCE_CHARS: usize = 2000;
@@ -39,7 +48,7 @@ pub async fn generate_title(
     let options = model_runtime::build_stream_options(
         &ChatOptions {
             temperature: Some(0.3),
-            max_tokens: Some(64),
+            max_tokens: Some(MAX_OUTPUT_TOKENS),
             ..Default::default()
         },
         api_key,
@@ -56,9 +65,9 @@ pub async fn generate_title(
     let message = client
         .complete_simple(&model, context, Some(options))
         .await
-        .map_err(|e| {
-            AppError::internal_error(&format!("title generation request failed: {e}"))
-        })?;
+        // network_error (not internal_error) so the UI hint is "check your
+        // network / provider" rather than the misleading "restart the app".
+        .map_err(|e| AppError::network_error(&format!("title generation request failed: {e}")))?;
 
     // `complete_simple` returns the error message (stop_reason == Error) rather
     // than erroring, so inspect it explicitly.
@@ -66,7 +75,7 @@ pub async fn generate_title(
         let detail = message
             .error_message
             .unwrap_or_else(|| "unknown error".to_string());
-        return Err(AppError::internal_error(&format!(
+        return Err(AppError::network_error(&format!(
             "title generation model error: {detail}"
         )));
     }
@@ -82,8 +91,8 @@ pub async fn generate_title(
 
     let title = sanitize_title(&raw);
     if title.is_empty() {
-        return Err(AppError::internal_error(
-            "title generation returned an empty title",
+        return Err(AppError::network_error(
+            "the model returned no title text (output may be reasoning-only or truncated)",
         ));
     }
     Ok(title)

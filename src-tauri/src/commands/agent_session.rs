@@ -202,11 +202,11 @@ pub async fn agent_session_generate_title(
     let provider_id = session
         .provider_id
         .clone()
-        .ok_or_else(|| AppError::validation_error("agent session has no provider selected"))?;
+        .ok_or_else(|| AppError::validation_error("会话未选择供应商，无法生成标题"))?;
     let model_id = session
         .model_id
         .clone()
-        .ok_or_else(|| AppError::validation_error("agent session has no model selected"))?;
+        .ok_or_else(|| AppError::validation_error("会话未选择模型，无法生成标题"))?;
     let provider = provider_service.get_provider(&provider_id).await?;
 
     // 首条用户消息文本（transcript 权威源是 JSONL）。
@@ -217,7 +217,7 @@ pub async fn agent_session_generate_title(
         .into_iter()
         .find(|m| m.role == "user")
         .and_then(|m| extract_user_text(&m.payload))
-        .ok_or_else(|| AppError::validation_error("session has no user message to title"))?;
+        .ok_or_else(|| AppError::validation_error("该会话还没有可用于生成标题的消息"))?;
 
     let title = title_gen::generate_title(
         &provider.provider_type,
@@ -226,7 +226,12 @@ pub async fn agent_session_generate_title(
         &provider.api_key,
         &source_text,
     )
-    .await?;
+    .await
+    .map_err(|e| {
+        // 真实原因会被前端通用 hint 遮盖，这里落一条日志便于诊断。
+        tracing::warn!(session_id = %session.id, error = %e, "session title generation failed");
+        e
+    })?;
 
     // 与 agent_session_rename 相同的落盘：SQLite 权威名先行，再 JSONL label（best-effort），
     // 返回经 overlay 的 session 供前端直接更新侧栏。
