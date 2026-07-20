@@ -4,11 +4,15 @@
     Square,
     Paperclip,
     X,
+    Ban,
     Bot,
     ChevronDown,
     ChevronsUpDown,
     Check,
     Folder,
+    SignalLow,
+    SignalMedium,
+    SignalHigh,
   } from "@lucide/svelte";
   import { onDestroy, tick } from "svelte";
   import { fly } from "svelte/transition";
@@ -41,10 +45,30 @@
   // 思考强度档位（thinkingLevel 为后端自由文本字段）。
   // $derived so labels re-render on language switch.
   const thinkingLevelOptions = $derived([
-    { value: "off", label: t("agent.thinking.off") },
-    { value: "low", label: t("agent.thinking.low") },
-    { value: "medium", label: t("agent.thinking.medium") },
-    { value: "high", label: t("agent.thinking.high") },
+    {
+      value: "off",
+      label: t("agent.thinking.off"),
+      desc: t("agent.thinking.offDesc"),
+      icon: Ban,
+    },
+    {
+      value: "low",
+      label: t("agent.thinking.low"),
+      desc: t("agent.thinking.lowDesc"),
+      icon: SignalLow,
+    },
+    {
+      value: "medium",
+      label: t("agent.thinking.medium"),
+      desc: t("agent.thinking.mediumDesc"),
+      icon: SignalMedium,
+    },
+    {
+      value: "high",
+      label: t("agent.thinking.high"),
+      desc: t("agent.thinking.highDesc"),
+      icon: SignalHigh,
+    },
   ]);
 
   // 单张图片软上限（10 MiB）。超限的图片不阻塞 UI，仅静默跳过并提示，避免把
@@ -83,6 +107,44 @@
   let modelModalOpen = $state(false);
 
   const thinkingLevel = $derived(session.thinkingLevel ?? "off");
+  const thinkingLevelLabel = $derived(
+    thinkingLevelOptions.find((o) => o.value === thinkingLevel)?.label ??
+      thinkingLevelOptions[0].label,
+  );
+
+  // 推理强度自定义菜单（镜像 Agent 选择器的弹层模式）。hover 项驱动底部描述区，
+  // 未 hover 时回落到当前选中项的描述。
+  let thinkingMenuOpen = $state(false);
+  let thinkingMenuHover = $state<string | null>(null);
+  const thinkingMenuDesc = $derived(
+    (
+      thinkingLevelOptions.find(
+        (o) => o.value === (thinkingMenuHover ?? thinkingLevel),
+      ) ?? thinkingLevelOptions[0]
+    ).desc,
+  );
+
+  // 点击外部关闭（镜像 Agent 菜单）。菜单内点击经 stopPropagation 不冒泡到 window。
+  $effect(() => {
+    if (!thinkingMenuOpen) return;
+    const handler = () => (thinkingMenuOpen = false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  });
+
+  function toggleThinkingMenu(event: MouseEvent) {
+    event.stopPropagation();
+    // stopPropagation 使另一弹层的「点击外部关闭」失效，故显式互斥。
+    agentMenuOpen = false;
+    thinkingMenuHover = null;
+    thinkingMenuOpen = !thinkingMenuOpen;
+  }
+
+  function selectThinkingLevel(value: string) {
+    thinkingMenuOpen = false;
+    if (value === thinkingLevel) return;
+    handleThinkingChange(value);
+  }
 
   // ── Agent 选择器（把 Agents 页的「使用」搬进输入框左下角）──────────────────
   //    显示当前会话来源 Agent 名；点开向上弹出 AgentDefinition 列表，选中他者即
@@ -139,6 +201,8 @@
 
   function toggleAgentMenu(event: MouseEvent) {
     event.stopPropagation();
+    // stopPropagation 使另一弹层的「点击外部关闭」失效，故显式互斥。
+    thinkingMenuOpen = false;
     agentMenuOpen = !agentMenuOpen;
   }
 
@@ -782,21 +846,68 @@
         <ChevronsUpDown size={13} class="shrink-0 opacity-60" />
       </button>
 
-      <!-- 推理等级：原生 select 套安静触发器样式，与模型触发器同高、同 hover。 -->
+      <!-- 推理强度：自定义向上弹出菜单（原生 select 无法自定义选项样式与描述区）。
+           触发器与模型触发器同高、同 hover；弹层镜像 Agent 选择器（bottom-full、
+           fly、点击外部关闭），每项带图标与选中勾，底部描述区随 hover 项联动。 -->
       <div class="relative">
-        <select
-          value={thinkingLevel}
-          onchange={(event) => handleThinkingChange(event.currentTarget.value)}
-          class="h-7 cursor-pointer appearance-none rounded-md bg-transparent pl-2 pr-6 py-1 text-sm text-base-content/80 hover:bg-base-300/60 transition-colors"
+        <button
+          type="button"
+          class={`flex h-7 items-center gap-1 rounded-md px-2 text-sm transition-colors ${
+            thinkingMenuOpen
+              ? "bg-base-300/60 text-base-content"
+              : "text-base-content/80 hover:bg-base-300/60"
+          }`}
+          aria-label={t("agent.thinking.label")}
+          aria-haspopup="listbox"
+          aria-expanded={thinkingMenuOpen}
+          title={t("agent.thinking.label")}
+          onclick={toggleThinkingMenu}
         >
-          {#each thinkingLevelOptions as opt (opt.value)}
-            <option value={opt.value}>{opt.label}</option>
-          {/each}
-        </select>
-        <ChevronsUpDown
-          size={13}
-          class="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-base-content/80 opacity-60"
-        />
+          <span>{thinkingLevelLabel}</span>
+          <ChevronsUpDown size={13} class="shrink-0 opacity-60" />
+        </button>
+
+        {#if thinkingMenuOpen}
+          <!-- 向上展开（bottom-full）+ 右对齐（right-0）：触发器贴近 composer 右缘，
+               左展以免弹层溢出窗口。stopPropagation 防止菜单内点击触发外部关闭。 -->
+          <div
+            transition:fly={{ y: -4, duration: 130 }}
+            class="absolute bottom-full right-0 z-40 mb-2 w-64 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            role="listbox"
+            tabindex="-1"
+            onclick={(event) => event.stopPropagation()}
+            onkeydown={() => {}}
+          >
+            {#each thinkingLevelOptions as opt (opt.value)}
+              {@const active = opt.value === thinkingLevel}
+              {@const Icon = opt.icon}
+              <button
+                type="button"
+                role="option"
+                aria-selected={active}
+                class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+                  active ? "bg-base-300/60" : ""
+                }`}
+                onmouseenter={() => (thinkingMenuHover = opt.value)}
+                onmouseleave={() => (thinkingMenuHover = null)}
+                onclick={() => selectThinkingLevel(opt.value)}
+              >
+                <Icon size={15} class="shrink-0 text-base-content/70" />
+                <span class="min-w-0 flex-1 truncate text-sm text-base-content">
+                  {opt.label}
+                </span>
+                {#if active}
+                  <Check size={14} class="shrink-0 text-primary" />
+                {/if}
+              </button>
+            {/each}
+            <div
+              class="mt-1 border-t border-[var(--hairline)] px-2 pb-1 pt-1.5 text-xs text-base-content/55"
+            >
+              {thinkingMenuDesc}
+            </div>
+          </div>
+        {/if}
       </div>
       {#if running}
         <CircleButton

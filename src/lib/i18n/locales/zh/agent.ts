@@ -8,10 +8,15 @@ export const agentZh = {
   "agent.systemPrompt.saveFailed": "保存失败：{error}",
 
   // Thinking-level selector (AgentInput)
+  "agent.thinking.label": "推理强度",
   "agent.thinking.off": "关闭",
   "agent.thinking.low": "低",
   "agent.thinking.medium": "中",
   "agent.thinking.high": "高",
+  "agent.thinking.offDesc": "不进行扩展推理，响应最快。",
+  "agent.thinking.lowDesc": "低强度推理 - 快速响应，轻量思考。",
+  "agent.thinking.mediumDesc": "中等强度推理 - 平衡响应速度和推理深度。",
+  "agent.thinking.highDesc": "高强度推理 - 深入思考，适合复杂任务。",
 
   // Input composer (AgentInput)
   "agent.input.oversizeSkipped": "部分图片超过 10MB 已跳过",
