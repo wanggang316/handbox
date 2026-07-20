@@ -8,9 +8,11 @@
     Folder,
     FolderOpen,
     Hash,
+    Loader2,
     MessagesSquare,
     PencilLine,
     Plus,
+    Sparkles,
     Trash2,
   } from "@lucide/svelte";
   import { resolveAgentIcon } from "$lib/utils/agentIcons";
@@ -234,6 +236,32 @@
       confirmRename();
     } else if (event.key === "Escape") {
       cancelRename();
+    }
+  }
+
+  // ============================================
+  // 生成标题（右键手动触发）
+  // ============================================
+  // 正在生成标题的 session id：该会话行以 spinner 替换相对时间做进行中反馈。
+  let generatingTitleId = $state<string | null>(null);
+
+  async function handleGenerateTitle() {
+    if (contextMenu?.kind !== "session") return;
+    const session = contextMenu.session;
+    contextMenu = null;
+    createErrorMessage = null;
+    generatingTitleId = session.id;
+    try {
+      await agentSessionActions.generateTitle(session.id);
+    } catch (error) {
+      console.error("Failed to generate session title:", error);
+      const normalized = normalizeError(
+        error,
+        t("agent.list.generateTitleFailed"),
+      );
+      createErrorMessage = normalized.hint ?? normalized.message;
+    } finally {
+      generatingTitleId = null;
     }
   }
 
@@ -511,9 +539,16 @@
       oncontextmenu={(event) => handleSessionContextMenu(event, session)}
     >
       <span class="truncate flex-1">{session.name}</span>
-      <span class="flex-shrink-0 text-[11px] text-base-content/45">
-        {formatRelativeTime(sessionActivityKey(session))}
-      </span>
+      {#if generatingTitleId === session.id}
+        <Loader2
+          size={12}
+          class="flex-shrink-0 animate-spin text-base-content/40"
+        />
+      {:else}
+        <span class="flex-shrink-0 text-[11px] text-base-content/45">
+          {formatRelativeTime(sessionActivityKey(session))}
+        </span>
+      {/if}
     </button>
   {/if}
 {/snippet}
@@ -720,6 +755,17 @@
     class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
   >
+    <!-- 生成标题：仅当会话已有消息（有内容可蒸馏）时提供 -->
+    {#if contextMenu.session.messageCount > 0}
+      <button
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+        onclick={handleGenerateTitle}
+      >
+        <Sparkles size={14} />
+        {t("ui.generateTitle")}
+      </button>
+    {/if}
+
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
       onclick={startRename}

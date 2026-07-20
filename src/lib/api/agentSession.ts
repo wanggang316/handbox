@@ -105,6 +105,16 @@ export async function renameAgentSession(
   return apiCall<AgentSession>("agent_session_rename", { sessionId, name });
 }
 
+/**
+ * 为 Agent Session 生成标题：后端用会话自身 model/provider 对首条用户消息做一次性
+ * LLM 补全并落盘新名，返回经 overlay 的会话。
+ */
+export async function generateAgentSessionTitle(
+  sessionId: UUID,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_generate_title", { sessionId });
+}
+
 /** `agent_session_update_field` 可更新的字段名（camelCase，后端 match 即用此键）。 */
 export type AgentSessionField =
   | "name"

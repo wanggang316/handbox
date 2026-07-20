@@ -120,6 +120,7 @@ export const agentZh = {
   "agent.list.deleteProjectFailed": "删除项目失败",
   "agent.list.createProjectFailed": "创建项目失败",
   "agent.list.createSessionFailed": "创建会话失败",
+  "agent.list.generateTitleFailed": "生成标题失败",
 
   // Agent form modal (AgentFormModal)
   "agent.form.nameRequired": "请输入 Agent 名称",

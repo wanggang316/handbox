@@ -154,6 +154,22 @@ export const agentSessionActions = {
   },
 
   /**
+   * 为会话生成标题（后端一次性 LLM 补全 + 落盘），并把返回的会话回填到列表与
+   * 当前会话。失败向上抛，由调用方决定提示与否（自动路径静默，手动路径可提示）。
+   */
+  async generateTitle(id: UUID): Promise<AgentSession> {
+    const updated = await agentSessionApi.generateAgentSessionTitle(id);
+    const index = sessions.findIndex((session) => session.id === id);
+    if (index !== -1) {
+      sessions[index] = updated;
+    }
+    if (currentSession?.id === id) {
+      currentSession = updated;
+    }
+    return updated;
+  },
+
+  /**
    * 删除 Agent Session：从列表移除；若为当前会话则清空当前。
    */
   async deleteSession(id: UUID): Promise<void> {

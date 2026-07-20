@@ -129,6 +129,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.deleteProjectFailed": "Failed to delete project",
   "agent.list.createProjectFailed": "Failed to create project",
   "agent.list.createSessionFailed": "Failed to create session",
+  "agent.list.generateTitleFailed": "Failed to generate title",
 
   // Agent form modal (AgentFormModal)
   "agent.form.nameRequired": "Enter an Agent name",
