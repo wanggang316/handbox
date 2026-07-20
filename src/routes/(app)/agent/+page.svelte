@@ -112,6 +112,28 @@
     });
   });
 
+  // 切换会话时先 paint 页面外壳（Header + Input），下一帧再挂载可能很重的
+  // AgentTimeline（逐条 markdown / 代码高亮 / katex 同步解析）。否则 Svelte 一次性
+  // 把整页渲染完才 paint，切换会话会有明显延迟。双 rAF 保证外壳先 paint 再挂 timeline。
+  let timelineReady = $state(false);
+  $effect(() => {
+    const id = sessionId;
+    timelineReady = false;
+    if (!browser || !id) {
+      return;
+    }
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        timelineReady = true;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  });
+
   // 当前会话的运行 view-model（响应式 getter；用于空态判定，渲染由 AgentTimeline 消费）。
   const runState = $derived(
     sessionId ? agentRunStore.runStateFor(sessionId) : null,
@@ -172,8 +194,12 @@
           })}
         </p>
       </div>
-    {:else}
+    {:else if timelineReady}
       <AgentTimeline {sessionId} />
+    {:else}
+      <!-- 外壳先 paint 的占位：保持内容区 flex 结构稳定（Input 仍贴底），
+           下一帧再挂载重的 AgentTimeline，使会话切换即时。 -->
+      <div class="flex-1"></div>
     {/if}
 
     <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->
