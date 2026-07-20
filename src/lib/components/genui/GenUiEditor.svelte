@@ -128,23 +128,23 @@
 
 <div class="h-full flex flex-col">
   <!-- 顶部工具栏 -->
-  <div class="flex-shrink-0 p-4 border-b border-base-300 mt-12">
-    <button
-      class="flex items-center gap-2 text-sm text-base-content/70 hover:text-base-content w-fit mb-4"
-      onclick={backToList}
-    >
-      <ArrowLeft size={14} />
-      返回列表
-    </button>
+  <div class="flex-shrink-0 border-b border-base-300 px-6 pb-4 pt-12">
+    <div class="mx-auto w-full max-w-5xl">
+      <button
+        class="flex items-center gap-2 text-sm text-base-content/70 hover:text-base-content w-fit mb-4"
+        onclick={backToList}
+      >
+        <ArrowLeft size={14} />
+        返回列表
+      </button>
 
-    <div class="flex items-end justify-between gap-4">
-      <div class="flex-1 max-w-md">
-        <Input label="名称" placeholder="为这份 GenUI 取个名字" bind:value={name} required />
-      </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-end gap-3">
+        <div class="flex-1">
+          <Input label="名称" placeholder="为这份 GenUI 取个名字" bind:value={name} required />
+        </div>
         {#if isEdit}
           <Button
-            variant="danger"
+            variant="ghost"
             size="sm"
             onclick={() => (showDeleteConfirm = true)}
             customClass="flex items-center gap-2"
@@ -168,8 +168,9 @@
   </div>
 
   <!-- 编辑器主体：左 JSON / 右实时渲染 -->
-  <div class="flex-1 min-h-0 overflow-y-auto p-4">
-    <div class="grid gap-4 lg:grid-cols-2 min-h-0 {isEdit ? 'h-full' : ''}">
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+    <div class="mx-auto w-full max-w-5xl {isEdit ? 'flex h-full flex-col' : ''}">
+    <div class="grid gap-4 lg:grid-cols-2 min-h-0 {isEdit ? 'flex-1' : ''}">
       <div class="flex flex-col gap-1 min-h-0">
         <div class="text-xs text-base-content/60">spec JSON</div>
         <textarea
@@ -254,6 +255,7 @@
         {/each}
       </ul>
     </details>
+    </div>
   </div>
 </div>
 
