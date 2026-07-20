@@ -6,6 +6,7 @@
   import LabeledSlider from "../ui/LabeledSlider.svelte";
   import { ChevronDown, ChevronRight } from "@lucide/svelte";
   import { AGENT_ICONS } from "$lib/utils/agentIcons";
+  import { normalizeError } from "$lib/utils/error";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
   import type { McpServerConfig } from "$lib/types/llm";
@@ -201,7 +202,8 @@
       onClose();
     } catch (error) {
       console.error("Failed to save agent:", error);
-      alert(t("agent.form.saveFailed"));
+      const normalized = normalizeError(error, t("agent.form.saveFailed"));
+      alert(`${t("agent.form.saveFailed")}\n${normalized.hint ?? normalized.message}`);
     } finally {
       saving = false;
     }

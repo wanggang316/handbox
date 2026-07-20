@@ -70,8 +70,12 @@
       data.generativeUi && data.genuiId ? data.genuiId : null;
 
     if (editingAgent?.id) {
-      // 更新现有 Agent
-      await agentActions.updateAgentName(editingAgent.id, data.name);
+      // 更新现有 Agent。仅在名称实际变化时才写：后端拒绝重命名内置 Agent
+      // （"Builtin agent cannot be renamed"），无条件下发会让「只改图标等其它
+      // 字段」的内置 Agent 编辑在第一步就失败。
+      if (data.name !== editingAgent.name) {
+        await agentActions.updateAgentName(editingAgent.id, data.name);
+      }
 
       // 图标：空串归一为 null（清除自定义图标，回退默认）。
       if ((data.icon || null) !== (editingAgent.icon ?? null)) {
