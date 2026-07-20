@@ -459,12 +459,6 @@
                     </span>
                   {/if}
                 </div>
-                <p class="truncate text-xs text-base-content/55">
-                  {agent.description || agent.systemPrompt || ""}
-                </p>
-              </div>
-              <div class="hidden shrink-0 text-[11px] text-base-content/35 sm:block">
-                {new Date(agent.createdAt).toLocaleDateString("zh-CN")}
               </div>
               <!-- 操作：hover / 键盘聚焦时显现 -->
               <div
