@@ -528,7 +528,7 @@
   {@const collapsed = agentProjectCollapse.isCollapsed(key)}
   {#if renamingProjectId === project.id}
     <!-- 项目重命名输入行：替换组头按钮，输入框包在 data-group-control 豁免区内。 -->
-    <div class="w-full flex items-center gap-1.5 py-0.5 pl-6 pr-2 text-[12px] leading-[18px]">
+    <div class="w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-[12px] leading-[18px]">
       {#if collapsed}
         <Folder size={14} class="flex-shrink-0 text-base-content/60" />
       {:else}
@@ -548,7 +548,7 @@
   {:else}
     <div
       data-project-id={project.id}
-      class="group/proj w-full flex items-center gap-1.5 py-1 pl-6 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/75 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+      class="group/proj w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/60 hover:text-base-content hover:bg-base-300 cursor-default select-none"
       role="button"
       tabindex="0"
       aria-expanded={!collapsed}
@@ -586,7 +586,7 @@
   {#if !collapsed}
     <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
       {#each sessions as session (session.id)}
-        {@render sessionRow(session, "pl-11", "pl-9")}
+        {@render sessionRow(session, "pl-12", "pl-10")}
       {/each}
     </div>
   {/if}
@@ -672,7 +672,7 @@
                 {#if child.kind === "project"}
                   {@render projectGroup(bucket, child.project, child.sessions)}
                 {:else}
-                  {@render sessionRow(child.session, "pl-8", "pl-6")}
+                  {@render sessionRow(child.session, "pl-7", "pl-5")}
                 {/if}
               {/each}
             </div>
