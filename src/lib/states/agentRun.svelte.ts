@@ -618,6 +618,13 @@ class AgentRunStore {
    * 绝不让一条坏行抛错而白屏整条 timeline；其余行照常渲染。
    */
   async loadTranscript(sessionId: UUID): Promise<void> {
+    // 已还原过则直接返回：store 单例按 sessionId 常驻消息、run 事件增量维护，
+    // 重访无需再 IPC 拉取。此前每次开会话都重拉并整体替换 `messages`（新数组 +
+    // 新对象），迫使 AgentTimeline 把所有消息连同 markdown/高亮/katex 全量重渲染，
+    // 造成切换会话明显卡顿。冷启动（未 hydrated）仍照常还原。
+    if (this.states[sessionId]?.hydrated) {
+      return;
+    }
     try {
       const rows: AgentSessionMessage[] =
         await getAgentSessionMessages(sessionId);
