@@ -10,10 +10,17 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.systemPrompt.saveFailed": "Save failed: {error}",
 
   // Thinking-level selector (AgentInput)
+  "agent.thinking.label": "Reasoning effort",
   "agent.thinking.off": "Off",
   "agent.thinking.low": "Low",
   "agent.thinking.medium": "Medium",
   "agent.thinking.high": "High",
+  "agent.thinking.offDesc": "No extended reasoning — fastest responses.",
+  "agent.thinking.lowDesc": "Light reasoning — quick responses with brief thinking.",
+  "agent.thinking.mediumDesc":
+    "Medium reasoning — balances speed and reasoning depth.",
+  "agent.thinking.highDesc":
+    "Deep reasoning — thorough thinking for complex tasks.",
 
   // Input composer (AgentInput)
   "agent.input.oversizeSkipped": "Some images over 10MB were skipped",
