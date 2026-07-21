@@ -317,17 +317,19 @@
     </label>
   {/if}
 
-    <!-- 可读化文案 -->
-    <div class="flex items-center gap-2 text-sm text-base-content/70">
-      <CalendarClock size={14} class="flex-shrink-0 text-base-content/50" />
-      <span class="truncate" title={cron}>{humanText}</span>
-    </div>
   </div>
 
-  <!-- 右列：Next N 次执行预览（与左列等高的独立卡） -->
+  <!-- 右列：可读化调度摘要 + Next N 次执行预览（与左列等高的独立卡） -->
   <div
     class="flex flex-col rounded-md border border-[var(--hairline)] bg-base-200 p-3"
   >
+    <div
+      class="mb-2 flex items-center gap-2 border-b border-[var(--hairline)] pb-2 text-sm text-base-content/70"
+    >
+      <CalendarClock size={14} class="flex-shrink-0 text-base-content/50" />
+      <span class="truncate" title={cron}>{humanText}</span>
+    </div>
+
     <div class="mb-2 text-xs font-medium text-base-content/60">
       {t("jobs.schedule.previewTitle", { n: previewCount })}
     </div>
