@@ -13,7 +13,7 @@
     SwitchRow,
   } from "../ui/table";
   import DefaultRow from "../ui/table/DefaultRow.svelte";
-  import { AGENT_ICONS } from "$lib/utils/agentIcons";
+  import { AGENT_ICONS, resolveAgentIcon } from "$lib/utils/agentIcons";
   import { normalizeError } from "$lib/utils/error";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
@@ -120,6 +120,23 @@
   let skillsModalOpen = $state(false);
   let mcpModalOpen = $state(false);
 
+  // 图标选择浮层：点标题前的图标按钮原地弹出；选择即替换并关闭，
+  // 点击当前选中项清除（回退默认 Bot）。点击浮层外关闭。
+  let iconPickerOpen = $state(false);
+
+  function handleIconPickerOutside(event: MouseEvent) {
+    if (!iconPickerOpen) return;
+    const target = event.target as HTMLElement;
+    if (!target.closest(".icon-picker")) {
+      iconPickerOpen = false;
+    }
+  }
+
+  function pickIcon(name: string) {
+    formData.icon = formData.icon === name ? "" : name;
+    iconPickerOpen = false;
+  }
+
   // 技能 Modal 内搜索（按名称 / 描述过滤，大小写不敏感）。
   let skillSearch = $state("");
   const filteredSkills = $derived.by(() => {
@@ -176,6 +193,9 @@
     workingDirMode: "optional",
     toolExecutionMode: "auto",
   });
+
+  // 当前图标（未设置 / 未识别回退默认 Bot）。
+  const CurrentIcon = $derived(resolveAgentIcon(formData.icon));
 
   // 已关联但不在发现列表里的名字（skill 被删 / 改名）：保留成可取消的行。
   const missingSelectedSkills = $derived(
@@ -479,6 +499,42 @@
       </button>
 
       <div class="flex items-center gap-3">
+        <!-- 图标：标题前的当前图标按钮（默认 Bot），点击原地弹出选择浮层 -->
+        <div class="icon-picker relative flex-shrink-0">
+          <button
+            type="button"
+            aria-expanded={iconPickerOpen}
+            title={t("agent.form.iconLabel")}
+            class="flex h-10 w-10 items-center justify-center rounded-lg bg-base-200 text-base-content/70 transition-colors hover:bg-base-300 hover:text-base-content"
+            onclick={() => (iconPickerOpen = !iconPickerOpen)}
+          >
+            <CurrentIcon size={20} />
+          </button>
+          {#if iconPickerOpen}
+            <div
+              class="absolute left-0 top-full z-[10020] mt-2 w-[19rem] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] p-3 shadow-xl"
+            >
+              <div class="flex flex-wrap gap-1.5">
+                {#each AGENT_ICONS as opt (opt.name)}
+                  {@const Icon = opt.Icon}
+                  <button
+                    type="button"
+                    aria-pressed={formData.icon === opt.name}
+                    title={opt.name}
+                    class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {formData.icon ===
+                    opt.name
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-transparent text-base-content/55 hover:bg-base-200 hover:text-base-content'}"
+                    onclick={() => pickIcon(opt.name)}
+                  >
+                    <Icon size={16} />
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+
         <div class="min-w-0 flex-1">
           <input
             class="modal-title-input w-full"
@@ -508,29 +564,6 @@
   <!-- 表单主体：设置页式分组卡纵排 -->
   <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-y-4">
-      <!-- 图标：精选 Lucide 图标网格；再次点选中项可清除（回退默认图标） -->
-      <TableGroup title={t("agent.form.iconLabel")}>
-        <TableBaseRow>
-          <div class="flex flex-wrap gap-1.5">
-            {#each AGENT_ICONS as opt (opt.name)}
-              {@const Icon = opt.Icon}
-              <button
-                type="button"
-                aria-pressed={formData.icon === opt.name}
-                title={opt.name}
-                class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {formData.icon ===
-                opt.name
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-[var(--hairline)] text-base-content/55 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
-                onclick={() =>
-                  (formData.icon = formData.icon === opt.name ? "" : opt.name)}
-              >
-                <Icon size={16} />
-              </button>
-            {/each}
-          </div>
-        </TableBaseRow>
-      </TableGroup>
 
       <!-- 系统提示词 -->
       <TableGroup title={t("agent.form.systemPromptTitle")}>
@@ -794,3 +827,6 @@
     </div>
   </div>
 </Modal>
+
+<!-- 点击浮层外关闭图标选择（浮层与触发按钮在 .icon-picker 内，点击其内不关闭） -->
+<svelte:window onclick={handleIconPickerOutside} />
