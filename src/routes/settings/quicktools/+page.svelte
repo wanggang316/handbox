@@ -9,8 +9,11 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import { TableGroup, SwitchRow } from "$lib/components/ui/table";
+  import { invoke } from "@tauri-apps/api/core";
+  import { TableGroup, SwitchRow, SelectRow } from "$lib/components/ui/table";
   import { settingsState } from "$lib/states";
+  import { agentState, agentActions } from "$lib/states/agent.svelte";
+  import { DEFAULT_ACCELERATOR } from "$lib/quickaction/accelerator";
   import { t } from "$lib/i18n";
   import { ExternalLink, RefreshCcw, Trash2, X } from "@lucide/svelte";
   import {
@@ -24,20 +27,29 @@
   import type { DisabledApp } from "$lib/api/selection";
     import IconButton from "$lib/components/ui/IconButton.svelte";
 
-  let showToolbarOnSelection: boolean = false;
+  let showToolbarOnSelection = $state(false);
+  // 划词「翻译」使用的 Agent 定义 ID；"" = 内置翻译回落
+  let translationAgentId = $state("");
+  // Quick Action（全局快捷键唤起浮层）是否启用；缺省视为 true
+  let quickActionEnabled = $state(true);
   // 权限/禁用应用是异步探测的：用模块级缓存让重访首帧直出上次结果，避免
   // 「警告条闪现又消失」「列表先空后填」。首次访问乐观按已授权画（警告延迟出现
   // 好过对多数已授权用户闪一下警告）。
-  let permissionGranted: boolean = cachedPermission ?? true;
-  let isCheckingPermission: boolean = false;
-  let disabledApps: DisabledApp[] = cachedApps ?? [];
-  let isLoadingApps: boolean = false;
+  let permissionGranted = $state(cachedPermission ?? true);
+  let isCheckingPermission = $state(false);
+  let disabledApps = $state<DisabledApp[]>(cachedApps ?? []);
+  let isLoadingApps = $state(false);
 
   // 从 settings 回填本地状态；store 未就绪时跳过
   function syncFromSettings(): void {
-    if (!settingsState.settings?.quickTools) return;
-    showToolbarOnSelection =
-      settingsState.settings.quickTools.showToolbarOnSelection;
+    if (!settingsState.settings) return;
+    if (settingsState.settings.quickTools) {
+      showToolbarOnSelection =
+        settingsState.settings.quickTools.showToolbarOnSelection;
+      translationAgentId =
+        settingsState.settings.quickTools.translationAgentId ?? "";
+    }
+    quickActionEnabled = settingsState.settings.quickAction?.enabled ?? true;
   }
 
   // 根布局已预加载 settings：同步回填，首帧即真实值，避免开关闪烁
@@ -59,7 +71,65 @@
     } catch (error) {
       console.error("加载快捷工具设置失败:", error);
     }
+
+    // 翻译 Agent 选择器的候选列表；失败不阻塞页面其余部分
+    try {
+      await agentActions.loadAgents();
+    } catch (error) {
+      console.error("加载 Agent 列表失败:", error);
+    }
   });
+
+  // 翻译 Agent 下拉候选："" = 内置翻译回落，其余为全部 Agent 定义
+  const translationAgentOptions = $derived([
+    { value: "", label: t("settings.quicktools.translationAgentDefault") },
+    ...agentState.agents.flatMap((a) =>
+      a.id ? [{ value: a.id, label: a.name }] : [],
+    ),
+  ]);
+
+  async function handleTranslationAgentSelect(value: string) {
+    try {
+      await settingsState.updateSettings({
+        section: "quickTools",
+        data: { translationAgentId: value || null },
+      });
+    } catch (error) {
+      console.error("更新划词翻译 Agent 失败:", error);
+    }
+  }
+
+  /**
+   * 切换 Quick Action：先持久化 enabled，再注册/反注册全局快捷键，保持
+   * 「开关状态 = 热键是否生效」的不变量；注册失败则回滚开关与持久化值。
+   */
+  async function handleQuickActionToggle(checked: boolean) {
+    quickActionEnabled = checked;
+    try {
+      await settingsState.updateSettings({
+        section: "quickAction",
+        data: { enabled: checked },
+      });
+      if (checked) {
+        const accelerator =
+          settingsState.settings?.quickAction?.shortcut ?? DEFAULT_ACCELERATOR;
+        await invoke("quick_action_register_shortcut", { accelerator });
+      } else {
+        await invoke("quick_action_unregister_shortcut");
+      }
+    } catch (error) {
+      console.error("切换 Quick Action 失败:", error);
+      quickActionEnabled = !checked;
+      try {
+        await settingsState.updateSettings({
+          section: "quickAction",
+          data: { enabled: !checked },
+        });
+      } catch (rollbackError) {
+        console.error("回滚 Quick Action 开关失败:", rollbackError);
+      }
+    }
+  }
 
   async function loadDisabledApps() {
     // 有缓存时静默刷新（不闪 spinner），仅冷启动首次显示加载态。
@@ -147,7 +217,8 @@
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-6">
-  <TableGroup>
+  <!-- 划词工具栏：显示开关 + 翻译 Agent + 禁用的应用列表 -->
+  <TableGroup title={t("settings.quicktools.selectionToolbarGroup")}>
     <SwitchRow
       label={t("settings.quicktools.showToolbarOnSelection")}
       bind:checked={showToolbarOnSelection}
@@ -155,50 +226,69 @@
       disabled={isCheckingPermission}
       onChange={handleToggleChange}
     />
-  </TableGroup>
+    <SelectRow
+      label={t("settings.quicktools.translationAgent")}
+      description={t("settings.quicktools.translationAgentDesc")}
+      options={translationAgentOptions}
+      bind:selectedValue={translationAgentId}
+      onSelect={handleTranslationAgentSelect}
+    />
 
-  <!-- 禁用的应用列表 -->
-  <TableGroup>
-    <div class="flex items-center justify-between px-6 py-4">
-      <h3 class="text-sm text-base-content">{t("settings.quicktools.disabledApps")}</h3>
-      {#if !isLoadingApps}
-        <IconButton
-          icon={RefreshCcw}
-          iconSize={16}
-          onclick={loadDisabledApps}
-        />
+    <!-- 禁用的应用列表（包成单个子元素，避免组内分隔线切开标题与列表） -->
+    <div>
+      <div class="flex items-center justify-between px-6 py-4">
+        <h3 class="text-sm text-base-content">{t("settings.quicktools.disabledApps")}</h3>
+        {#if !isLoadingApps}
+          <IconButton
+            icon={RefreshCcw}
+            iconSize={16}
+            onclick={loadDisabledApps}
+          />
+        {/if}
+      </div>
+
+      {#if isLoadingApps}
+        <div class="flex justify-center py-8">
+          <div class="text-sm text-base-content/50">{t("common.loading")}</div>
+        </div>
+      {:else if disabledApps.length === 0}
+        <div class="flex justify-center py-8">
+          <p class="text-sm text-base-content/50">
+            {t("settings.quicktools.disabledAppsEmpty")}
+          </p>
+        </div>
+      {:else}
+        <div class="grid grid-cols-2 p-4 gap-x-4 gap-y-2">
+          {#each disabledApps as app}
+            <div class="flex items-center justify-between px-3 py-2 bg-base-300 rounded-lg group">
+              <div class="flex flex-col">
+                <span class="text-sm font-medium">{app.name}</span>
+                <span class="text-xs text-base-content/50">{app.bundle_id}</span>
+              </div>
+
+              <IconButton
+                icon={Trash2}
+                iconSize={14}
+                onclick={() => handleRemoveApp(app.bundle_id)}
+                title={t("common.remove")}
+              />
+            </div>
+          {/each}
+        </div>
       {/if}
     </div>
+  </TableGroup>
 
-    {#if isLoadingApps}
-      <div class="flex justify-center py-8">
-        <div class="text-sm text-base-content/50">{t("common.loading")}</div>
-      </div>
-    {:else if disabledApps.length === 0}
-      <div class="flex justify-center py-8">
-        <p class="text-sm text-base-content/50">
-          {t("settings.quicktools.disabledAppsEmpty")}
-        </p>
-      </div>
-    {:else}
-      <div class="grid grid-cols-2 p-4 gap-x-4 gap-y-2">
-        {#each disabledApps as app}
-          <div class="flex items-center justify-between px-3 py-2 bg-base-300 rounded-lg group">
-            <div class="flex flex-col">
-              <span class="text-sm font-medium">{app.name}</span>
-              <span class="text-xs text-base-content/50">{app.bundle_id}</span>
-            </div>
-
-            <IconButton
-              icon={Trash2}
-              iconSize={14}
-              onclick={() => handleRemoveApp(app.bundle_id)}
-              title={t("common.remove")}
-            />
-          </div>
-        {/each}
-      </div>
-    {/if}
+  <!-- Quick Action（全局快捷键唤起浮层） -->
+  <TableGroup title={t("settings.quicktools.quickActionGroup")}>
+    <SwitchRow
+      label={t("settings.quicktools.enableQuickAction")}
+      bind:checked={quickActionEnabled}
+      description={t("settings.quicktools.enableQuickActionDesc", {
+        shortcut: settingsState.settings?.quickAction?.shortcut ?? DEFAULT_ACCELERATOR,
+      })}
+      onChange={handleQuickActionToggle}
+    />
   </TableGroup>
 
   {#if !permissionGranted}

@@ -19,6 +19,6 @@ export const selectionZh = {
   "selection.retranslate": "重新翻译",
   "selection.regenerate": "重新生成",
   "selection.continueAsk": "继续问",
-  "selection.translationConfigHint": "请先在单词本页面配置翻译 Agent 和模型",
+  "selection.translationConfigHint": "请先在「设置 → 快捷键」中配置默认模型",
   "selection.translationFailed": "翻译失败",
 };

@@ -44,7 +44,16 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.about.officialSite": "Official Website",
 
   // Quick Tools page
+  "settings.quicktools.selectionToolbarGroup": "Text Selection Toolbar",
   "settings.quicktools.showToolbarOnSelection": "Show toolbar on text selection",
+  "settings.quicktools.translationAgent": "Selection translate Agent",
+  "settings.quicktools.translationAgentDesc":
+    "Agent used by the toolbar Translate button; falls back to the built-in translator when unset",
+  "settings.quicktools.translationAgentDefault": "Built-in translator",
+  "settings.quicktools.quickActionGroup": "Quick Action",
+  "settings.quicktools.enableQuickAction": "Enable Quick Action",
+  "settings.quicktools.enableQuickActionDesc":
+    "Summon the quick action overlay with the global hotkey {shortcut}",
   "settings.quicktools.permissionRequired": "Accessibility permission required",
   "settings.quicktools.disabledApps": "Disabled apps",
   "settings.quicktools.disabledAppsEmpty":

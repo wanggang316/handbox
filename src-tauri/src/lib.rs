@@ -19,8 +19,8 @@ use tauri::Manager;
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    GenUiService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
-    ProviderService, SettingsService, StorageService, UserSessionService,
+    GenUiService, JobExecutor, JobScheduler, JobService, McpService, ModelService, ProviderService,
+    SettingsService, StorageService, UserSessionService,
 };
 use crate::storage::Database;
 use crate::utils::logger;
@@ -150,6 +150,7 @@ pub fn run() {
             quick_action_hide,
             quick_action_toggle,
             quick_action_register_shortcut,
+            quick_action_unregister_shortcut,
             quick_action_continue_in_chat,
             // selection_hide_action_panel,
             // selection_show_action_panel,
@@ -328,7 +329,11 @@ async fn initialize_services(
     {
         match settings_service.get_settings() {
             Ok(settings) => {
-                if let Err(e) = crate::services::quick_action::register_shortcut(
+                if !settings.quick_action.enabled {
+                    tracing::info!(
+                        "[QuickActionShortcut::register] quick action disabled, skipping hotkey registration"
+                    );
+                } else if let Err(e) = crate::services::quick_action::register_shortcut(
                     app,
                     &settings.quick_action.shortcut,
                 ) {
@@ -344,7 +349,6 @@ async fn initialize_services(
             }
         }
     }
-
 
     // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());

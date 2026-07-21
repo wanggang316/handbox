@@ -29,6 +29,7 @@ export interface GeneralSettings {
 // 翻译设置
 export interface TranslationSettings {
   sessionId?: string | null; // 翻译使用的 Session ID
+  agentId?: string | null; // 创建 sessionId 时使用的 Agent 定义 ID（null = 内置回落）
 }
 
 // MCP 服务器配置
@@ -69,6 +70,7 @@ export interface SelectionBlacklist {
 
 export interface QuickToolsSettings {
   showToolbarOnSelection: boolean;
+  translationAgentId?: string | null; // 划词「翻译」使用的 Agent 定义 ID（null = 内置回落）
   selectionBlacklist: SelectionBlacklist;
 }
 
@@ -80,6 +82,7 @@ export interface AgentSettings {
 
 // 快捷动作设置
 export interface QuickActionSettings {
+  enabled?: boolean; // 是否启用 Quick Action（禁用时不注册全局快捷键；缺省视为 true）
   shortcut?: string; // 唤起快捷动作面板的全局快捷键
   modelId?: string | null; // 快捷动作默认使用的模型 ID（未设则由默认模型解析器回退）
   providerId?: string | null; // 快捷动作默认使用的供应商 ID（未设则由默认模型解析器回退）

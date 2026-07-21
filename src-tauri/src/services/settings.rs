@@ -246,9 +246,13 @@ fn default_settings() -> AppSettings {
             user: None,
             is_logged_in: false,
         },
-        translation: TranslationSettings { session_id: None },
+        translation: TranslationSettings {
+            session_id: None,
+            agent_id: None,
+        },
         quick_tools: QuickToolsSettings {
             show_toolbar_on_selection: false,
+            translation_agent_id: None,
             selection_blacklist: Default::default(),
         },
         skills: SkillSettings::default(),
@@ -886,6 +890,69 @@ mod tests {
             .reset_settings(Some(vec!["quickAction".to_string()]))
             .unwrap();
         assert_eq!(reset.quick_action.shortcut, "CmdOrCtrl+Shift+Space");
+    }
+
+    // quickAction.enabled round-trips through update → config.json → a fresh
+    // service, and a shortcut-only patch leaves the disabled state untouched.
+    #[test]
+    fn quick_action_enabled_round_trips_and_survives_shortcut_patch() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({ "enabled": false }),
+            })
+            .unwrap();
+        assert!(!updated.quick_action.enabled);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickAction".to_string(),
+                data: serde_json::json!({ "shortcut": "Alt+Space" }),
+            })
+            .unwrap();
+        assert!(
+            !updated.quick_action.enabled,
+            "a shortcut-only patch must not flip enabled back on"
+        );
+
+        let reread = service(&dir).get_settings().unwrap();
+        assert!(!reread.quick_action.enabled);
+    }
+
+    // quickTools.translationAgentId round-trips through update → config.json →
+    // a fresh service, and null clears it back to None.
+    #[test]
+    fn quick_tools_translation_agent_id_round_trips_and_clears() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickTools".to_string(),
+                data: serde_json::json!({ "translationAgentId": "agent-1" }),
+            })
+            .unwrap();
+        assert_eq!(
+            updated.quick_tools.translation_agent_id.as_deref(),
+            Some("agent-1")
+        );
+
+        let reread = service(&dir).get_settings().unwrap();
+        assert_eq!(
+            reread.quick_tools.translation_agent_id.as_deref(),
+            Some("agent-1")
+        );
+
+        let cleared = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "quickTools".to_string(),
+                data: serde_json::json!({ "translationAgentId": null }),
+            })
+            .unwrap();
+        assert_eq!(cleared.quick_tools.translation_agent_id, None);
     }
 
     // A quickAction patch is a shallow section merge: it must not clobber

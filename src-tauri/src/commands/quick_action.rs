@@ -81,6 +81,13 @@ pub async fn quick_action_register_shortcut(
     crate::services::quick_action::register_shortcut(&app, &accelerator)
 }
 
+/// 反注册 Quick Action 全局快捷键（设置页「启用 Quick Action」关闭时调用）。
+/// 幂等：未注册时是 no-op。
+#[tauri::command]
+pub async fn quick_action_unregister_shortcut(app: tauri::AppHandle) -> Result<(), AppError> {
+    crate::services::quick_action::unregister_shortcut(&app)
+}
+
 /// 「在对话中继续」的后端：把主窗口带到前台并通知前端导航到指定 chat 会话。
 ///
 /// 取消最小化、显示并聚焦 `main` 窗口，随后向该窗口发送 `quick-action-open-chat`

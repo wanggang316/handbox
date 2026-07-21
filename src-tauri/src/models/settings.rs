@@ -62,6 +62,11 @@ pub struct GeneralSettings {
 pub struct TranslationSettings {
     /// 翻译使用的 Session ID
     pub session_id: Option<String>,
+    /// 创建 `session_id` 时使用的 Agent 定义 ID。`None` = 内置回落
+    /// （builtin-chat 加硬编码翻译 prompt）。与 `quickTools.translationAgentId`
+    /// 不一致时，前端判定缓存会话失效并重建。
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 /// MCP 服务器配置
@@ -129,6 +134,10 @@ pub struct QuickToolsSettings {
     /// 选中文本时显示工具栏
     #[serde(default)]
     pub show_toolbar_on_selection: bool,
+    /// 划词「翻译」使用的 Agent 定义 ID。`None` = 内置回落（builtin-chat +
+    /// 硬编码翻译 prompt）。
+    #[serde(default)]
+    pub translation_agent_id: Option<String>,
     /// 选词工具黑名单
     #[serde(default)]
     pub selection_blacklist: SelectionBlacklist,
@@ -177,6 +186,9 @@ fn default_agent_enabled_tools() -> Vec<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickActionSettings {
+    /// 是否启用 Quick Action（全局快捷键唤起浮层）。禁用时不注册全局快捷键。
+    #[serde(default = "default_quick_action_enabled")]
+    pub enabled: bool,
     /// 唤起快捷动作面板的全局快捷键(Tauri global-shortcut 加速键语法)。
     #[serde(default = "default_quick_action_shortcut")]
     pub shortcut: String,
@@ -191,11 +203,16 @@ pub struct QuickActionSettings {
 impl Default for QuickActionSettings {
     fn default() -> Self {
         Self {
+            enabled: default_quick_action_enabled(),
             shortcut: default_quick_action_shortcut(),
             model_id: None,
             provider_id: None,
         }
     }
+}
+
+fn default_quick_action_enabled() -> bool {
+    true
 }
 
 fn default_quick_action_shortcut() -> String {
@@ -294,10 +311,65 @@ mod tests {
         assert_eq!(parsed.provider_id, None);
     }
 
+    // The enabled flag defaults to true, both via Default and when the field
+    // is absent from a persisted section (old configs upgrade to "on").
+    #[test]
+    fn quick_action_enabled_defaults_to_true() {
+        assert!(QuickActionSettings::default().enabled);
+
+        let parsed: QuickActionSettings =
+            serde_json::from_value(serde_json::json!({ "shortcut": "Alt+Space" })).unwrap();
+        assert!(parsed.enabled);
+    }
+
+    // The enabled flag round-trips under its JSON key.
+    #[test]
+    fn quick_action_enabled_round_trips() {
+        let parsed: QuickActionSettings =
+            serde_json::from_value(serde_json::json!({ "enabled": false })).unwrap();
+        assert!(!parsed.enabled);
+
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(value["enabled"], false);
+    }
+
+    // translationAgentId defaults to None when absent and round-trips under
+    // its camelCase JSON key.
+    #[test]
+    fn quick_tools_translation_agent_id_defaults_and_round_trips() {
+        let parsed: QuickToolsSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(parsed.translation_agent_id, None);
+
+        let parsed: QuickToolsSettings =
+            serde_json::from_value(serde_json::json!({ "translationAgentId": "agent-1" })).unwrap();
+        assert_eq!(parsed.translation_agent_id.as_deref(), Some("agent-1"));
+
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(value["translationAgentId"], "agent-1");
+    }
+
+    // translation.agentId defaults to None when absent (old configs that only
+    // carry sessionId upgrade cleanly) and round-trips under its camelCase key.
+    #[test]
+    fn translation_agent_id_defaults_and_round_trips() {
+        let parsed: TranslationSettings =
+            serde_json::from_value(serde_json::json!({ "sessionId": "s-1" })).unwrap();
+        assert_eq!(parsed.agent_id, None);
+
+        let parsed: TranslationSettings =
+            serde_json::from_value(serde_json::json!({ "sessionId": "s-1", "agentId": "agent-1" }))
+                .unwrap();
+        assert_eq!(parsed.agent_id.as_deref(), Some("agent-1"));
+
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(value["agentId"], "agent-1");
+    }
+
     // The model/provider fields round-trip under their camelCase JSON keys.
     #[test]
     fn quick_action_model_provider_use_camel_case_keys() {
         let settings = QuickActionSettings {
+            enabled: true,
             shortcut: "Alt+Space".to_string(),
             model_id: Some("gpt-4o".to_string()),
             provider_id: Some("openai".to_string()),

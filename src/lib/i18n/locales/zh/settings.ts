@@ -42,7 +42,15 @@ export const settingsZh = {
   "settings.about.officialSite": "官方网站",
 
   // 快捷工具页
+  "settings.quicktools.selectionToolbarGroup": "选中文本工具栏",
   "settings.quicktools.showToolbarOnSelection": "选中文本显示工具栏",
+  "settings.quicktools.translationAgent": "划词翻译 Agent",
+  "settings.quicktools.translationAgentDesc":
+    "工具栏「翻译」使用的 Agent；未选择时使用内置翻译",
+  "settings.quicktools.translationAgentDefault": "内置翻译",
+  "settings.quicktools.quickActionGroup": "Quick Action",
+  "settings.quicktools.enableQuickAction": "启用 Quick Action",
+  "settings.quicktools.enableQuickActionDesc": "通过全局快捷键 {shortcut} 唤起快捷动作浮层",
   "settings.quicktools.permissionRequired": "需要辅助功能权限",
   "settings.quicktools.disabledApps": "禁用的应用",
   "settings.quicktools.disabledAppsEmpty": "禁止使用划词工具的应用将显示在这里。",

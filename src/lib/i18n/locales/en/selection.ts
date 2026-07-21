@@ -21,6 +21,6 @@ export const selectionEn: Record<keyof typeof selectionZh, string> = {
   "selection.retranslate": "Retranslate",
   "selection.regenerate": "Regenerate",
   "selection.continueAsk": "Continue asking",
-  "selection.translationConfigHint": "Configure the translation Agent and model on the Vocabulary page first",
+  "selection.translationConfigHint": "Configure a default model in Settings → Shortcuts first",
   "selection.translationFailed": "Translation failed",
 };

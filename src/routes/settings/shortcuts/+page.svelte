@@ -146,9 +146,14 @@
     busy = true;
     try {
       // Register first — this validates against the OS and swaps the live combo
-      // (unregister-old-before-register is handled by the command).
-      await invoke("quick_action_register_shortcut", { accelerator: next });
-      // Registration succeeded → persist the new value.
+      // (unregister-old-before-register is handled by the command). When Quick
+      // Action is disabled (settings > Quick Tools) the hotkey must stay
+      // inactive: persist only, registration happens on re-enable.
+      const enabled = settingsState.settings?.quickAction?.enabled ?? true;
+      if (enabled) {
+        await invoke("quick_action_register_shortcut", { accelerator: next });
+      }
+      // Registration succeeded (or is deferred while disabled) → persist.
       await settingsState.updateSettings({
         section: "quickAction",
         data: { shortcut: next },

@@ -29,6 +29,13 @@
     createSessionFromDefinition,
     updateAgentSessionField,
   } from "$lib/api/agentSession";
+  import {
+    resolveSpec,
+    looksLikeStreamingSpec,
+  } from "$lib/components/genui/jsonui/resolveSpec";
+  import { uiRegistry } from "$lib/components/genui/jsonui/registry";
+  import { Renderer, JsonUIProvider } from "@json-render/svelte";
+  import type { Spec } from "@json-render/core";
 
   const appWindow = getCurrentWindow();
 
@@ -47,10 +54,12 @@
     app_info: { name: "", bundle_id: "", pid: 0 },
   });
 
-  // 翻译状态
+  // 翻译状态。spec 与 result 互斥：最终回复是合法 JSON-Render spec 时走 GenUI
+  // 卡片（spec），否则回落结构化/纯文本解析（result）。
   let translation = $state({
     isLoading: false,
     result: null as TranslationResult | null,
+    spec: null as Spec | null,
     error: null as string | null,
   });
 
@@ -167,15 +176,26 @@
     'You are a translation assistant. Translate the user\'s input between Chinese and English (auto-detect the source and translate to the other language). Reply with ONLY a JSON object and no other text: {"translation": "<translated text>", "targetLanguage": "<zh|en>", "phonetic": "<pronunciation, or null>", "explanation": "<brief usage note in Chinese, or null>"}';
 
   /**
-   * 获取翻译 Session：settings 已绑定则复用；否则用 builtin-chat 定义 +
-   * quick-action 默认模型自举一个并写回 settings（本处是唯一创建点）。
-   * 无可用默认模型时返回 null，上层提示去设置配置。
+   * 获取翻译 Session：优先使用设置里选定的翻译 Agent（quickTools.
+   * translationAgentId），未选定时回落 builtin-chat + 硬编码翻译 prompt。
+   *
+   * 缓存的 sessionId 仅在「创建它的 agent（translation.agentId）」与当前配置
+   * 一致时复用——用户在设置里切换翻译 Agent 后，这里自动按新 Agent 重建会话并
+   * 写回 settings（本处是唯一创建点）。模型统一取 quick-action 默认模型
+   * （Agent 定义已与模型解耦，实例化必须显式给 model）；无可用模型时返回
+   * null，上层提示去设置配置。
    */
   async function getOrCreateTranslationSession(): Promise<string | null> {
     try {
-      const currentSessionId = settingsState.settings?.translation?.sessionId;
-      if (currentSessionId) {
-        return currentSessionId;
+      // 设置可能在主窗口被修改过（换了翻译 Agent / 默认模型）：强制刷新本窗口
+      // 的 settings 快照，再决定复用还是重建。
+      await settingsState.loadSettings(true);
+
+      const configuredAgentId =
+        settingsState.settings?.quickTools?.translationAgentId ?? null;
+      const cached = settingsState.settings?.translation;
+      if (cached?.sessionId && (cached.agentId ?? null) === configuredAgentId) {
+        return cached.sessionId;
       }
 
       if (getAllModels().length === 0) {
@@ -189,23 +209,29 @@
         return null;
       }
 
-      const session = await createSessionFromDefinition("builtin-chat", {
-        modelId: resolved.modelId,
-        providerId: resolved.providerId,
-      });
-      // JSON 输出契约挂在会话 system prompt 上；失败不阻塞（回落纯文本解析）。
-      try {
-        await updateAgentSessionField(
-          session.id,
-          "systemPrompt",
-          TRANSLATION_PROMPT,
-        );
-      } catch (error) {
-        console.warn("Failed to set translation system prompt:", error);
+      const session = await createSessionFromDefinition(
+        configuredAgentId ?? "builtin-chat",
+        {
+          modelId: resolved.modelId,
+          providerId: resolved.providerId,
+        },
+      );
+      if (!configuredAgentId) {
+        // builtin 回落：JSON 输出契约挂在会话 system prompt 上；失败不阻塞
+        // （回落纯文本解析）。选定 Agent 时用其自带 system prompt / GenUI 配置。
+        try {
+          await updateAgentSessionField(
+            session.id,
+            "systemPrompt",
+            TRANSLATION_PROMPT,
+          );
+        } catch (error) {
+          console.warn("Failed to set translation system prompt:", error);
+        }
       }
       await settingsState.updateSettings({
         section: "translation",
-        data: { sessionId: session.id },
+        data: { sessionId: session.id, agentId: configuredAgentId },
       });
       return session.id;
     } catch (error) {
@@ -268,12 +294,15 @@
     translation.isLoading = true;
     translation.error = null;
     translation.result = null;
+    translation.spec = null;
 
-    // 划词翻译复用 words 页绑定的同一翻译会话（settings.translation.sessionId）。
     const term = content.text;
     try {
-      // 一问一答：增量实时回灌预览，结束再解析结构化译文。
+      // 一问一答：纯文本增量实时回灌预览；spec 形状的流不逐字符渲染原始
+      // JSON，保持加载态直到定稿。结束后先按 GenUI spec 解析，非 spec 回落
+      // 结构化译文解析。
       const finalContent = await runAgentTextTurn(sessionId, term, (partial) => {
+        if (looksLikeStreamingSpec(partial)) return;
         translation.result = {
           term,
           translation: partial,
@@ -282,10 +311,25 @@
           explanation: null,
         };
       });
-      translation.result = parseTranslationResponse(finalContent, term);
+      const spec = resolveSpec(finalContent);
+      if (spec) {
+        translation.result = null;
+        translation.spec = spec;
+      } else {
+        translation.result = parseTranslationResponse(finalContent, term);
+      }
     } catch (error) {
       console.error("Translation error:", error);
       translation.error = t("selection.translationFailed");
+      // 缓存会话可能已失效（被删除等）：清掉绑定让「重新翻译」重建会话。
+      try {
+        await settingsState.updateSettings({
+          section: "translation",
+          data: { sessionId: null, agentId: null },
+        });
+      } catch (clearError) {
+        console.warn("Failed to clear stale translation session:", clearError);
+      }
     } finally {
       translation.isLoading = false;
     }
@@ -366,8 +410,8 @@
   <!-- 内容区域 -->
   <div class="flex-1 p-3 overflow-auto min-h-0">
     {#if content.mode === "translate"}
-      <!-- 翻译模式 -->
-      {#if translation.isLoading}
+      <!-- 翻译模式：流式期间纯文本增量走 result 预览，spec 形状的流保持加载态 -->
+      {#if translation.isLoading && !translation.result}
         <div class="flex items-center justify-center py-8">
           <Spinner size={28} />
           <span class="ml-2 text-sm text-base-content/60">{t("selection.translating")}</span>
@@ -376,6 +420,11 @@
         <div class="p-3 rounded-lg bg-error/10 text-error text-sm">
           {translation.error}
         </div>
+      {:else if translation.spec}
+        <!-- 翻译 Agent 的 GenUI 输出：整条回复是合法 JSON-Render spec → 卡片渲染 -->
+        <JsonUIProvider initialState={{}}>
+          <Renderer spec={translation.spec} registry={uiRegistry} />
+        </JsonUIProvider>
       {:else if translation.result}
         <div class="space-y-3">
           <!-- 译文 -->
