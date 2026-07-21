@@ -31,9 +31,9 @@ use crate::services::agent_permission::{
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::skills::Skill;
 use crate::services::{
-    abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest,
-    AgentService, AgentSessionService, CodingRunSink, GenUiService, McpService, ProviderService,
-    SettingsService, SkillService,
+    abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest, AgentService,
+    AgentSessionService, CodingRunSink, GenUiService, McpService, ProviderService, SettingsService,
+    SkillService,
 };
 use crate::storage::types::UUID;
 use hand_ai_model::Message;
@@ -171,6 +171,9 @@ fn append_generative_ui_prompt(system_prompt: &mut String, example: Option<&str>
 /// 装配阶段（步骤 2/3）的任何错误都会先把注册表占位移除再向上抛出，避免会话被
 /// 永久“卡住”。
 #[tauri::command]
+// Tauri command: one State param per injected service; splitting them into a
+// struct would not reduce real complexity.
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_run_stream(
     request: AgentRunRequest,
     window: Window,
@@ -259,44 +262,52 @@ async fn assemble_and_drive(
 
     let mut config = config_from_rows(&session_row, &provider, app_data_dir)?;
 
+    // 会话的来源 Agent（provenance 链接 agent_definition_id）：运行时实时解析
+    // （agent_sessions 无相应快照列），编辑 Agent 配置对既有会话的下一轮立即生效。
+    // 悬挂 definition / 查询失败一律静默降级为 None——绝不阻塞 run。
+    // (2a) generative-UI 注入与 (2b) 定义关联 skill 注入共用这一次解析。
+    let definition = match session_row.agent_definition_id.clone() {
+        Some(def_id) => agents.get_agent(def_id).await.ok(),
+        None => None,
+    };
+
     // --- (2a) Generative-UI injection（会话级能力；旧 chat 后端语义迁移）。
     //
-    // 会话的来源 Agent（provenance 链接 agent_definition_id）开启 generative_ui
-    // 时，把冻结的 catalog prompt 追加进本轮 system prompt；其关联的 GenUI 模板
-    // （agents.genui_id → genui.spec）非空时再追加一段 few-shot 输出示例。运行时
-    // 实时解析（agent_sessions 无 genui 快照列）：编辑 Agent 的 GenUI 配置对既有
-    // 会话的下一轮立即生效。悬挂 definition / 模板已删 / 查询失败一律静默降级为
-    // 不注入——绝不阻塞 run。
-    if let Some(def_id) = session_row.agent_definition_id.clone() {
-        if let Ok(definition) = agents.get_agent(def_id).await {
-            if definition.generative_ui == Some(true) {
-                let example = match definition.genui_id.clone() {
-                    Some(genui_id) => genui.get_genui(genui_id).await.ok().map(|g| g.spec),
-                    None => None,
-                };
-                let mut system_prompt = config.system_prompt.take().unwrap_or_default();
-                append_generative_ui_prompt(&mut system_prompt, example.as_deref());
-                config.system_prompt = Some(system_prompt);
-            }
-        }
+    // 来源 Agent 开启 generative_ui 时，把冻结的 catalog prompt 追加进本轮
+    // system prompt；其关联的 GenUI 模板（agents.genui_id → genui.spec）非空时
+    // 再追加一段 few-shot 输出示例。模板已删静默降级为仅 catalog prompt。
+    if let Some(definition) = definition
+        .as_ref()
+        .filter(|d| d.generative_ui == Some(true))
+    {
+        let example = match definition.genui_id.clone() {
+            Some(genui_id) => genui.get_genui(genui_id).await.ok().map(|g| g.spec),
+            None => None,
+        };
+        let mut system_prompt = config.system_prompt.take().unwrap_or_default();
+        append_generative_ui_prompt(&mut system_prompt, example.as_deref());
+        config.system_prompt = Some(system_prompt);
     }
 
-    // --- (2b) Forced-skill injection for THIS turn (VAL-CACLEAN-007).
+    // --- (2b) Skill injection：定义关联（每轮固定）+ 本轮 forced（VAL-CACLEAN-007）。
     //
-    // `request.forced_skills` (wire `forcedSkills`) carries the skills the user
-    // explicitly forced for this turn. The coding-agent owns ambient skill
-    // discovery (it indexes `<available_skills>` and exposes a `skill` tool from
-    // its own roots), but it has NO forced-skill API. So HandBox resolves the
-    // forced names against ITS effective skill set — discovered-and-validated
-    // (across app-data / user / project scopes) MINUS the global `skills.disabled`
-    // opt-out — and appends each surviving body VERBATIM, bracketed in a
-    // `<forced_skill name="…">` marker, onto this session's system prompt before
-    // construction. This mirrors the retired native runtime's semantics exactly
-    // (disabled wins over forced; unknown/empty/duplicate names are silently
-    // skipped) and is purely additive: an empty / all-unresolved forced list
-    // leaves the prompt untouched. No second discovery IO is shared with the
-    // coding-agent — this only affects the system prompt seen by the model.
-    if !request.forced_skills.is_empty() {
+    // 两个来源合并注入：来源 Agent 定义关联的 skills（`agents.skills`，对该 Agent
+    // 的所有会话每轮生效——与 MCP 绑定同构的「定义携带、运行消费」机制）在前，
+    // `request.forced_skills`（wire `forcedSkills`，用户本轮显式强制）在后。
+    //
+    // The coding-agent owns ambient skill discovery (it indexes
+    // `<available_skills>` and exposes a `skill` tool from its own roots), but it
+    // has NO forced-skill API. So HandBox resolves the combined names against ITS
+    // effective skill set — discovered-and-validated (across app-data / user /
+    // project scopes) MINUS the global `skills.disabled` opt-out — and appends
+    // each surviving body VERBATIM, bracketed in a `<forced_skill name="…">`
+    // marker, onto this session's system prompt before construction. Disabled
+    // wins over pinned/forced; unknown/empty names are silently skipped;
+    // duplicates (incl. pinned∩forced overlap) inject once, first occurrence
+    // wins. Purely additive: an empty / all-unresolved list leaves the prompt
+    // untouched.
+    let pinned_skills: &[String] = definition.as_ref().map_or(&[], |d| d.skills.as_slice());
+    if !pinned_skills.is_empty() || !request.forced_skills.is_empty() {
         let working_dir = session_row.working_dir.as_deref().map(std::path::Path::new);
         let (discovered, skill_errs) = skills.discover(working_dir);
         if !skill_errs.is_empty() {
@@ -311,9 +322,14 @@ async fn assemble_and_drive(
             .filter(|s| !disabled.contains(&s.name))
             .collect();
 
+        let combined: Vec<String> = pinned_skills
+            .iter()
+            .chain(request.forced_skills.iter())
+            .cloned()
+            .collect();
         let mut system_prompt = config.system_prompt.take().unwrap_or_default();
-        append_forced_skill_bodies(&mut system_prompt, &request.forced_skills, &effective);
-        // Keep `None` (default prompt) when nothing was forced AND there was no
+        append_forced_skill_bodies(&mut system_prompt, &combined, &effective);
+        // Keep `None` (default prompt) when nothing was injected AND there was no
         // base prompt, so a session without a custom prompt still falls back to
         // the coding-agent default rather than an empty override.
         config.system_prompt = (!system_prompt.is_empty()).then_some(system_prompt);

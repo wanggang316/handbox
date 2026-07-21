@@ -142,6 +142,18 @@
         );
       }
 
+      // 关联 skill 变更（序列化比较，避免无意义写入）
+      if (
+        JSON.stringify(data.skills ?? []) !==
+        JSON.stringify(editingAgent.skills ?? [])
+      ) {
+        await agentActions.updateAgentField(
+          editingAgent.id,
+          "skills",
+          data.skills
+        );
+      }
+
       // 能力字段：后端仅支持逐字段更新，变更时下发。
       if (data.description !== (editingAgent.description ?? "")) {
         await agentActions.updateAgentField(
@@ -185,7 +197,7 @@
         systemPrompt: data.systemPrompt || undefined,
         reasoning: undefined,
         mcpServers: data.mcpServers,
-        skills: [],
+        skills: data.skills,
         generativeUi: data.generativeUi,
         genuiId: effectiveGenuiId ?? undefined,
       });
@@ -264,7 +276,7 @@
         systemPrompt: agent.systemPrompt || undefined,
         reasoning: undefined,
         mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
-        skills: [],
+        skills: agent.skills ? [...agent.skills] : [],
         generativeUi: agent.generativeUi ?? false,
         genuiId: agent.genuiId || undefined,
       });

@@ -12,6 +12,8 @@
   import type { McpServerConfig } from "$lib/types/llm";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
+  import { listSkills } from "$lib/api/skill";
+  import type { SkillInfo } from "$lib/types";
 
   interface Props {
     open: boolean;
@@ -27,6 +29,8 @@
     temperature?: number;
     maxTokens?: number;
     systemPrompt: string;
+    // 关联的 skill 名单（按名引用已发现的 skill；运行时每轮固定注入）
+    skills: string[];
     mcpServers: McpServerConfig[];
     generativeUi: boolean;
     // 关联的 GenUI id；空串表示未关联
@@ -106,6 +110,24 @@
     )
   );
 
+  // 可关联的 skill 列表：定义级关联与具体项目无关，不传 workingDir（只发现
+  // user / appData 两档）；仅列校验通过的干净 skill。已关联但磁盘上已消失的
+  // 名字仍显示为附加行（可取消关联），运行时未知名静默跳过、不会报错。
+  let availableSkills = $state<SkillInfo[]>([]);
+
+  function isSkillSelected(name: string): boolean {
+    return formData.skills.includes(name);
+  }
+  function toggleSkill(name: string, selected: boolean) {
+    if (selected) {
+      if (!formData.skills.includes(name)) {
+        formData.skills = [...formData.skills, name];
+      }
+    } else {
+      formData.skills = formData.skills.filter((x) => x !== name);
+    }
+  }
+
   onMount(() => {
     if (genuiState.genuis.length === 0) {
       genuiActions
@@ -117,6 +139,11 @@
         .loadServers()
         .catch((e) => console.error("Failed to load MCP servers:", e));
     }
+    listSkills()
+      .then((skills) => {
+        availableSkills = skills.filter((s) => s.body !== null);
+      })
+      .catch((e) => console.error("Failed to list skills:", e));
   });
 
   let localOpen = $state(false);
@@ -128,6 +155,7 @@
     name: "",
     icon: "",
     systemPrompt: "",
+    skills: [],
     mcpServers: [],
     generativeUi: false,
     genuiId: "",
@@ -136,6 +164,13 @@
     workingDirMode: "optional",
     toolExecutionMode: "auto",
   });
+
+  // 已关联但不在发现列表里的名字（skill 被删 / 改名）：保留成可取消的行。
+  const missingSelectedSkills = $derived(
+    formData.skills.filter(
+      (name) => !availableSkills.some((s) => s.name === name)
+    )
+  );
 
   let paramEnabled = $state<Record<ParamKey, boolean>>({
     temperature: false,
@@ -217,6 +252,7 @@
         temperature: agent.temperature,
         maxTokens: agent.maxTokens,
         systemPrompt: agent.systemPrompt || "",
+        skills: agent.skills ? [...agent.skills] : [],
         mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
         generativeUi: agent.generativeUi ?? false,
         genuiId: agent.genuiId ?? "",
@@ -230,6 +266,7 @@
         name: "",
         icon: "",
         systemPrompt: "",
+        skills: [],
         mcpServers: [],
         generativeUi: false,
         genuiId: "",
@@ -360,6 +397,59 @@
             bind:selectedValue={formData.toolExecutionMode}
             size="sm"
           />
+        </div>
+
+        <!-- 关联 skill：与 MCP 同构的「定义携带、运行消费」机制——勾选的 skill
+             对该 Agent 的所有会话每轮固定注入（全局禁用优先）。 -->
+        <div class="flex flex-col gap-1.5">
+          <span class="text-xs text-base-content/70">
+            {t("agent.form.skillsTitle")}
+          </span>
+          {#if availableSkills.length === 0 && missingSelectedSkills.length === 0}
+            <div
+              class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-3 text-center"
+            >
+              <p class="text-xs text-base-content/55">
+                {t("agent.form.noSkills")}
+              </p>
+            </div>
+          {:else}
+            <div class="flex flex-col gap-2">
+              {#each availableSkills as skill (skill.name)}
+                <div class="flex items-center justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <span class="block truncate text-sm text-base-content/85">
+                      {skill.name}
+                      {#if skill.disabled}
+                        <span class="ml-1 text-xs text-base-content/40">
+                          {t("agent.form.skillDisabled")}
+                        </span>
+                      {/if}
+                    </span>
+                    {#if skill.description}
+                      <span class="block truncate text-xs text-base-content/40">
+                        {skill.description}
+                      </span>
+                    {/if}
+                  </div>
+                  <Toggle
+                    checked={isSkillSelected(skill.name)}
+                    onChange={(v) => toggleSkill(skill.name, v)}
+                  />
+                </div>
+              {/each}
+              <!-- 已关联但已不存在的 skill（被删 / 改名）：保留成可取消的行 -->
+              {#each missingSelectedSkills as name (name)}
+                <div class="flex items-center justify-between gap-2">
+                  <span class="min-w-0 flex-1 truncate text-sm text-base-content/40">
+                    {name}
+                    <span class="ml-1 text-xs">{t("agent.form.skillMissing")}</span>
+                  </span>
+                  <Toggle checked={true} onChange={() => toggleSkill(name, false)} />
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
 
         <div class="flex flex-col gap-1.5">
