@@ -92,6 +92,8 @@ export const jobsEn: Record<keyof typeof jobsZh, string> = {
   "jobs.form.mustBeInteger": "{label} must be an integer",
   "jobs.form.mustNotBeNegative": "{label} cannot be negative",
   "jobs.form.saveFailed": "Save failed, please try again",
+  "jobs.form.backToList": "Back to list",
+  "jobs.form.loadFailed": "Failed to load job",
   "jobs.form.saving": "Saving…",
   "jobs.form.save": "Save",
   "jobs.form.createAction": "Create",

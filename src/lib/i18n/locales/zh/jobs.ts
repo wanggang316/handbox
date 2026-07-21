@@ -83,6 +83,8 @@ export const jobsZh = {
   "jobs.form.mustBeInteger": "{label}必须是整数",
   "jobs.form.mustNotBeNegative": "{label}不能为负数",
   "jobs.form.saveFailed": "保存失败，请重试",
+  "jobs.form.backToList": "返回列表",
+  "jobs.form.loadFailed": "加载任务失败",
   "jobs.form.saving": "保存中…",
   "jobs.form.save": "保存",
   "jobs.form.createAction": "创建",

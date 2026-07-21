@@ -8,17 +8,13 @@
   import Button from "$lib/components/ui/Button.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
-  import JobFormModal from "$lib/components/jobs/JobFormModal.svelte";
   import JobDetailModal from "$lib/components/jobs/JobDetailModal.svelte";
-  import type { JobFormData } from "$lib/components/jobs/JobFormModal.svelte";
+  import { goto } from "$app/navigation";
   import { t } from "$lib/i18n";
   import type { Job } from "$lib/types";
 
   let searchQuery = $state("");
 
-  // Modal 状态：创建/编辑共用一个 JobFormModal（job 为 null → 创建）。
-  let showFormModal = $state(false);
-  let editingJob = $state<Job | null>(null);
   let showDeleteConfirm = $state(false);
   let deletingJob = $state<Job | null>(null);
   let deleting = $state(false);
@@ -50,14 +46,14 @@
     }
   }
 
+  // 创建 / 编辑走二级页（不再使用 Modal）。
   function handleCreate() {
-    editingJob = null;
-    showFormModal = true;
+    goto("/jobs/new");
   }
 
   function handleEdit(job: Job) {
-    editingJob = job;
-    showFormModal = true;
+    if (!job.id) return;
+    goto(`/jobs/${job.id}`);
   }
 
   function handleDelete(job: Job) {
@@ -95,43 +91,6 @@
       ? `<span class="text-error">${escapeHtml(deleteError)}</span>`
       : t("jobs.delete.confirmMessage"),
   );
-
-  function closeFormModal() {
-    showFormModal = false;
-    editingJob = null;
-  }
-
-  /**
-   * 保存桥接：落库成功后 store 自动 upsert 列表。失败时 throw 给 JobFormModal，
-   * 由其捕获并展示错误且保持表单打开——不在落库前乐观更新，避免 ghost 卡片。
-   */
-  async function handleSave(data: JobFormData): Promise<void> {
-    if (editingJob?.id) {
-      await jobStore.update(editingJob.id, {
-        name: data.name,
-        description: data.description,
-        target: data.target,
-        cronExpr: data.cronExpr,
-        timezone: data.timezone,
-        enabled: data.enabled,
-        execTimeoutSecs: data.execTimeoutSecs,
-        maxRetries: data.maxRetries,
-        retryDelaySecs: data.retryDelaySecs,
-      });
-    } else {
-      await jobStore.create({
-        name: data.name,
-        description: data.description,
-        target: data.target,
-        cronExpr: data.cronExpr,
-        timezone: data.timezone,
-        enabled: data.enabled,
-        execTimeoutSecs: data.execTimeoutSecs,
-        maxRetries: data.maxRetries,
-        retryDelaySecs: data.retryDelaySecs,
-      });
-    }
-  }
 
   async function confirmDelete(): Promise<void> {
     if (!deletingJob?.id) return;
@@ -264,14 +223,6 @@
     </div>
   </div>
 </div>
-
-<!-- 任务表单 Modal（创建/编辑共用） -->
-<JobFormModal
-  open={showFormModal}
-  job={editingJob}
-  onClose={closeFormModal}
-  onSave={handleSave}
-/>
 
 <!-- 任务详情 Modal（执行历史时间线） -->
 <JobDetailModal
