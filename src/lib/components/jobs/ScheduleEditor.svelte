@@ -201,7 +201,7 @@
   }
 </script>
 
-<!-- 左右结构：左列编辑（快捷/Cron + 可读化文案），右列 Next N 次执行预览。 -->
+<!-- 左右结构：左列编辑（快捷/Cron），右列 = 可读化调度摘要 + Next N 次执行预览。 -->
 <div class="grid grid-cols-2 gap-5">
   <div class="flex flex-col gap-4">
   <Tabs value={activeTab} items={TAB_ITEMS} onChange={handleTabChange} />
