@@ -274,11 +274,6 @@
           {#if nameError}
             <span class="text-xs text-error">{nameError}</span>
           {/if}
-          <input
-            class="mt-1 w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
-            bind:value={form.description}
-            placeholder={t("jobs.form.descriptionPlaceholder")}
-          />
         </div>
         <Button
           variant="primary"

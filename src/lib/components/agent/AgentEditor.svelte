@@ -486,11 +486,6 @@
             placeholder={t("agent.form.namePlaceholder")}
             disabled={isBuiltin}
           />
-          <input
-            class="mt-1 w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
-            bind:value={formData.description}
-            placeholder={t("agent.form.descriptionPlaceholder")}
-          />
         </div>
         <Button
           variant="primary"
