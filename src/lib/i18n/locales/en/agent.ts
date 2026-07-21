@@ -154,6 +154,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.descriptionPlaceholder": "One-line summary shown in the list",
   "agent.form.iconLabel": "Icon",
   "agent.form.sectionTools": "Tools",
+  "agent.form.sectionRuntime": "Runtime",
+  "agent.form.linkedCount": "{count} linked",
   "agent.form.builtinTools": "Built-in tools",
   "agent.form.workingDir": "Working directory",
   "agent.form.toolExecution": "Tool execution",

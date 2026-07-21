@@ -146,6 +146,8 @@ export const agentZh = {
   "agent.form.descriptionPlaceholder": "一行简介，便于在列表中识别",
   "agent.form.iconLabel": "图标",
   "agent.form.sectionTools": "工具",
+  "agent.form.sectionRuntime": "运行",
+  "agent.form.linkedCount": "已关联 {count} 个",
   "agent.form.builtinTools": "内置工具",
   "agent.form.workingDir": "工作目录",
   "agent.form.toolExecution": "工具执行",

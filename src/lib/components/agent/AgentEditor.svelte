@@ -1,11 +1,19 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { ArrowLeft, ChevronDown, ChevronRight, Save } from "@lucide/svelte";
+  import { ArrowLeft, Save } from "@lucide/svelte";
   import Button from "../ui/Button.svelte";
   import Select from "../ui/Select.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
+  import Modal from "../ui/Modal.svelte";
+  import {
+    TableGroup,
+    TableBaseRow,
+    SelectRow,
+    SwitchRow,
+  } from "../ui/table";
+  import DefaultRow from "../ui/table/DefaultRow.svelte";
   import { AGENT_ICONS } from "$lib/utils/agentIcons";
   import { normalizeError } from "$lib/utils/error";
   import { t } from "$lib/i18n";
@@ -43,7 +51,7 @@
 
   let { agent = null }: Props = $props();
 
-  // ── 模型参数：会话/引擎实际消费的采样参数，扁平绘制（label + toggle + slider）。
+  // ── 模型参数：会话/引擎实际消费的采样参数（label + toggle + slider）。
   //    仅 temperature / maxTokens —— top_p / top_k 会话层与引擎均不消费，故不在此暴露。 ──
   type ParamKey = "temperature" | "maxTokens";
   const PARAM_META: Array<{
@@ -82,11 +90,6 @@
     { value: "manual", label: t("agent.input.manualExecution") },
   ]);
 
-  // 折叠区标题：与 .form-section-label 同观感；按钮需 flex 排布 chevron，
-  // 而该类是无层级 CSS（display: block 会压过 .flex），故用等效 utilities。
-  const SECTION_TOGGLE_CLASS =
-    "flex items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-base-content/45 transition-colors hover:text-base-content/70";
-
   // 内置 Agent：名称只读、不可删除（由后端约束）。
   const isBuiltin = $derived(agent?.builtin ?? false);
 
@@ -113,6 +116,10 @@
   // user / appData 两档）；仅列校验通过的干净 skill。已关联但磁盘上已消失的
   // 名字仍显示为附加行（可取消关联），运行时未知名静默跳过、不会报错。
   let availableSkills = $state<SkillInfo[]>([]);
+
+  // Skill / MCP 的选择在 Modal 弹窗中进行（行上仅显示已关联数量）。
+  let skillsModalOpen = $state(false);
+  let mcpModalOpen = $state(false);
 
   function isSkillSelected(name: string): boolean {
     return formData.skills.includes(name);
@@ -175,7 +182,6 @@
     maxTokens: 4096,
   });
 
-  let paramsOpen = $state(false);
   let saving = $state(false);
 
   function isMcpSelected(serverId: string): boolean {
@@ -447,12 +453,12 @@
   });
 </script>
 
-<!-- Agent 编辑二级页：与 GenUI 编辑页同构的容器（居中 max-w-5xl + 页边距），
-     单列纵排（不再左右结构）。 -->
+<!-- Agent 编辑二级页：设置子页的样式语言——居中 max-w-3xl 阅读宽度（不撑满屏幕）、
+     TableGroup 分组卡 + 行组件；Skill / MCP 的选择经 Modal 弹窗。 -->
 <div class="h-full flex flex-col">
   <!-- 顶部工具栏 -->
-  <div class="flex-shrink-0 border-b border-base-300 px-6 pb-4 pt-12">
-    <div class="mx-auto w-full max-w-5xl">
+  <div class="flex-shrink-0 px-6 pb-4 pt-12">
+    <div class="mx-auto w-full max-w-3xl">
       <button
         class="flex items-center gap-2 text-sm text-base-content/70 hover:text-base-content w-fit mb-4"
         onclick={backToList}
@@ -493,56 +499,50 @@
     </div>
   </div>
 
-  <!-- 表单主体：单列纵排各配置区 -->
-  <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5">
-    <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
+  <!-- 表单主体：设置页式分组卡纵排 -->
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+    <div class="mx-auto flex w-full max-w-3xl flex-col gap-y-4">
       <!-- 图标：精选 Lucide 图标网格；再次点选中项可清除（回退默认图标） -->
-      <div class="flex flex-col gap-2">
-        <span class="form-section-label">{t("agent.form.iconLabel")}</span>
-        <div class="flex flex-wrap gap-1.5">
-          {#each AGENT_ICONS as opt (opt.name)}
-            {@const Icon = opt.Icon}
-            <button
-              type="button"
-              aria-pressed={formData.icon === opt.name}
-              title={opt.name}
-              class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {formData.icon ===
-              opt.name
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-[var(--hairline)] text-base-content/55 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
-              onclick={() =>
-                (formData.icon = formData.icon === opt.name ? "" : opt.name)}
-            >
-              <Icon size={16} />
-            </button>
-          {/each}
-        </div>
-      </div>
+      <TableGroup title={t("agent.form.iconLabel")}>
+        <TableBaseRow>
+          <div class="flex flex-wrap gap-1.5">
+            {#each AGENT_ICONS as opt (opt.name)}
+              {@const Icon = opt.Icon}
+              <button
+                type="button"
+                aria-pressed={formData.icon === opt.name}
+                title={opt.name}
+                class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {formData.icon ===
+                opt.name
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-[var(--hairline)] text-base-content/55 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
+                onclick={() =>
+                  (formData.icon = formData.icon === opt.name ? "" : opt.name)}
+              >
+                <Icon size={16} />
+              </button>
+            {/each}
+          </div>
+        </TableBaseRow>
+      </TableGroup>
 
       <!-- 系统提示词 -->
-      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-5">
-        <div class="flex items-baseline justify-between">
-          <span class="form-section-label">{t("agent.form.systemPromptTitle")}</span>
-          <span class="text-xs text-base-content/35">
+      <TableGroup title={t("agent.form.systemPromptTitle")}>
+        <TableBaseRow>
+          <textarea
+            class="field min-h-48 w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
+            bind:value={formData.systemPrompt}
+            placeholder={t("agent.systemPrompt.placeholder")}
+          ></textarea>
+          <div class="mt-1 text-right text-xs text-base-content/35">
             {t("agent.form.charCount", { count: formData.systemPrompt.length })}
-          </span>
-        </div>
-        <textarea
-          class="field min-h-64 w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
-          bind:value={formData.systemPrompt}
-          placeholder={t("agent.systemPrompt.placeholder")}
-        ></textarea>
-      </div>
+          </div>
+        </TableBaseRow>
+      </TableGroup>
 
-      <!-- 工具：内置工具 / 执行方式 / 技能 / MCP 服务器——所有工具面配置归一组 -->
-      <div class="flex flex-col gap-3.5 border-t border-[var(--hairline)] pt-5">
-        <span class="form-section-label">{t("agent.form.sectionTools")}</span>
-
-        <div class="flex flex-col gap-1.5">
-          <span class="text-xs text-base-content/70">
-            {t("agent.form.builtinTools")}
-          </span>
-          <!-- chip 式多选（选中高亮） -->
+      <!-- 工具：内置工具 / 执行方式 / 技能 / MCP（技能与 MCP 经 Modal 选择） -->
+      <TableGroup title={t("agent.form.sectionTools")}>
+        <TableBaseRow label={t("agent.form.builtinTools")} layout="vertical">
           <div class="flex flex-wrap gap-1.5">
             {#each BUILTIN_TOOLS as tool (tool)}
               <button
@@ -559,197 +559,169 @@
               </button>
             {/each}
           </div>
-        </div>
+        </TableBaseRow>
 
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-base-content/70">
-            {t("agent.form.toolExecution")}
-          </span>
-          <Select
-            options={toolExecutionModeOptions}
-            bind:selectedValue={formData.toolExecutionMode}
-            size="sm"
-          />
-        </div>
+        <SelectRow
+          label={t("agent.form.toolExecution")}
+          options={toolExecutionModeOptions}
+          bind:selectedValue={formData.toolExecutionMode}
+        />
 
-        <!-- 关联 skill：与 MCP 同构的「定义携带、运行消费」机制——勾选的 skill
-             对该 Agent 的所有会话每轮固定注入（全局禁用优先）。 -->
-        <div class="flex flex-col gap-1.5">
-          <span class="text-xs text-base-content/70">
-            {t("agent.form.skillsTitle")}
-          </span>
-          {#if availableSkills.length === 0 && missingSelectedSkills.length === 0}
-            <div
-              class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-3 text-center"
-            >
-              <p class="text-xs text-base-content/55">
-                {t("agent.form.noSkills")}
-              </p>
-            </div>
-          {:else}
-            <div class="flex flex-col gap-2">
-              {#each availableSkills as skill (skill.name)}
-                <div class="flex items-center justify-between gap-2">
-                  <div class="min-w-0 flex-1">
-                    <span class="block truncate text-sm text-base-content/85">
-                      {skill.name}
-                      {#if skill.disabled}
-                        <span class="ml-1 text-xs text-base-content/40">
-                          {t("agent.form.skillDisabled")}
-                        </span>
-                      {/if}
-                    </span>
-                    {#if skill.description}
-                      <span class="block truncate text-xs text-base-content/40">
-                        {skill.description}
-                      </span>
-                    {/if}
-                  </div>
-                  <Toggle
-                    checked={isSkillSelected(skill.name)}
-                    onChange={(v) => toggleSkill(skill.name, v)}
-                  />
-                </div>
-              {/each}
-              <!-- 已关联但已不存在的 skill（被删 / 改名）：保留成可取消的行 -->
-              {#each missingSelectedSkills as name (name)}
-                <div class="flex items-center justify-between gap-2">
-                  <span class="min-w-0 flex-1 truncate text-sm text-base-content/40">
-                    {name}
-                    <span class="ml-1 text-xs">{t("agent.form.skillMissing")}</span>
-                  </span>
-                  <Toggle checked={true} onChange={() => toggleSkill(name, false)} />
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <DefaultRow
+          label={t("agent.form.skillsTitle")}
+          value={t("agent.form.linkedCount", { count: formData.skills.length })}
+          onclick={() => (skillsModalOpen = true)}
+        />
 
-        <div class="flex flex-col gap-1.5">
-          <span class="text-xs text-base-content/70">
-            {t("agent.form.mcpServers")}
-          </span>
-          {#if availableServers.length === 0}
-            <div
-              class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-3 text-center"
-            >
-              <p class="text-xs text-base-content/55">
-                {t("agent.input.noAvailableMcpServers")}
-              </p>
-              <p class="mt-0.5 text-xs text-base-content/40">
-                {t("agent.input.configureMcpInSettings")}
-              </p>
-            </div>
-          {:else}
-            <div class="flex flex-col gap-3">
-              {#each availableServers as server (server.id)}
-                <div class="flex flex-col gap-1">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="truncate text-sm text-base-content/85">
-                      {server.displayName ?? server.name}
-                    </span>
-                    <Toggle
-                      checked={isMcpSelected(server.id)}
-                      onChange={(v) => toggleMcp(server.id, v)}
-                    />
-                  </div>
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-xs text-base-content/40">
-                      {t("agent.input.enabledToolsCount", {
-                        count: server.enabledTools.length,
-                      })}
-                    </span>
-                    {#if isMcpSelected(server.id)}
-                      <Select
-                        options={executionModeOptions}
-                        selectedValue={mcpMode(server.id)}
-                        onSelect={(value) =>
-                          setMcpMode(server.id, value as "auto" | "manual")}
-                        size="sm"
-                        autoWidth={true}
-                      />
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      </div>
+        <DefaultRow
+          label={t("agent.form.mcpServers")}
+          value={t("agent.form.linkedCount", {
+            count: formData.mcpServers.length,
+          })}
+          onclick={() => (mcpModalOpen = true)}
+        />
+      </TableGroup>
 
-      <!-- 工作目录：运行环境配置，独立于工具组 -->
-      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-5">
-        <span class="form-section-label">{t("agent.form.workingDir")}</span>
-        <Select
+      <!-- 运行：工作目录 / 生成式 UI -->
+      <TableGroup title={t("agent.form.sectionRuntime")}>
+        <SelectRow
+          label={t("agent.form.workingDir")}
           options={workingDirModeOptions}
           bind:selectedValue={formData.workingDirMode}
-          size="sm"
         />
-      </div>
 
-      <!-- 生成式 UI -->
-      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-5">
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex min-w-0 flex-col gap-0.5">
-            <span class="text-sm text-base-content/85">
-              {t("agent.form.generativeUi")}
-            </span>
-            <span class="text-xs text-base-content/50">
-              {t("agent.form.generativeUiDesc")}
-            </span>
-          </div>
-          <Toggle bind:checked={formData.generativeUi} />
-        </div>
+        <SwitchRow
+          label={t("agent.form.generativeUi")}
+          description={t("agent.form.generativeUiDesc")}
+          bind:checked={formData.generativeUi}
+        />
+
         {#if formData.generativeUi}
-          <div class="flex flex-col gap-1">
-            <Select
-              options={genuiOptions}
-              bind:selectedValue={formData.genuiId}
-              size="sm"
-            />
-            <span class="text-xs text-base-content/50">
-              {t("agent.form.genuiHint")}
-            </span>
-          </div>
+          <SelectRow
+            label={t("agent.form.genuiHint")}
+            options={genuiOptions}
+            bind:selectedValue={formData.genuiId}
+          />
         {/if}
-      </div>
+      </TableGroup>
 
-      <!-- 模型参数（折叠） -->
-      <div class="flex flex-col gap-3 border-t border-[var(--hairline)] pt-5 pb-6">
-        <button
-          type="button"
-          class={SECTION_TOGGLE_CLASS}
-          onclick={() => (paramsOpen = !paramsOpen)}
-        >
-          {#if paramsOpen}
-            <ChevronDown size={13} />
-          {:else}
-            <ChevronRight size={13} />
+      <!-- 模型参数（可折叠分组卡） -->
+      <TableGroup
+        title={t("agent.form.modelParams")}
+        collapsible
+        defaultCollapsed
+      >
+        {#each PARAM_META as p (p.key)}
+          <SwitchRow label={p.label} bind:checked={paramEnabled[p.key]} />
+          {#if paramEnabled[p.key]}
+            <TableBaseRow>
+              <LabeledSlider
+                bind:value={paramValues[p.key]}
+                min={p.min}
+                max={p.max}
+                step={p.step}
+                showValue={true}
+              />
+            </TableBaseRow>
           {/if}
-          {t("agent.form.modelParams")}
-        </button>
-        {#if paramsOpen}
-          <div class="flex max-w-md flex-col gap-3">
-            {#each PARAM_META as p (p.key)}
-              <div class="flex flex-col gap-2">
-                <div class="flex items-center justify-between">
-                  <span class="text-sm text-base-content/85">{p.label}</span>
-                  <Toggle bind:checked={paramEnabled[p.key]} />
-                </div>
-                {#if paramEnabled[p.key]}
-                  <LabeledSlider
-                    bind:value={paramValues[p.key]}
-                    min={p.min}
-                    max={p.max}
-                    step={p.step}
-                    showValue={true}
-                  />
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
+        {/each}
+      </TableGroup>
     </div>
   </div>
 </div>
+
+<!-- 技能选择 Modal：Toggle 已发现的 skill；已消失的关联名保留成可取消的行 -->
+<Modal bind:open={skillsModalOpen} title={t("agent.form.skillsTitle")}>
+  {#if availableSkills.length === 0 && missingSelectedSkills.length === 0}
+    <div
+      class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-6 text-center"
+    >
+      <p class="text-sm text-base-content/55">{t("agent.form.noSkills")}</p>
+    </div>
+  {:else}
+    <div class="flex max-h-96 flex-col gap-3 overflow-y-auto">
+      {#each availableSkills as skill (skill.name)}
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <span class="block truncate text-sm text-base-content/85">
+              {skill.name}
+              {#if skill.disabled}
+                <span class="ml-1 text-xs text-base-content/40">
+                  {t("agent.form.skillDisabled")}
+                </span>
+              {/if}
+            </span>
+            {#if skill.description}
+              <span class="block truncate text-xs text-base-content/40">
+                {skill.description}
+              </span>
+            {/if}
+          </div>
+          <Toggle
+            checked={isSkillSelected(skill.name)}
+            onChange={(v) => toggleSkill(skill.name, v)}
+          />
+        </div>
+      {/each}
+      <!-- 已关联但已不存在的 skill（被删 / 改名）：保留成可取消的行 -->
+      {#each missingSelectedSkills as name (name)}
+        <div class="flex items-center justify-between gap-3">
+          <span class="min-w-0 flex-1 truncate text-sm text-base-content/40">
+            {name}
+            <span class="ml-1 text-xs">{t("agent.form.skillMissing")}</span>
+          </span>
+          <Toggle checked={true} onChange={() => toggleSkill(name, false)} />
+        </div>
+      {/each}
+    </div>
+  {/if}
+</Modal>
+
+<!-- MCP 服务器选择 Modal：Toggle 可用服务器 + 每服务器的执行方式 -->
+<Modal bind:open={mcpModalOpen} title={t("agent.form.mcpServers")}>
+  {#if availableServers.length === 0}
+    <div
+      class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-6 text-center"
+    >
+      <p class="text-sm text-base-content/55">
+        {t("agent.input.noAvailableMcpServers")}
+      </p>
+      <p class="mt-0.5 text-xs text-base-content/40">
+        {t("agent.input.configureMcpInSettings")}
+      </p>
+    </div>
+  {:else}
+    <div class="flex max-h-96 flex-col gap-3 overflow-y-auto">
+      {#each availableServers as server (server.id)}
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center justify-between gap-3">
+            <span class="truncate text-sm text-base-content/85">
+              {server.displayName ?? server.name}
+            </span>
+            <Toggle
+              checked={isMcpSelected(server.id)}
+              onChange={(v) => toggleMcp(server.id, v)}
+            />
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs text-base-content/40">
+              {t("agent.input.enabledToolsCount", {
+                count: server.enabledTools.length,
+              })}
+            </span>
+            {#if isMcpSelected(server.id)}
+              <Select
+                options={executionModeOptions}
+                selectedValue={mcpMode(server.id)}
+                onSelect={(value) =>
+                  setMcpMode(server.id, value as "auto" | "manual")}
+                size="sm"
+                autoWidth={true}
+              />
+            {/if}
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
+</Modal>

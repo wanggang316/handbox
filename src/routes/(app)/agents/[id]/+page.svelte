@@ -45,7 +45,7 @@
   {/key}
 {:else}
   <div class="h-full flex flex-col gap-4 px-6 pt-12">
-    <div class="mx-auto w-full max-w-5xl">
+    <div class="mx-auto w-full max-w-3xl">
       <button
         class="flex items-center gap-2 text-sm text-base-content/70 hover:text-base-content w-fit"
         onclick={() => goto("/agents")}
