@@ -135,6 +135,7 @@ export const agentZh = {
   "agent.form.charCount": "{count} 字符",
   "agent.form.skillsTitle": "技能",
   "agent.form.noSkills": "还没有可用的 Skill",
+  "agent.form.searchSkills": "搜索 Skill...",
   "agent.form.skillDisabled": "（已全局禁用）",
   "agent.form.skillMissing": "（不存在）",
   "agent.form.skillsLabel": "技能标签",

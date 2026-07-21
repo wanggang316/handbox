@@ -144,6 +144,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.charCount": "{count} chars",
   "agent.form.skillsTitle": "Skills",
   "agent.form.noSkills": "No skills available yet",
+  "agent.form.searchSkills": "Search skills...",
   "agent.form.skillDisabled": "(globally disabled)",
   "agent.form.skillMissing": "(missing)",
   "agent.form.skillsLabel": "Skill tags",

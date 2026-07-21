@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { ArrowLeft, Save } from "@lucide/svelte";
+  import { ArrowLeft, Check, Save, Search } from "@lucide/svelte";
   import Button from "../ui/Button.svelte";
   import Select from "../ui/Select.svelte";
-  import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
   import Modal from "../ui/Modal.svelte";
   import {
@@ -120,6 +119,18 @@
   // Skill / MCP 的选择在 Modal 弹窗中进行（行上仅显示已关联数量）。
   let skillsModalOpen = $state(false);
   let mcpModalOpen = $state(false);
+
+  // 技能 Modal 内搜索（按名称 / 描述过滤，大小写不敏感）。
+  let skillSearch = $state("");
+  const filteredSkills = $derived.by(() => {
+    const q = skillSearch.trim().toLowerCase();
+    if (!q) return availableSkills;
+    return availableSkills.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.description ?? "").toLowerCase().includes(q)
+    );
+  });
 
   function isSkillSelected(name: string): boolean {
     return formData.skills.includes(name);
@@ -630,98 +641,161 @@
   </div>
 </div>
 
-<!-- 技能选择 Modal：Toggle 已发现的 skill；已消失的关联名保留成可取消的行 -->
+<!-- 技能选择 Modal：搜索 + 双列卡片网格，整卡点击切换选中（Directory 式）。 -->
 <Modal bind:open={skillsModalOpen} title={t("agent.form.skillsTitle")}>
-  {#if availableSkills.length === 0 && missingSelectedSkills.length === 0}
-    <div
-      class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-6 text-center"
-    >
-      <p class="text-sm text-base-content/55">{t("agent.form.noSkills")}</p>
+  <div class="flex h-[65vh] w-[680px] max-w-[85vw] flex-col pt-14">
+    <!-- 搜索框 -->
+    <div class="border-b border-[var(--hairline)] px-5 pb-4">
+      <div class="relative">
+        <Search
+          class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+          size={15}
+        />
+        <input
+          type="text"
+          bind:value={skillSearch}
+          placeholder={t("agent.form.searchSkills")}
+          class="w-full rounded-lg border border-[var(--hairline)] bg-base-200 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-base-content/35 focus:border-primary"
+        />
+      </div>
     </div>
-  {:else}
-    <div class="flex max-h-96 flex-col gap-3 overflow-y-auto">
-      {#each availableSkills as skill (skill.name)}
-        <div class="flex items-center justify-between gap-3">
-          <div class="min-w-0 flex-1">
-            <span class="block truncate text-sm text-base-content/85">
-              {skill.name}
+
+    <!-- 卡片网格（滚动区） -->
+    <div class="flex-1 overflow-y-auto p-5">
+      {#if filteredSkills.length === 0 && missingSelectedSkills.length === 0}
+        <div class="flex h-full items-center justify-center">
+          <p class="text-sm text-base-content/45">{t("agent.form.noSkills")}</p>
+        </div>
+      {:else}
+        <div class="grid grid-cols-2 gap-3">
+          {#each filteredSkills as skill (skill.name)}
+            {@const selected = isSkillSelected(skill.name)}
+            <button
+              type="button"
+              aria-pressed={selected}
+              class="flex flex-col rounded-xl border p-4 text-left transition-colors {selected
+                ? 'border-primary/50 bg-primary/5'
+                : 'border-[var(--hairline)] bg-[var(--bg-panel)] hover:border-[var(--hairline-strong)]'}"
+              onclick={() => toggleSkill(skill.name, !selected)}
+            >
+              <div class="flex w-full items-center justify-between gap-2">
+                <span class="truncate text-sm font-medium text-base-content">
+                  {skill.name}
+                </span>
+                {#if selected}
+                  <Check size={15} class="shrink-0 text-primary" />
+                {/if}
+              </div>
               {#if skill.disabled}
-                <span class="ml-1 text-xs text-base-content/40">
+                <span class="mt-0.5 text-xs text-base-content/40">
                   {t("agent.form.skillDisabled")}
                 </span>
               {/if}
-            </span>
-            {#if skill.description}
-              <span class="block truncate text-xs text-base-content/40">
-                {skill.description}
+              {#if skill.description}
+                <p
+                  class="mt-1.5 line-clamp-2 text-xs leading-relaxed text-base-content/50"
+                >
+                  {skill.description}
+                </p>
+              {/if}
+            </button>
+          {/each}
+          <!-- 已关联但已不存在的 skill（被删 / 改名）：暗淡卡，点击取消关联 -->
+          {#each missingSelectedSkills as name (name)}
+            <button
+              type="button"
+              class="flex flex-col rounded-xl border border-primary/30 bg-[var(--bg-panel)] p-4 text-left opacity-60"
+              onclick={() => toggleSkill(name, false)}
+            >
+              <div class="flex w-full items-center justify-between gap-2">
+                <span class="truncate text-sm font-medium text-base-content/60">
+                  {name}
+                </span>
+                <Check size={15} class="shrink-0 text-primary/60" />
+              </div>
+              <span class="mt-0.5 text-xs text-base-content/40">
+                {t("agent.form.skillMissing")}
               </span>
-            {/if}
-          </div>
-          <Toggle
-            checked={isSkillSelected(skill.name)}
-            onChange={(v) => toggleSkill(skill.name, v)}
-          />
+            </button>
+          {/each}
         </div>
-      {/each}
-      <!-- 已关联但已不存在的 skill（被删 / 改名）：保留成可取消的行 -->
-      {#each missingSelectedSkills as name (name)}
-        <div class="flex items-center justify-between gap-3">
-          <span class="min-w-0 flex-1 truncate text-sm text-base-content/40">
-            {name}
-            <span class="ml-1 text-xs">{t("agent.form.skillMissing")}</span>
-          </span>
-          <Toggle checked={true} onChange={() => toggleSkill(name, false)} />
-        </div>
-      {/each}
+      {/if}
     </div>
-  {/if}
+  </div>
 </Modal>
 
-<!-- MCP 服务器选择 Modal：Toggle 可用服务器 + 每服务器的执行方式 -->
+<!-- MCP 服务器选择 Modal：双列卡片网格，整卡点击切换；选中卡内配置执行方式。 -->
 <Modal bind:open={mcpModalOpen} title={t("agent.form.mcpServers")}>
-  {#if availableServers.length === 0}
-    <div
-      class="rounded-md border border-dashed border-[var(--hairline)] px-3 py-6 text-center"
-    >
-      <p class="text-sm text-base-content/55">
-        {t("agent.input.noAvailableMcpServers")}
-      </p>
-      <p class="mt-0.5 text-xs text-base-content/40">
-        {t("agent.input.configureMcpInSettings")}
-      </p>
-    </div>
-  {:else}
-    <div class="flex max-h-96 flex-col gap-3 overflow-y-auto">
-      {#each availableServers as server (server.id)}
-        <div class="flex flex-col gap-1">
-          <div class="flex items-center justify-between gap-3">
-            <span class="truncate text-sm text-base-content/85">
-              {server.displayName ?? server.name}
-            </span>
-            <Toggle
-              checked={isMcpSelected(server.id)}
-              onChange={(v) => toggleMcp(server.id, v)}
-            />
-          </div>
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-xs text-base-content/40">
-              {t("agent.input.enabledToolsCount", {
-                count: server.enabledTools.length,
-              })}
-            </span>
-            {#if isMcpSelected(server.id)}
-              <Select
-                options={executionModeOptions}
-                selectedValue={mcpMode(server.id)}
-                onSelect={(value) =>
-                  setMcpMode(server.id, value as "auto" | "manual")}
-                size="sm"
-                autoWidth={true}
-              />
-            {/if}
-          </div>
+  <div class="flex max-h-[65vh] w-[680px] max-w-[85vw] flex-col pt-14">
+    <div class="flex-1 overflow-y-auto p-5 pt-1">
+      {#if availableServers.length === 0}
+        <div class="px-3 py-10 text-center">
+          <p class="text-sm text-base-content/55">
+            {t("agent.input.noAvailableMcpServers")}
+          </p>
+          <p class="mt-1 text-xs text-base-content/40">
+            {t("agent.input.configureMcpInSettings")}
+          </p>
         </div>
-      {/each}
+      {:else}
+        <div class="grid grid-cols-2 gap-3">
+          {#each availableServers as server (server.id)}
+            {@const selected = isMcpSelected(server.id)}
+            <!-- 宿主是 role="button" 的 div 而非 <button>：选中态卡内嵌执行方式
+                 Select（真按钮），HTML 禁止 button 嵌套。 -->
+            <div
+              role="button"
+              tabindex="0"
+              aria-pressed={selected}
+              class="flex cursor-default flex-col rounded-xl border p-4 text-left transition-colors {selected
+                ? 'border-primary/50 bg-primary/5'
+                : 'border-[var(--hairline)] bg-[var(--bg-panel)] hover:border-[var(--hairline-strong)]'}"
+              onclick={() => toggleMcp(server.id, !selected)}
+              onkeydown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleMcp(server.id, !selected);
+                }
+              }}
+            >
+              <div class="flex w-full items-center justify-between gap-2">
+                <span class="truncate text-sm font-medium text-base-content">
+                  {server.displayName ?? server.name}
+                </span>
+                {#if selected}
+                  <Check size={15} class="shrink-0 text-primary" />
+                {/if}
+              </div>
+              <span class="mt-1.5 text-xs text-base-content/50">
+                {t("agent.input.enabledToolsCount", {
+                  count: server.enabledTools.length,
+                })}
+              </span>
+              {#if selected}
+                <!-- 执行方式：选中后卡内配置；包一层拦截点击避免误触整卡切换 -->
+                <div
+                  class="mt-2.5 flex items-center justify-between gap-2"
+                  role="none"
+                  onclick={(e) => e.stopPropagation()}
+                  onkeydown={(e) => e.stopPropagation()}
+                >
+                  <span class="text-xs text-base-content/45">
+                    {t("agent.form.toolExecution")}
+                  </span>
+                  <Select
+                    options={executionModeOptions}
+                    selectedValue={mcpMode(server.id)}
+                    onSelect={(value) =>
+                      setMcpMode(server.id, value as "auto" | "manual")}
+                    size="sm"
+                    autoWidth={true}
+                  />
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
-  {/if}
+  </div>
 </Modal>
