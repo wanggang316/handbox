@@ -32,7 +32,8 @@ use crate::services::coding_agent_session::{build_agent_session, config_from_row
 use crate::services::skills::Skill;
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest,
-    AgentSessionService, CodingRunSink, McpService, ProviderService, SettingsService, SkillService,
+    AgentService, AgentSessionService, CodingRunSink, GenUiService, McpService, ProviderService,
+    SettingsService, SkillService,
 };
 use crate::storage::types::UUID;
 use hand_ai_model::Message;
@@ -123,6 +124,35 @@ fn append_forced_skill_bodies(system_prompt: &mut String, forced: &[String], eff
     }
 }
 
+/// 冻结的 generative-UI catalog prompt（由 `npm run gen:gui-prompt` 生成、
+/// vitest drift 测试逐字节锁定）。教模型输出一份完整的 JSON-Render spec。
+const GENERATIVE_UI_PROMPT: &str = include_str!("../../resources/generative-ui-prompt.txt");
+
+/// 把 generative-UI 指令追加进 `system_prompt`（原地）。
+///
+/// 迁移自旧 chat 后端 `build_system_messages` 的语义：catalog prompt 无条件追加
+/// （调用方已确认来源 Agent 开启 generative_ui）；`example`（关联 GenUI 模板的
+/// spec 文本）非空白时再追加一段 few-shot 输出示例。`system_prompt` 非空时以
+/// 空行分隔；example 为 None / 空白时只注入 catalog prompt。
+fn append_generative_ui_prompt(system_prompt: &mut String, example: Option<&str>) {
+    if !system_prompt.is_empty() {
+        system_prompt.push_str("\n\n");
+    }
+    system_prompt.push_str(GENERATIVE_UI_PROMPT.trim_end());
+
+    if let Some(example) = example {
+        let example = example.trim();
+        if !example.is_empty() {
+            system_prompt.push_str(
+                "\n\nWhen you reply with a spec, imitate the structure of this example \
+                 template (adapt its content to the actual answer):\n```json\n",
+            );
+            system_prompt.push_str(example);
+            system_prompt.push_str("\n```");
+        }
+    }
+}
+
 /// 启动一次 Agent run（流式）—— 经 coding-agent `AgentSession` 驱动。
 ///
 /// 步骤：
@@ -149,6 +179,8 @@ pub async fn agent_run_stream(
     skills: State<'_, Arc<SkillService>>,
     settings: State<'_, SettingsService>,
     mcp: State<'_, McpService>,
+    agents: State<'_, AgentService>,
+    genui: State<'_, GenUiService>,
 ) -> Result<(), AppError> {
     let session_id = request.session_id.clone();
 
@@ -166,7 +198,11 @@ pub async fn agent_run_stream(
     }
 
     // 从此处起，任何提前返回都必须先把占位移除。
-    match assemble_and_drive(request, &window, &sessions, &providers, &skills, &settings, &mcp).await {
+    match assemble_and_drive(
+        request, &window, &sessions, &providers, &skills, &settings, &mcp, &agents, &genui,
+    )
+    .await
+    {
         Ok(handles) => {
             // 看护任务：驱动任务结束（即 closed 已发出）后把会话从注册表移除。
             // 与 closed 同步 —— 移除发生在终结信号之后，使下一轮可以发起。
@@ -192,6 +228,7 @@ pub async fn agent_run_stream(
 /// 拆出独立函数让 `agent_run_stream` 的占位清理（失败回滚）保持简单：装配阶段
 /// 失败时调用方统一移除占位。返回 `RunDriveHandles`（含驱动任务 + 为下个 feature
 /// 预留的 cancel / steering handle）。
+#[allow(clippy::too_many_arguments)]
 async fn assemble_and_drive(
     request: AgentRunRequest,
     window: &Window,
@@ -200,6 +237,8 @@ async fn assemble_and_drive(
     skills: &SkillService,
     settings: &SettingsService,
     mcp: &McpService,
+    agents: &AgentService,
+    genui: &GenUiService,
 ) -> Result<crate::services::RunDriveHandles, AppError> {
     let session_id = request.session_id.clone();
 
@@ -219,6 +258,28 @@ async fn assemble_and_drive(
         })?;
 
     let mut config = config_from_rows(&session_row, &provider, app_data_dir)?;
+
+    // --- (2a) Generative-UI injection（会话级能力；旧 chat 后端语义迁移）。
+    //
+    // 会话的来源 Agent（provenance 链接 agent_definition_id）开启 generative_ui
+    // 时，把冻结的 catalog prompt 追加进本轮 system prompt；其关联的 GenUI 模板
+    // （agents.genui_id → genui.spec）非空时再追加一段 few-shot 输出示例。运行时
+    // 实时解析（agent_sessions 无 genui 快照列）：编辑 Agent 的 GenUI 配置对既有
+    // 会话的下一轮立即生效。悬挂 definition / 模板已删 / 查询失败一律静默降级为
+    // 不注入——绝不阻塞 run。
+    if let Some(def_id) = session_row.agent_definition_id.clone() {
+        if let Ok(definition) = agents.get_agent(def_id).await {
+            if definition.generative_ui == Some(true) {
+                let example = match definition.genui_id.clone() {
+                    Some(genui_id) => genui.get_genui(genui_id).await.ok().map(|g| g.spec),
+                    None => None,
+                };
+                let mut system_prompt = config.system_prompt.take().unwrap_or_default();
+                append_generative_ui_prompt(&mut system_prompt, example.as_deref());
+                config.system_prompt = Some(system_prompt);
+            }
+        }
+    }
 
     // --- (2b) Forced-skill injection for THIS turn (VAL-CACLEAN-007).
     //
@@ -630,6 +691,43 @@ mod tests {
         assert_eq!(
             prompt, "<forced_skill name=\"alpha\">\nA\n</forced_skill>",
             "the empty name is skipped; alpha still injects",
+        );
+    }
+
+    // Generative-UI injection: catalog prompt appends after the base prompt
+    // with a blank-line separator; no example section without an example.
+    #[test]
+    fn generative_ui_appends_catalog_after_base_prompt() {
+        let mut prompt = String::from("base");
+        append_generative_ui_prompt(&mut prompt, None);
+        assert!(prompt.starts_with("base\n\n"), "blank-line separated");
+        assert!(
+            prompt.contains(GENERATIVE_UI_PROMPT.trim_end()),
+            "catalog prompt embedded verbatim"
+        );
+        assert!(
+            !prompt.contains("example template"),
+            "no example section without an example"
+        );
+    }
+
+    // A linked template spec appends as a fenced few-shot example after the
+    // catalog prompt; blank example degrades to catalog-only.
+    #[test]
+    fn generative_ui_appends_example_when_present() {
+        let mut prompt = String::new();
+        append_generative_ui_prompt(&mut prompt, Some("{\"root\":\"card\"}"));
+        assert!(
+            prompt.ends_with("```json\n{\"root\":\"card\"}\n```"),
+            "example fenced at the end, got tail: {:?}",
+            &prompt[prompt.len().saturating_sub(60)..]
+        );
+
+        let mut blank = String::new();
+        append_generative_ui_prompt(&mut blank, Some("   "));
+        assert!(
+            !blank.contains("example template"),
+            "blank example injects catalog prompt only"
         );
     }
 }

@@ -67,6 +67,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.compacting": "Compacting context…",
   "agent.timeline.usageInput": "Input {count}",
   "agent.timeline.usageOutput": "Output {count}",
+  "agent.timeline.genuiStreaming": "Generating UI…",
 
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "Thinking...",

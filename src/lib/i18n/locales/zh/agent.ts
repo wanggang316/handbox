@@ -60,6 +60,7 @@ export const agentZh = {
   "agent.timeline.compacting": "整理上下文中…",
   "agent.timeline.usageInput": "输入 {count}",
   "agent.timeline.usageOutput": "输出 {count}",
+  "agent.timeline.genuiStreaming": "生成界面中…",
 
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "思考中...",

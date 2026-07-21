@@ -14,8 +14,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildGenerativeUiPrompt } from "../src/lib/components/chat/renderers/jsonui/prompt";
-import { uiCatalog } from "../src/lib/components/chat/renderers/jsonui/catalog";
+import { buildGenerativeUiPrompt } from "../src/lib/components/genui/jsonui/prompt";
+import { uiCatalog } from "../src/lib/components/genui/jsonui/catalog";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outPath = resolve(repoRoot, "src-tauri/resources/generative-ui-prompt.txt");
