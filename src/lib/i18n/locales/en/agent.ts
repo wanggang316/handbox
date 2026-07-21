@@ -133,6 +133,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.generateTitleFailed": "Failed to generate title",
 
   // Agent form modal (AgentFormModal)
+  "agent.form.backToList": "Back to list",
   "agent.form.nameRequired": "Enter an Agent name",
   "agent.form.saveFailed": "Save failed, please try again",
   "agent.form.editTitle": "Edit Agent",
@@ -181,6 +182,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.manage.empty": "No Agents created yet",
   "agent.manage.emptyHint": "Click the button above to create your first Agent",
   "agent.manage.use": "Use",
+  "agent.manage.loadFailed": "Failed to load agent",
   "agent.manage.deleteTitle": "Delete Agent",
   "agent.manage.deleteConfirm":
     "Are you sure you want to delete this Agent? This action cannot be undone.",

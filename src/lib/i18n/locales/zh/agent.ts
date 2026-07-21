@@ -124,6 +124,7 @@ export const agentZh = {
   "agent.list.generateTitleFailed": "生成标题失败",
 
   // Agent form modal (AgentFormModal)
+  "agent.form.backToList": "返回列表",
   "agent.form.nameRequired": "请输入 Agent 名称",
   "agent.form.saveFailed": "保存失败，请重试",
   "agent.form.editTitle": "编辑 Agent",
@@ -170,6 +171,7 @@ export const agentZh = {
   "agent.manage.empty": "还没有创建任何 Agent",
   "agent.manage.emptyHint": "点击上方按钮创建您的第一个 Agent",
   "agent.manage.use": "使用",
+  "agent.manage.loadFailed": "加载 Agent 失败",
   "agent.manage.deleteTitle": "删除 Agent",
   "agent.manage.deleteConfirm": "确定要删除这个 Agent 吗？此操作无法撤销。",
 };

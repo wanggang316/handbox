@@ -21,8 +21,6 @@
   import Button from "$lib/components/ui/Button.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import Tabs from "$lib/components/ui/Tabs.svelte";
-  import AgentFormModal from "$lib/components/agent/AgentFormModal.svelte";
-  import type { AgentFormData } from "$lib/components/agent/AgentFormModal.svelte";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
   // 当前激活的标签页：Agents / GenUI。返回链接通过 ?tab=genui 直接定位到 GenUI 列表。
@@ -35,8 +33,6 @@
     { value: "genui", label: "GenUI" },
   ];
 
-  let showFormModal = $state(false);
-  let editingAgent = $state<Agent | null>(null);
   let showDeleteConfirm = $state(false);
   let selectedAgent = $state<Agent | null>(null);
 
@@ -44,199 +40,19 @@
   let showGenuiDeleteConfirm = $state(false);
   let selectedGenui = $state<GenUi | null>(null);
 
-  function openCreateModal() {
-    editingAgent = null;
-    showFormModal = true;
+  // 创建 / 编辑走二级页（不再使用 Modal）。
+  function openCreate() {
+    goto("/agents/new");
   }
 
-  function openEditModal(agent: Agent) {
-    editingAgent = agent;
-    showFormModal = true;
+  function openEdit(agent: Agent) {
+    if (!agent.id) return;
+    goto(`/agents/${agent.id}`);
   }
 
   function openDeleteConfirm(agent: Agent) {
     selectedAgent = agent;
     showDeleteConfirm = true;
-  }
-
-  function closeFormModal() {
-    showFormModal = false;
-    editingAgent = null;
-  }
-
-  async function handleSave(data: AgentFormData) {
-    // 关联的 GenUI 仅在开启生成式 UI 时有效；关闭时清空关联。
-    const effectiveGenuiId =
-      data.generativeUi && data.genuiId ? data.genuiId : null;
-
-    if (editingAgent?.id) {
-      // 更新现有 Agent。仅在名称实际变化时才写：后端拒绝重命名内置 Agent
-      // （"Builtin agent cannot be renamed"），无条件下发会让「只改图标等其它
-      // 字段」的内置 Agent 编辑在第一步就失败。
-      if (data.name !== editingAgent.name) {
-        await agentActions.updateAgentName(editingAgent.id, data.name);
-      }
-
-      // 图标：空串归一为 null（清除自定义图标，回退默认）。
-      if ((data.icon || null) !== (editingAgent.icon ?? null)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "icon",
-          data.icon || null
-        );
-      }
-
-      // Helper function to compare optional values
-      const hasChanged = <T,>(a: T | undefined, b: T | undefined) =>
-        a !== b && !(a === undefined && b === undefined);
-
-      if (hasChanged(data.temperature, editingAgent.temperature)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "temperature",
-          data.temperature ?? null
-        );
-      }
-      if (hasChanged(data.maxTokens, editingAgent.maxTokens)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "maxTokens",
-          data.maxTokens ?? null
-        );
-      }
-      if (data.systemPrompt !== editingAgent.systemPrompt) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "systemPrompt",
-          data.systemPrompt || null
-        );
-      }
-
-      // MCP 服务器变更（序列化比较，避免无意义写入）
-      if (
-        JSON.stringify(data.mcpServers ?? []) !==
-        JSON.stringify(editingAgent.mcpServers ?? [])
-      ) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "mcpServers",
-          data.mcpServers
-        );
-      }
-
-      // 生成式 UI: 显式比较布尔值，关闭时必须发送 false（不能被假值跳过）
-      if ((data.generativeUi ?? false) !== (editingAgent.generativeUi ?? false)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "generativeUi",
-          data.generativeUi ?? false
-        );
-      }
-
-      // 关联 GenUI: 与既有值比较，变更时下发（null 表示解除关联）
-      if ((editingAgent.genuiId ?? null) !== effectiveGenuiId) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "genuiId",
-          effectiveGenuiId
-        );
-      }
-
-      // 关联 skill 变更（序列化比较，避免无意义写入）
-      if (
-        JSON.stringify(data.skills ?? []) !==
-        JSON.stringify(editingAgent.skills ?? [])
-      ) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "skills",
-          data.skills
-        );
-      }
-
-      // 能力字段：后端仅支持逐字段更新，变更时下发。
-      if (data.description !== (editingAgent.description ?? "")) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "description",
-          data.description || null
-        );
-      }
-      if (
-        JSON.stringify(data.builtinTools ?? []) !==
-        JSON.stringify(editingAgent.builtinTools ?? [])
-      ) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "builtinTools",
-          data.builtinTools
-        );
-      }
-      if (data.workingDirMode !== (editingAgent.workingDirMode ?? "optional")) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "workingDirMode",
-          data.workingDirMode
-        );
-      }
-      if (
-        data.toolExecutionMode !== (editingAgent.toolExecutionMode ?? "auto")
-      ) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "toolExecutionMode",
-          data.toolExecutionMode
-        );
-      }
-    } else {
-      // 创建新 Agent（后端 create 不接受能力字段，需创建后逐项写入）
-      const newAgent = await agentActions.createAgent({
-        name: data.name,
-        temperature: data.temperature,
-        maxTokens: data.maxTokens,
-        systemPrompt: data.systemPrompt || undefined,
-        reasoning: undefined,
-        mcpServers: data.mcpServers,
-        skills: data.skills,
-        generativeUi: data.generativeUi,
-        genuiId: effectiveGenuiId ?? undefined,
-      });
-
-      // 仅对非默认能力字段做 create-then-update。
-      if (newAgent.id) {
-        if (data.icon) {
-          await agentActions.updateAgentField(newAgent.id, "icon", data.icon);
-        }
-        if (data.description) {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "description",
-            data.description
-          );
-        }
-        if (data.builtinTools.length > 0) {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "builtinTools",
-            data.builtinTools
-          );
-        }
-        if (data.workingDirMode !== "optional") {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "workingDirMode",
-            data.workingDirMode
-          );
-        }
-        if (data.toolExecutionMode !== "auto") {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "toolExecutionMode",
-            data.toolExecutionMode
-          );
-        }
-      }
-    }
   }
 
   async function handleDelete() {
@@ -392,7 +208,7 @@
               <Button
                 variant="primary"
                 size="sm"
-                onclick={openCreateModal}
+                onclick={openCreate}
                 customClass="flex items-center gap-2"
               >
                 <Plus size={16} />
@@ -493,7 +309,7 @@
                 </button>
                 <button
                   class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
-                  onclick={() => openEditModal(agent)}
+                  onclick={() => openEdit(agent)}
                   title={t("common.edit")}
                 >
                   <Pencil size={14} />
@@ -572,14 +388,6 @@
     </div>
   </div>
 </div>
-
-<!-- Agent 表单 Modal -->
-<AgentFormModal
-  open={showFormModal}
-  agent={editingAgent}
-  onClose={closeFormModal}
-  onSave={handleSave}
-/>
 
 <!-- 删除 Agent 确认框 -->
 <ConfirmModal

@@ -1,28 +1,28 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import FormModal from "../ui/FormModal.svelte";
+  import { goto } from "$app/navigation";
+  import { ArrowLeft, ChevronDown, ChevronRight, Save } from "@lucide/svelte";
+  import Button from "../ui/Button.svelte";
   import Select from "../ui/Select.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
-  import { ChevronDown, ChevronRight } from "@lucide/svelte";
   import { AGENT_ICONS } from "$lib/utils/agentIcons";
   import { normalizeError } from "$lib/utils/error";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
   import type { McpServerConfig } from "$lib/types/llm";
+  import { agentActions } from "$lib/states/agent.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
   import { listSkills } from "$lib/api/skill";
   import type { SkillInfo } from "$lib/types";
 
   interface Props {
-    open: boolean;
-    agent: Agent | null;
-    onClose: () => void;
-    onSave: (data: AgentFormData) => Promise<void>;
+    // 编辑模式传入既有 Agent；新建模式留空
+    agent?: Agent | null;
   }
 
-  export interface AgentFormData {
+  interface AgentFormData {
     name: string;
     // Lucide kebab-case 图标名；空串表示用默认图标
     icon: string;
@@ -35,14 +35,13 @@
     generativeUi: boolean;
     // 关联的 GenUI id；空串表示未关联
     genuiId: string;
-    // ── 能力扩展字段（P2） ──
     description: string;
     builtinTools: string[];
     workingDirMode: string;
     toolExecutionMode: string;
   }
 
-  let { open, agent, onClose, onSave }: Props = $props();
+  let { agent = null }: Props = $props();
 
   // ── 模型参数：会话/引擎实际消费的采样参数，扁平绘制（label + toggle + slider）。
   //    仅 temperature / maxTokens —— top_p / top_k 会话层与引擎均不消费，故不在此暴露。 ──
@@ -146,11 +145,6 @@
       .catch((e) => console.error("Failed to list skills:", e));
   });
 
-  let localOpen = $state(false);
-  $effect(() => {
-    localOpen = open;
-  });
-
   let formData = $state<AgentFormData>({
     name: "",
     icon: "",
@@ -218,9 +212,173 @@
     );
   }
 
+  function backToList() {
+    goto("/agents");
+  }
+
+  /** 把表单落库：编辑 = 逐字段比较下发；新建 = create 后对非默认能力字段补写。 */
+  async function persist(data: AgentFormData) {
+    // 关联的 GenUI 仅在开启生成式 UI 时有效；关闭时清空关联。
+    const effectiveGenuiId =
+      data.generativeUi && data.genuiId ? data.genuiId : null;
+
+    if (agent?.id) {
+      // 更新现有 Agent。仅在名称实际变化时才写：后端拒绝重命名内置 Agent
+      // （"Builtin agent cannot be renamed"），无条件下发会让「只改图标等其它
+      // 字段」的内置 Agent 编辑在第一步就失败。
+      if (data.name !== agent.name) {
+        await agentActions.updateAgentName(agent.id, data.name);
+      }
+
+      // 图标：空串归一为 null（清除自定义图标，回退默认）。
+      if ((data.icon || null) !== (agent.icon ?? null)) {
+        await agentActions.updateAgentField(agent.id, "icon", data.icon || null);
+      }
+
+      // Helper function to compare optional values
+      const hasChanged = <T,>(a: T | undefined, b: T | undefined) =>
+        a !== b && !(a === undefined && b === undefined);
+
+      if (hasChanged(data.temperature, agent.temperature)) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "temperature",
+          data.temperature ?? null
+        );
+      }
+      if (hasChanged(data.maxTokens, agent.maxTokens)) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "maxTokens",
+          data.maxTokens ?? null
+        );
+      }
+      if (data.systemPrompt !== agent.systemPrompt) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "systemPrompt",
+          data.systemPrompt || null
+        );
+      }
+
+      // MCP 服务器变更（序列化比较，避免无意义写入）
+      if (
+        JSON.stringify(data.mcpServers ?? []) !==
+        JSON.stringify(agent.mcpServers ?? [])
+      ) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "mcpServers",
+          data.mcpServers
+        );
+      }
+
+      // 生成式 UI: 显式比较布尔值，关闭时必须发送 false（不能被假值跳过）
+      if ((data.generativeUi ?? false) !== (agent.generativeUi ?? false)) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "generativeUi",
+          data.generativeUi ?? false
+        );
+      }
+
+      // 关联 GenUI: 与既有值比较，变更时下发（null 表示解除关联）
+      if ((agent.genuiId ?? null) !== effectiveGenuiId) {
+        await agentActions.updateAgentField(agent.id, "genuiId", effectiveGenuiId);
+      }
+
+      // 关联 skill 变更（序列化比较，避免无意义写入）
+      if (
+        JSON.stringify(data.skills ?? []) !== JSON.stringify(agent.skills ?? [])
+      ) {
+        await agentActions.updateAgentField(agent.id, "skills", data.skills);
+      }
+
+      // 能力字段：后端仅支持逐字段更新，变更时下发。
+      if (data.description !== (agent.description ?? "")) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "description",
+          data.description || null
+        );
+      }
+      if (
+        JSON.stringify(data.builtinTools ?? []) !==
+        JSON.stringify(agent.builtinTools ?? [])
+      ) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "builtinTools",
+          data.builtinTools
+        );
+      }
+      if (data.workingDirMode !== (agent.workingDirMode ?? "optional")) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "workingDirMode",
+          data.workingDirMode
+        );
+      }
+      if (data.toolExecutionMode !== (agent.toolExecutionMode ?? "auto")) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "toolExecutionMode",
+          data.toolExecutionMode
+        );
+      }
+    } else {
+      // 创建新 Agent（后端 create 不接受能力字段，需创建后逐项写入）
+      const newAgent = await agentActions.createAgent({
+        name: data.name,
+        temperature: data.temperature,
+        maxTokens: data.maxTokens,
+        systemPrompt: data.systemPrompt || undefined,
+        reasoning: undefined,
+        mcpServers: data.mcpServers,
+        skills: data.skills,
+        generativeUi: data.generativeUi,
+        genuiId: effectiveGenuiId ?? undefined,
+      });
+
+      // 仅对非默认能力字段做 create-then-update。
+      if (newAgent.id) {
+        if (data.icon) {
+          await agentActions.updateAgentField(newAgent.id, "icon", data.icon);
+        }
+        if (data.description) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "description",
+            data.description
+          );
+        }
+        if (data.builtinTools.length > 0) {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "builtinTools",
+            data.builtinTools
+          );
+        }
+        if (data.workingDirMode !== "optional") {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "workingDirMode",
+            data.workingDirMode
+          );
+        }
+        if (data.toolExecutionMode !== "auto") {
+          await agentActions.updateAgentField(
+            newAgent.id,
+            "toolExecutionMode",
+            data.toolExecutionMode
+          );
+        }
+      }
+    }
+  }
+
   async function handleSave() {
-    if (!formData.name.trim()) {
-      alert(t("agent.form.nameRequired"));
+    if (!formData.name.trim() || saving) {
       return;
     }
     formData.temperature = paramEnabled.temperature
@@ -232,9 +390,8 @@
 
     saving = true;
     try {
-      await onSave(formData);
-      localOpen = false;
-      onClose();
+      await persist(formData);
+      backToList();
     } catch (error) {
       console.error("Failed to save agent:", error);
       const normalized = normalizeError(error, t("agent.form.saveFailed"));
@@ -290,54 +447,55 @@
   });
 </script>
 
-<FormModal
-  bind:open={localOpen}
-  size="lg"
-  title={agent ? t("agent.form.editTitle") : t("agent.form.createTitle")}
-  {onClose}
-  {saving}
-  submitLabel={saving
-    ? t("common.saving")
-    : agent
-      ? t("common.save")
-      : t("common.create")}
-  submitDisabled={saving || !formData.name.trim()}
-  onSubmit={handleSave}
->
-  <!-- 主区：大标题式名称 + 一行描述 + 系统提示词（填满剩余高度，主编辑面） -->
-  <div class="flex h-full flex-col">
-    <div class="flex shrink-0 flex-col gap-1">
-      <input
-        class="modal-title-input"
-        bind:value={formData.name}
-        placeholder={t("agent.form.namePlaceholder")}
-        disabled={isBuiltin}
-      />
-      <input
-        class="w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
-        bind:value={formData.description}
-        placeholder={t("agent.form.descriptionPlaceholder")}
-      />
-    </div>
+<!-- Agent 编辑二级页：与 GenUI 编辑页同构的容器（居中 max-w-5xl + 页边距），
+     单列纵排（不再左右结构）。 -->
+<div class="h-full flex flex-col">
+  <!-- 顶部工具栏 -->
+  <div class="flex-shrink-0 border-b border-base-300 px-6 pb-4 pt-12">
+    <div class="mx-auto w-full max-w-5xl">
+      <button
+        class="flex items-center gap-2 text-sm text-base-content/70 hover:text-base-content w-fit mb-4"
+        onclick={backToList}
+      >
+        <ArrowLeft size={14} />
+        {t("agent.form.backToList")}
+      </button>
 
-    <div class="mt-6 flex min-h-0 flex-1 flex-col gap-2.5">
-      <div class="flex items-baseline justify-between">
-        <span class="form-section-label">{t("agent.form.systemPromptTitle")}</span>
-        <span class="text-xs text-base-content/35">
-          {t("agent.form.charCount", { count: formData.systemPrompt.length })}
-        </span>
+      <div class="flex items-center gap-3">
+        <div class="min-w-0 flex-1">
+          <input
+            class="modal-title-input w-full"
+            bind:value={formData.name}
+            placeholder={t("agent.form.namePlaceholder")}
+            disabled={isBuiltin}
+          />
+          <input
+            class="mt-1 w-full bg-transparent text-sm text-base-content/80 outline-none placeholder:text-base-content/35"
+            bind:value={formData.description}
+            placeholder={t("agent.form.descriptionPlaceholder")}
+          />
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onclick={handleSave}
+          disabled={saving || !formData.name.trim()}
+          customClass="flex items-center gap-2"
+        >
+          <Save size={14} />
+          {saving
+            ? t("common.saving")
+            : agent
+              ? t("common.save")
+              : t("common.create")}
+        </Button>
       </div>
-      <textarea
-        class="field min-h-0 w-full flex-1 resize-none px-3 py-2.5 font-mono text-sm leading-relaxed"
-        bind:value={formData.systemPrompt}
-        placeholder={t("agent.systemPrompt.placeholder")}
-      ></textarea>
     </div>
   </div>
 
-  {#snippet aside()}
-    <!-- 配置栏：图标 / 能力 / 生成式 UI / 模型参数 / MCP 服务器，紧凑纵排 -->
-    <div class="flex flex-col gap-6 pt-1">
+  <!-- 表单主体：单列纵排各配置区 -->
+  <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+    <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <!-- 图标：精选 Lucide 图标网格；再次点选中项可清除（回退默认图标） -->
       <div class="flex flex-col gap-2">
         <span class="form-section-label">{t("agent.form.iconLabel")}</span>
@@ -361,8 +519,23 @@
         </div>
       </div>
 
-      <!-- 工具：内置工具 / 执行方式 / MCP 服务器——所有工具面配置归一组 -->
-      <div class="flex flex-col gap-3.5">
+      <!-- 系统提示词 -->
+      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-5">
+        <div class="flex items-baseline justify-between">
+          <span class="form-section-label">{t("agent.form.systemPromptTitle")}</span>
+          <span class="text-xs text-base-content/35">
+            {t("agent.form.charCount", { count: formData.systemPrompt.length })}
+          </span>
+        </div>
+        <textarea
+          class="field min-h-64 w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
+          bind:value={formData.systemPrompt}
+          placeholder={t("agent.systemPrompt.placeholder")}
+        ></textarea>
+      </div>
+
+      <!-- 工具：内置工具 / 执行方式 / 技能 / MCP 服务器——所有工具面配置归一组 -->
+      <div class="flex flex-col gap-3.5 border-t border-[var(--hairline)] pt-5">
         <span class="form-section-label">{t("agent.form.sectionTools")}</span>
 
         <div class="flex flex-col gap-1.5">
@@ -505,7 +678,7 @@
       </div>
 
       <!-- 工作目录：运行环境配置，独立于工具组 -->
-      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-4">
+      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-5">
         <span class="form-section-label">{t("agent.form.workingDir")}</span>
         <Select
           options={workingDirModeOptions}
@@ -514,7 +687,8 @@
         />
       </div>
 
-      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-4">
+      <!-- 生成式 UI -->
+      <div class="flex flex-col gap-2.5 border-t border-[var(--hairline)] pt-5">
         <div class="flex items-center justify-between gap-3">
           <div class="flex min-w-0 flex-col gap-0.5">
             <span class="text-sm text-base-content/85">
@@ -540,7 +714,8 @@
         {/if}
       </div>
 
-      <div class="flex flex-col gap-3 border-t border-[var(--hairline)] pt-4">
+      <!-- 模型参数（折叠） -->
+      <div class="flex flex-col gap-3 border-t border-[var(--hairline)] pt-5 pb-6">
         <button
           type="button"
           class={SECTION_TOGGLE_CLASS}
@@ -554,7 +729,7 @@
           {t("agent.form.modelParams")}
         </button>
         {#if paramsOpen}
-          <div class="flex flex-col gap-3">
+          <div class="flex max-w-md flex-col gap-3">
             {#each PARAM_META as p (p.key)}
               <div class="flex flex-col gap-2">
                 <div class="flex items-center justify-between">
@@ -575,7 +750,6 @@
           </div>
         {/if}
       </div>
-
     </div>
-  {/snippet}
-</FormModal>
+  </div>
+</div>
