@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot } from "@lucide/svelte";
+  import { Bot, ChevronsUpDown } from "@lucide/svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import ModelSelectModal from "$lib/components/agentsession/ModelSelectModal.svelte";
   import { t } from "$lib/i18n";
@@ -181,8 +181,6 @@
       (!agentTarget || !agentTarget.modelId),
   );
 
-  const inputClass =
-    "w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary";
 </script>
 
 <div class="flex flex-col gap-3">
@@ -202,18 +200,19 @@
     <!-- Prompt：模型（弹窗选择，成对写入 provider/model）+ prompt 文本 -->
     <div class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.modelLabel")}</span>
+      <!-- 触发器样式对齐 Select（field--soft 浅底 + 右侧上下箭头），与 Target type 一致 -->
       <button
         type="button"
         onclick={() => (promptModelModalOpen = true)}
-        class="{inputClass} flex items-center justify-between gap-2 text-left {promptModelInvalid
-          ? 'border-error ring-1 ring-error'
-          : ''}"
+        class="field field--soft flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm"
+        class:is-error={promptModelInvalid}
       >
         {#if selectedPromptModel}
           <span class="truncate text-base-content">{selectedPromptModel.name}</span>
         {:else}
           <span class="text-base-content/50">{t("agent.input.selectModel")}</span>
         {/if}
+        <ChevronsUpDown size={14} class="shrink-0 text-base-content/60" />
       </button>
       {#if promptModelInvalid}
         <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
@@ -236,9 +235,8 @@
         placeholder={t("jobs.target.promptPlaceholder")}
         oninput={(e) =>
           handlePromptTextChange((e.currentTarget as HTMLTextAreaElement).value)}
-        class="{inputClass} resize-none {promptTextInvalid
-          ? 'border-error ring-1 ring-error'
-          : ''}"
+        class="field w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
+        class:is-error={promptTextInvalid}
       ></textarea>
       {#if promptTextInvalid}
         <span class="text-xs text-error">{t("jobs.target.promptRequired")}</span>
@@ -258,21 +256,28 @@
           <span>{t("jobs.target.agentEmpty")}</span>
         </div>
       {:else}
-        <select
-          aria-label={t("jobs.target.agentLabel")}
-          aria-invalid={agentInvalid}
-          value={agentTarget.agentId}
-          onchange={(e) =>
-            handleAgentChange((e.currentTarget as HTMLSelectElement).value)}
-          class="{inputClass} cursor-pointer appearance-none {agentInvalid
-            ? 'border-error ring-1 ring-error'
-            : ''}"
-        >
-          <option value="" disabled>{t("jobs.target.agentSelect")}</option>
-          {#each agents as agent (agent.id)}
-            <option value={agent.id}>{agent.name}</option>
-          {/each}
-        </select>
+        <!-- 样式对齐 Select（field--soft 浅底 + 右侧上下箭头），与 Target type 一致 -->
+        <div class="relative w-full">
+          <select
+            aria-label={t("jobs.target.agentLabel")}
+            aria-invalid={agentInvalid}
+            value={agentTarget.agentId}
+            onchange={(e) =>
+              handleAgentChange((e.currentTarget as HTMLSelectElement).value)}
+            class="field field--soft w-full cursor-pointer appearance-none px-3 py-2 pr-8 text-sm"
+            class:is-error={agentInvalid}
+          >
+            <option value="" disabled>{t("jobs.target.agentSelect")}</option>
+            {#each agents as agent (agent.id)}
+              <option value={agent.id}>{agent.name}</option>
+            {/each}
+          </select>
+          <div
+            class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-base-content/60"
+          >
+            <ChevronsUpDown size={14} />
+          </div>
+        </div>
       {/if}
       {#if agentInvalid}
         <span class="text-xs text-error">{t("jobs.target.agentRequired")}</span>
@@ -285,12 +290,12 @@
       <span class="font-medium text-base-content/80"
         >{t("jobs.target.modelLabel")}</span
       >
+      <!-- 触发器样式对齐 Select（field--soft 浅底 + 右侧上下箭头），与 Target type 一致 -->
       <button
         type="button"
         onclick={() => (agentModelModalOpen = true)}
-        class="{inputClass} flex items-center justify-between gap-2 text-left {agentModelInvalid
-          ? 'border-error ring-1 ring-error'
-          : ''}"
+        class="field field--soft flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm"
+        class:is-error={agentModelInvalid}
       >
         {#if selectedAgentModel}
           <span class="truncate text-base-content">{selectedAgentModel.name}</span
@@ -298,6 +303,7 @@
         {:else}
           <span class="text-base-content/50">{t("agent.input.selectModel")}</span>
         {/if}
+        <ChevronsUpDown size={14} class="shrink-0 text-base-content/60" />
       </button>
       {#if agentModelInvalid}
         <span class="text-xs text-error">{t("jobs.target.modelRequired")}</span>
@@ -321,7 +327,7 @@
           handleAgentMessageChange(
             (e.currentTarget as HTMLTextAreaElement).value,
           )}
-        class="{inputClass} resize-none"
+        class="field w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
       ></textarea>
     </label>
   {/if}
