@@ -16,6 +16,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.4.1] - 2026-07-22
+
+### Added
+- Sessions get automatic titles generated from your first exchange, and you can
+  right-click a session to regenerate one on demand — your own manual names are
+  always kept.
+- Give each agent its own icon; it now appears in the sidebar, the agents list,
+  and the composer's agent picker.
+
+### Changed
+- The sidebar is now an Agent → Project → Session tree with cleaner alignment
+  and instant switching; sessions without an agent are grouped under "Chats."
+- Creating or editing an agent or a scheduled job now opens a full page instead
+  of a pop-up modal, including a live preview of a schedule's next runs.
+- The composer's reasoning-effort picker is now a tidy popup menu with an icon
+  and a short description for each level.
+- Refreshed the app icon.
+
+### Fixed
+- An agent's linked Generative UI template and skills now actually take effect
+  while it replies.
+- The window no longer shows a dark border when the app runs in light mode on a
+  dark system.
+- Switching between sessions feels instant — pages no longer blank to a spinner
+  and already-loaded conversations aren't re-fetched.
+
+
 ## [0.4.0] - 2026-07-11
 
 ### Added
