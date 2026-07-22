@@ -67,6 +67,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.compacting": "Compacting context…",
   "agent.timeline.usageInput": "Input {count}",
   "agent.timeline.usageOutput": "Output {count}",
+  "agent.timeline.genuiStreaming": "Generating UI…",
 
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "Thinking...",
@@ -112,12 +113,12 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
 
   // Project / session list (AgentProjectList)
   "agent.list.renamePlaceholder": "Enter a new name",
-  "agent.list.heading": "Agent Sessions",
+  "agent.list.heading": "Sessions",
   "agent.list.pickProjectDir": "Choose a project directory",
   "agent.list.loadFailed": "Failed to load list",
-  "agent.list.emptyHint": "Click + to choose a project directory and start",
+  "agent.list.emptyHint": "No sessions yet — start one from Agents",
   "agent.list.noChats": "No chats",
-  "agent.list.ungrouped": "Ungrouped",
+  "agent.list.ungrouped": "Chats",
   "agent.list.newSession": "New session",
   "agent.list.newSessionInProject": "New session in project {name}",
   "agent.list.copyPath": "Copy path",
@@ -129,8 +130,10 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.deleteProjectFailed": "Failed to delete project",
   "agent.list.createProjectFailed": "Failed to create project",
   "agent.list.createSessionFailed": "Failed to create session",
+  "agent.list.generateTitleFailed": "Failed to generate title",
 
   // Agent form modal (AgentFormModal)
+  "agent.form.backToList": "Back to list",
   "agent.form.nameRequired": "Enter an Agent name",
   "agent.form.saveFailed": "Save failed, please try again",
   "agent.form.editTitle": "Edit Agent",
@@ -140,13 +143,20 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.systemPromptTitle": "System prompt",
   "agent.form.charCount": "{count} chars",
   "agent.form.skillsTitle": "Skills",
+  "agent.form.noSkills": "No skills available yet",
+  "agent.form.searchSkills": "Search skills...",
+  "agent.form.skillDisabled": "(globally disabled)",
+  "agent.form.skillMissing": "(missing)",
   "agent.form.skillsLabel": "Skill tags",
   "agent.form.skillsPlaceholder": "e.g. coding, writing, translation",
   "agent.form.skillsHint": "Separate multiple skill tags with commas",
   "agent.form.modelParams": "Model parameters",
   "agent.form.mcpServers": "MCP servers",
   "agent.form.descriptionPlaceholder": "One-line summary shown in the list",
+  "agent.form.iconLabel": "Icon",
   "agent.form.sectionTools": "Tools",
+  "agent.form.sectionRuntime": "Runtime",
+  "agent.form.linkedCount": "{count} linked",
   "agent.form.builtinTools": "Built-in tools",
   "agent.form.workingDir": "Working directory",
   "agent.form.toolExecution": "Tool execution",
@@ -175,6 +185,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.manage.empty": "No Agents created yet",
   "agent.manage.emptyHint": "Click the button above to create your first Agent",
   "agent.manage.use": "Use",
+  "agent.manage.loadFailed": "Failed to load agent",
   "agent.manage.deleteTitle": "Delete Agent",
   "agent.manage.deleteConfirm":
     "Are you sure you want to delete this Agent? This action cannot be undone.",

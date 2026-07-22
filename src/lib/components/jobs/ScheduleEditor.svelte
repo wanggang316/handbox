@@ -201,7 +201,9 @@
   }
 </script>
 
-<div class="flex flex-col gap-4">
+<!-- 左右结构：左列编辑（快捷/Cron），右列 = 可读化调度摘要 + Next N 次执行预览。 -->
+<div class="grid grid-cols-2 gap-5">
+  <div class="flex flex-col gap-4">
   <Tabs value={activeTab} items={TAB_ITEMS} onChange={handleTabChange} />
 
   {#if activeTab === "quick"}
@@ -223,7 +225,7 @@
             max="59"
             bind:value={minuteN}
             oninput={applyQuick}
-            class="w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+            class="field field--soft w-full px-3 py-2 text-sm"
           />
         </label>
       {:else if presetKind === "hours"}
@@ -235,7 +237,7 @@
             max="23"
             bind:value={hourN}
             oninput={applyQuick}
-            class="w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+            class="field field--soft w-full px-3 py-2 text-sm"
           />
         </label>
       {:else if presetKind === "daily"}
@@ -245,7 +247,7 @@
             type="time"
             bind:value={timeStr}
             oninput={applyQuick}
-            class="w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+            class="field field--soft w-full px-3 py-2 text-sm"
           />
         </label>
       {:else if presetKind === "weekly"}
@@ -274,7 +276,7 @@
             type="time"
             bind:value={timeStr}
             oninput={applyQuick}
-            class="w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+            class="field field--soft w-full px-3 py-2 text-sm"
           />
         </label>
       {:else if presetKind === "monthly"}
@@ -286,7 +288,7 @@
             max="31"
             bind:value={monthDay}
             oninput={applyQuick}
-            class="w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+            class="field field--soft w-full px-3 py-2 text-sm"
           />
         </label>
         <label class="flex flex-col gap-1 text-sm">
@@ -295,7 +297,7 @@
             type="time"
             bind:value={timeStr}
             oninput={applyQuick}
-            class="w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+            class="field field--soft w-full px-3 py-2 text-sm"
           />
         </label>
       {/if}
@@ -310,19 +312,24 @@
         spellcheck="false"
         autocomplete="off"
         placeholder="0 9 * * *"
-        class="w-full rounded-md border border-[var(--hairline)] bg-base-300 px-3 py-2 font-mono text-sm text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+        class="field field--soft w-full px-3 py-2 font-mono text-sm"
       />
     </label>
   {/if}
 
-  <!-- 可读化文案 -->
-  <div class="flex items-center gap-2 text-sm text-base-content/70">
-    <CalendarClock size={14} class="flex-shrink-0 text-base-content/50" />
-    <span class="truncate" title={cron}>{humanText}</span>
   </div>
 
-  <!-- 预览区 -->
-  <div class="rounded-md border border-[var(--hairline)] bg-base-200 p-3">
+  <!-- 右列：可读化调度摘要 + Next N 次执行预览（与左列等高的独立卡） -->
+  <div
+    class="flex flex-col rounded-md border border-[var(--hairline)] bg-base-200 p-3"
+  >
+    <div
+      class="mb-2 flex items-center gap-2 border-b border-[var(--hairline)] pb-2 text-sm text-base-content/70"
+    >
+      <CalendarClock size={14} class="flex-shrink-0 text-base-content/50" />
+      <span class="truncate" title={cron}>{humanText}</span>
+    </div>
+
     <div class="mb-2 text-xs font-medium text-base-content/60">
       {t("jobs.schedule.previewTitle", { n: previewCount })}
     </div>
@@ -337,7 +344,7 @@
     {:else if occurrences.length === 0}
       <div class="text-sm text-base-content/50">{t("jobs.schedule.noOccurrences")}</div>
     {:else}
-      <ol class="flex flex-col gap-1 text-sm text-base-content/80">
+      <ol class="flex flex-col gap-1.5 text-sm text-base-content/80">
         {#each occurrences as ms (ms)}
           <li class="font-mono tabular-nums">{formatOccurrence(ms)}</li>
         {/each}

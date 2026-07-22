@@ -16,6 +16,7 @@ import type { McpServerConfig } from "../types/llm";
 import type { AgentSessionField } from "../api/agentSession";
 import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
+import { agentState } from "./agent.svelte";
 
 // ============================================
 // Agent Session 状态 - 使用 Svelte 5 runes
@@ -23,6 +24,36 @@ import { normalizeError } from "../utils/error";
 let sessions = $state<AgentSession[]>([]);
 let currentSession = $state<AgentSession | null>(null);
 let isLoading = $state(false);
+
+// 已自动生成过标题的会话 id（每会话仅自动生成一次；失败会移除以允许重试）。
+const autoTitledSessions = new Set<string>();
+
+/**
+ * 会话首个 run 结束后按需自动生成标题。仅当：这是首个 run、尚未自动生成过、且当前
+ * 名称仍等于来源 Agent 的默认名（说明用户未手动命名）时触发一次。后台进行、失败静默
+ * ——用户始终可通过右键菜单手动生成。这样绝不覆盖用户手动设置的标题。
+ */
+async function maybeAutoGenerateTitle(
+  id: string,
+  wasFirstRun: boolean,
+  currentName: string,
+  agentDefinitionId?: string,
+): Promise<void> {
+  if (!wasFirstRun || autoTitledSessions.has(id)) return;
+  const agent = agentDefinitionId
+    ? agentState.agents.find((a) => a.id === agentDefinitionId)
+    : undefined;
+  // 无法解析来源 Agent（无 / 悬挂 agentDefinitionId），或名称已非默认名：不自动改名。
+  if (!agent || agent.name !== currentName) return;
+
+  autoTitledSessions.add(id);
+  try {
+    await agentSessionActions.generateTitle(id);
+  } catch (error) {
+    autoTitledSessions.delete(id);
+    console.warn("Auto title generation failed:", error);
+  }
+}
 
 export const agentSessionState = {
   get sessions() {
@@ -154,6 +185,22 @@ export const agentSessionActions = {
   },
 
   /**
+   * 为会话生成标题（后端一次性 LLM 补全 + 落盘），并把返回的会话回填到列表与
+   * 当前会话。失败向上抛，由调用方决定提示与否（自动路径静默，手动路径可提示）。
+   */
+  async generateTitle(id: UUID): Promise<AgentSession> {
+    const updated = await agentSessionApi.generateAgentSessionTitle(id);
+    const index = sessions.findIndex((session) => session.id === id);
+    if (index !== -1) {
+      sessions[index] = updated;
+    }
+    if (currentSession?.id === id) {
+      currentSession = updated;
+    }
+    return updated;
+  },
+
+  /**
    * 删除 Agent Session：从列表移除；若为当前会话则清空当前。
    */
   async deleteSession(id: UUID): Promise<void> {
@@ -238,12 +285,16 @@ export const agentSessionActions = {
    * 不抛出，避免影响 run 终结的其它收尾。
    */
   async refreshAfterRun(id: UUID): Promise<void> {
-    if (!sessions.some((session) => session.id === id)) {
+    const prev = sessions.find((session) => session.id === id);
+    if (!prev) {
       // 已删除（或从未在列表内）的会话：静默 no-op（GROUP-018 / CROSS-008）。
       // 不发起重拉——对已删 id 的 agent_session_get 必然 NOT_FOUND，
       // 落进下方 catch 会留下无意义的 console.error 噪音。
       return;
     }
+    // 在重拉刷新 messageCount 之前捕获「是否首个 run」，供自动起标题判定。
+    const wasFirstRun = prev.messageCount === 0;
+    const agentDefinitionId = prev.agentDefinitionId;
     try {
       const updated = await agentSessionApi.getAgentSession(id);
       const others = sessions.filter((session) => session.id !== id);
@@ -257,6 +308,8 @@ export const agentSessionActions = {
       if (currentSession?.id === id) {
         currentSession = updated;
       }
+      // 首个 run 后按需自动生成标题（后台、失败静默、绝不覆盖手动标题）。
+      void maybeAutoGenerateTitle(id, wasFirstRun, updated.name, agentDefinitionId);
     } catch (error) {
       if (normalizeError(error).code === "NOT_FOUND") {
         // Session deleted while refreshing (abort-closed raced the delete IPC):

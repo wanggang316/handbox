@@ -8,6 +8,12 @@
   } from "$lib/types/agentSession";
   import AgentThinkingBlock from "./AgentThinkingBlock.svelte";
   import AgentToolCallCard from "./AgentToolCallCard.svelte";
+  import {
+    resolveSpec,
+    looksLikeStreamingSpec,
+  } from "$lib/components/genui/jsonui/resolveSpec";
+  import { uiRegistry } from "$lib/components/genui/jsonui/registry";
+  import { Renderer, JsonUIProvider } from "@json-render/svelte";
 
   interface Props {
     sessionId: string;
@@ -211,12 +217,22 @@
             {/if}
 
             {#if assistantText(message)}
-              <div
-                class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-                use:markdownInteractions
-              >
-                {@html renderMarkdown(assistantText(message))}
-              </div>
+              {@const genuiSpec = resolveSpec(assistantText(message))}
+              {#if genuiSpec}
+                <!-- GenUI 卡片：整条回复是一份合法的 JSON-Render spec（generative_ui
+                     会话由后端注入 catalog prompt 引导）→ 经 json-render 渲染为
+                     交互卡片；未命中（普通回复）走下方 markdown。 -->
+                <JsonUIProvider initialState={{}}>
+                  <Renderer spec={genuiSpec} registry={uiRegistry} />
+                </JsonUIProvider>
+              {:else}
+                <div
+                  class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+                  use:markdownInteractions
+                >
+                  {@html renderMarkdown(assistantText(message))}
+                </div>
+              {/if}
             {/if}
 
             <!-- 工具调用卡片：按助手内容源顺序渲染；同一 toolCallId 一张卡，
@@ -270,12 +286,25 @@
           {/if}
 
           {#if runState.streamingText}
-            <div
-              class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-              use:markdownInteractions
-            >
-              {@html renderMarkdown(runState.streamingText)}
-            </div>
+            {#if looksLikeStreamingSpec(runState.streamingText)}
+              <!-- spec 形状的流：未闭合的 JSON 不逐字符渲染（会闪一屏原始 JSON），
+                   显示占位；message_end 定稿后由上方已提交分支渲染成 GenUI 卡片。 -->
+              <div
+                class="py-2 flex items-center gap-2 text-sm text-base-content/50"
+              >
+                <div
+                  class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+                ></div>
+                <span>{t("agent.timeline.genuiStreaming")}</span>
+              </div>
+            {:else}
+              <div
+                class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+                use:markdownInteractions
+              >
+                {@html renderMarkdown(runState.streamingText)}
+              </div>
+            {/if}
           {:else if !runState.thinkingText}
             <!-- 流式启动但尚无内容：进行中指示。 -->
             <div class="py-2 text-base-content flex items-center">

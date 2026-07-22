@@ -60,6 +60,7 @@ export const agentZh = {
   "agent.timeline.compacting": "整理上下文中…",
   "agent.timeline.usageInput": "输入 {count}",
   "agent.timeline.usageOutput": "输出 {count}",
+  "agent.timeline.genuiStreaming": "生成界面中…",
 
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "思考中...",
@@ -104,12 +105,12 @@ export const agentZh = {
 
   // Project / session list (AgentProjectList)
   "agent.list.renamePlaceholder": "输入新名称",
-  "agent.list.heading": "Agent 会话",
+  "agent.list.heading": "会话",
   "agent.list.pickProjectDir": "选择项目目录",
   "agent.list.loadFailed": "列表加载失败",
-  "agent.list.emptyHint": "点击 + 选择项目目录开始",
+  "agent.list.emptyHint": "还没有会话——从 Agents 开始一个",
   "agent.list.noChats": "No chats",
-  "agent.list.ungrouped": "未分组",
+  "agent.list.ungrouped": "对话",
   "agent.list.newSession": "新建会话",
   "agent.list.newSessionInProject": "在项目 {name} 中新建会话",
   "agent.list.copyPath": "复制路径",
@@ -120,8 +121,10 @@ export const agentZh = {
   "agent.list.deleteProjectFailed": "删除项目失败",
   "agent.list.createProjectFailed": "创建项目失败",
   "agent.list.createSessionFailed": "创建会话失败",
+  "agent.list.generateTitleFailed": "生成标题失败",
 
   // Agent form modal (AgentFormModal)
+  "agent.form.backToList": "返回列表",
   "agent.form.nameRequired": "请输入 Agent 名称",
   "agent.form.saveFailed": "保存失败，请重试",
   "agent.form.editTitle": "编辑 Agent",
@@ -131,6 +134,10 @@ export const agentZh = {
   "agent.form.systemPromptTitle": "系统提示词",
   "agent.form.charCount": "{count} 字符",
   "agent.form.skillsTitle": "技能",
+  "agent.form.noSkills": "还没有可用的 Skill",
+  "agent.form.searchSkills": "搜索 Skill...",
+  "agent.form.skillDisabled": "（已全局禁用）",
+  "agent.form.skillMissing": "（不存在）",
   "agent.form.skillsLabel": "技能标签",
   "agent.form.skillsPlaceholder": "例如: coding, writing, translation",
   "agent.form.skillsHint": "用逗号分隔多个技能标签",
@@ -138,7 +145,10 @@ export const agentZh = {
   "agent.form.mcpServers": "MCP 服务器",
   "agent.form.mcpComingSoon": "MCP 服务器配置即将推出，敬请期待...",
   "agent.form.descriptionPlaceholder": "一行简介，便于在列表中识别",
+  "agent.form.iconLabel": "图标",
   "agent.form.sectionTools": "工具",
+  "agent.form.sectionRuntime": "运行",
+  "agent.form.linkedCount": "已关联 {count} 个",
   "agent.form.builtinTools": "内置工具",
   "agent.form.workingDir": "工作目录",
   "agent.form.toolExecution": "工具执行",
@@ -164,6 +174,7 @@ export const agentZh = {
   "agent.manage.empty": "还没有创建任何 Agent",
   "agent.manage.emptyHint": "点击上方按钮创建您的第一个 Agent",
   "agent.manage.use": "使用",
+  "agent.manage.loadFailed": "加载 Agent 失败",
   "agent.manage.deleteTitle": "删除 Agent",
   "agent.manage.deleteConfirm": "确定要删除这个 Agent 吗？此操作无法撤销。",
 };

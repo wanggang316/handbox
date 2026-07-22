@@ -14,14 +14,13 @@
   import { page } from "$app/stores";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
+  import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import { t } from "$lib/i18n";
   import type { Agent, GenUi } from "$lib/types";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import Tabs from "$lib/components/ui/Tabs.svelte";
-  import AgentFormModal from "$lib/components/agent/AgentFormModal.svelte";
-  import type { AgentFormData } from "$lib/components/agent/AgentFormModal.svelte";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
   // 当前激活的标签页：Agents / GenUI。返回链接通过 ?tab=genui 直接定位到 GenUI 列表。
@@ -34,8 +33,6 @@
     { value: "genui", label: "GenUI" },
   ];
 
-  let showFormModal = $state(false);
-  let editingAgent = $state<Agent | null>(null);
   let showDeleteConfirm = $state(false);
   let selectedAgent = $state<Agent | null>(null);
 
@@ -43,171 +40,19 @@
   let showGenuiDeleteConfirm = $state(false);
   let selectedGenui = $state<GenUi | null>(null);
 
-  function openCreateModal() {
-    editingAgent = null;
-    showFormModal = true;
+  // 创建 / 编辑走二级页（不再使用 Modal）。
+  function openCreate() {
+    goto("/agents/new");
   }
 
-  function openEditModal(agent: Agent) {
-    editingAgent = agent;
-    showFormModal = true;
+  function openEdit(agent: Agent) {
+    if (!agent.id) return;
+    goto(`/agents/${agent.id}`);
   }
 
   function openDeleteConfirm(agent: Agent) {
     selectedAgent = agent;
     showDeleteConfirm = true;
-  }
-
-  function closeFormModal() {
-    showFormModal = false;
-    editingAgent = null;
-  }
-
-  async function handleSave(data: AgentFormData) {
-    // 关联的 GenUI 仅在开启生成式 UI 时有效；关闭时清空关联。
-    const effectiveGenuiId =
-      data.generativeUi && data.genuiId ? data.genuiId : null;
-
-    if (editingAgent?.id) {
-      // 更新现有 Agent
-      await agentActions.updateAgentName(editingAgent.id, data.name);
-
-      // Helper function to compare optional values
-      const hasChanged = <T,>(a: T | undefined, b: T | undefined) =>
-        a !== b && !(a === undefined && b === undefined);
-
-      if (hasChanged(data.temperature, editingAgent.temperature)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "temperature",
-          data.temperature ?? null
-        );
-      }
-      if (hasChanged(data.maxTokens, editingAgent.maxTokens)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "maxTokens",
-          data.maxTokens ?? null
-        );
-      }
-      if (data.systemPrompt !== editingAgent.systemPrompt) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "systemPrompt",
-          data.systemPrompt || null
-        );
-      }
-
-      // MCP 服务器变更（序列化比较，避免无意义写入）
-      if (
-        JSON.stringify(data.mcpServers ?? []) !==
-        JSON.stringify(editingAgent.mcpServers ?? [])
-      ) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "mcpServers",
-          data.mcpServers
-        );
-      }
-
-      // 生成式 UI: 显式比较布尔值，关闭时必须发送 false（不能被假值跳过）
-      if ((data.generativeUi ?? false) !== (editingAgent.generativeUi ?? false)) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "generativeUi",
-          data.generativeUi ?? false
-        );
-      }
-
-      // 关联 GenUI: 与既有值比较，变更时下发（null 表示解除关联）
-      if ((editingAgent.genuiId ?? null) !== effectiveGenuiId) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "genuiId",
-          effectiveGenuiId
-        );
-      }
-
-      // 能力字段：后端仅支持逐字段更新，变更时下发。
-      if (data.description !== (editingAgent.description ?? "")) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "description",
-          data.description || null
-        );
-      }
-      if (
-        JSON.stringify(data.builtinTools ?? []) !==
-        JSON.stringify(editingAgent.builtinTools ?? [])
-      ) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "builtinTools",
-          data.builtinTools
-        );
-      }
-      if (data.workingDirMode !== (editingAgent.workingDirMode ?? "optional")) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "workingDirMode",
-          data.workingDirMode
-        );
-      }
-      if (
-        data.toolExecutionMode !== (editingAgent.toolExecutionMode ?? "auto")
-      ) {
-        await agentActions.updateAgentField(
-          editingAgent.id,
-          "toolExecutionMode",
-          data.toolExecutionMode
-        );
-      }
-    } else {
-      // 创建新 Agent（后端 create 不接受能力字段，需创建后逐项写入）
-      const newAgent = await agentActions.createAgent({
-        name: data.name,
-        temperature: data.temperature,
-        maxTokens: data.maxTokens,
-        systemPrompt: data.systemPrompt || undefined,
-        reasoning: undefined,
-        mcpServers: data.mcpServers,
-        skills: [],
-        generativeUi: data.generativeUi,
-        genuiId: effectiveGenuiId ?? undefined,
-      });
-
-      // 仅对非默认能力字段做 create-then-update。
-      if (newAgent.id) {
-        if (data.description) {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "description",
-            data.description
-          );
-        }
-        if (data.builtinTools.length > 0) {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "builtinTools",
-            data.builtinTools
-          );
-        }
-        if (data.workingDirMode !== "optional") {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "workingDirMode",
-            data.workingDirMode
-          );
-        }
-        if (data.toolExecutionMode !== "auto") {
-          await agentActions.updateAgentField(
-            newAgent.id,
-            "toolExecutionMode",
-            data.toolExecutionMode
-          );
-        }
-      }
-    }
   }
 
   async function handleDelete() {
@@ -247,12 +92,15 @@
         systemPrompt: agent.systemPrompt || undefined,
         reasoning: undefined,
         mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
-        skills: [],
+        skills: agent.skills ? [...agent.skills] : [],
         generativeUi: agent.generativeUi ?? false,
         genuiId: agent.genuiId || undefined,
       });
 
       if (newAgent.id) {
+        if (agent.icon) {
+          await agentActions.updateAgentField(newAgent.id, "icon", agent.icon);
+        }
         if (agent.builtinTools && agent.builtinTools.length > 0) {
           await agentActions.updateAgentField(newAgent.id, "builtinTools", [
             ...agent.builtinTools,
@@ -360,7 +208,7 @@
               <Button
                 variant="primary"
                 size="sm"
-                onclick={openCreateModal}
+                onclick={openCreate}
                 customClass="flex items-center gap-2"
               >
                 <Plus size={16} />
@@ -374,7 +222,6 @@
           <PageHeader
             title="GenUI"
             meta={`共 ${genuiState.genuis.length} 个模板`}
-            description="具名、可复用的 JSON-Render UI 模板，可在 Agent 表单中关联使用。"
           >
             {#snippet actions()}
               <Button
@@ -391,7 +238,9 @@
         </div>
       {/if}
     {#if activeTab === "agents"}
-      {#if agentState.isLoading}
+      <!-- Spinner 仅在冷启动（列表为空）时顶替内容；已有缓存则立即渲染、后台刷新
+           不 blank，避免每次导航都闪一下 spinner（感知为切换延迟）。 -->
+      {#if agentState.isLoading && agentState.agents.length === 0}
         <div class="flex items-center justify-center h-full">
           <Spinner size={28} />
         </div>
@@ -409,13 +258,14 @@
           class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-panel)]"
         >
           {#each agentState.agents as agent (agent.id)}
+            {@const AgentIcon = resolveAgentIcon(agent.icon)}
             <div
               class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-300/40"
             >
               <div
                 class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-base-200 text-base-content/60"
               >
-                <Bot size={16} />
+                <AgentIcon size={16} />
               </div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
@@ -438,12 +288,6 @@
                     </span>
                   {/if}
                 </div>
-                <p class="truncate text-xs text-base-content/55">
-                  {agent.description || agent.systemPrompt || ""}
-                </p>
-              </div>
-              <div class="hidden shrink-0 text-[11px] text-base-content/35 sm:block">
-                {new Date(agent.createdAt).toLocaleDateString("zh-CN")}
               </div>
               <!-- 操作：hover / 键盘聚焦时显现 -->
               <div
@@ -465,7 +309,7 @@
                 </button>
                 <button
                   class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
-                  onclick={() => openEditModal(agent)}
+                  onclick={() => openEdit(agent)}
                   title={t("common.edit")}
                 >
                   <Pencil size={14} />
@@ -499,60 +343,44 @@
           <p class="text-sm mt-2">点击右上角「新建 GenUI」创建第一个模板</p>
         </div>
       {:else}
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- 列表：一行一个 GenUI（图标 + 名称 + hover 操作），与 Agents 列表一致 -->
+        <div
+          class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-panel)]"
+        >
           {#each genuiState.genuis as genui (genui.id)}
-            <button
-              type="button"
-              class="text-left bg-base-200 rounded-lg p-4 hover:bg-base-300 transition-colors"
-              onclick={() => openGenuiEditor(genui)}
+            <div
+              class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-300/40"
             >
-              <div class="flex items-start justify-between mb-3">
-                <div class="flex items-center gap-2">
-                  <div
-                    class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center text-primary"
-                  >
-                    <LayoutTemplate size={20} />
-                  </div>
-                  <div>
-                    <h3 class="font-medium text-base-content">{genui.name}</h3>
-                    <p class="text-xs text-base-content/60">
-                      {genui.spec.length} 字符
-                    </p>
-                  </div>
-                </div>
-                <div class="flex items-center gap-1">
-                  <span
-                    class="p-1.5 rounded-lg hover:bg-base-100 text-base-content/60 hover:text-base-content transition-colors"
-                    title={t("common.edit")}
-                  >
-                    <Pencil size={14} />
-                  </span>
-                  <span
-                    role="button"
-                    tabindex="0"
-                    class="p-1.5 rounded-lg hover:bg-error/10 text-base-content/60 hover:text-error transition-colors"
-                    title={t("common.delete")}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      openGenuiDeleteConfirm(genui);
-                    }}
-                    onkeydown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openGenuiDeleteConfirm(genui);
-                      }
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </span>
-                </div>
+              <div
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-base-200 text-base-content/60"
+              >
+                <LayoutTemplate size={16} />
               </div>
-
-              <div class="mt-3 pt-3 border-t border-base-300 text-xs text-base-content/50">
-                {new Date(genui.updatedAt).toLocaleDateString("zh-CN")}
+              <div class="min-w-0 flex-1">
+                <h3 class="truncate text-sm font-medium text-base-content">
+                  {genui.name}
+                </h3>
               </div>
-            </button>
+              <!-- 操作：hover / 键盘聚焦时显现 -->
+              <div
+                class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+              >
+                <button
+                  class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
+                  onclick={() => openGenuiEditor(genui)}
+                  title={t("common.edit")}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-error/10 hover:text-error"
+                  onclick={() => openGenuiDeleteConfirm(genui)}
+                  title={t("common.delete")}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
           {/each}
         </div>
       {/if}
@@ -560,14 +388,6 @@
     </div>
   </div>
 </div>
-
-<!-- Agent 表单 Modal -->
-<AgentFormModal
-  open={showFormModal}
-  agent={editingAgent}
-  onClose={closeFormModal}
-  onSave={handleSave}
-/>
 
 <!-- 删除 Agent 确认框 -->
 <ConfirmModal

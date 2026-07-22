@@ -112,6 +112,36 @@
     });
   });
 
+  // 切换会话时先 paint 页面外壳（Header + Input），下一帧再挂载可能很重的
+  // AgentTimeline（逐条 markdown / 代码高亮 / katex 同步解析）。否则 Svelte 一次性
+  // 把整页渲染完才 paint，切换会话有明显延迟。
+  //
+  // gate 必须是 **derived**（readySessionId === sessionId）而非 effect 里重置的
+  // boolean：effect 在 DOM 更新之后才跑，若靠它置 false，切换那一刻的首次渲染仍会
+  // 按新会话同步重渲染整条 timeline（重活白干一遍），随后才卸载再挂回。derived 让
+  // timeline 在 sessionId 变化的同一次 flush 里就卸载，外壳即时 paint、重渲染只发生
+  // 一次。双 rAF 保证外壳先 paint 再挂 timeline。
+  let readySessionId = $state("");
+  const timelineReady = $derived(
+    readySessionId !== "" && readySessionId === sessionId,
+  );
+  $effect(() => {
+    const id = sessionId;
+    if (!browser || !id) {
+      return;
+    }
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        readySessionId = id;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  });
+
   // 当前会话的运行 view-model（响应式 getter；用于空态判定，渲染由 AgentTimeline 消费）。
   const runState = $derived(
     sessionId ? agentRunStore.runStateFor(sessionId) : null,
@@ -172,8 +202,12 @@
           })}
         </p>
       </div>
-    {:else}
+    {:else if timelineReady}
       <AgentTimeline {sessionId} />
+    {:else}
+      <!-- 外壳先 paint 的占位：保持内容区 flex 结构稳定（Input 仍贴底），
+           下一帧再挂载重的 AgentTimeline，使会话切换即时。 -->
+      <div class="flex-1"></div>
     {/if}
 
     <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->

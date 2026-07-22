@@ -217,9 +217,10 @@
     overflow: hidden;
   }
 
-  /* 仅在 sidebar 打开时给 top / left / bottom 8px 间距；右侧贴主体 border，无 mr */
+  /* 仅在 sidebar 打开时给 top / bottom 8px 间距；左右不留 margin —— 右侧贴主体
+     border，左侧贴窗口，使侧栏内容左右间距对称（内容自身 px 已对称）。 */
   .sidebar-wrapper.open {
-    margin: 0.5rem 0 0.5rem 0.5rem;
+    margin: 0.5rem 0 0.5rem 0;
   }
 
   .sidebar-wrapper:not(.dragging) {

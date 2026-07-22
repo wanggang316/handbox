@@ -105,6 +105,29 @@ pub fn register_shortcut(app: &AppHandle, accelerator: &str) -> Result<(), AppEr
     Ok(())
 }
 
+/// 反注册当前的 Quick Action 全局快捷键（设置页「启用 Quick Action」关闭时调用）。
+///
+/// 按进程级记录 [`CURRENT_ACCELERATOR`] 反注册并清空记录；无记录时是幂等 no-op。
+/// 反注册失败仅记录并返回 Ok——组合已失活或插件状态异常都不应阻断「禁用」语义。
+#[cfg(target_os = "macos")]
+pub fn unregister_shortcut(app: &AppHandle) -> Result<(), AppError> {
+    let mut current = CURRENT_ACCELERATOR.lock().map_err(|_| {
+        let message = "全局快捷键状态锁已损坏".to_string();
+        tracing::error!("{LOG_PREFIX} {message}");
+        AppError::internal_error(&message)
+    })?;
+
+    if let Some(previous) = current.take() {
+        if let Ok(shortcut) = parse_accelerator(&previous) {
+            if let Err(e) = app.global_shortcut().unregister(shortcut) {
+                tracing::warn!("{LOG_PREFIX} failed to unregister \"{previous}\": {e}");
+            }
+        }
+        tracing::info!("{LOG_PREFIX} unregistered \"{previous}\"");
+    }
+    Ok(())
+}
+
 /// 切换 Quick Action 浮层：可见则隐藏、隐藏则按当前鼠标位置显示。复用面板模块的
 /// 进程级可见性标志与 show/hide，绝不在已可见时再次 show。
 #[cfg(target_os = "macos")]
@@ -135,6 +158,12 @@ fn toggle_overlay(app: &AppHandle) {
 /// 同样仅 macOS）。
 #[cfg(not(target_os = "macos"))]
 pub fn register_shortcut(_app: &tauri::AppHandle, _accelerator: &str) -> Result<(), AppError> {
+    Ok(())
+}
+
+/// 非 macOS 平台的 no-op stub。
+#[cfg(not(target_os = "macos"))]
+pub fn unregister_shortcut(_app: &tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 

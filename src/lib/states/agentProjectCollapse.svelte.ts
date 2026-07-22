@@ -1,15 +1,14 @@
 /**
- * Agent Project 分组折叠态 - Svelte 5 runes + localStorage 持久化
+ * 侧栏分组折叠态 - Svelte 5 runes + localStorage 持久化
  *
- * 按 project id 记忆折叠状态；未分组桶使用保留 key `UNGROUPED_COLLAPSE_KEY`。
- * 持久化形态为 `{ [id]: true }`（只记录折叠项；展开为默认态不落盘）。
- * 损坏 / 缺失 / 非法值一律 fallback 到展开（空 map）。
+ * 按不透明字符串 key 记忆折叠状态，key 由调用方给定：Agent 桶用 agent.id、
+ * 「Chats」桶用 `CHATS_BUCKET_KEY`、项目子组用 `桶key::projectId` 复合键
+ * （同一项目挂多个 Agent 下时各自独立折叠）。持久化形态为 `{ [key]: true }`
+ * （只记录折叠项；展开为默认态不落盘）。损坏 / 缺失 / 非法值一律 fallback
+ * 到展开（空 map）。
  */
 
 const COLLAPSE_STORAGE_KEY = "agentProjectCollapse";
-
-/** 未分组桶的保留折叠 key（不会与 UUID 项目 id 冲突）。 */
-export const UNGROUPED_COLLAPSE_KEY = "__ungrouped__";
 
 function loadPersistedCollapse(): Record<string, boolean> {
   if (typeof localStorage === "undefined") return {};

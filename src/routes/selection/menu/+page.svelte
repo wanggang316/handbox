@@ -92,7 +92,7 @@
     class="flex flex-row flex-1 items-center justify-between gap-1 px-2 text-[14px] text-gray-600"
   >
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
       onclick={handleCopy}
     >
       <Copy class="size-3.5" />
@@ -100,7 +100,7 @@
     </button>
 
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
       onclick={handleTranslate}
     >
       <Languages class="size-3.5" />
@@ -108,7 +108,7 @@
     </button>
 
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
       onclick={handleAi}
     >
       <Sparkles class="size-3.5" />
@@ -116,7 +116,7 @@
     </button>
   </div>
   <button
-    class="flex items-center justify-center flex-none w-8 h-8 rounded-full bg-gray-200"
+    class="flex items-center justify-center flex-none w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
     onclick={handleSettings}
   >
     <EllipsisVertical class="size-3.5" />

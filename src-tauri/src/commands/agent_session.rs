@@ -12,7 +12,10 @@
 //    读 JSONL，无 JSONL 文件（pre-M3 老会话）时回退 SQLite transcript。
 
 use crate::models::AppError;
-use crate::services::{abort_run, agent_jsonl_store, AgentSessionParameter, AgentSessionService};
+use crate::services::{
+    abort_run, agent_jsonl_store, title_gen, AgentSessionParameter, AgentSessionService,
+    ProviderService,
+};
 use crate::storage::types::{
     AgentSession, AgentSessionMessage, CreateAgentSessionRequest, InstantiateAgentSessionRequest,
     UUID,
@@ -180,6 +183,110 @@ pub async fn agent_session_rename(
     // 返回经 overlay 的 session（与 list/get 一致）：刚写的 label 让 name 即新名。
     overlay_jsonl_activity(&mut session, &app_data_dir);
     Ok(session)
+}
+
+/// 为会话生成标题：用会话自身的 model/provider 对「首条用户消息」做一次性 LLM
+/// 补全，蒸馏出短标题，再走与 rename 相同的落盘路径（SQLite 权威名 + JSONL label +
+/// overlay 返回）。自动（首条消息后）与手动（右键菜单）两条路径共用本命令。
+///
+/// 失败情形（无 provider/model、无用户消息、模型报错/空结果）返回 AppError，
+/// 前端据此提示且**不**改名。
+#[tauri::command]
+pub async fn agent_session_generate_title(
+    session_id: UUID,
+    app_handle: AppHandle,
+    agent_session_service: State<'_, AgentSessionService>,
+    provider_service: State<'_, ProviderService>,
+) -> Result<AgentSession, AppError> {
+    let session = agent_session_service.get_session(session_id.clone()).await?;
+    let provider_id = session
+        .provider_id
+        .clone()
+        .ok_or_else(|| AppError::validation_error("会话未选择供应商，无法生成标题"))?;
+    let model_id = session
+        .model_id
+        .clone()
+        .ok_or_else(|| AppError::validation_error("会话未选择模型，无法生成标题"))?;
+    let provider = provider_service.get_provider(&provider_id).await?;
+
+    // 首条用户消息文本（transcript 权威源是 JSONL）。
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
+    let source_text = agent_jsonl_store::load_transcript(&app_data_dir, &cwd, &session.id)?
+        .unwrap_or_default()
+        .into_iter()
+        .find(|m| m.role == "user")
+        .and_then(|m| extract_user_text(&m.payload))
+        .ok_or_else(|| AppError::validation_error("该会话还没有可用于生成标题的消息"))?;
+
+    let title = title_gen::generate_title(
+        &provider.provider_type,
+        &model_id,
+        &provider.base_url,
+        &provider.api_key,
+        &source_text,
+    )
+    .await
+    .map_err(|e| {
+        // 真实原因会被前端通用 hint 遮盖，这里落一条日志便于诊断。
+        tracing::warn!(session_id = %session.id, error = %e, "session title generation failed");
+        e
+    })?;
+
+    // 与 agent_session_rename 相同的落盘：SQLite 权威名先行，再 JSONL label（best-effort），
+    // 返回经 overlay 的 session 供前端直接更新侧栏。
+    let mut session = agent_session_service
+        .rename_session(session_id, title.clone())
+        .await?;
+    if let Err(e) = agent_jsonl_store::append_label(
+        &app_data_dir,
+        &cwd,
+        &session.id,
+        &title,
+        session.created_at,
+    ) {
+        tracing::warn!(
+            session_id = %session.id,
+            "failed to write JSONL label on generated title, keeping SQLite name: {e}"
+        );
+    }
+    overlay_jsonl_activity(&mut session, &app_data_dir);
+    Ok(session)
+}
+
+/// 从一条持久化的用户消息 payload（序列化后的 hand-ai `Message::User`）抽取纯文本。
+/// `content` 可能是字符串（`UserContent::Text`）或内容块数组（`UserContent::Blocks`）。
+fn extract_user_text(payload: &serde_json::Value) -> Option<String> {
+    match payload.get("content")? {
+        serde_json::Value::String(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        }
+        serde_json::Value::Array(blocks) => {
+            let mut out = String::new();
+            for block in blocks {
+                if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                        if !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(text);
+                    }
+                }
+            }
+            let out = out.trim().to_string();
+            if out.is_empty() {
+                None
+            } else {
+                Some(out)
+            }
+        }
+        _ => None,
+    }
 }
 
 /// 更新 Agent Session 单个字段（镜像 `agent_update_field`）
