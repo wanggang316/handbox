@@ -5,7 +5,6 @@
     Paperclip,
     X,
     Ban,
-    Bot,
     ChevronDown,
     ChevronsUpDown,
     Check,
@@ -21,6 +20,7 @@
   import ModelSelectModal from "./ModelSelectModal.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { t } from "$lib/i18n";
+  import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
@@ -163,6 +163,8 @@
   const currentAgentLabel = $derived(
     currentAgent?.name ?? t("agent.input.selectAgent"),
   );
+  // 触发按钮图标取实际 Agent 配置的图标（无来源 Agent / 未设置时回退默认 Bot）。
+  const CurrentAgentIcon = $derived(resolveAgentIcon(currentAgent?.icon));
 
   // 是否显示「工作目录」选择：仅当会话来源 Agent 的 workingDirMode ≠ "none"
   // （required / optional / 旧定义 NULL 均需要工作目录，只有纯对话 "none" 不需要）。
@@ -771,7 +773,7 @@
           title={t("agent.input.selectAgent")}
           onclick={toggleAgentMenu}
         >
-          <Bot size={16} class="shrink-0" />
+          <CurrentAgentIcon size={16} class="shrink-0" />
           <span class="max-w-[140px] truncate text-sm">{currentAgentLabel}</span>
           <ChevronDown size={14} class="shrink-0 opacity-60" />
         </button>
@@ -782,7 +784,7 @@
                stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
           <div
             transition:fly={{ y: -4, duration: 130 }}
-            class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-64 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-52 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
             role="menu"
             tabindex="-1"
             onclick={(event) => event.stopPropagation()}
@@ -795,6 +797,7 @@
             {:else}
               {#each agentState.agents as agent (agent.id)}
                 {@const active = agent.id === session.agentDefinitionId}
+                {@const ItemIcon = resolveAgentIcon(agent.icon)}
                 <button
                   type="button"
                   role="menuitem"
@@ -803,7 +806,7 @@
                   }`}
                   onclick={() => selectAgent(agent)}
                 >
-                  <Bot size={16} class="shrink-0 text-base-content/70" />
+                  <ItemIcon size={16} class="shrink-0 text-base-content/70" />
                   <span
                     class="min-w-0 flex-1 truncate text-sm text-base-content"
                   >
@@ -837,9 +840,9 @@
               class="h-4 w-4 shrink-0 rounded object-contain"
             />
           {/if}
-          <span class="max-w-[160px] truncate">{selectedModel.name}</span>
+          <span class="max-w-[240px] truncate">{selectedModel.name}</span>
         {:else}
-          <span class="max-w-[160px] truncate text-warning"
+          <span class="max-w-[240px] truncate text-warning"
             >{t("agent.input.selectModel")}</span
           >
         {/if}
@@ -872,7 +875,7 @@
                左展以免弹层溢出窗口。stopPropagation 防止菜单内点击触发外部关闭。 -->
           <div
             transition:fly={{ y: -4, duration: 130 }}
-            class="absolute bottom-full right-0 z-40 mb-2 w-64 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            class="absolute bottom-full right-0 z-40 mb-2 w-52 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
             role="listbox"
             tabindex="-1"
             onclick={(event) => event.stopPropagation()}
