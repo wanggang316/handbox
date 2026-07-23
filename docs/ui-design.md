@@ -622,16 +622,16 @@ Colour intent is expressed by a **semantic `variant` prop**, never by passing ut
 
 ### 3. Size ladder
 
-Control heights snap to a fixed ladder — no magic per-component heights. Convergence target (Tailwind `h-*`):
+Control heights snap to a fixed ladder — no magic per-component heights. `Button` realises this as its `size` axis (text sizes and square icon sizes share one scale):
 
-| Token | Height | Use |
+| `size` | Height | Use |
 |---|---|---|
-| `xs` | `h-6` (24px) | Dense toolbars, inline chips |
-| `sm` | `h-7` (28px) | Compact buttons, icon buttons (`IconButton` default) |
-| `md` | `h-8`–`h-9` (32–36px) | Default buttons, inputs, rows |
-| `lg` | `h-10` (40px) | Primary CTAs, circular FABs (`CircleButton` / `RoundButton`) |
+| `sm` | `h-7` (28px) | Compact buttons, dense rows |
+| `md` | `h-8` (32px) | Default buttons, inputs, rows |
+| `lg` | `h-10` (40px) | Primary CTAs |
+| `icon-sm` / `icon` / `icon-lg` | `size-7` / `size-8` / `size-10` | Square icon-only buttons (the former IconButton) |
 
-Touch viewports grow interactive targets to ≥44px per the Responsive section — that is a viewport concern, not a new size token.
+Circular / pill buttons are the same sizes with `shape="pill"`. Touch viewports grow interactive targets to ≥44px per the Responsive section — that is a viewport concern, not a new size token.
 
 ### 4. Interaction contract (one implementation, everywhere)
 

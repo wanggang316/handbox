@@ -27,24 +27,34 @@
 - **验收台**：`/settings/components` 画廊按 `variant × size × state` 双主题渲染每个原子件，是本设计系统的回归基线。
 
 ## 按钮类
-- `Button`：基础按钮。Props: `variant`（`primary` | `secondary` | `gray` | `danger` | `ghost` | `clear`）, `size`, `disabled`, `type`, `customClass`, `onclick`。
-- `RoundButton`：圆角按钮。Props: `label`, `icon`, `loading`, `variant`（`primary` | `accent` | `danger` | `secondary`）, `size`, `rounded`, `fontSize`, `customClass`, `onclick`。
-- `CircleButton`：圆形图标按钮。Props: `icon`, `iconSize`, `ariaLabel`, `variant`（`neutral`（默认）| `secondary`）, `size`, `rounded`, `customClass`, `onclick`。
-- `IconButton`：方形图标按钮。Props: `icon`, `iconSize`, `strokeWidth`, `ariaLabel`, `variant`（`ghost`，默认）, `size`, `rounded`, `customClass`, `onclick`。
-- `ArrowButton`：文本 + 下拉箭头。Props: `label`, `icon`, `iconSize`, `onclick`。
+
+只有一个按钮组件 `Button`——文字、图标、圆形、药丸按钮都由它的 `variant × size × shape` 表达（吸收了原 IconButton / CircleButton / RoundButton / ArrowButton）。图标作 `children` 传入。
+
+- `Button`：唯一按钮组件。Props:
+  - `variant`：`primary` | `secondary` | `gray` | `danger` | `accent` | `neutral` | `ghost` | `clear` | `link`（默认 `primary`）
+  - `size`：`sm` | `md` | `lg` | `icon` | `icon-sm` | `icon-lg`（`icon*` 为方形图标按钮；默认 `md`）
+  - `shape`：`default` | `pill`（`pill` = 全圆角，用于药丸 / 圆形图标按钮）
+  - `loading`（内置 spinner，自动禁用）, `disabled`, `type`, `class` / `customClass`（别名）, `ariaLabel`, `title`, `elementRef`, `onclick`, `children`
+  - 用法约定：图标按钮 = `size="icon*"` + 图标作 children；圆形 = `size="icon" shape="pill"`；药丸 = `shape="pill"`。
+- `MenuButton`：侧栏 / 列表菜单项（非通用按钮，见「导航与布局」）。
 - `TrafficLightsRedButton`：窗口关闭按钮样式。Props: `onClick`。
 
 示例：
 ```svelte
 <Button variant="primary" onclick={handleClick}>保存</Button>
-<RoundButton label="确认" variant="accent" onclick={handleConfirm} />
-<CircleButton icon={Box} ariaLabel="图标按钮" />
+<Button shape="pill" variant="accent" loading={submitting} onclick={handleConfirm}>确认</Button>
+<Button variant="clear" size="icon-sm" ariaLabel="设置" onclick={openSettings}>
+  <Settings size={16} />
+</Button>
+<Button variant="neutral" size="icon" shape="pill" ariaLabel="发送" onclick={send}>
+  <ArrowUp size={18} />
+</Button>
 ```
 
 ## 表单类
 - `Input`：文本输入框。Props: `label`, `placeholder`, `type`, `value`（`$bindable`）, `onInput`, `disabled`, `required`, `error`。`error` 非空时显示行内错误文案并联动 `aria-invalid` / `aria-describedby`；`required` 渲染 `*` 标记并设 `aria-required`。
 - `Textarea`：多行输入。Props: `value`, `placeholder`, `rows`, `disabled`, `readonly`, `maxlength`, `minlength`, `required`, `showCharCount`。
-- `Select`：下拉框。Props: `options`, `value` / `selectedValue`, `placeholder`, `autoWidth`, `disabled`, `size`, `onChange` / `onSelect`。
+- `Select`：下拉框。**全自定义样式**（基于 bits-ui，非原生 `<select>`——展开列表也走设计系统皮肤，双主题一致）。Props: `options`（`{ value, label, disabled? }[]`）, `value` / `selectedValue`（bindable）, `placeholder`, `autoWidth`, `disabled`, `invalid`（FormField 外的独立错误态）, `size`（`sm`|`md`|`lg`）, `onChange` / `onSelect`, `icon`（自定义 trailing 图标 snippet）。选项内容只由 `options` 提供，不再接受 `<option>` children。
 - `Toggle`：开关。Props: `checked`, `onChange`, `onChangeBefore`, `id`, `disabled`。
 - `Slider`：滑杆。Props: `value`, `min`, `max`, `step`, `label`, `formatValue`, `description`。
 - `LabeledSlider`：带左右标签与刻度。Props: `value`, `min`, `max`, `step`, `leftLabel`, `rightLabel`, `scaleMarks`, `showValue`, `showScaleMarks`。
