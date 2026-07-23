@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Eye, EyeOff } from "@lucide/svelte";
-  import IconButton from "../IconButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import TableBaseRow from "./TableBaseRow.svelte";
   import { t } from "$lib/i18n";
 
@@ -94,10 +94,13 @@
         class="px-1 flex items-center justify-center"
         class:hidden={!isPassword}
       >
-        <IconButton
-          icon={showPassword ? Eye : EyeOff}
-          onclick={togglePassword}
-        />
+        <Button variant="clear" size="icon-sm" onclick={togglePassword}>
+          {#if showPassword}
+            <Eye size={20} />
+          {:else}
+            <EyeOff size={20} />
+          {/if}
+        </Button>
       </div>
     </div>
     {#if error}

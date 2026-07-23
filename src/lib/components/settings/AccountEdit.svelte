@@ -2,7 +2,7 @@
   import Modal from "../ui/Modal.svelte";
   import { TextRow, TableGroup } from "../ui/table";
   import Avatar from "../ui/Avatar.svelte";
-  import RoundButton from "../ui/RoundButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import { t } from "$lib/i18n";
 
   interface Props {
@@ -111,18 +111,20 @@
     </div>
 
     <div class="flex justify-end gap-4">
-      <RoundButton
-        customClass="w-18"
-        label={t("common.cancel")}
+      <Button
+        shape="pill"
+        class="w-18"
+        size="lg"
         variant="secondary"
         onclick={handleCancel}
-      />
+      >{t("common.cancel")}</Button>
 
-      <RoundButton
-        customClass="w-18"
-        label={t("common.save")}
+      <Button
+        shape="pill"
+        class="w-18"
+        size="lg"
         onclick={handleSave}
-      />
+      >{t("common.save")}</Button>
     </div>
   </div>
 </Modal>

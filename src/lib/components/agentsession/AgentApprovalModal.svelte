@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ShieldAlert, FilePlus, FilePen, Terminal } from "@lucide/svelte";
   import Modal from "$lib/components/ui/Modal.svelte";
-  import RoundButton from "$lib/components/ui/RoundButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import { renderCodeBlock } from "$lib/utils/code";
   import { t } from "$lib/i18n";
   import type {
@@ -225,30 +225,27 @@
     <div
       class="flex items-center justify-end gap-3 px-6 pt-3 pb-4 border-t border-[var(--hairline)]"
     >
-      <RoundButton
-        customClass="w-20"
-        label={t("agent.approval.deny")}
-        size="h-8"
-        fontSize="text-sm"
+      <Button
+        shape="pill"
+        class="w-20"
+        size="md"
         variant="secondary"
         onclick={() => onRespond(request, "deny")}
-      />
-      <RoundButton
-        customClass="w-24"
-        label={t("agent.approval.allowOnce")}
-        size="h-8"
-        fontSize="text-sm"
+      >{t("agent.approval.deny")}</Button>
+      <Button
+        shape="pill"
+        class="w-24"
+        size="md"
         variant="secondary"
         onclick={() => onRespond(request, "allow_once")}
-      />
-      <RoundButton
-        customClass="w-28"
-        label={t("agent.approval.allowAlways")}
-        size="h-8"
-        fontSize="text-sm"
+      >{t("agent.approval.allowOnce")}</Button>
+      <Button
+        shape="pill"
+        class="w-28"
+        size="md"
         variant="primary"
         onclick={() => onRespond(request, "allow_always")}
-      />
+      >{t("agent.approval.allowAlways")}</Button>
     </div>
   </div>
 </Modal>

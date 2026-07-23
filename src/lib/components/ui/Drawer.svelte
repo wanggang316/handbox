@@ -1,7 +1,7 @@
 <script lang="ts">
   import { X } from "@lucide/svelte";
   import TitleBar from "./TitleBar.svelte";
-  import IconButton from "./IconButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import { t } from "$lib/i18n";
 
   interface Props {
@@ -77,12 +77,15 @@
       >
         <h2 class="text-md text-base-content">{title}</h2>
         {#if showCloseButton}
-          <IconButton
-            icon={X}
+          <Button
+            variant="clear"
+            size="icon-sm"
             ariaLabel={t("common.close")}
-            customClass="z-[10001]"
+            class="z-[10001]"
             onclick={handleClose}
-          />
+          >
+            <X size={20} />
+          </Button>
         {/if}
       </div>
 

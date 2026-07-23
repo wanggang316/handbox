@@ -25,7 +25,7 @@
   } from "$lib/api";
 
   import type { DisabledApp } from "$lib/api/selection";
-    import IconButton from "$lib/components/ui/IconButton.svelte";
+    import Button from "$lib/components/ui/Button.svelte";
 
   let showToolbarOnSelection = $state(false);
   // 划词「翻译」使用的 Agent 定义 ID；"" = 内置翻译回落
@@ -239,11 +239,9 @@
       <div class="flex items-center justify-between px-6 py-4">
         <h3 class="text-sm text-base-content">{t("settings.quicktools.disabledApps")}</h3>
         {#if !isLoadingApps}
-          <IconButton
-            icon={RefreshCcw}
-            iconSize={16}
-            onclick={loadDisabledApps}
-          />
+          <Button variant="clear" size="icon-sm" onclick={loadDisabledApps}>
+            <RefreshCcw size={16} />
+          </Button>
         {/if}
       </div>
 
@@ -266,12 +264,14 @@
                 <span class="text-xs text-base-content/50">{app.bundle_id}</span>
               </div>
 
-              <IconButton
-                icon={Trash2}
-                iconSize={14}
+              <Button
+                variant="clear"
+                size="icon-sm"
                 onclick={() => handleRemoveApp(app.bundle_id)}
                 title={t("common.remove")}
-              />
+              >
+                <Trash2 size={14} />
+              </Button>
             </div>
           {/each}
         </div>

@@ -18,7 +18,7 @@
     title?: string;
     ariaLabel?: string;
     onclick?: (event: MouseEvent) => void;
-    /** Receives the underlying <button> (replaces the former IconButton elementRef). */
+    /** Receives the underlying <button> element (to focus, measure, or anchor to it). */
     elementRef?: (el: HTMLButtonElement | null) => void;
     children?: Snippet;
   }

@@ -3,10 +3,9 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import Tabs from "$lib/components/ui/Tabs.svelte";
-  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
-  import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
@@ -218,15 +217,16 @@
 <div class="flex flex-col h-screen">
   <!-- 粘性导航栏 -->
   <header class="text-base-content py-2 px-4 flex-shrink-0">
-    <CircleButton
-      icon={ChevronLeft}
-      iconSize={22}
-      ariaLabel={t("provider.backAria")}
-      size="w-8 h-8"
+    <Button
       variant="secondary"
-      customClass="hover:text-base-content/80 z-10004 relative"
+      size="icon"
+      shape="pill"
+      ariaLabel={t("provider.backAria")}
+      class="hover:text-base-content/80 z-10004 relative"
       onclick={handleBack}
-    />
+    >
+      <ChevronLeft size={22} />
+    </Button>
   </header>
 
   <!-- 主要内容区域 -->
@@ -247,14 +247,21 @@
               </span>
             </div>
             <div class="flex flex-row items-center gap-4">
-              <IconButton icon={SquarePen} onclick={handleEdit} />
-              <IconButton icon={Trash2} onclick={handleDelete} />
-              <IconButton
-                icon={RefreshCw}
+              <Button variant="clear" size="icon-sm" onclick={handleEdit}>
+                <SquarePen size={20} />
+              </Button>
+              <Button variant="clear" size="icon-sm" onclick={handleDelete}>
+                <Trash2 size={20} />
+              </Button>
+              <Button
+                variant="clear"
+                size="icon-sm"
                 onclick={handleRefresh}
                 disabled={!server.enabled || isRefreshing}
-                customClass={isRefreshing ? "animate-spin" : ""}
-              />
+                class={isRefreshing ? "animate-spin" : ""}
+              >
+                <RefreshCw size={20} />
+              </Button>
               <Toggle
                 checked={formData.enabled}
                 onChange={handleToggle}

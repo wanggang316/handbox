@@ -5,7 +5,6 @@
   import Button from "$lib/components/ui/Button.svelte";
   import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
-  import IconButton from "$lib/components/ui/IconButton.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import type {
     CreateMcpServerRequest,
@@ -125,13 +124,14 @@
                 checked={server.enabled}
                 onChange={(enabled) => handleToggleServer(server, enabled)}
               />
-              <IconButton
-                icon={Settings2}
-                iconSize={16}
+              <Button
+                variant="clear"
+                size="icon-sm"
                 ariaLabel={t("provider.editAria")}
-                size="w-7 h-7"
                 onclick={(e) => handleEditServer(server, e)}
-              />
+              >
+                <Settings2 size={16} />
+              </Button>
             </div>
           </div>
           <div>

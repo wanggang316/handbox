@@ -1,5 +1,5 @@
 <script lang="ts">
-  import IconButton from "$lib/components/ui/IconButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import { PanelLeft } from "@lucide/svelte";
   import { t } from "$lib/i18n";
 
@@ -26,13 +26,14 @@
   <!-- 左侧：侧边栏切换按钮 -->
   {#if showToggleButton}
     <div class="sidebar-toggle-button">
-      <IconButton
-        icon={PanelLeft}
-        iconSize={15}
-        strokeWidth={1.5}
+      <Button
+        variant="clear"
+        size="icon-sm"
         ariaLabel={sidebarOpen ? t("ui.hideSidebar") : t("ui.showSidebar")}
         onclick={handleToggle}
-      />
+      >
+        <PanelLeft size={15} strokeWidth={1.5} />
+      </Button>
     </div>
   {/if}
 

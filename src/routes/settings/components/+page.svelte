@@ -6,10 +6,6 @@
   import Checkbox from "$lib/components/ui/Checkbox.svelte";
   import RadioGroup from "$lib/components/ui/RadioGroup.svelte";
   import FormField from "$lib/components/ui/FormField.svelte";
-  import IconButton from "$lib/components/ui/IconButton.svelte";
-  import CircleButton from "$lib/components/ui/CircleButton.svelte";
-  import RoundButton from "$lib/components/ui/RoundButton.svelte";
-  import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
   import TrafficLightsRedButton from "$lib/components/ui/TrafficLightsRedButton.svelte";
   import { Settings, Plus, Check, Search } from "@lucide/svelte";
 
@@ -97,12 +93,12 @@
     </div>
   </section>
 
-  <!-- 按钮：全家族 variant × size × state 矩阵，作回归验收基线 -->
+  <!-- 按钮：单组件 Button 的 variant × size × shape × state 矩阵 -->
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">按钮</h2>
 
     <div class="space-y-2">
-      <p class="text-xs text-base-content/60">Button · variant</p>
+      <p class="text-xs text-base-content/60">variant</p>
       <div class="flex flex-wrap items-center gap-2">
         <Button variant="primary">Primary</Button>
         <Button variant="secondary">Secondary</Button>
@@ -110,41 +106,42 @@
         <Button variant="ghost">Ghost</Button>
         <Button variant="clear">Clear</Button>
         <Button variant="danger">Danger</Button>
+        <Button variant="accent">Accent</Button>
+        <Button variant="neutral">Neutral</Button>
+        <Button variant="link">Link</Button>
       </div>
     </div>
 
     <div class="space-y-2">
-      <p class="text-xs text-base-content/60">Button · size / state</p>
+      <p class="text-xs text-base-content/60">size / state</p>
       <div class="flex flex-wrap items-center gap-2">
         <Button size="sm">Small</Button>
         <Button size="md">Medium</Button>
+        <Button size="lg">Large</Button>
+        <Button loading>Loading</Button>
         <Button disabled>Disabled</Button>
       </div>
     </div>
 
     <div class="space-y-2">
-      <p class="text-xs text-base-content/60">
-        图标 / 形状按钮 · IconButton · CircleButton · ArrowButton · TrafficLight
-      </p>
-      <div class="flex flex-wrap items-center gap-3">
-        <IconButton icon={Settings} ariaLabel="设置" />
-        <IconButton icon={Search} ariaLabel="搜索" />
-        <IconButton icon={Plus} ariaLabel="新增（禁用）" disabled />
-        <CircleButton icon={Plus} ariaLabel="新增" variant="neutral" />
-        <CircleButton icon={Check} ariaLabel="确认" variant="secondary" />
-        <ArrowButton label="展开" />
-        <TrafficLightsRedButton />
+      <p class="text-xs text-base-content/60">size=icon（方形图标按钮，图标作 children）</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <Button variant="clear" size="icon-sm" ariaLabel="设置"><Settings size={16} /></Button>
+        <Button variant="clear" size="icon" ariaLabel="搜索"><Search size={18} /></Button>
+        <Button variant="secondary" size="icon-lg" ariaLabel="新增"><Plus size={20} /></Button>
+        <Button variant="clear" size="icon" ariaLabel="禁用" disabled><Check size={18} /></Button>
       </div>
     </div>
 
     <div class="space-y-2">
-      <p class="text-xs text-base-content/60">RoundButton · variant / loading</p>
+      <p class="text-xs text-base-content/60">shape=pill（药丸 / 圆形）· 含 loading · TrafficLight</p>
       <div class="flex flex-wrap items-center gap-2">
-        <RoundButton label="Primary" variant="primary" />
-        <RoundButton label="Accent" variant="accent" />
-        <RoundButton label="Danger" variant="danger" />
-        <RoundButton label="Secondary" variant="secondary" />
-        <RoundButton label="Loading" variant="primary" loading />
+        <Button shape="pill" variant="primary">Pill</Button>
+        <Button shape="pill" variant="secondary">Pill secondary</Button>
+        <Button shape="pill" variant="primary" loading>Loading</Button>
+        <Button shape="pill" size="icon" variant="neutral" ariaLabel="发送"><Plus size={16} /></Button>
+        <Button shape="pill" size="icon" variant="secondary" ariaLabel="确认"><Check size={16} /></Button>
+        <TrafficLightsRedButton />
       </div>
     </div>
   </section>
