@@ -1,34 +1,13 @@
 <script lang="ts">
   import type { Icon as IconType } from "@lucide/svelte";
-
-  type Variant = "neutral" | "secondary";
-
-  type VariantClasses = {
-    bg: string;
-    text: string;
-    hover: string;
-  };
-
-  // Authoritative variant → class map. Reproduces the exact rest + hover
-  // colors per variant (neutral = the former default).
-  const VARIANT_CLASSES: Record<Variant, VariantClasses> = {
-    neutral: {
-      bg: "bg-neutral",
-      text: "text-neutral-content",
-      hover: "hover:bg-neutral/90",
-    },
-    secondary: {
-      bg: "bg-base-200",
-      text: "text-base-content",
-      hover: "hover:bg-base-300",
-    },
-  };
+  import { circleButton, type CircleButtonVariants } from "./variants";
+  import { cn } from "./utils";
 
   interface Props {
     icon: typeof IconType;
     iconSize?: number;
     ariaLabel: string;
-    variant?: Variant;
+    variant?: CircleButtonVariants["variant"];
     size?: string;
     rounded?: string;
     disabled?: boolean;
@@ -48,8 +27,6 @@
     onclick = undefined,
   }: Props = $props();
 
-  const colors = $derived(VARIANT_CLASSES[variant]);
-
   function handleClick(event: MouseEvent) {
     if (!disabled) {
       onclick?.(event);
@@ -58,9 +35,8 @@
 </script>
 
 <button
-  class="{size} {colors.bg} {colors.hover} {colors.text} {rounded} flex items-center justify-center transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] {customClass}"
-  class:opacity-60={disabled}
-  class:cursor-not-allowed={disabled}
+  class={cn(circleButton({ variant }), size, rounded, customClass)}
+  data-slot="circle-button"
   aria-label={ariaLabel}
   onclick={handleClick}
   {disabled}

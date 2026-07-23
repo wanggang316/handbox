@@ -1,45 +1,14 @@
 <script lang="ts">
   import type { Icon as IconType } from "@lucide/svelte";
   import { Loader } from "@lucide/svelte";
-
-  type Variant = "primary" | "accent" | "danger" | "secondary";
-
-  type VariantClasses = {
-    bg: string;
-    text: string;
-    hover: string;
-  };
-
-  // Authoritative variant → class map (lifted from ConfirmModal's former
-  // color helper). Reproduces the exact rest + hover colors per variant.
-  const VARIANT_CLASSES: Record<Variant, VariantClasses> = {
-    primary: {
-      bg: "bg-primary",
-      text: "text-primary-content",
-      hover: "hover:opacity-90",
-    },
-    accent: {
-      bg: "bg-accent",
-      text: "text-accent-content",
-      hover: "hover:bg-accent/90",
-    },
-    danger: {
-      bg: "bg-error",
-      text: "text-error-content",
-      hover: "hover:bg-error/90",
-    },
-    secondary: {
-      bg: "bg-base-300",
-      text: "text-base-content/80",
-      hover: "hover:bg-base-300/80",
-    },
-  };
+  import { roundButton, type RoundButtonVariants } from "./variants";
+  import { cn } from "./utils";
 
   interface Props {
     label: string;
     icon?: typeof IconType;
     iconSize?: number;
-    variant?: Variant;
+    variant?: RoundButtonVariants["variant"];
     size?: string;
     rounded?: string;
     fontSize?: string;
@@ -63,11 +32,7 @@
     onclick = undefined,
   }: Props = $props();
 
-  const colors = $derived(VARIANT_CLASSES[variant]);
   const inactive = $derived(disabled || loading);
-  // Hover class only applies while interactive; reproduces the exact
-  // per-variant hover token (e.g. hover:bg-accent/90).
-  const hoverClass = $derived(inactive ? "" : colors.hover);
 
   function handleClick(event: MouseEvent) {
     if (!disabled && !loading) {
@@ -77,10 +42,8 @@
 </script>
 
 <button
-  class="{size} {colors.bg} {colors.text} {rounded} {fontSize} {hoverClass} flex items-center justify-center gap-1.5 transition duration-[var(--dur-fast)] ease-[var(--ease-out)] disabled:bg-base-300 {customClass}"
-  class:opacity-60={inactive}
-  class:cursor-not-allowed={inactive}
-  class:pointer-events-none={inactive}
+  class={cn(roundButton({ variant }), size, fontSize, rounded, customClass)}
+  data-slot="round-button"
   onclick={handleClick}
   disabled={inactive}
 >

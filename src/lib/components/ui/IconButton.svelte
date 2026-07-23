@@ -1,23 +1,7 @@
 <script lang="ts">
   import type { Icon as IconType } from '@lucide/svelte';
-
-  type Variant = 'ghost';
-
-  type VariantClasses = {
-    bg: string;
-    hover: string;
-    text: string;
-  };
-
-  // Authoritative variant → class map. `ghost` reproduces the exact former
-  // default (transparent rest, base-300 hover, base-content text).
-  const VARIANT_CLASSES: Record<Variant, VariantClasses> = {
-    ghost: {
-      bg: 'bg-transparent',
-      hover: 'hover:bg-base-300',
-      text: 'text-base-content',
-    },
-  };
+  import { iconButton, type IconButtonVariants } from './variants';
+  import { cn } from './utils';
 
   interface Props {
     icon: typeof IconType;
@@ -26,7 +10,7 @@
     ariaLabel?: string;
     size?: string;
     rounded?: string;
-    variant?: Variant;
+    variant?: IconButtonVariants['variant'];
     disabled?: boolean;
     customClass?: string;
     onclick?: (event: MouseEvent) => void;
@@ -49,7 +33,6 @@
     title = '',
   }: Props = $props();
 
-  const colors = $derived(VARIANT_CLASSES[variant]);
   let buttonEl: HTMLButtonElement | null = null;
   $effect(() => {
     elementRef?.(buttonEl);
@@ -63,9 +46,8 @@
 </script>
 
 <button
-  class="{size} {colors.bg} {colors.hover} {colors.text} {rounded} flex items-center justify-center transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] {customClass}"
-  class:opacity-60={disabled}
-  class:cursor-not-allowed={disabled}
+  class={cn(iconButton({ variant }), size, rounded, customClass)}
+  data-slot="icon-button"
   aria-label={ariaLabel}
   onclick={handleClick}
   title={title}
