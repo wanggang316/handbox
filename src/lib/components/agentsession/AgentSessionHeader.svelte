@@ -164,7 +164,7 @@
   <!-- 侧栏收起时主内容顶到窗口左缘：给头部让出红绿灯 + 侧栏开关的位置
        （toggle 位于 left:100px，按钮宽约 30px），padding 过渡与侧栏动画同步。 -->
   <header
-    class="flex items-center gap-3 px-4 py-2.5 border-b border-base-300 shrink-0 transition-[padding-left] duration-200 {uiState.sidebarOpen
+    class="flex items-center gap-3 px-4 py-2.5 border-b border-base-300 shrink-0 transition-[padding-left] duration-[var(--dur-base)] {uiState.sidebarOpen
       ? ''
       : 'pl-[136px]'}"
   >
@@ -225,7 +225,7 @@
 
         {#if openInMenuOpen}
           <div
-            class="openin-popover absolute right-0 top-full mt-2 z-[10020] min-w-48 max-w-[80vw] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl p-1 flex flex-col max-h-96 overflow-y-auto"
+            class="openin-popover absolute right-0 top-full mt-2 z-[var(--z-popover)] min-w-48 max-w-[80vw] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl p-1 flex flex-col max-h-96 overflow-y-auto"
           >
             {#if openInError}
               <div
@@ -246,7 +246,7 @@
                   target.kind !== "system" && target.id === defaultEditorId}
                 <button
                   type="button"
-                  class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+                  class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
                   onclick={() => pickTarget(target)}
                 >
                   {#if target.icon}

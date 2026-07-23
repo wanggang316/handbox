@@ -165,13 +165,13 @@
 
   {#if showUserMenu}
     <div
-      class="user-context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
+      class="user-context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
       style="left: {userMenuX}px; top: {userMenuY}px; transform: translateY(calc(-100% - 8px));"
       role="menu"
     >
       {#if currentUser.isLoggedIn}
         <button
-          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
           onclick={handleMenuAccount}
         >
           <User size={14} />
@@ -179,7 +179,7 @@
         </button>
       {:else}
         <button
-          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
           onclick={handleMenuLogin}
         >
           {t("common.login")}
@@ -189,7 +189,7 @@
       <div class="border-t border-base-300 my-1 mx-2"></div>
 
       <button
-        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
         onclick={handleMenuSettings}
       >
         <Settings size={14} />

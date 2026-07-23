@@ -42,31 +42,33 @@
   }
 </script>
 
-<div class="w-full h-full bg-red-500">
-  <div class="flex flex-col bg-white gap-1">
+<div
+  class="w-full h-full p-1 bg-[var(--bg-card)] rounded-xl shadow-lg border border-[var(--hairline)] overflow-hidden"
+>
+  <div class="flex flex-col gap-1">
     <button
-      class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+      class="flex items-center w-full px-3 py-2 text-sm rounded-lg text-base-content hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
       onclick={handleHideUntilRestart}
     >
       {t("selection.hideUntilRestart")}
     </button>
 
     <button
-      class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+      class="flex items-center w-full px-3 py-2 text-sm rounded-lg text-base-content hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
       onclick={handleDisableByBundleId}
     >
       {t("selection.disableForApp")}
     </button>
 
     <button
-      class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+      class="flex items-center w-full px-3 py-2 text-sm rounded-lg text-base-content hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
       onclick={handleDisableGlobal}
     >
       {t("selection.disableGlobal")}
     </button>
 
     <button
-      class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+      class="flex items-center w-full px-3 py-2 text-sm rounded-lg text-base-content hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
       onclick={handleOpenSettings}
     >
       {t("common.settings")}

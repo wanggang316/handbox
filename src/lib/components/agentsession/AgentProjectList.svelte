@@ -614,7 +614,7 @@
       </span>
       <ChevronRight
         size={14}
-        class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
+        class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {collapsed
           ? ''
           : 'rotate-90'}"
       />
@@ -698,7 +698,7 @@
             {/if}
             <ChevronRight
               size={14}
-              class="flex-shrink-0 text-base-content/40 transition-transform duration-150 {collapsed
+              class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {collapsed
                 ? ''
                 : 'rotate-90'}"
             />
@@ -723,11 +723,11 @@
 <!-- 右键菜单（单一 state 按 kind 分发：session 行 / 项目组头互斥） -->
 {#if contextMenu?.kind === "project"}
   <div
-    class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
+    class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
   >
     <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
       onclick={startProjectRename}
     >
       <PencilLine size={14} />
@@ -735,7 +735,7 @@
     </button>
 
     <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
       onclick={handleCopyProjectPath}
     >
       <Copy size={14} />
@@ -754,13 +754,13 @@
   </div>
 {:else if contextMenu?.kind === "session"}
   <div
-    class="context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
+    class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
   >
     <!-- 生成标题：仅当会话已有消息（有内容可蒸馏）时提供 -->
     {#if contextMenu.session.messageCount > 0}
       <button
-        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
         onclick={handleGenerateTitle}
       >
         <Sparkles size={14} />
@@ -769,7 +769,7 @@
     {/if}
 
     <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
       onclick={startRename}
     >
       <PencilLine size={14} />
@@ -777,7 +777,7 @@
     </button>
 
     <button
-      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
       onclick={handleCopyId}
     >
       <Hash size={14} />
