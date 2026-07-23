@@ -6,6 +6,12 @@
   import Checkbox from "$lib/components/ui/Checkbox.svelte";
   import RadioGroup from "$lib/components/ui/RadioGroup.svelte";
   import FormField from "$lib/components/ui/FormField.svelte";
+  import IconButton from "$lib/components/ui/IconButton.svelte";
+  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import RoundButton from "$lib/components/ui/RoundButton.svelte";
+  import ArrowButton from "$lib/components/ui/ArrowButton.svelte";
+  import TrafficLightsRedButton from "$lib/components/ui/TrafficLightsRedButton.svelte";
+  import { Settings, Plus, Check, Search } from "@lucide/svelte";
 
   let name = $state("");
   let email = $state("bad-value");
@@ -91,15 +97,55 @@
     </div>
   </section>
 
-  <!-- 按钮 -->
+  <!-- 按钮：全家族 variant × size × state 矩阵，作回归验收基线 -->
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">按钮</h2>
-    <div class="flex flex-wrap gap-2">
-      <Button variant="primary">Primary</Button>
-      <Button variant="secondary">Secondary</Button>
-      <Button variant="gray">Gray</Button>
-      <Button variant="danger">Danger</Button>
-      <Button disabled>Disabled</Button>
+
+    <div class="space-y-2">
+      <p class="text-xs text-base-content/60">Button · variant</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <Button variant="primary">Primary</Button>
+        <Button variant="secondary">Secondary</Button>
+        <Button variant="gray">Gray</Button>
+        <Button variant="ghost">Ghost</Button>
+        <Button variant="clear">Clear</Button>
+        <Button variant="danger">Danger</Button>
+      </div>
+    </div>
+
+    <div class="space-y-2">
+      <p class="text-xs text-base-content/60">Button · size / state</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <Button size="sm">Small</Button>
+        <Button size="md">Medium</Button>
+        <Button disabled>Disabled</Button>
+      </div>
+    </div>
+
+    <div class="space-y-2">
+      <p class="text-xs text-base-content/60">
+        图标 / 形状按钮 · IconButton · CircleButton · ArrowButton · TrafficLight
+      </p>
+      <div class="flex flex-wrap items-center gap-3">
+        <IconButton icon={Settings} ariaLabel="设置" />
+        <IconButton icon={Search} ariaLabel="搜索" />
+        <IconButton icon={Plus} ariaLabel="新增（禁用）" disabled />
+        <CircleButton icon={Plus} ariaLabel="新增" variant="neutral" />
+        <CircleButton icon={Check} ariaLabel="确认" variant="secondary" />
+        <ArrowButton label="展开" />
+        <TrafficLightsRedButton />
+      </div>
+    </div>
+
+    <div class="space-y-2">
+      <p class="text-xs text-base-content/60">RoundButton · variant / loading</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <RoundButton label="Primary" variant="primary" />
+        <RoundButton label="Accent" variant="accent" />
+        <RoundButton label="Danger" variant="danger" />
+        <RoundButton label="Secondary" variant="secondary" />
+        <RoundButton label="Loading" variant="primary" loading />
+      </div>
     </div>
   </section>
 </div>

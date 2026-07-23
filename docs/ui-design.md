@@ -597,3 +597,68 @@ Linear's deeper-ladder tokens (`surface-3`, `surface-4`, `hairline`, `hairline-s
 ### 6. Component Coverage Beyond Linear's Surface
 
 Linear marketing has no concept of: chat bubbles (user vs assistant), settings table rows (`TableGroup`/`*Row`), model selectors, MCP server cards. HandBox extends the Linear language to these surfaces by composition — chat bubbles use `surface-1` lift + hairline border + `rounded-lg`; assistant messages tile flat on canvas; settings groups become `surface-1` cards with hairline-divided rows. Hover behavior follows Linear's "lift one level on interaction" convention (e.g., row `bg-base-200` → `bg-base-300` on hover).
+
+## Engineering Conventions (HandBox)
+
+The sections above define the **visual** language. This section defines the **engineering** discipline that keeps that language consistent across ~40 atomic components and ~30 pages. The visual tokens never change here — this is about *how components consume them*. The discipline is adapted from multica's React/CVA system, re-expressed for Svelte 5 + Tailwind. The audit that motivated it found the token base was sound but the consumption layer had drifted (hardcoded durations, colliding z-indexes, a bare-`<button>` culture, and `base-100`-as-foreground bugs).
+
+### 1. Component architecture
+
+- **`src/lib/components/ui/utils.ts`** exports `cn(...)` = `twMerge(clsx(...))`. Every atomic component composes its class list through `cn()` so a caller's `class` / `customClass` prop reliably *overrides* internal variant classes (last-writer-wins on conflicting Tailwind utilities) instead of stacking two fighting rules.
+- **`src/lib/components/ui/variants.ts`** holds `tailwind-variants` (`tv`) tables — the single source of truth for a component's `variant × size × state` → utility-class mapping. Atomic components import their table; they do **not** carry scoped `<style>` skins. (`Button` is the reference implementation.)
+- A component's public API is **props only** — semantic `variant` / `size` / `disabled` / `error`, never raw class or color knobs. The legacy `bgColor` / `hoverColor` / `textColor` color-as-prop API is removed.
+
+### 2. Variant naming
+
+Colour intent is expressed by a **semantic `variant` prop**, never by passing utilities. Variant vocabularies are per-component but drawn from a shared palette of intents:
+
+| Intent | Meaning | Backing tokens |
+|---|---|---|
+| `primary` | The one lavender CTA | `bg-primary` / `text-primary-content` |
+| `secondary` | Charcoal / surface-lift action | `bg-base-200` + hairline |
+| `gray` / `ghost` / `clear` | Progressively quieter (bordered → transparent → chromeless) | `bg-transparent` → `hover:bg-base-300` |
+| `danger` | Destructive | `bg-error` / `text-error-content` |
+| `accent` / `neutral` | Emphasis / neutral fill on specialised controls | `bg-accent` / `bg-neutral` + matching `-content` |
+
+### 3. Size ladder
+
+Control heights snap to a fixed ladder — no magic per-component heights. Convergence target (Tailwind `h-*`):
+
+| Token | Height | Use |
+|---|---|---|
+| `xs` | `h-6` (24px) | Dense toolbars, inline chips |
+| `sm` | `h-7` (28px) | Compact buttons, icon buttons (`IconButton` default) |
+| `md` | `h-8`–`h-9` (32–36px) | Default buttons, inputs, rows |
+| `lg` | `h-10` (40px) | Primary CTAs, circular FABs (`CircleButton` / `RoundButton`) |
+
+Touch viewports grow interactive targets to ≥44px per the Responsive section — that is a viewport concern, not a new size token.
+
+### 4. Interaction contract (one implementation, everywhere)
+
+- **Focus** — keyboard focus uses the Elevation level-4 ring: a 2px `primary` outline at ~50% opacity, via `focus-visible:` (never bare `focus:`, so mouse clicks don't ring). Codified once; components must not each invent a focus style.
+- **Disabled** — exactly `disabled:opacity-60 disabled:cursor-not-allowed`. `0.6` is the single disabled opacity across the whole component set (previously drifted across 0.5 / 0.6 / 0.8).
+- **Error / validation** — form controls reflect invalid state through `aria-invalid` + `aria-describedby` pointing at an inline error node; the visual error tint is driven off the same state, not set independently.
+
+### 5. Token consumption red lines
+
+These are the highest-frequency drift sources the audit found. They are hard rules — **no hardcoded literals** where a token exists.
+
+| Axis | Consume | Never write |
+|---|---|---|
+| **Motion** | `duration-[var(--dur-fast)]` (100ms) · `--dur-base` (200ms) · `--dur-slow` (300ms), with `ease-[var(--ease-out)]` / `--ease-standard` | `duration-200`, `transition: … 0.15s`, or any raw ms |
+| **z-index** | `var(--z-dropdown)` 10030 · `--z-overlay` 10050 · `--z-modal` 10060 · `--z-popover` 10070 · `--z-toast` 99999 | `z-[9999]`, `z-50`, ad-hoc `z-[10020]` |
+| **Colour** | daisyUI semantic utilities (`bg-base-*`, `text-base-content`, `bg-primary`, `bg-error`, …) and the `--color-*` vars | bare palette (`bg-red-500`, `bg-white`, `text-gray-*`) |
+| **Text on colour** | the matching `-content` token (`text-primary-content` on `bg-primary`, `text-error-content` on `bg-error`) | `text-base-100` as a foreground — `base-100` is the *canvas background*; used as text it inverts wrongly across light/dark and disappears |
+| **Radius / spacing** | the Shapes / Spacing scales (`rounded-md`, `rounded-lg`, 4px grid) | arbitrary `rounded-[7px]`, `p-[13px]` |
+
+The **z-index layering order** is intentional: dropdown < overlay < modal < popover < toast. A popover launched from inside a modal must sit above it — that is why `--z-popover` (10070) is above `--z-modal` (10060).
+
+The token scale governs the **overlay ladder** only (floating layers that stack against the whole page). Two kinds of z are deliberately *outside* it and keep raw values: (a) **local z** inside a component's own stacking context (e.g. `z-10` on a modal's corner control, `z-30`/`z-40` on composer-anchored popovers) — scoped to a parent, they never compete with the ladder; (b) **structural window-chrome z** — the `TitleBar` drag-region micro-stack (`9999` region / `10000` buttons) and the modal drag-strip intermediate (`10055`, deliberately between `--z-overlay` and `--z-modal`) — these carry explanatory comments at the call site. Any *new* full-page floating layer must use a `--z-*` token; raw z is only for these two documented cases.
+
+### 6. Reuse culture
+
+The business layer (feature components, pages) **composes** atomic components; it does not hand-roll them. No bare `<button>` / `<input>`, no ad-hoc dropdown menus or modal scaffolding copied inline. If a needed primitive is missing, add it to `ui/` once and reuse it — do not fork a local copy.
+
+### 7. Verification surface
+
+`/settings/components` is the live gallery: every atomic component renders there across its full `variant × size × state` matrix in both themes. It is the regression check for this design system — a change that looks right in isolation but breaks the gallery (or breaks in the opposite theme) is not done.
