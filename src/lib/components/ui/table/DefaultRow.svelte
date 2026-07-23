@@ -27,7 +27,7 @@
 			{/if}
 			<ChevronRight
 				size="16"
-				class="text-base-content/50 group-hover:text-base-content transition-colors duration-75"
+				class="text-base-content/50 group-hover:text-base-content transition-colors duration-[var(--dur-fast)]"
 			/>
 		</div>
 	</TableBaseRow>

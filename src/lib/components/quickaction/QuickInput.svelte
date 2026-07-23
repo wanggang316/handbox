@@ -220,7 +220,7 @@
     border-radius: 4px;
     padding: 0.1rem;
     color: color-mix(in srgb, var(--base-content) 55%, transparent);
-    transition: background-color 0.12s ease;
+    transition: background-color var(--dur-fast) ease;
   }
   .qa-chip-x:hover {
     background: color-mix(in srgb, var(--base-content) 12%, transparent);
@@ -235,7 +235,7 @@
     padding: 0.25rem 0.5rem;
     font-size: 12px;
     color: color-mix(in srgb, var(--base-content) 62%, transparent);
-    transition: background-color 0.12s ease;
+    transition: background-color var(--dur-fast) ease;
   }
   button.qa-action:hover {
     background: color-mix(in srgb, var(--base-content) 8%, transparent);

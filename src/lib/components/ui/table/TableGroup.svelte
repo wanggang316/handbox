@@ -49,7 +49,7 @@
         <!-- 常驻单 chevron：hover 淡入、展开时旋转指上（替代双 icon 切换） -->
         <ChevronDown
           size={16}
-          class="transition duration-150 {isHovering
+          class="transition duration-[var(--dur-fast)] {isHovering
             ? 'opacity-100'
             : 'opacity-0'} {isCollapsed ? '' : 'rotate-180'}"
         />

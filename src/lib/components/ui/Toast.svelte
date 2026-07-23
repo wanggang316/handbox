@@ -72,12 +72,12 @@
 </script>
 
 <!-- 全局 Toast 容器 -->
-<div class="fixed top-4 left-1/2 transform -translate-x-1/2 z-[99999] flex flex-col gap-2">
+<div class="fixed top-4 left-1/2 transform -translate-x-1/2 z-[var(--z-toast)] flex flex-col gap-2">
   {#each toastStore.messages as toast (toast.id)}
     {@const Icon = getIcon(toast.type)}
     {@const styles = getStyles(toast.type)}
     <div 
-      class="animate-in slide-in-from-top-2 duration-300"
+      class="animate-in slide-in-from-top-2 duration-[var(--dur-slow)]"
       role="alert"
     >
       <div class="border rounded-lg shadow-lg p-4 min-w-80 max-w-md backdrop-blur-sm {styles.container}">

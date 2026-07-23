@@ -68,7 +68,7 @@
         <div class="h-1.5 w-full overflow-hidden rounded-full bg-base-300">
           {#if hasTotal}
             <div
-              class="h-full rounded-full bg-primary transition-[width] duration-150"
+              class="h-full rounded-full bg-primary transition-[width] duration-[var(--dur-base)]"
               style={`width:${percent}%`}
             ></div>
           {:else}

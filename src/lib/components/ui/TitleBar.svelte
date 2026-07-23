@@ -61,7 +61,7 @@
     left: 100px; /* 位于系统按钮右边 */
     pointer-events: auto;
     z-index: 10000;
-    transition: opacity 0.2s ease-in-out;
+    transition: opacity var(--dur-base) ease-in-out;
   }
 
   .sidebar-toggle-button:hover {

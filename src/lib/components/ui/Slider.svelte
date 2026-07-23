@@ -66,7 +66,7 @@
     cursor: pointer;
     border: 2px solid var(--base-100);
     box-shadow: 0 2px 4px color-mix(in oklch, var(--base-content) 15%, transparent);
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
   }
 
   .slider::-webkit-slider-thumb:hover {
@@ -83,7 +83,7 @@
     cursor: pointer;
     border: 2px solid var(--base-100);
     box-shadow: 0 2px 4px color-mix(in oklch, var(--base-content) 15%, transparent);
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
   }
 
   .slider::-moz-range-thumb:hover {

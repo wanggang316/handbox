@@ -512,7 +512,7 @@
           </button>
           {#if iconPickerOpen}
             <div
-              class="absolute left-0 top-full z-[10020] mt-2 w-[19rem] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] p-3 shadow-xl"
+              class="absolute left-0 top-full z-[var(--z-popover)] mt-2 w-[19rem] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] p-3 shadow-xl"
             >
               <div class="flex flex-wrap gap-1.5">
                 {#each AGENT_ICONS as opt (opt.name)}

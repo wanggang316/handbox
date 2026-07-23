@@ -41,7 +41,7 @@
 {#if open}
   <div
     bind:this={drawerElement}
-    class="fixed inset-0 z-[10010] flex"
+    class="fixed inset-0 z-[var(--z-modal)] flex"
     role="dialog"
     aria-modal="true"
     tabindex="-1"

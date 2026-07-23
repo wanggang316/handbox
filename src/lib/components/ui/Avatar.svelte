@@ -131,10 +131,10 @@
     <!-- 编辑遮罩层 -->
     {#if editable}
       <div
-        class="absolute inset-0 bg-base-content/0 group-hover:bg-base-content/30 transition-all duration-200 rounded-full flex items-center justify-center"
+        class="absolute inset-0 bg-base-content/0 group-hover:bg-base-content/30 transition-all duration-[var(--dur-base)] rounded-full flex items-center justify-center"
       >
         <div
-          class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-base-100 text-xs text-center"
+          class="opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--dur-base)] text-base-100 text-xs text-center"
         >
           {t("ui.clickToUpload")}
         </div>

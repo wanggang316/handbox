@@ -76,7 +76,7 @@
     border-radius: 999px;
     background: var(--base-300);
     position: relative;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
   }
   .slider::after {
     content: "";
@@ -87,7 +87,7 @@
     height: 16px;
     border-radius: 50%;
     background: var(--base-100);
-    transition: transform 0.2s;
+    transition: transform var(--dur-base);
     box-shadow: 0 1px 2px
       color-mix(in oklch, var(--base-content) 20%, transparent);
   }
