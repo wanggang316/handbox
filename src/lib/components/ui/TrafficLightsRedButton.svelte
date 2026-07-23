@@ -11,7 +11,7 @@
 </script>
 
 <button 
-  class="w-3 h-3 rounded-full flex items-center justify-center transition-colors duration-200"
+  class="w-3 h-3 rounded-full flex items-center justify-center transition-colors duration-[var(--dur-base)]"
   class:bg-error={isHovered}
   class:bg-base-300={!isHovered}
   aria-label="Close"

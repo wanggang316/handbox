@@ -19,7 +19,7 @@
 
 <button
   type="button"
-  class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded py-0.5 transition-colors"
+  class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 rounded py-0.5 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
   {onclick}
 >
   <span>{label}</span>

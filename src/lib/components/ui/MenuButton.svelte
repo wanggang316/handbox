@@ -32,7 +32,7 @@
 
   // 默认样式
   const defaultButtonClass =
-    "w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 transition-colors truncate";
+    "w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] truncate";
   const defaultActiveClass = "bg-base-300";
   const defaultIconClass = "flex-shrink-0";
 

@@ -25,7 +25,7 @@
     },
     danger: {
       bg: "bg-error",
-      text: "text-base-100",
+      text: "text-error-content",
       hover: "hover:bg-error/90",
     },
     secondary: {
@@ -77,8 +77,8 @@
 </script>
 
 <button
-  class="{size} {colors.bg} {colors.text} {rounded} {fontSize} {hoverClass} flex items-center justify-center gap-1.5 transition disabled:bg-base-300 {customClass}"
-  class:opacity-50={inactive}
+  class="{size} {colors.bg} {colors.text} {rounded} {fontSize} {hoverClass} flex items-center justify-center gap-1.5 transition duration-[var(--dur-fast)] ease-[var(--ease-out)] disabled:bg-base-300 {customClass}"
+  class:opacity-60={inactive}
   class:cursor-not-allowed={inactive}
   class:pointer-events-none={inactive}
   onclick={handleClick}

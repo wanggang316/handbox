@@ -63,8 +63,8 @@
 </script>
 
 <button
-  class="{size} {colors.bg} {colors.hover} {colors.text} {rounded} flex items-center justify-center transition-colors {customClass}"
-  class:opacity-80={disabled}
+  class="{size} {colors.bg} {colors.hover} {colors.text} {rounded} flex items-center justify-center transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] {customClass}"
+  class:opacity-60={disabled}
   class:cursor-not-allowed={disabled}
   aria-label={ariaLabel}
   onclick={handleClick}
