@@ -54,7 +54,7 @@
 ## 表单类
 - `Input`：文本输入框。Props: `label`, `placeholder`, `type`, `value`（`$bindable`）, `onInput`, `disabled`, `required`, `error`。`error` 非空时显示行内错误文案并联动 `aria-invalid` / `aria-describedby`；`required` 渲染 `*` 标记并设 `aria-required`。
 - `Textarea`：多行输入。Props: `value`, `placeholder`, `rows`, `disabled`, `readonly`, `maxlength`, `minlength`, `required`, `showCharCount`。
-- `Select`：下拉框。**全自定义样式**（基于 bits-ui，非原生 `<select>`——展开列表也走设计系统皮肤，双主题一致）。Props: `options`（`{ value, label, disabled? }[]`）, `value` / `selectedValue`（bindable）, `placeholder`, `autoWidth`, `disabled`, `invalid`（FormField 外的独立错误态）, `size`（`sm`|`md`|`lg`）, `onChange` / `onSelect`, `icon`（自定义 trailing 图标 snippet）。选项内容只由 `options` 提供，不再接受 `<option>` children。
+- `Select`：下拉框。**全自定义样式**（基于 bits-ui，非原生 `<select>`——展开列表也走设计系统皮肤，双主题一致）。Props: `options`（`{ value, label, disabled? }[]`）, `value` / `selectedValue`（bindable）, `placeholder`, `autoWidth`, `disabled`, `invalid`（FormField 外的独立错误态）, `size`（`sm`|`md`|`lg`）, `align`（popover 水平对齐 `start`|`center`|`end`；缺省按 `autoWidth` 推导——紧凑触发器右对齐、全宽左对齐）, `onChange` / `onSelect`, `icon`（自定义 trailing 图标 snippet）。选项内容只由 `options` 提供，不再接受 `<option>` children。
 - `Toggle`：开关。Props: `checked`, `onChange`, `onChangeBefore`, `id`, `disabled`。
 - `Slider`：滑杆。Props: `value`, `min`, `max`, `step`, `label`, `formatValue`, `description`。
 - `LabeledSlider`：带左右标签与刻度。Props: `value`, `min`, `max`, `step`, `leftLabel`, `rightLabel`, `scaleMarks`, `showValue`, `showScaleMarks`。

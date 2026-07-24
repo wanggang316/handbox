@@ -18,6 +18,12 @@
     options?: Option[];
     placeholder?: string;
     autoWidth?: boolean;
+    /**
+     * popover 相对触发器的水平对齐。缺省按 autoWidth 推导：紧凑触发器（autoWidth）
+     * 在本设计系统里恒靠行右侧，故右边缘对齐（end）、向左生长，避免贴窗右缘被挤偏；
+     * 全宽触发器则左对齐（start，左右边缘本就与触发器重合）。
+     */
+    align?: "start" | "center" | "end";
     disabled?: boolean;
     /** standalone 错误态；在 FormField 内则由 FormField 接管。 */
     invalid?: boolean;
@@ -36,6 +42,7 @@
     options = [],
     placeholder = "",
     autoWidth = false,
+    align,
     disabled = false,
     invalid = false,
     size = "md",
@@ -76,6 +83,8 @@
     md: "h-8 px-3 text-sm",
     lg: "h-10 px-4 text-base",
   };
+
+  const contentAlign = $derived(align ?? (autoWidth ? "end" : "start"));
 </script>
 
 <div class={cn("inline-flex flex-col gap-1", autoWidth ? "" : "w-full", className)}>
@@ -122,6 +131,8 @@
     <Select.Portal>
       <Select.Content
         sideOffset={6}
+        align={contentAlign}
+        collisionPadding={8}
         class="z-[var(--z-popover)] max-h-72 min-w-[var(--bits-floating-anchor-width)] overflow-y-auto rounded-md border border-[var(--hairline)] bg-[var(--bg-card)] shadow-lg outline-none"
       >
         <Select.Viewport class="p-1">
