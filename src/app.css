@@ -42,8 +42,11 @@
   --color-success-content: oklch(98% 0 0);
   --color-warning: oklch(82% 0.189 84.429);
   --color-warning-content: oklch(41% 0.112 45.904);
-  --color-error: oklch(71% 0.194 13.428);
-  --color-error-content: oklch(27% 0.105 12.094);
+  /* 危险红 #D72828；57% L 让 white-on-error = 4.96:1，text-error 白底也 ≥ AA
+     （旧 71% L 玫红只有 2.82:1，逼得 danger 按钮退用深红字而显"洗白"）。
+     error-content 取白，danger 实心按钮直接用白字。 */
+  --color-error: oklch(57% 0.21 27);
+  --color-error-content: oklch(100% 0 0);
 
   /* Linear extended ladder — not mapped to daisyUI vocab; consumed via var(...) */
   --color-surface-3: oklch(91% 0 0);
