@@ -100,7 +100,6 @@
       <div class="flex flex-col gap-2 px-6 pt-2 pb-4">
         {#each actions as action}
           <Button
-            shape="pill"
             class="w-full"
             size="md"
             variant={action.style ?? "primary"}
@@ -113,14 +112,12 @@
       <!-- 默认两个按钮：水平排列 -->
       <div class="flex items-center justify-center gap-4 px-6 pt-2 pb-4">
         <Button
-          shape="pill"
           class="w-22"
           size="md"
           variant="secondary"
           onclick={handleCancel}
         >{resolvedCancelText}</Button>
         <Button
-          shape="pill"
           class="w-22"
           size="md"
           variant={confirmButtonStyle}
