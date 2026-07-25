@@ -10,6 +10,7 @@
     Bot,
     Settings,
     User,
+    LogIn,
     LogOut,
     Download,
     Clock,
@@ -182,6 +183,7 @@
           class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
           onclick={handleMenuLogin}
         >
+          <LogIn size={14} />
           {t("common.login")}
         </button>
       {/if}
