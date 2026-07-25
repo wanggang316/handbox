@@ -533,7 +533,7 @@
     </div>
   {:else}
     <button
-      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 {session.id ===
+      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
@@ -547,7 +547,7 @@
           class="flex-shrink-0 animate-spin text-base-content/40"
         />
       {:else}
-        <span class="flex-shrink-0 text-[11px] text-base-content/45">
+        <span class="flex-shrink-0 text-[11px] text-base-content/55">
           {formatRelativeTime(sessionActivityKey(session))}
         </span>
       {/if}
@@ -585,7 +585,7 @@
   {:else}
     <div
       data-project-id={project.id}
-      class="group/proj w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/60 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+      class="group/proj w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 cursor-default select-none"
       role="button"
       tabindex="0"
       aria-expanded={!collapsed}
@@ -668,7 +668,7 @@
         <div class="space-y-0.5">
           <!-- 桶组头：Agent（Bot 图标 + 名称 + hover「+」直建）或 Chats（MessagesSquare，无直建）。 -->
           <div
-            class="group/bucket w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/55 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+            class="group/bucket w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 cursor-default select-none"
             role="button"
             tabindex="0"
             aria-expanded={!collapsed}
