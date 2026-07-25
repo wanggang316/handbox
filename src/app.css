@@ -22,13 +22,13 @@
   --dur-base: 200ms;
   --dur-slow: 300ms;
 
-  /* 浅色：反相 Linear（白画布 + 浅灰阶梯 + 加深的薰衣草紫） */
+  /* 浅色：反相 Linear（白画布 + 浅灰阶梯 + 品牌蓝） */
   --color-base-100: oklch(99% 0 0);
   --color-base-200: oklch(97% 0 0);
   --color-base-300: oklch(94% 0 0);
   --color-base-content: oklch(18% 0 0);
-  /* primary 加深至 45% L 以确保 white-on-primary ≥ 4.5:1 (WCAG AA) */
-  --color-primary: oklch(45% 0.19 277);
+  /* 品牌蓝 #0268CA；52.5% L 使 white-on-primary = 5.48:1 ≥ 4.5:1 (WCAG AA) */
+  --color-primary: oklch(52.5% 0.172 255);
   --color-primary-content: oklch(100% 0 0);
   --color-secondary: oklch(65% 0.241 354.308);
   --color-secondary-content: oklch(94% 0.028 342.258);
@@ -57,13 +57,14 @@
   /* 遮罩层颜色 (Modal/Drawer backdrop) */
   --color-overlay: oklch(8% 0 250 / 0.5);
 
-  /* 深色：Linear 锚定（canvas #010102 / surface-1..4 / 薰衣草紫） */
+  /* 深色：Linear 锚定（canvas #010102 / surface-1..4 / 品牌蓝） */
   /* chroma 0.005 + hue 250 真正赋予 Linear 描述的"近黑带蓝调"（chroma 0 时 hue 无效）*/
   --color-base-100-dark: oklch(8% 0.005 250);
   --color-base-200-dark: oklch(15% 0.005 250);
   --color-base-300-dark: oklch(18% 0.005 250);
   --color-base-content-dark: oklch(97% 0 0);
-  --color-primary-dark: oklch(54% 0.16 277);
+  /* 深色画布上的更亮同色变体；white-on-primary = 5.12:1 ≥ 4.5:1 (WCAG AA) */
+  --color-primary-dark: oklch(54% 0.16 255);
   --color-primary-content-dark: oklch(100% 0 0);
   --color-secondary-dark: oklch(65% 0.241 354.308);
   --color-secondary-content-dark: oklch(94% 0.028 342.258);
