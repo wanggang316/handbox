@@ -22,17 +22,17 @@
     /** Self-contained HTML: a fragment or a complete document. */
     html: string;
     /**
-     * inline — height follows content (clamped to maxHeight), for in-timeline
-     * cards; fill — stretches to the container (artifact panel, M2).
+     * inline — height always follows content (no clamp: an inner scrollbar
+     * would break the "card blends into the conversation" contract; the page
+     * scrolls instead), for in-timeline cards; fill — stretches to the
+     * container (artifact panel, M2).
      */
     mode?: "inline" | "fill";
-    /** Height clamp for inline mode, in px. */
-    maxHeight?: number;
     /** Accessible iframe title. */
     title?: string;
   }
 
-  let { html, mode = "inline", maxHeight = 560, title = "HTML card" }: Props = $props();
+  let { html, mode = "inline", title = "HTML card" }: Props = $props();
 
   let iframeEl: HTMLIFrameElement | undefined = $state();
   let height = $state(120);
@@ -107,12 +107,13 @@
       return injection + userHtml;
     }
 
-    // Fragment: wrap in a minimal skeleton. Transparent body lets the card
-    // container's background show through; padding keeps content off the edge.
+    // Fragment: wrap in a minimal skeleton. Transparent body + zero padding:
+    // the card has no chrome, so the generated HTML owns the full width and
+    // all of its own spacing.
     return (
       "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" +
       themeStyle +
-      "<style>body{margin:0;padding:12px;background:transparent;color:var(--base-content);" +
+      "<style>body{margin:0;padding:0;background:transparent;color:var(--base-content);" +
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;line-height:1.6;}</style>' +
       "</head><body>" +
       userHtml +
@@ -151,7 +152,7 @@
         typeof (data as { height?: unknown }).height === "number"
       ) {
         const reported = Math.ceil((data as { height: number }).height);
-        height = Math.min(Math.max(reported, 40), maxHeight);
+        height = Math.max(reported, 40);
       }
     };
     window.addEventListener("message", onMessage);

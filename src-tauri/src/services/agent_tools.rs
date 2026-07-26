@@ -599,6 +599,33 @@ const RENDER_CARD_INVALID_ARG_MSG: &str = "invalid html argument: must be a non-
 /// Message when `html` exceeds [`RENDER_CARD_BYTE_CAP`].
 const RENDER_CARD_TOO_LARGE_MSG: &str = "html too large: exceeds the 512 KB card limit";
 
+/// Visual-quality doctrine shared by both presentational tools' descriptions.
+///
+/// Models left to their own devices produce "AI slop": emoji icons, one color
+/// per item, gradient headers, cramped stacked boxes. These rules are the
+/// distilled counter-doctrine (SVG for structure, meaning-bearing accents,
+/// hierarchy from spacing not color) and are what makes generated output look
+/// designed; keep them in sync across render_card / render_app.
+const VISUAL_DOCTRINE: &str = "\
+Visual standard — the output must look designed, not generated:\n\
+- ABSOLUTELY NO emoji anywhere in the output: not in the title, headings, \
+labels, or nodes. Draw all structure (arrows, connectors, nodes, charts) as \
+inline SVG; arrows are SVG paths, never unicode characters; if an icon is \
+essential, inline a small SVG.\n\
+- Restrained palette: neutral surfaces and text from the theme variables, plus \
+at most two accent colors that CARRY MEANING (e.g. gray = plaintext, green = \
+encrypted). Never one color per item, never rainbow section headers.\n\
+- Hierarchy comes from size, weight and spacing — not from more colors. \
+Secondary text is muted (~60% opacity); keep text contrast at least 4.5:1.\n\
+- Surfaces: hairline 1px borders (var(--hairline)), subtle rounded corners, \
+flat or barely tinted fills. No gradients, no heavy shadows, no decorative \
+clutter.\n\
+- Generous whitespace on an 8px rhythm. When colors or line styles carry \
+meaning, end with one small legend line.\n\
+Theme variables are provided and adapt to light/dark automatically: \
+--base-100/--base-200/--base-300 (surfaces), --base-content (text), \
+--hairline (borders), --primary, --info, --success, --warning, --error.";
+
 /// Build the `render_card` tool.
 ///
 /// The handler is pure argument validation — see the section comment for why
@@ -607,17 +634,38 @@ const RENDER_CARD_TOO_LARGE_MSG: &str = "html too large: exceeds the 512 KB card
 pub fn make_render_card_tool() -> AgentTool {
     AgentTool::simple(
         TOOL_RENDER_CARD,
-        "Render an interactive HTML card inline in the conversation, directly \
-         visible to the user. Use it when a visual or interactive presentation \
-         explains something better than prose: comparisons, diagrams, small \
-         simulations, annotated tables. The card runs in a sandboxed iframe \
-         with NO network access: inline ALL CSS and JavaScript, and never \
-         reference external scripts, stylesheets, fonts, or images. Theme CSS \
-         variables are provided (--base-100, --base-200, --base-300, \
-         --base-content, --primary, --info, --success, --warning, --error); \
-         use them so the card matches the app's light/dark theme. The card is \
-         already shown to the user — do not repeat its content in your text \
-         reply.",
+        format!(
+            "Render a self-contained visual inline in the conversation, \
+             directly visible to the user. Use it when a picture explains \
+             something better than prose.\n\
+             \n\
+             FIRST pick the representation that matches the information's \
+             structure — never default to a stack of colored boxes:\n\
+             - message exchange between parties -> sequence diagram (vertical \
+             lifelines, SVG arrows between them)\n\
+             - process / decision logic -> flowchart\n\
+             - hierarchy / composition -> tree or mindmap\n\
+             - phases over time -> timeline or Gantt\n\
+             - data entities and relations -> ER / UML boxes with relationship \
+             lines\n\
+             - cause analysis -> fishbone\n\
+             - alternatives -> side-by-side comparison\n\
+             - quantities -> SVG bar / line chart\n\
+             - none of these fit -> a free-form composition designed for this \
+             specific content\n\
+             \n\
+             {VISUAL_DOCTRINE}\n\
+             \n\
+             The card has NO frame, title bar or background of its own — it \
+             renders directly in the chat flow, so the composition must stand \
+             on its own. It must fit the container width (no horizontal \
+             overflow) and grow naturally in height; never create inner \
+             scroll areas or fixed heights with overflow. It runs in a \
+             sandboxed iframe with NO network access: inline ALL CSS and \
+             JavaScript, and never reference external scripts, stylesheets, \
+             fonts, or images. The card is already shown to the user — do \
+             not repeat its content in your text reply."
+        ),
         json!({
             "type": "object",
             "properties": {
@@ -627,7 +675,7 @@ pub fn make_render_card_tool() -> AgentTool {
                 },
                 "title": {
                     "type": "string",
-                    "description": "Optional short title displayed above the card."
+                    "description": "Optional short title; used as the card's accessible name and hover tooltip, not rendered visibly."
                 }
             },
             "required": ["html"]
@@ -683,21 +731,24 @@ const RENDER_APP_TOO_LARGE_MSG: &str = "content too large: exceeds the 1 MB app 
 pub fn make_render_app_tool() -> AgentTool {
     AgentTool::simple(
         TOOL_RENDER_APP,
-        "Create or update a complete, self-contained HTML application shown \
-         to the user in a side panel with a live preview and a source view. \
-         Use it for substantial interactive deliverables — dashboards, games, \
-         simulations, full pages — while render_card stays for small inline \
-         visual aids. `command: \"create\"` starts a new app (requires title \
-         and content); `command: \"update\"` replaces the app's content after \
-         user feedback (resend the FULL document, not a diff). `content` must \
-         be one complete HTML document with ALL CSS and JavaScript inlined: \
-         the panel is a sandboxed iframe with NO network access, so never \
-         reference external scripts, stylesheets, fonts, or images. Theme CSS \
-         variables are provided (--base-100, --base-200, --base-300, \
-         --base-content, --primary, --info, --success, --warning, --error) so \
-         the app can match the app's light/dark theme. The panel is already \
-         visible to the user — do not repeat the source code in your text \
-         reply.",
+        format!(
+            "Create or update a complete, self-contained HTML application \
+             shown to the user in a side panel with a live preview and a \
+             source view. Use it for substantial interactive deliverables — \
+             dashboards, games, simulations, full pages — while render_card \
+             stays for small inline visual aids. `command: \"create\"` starts \
+             a new app (requires title and content); `command: \"update\"` \
+             replaces the app's content after user feedback (resend the FULL \
+             document, not a diff). `content` must be one complete HTML \
+             document with ALL CSS and JavaScript inlined: the panel is a \
+             sandboxed iframe with NO network access, so never reference \
+             external scripts, stylesheets, fonts, or images.\n\
+             \n\
+             {VISUAL_DOCTRINE}\n\
+             \n\
+             The panel is already visible to the user — do not repeat the \
+             source code in your text reply."
+        ),
         json!({
             "type": "object",
             "properties": {

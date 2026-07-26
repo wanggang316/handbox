@@ -2,7 +2,10 @@
   // Inline HTML card for `render_card` toolcall blocks (feat/html-segment-render).
   //
   // Render-only presentation: unlike AgentToolCallCard there is no expandable
-  // Request/Response view — the card IS the content. Args become available at
+  // Request/Response view — the card IS the content. The card deliberately has
+  // NO chrome (border, background, title bar): it blends into the chat flow
+  // and the generated HTML owns its whole composition; the title survives as
+  // the iframe's accessible name / hover tooltip. Args become available at
   // tool_execution_start, so a valid parse renders immediately even while the
   // status is still `executing`; the skeleton only covers the brief window
   // before args are parseable, and errors get a compact error box.
@@ -22,22 +25,9 @@
 </script>
 
 {#if parsed && toolCall.status !== "error"}
-  <div
-    class="overflow-hidden rounded-lg border border-[var(--hairline)] bg-base-100"
-  >
-    {#if parsed.title}
-      <div
-        class="border-b border-[var(--hairline)] px-3 py-1.5 text-xs text-base-content/60"
-      >
-        {parsed.title}
-      </div>
-    {/if}
-    <SandboxHost html={parsed.html} title={parsed.title ?? t("agent.htmlCard.iframeTitle")} />
-  </div>
+  <SandboxHost html={parsed.html} title={parsed.title ?? t("agent.htmlCard.iframeTitle")} />
 {:else if toolCall.status === "executing"}
-  <div
-    class="flex items-center gap-2 rounded-lg border border-[var(--hairline)] bg-base-100 px-3 py-2 text-sm text-base-content/50"
-  >
+  <div class="flex items-center gap-2 py-1 text-sm text-base-content/50">
     <div
       class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
     ></div>
