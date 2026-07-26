@@ -17,6 +17,9 @@
   import AgentInput from "$lib/components/agentsession/AgentInput.svelte";
   import AgentTimeline from "$lib/components/agentsession/AgentTimeline.svelte";
   import AgentApprovalModal from "$lib/components/agentsession/AgentApprovalModal.svelte";
+  import AppPanel from "$lib/components/agentsession/AppPanel.svelte";
+  import { reconstructAppArtifact } from "$lib/components/agentsession/renderApp";
+  import { agentAppPanel } from "$lib/states/agentAppPanel.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import type {
     AgentApprovalRequest,
@@ -162,6 +165,34 @@
     sessionId ? agentApprovalStore.pendingFor(sessionId) : null,
   );
 
+  // render_app artifact：由 transcript 重放推导（create/update 折叠），live 与
+  // restored 两路共用（toolcall 块 run 期间即入 messages，live toolCalls 提供
+  // 实时 status/args 调和）。无 render_app 调用则为 null，面板不可见。
+  const appArtifact = $derived(
+    runState ? reconstructAppArtifact(runState.messages, runState.toolCalls) : null,
+  );
+
+  // 面板可见：属于当前会话且确有 artifact（切会话即自然隐藏）。
+  const showAppPanel = $derived(
+    appArtifact !== null && agentAppPanel.openSessionId === sessionId,
+  );
+
+  // run 期间新的 render_app 内容抵达 → 自动打开面板，live 跟手。流式事件高频
+  // 重算 artifact（新对象引用）使本 effect 反复重跑，故用内容 key（toolCallId +
+  // 长度）显式去重：同一份内容只触发一次 open——用户中途关闭面板后不会被同一
+  // 内容反复顶开，只有**新的** create/update 才再次打开。key 不进响应式（纯簿记）。
+  let autoOpenedKey = "";
+  $effect(() => {
+    const contentKey = appArtifact
+      ? `${appArtifact.toolCallId}:${appArtifact.content.length}`
+      : "";
+    if (!contentKey || !runState?.isRunning || contentKey === autoOpenedKey) {
+      return;
+    }
+    autoOpenedKey = contentKey;
+    agentAppPanel.open(sessionId);
+  });
+
   // 用户决策（含作用域）：allow_once 本次允许 / allow_always 本会话始终允许该工具
   // → 工具执行、对话继续（VAL-CAPERM-003/008）；deny → 工具被 Cancel、模型收被拒
   // 结果、对话继续不中断（VAL-CAPERM-005）。透传**弹窗当前展示的 request**，store 据
@@ -180,48 +211,58 @@
     <!-- 已选中会话：Header（顶部）+ 内容区（完整 timeline 渲染）+ input 槽。 -->
     <AgentSessionHeader />
 
-    <!--
-      内容区：完整 timeline 渲染 —— 用户气泡 / 助手 markdown / 思考块 / 用量 / 多轮 / 错误态。
-      AgentTimeline 消费 `agentRunStore.runStateFor(sessionId)` 这一稳定 getter；
-      工具卡片留给 M2（toolResult / toolcall 块当前仅占位）。
-    -->
-    {#if isEmpty && !runState?.hydrated}
-      <!-- 无缓存首开：transcript 还原在途。容器结构保持稳定，仅居中 Spinner；
-           重访会话由 store 内按 sessionId 常驻的缓存直出，不再经过此分支。 -->
-      <div class="flex-1 flex items-center justify-center">
-        <Spinner size={28} />
-      </div>
-    {:else if isEmpty}
-      <div
-        class="flex-1 flex flex-col items-center justify-center text-base-content/40"
-      >
-        <Bot size={40} class="mb-3 opacity-20" />
-        <p class="text-sm">
-          {t("agent.page.startConversation", {
-            name: currentSession?.name ?? "Agent",
-          })}
-        </p>
-      </div>
-    {:else if timelineReady}
-      <AgentTimeline {sessionId} />
-    {:else}
-      <!-- 外壳先 paint 的占位：保持内容区 flex 结构稳定（Input 仍贴底），
-           下一帧再挂载重的 AgentTimeline，使会话切换即时。 -->
-      <div class="flex-1"></div>
-    {/if}
+    <!-- 会话主体：左列（timeline + input）+ 可选右侧应用面板（render_app）。 -->
+    <div class="flex-1 flex min-h-0">
+      <div class="flex-1 flex flex-col min-w-0">
+        <!--
+          内容区：完整 timeline 渲染 —— 用户气泡 / 助手 markdown / 思考块 / 用量 / 多轮 / 错误态。
+          AgentTimeline 消费 `agentRunStore.runStateFor(sessionId)` 这一稳定 getter；
+          工具卡片留给 M2（toolResult / toolcall 块当前仅占位）。
+        -->
+        {#if isEmpty && !runState?.hydrated}
+          <!-- 无缓存首开：transcript 还原在途。容器结构保持稳定，仅居中 Spinner；
+               重访会话由 store 内按 sessionId 常驻的缓存直出，不再经过此分支。 -->
+          <div class="flex-1 flex items-center justify-center">
+            <Spinner size={28} />
+          </div>
+        {:else if isEmpty}
+          <div
+            class="flex-1 flex flex-col items-center justify-center text-base-content/40"
+          >
+            <Bot size={40} class="mb-3 opacity-20" />
+            <p class="text-sm">
+              {t("agent.page.startConversation", {
+                name: currentSession?.name ?? "Agent",
+              })}
+            </p>
+          </div>
+        {:else if timelineReady}
+          <AgentTimeline {sessionId} appTitle={appArtifact?.title} />
+        {:else}
+          <!-- 外壳先 paint 的占位：保持内容区 flex 结构稳定（Input 仍贴底），
+               下一帧再挂载重的 AgentTimeline，使会话切换即时。 -->
+          <div class="flex-1"></div>
+        {/if}
 
-    <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->
-    <!--
-      `{#key currentSession.id}` 强制 per-session 重新挂载 AgentInput：切换会话时
-      销毁旧实例、重建新实例，使所有瞬时 composer 态（input / attachments /
-      forced chip / slash 浮层）全部回到初值，绝不在会话 A 与 B 间串台
-      （VAL-SLASH-023）。组件实例被复用是底层 bug；重新挂载即正确语义。
-    -->
-    <div class="shrink-0 px-4 pb-3">
-      {#if currentSession}
-        {#key currentSession.id}
-          <AgentInput session={currentSession} />
-        {/key}
+        <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->
+        <!--
+          `{#key currentSession.id}` 强制 per-session 重新挂载 AgentInput：切换会话时
+          销毁旧实例、重建新实例，使所有瞬时 composer 态（input / attachments /
+          forced chip / slash 浮层）全部回到初值，绝不在会话 A 与 B 间串台
+          （VAL-SLASH-023）。组件实例被复用是底层 bug；重新挂载即正确语义。
+        -->
+        <div class="shrink-0 px-4 pb-3">
+          {#if currentSession}
+            {#key currentSession.id}
+              <AgentInput session={currentSession} />
+            {/key}
+          {/if}
+        </div>
+      </div>
+
+      <!-- render_app 应用面板：预览 + 源码切换；artifact 由 transcript 重放推导。 -->
+      {#if showAppPanel && appArtifact}
+        <AppPanel artifact={appArtifact} onClose={() => agentAppPanel.close()} />
       {/if}
     </div>
 

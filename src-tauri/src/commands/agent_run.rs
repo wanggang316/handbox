@@ -418,9 +418,11 @@ async fn assemble_and_drive(
     }
 
     // Presentational tools ride the same extra_tools channel as MCP tools. The
-    // Rust handler only validates and acknowledges; the frontend renders the
-    // card from the toolcall block's arguments, so no extra IPC exists.
+    // Rust handlers only validate and acknowledge; the frontend renders the
+    // card / app panel from the toolcall blocks' arguments, so no extra IPC
+    // exists.
     extra_tools.push(agent_tools::make_render_card_tool());
+    extra_tools.push(agent_tools::make_render_app_tool());
 
     let mut session = build_agent_session(&config, Some(approval_emitter), extra_tools)?;
 

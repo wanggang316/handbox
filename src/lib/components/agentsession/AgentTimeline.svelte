@@ -10,6 +10,8 @@
   import AgentToolCallCard from "./AgentToolCallCard.svelte";
   import HtmlCard from "./HtmlCard.svelte";
   import { RENDER_CARD_TOOL_NAME } from "./renderCard";
+  import AppPill from "./AppPill.svelte";
+  import { RENDER_APP_TOOL_NAME } from "./renderApp";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -19,9 +21,11 @@
 
   interface Props {
     sessionId: string;
+    /** Folded render_app artifact title (from +page); AppPill fallback. */
+    appTitle?: string;
   }
 
-  let { sessionId }: Props = $props();
+  let { sessionId, appTitle }: Props = $props();
 
   // 会话运行 view-model（响应式 getter；按 sessionId 分键）。
   const runState = $derived(agentRunStore.runStateFor(sessionId));
@@ -247,6 +251,14 @@
                     <!-- render_card 是纯呈现型工具：其 arguments 即卡片内容，
                          渲染为内联 sandbox 卡片而非通用工具卡。 -->
                     <HtmlCard toolCall={toolCallView(block)} />
+                  {:else if block.name === RENDER_APP_TOOL_NAME}
+                    <!-- render_app：timeline 只渲染可点击 pill，应用本体在
+                         右侧 AppPanel（点击 / run 期间自动打开）。 -->
+                    <AppPill
+                      toolCall={toolCallView(block)}
+                      {sessionId}
+                      fallbackTitle={appTitle}
+                    />
                   {:else}
                     <AgentToolCallCard toolCall={toolCallView(block)} />
                   {/if}

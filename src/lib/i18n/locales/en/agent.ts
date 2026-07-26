@@ -99,6 +99,16 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.htmlCard.error": "Card failed to render",
   "agent.htmlCard.iframeTitle": "Interactive card",
 
+  // HTML app pill + side panel (AppPill / AppPanel)
+  "agent.htmlApp.generating": "Generating app…",
+  "agent.htmlApp.error": "App failed to generate",
+  "agent.htmlApp.untitled": "Untitled app",
+  "agent.htmlApp.open": "View",
+  "agent.htmlApp.preview": "Preview",
+  "agent.htmlApp.code": "Code",
+  "agent.htmlApp.close": "Close panel",
+  "agent.htmlApp.iframeTitle": "App preview",
+
   // Approval modal (AgentApprovalModal)
   "agent.approval.toolWrite": "Write file",
   "agent.approval.toolEdit": "Edit file",

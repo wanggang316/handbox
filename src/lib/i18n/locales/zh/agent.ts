@@ -90,6 +90,16 @@ export const agentZh = {
   "agent.htmlCard.error": "卡片渲染失败",
   "agent.htmlCard.iframeTitle": "交互卡片",
 
+  // HTML app pill + side panel (AppPill / AppPanel)
+  "agent.htmlApp.generating": "生成应用中…",
+  "agent.htmlApp.error": "应用生成失败",
+  "agent.htmlApp.untitled": "未命名应用",
+  "agent.htmlApp.open": "查看",
+  "agent.htmlApp.preview": "预览",
+  "agent.htmlApp.code": "源码",
+  "agent.htmlApp.close": "关闭面板",
+  "agent.htmlApp.iframeTitle": "应用预览",
+
   // Approval modal (AgentApprovalModal)
   "agent.approval.toolWrite": "写入文件",
   "agent.approval.toolEdit": "编辑文件",
