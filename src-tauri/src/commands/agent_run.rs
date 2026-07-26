@@ -28,6 +28,7 @@ use crate::models::AppError;
 use crate::services::agent_permission::{
     respond_to_approval, ApprovalDecision, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
 };
+use crate::services::agent_tools;
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::skills::Skill;
 use crate::services::web_search;
@@ -415,6 +416,11 @@ async fn assemble_and_drive(
             ));
         }
     }
+
+    // Presentational tools ride the same extra_tools channel as MCP tools. The
+    // Rust handler only validates and acknowledges; the frontend renders the
+    // card from the toolcall block's arguments, so no extra IPC exists.
+    extra_tools.push(agent_tools::make_render_card_tool());
 
     let mut session = build_agent_session(&config, Some(approval_emitter), extra_tools)?;
 

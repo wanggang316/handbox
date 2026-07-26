@@ -218,6 +218,14 @@ pub fn build_agent_session(
         base_dir: Some(config.app_data_dir.clone()),
     };
 
+    // Surface the effective tool set once per construction: tool-availability
+    // bugs (a missing extra tool, an unmatched enabled name) are otherwise only
+    // observable through model behavior.
+    tracing::info!(
+        tools = ?tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+        "[build_agent_session] registering tools"
+    );
+
     let mut session = AgentSession::new_with_skill_dirs(session_config, tools, None, None)
         .map_err(|e| {
             AppError::internal_error(&format!("failed to construct agent session: {e}"))

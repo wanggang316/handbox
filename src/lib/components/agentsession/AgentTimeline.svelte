@@ -8,6 +8,8 @@
   } from "$lib/types/agentSession";
   import AgentThinkingBlock from "./AgentThinkingBlock.svelte";
   import AgentToolCallCard from "./AgentToolCallCard.svelte";
+  import HtmlCard from "./HtmlCard.svelte";
+  import { RENDER_CARD_TOOL_NAME } from "./renderCard";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -241,7 +243,13 @@
             {#if assistantToolCalls(message).length}
               <div class="mt-2 space-y-2">
                 {#each assistantToolCalls(message) as block (block.id)}
-                  <AgentToolCallCard toolCall={toolCallView(block)} />
+                  {#if block.name === RENDER_CARD_TOOL_NAME}
+                    <!-- render_card 是纯呈现型工具：其 arguments 即卡片内容，
+                         渲染为内联 sandbox 卡片而非通用工具卡。 -->
+                    <HtmlCard toolCall={toolCallView(block)} />
+                  {:else}
+                    <AgentToolCallCard toolCall={toolCallView(block)} />
+                  {/if}
                 {/each}
               </div>
             {/if}

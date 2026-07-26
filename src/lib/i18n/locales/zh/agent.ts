@@ -85,13 +85,19 @@ export const agentZh = {
   "agent.toolCall.fallbackName": "工具",
   "agent.toolCall.resultImageAlt": "工具结果图片",
 
+  // Inline HTML card (HtmlCard)
+  "agent.htmlCard.rendering": "渲染卡片中…",
+  "agent.htmlCard.error": "卡片渲染失败",
+  "agent.htmlCard.iframeTitle": "交互卡片",
+
   // Approval modal (AgentApprovalModal)
   "agent.approval.toolWrite": "写入文件",
   "agent.approval.toolEdit": "编辑文件",
   "agent.approval.toolBash": "执行命令",
   "agent.approval.toolFallback": "工具调用",
   "agent.approval.title": "需要你的确认",
-  "agent.approval.intro": "Agent 请求执行以下操作，确认后才会运行。请核对参数。",
+  "agent.approval.intro":
+    "Agent 请求执行以下操作，确认后才会运行。请核对参数。",
   "agent.approval.command": "命令",
   "agent.approval.targetPath": "目标路径",
   "agent.approval.content": "内容",
@@ -118,7 +124,8 @@ export const agentZh = {
   "agent.list.deleteProject": "删除项目",
   "agent.list.copyId": "复制ID",
   "agent.list.untitledSession": "未命名",
-  "agent.list.deleteProjectConfirm": "将删除项目“{name}”及其 {count} 个会话，不可恢复。",
+  "agent.list.deleteProjectConfirm":
+    "将删除项目“{name}”及其 {count} 个会话，不可恢复。",
   "agent.list.deleteProjectFailed": "删除项目失败",
   "agent.list.createProjectFailed": "创建项目失败",
   "agent.list.createSessionFailed": "创建会话失败",

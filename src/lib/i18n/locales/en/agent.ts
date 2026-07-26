@@ -16,7 +16,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.thinking.medium": "Medium",
   "agent.thinking.high": "High",
   "agent.thinking.offDesc": "No extended reasoning — fastest responses.",
-  "agent.thinking.lowDesc": "Light reasoning — quick responses with brief thinking.",
+  "agent.thinking.lowDesc":
+    "Light reasoning — quick responses with brief thinking.",
   "agent.thinking.mediumDesc":
     "Medium reasoning — balances speed and reasoning depth.",
   "agent.thinking.highDesc":
@@ -56,7 +57,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.modelSelect.allProviders": "All providers",
   "agent.modelSelect.favorites": "Favorites",
   "agent.modelSelect.noMatchingModels": "No matching models found",
-  "agent.modelSelect.adjustSearchHint": "Try adjusting your search or clearing the filters",
+  "agent.modelSelect.adjustSearchHint":
+    "Try adjusting your search or clearing the filters",
   "agent.modelSelect.supportsImageGeneration": "Supports image generation",
   "agent.modelSelect.contextLength": "Context length",
   "agent.modelSelect.maxOutputLength": "Max output length",
@@ -91,6 +93,11 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.toolCall.error": "Failed",
   "agent.toolCall.fallbackName": "Tool",
   "agent.toolCall.resultImageAlt": "Tool result image",
+
+  // Inline HTML card (HtmlCard)
+  "agent.htmlCard.rendering": "Rendering card…",
+  "agent.htmlCard.error": "Card failed to render",
+  "agent.htmlCard.iframeTitle": "Interactive card",
 
   // Approval modal (AgentApprovalModal)
   "agent.approval.toolWrite": "Write file",
@@ -165,7 +172,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.workingDirOptional": "Optional",
   "agent.form.workingDirNone": "None",
   "agent.form.generativeUi": "Generative UI",
-  "agent.form.generativeUiDesc": "Let the assistant render interactive UI in replies",
+  "agent.form.generativeUiDesc":
+    "Let the assistant render interactive UI in replies",
   "agent.form.genuiHint": "Pick a saved template",
   "agent.form.genuiNone": "Not linked",
   "agent.form.mcpComingSoon": "MCP server configuration is coming soon...",
