@@ -186,7 +186,16 @@
     const contentKey = appArtifact
       ? `${appArtifact.toolCallId}:${appArtifact.content.length}`
       : "";
-    if (!contentKey || !runState?.isRunning || contentKey === autoOpenedKey) {
+    if (!contentKey) {
+      return;
+    }
+    if (!runState?.isRunning) {
+      // Outside a run the key is only a baseline: restored/pre-existing
+      // content must not auto-open the panel when the next run starts.
+      autoOpenedKey = contentKey;
+      return;
+    }
+    if (contentKey === autoOpenedKey) {
       return;
     }
     autoOpenedKey = contentKey;
