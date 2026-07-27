@@ -707,19 +707,28 @@ mod tests {
     }
 
     // Fresh environment: agent.defaultEnabledTools defaults to all 7 builtin
-    // tools, in registration order.
+    // tools plus web_search, in registration order.
     #[test]
     fn fresh_env_defaults_to_all_agent_tools() {
         let dir = TempDir::new().unwrap();
         let settings = service(&dir).get_settings().unwrap();
         assert_eq!(
             settings.agent.default_enabled_tools,
-            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+            vec![
+                "read",
+                "write",
+                "edit",
+                "bash",
+                "grep",
+                "find",
+                "ls",
+                "web_search"
+            ]
         );
     }
 
     // A valid config.json missing the `agent` section parses without error via
-    // serde(default) → defaults back to all 7 tools (old configs upgrade
+    // serde(default) → defaults back to the full tool set (old configs upgrade
     // cleanly, no agent section means "everything on").
     #[test]
     fn missing_agent_section_parses_with_all_tools() {
@@ -735,7 +744,16 @@ mod tests {
         let settings = service(&dir).get_settings().unwrap();
         assert_eq!(
             settings.agent.default_enabled_tools,
-            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+            vec![
+                "read",
+                "write",
+                "edit",
+                "bash",
+                "grep",
+                "find",
+                "ls",
+                "web_search"
+            ]
         );
     }
 
@@ -761,7 +779,16 @@ mod tests {
         let reset = svc.reset_settings(Some(vec!["agent".to_string()])).unwrap();
         assert_eq!(
             reset.agent.default_enabled_tools,
-            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+            vec![
+                "read",
+                "write",
+                "edit",
+                "bash",
+                "grep",
+                "find",
+                "ls",
+                "web_search"
+            ]
         );
     }
 

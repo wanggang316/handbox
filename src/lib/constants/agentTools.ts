@@ -1,10 +1,11 @@
 /**
- * Built-in coding-agent tools — the single source of truth for the 7 tools'
- * registration names, ordering and display labels. Consumed by both the
+ * Built-in agent tools — the single source of truth for the tools'
+ * registration names, ordering and display labels: the 7 coding-agent
+ * built-ins plus HandBox's own `web_search`. Consumed by both the
  * "Agent 工具" settings page (global default) and the per-session tool popover
  * in AgentInput, so the two views always list the same tools in the same order.
  *
- * `id` == the coding-agent registration name the backend gates on; the order
+ * `id` == the registration name the backend gates on; the order
  * here is the canonical display order. `labelKey` is an i18n key — consumers
  * render it via `t(tool.labelKey)` so labels follow the UI language.
  */
@@ -17,6 +18,7 @@ import {
   Search,
   FileSearch,
   FolderTree,
+  Globe,
 } from "@lucide/svelte";
 import type { MessageKey } from "$lib/i18n";
 import { BUILTIN_TOOL_IDS } from "./builtinToolIds";
@@ -39,10 +41,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   { id: "grep", labelKey: "agent.tool.grep", icon: Search, requiresWorkingDir: true },
   { id: "find", labelKey: "agent.tool.find", icon: FileSearch, requiresWorkingDir: true },
   { id: "ls", labelKey: "agent.tool.ls", icon: FolderTree, requiresWorkingDir: true },
+  { id: "web_search", labelKey: "agent.tool.web_search", icon: Globe, requiresWorkingDir: false },
 ];
 
 /**
- * All 7 tool ids in canonical order — the default enabled set (everything on).
+ * All tool ids in canonical order — the default enabled set (everything on).
  *
  * Re-exported from the icon-free `builtinToolIds` module so pure modules can
  * import the id list without the Lucide `.svelte` imports this file carries.

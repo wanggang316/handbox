@@ -23,6 +23,7 @@
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
   import { listSkills } from "$lib/api/skill";
   import type { SkillInfo } from "$lib/types";
+  import { BUILTIN_TOOL_IDS } from "$lib/constants/builtinToolIds";
 
   interface Props {
     // 编辑模式传入既有 Agent；新建模式留空
@@ -76,8 +77,8 @@
   ]);
 
   // ── 能力（Capability）：内置工具 / 工作目录 / 工具执行 ──
-  // coding-agent 内置工具名（与后端 builtinTools 取值对齐）。
-  const BUILTIN_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls"];
+  // 内置工具名（canonical 源 constants/builtinToolIds，与后端 builtinTools 取值对齐）。
+  const BUILTIN_TOOLS = BUILTIN_TOOL_IDS;
   // $derived so labels track language switch.
   const workingDirModeOptions = $derived([
     { value: "required", label: t("agent.form.workingDirRequired") },

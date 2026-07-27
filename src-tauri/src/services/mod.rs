@@ -28,6 +28,7 @@ pub mod skill_service;
 pub mod skills;
 pub mod storage;
 pub mod user_session;
+pub mod web_search;
 
 // 重新导出服务
 pub use crate::storage::Database;

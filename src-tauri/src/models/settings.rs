@@ -153,17 +153,46 @@ pub struct SkillSettings {
     pub disabled: Vec<String>,
 }
 
+/// Web 搜索设置（agent `web_search` 工具的搜索服务商配置）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettings {
+    /// 搜索服务商标识。当前仅支持 `"tavily"`；字段保留以便后续扩展。
+    #[serde(default = "default_web_search_provider")]
+    pub provider: String,
+    /// 搜索服务商 API Key。空串 = 未配置，`web_search` 工具不注册。
+    #[serde(default)]
+    pub api_key: String,
+}
+
+impl Default for WebSearchSettings {
+    fn default() -> Self {
+        Self {
+            provider: default_web_search_provider(),
+            api_key: String::new(),
+        }
+    }
+}
+
+fn default_web_search_provider() -> String {
+    "tavily".to_string()
+}
+
 /// Agent 设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSettings {
-    /// 新建 Agent 会话默认启用的内置工具(coding-agent 注册名)。默认全 7 个。
+    /// 新建 Agent 会话默认启用的内置工具(coding-agent 注册名 + `web_search`)。
+    /// 默认全 8 个。
     #[serde(default = "default_agent_enabled_tools")]
     pub default_enabled_tools: Vec<String>,
     /// "Open in ..." 的默认应用 target id（见 commands/open_in.rs）。
     /// `None` = 未设默认，前端回退到首个可用 editor/terminal。
     #[serde(default)]
     pub default_editor_id: Option<String>,
+    /// `web_search` 工具的搜索服务商配置。
+    #[serde(default)]
+    pub web_search: WebSearchSettings,
 }
 
 impl Default for AgentSettings {
@@ -171,15 +200,25 @@ impl Default for AgentSettings {
         Self {
             default_enabled_tools: default_agent_enabled_tools(),
             default_editor_id: None,
+            web_search: WebSearchSettings::default(),
         }
     }
 }
 
 fn default_agent_enabled_tools() -> Vec<String> {
-    ["read", "write", "edit", "bash", "grep", "find", "ls"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "read",
+        "write",
+        "edit",
+        "bash",
+        "grep",
+        "find",
+        "ls",
+        "web_search",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 /// 快捷动作设置
@@ -363,6 +402,47 @@ mod tests {
 
         let value = serde_json::to_value(&parsed).unwrap();
         assert_eq!(value["agentId"], "agent-1");
+    }
+
+    // An `agent` section missing the `webSearch` field falls back to the
+    // default provider with an empty key (old configs upgrade cleanly).
+    #[test]
+    fn agent_missing_web_search_field_uses_default() {
+        let parsed: AgentSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(parsed.web_search.provider, "tavily");
+        assert_eq!(parsed.web_search.api_key, "");
+    }
+
+    // webSearch round-trips under its camelCase JSON keys.
+    #[test]
+    fn agent_web_search_uses_camel_case_keys() {
+        let parsed: AgentSettings = serde_json::from_value(serde_json::json!({
+            "webSearch": { "provider": "tavily", "apiKey": "tvly-secret" }
+        }))
+        .unwrap();
+        assert_eq!(parsed.web_search.api_key, "tvly-secret");
+
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(value["webSearch"]["provider"], "tavily");
+        assert_eq!(value["webSearch"]["apiKey"], "tvly-secret");
+    }
+
+    // The default enabled-tool list carries web_search after the 7 built-ins.
+    #[test]
+    fn default_agent_tools_include_web_search() {
+        assert_eq!(
+            AgentSettings::default().default_enabled_tools,
+            vec![
+                "read",
+                "write",
+                "edit",
+                "bash",
+                "grep",
+                "find",
+                "ls",
+                "web_search"
+            ]
+        );
     }
 
     // The model/provider fields round-trip under their camelCase JSON keys.
