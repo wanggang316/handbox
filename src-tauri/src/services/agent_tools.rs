@@ -1,10 +1,17 @@
-// Agent-mode read-only filesystem tools + a self-built working_dir sandbox.
+// Agent-run extra tools + the working_dir sandbox resolver.
 //
-// This module provides the SECURITY CORE for Agent mode's file tools. The
-// model supplies a path string; we MUST guarantee it can only ever resolve to
-// a target contained inside the session's `working_dir`. We do NOT reuse
-// hand-ai's `coding-agent` path helpers: they have no sandbox and they expand
-// `~` to the user's home — exactly the escape we must forbid.
+// Two things live here:
+//
+//  1. `resolve_in_sandbox` — the path-containment SECURITY CORE consumed by
+//     the approval layer (`agent_permission`). File access itself goes through
+//     coding-agent's built-in tools (`select_enabled_tools` in
+//     coding_agent_session.rs), but approval gating must decide whether a
+//     model-supplied path stays inside the session's `working_dir`; this
+//     resolver is that decision. We do NOT reuse hand-ai's path helpers: they
+//     have no containment check and they expand `~` to the user's home —
+//     exactly the escape this must forbid.
+//  2. The presentational tools `render_card` / `render_app`, injected per-run
+//     via `extra_tools` (see their section comments below).
 //
 // The resolver (`resolve_in_sandbox`) is deliberately strict:
 //   - empty / `.` / whitespace-only / NUL-containing args are rejected;
@@ -29,20 +36,11 @@
 // single-user local; closing the race is out of scope and intentionally not
 // attempted.
 
-use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use hand_agent::{AgentTool, ToolResult};
-use hand_ai_model::{ImageContent, ToolResultContent};
 use serde_json::json;
 
-/// Tool names this factory knows how to build.
-const TOOL_READ_FILE: &str = "read_file";
-const TOOL_LIST_DIRECTORY: &str = "list_directory";
-/// The skill tool's fixed name. Auto-injected when a run has enabled skills;
-/// distinct from every `build_tools`-produced name so it never collides.
-const TOOL_SKILL: &str = "skill";
 /// The render_card tool's fixed name. Always injected for interactive agent
 /// runs (rides the `extra_tools` channel alongside MCP tools); the frontend
 /// special-cases toolcall blocks with this name into an inline sandbox card.
@@ -51,15 +49,6 @@ pub const TOOL_RENDER_CARD: &str = "render_card";
 /// frontend renders toolcall blocks with this name as a pill that opens the
 /// right-side app panel (preview + source view).
 pub const TOOL_RENDER_APP: &str = "render_app";
-
-/// Byte budget for a single `read_file` result before truncation kicks in.
-const READ_FILE_BYTE_BUDGET: usize = 50 * 1024;
-/// Hard cap on the raw bytes of an image we will base64 + return as an image
-/// block. Larger images are refused with a generic message rather than
-/// base64-encoding an unbounded file into the model context.
-const READ_FILE_IMAGE_BYTE_CAP: usize = 5 * 1024 * 1024;
-/// Max entries a single `list_directory` result will emit before truncation.
-const LIST_MAX_ENTRIES: usize = 500;
 
 /// Generic, leak-free message for any sandbox containment violation (D14).
 /// MUST NOT contain the offending absolute path or any file contents.
@@ -248,336 +237,6 @@ fn fold_component(s: &str) -> String {
     s.to_lowercase()
 }
 
-/// Build the requested read-only tools bound to the session's `working_dir`.
-///
-/// `enabled` lists tool names the session turned on. `working_dir` is the
-/// sandbox root; when `None`/empty, the FS tools that NEED a sandbox root
-/// (`read_file`, `list_directory`) are omitted entirely — without a root there
-/// is no safe place for them to operate.
-pub fn build_tools(enabled: &[String], working_dir: Option<&Path>) -> Vec<AgentTool> {
-    let mut tools = Vec::new();
-
-    // FS tools require a non-empty sandbox root.
-    let sandbox_root: Option<PathBuf> = working_dir
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(|p| p.to_path_buf());
-
-    for name in enabled {
-        match name.as_str() {
-            TOOL_READ_FILE => {
-                if let Some(root) = &sandbox_root {
-                    tools.push(make_read_file_tool(root.clone()));
-                }
-            }
-            TOOL_LIST_DIRECTORY => {
-                if let Some(root) = &sandbox_root {
-                    tools.push(make_list_directory_tool(root.clone()));
-                }
-            }
-            // Unknown / not-yet-implemented tool names are ignored.
-            _ => {}
-        }
-    }
-
-    tools
-}
-
-/// Construct the `read_file` tool bound to `root`.
-fn make_read_file_tool(root: PathBuf) -> AgentTool {
-    AgentTool::simple(
-        TOOL_READ_FILE,
-        "Read the contents of a regular file inside the working directory. \
-         Paths are resolved relative to the working directory; escaping it is \
-         not permitted. Large files are truncated.",
-        json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path to the file, relative to the working directory."
-                }
-            },
-            "required": ["path"]
-        }),
-        "Read file",
-        move |_tool_call_id, args| {
-            let root = root.clone();
-            async move { execute_read_file(&root, args) }
-        },
-    )
-}
-
-/// Construct the `list_directory` tool bound to `root`.
-fn make_list_directory_tool(root: PathBuf) -> AgentTool {
-    AgentTool::simple(
-        TOOL_LIST_DIRECTORY,
-        "List the entries of a directory inside the working directory. \
-         Paths are resolved relative to the working directory; escaping it is \
-         not permitted. Directories are listed first. Long listings are truncated.",
-        json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path to the directory, relative to the working directory."
-                }
-            },
-            "required": ["path"]
-        }),
-        "List directory",
-        move |_tool_call_id, args| {
-            let root = root.clone();
-            async move { execute_list_directory(&root, args) }
-        },
-    )
-}
-
-/// `read_file` body: resolve in sandbox, reject non-regular files BEFORE
-/// reading, then read + truncate.
-fn execute_read_file(root: &Path, args: serde_json::Value) -> ToolResult {
-    let path_str = match args.get("path").and_then(|v| v.as_str()) {
-        Some(p) => p,
-        None => return ToolResult::error("Missing required parameter: path"),
-    };
-
-    let target = match resolve_in_sandbox(root, path_str) {
-        Ok(t) => t,
-        Err(e) => return ToolResult::error(e.display_message()),
-    };
-
-    // Reject non-regular files (FIFO/device/socket) BEFORE opening, so a FIFO
-    // cannot block the run on a read that never returns.
-    let metadata = match std::fs::symlink_metadata(&target) {
-        Ok(m) => m,
-        // Generic message — do not echo the (now in-sandbox) absolute path.
-        Err(_) => return ToolResult::error("Failed to read file: file not found"),
-    };
-    if metadata.is_dir() {
-        return ToolResult::error("Failed to read file: path is a directory");
-    }
-    if !metadata.is_file() {
-        return ToolResult::error("Failed to read file: not a regular file");
-    }
-
-    let raw_bytes = match std::fs::read(&target) {
-        Ok(b) => b,
-        Err(_) => return ToolResult::error("Failed to read file"),
-    };
-
-    // Image files become an Image content block (base64 + mime) so the model
-    // (and the tool-call card) sees the picture, not replacement-char noise from
-    // a lossy UTF-8 decode of binary bytes. Detection is by extension first,
-    // then a magic-byte sniff so an image with a wrong/missing extension is
-    // still handled. Oversize images are refused (we must not base64 an
-    // unbounded file into the context).
-    if let Some(mime) = detect_image_mime(&target, &raw_bytes) {
-        if raw_bytes.len() > READ_FILE_IMAGE_BYTE_CAP {
-            return ToolResult::error("Failed to read file: image is too large");
-        }
-        let data_b64 = BASE64_STANDARD.encode(&raw_bytes);
-        return ToolResult {
-            content: vec![ToolResultContent::Image(ImageContent::new(data_b64, mime))],
-            details: None,
-            terminate: None,
-        };
-    }
-
-    // Text files: lossy-decode (binary-safe — never panics) and truncate.
-    let content = String::from_utf8_lossy(&raw_bytes).into_owned();
-    let (body, truncated) = truncate_text(&content, READ_FILE_BYTE_BUDGET);
-
-    let mut output = body;
-    if truncated {
-        output.push_str(&format!(
-            "\n[Truncated: showing first {} bytes of {} total.]",
-            READ_FILE_BYTE_BUDGET,
-            content.len()
-        ));
-    }
-    ToolResult::text(output)
-}
-
-/// Detect whether `target`/`bytes` is a supported image, returning its MIME
-/// type when so. Extension match (png/jpg/jpeg/gif/webp/bmp) is checked first;
-/// otherwise a magic-byte sniff covers files with a wrong or missing extension.
-/// Returns `None` for non-image (text/binary) files, which keep the text path.
-fn detect_image_mime(target: &Path, bytes: &[u8]) -> Option<String> {
-    if let Some(ext) = target.extension().and_then(|e| e.to_str()) {
-        match ext.to_ascii_lowercase().as_str() {
-            "png" => return Some("image/png".to_string()),
-            "jpg" | "jpeg" => return Some("image/jpeg".to_string()),
-            "gif" => return Some("image/gif".to_string()),
-            "webp" => return Some("image/webp".to_string()),
-            "bmp" => return Some("image/bmp".to_string()),
-            _ => {}
-        }
-    }
-    sniff_image_mime(bytes).map(str::to_string)
-}
-
-/// Sniff a supported image MIME from leading magic bytes. Covers PNG, JPEG,
-/// GIF, WEBP (RIFF....WEBP), and BMP. Returns `None` when the bytes are not a
-/// recognized image.
-fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Some("image/png");
-    }
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some("image/jpeg");
-    }
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        return Some("image/gif");
-    }
-    if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        return Some("image/webp");
-    }
-    if bytes.starts_with(b"BM") {
-        return Some("image/bmp");
-    }
-    None
-}
-
-/// `list_directory` body: resolve in sandbox, list entries (dirs first), and
-/// truncate to a max entry count with a visible marker.
-fn execute_list_directory(root: &Path, args: serde_json::Value) -> ToolResult {
-    let path_str = match args.get("path").and_then(|v| v.as_str()) {
-        Some(p) => p,
-        None => return ToolResult::error("Missing required parameter: path"),
-    };
-
-    let target = match resolve_in_sandbox(root, path_str) {
-        Ok(t) => t,
-        Err(e) => return ToolResult::error(e.display_message()),
-    };
-
-    let read_dir = match std::fs::read_dir(&target) {
-        Ok(rd) => rd,
-        Err(_) => return ToolResult::error("Failed to read directory"),
-    };
-
-    // (name, is_dir)
-    let mut items: Vec<(String, bool)> = Vec::new();
-    for entry in read_dir.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        items.push((name, is_dir));
-    }
-
-    // Dirs first, then files; each group sorted by name.
-    items.sort_by(|a, b| {
-        let order = |is_dir: bool| if is_dir { 0 } else { 1 };
-        order(a.1).cmp(&order(b.1)).then_with(|| a.0.cmp(&b.0))
-    });
-
-    let total = items.len();
-    let truncated = total > LIST_MAX_ENTRIES;
-    let shown = if truncated { LIST_MAX_ENTRIES } else { total };
-
-    if total == 0 {
-        return ToolResult::text("(empty directory)".to_string());
-    }
-
-    let mut output = String::new();
-    for (name, is_dir) in items.iter().take(shown) {
-        if *is_dir {
-            output.push_str(&format!("  {}/\n", name));
-        } else {
-            output.push_str(&format!("  {}\n", name));
-        }
-    }
-    if truncated {
-        output.push_str(&format!(
-            "[Truncated: showing {} of {} entries.]",
-            shown, total
-        ));
-    }
-    ToolResult::text(output)
-}
-
-/// Truncate `text` to at most `budget` bytes on a char boundary.
-///
-/// Returns `(possibly_truncated_text, was_truncated)`. The caller appends the
-/// visible truncation marker.
-fn truncate_text(text: &str, budget: usize) -> (String, bool) {
-    if text.len() <= budget {
-        return (text.to_string(), false);
-    }
-    // Find the largest char boundary <= budget so we never split a UTF-8 scalar.
-    let mut end = budget;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    (text[..end].to_string(), true)
-}
-
-// ===========================================================================
-// skill — load an enabled skill's full instructions by name (NOT by path).
-// ===========================================================================
-//
-// SECURITY (VAL-TOOL-018): this tool NEVER touches the filesystem. The model
-// supplies a `name`; we look that name up in an in-memory map of
-// already-discovered, already-validated skills (name -> body). A miss — including
-// a path-shaped argument like `/etc/passwd` or `../x` — returns a generic error
-// that contains NO path and NO file contents. There is no read-from-disk path to
-// abuse, so traversal/escape is structurally impossible here.
-
-/// Generic, leak-free message for a skill lookup that finds no match. MUST NOT
-/// echo the requested name verbatim if it is path-shaped, nor any file content.
-const SKILL_NOT_FOUND_MSG: &str = "skill not found";
-/// Message for a missing / empty / non-string `name` argument.
-const SKILL_INVALID_ARG_MSG: &str = "invalid skill name argument";
-
-/// Build the `skill` tool over a fixed `name -> body` map of the run's enabled,
-/// discovered, validated skills.
-///
-/// The handler is a PURE table lookup: it reads `args["name"]`, trims it, and
-/// returns the mapped body on a hit or a generic error on a miss/bad-arg. It
-/// performs NO filesystem access — the only legitimate way to reach a skill body
-/// is to name one that the run already gated into the map (VAL-TOOL-018). The
-/// map is captured and `.clone()`d into the async future, mirroring the FS
-/// tools' `PathBuf` capture pattern.
-pub fn make_skill_tool(map: HashMap<String, String>) -> AgentTool {
-    AgentTool::simple(
-        TOOL_SKILL,
-        "Load an enabled skill's full instructions by name. Pass the exact \
-         skill name from the available-skills index; the full instruction body \
-         is returned. Skills are referenced by name only, never by file path.",
-        json!({
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "The exact name of an enabled skill to load."
-                }
-            },
-            "required": ["name"]
-        }),
-        "Load skill",
-        move |_tool_call_id, args| {
-            let map = map.clone();
-            async move { execute_skill(&map, args) }
-        },
-    )
-}
-
-/// `skill` tool body: look the requested name up in `map` and return its body,
-/// or a generic, leak-free error. NO filesystem access of any kind.
-fn execute_skill(map: &HashMap<String, String>, args: serde_json::Value) -> ToolResult {
-    // A missing / non-string / empty (after trim) name is a bad argument.
-    let name = match args.get("name").and_then(|v| v.as_str()) {
-        Some(n) if !n.trim().is_empty() => n.trim(),
-        _ => return ToolResult::error(SKILL_INVALID_ARG_MSG),
-    };
-
-    // Pure table lookup by name. A path-shaped name (`/etc/passwd`, `../x`)
-    // simply isn't a key, so it falls through to the generic not-found message —
-    // we never interpret the argument as a path or read any file (VAL-TOOL-018).
-    match map.get(name) {
-        Some(body) => ToolResult::text(body.clone()),
-        None => ToolResult::error(SKILL_NOT_FOUND_MSG),
-    }
-}
-
 // ===========================================================================
 // render_card — render a self-contained interactive HTML card to the user.
 // ===========================================================================
@@ -629,8 +288,8 @@ Theme variables are provided and adapt to light/dark automatically: \
 /// Build the `render_card` tool.
 ///
 /// The handler is pure argument validation — see the section comment for why
-/// execution carries no content. Injected per-run via `extra_tools` (not
-/// `build_tools`) so it needs no `working_dir` and no enablement plumbing.
+/// execution carries no content. Injected per-run via `extra_tools` so it
+/// needs no `working_dir` and no enablement plumbing.
 pub fn make_render_card_tool() -> AgentTool {
     AgentTool::simple(
         TOOL_RENDER_CARD,
@@ -818,19 +477,7 @@ mod tests {
         }
     }
 
-    /// Extract the first image content block from a result.
-    fn get_image(result: &ToolResult) -> &hand_ai_model::ImageContent {
-        match &result.content[0] {
-            hand_ai_model::ToolResultContent::Image(img) => img,
-            _ => panic!("expected image content"),
-        }
-    }
-
-    /// The 8-byte PNG signature plus a minimal trailer — enough that both the
-    /// extension match and the magic-byte sniff treat it as a PNG.
-    const PNG_BYTES: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
-
-    /// A sandbox root with a few known files, plus a sibling dir OUTSIDE it.
+    /// A sandbox root plus a secret file OUTSIDE it (escape-vector target).
     struct Fixture {
         _outer: TempDir,
         root: PathBuf,
@@ -841,9 +488,9 @@ mod tests {
         let outer = TempDir::new().unwrap();
         let root = outer.path().join("proj");
         fs::create_dir(&root).unwrap();
-        fs::write(root.join("inside.txt"), "hello from inside").unwrap();
+        // A real subdir so `sub/../..` traversal resolves (and is then
+        // rejected by containment, not as an unresolvable path).
         fs::create_dir(root.join("sub")).unwrap();
-        fs::write(root.join("sub").join("nested.txt"), "nested body").unwrap();
 
         // A secret file OUTSIDE the sandbox, as a sibling of the root.
         let outside_secret = outer.path().join("secret.txt");
@@ -856,20 +503,6 @@ mod tests {
         }
     }
 
-    /// Assert an error result that leaks NEITHER the out-of-sandbox absolute
-    /// path NOR file contents.
-    fn assert_no_leak(result: &ToolResult, abs_path: &Path, secret_substr: &str) {
-        let text = get_text(result);
-        assert!(
-            !text.contains(&*abs_path.to_string_lossy()),
-            "error text leaked the out-of-sandbox absolute path: {text:?}"
-        );
-        assert!(
-            !text.contains(secret_substr),
-            "error text leaked out-of-sandbox file contents: {text:?}"
-        );
-    }
-
     // -----------------------------------------------------------------------
     // VAL-TOOLS-009 — every escape vector is rejected, no leak.
     // Each vector is its own test (the security value is in the enumeration).
@@ -880,11 +513,8 @@ mod tests {
         let fx = fixture();
         let err = resolve_in_sandbox(&fx.root, "../secret.txt").unwrap_err();
         assert_eq!(err, SandboxError::OutsideSandbox);
-
-        // And through the tool: no leak of path/content.
-        let result = execute_read_file(&fx.root, json!({"path": "../secret.txt"}));
-        assert_eq!(get_text(&result), SANDBOX_VIOLATION_MSG);
-        assert_no_leak(&result, &fx.outside_secret, "TOP SECRET CONTENT");
+        // The model-facing message stays generic: no path, no contents.
+        assert_eq!(err.display_message(), SANDBOX_VIOLATION_MSG);
     }
 
     #[test]
@@ -903,11 +533,12 @@ mod tests {
             SandboxError::OutsideSandbox | SandboxError::ResolveFailed
         ));
 
-        // Absolute path to the real outside secret -> rejected, no leak.
+        // Absolute path to the real outside secret is rejected too.
         let abs = fx.outside_secret.to_string_lossy().into_owned();
-        let result = execute_read_file(&fx.root, json!({"path": abs}));
-        assert_eq!(get_text(&result), SANDBOX_VIOLATION_MSG);
-        assert_no_leak(&result, &fx.outside_secret, "TOP SECRET CONTENT");
+        assert_eq!(
+            resolve_in_sandbox(&fx.root, &abs).unwrap_err(),
+            SandboxError::OutsideSandbox
+        );
     }
 
     /// The component-wise (not string-prefix) bypass: `/p/proj` must NOT accept
@@ -927,10 +558,6 @@ mod tests {
         let abs = sibling_secret.to_string_lossy().into_owned();
         let err = resolve_in_sandbox(&root, &abs).unwrap_err();
         assert_eq!(err, SandboxError::OutsideSandbox);
-
-        let result = execute_read_file(&root, json!({"path": abs}));
-        assert_eq!(get_text(&result), SANDBOX_VIOLATION_MSG);
-        assert_no_leak(&result, &sibling_secret, "SIBLING SECRET");
     }
 
     /// `~` must NOT be expanded to $HOME. The arg is rejected outright.
@@ -950,11 +577,6 @@ mod tests {
             resolve_in_sandbox(&fx.root, "~root/.ssh/id_rsa").unwrap_err(),
             SandboxError::InvalidArg
         );
-
-        // Through the tool: generic message, no home contents leaked.
-        let result = execute_read_file(&fx.root, json!({"path": "~/secret.txt"}));
-        let text = get_text(&result);
-        assert!(!text.contains('~') || text == "invalid path argument");
     }
 
     /// A symlink INSIDE the root whose canonical target leaves the root is
@@ -971,10 +593,6 @@ mod tests {
 
         let err = resolve_in_sandbox(&fx.root, "escape-link.txt").unwrap_err();
         assert_eq!(err, SandboxError::OutsideSandbox);
-
-        let result = execute_read_file(&fx.root, json!({"path": "escape-link.txt"}));
-        assert_eq!(get_text(&result), SANDBOX_VIOLATION_MSG);
-        assert_no_leak(&result, &fx.outside_secret, "TOP SECRET CONTENT");
     }
 
     /// A symlink to a DIRECTORY outside the root is also rejected (and we never
@@ -996,11 +614,6 @@ mod tests {
 
         let err = resolve_in_sandbox(&root, "vault-link").unwrap_err();
         assert_eq!(err, SandboxError::OutsideSandbox);
-
-        let result = execute_list_directory(&root, json!({"path": "vault-link"}));
-        assert_eq!(get_text(&result), SANDBOX_VIOLATION_MSG);
-        let text = get_text(&result);
-        assert!(!text.contains("key.pem"), "leaked outside dir entry");
     }
 
     /// A case-folded variant that resolves OUTSIDE the root is still rejected.
@@ -1020,10 +633,6 @@ mod tests {
         let abs = secret.to_string_lossy().into_owned();
         let err = resolve_in_sandbox(&root, &abs).unwrap_err();
         assert_eq!(err, SandboxError::OutsideSandbox);
-
-        let result = execute_read_file(&root, json!({"path": abs}));
-        assert_eq!(get_text(&result), SANDBOX_VIOLATION_MSG);
-        assert_no_leak(&result, &secret, "CASE SIBLING SECRET");
     }
 
     /// An NFD/NFC variant that resolves OUTSIDE the root is still rejected. We
@@ -1044,10 +653,6 @@ mod tests {
         let abs = secret.to_string_lossy().into_owned();
         let err = resolve_in_sandbox(&root, &abs).unwrap_err();
         assert_eq!(err, SandboxError::OutsideSandbox);
-
-        let result = execute_read_file(&root, json!({"path": abs}));
-        assert_eq!(get_text(&result), SANDBOX_VIOLATION_MSG);
-        assert_no_leak(&result, &secret, "UNICODE SIBLING SECRET");
     }
 
     /// An NFD/NFC variant that resolves INSIDE the root is ACCEPTED — folding
@@ -1071,8 +676,6 @@ mod tests {
         match resolve_in_sandbox(&root, nfd_name) {
             Ok(t) => {
                 assert!(is_contained(&root.canonicalize().unwrap(), &t));
-                let result = execute_read_file(&root, json!({"path": nfd_name}));
-                assert!(get_text(&result).contains("MY RESUME"));
             }
             Err(SandboxError::ResolveFailed) => {
                 // Acceptable on a strict-byte FS that has no such entry.
@@ -1121,231 +724,6 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // VAL-TOOLS-006 (FS half) — non-regular files rejected before read;
-    // large outputs truncated with a marker.
-    // -----------------------------------------------------------------------
-
-    /// A FIFO is rejected BEFORE any (blocking) read. The test would hang
-    /// forever if we opened the FIFO, so passing proves we checked metadata
-    /// first.
-    #[cfg(unix)]
-    #[test]
-    fn non_regular_fifo_rejected_before_read() {
-        let fx = fixture();
-        let fifo = fx.root.join("pipe");
-        // Create a FIFO via the system `mkfifo` so we need no extra crate. If
-        // the binary is unavailable the test is skipped rather than failing.
-        let status = std::process::Command::new("mkfifo").arg(&fifo).status();
-        match status {
-            Ok(s) if s.success() => {}
-            _ => return, // mkfifo unavailable; skip (the read path is still tested elsewhere).
-        }
-
-        let result = execute_read_file(&fx.root, json!({"path": "pipe"}));
-        let text = get_text(&result);
-        assert!(
-            text.contains("not a regular file"),
-            "FIFO should be rejected as non-regular, got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn read_file_truncates_large_content_with_marker() {
-        let fx = fixture();
-        let big = fx.root.join("big.txt");
-        // Well over the 50KB budget.
-        let blob = "x".repeat(READ_FILE_BYTE_BUDGET * 2);
-        fs::write(&big, &blob).unwrap();
-
-        let result = execute_read_file(&fx.root, json!({"path": "big.txt"}));
-        let text = get_text(&result);
-        assert!(
-            text.contains("[Truncated:"),
-            "expected a visible truncation marker, got tail: {}",
-            &text[text.len().saturating_sub(120)..]
-        );
-        // Body capped near the budget (+ marker), not the whole 100KB.
-        assert!(
-            text.len() < READ_FILE_BYTE_BUDGET + 200,
-            "truncated body should fit the budget + marker, got {} bytes",
-            text.len()
-        );
-    }
-
-    #[test]
-    fn list_directory_truncates_large_listing_with_marker() {
-        let outer = TempDir::new().unwrap();
-        let root = outer.path().join("proj");
-        fs::create_dir(&root).unwrap();
-        for i in 0..(LIST_MAX_ENTRIES + 50) {
-            fs::write(root.join(format!("f{i:04}.txt")), "x").unwrap();
-        }
-        let result = execute_list_directory(&root, json!({"path": "."}));
-        // "." is rejected as an arg -> use the root via a child request instead.
-        // Re-run against the dir by absolute (in-sandbox) path.
-        let _ = result;
-        let result = execute_list_directory(&root, json!({"path": root.to_string_lossy()}));
-        let text = get_text(&result);
-        assert!(
-            text.contains("[Truncated: showing 500 of"),
-            "expected list truncation marker, got tail: {}",
-            &text[text.len().saturating_sub(120)..]
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Happy path — legitimate in-sandbox reads/listings work.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn happy_path_read_in_sandbox_file() {
-        let fx = fixture();
-        let result = execute_read_file(&fx.root, json!({"path": "inside.txt"}));
-        let text = get_text(&result);
-        assert_eq!(text, "hello from inside");
-    }
-
-    #[test]
-    fn happy_path_read_nested_in_sandbox_file() {
-        let fx = fixture();
-        let result = execute_read_file(&fx.root, json!({"path": "sub/nested.txt"}));
-        assert!(get_text(&result).contains("nested body"));
-    }
-
-    /// VAL-TOOLS-002 (image-result gap): reading an in-sandbox image returns an
-    /// Image content block (base64 + mime), NOT a lossy-UTF-8 text dump of the
-    /// binary bytes. This is what lets the tool-call card render the picture.
-    #[test]
-    fn read_in_sandbox_image_returns_image_block() {
-        let fx = fixture();
-        let img = fx.root.join("pic.png");
-        fs::write(&img, PNG_BYTES).unwrap();
-
-        let result = execute_read_file(&fx.root, json!({"path": "pic.png"}));
-
-        // It is an Image block, never a Text block.
-        assert!(
-            matches!(result.content[0], ToolResultContent::Image(_)),
-            "image read must yield an Image content block, not text"
-        );
-        let image = get_image(&result);
-        assert_eq!(image.mime_type, "image/png");
-        // The data is base64 of the file bytes (round-trips back to them).
-        let decoded = BASE64_STANDARD.decode(&image.data).expect("valid base64");
-        assert_eq!(decoded, PNG_BYTES);
-    }
-
-    /// An image with NO recognizable extension is still detected by its magic
-    /// bytes and returned as an Image block (not garbled text).
-    #[test]
-    fn read_extensionless_image_detected_by_magic_bytes() {
-        let fx = fixture();
-        let img = fx.root.join("blob");
-        fs::write(&img, PNG_BYTES).unwrap();
-
-        let result = execute_read_file(&fx.root, json!({"path": "blob"}));
-        assert!(
-            matches!(result.content[0], ToolResultContent::Image(_)),
-            "magic-byte-sniffed image must yield an Image block"
-        );
-        assert_eq!(get_image(&result).mime_type, "image/png");
-    }
-
-    /// A regular (non-image) text file keeps returning a Text block unchanged —
-    /// image handling must not regress the text path.
-    #[test]
-    fn read_text_file_still_returns_text_block() {
-        let fx = fixture();
-        let result = execute_read_file(&fx.root, json!({"path": "inside.txt"}));
-        assert!(
-            matches!(result.content[0], ToolResultContent::Text(_)),
-            "text file must still yield a Text content block"
-        );
-        assert_eq!(get_text(&result), "hello from inside");
-    }
-
-    /// An oversize image is refused with a generic message rather than
-    /// base64-encoding an unbounded file into the model context.
-    #[test]
-    fn read_oversize_image_is_refused() {
-        let fx = fixture();
-        let img = fx.root.join("huge.png");
-        // PNG signature followed by enough bytes to exceed the cap.
-        let mut blob = PNG_BYTES.to_vec();
-        blob.resize(READ_FILE_IMAGE_BYTE_CAP + 1, 0u8);
-        fs::write(&img, &blob).unwrap();
-
-        let result = execute_read_file(&fx.root, json!({"path": "huge.png"}));
-        assert!(
-            matches!(result.content[0], ToolResultContent::Text(_)),
-            "an oversize image is refused with a (text) error, not an image block"
-        );
-        assert!(
-            get_text(&result).contains("too large"),
-            "oversize image refusal should explain the size limit, got: {}",
-            get_text(&result)
-        );
-    }
-
-    #[test]
-    fn happy_path_list_in_sandbox_dir() {
-        let fx = fixture();
-        // List the sandbox root via its (in-sandbox) absolute path.
-        let result = execute_list_directory(&fx.root, json!({"path": fx.root.to_string_lossy()}));
-        let text = get_text(&result);
-        assert!(
-            text.contains("sub/"),
-            "dir should be listed first, got: {text}"
-        );
-        assert!(
-            text.contains("inside.txt"),
-            "file should be listed, got: {text}"
-        );
-        // dir-first ordering: `sub/` appears before `inside.txt`.
-        let dir_pos = text.find("sub/").unwrap();
-        let file_pos = text.find("inside.txt").unwrap();
-        assert!(dir_pos < file_pos, "directories must come first");
-    }
-
-    // -----------------------------------------------------------------------
-    // build_tools factory.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn build_tools_omits_fs_tools_without_working_dir() {
-        let enabled = vec!["read_file".to_string(), "list_directory".to_string()];
-        let tools = build_tools(&enabled, None);
-        assert!(tools.is_empty(), "FS tools need a sandbox root");
-    }
-
-    #[test]
-    fn build_tools_omits_fs_tools_for_empty_working_dir() {
-        let enabled = vec!["read_file".to_string()];
-        let tools = build_tools(&enabled, Some(Path::new("")));
-        assert!(tools.is_empty(), "empty working_dir is no sandbox");
-    }
-
-    #[test]
-    fn build_tools_includes_requested_fs_tools_with_working_dir() {
-        let fx = fixture();
-        let enabled = vec!["read_file".to_string(), "list_directory".to_string()];
-        let tools = build_tools(&enabled, Some(&fx.root));
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        assert!(names.contains(&"read_file"));
-        assert!(names.contains(&"list_directory"));
-        assert_eq!(tools.len(), 2);
-    }
-
-    #[test]
-    fn build_tools_ignores_unknown_tool_names() {
-        let fx = fixture();
-        let enabled = vec!["read_file".to_string(), "totally_unknown".to_string()];
-        let tools = build_tools(&enabled, Some(&fx.root));
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, vec!["read_file"]);
-    }
-
     // Minimal single-thread executor so the skill tool's async `execute`
     // closure is exercised without pulling in a new test-only crate (tokio is
     // already a dep).
@@ -1355,154 +733,6 @@ mod tests {
             .build()
             .expect("build current-thread runtime")
             .block_on(fut)
-    }
-
-    // -----------------------------------------------------------------------
-    // skill tool — name-keyed lookup, never a filesystem read (VAL-TOOL-003/
-    // 004/005/015/018).
-    // -----------------------------------------------------------------------
-
-    /// Build a `name -> body` map from `(name, body)` pairs.
-    fn skill_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs
-            .iter()
-            .map(|(n, b)| (n.to_string(), b.to_string()))
-            .collect()
-    }
-
-    /// VAL-TOOL-015: the skill tool's name is the fixed `"skill"` and does not
-    /// collide with any built-in tool name `build_tools` can produce.
-    #[test]
-    fn skill_tool_name_is_unique_and_does_not_collide() {
-        let tool = make_skill_tool(skill_map(&[("alpha", "body")]));
-        assert_eq!(tool.name, "skill");
-        // None of the built-in factory names is "skill".
-        for builtin in [TOOL_READ_FILE, TOOL_LIST_DIRECTORY] {
-            assert_ne!(tool.name, builtin, "skill name collides with {builtin}");
-        }
-    }
-
-    /// VAL-TOOL-003: a hit returns the skill's body VERBATIM, untruncated, even
-    /// for a large body (well past the read_file truncation budget — the skill
-    /// tool has no byte cap).
-    #[test]
-    fn skill_hit_returns_full_body_untruncated() {
-        let big = "B".repeat(READ_FILE_BYTE_BUDGET * 4);
-        let map = skill_map(&[("alpha", &big)]);
-        let result = execute_skill(&map, json!({"name": "alpha"}));
-        assert_eq!(
-            get_text(&result),
-            big,
-            "skill body must be returned verbatim and untruncated"
-        );
-        // Sanity: it is a Text block, with no truncation marker.
-        assert!(matches!(result.content[0], ToolResultContent::Text(_)));
-        assert!(!get_text(&result).contains("[Truncated"));
-    }
-
-    /// A name with surrounding whitespace still resolves (the handler trims).
-    #[test]
-    fn skill_hit_trims_surrounding_whitespace() {
-        let map = skill_map(&[("alpha", "alpha body")]);
-        let result = execute_skill(&map, json!({"name": "  alpha  "}));
-        assert_eq!(get_text(&result), "alpha body");
-    }
-
-    /// VAL-TOOL-004: a miss returns a generic error — no panic, and the error
-    /// text leaks NO filesystem path and NO file contents.
-    #[test]
-    fn skill_miss_is_generic_error_no_leak() {
-        let map = skill_map(&[("alpha", "secret body")]);
-        let result = execute_skill(&map, json!({"name": "ghost"}));
-        let text = get_text(&result);
-        assert_eq!(text, SKILL_NOT_FOUND_MSG);
-        assert!(!text.contains('/'), "no path in error: {text:?}");
-        assert!(!text.contains("secret body"), "no body leak: {text:?}");
-    }
-
-    /// VAL-TOOL-005: a missing, non-string, or empty/whitespace `name` argument
-    /// yields the invalid-arg error (no panic).
-    #[test]
-    fn skill_bad_arg_yields_invalid_arg_error() {
-        let map = skill_map(&[("alpha", "body")]);
-
-        // Missing entirely.
-        assert_eq!(
-            get_text(&execute_skill(&map, json!({}))),
-            SKILL_INVALID_ARG_MSG
-        );
-        // Wrong type (number, not string).
-        assert_eq!(
-            get_text(&execute_skill(&map, json!({"name": 42}))),
-            SKILL_INVALID_ARG_MSG
-        );
-        // Empty string.
-        assert_eq!(
-            get_text(&execute_skill(&map, json!({"name": ""}))),
-            SKILL_INVALID_ARG_MSG
-        );
-        // Whitespace-only.
-        assert_eq!(
-            get_text(&execute_skill(&map, json!({"name": "   "}))),
-            SKILL_INVALID_ARG_MSG
-        );
-    }
-
-    /// VAL-TOOL-018 (SECURITY): a path-shaped `name` is treated as an ordinary
-    /// (missing) key — the tool NEVER reads from disk. We seed the map with one
-    /// real skill, then ask for filesystem-y names; each must return the generic
-    /// not-found error with no file contents and no path echo.
-    #[test]
-    fn skill_path_shaped_name_never_reads_disk() {
-        let map = skill_map(&[("alpha", "alpha body")]);
-        for malicious in [
-            "/etc/passwd",
-            "../secret.txt",
-            "../../etc/hosts",
-            "sub/../../escape",
-            "~/.ssh/id_rsa",
-            "alpha/../../etc/passwd",
-        ] {
-            let result = execute_skill(&map, json!({ "name": malicious }));
-            let text = get_text(&result);
-            assert_eq!(
-                text, SKILL_NOT_FOUND_MSG,
-                "path-shaped name {malicious:?} must be a plain miss"
-            );
-            // The error must not echo the (path-shaped) argument or any content.
-            assert!(
-                !text.contains(malicious),
-                "error leaked the path argument {malicious:?}: {text:?}"
-            );
-            assert!(
-                !text.contains("root:") && !text.contains("alpha body"),
-                "error leaked file/skill content: {text:?}"
-            );
-        }
-    }
-
-    /// The skill tool resolves via the registered `execute` closure (end-to-end
-    /// through `AgentTool`), not just the bare helper — proving the wiring.
-    #[test]
-    fn skill_tool_execute_closure_resolves_hit_and_miss() {
-        let tool = make_skill_tool(skill_map(&[("alpha", "alpha body")]));
-        let ctx_hit = hand_agent::ToolExecuteCtx {
-            tool_call_id: "tc-1".to_string(),
-            args: json!({"name": "alpha"}),
-            cancel: hand_agent::CancellationToken::new(),
-            on_update: std::sync::Arc::new(|_: ToolResult| {}),
-        };
-        let hit = tokio_test_block((tool.execute)(ctx_hit)).expect("execute ok");
-        assert_eq!(get_text(&hit), "alpha body");
-
-        let ctx_miss = hand_agent::ToolExecuteCtx {
-            tool_call_id: "tc-2".to_string(),
-            args: json!({"name": "ghost"}),
-            cancel: hand_agent::CancellationToken::new(),
-            on_update: std::sync::Arc::new(|_: ToolResult| {}),
-        };
-        let miss = tokio_test_block((tool.execute)(ctx_miss)).expect("execute ok");
-        assert_eq!(get_text(&miss), SKILL_NOT_FOUND_MSG);
     }
 
     // --- render_card ---
