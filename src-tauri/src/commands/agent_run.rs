@@ -417,12 +417,26 @@ async fn assemble_and_drive(
         }
     }
 
-    // Presentational tools ride the same extra_tools channel as MCP tools. The
-    // Rust handlers only validate and acknowledge; the frontend renders the
-    // card / app panel from the toolcall blocks' arguments, so no extra IPC
-    // exists.
-    extra_tools.push(agent_tools::make_render_card_tool());
-    extra_tools.push(agent_tools::make_render_app_tool());
+    // Presentational tools ride the same extra_tools channel as MCP tools and
+    // are gated like web_search: only sessions whose `enabled_tools` name them
+    // get the registration (settings default + per-agent capability set +
+    // session edits control that list). The Rust handlers only validate and
+    // acknowledge; the frontend renders the card / app panel from the toolcall
+    // blocks' arguments, so no extra IPC exists.
+    if config
+        .enabled_tools
+        .iter()
+        .any(|t| t == agent_tools::TOOL_RENDER_CARD)
+    {
+        extra_tools.push(agent_tools::make_render_card_tool());
+    }
+    if config
+        .enabled_tools
+        .iter()
+        .any(|t| t == agent_tools::TOOL_RENDER_APP)
+    {
+        extra_tools.push(agent_tools::make_render_app_tool());
+    }
 
     let mut session = build_agent_session(&config, Some(approval_emitter), extra_tools)?;
 

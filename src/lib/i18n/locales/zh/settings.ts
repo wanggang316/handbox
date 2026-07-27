@@ -66,6 +66,10 @@ export const settingsZh = {
   "settings.agentTools.webSearch.provider": "搜索服务商",
   "settings.agentTools.webSearch.apiKey": "API Key",
   "settings.agentTools.webSearch.apiKeyPlaceholder": "tvly-...",
+  "settings.agentTools.extensions.title": "扩展工具",
+  "settings.agentTools.renderCardDesc": "在会话中内联渲染交互式 HTML 卡片",
+  "settings.agentTools.renderAppDesc": "在侧边面板生成完整的 HTML 应用（预览 + 源码）",
+  "settings.agentTools.skillDesc": "允许模型发现并按需加载 Skill",
 
   // 技能页
   "settings.skills.title": "技能",

@@ -41,14 +41,20 @@ use std::path::{Component, Path, PathBuf};
 use hand_agent::{AgentTool, ToolResult};
 use serde_json::json;
 
-/// The render_card tool's fixed name. Always injected for interactive agent
-/// runs (rides the `extra_tools` channel alongside MCP tools); the frontend
+/// The render_card tool's fixed name. An extension tool like `web_search`:
+/// injected via `extra_tools` only when the session's `enabled_tools` names it
+/// (settings default + per-agent capability set control that). The frontend
 /// special-cases toolcall blocks with this name into an inline sandbox card.
 pub const TOOL_RENDER_CARD: &str = "render_card";
-/// The render_app tool's fixed name. Injected like [`TOOL_RENDER_CARD`]; the
+/// The render_app tool's fixed name. Gated like [`TOOL_RENDER_CARD`]; the
 /// frontend renders toolcall blocks with this name as a pill that opens the
 /// right-side app panel (preview + source view).
 pub const TOOL_RENDER_APP: &str = "render_app";
+/// The `enabled_tools` id gating the coding-agent skill pipeline. Not a tool
+/// factory here: when a session's `enabled_tools` names it, `build_agent_session`
+/// lets the coding-agent discover skills, index them into the system prompt and
+/// register its own `skill` tool; when absent, that whole pipeline is off.
+pub const TOOL_SKILL: &str = "skill";
 
 /// Generic, leak-free message for any sandbox containment violation (D14).
 /// MUST NOT contain the offending absolute path or any file contents.

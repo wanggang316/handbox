@@ -32,7 +32,9 @@ use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
 use crate::services::agent_permission::{ApprovalEmitter, PermissionExtension, SandboxExtension};
+use crate::services::agent_tools;
 use crate::services::model_runtime::{self, ChatOptions};
+use crate::services::web_search;
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
 /// HandBox-side inputs needed to construct a coding-agent session.
@@ -101,13 +103,14 @@ pub struct HandBoxAgentSessionConfig {
     /// parses it via `parse_thinking_level` (unknown values map to `None`, so a
     /// non-reasoning model never breaks). Same contract as `agent_runtime.rs:586`.
     pub thinking_level: Option<String>,
-    /// HandBox's per-session enabled-tool list, by coding-agent registered
-    /// name (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`). Only the named
-    /// tools are registered against the session (see
-    /// [`select_enabled_tools`]). Following the legacy `agent_tools::build_tools`
-    /// convention, an empty list means "no tool enabled" (not "all enabled").
-    /// Non-built-in names (e.g. `web_search`) are ignored here — agent_run
-    /// resolves those into `extra_tools` before construction.
+    /// HandBox's per-session enabled-tool list: coding-agent registered names
+    /// (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`) plus the extension-tool
+    /// ids ([`EXTENSION_TOOL_IDS`]). Only the named built-ins are registered
+    /// against the session (see [`select_enabled_tools`]); an empty list means
+    /// "no tool enabled" (not "all enabled"). Extension ids are resolved
+    /// elsewhere: `web_search`/`render_card`/`render_app` into `extra_tools` by
+    /// agent_run, `skill` into the skill-pipeline gate in
+    /// [`build_agent_session`].
     pub enabled_tools: Vec<String>,
     /// Tool names requiring approval this session: the `mcp__server__tool` names
     /// of manual-execution MCP servers. Populated by agent_run; empty default =
@@ -210,7 +213,15 @@ pub fn build_agent_session(
         // both discoveries. Workspace sessions (a real cwd) keep them on.
         no_context_files: config.pure_dialog,
         session_dir: None,
-        no_skills: config.pure_dialog,
+        // The skill pipeline (discovery + `<available_skills>` index + the
+        // coding-agent's own `skill` tool) additionally requires the session to
+        // opt in via the `skill` extension-tool id — the settings/agent-level
+        // toggle rides `enabled_tools` like every other extension tool.
+        no_skills: config.pure_dialog
+            || !config
+                .enabled_tools
+                .iter()
+                .any(|t| t == agent_tools::TOOL_SKILL),
         extra_skill_dirs: Vec::new(),
         // Sandbox: persist under the Tauri app data dir, never ~/.hand. The
         // resume path resolves `<base_dir>/sessions/<flattened-cwd>/<id>.jsonl`,
@@ -262,6 +273,18 @@ pub fn build_agent_session(
     Ok(session)
 }
 
+/// Extension-tool ids that legitimately ride `enabled_tools` but are NOT
+/// coding-agent built-ins, so [`select_enabled_tools`] must not warn on them:
+/// `web_search` / `render_card` / `render_app` are injected via `extra_tools`
+/// by agent_run, `skill` gates the coding-agent skill pipeline in
+/// [`build_agent_session`].
+pub const EXTENSION_TOOL_IDS: [&str; 4] = [
+    web_search::WEB_SEARCH_TOOL_NAME,
+    agent_tools::TOOL_RENDER_CARD,
+    agent_tools::TOOL_RENDER_APP,
+    agent_tools::TOOL_SKILL,
+];
+
 /// Translate a single persisted `enabled_tools` entry to its coding-agent
 /// registered name, accounting for sessions MIGRATED from the pre-M4 SQLite
 /// store (M3 migration kept their `enabled_tools` verbatim, by the OLD native
@@ -271,13 +294,15 @@ pub fn build_agent_session(
 /// - `read_file`      → `read`
 /// - `list_directory` → `ls`
 ///
-/// Old tools with no coding-agent counterpart (`web_fetch`, retired in M4; the
-/// old auto-injected `skill` tool, now owned by the coding-agent's own skill
-/// pipeline) have NO mapping: they are returned unchanged so the downstream
-/// built-in filter drops them — never matching, never failing, never opening
-/// the full set. A NEW name (already a coding-agent name like `read`/`ls`) or
-/// any unknown string passes through unchanged: new sessions are unaffected and
-/// genuinely unknown names still fall through to the existing `warn`.
+/// Old tools with no coding-agent counterpart (`web_fetch`, retired in M4) have
+/// NO mapping: they are returned unchanged so the downstream built-in filter
+/// drops them — never matching, never failing, never opening the full set. The
+/// old auto-injected `skill` tool name passes through unchanged too, and lands
+/// on the SAME id the skill-pipeline gate reads today, so a migrated session
+/// that had the old skill tool keeps skill access. A NEW name (already a
+/// coding-agent name like `read`/`ls`) or any unknown string passes through
+/// unchanged: new sessions are unaffected and genuinely unknown names still
+/// fall through to the existing `warn`.
 ///
 /// Pure, non-destructive, applied at construction time only — the SQLite
 /// `enabled_tools` column is never rewritten, so the mapping is fully
@@ -287,9 +312,9 @@ fn remap_legacy_tool_name(name: &str) -> &str {
         // Old native read-only tools → coding-agent built-ins (VAL-CACLEAN-005).
         "read_file" => "read",
         "list_directory" => "ls",
-        // No mapping (`web_fetch` retired, `skill` now coding-agent-owned) or
-        // already a coding-agent / unknown name — leave it for the built-in
-        // filter to match-or-drop unchanged.
+        // No mapping (`web_fetch` retired), an extension id (`skill` gates the
+        // skill pipeline), or already a coding-agent / unknown name — leave it
+        // for the downstream filters unchanged.
         other => other,
     }
 }
@@ -303,10 +328,11 @@ fn remap_legacy_tool_name(name: &str) -> &str {
 /// passed through [`remap_legacy_tool_name`], so a session migrated from the
 /// pre-M4 SQLite store (whose `enabled_tools` carry OLD native names like
 /// `read_file` / `list_directory`) enables the expected coding-agent built-ins
-/// (`read` / `ls`) instead of silently losing all its tools. Old names with no
-/// counterpart (`web_fetch` / `skill`) and genuinely unknown names contribute
-/// no tool — they are ignored with a `warn` log rather than failing
-/// construction.
+/// (`read` / `ls`) instead of silently losing all its tools. Extension-tool ids
+/// ([`EXTENSION_TOOL_IDS`]) are skipped silently — they are legitimate
+/// `enabled_tools` entries resolved outside this filter. Old names with no
+/// counterpart (`web_fetch`) and genuinely unknown names contribute no tool —
+/// they are ignored with a `warn` log rather than failing construction.
 ///
 /// Empty-list semantics follow HandBox's legacy `agent_tools::build_tools`
 /// convention: an empty `enabled` registers NO tools ("not listed = not
@@ -318,6 +344,7 @@ pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
     let mut wanted: Vec<&str> = enabled
         .iter()
         .map(|name| remap_legacy_tool_name(name.as_str()))
+        .filter(|name| !EXTENSION_TOOL_IDS.contains(name))
         .collect();
 
     let selected: Vec<AgentTool> = create_default_tools(cwd)
@@ -665,10 +692,10 @@ mod tests {
     }
 
     // VAL-CACLEAN-005: old names with NO coding-agent counterpart are dropped
-    // SAFELY — `web_fetch` (retired in M4) and the old auto-injected `skill`
-    // tool (now owned by the coding-agent skill pipeline) contribute no tool,
-    // never error, and never open the full set. The mappable sibling still
-    // enables its built-in.
+    // SAFELY — `web_fetch` (retired in M4) contributes no tool, never errors,
+    // and never opens the full set; `skill` is an extension id (skipped here,
+    // it gates the skill pipeline instead). The mappable sibling still enables
+    // its built-in.
     #[test]
     fn remap_drops_unmapped_old_names_without_error() {
         let cwd = TempDir::new().unwrap();
@@ -676,7 +703,24 @@ mod tests {
         assert_eq!(
             names,
             vec!["read"],
-            "web_fetch/skill have no counterpart and must be dropped, read survives"
+            "web_fetch/skill contribute no built-in tool, read survives"
+        );
+    }
+
+    // Extension-tool ids are legitimate `enabled_tools` entries resolved
+    // outside this filter (extra_tools injection / skill-pipeline gate): they
+    // select no built-in here and must be skipped silently, while built-in
+    // siblings still resolve.
+    #[test]
+    fn extension_tool_ids_select_no_builtin() {
+        let cwd = TempDir::new().unwrap();
+        let mut enabled: Vec<&str> = vec!["read"];
+        enabled.extend(EXTENSION_TOOL_IDS);
+        let names = tool_names(cwd.path(), &enabled);
+        assert_eq!(
+            names,
+            vec!["read"],
+            "extension ids contribute no built-in tool, read survives"
         );
     }
 

@@ -82,7 +82,7 @@ export interface WebSearchSettings {
 
 // Agent 设置
 export interface AgentSettings {
-  defaultEnabledTools: string[]; // 新建 Agent 会话默认启用的内置工具(注册名，含 web_search)
+  defaultEnabledTools: string[]; // 新建 Agent 会话默认启用的工具(注册名，含扩展工具)
   defaultEditorId?: string | null; // "Open in ..." 的默认应用 target id（见 api/openIn.ts）
   webSearch?: WebSearchSettings; // web_search 工具的搜索服务商配置（缺省 = 未配置）
 }
