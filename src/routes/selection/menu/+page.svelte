@@ -87,12 +87,14 @@
 </script>
 
 {#if captured.text}
-<div class="flex items-center w-full h-full p-1 bg-white">
+<div
+  class="flex items-center w-full h-full p-1 bg-[var(--bg-card)] rounded-xl shadow-lg border border-[var(--hairline)] overflow-hidden"
+>
   <div
-    class="flex flex-row flex-1 items-center justify-between gap-1 px-2 text-[14px] text-gray-600"
+    class="flex flex-row flex-1 items-center justify-between gap-1 px-2 text-[14px] text-base-content"
   >
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-base-200 hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
       onclick={handleCopy}
     >
       <Copy class="size-3.5" />
@@ -100,7 +102,7 @@
     </button>
 
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-base-200 hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
       onclick={handleTranslate}
     >
       <Languages class="size-3.5" />
@@ -108,7 +110,7 @@
     </button>
 
     <button
-      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+      class="flex items-center gap-1 px-2 py-1 rounded-lg bg-base-200 hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
       onclick={handleAi}
     >
       <Sparkles class="size-3.5" />
@@ -116,7 +118,7 @@
     </button>
   </div>
   <button
-    class="flex items-center justify-center flex-none w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
+    class="flex items-center justify-center flex-none w-8 h-8 rounded-full bg-base-200 hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]"
     onclick={handleSettings}
   >
     <EllipsisVertical class="size-3.5" />

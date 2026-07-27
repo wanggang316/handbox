@@ -71,13 +71,13 @@
 
   // 模式配置
   const modeConfig = $derived({
-    show: { icon: Eye, label: t("selection.modeShow"), color: "text-red-600" },
+    show: { icon: Eye, label: t("selection.modeShow"), color: "text-error" },
     translate: {
       icon: Languages,
       label: t("selection.modeTranslate"),
-      color: "text-blue-600",
+      color: "text-info",
     },
-    ai: { icon: Sparkles, label: t("selection.modeAi"), color: "text-purple-600" },
+    ai: { icon: Sparkles, label: t("selection.modeAi"), color: "text-primary" },
   });
 
   onMount(() => {

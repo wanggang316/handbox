@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
-  import RoundButton from "./RoundButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import { t } from "$lib/i18n";
 
   // 定义操作按钮类型
@@ -99,37 +99,31 @@
       <!-- 多个操作按钮：垂直排列 -->
       <div class="flex flex-col gap-2 px-6 pt-2 pb-4">
         {#each actions as action}
-          <RoundButton
-            customClass="w-full"
-            label={action.label}
-            size="h-9"
-            fontSize="text-sm"
+          <Button
+            class="w-full"
+            size="md"
             variant={action.style ?? "primary"}
             disabled={isLoading}
             onclick={() => handleActionClick(action)}
-          />
+          >{action.label}</Button>
         {/each}
       </div>
     {:else}
       <!-- 默认两个按钮：水平排列 -->
       <div class="flex items-center justify-center gap-4 px-6 pt-2 pb-4">
-        <RoundButton
-          customClass="w-22"
-          label={resolvedCancelText}
-          size="h-8"
-          fontSize="text-sm"
+        <Button
+          class="w-22"
+          size="md"
           variant="secondary"
           onclick={handleCancel}
-        />
-        <RoundButton
-          customClass="w-22"
-          size="h-8"
-          fontSize="text-sm"
-          label={isLoading ? t("ui.processing") : resolvedConfirmText}
+        >{resolvedCancelText}</Button>
+        <Button
+          class="w-22"
+          size="md"
           variant={confirmButtonStyle}
           disabled={isLoading}
           onclick={handleConfirm}
-        />
+        >{isLoading ? t("ui.processing") : resolvedConfirmText}</Button>
       </div>
     {/if}
   </div>

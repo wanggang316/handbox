@@ -57,7 +57,7 @@
     border-radius: 8px;
     padding: 0.5rem 0.625rem;
     color: var(--base-content);
-    transition: background-color 0.1s ease;
+    transition: background-color var(--dur-fast) ease;
   }
   .qa-row.is-active {
     background: color-mix(in srgb, var(--base-content) 9%, transparent);

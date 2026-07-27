@@ -22,10 +22,9 @@
     Eye as EyeIcon,
   } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
-  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
-  import IconButton from "$lib/components/ui/IconButton.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import ModelInfoModal from "$lib/components/settings/ModelInfoModal.svelte";
@@ -263,15 +262,16 @@
 <!-- 粘性导航栏 - 在右侧主体区域内固定 -->
 <div class="flex flex-col h-screen">
   <header class="text-base-content py-2 px-4 flex-shrink-0">
-    <CircleButton
-      icon={ChevronLeft}
-      iconSize={22}
-      ariaLabel={t("provider.backAria")}
-      size="w-8 h-8"
+    <Button
       variant="secondary"
-      customClass="hover:text-base-content/80 z-10004 relative"
+      size="icon"
+      shape="pill"
+      ariaLabel={t("provider.backAria")}
+      class="hover:text-base-content/80 z-10004 relative"
       onclick={handleBack}
-    />
+    >
+      <ChevronLeft size={22} />
+    </Button>
   </header>
 
   <!-- 主要内容区域 -->
@@ -280,17 +280,24 @@
       <TableGroup>
         <TableBaseRow label={currentProvider.name} icon={iconSnippet}>
           <div class="flex flex-row items-center gap-4">
-            <IconButton icon={SquarePen} onclick={handleEdit} />
+            <Button variant="clear" size="icon-sm" onclick={handleEdit}>
+              <SquarePen size={20} />
+            </Button>
 
-            <IconButton
-              icon={RefreshCw}
+            <Button
+              variant="clear"
+              size="icon-sm"
               ariaLabel={t("provider.refreshModels")}
               onclick={refreshModels}
               disabled={isRefreshing}
-              customClass={`transition-transform ${isRefreshing ? "animate-spin text-primary" : ""}`}
-            />
+              class={`transition-transform ${isRefreshing ? "animate-spin text-primary" : ""}`}
+            >
+              <RefreshCw size={20} />
+            </Button>
 
-            <IconButton icon={Trash2} onclick={handleDelete} />
+            <Button variant="clear" size="icon-sm" onclick={handleDelete}>
+              <Trash2 size={20} />
+            </Button>
 
             <Toggle
               checked={formData.enabled}
@@ -422,13 +429,14 @@
                 </div>
 
                 <div class="flex items-center justify-center w-14">
-                  <IconButton
-                    icon={Info}
-                    iconSize={16}
-                    size="w-6 h-6"
+                  <Button
+                    variant="clear"
+                    size="icon-sm"
                     ariaLabel={t("provider.viewModelInfo")}
                     onclick={() => openModelInfo(model)}
-                  />
+                  >
+                    <Info size={16} />
+                  </Button>
                 </div>
               </div>
             {/each}

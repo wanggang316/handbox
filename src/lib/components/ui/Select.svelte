@@ -1,148 +1,158 @@
 <script lang="ts">
+  import { Select } from "bits-ui";
+  import { Check, ChevronsUpDown } from "@lucide/svelte";
   import type { Snippet } from "svelte";
-  import { ChevronsUpDown } from "@lucide/svelte";
   import { getFormField } from "./FormField.svelte";
+  import { cn } from "./utils";
 
   interface Option {
     value: string;
     label: string;
+    disabled?: boolean;
   }
 
   interface Props {
     label?: string;
-    value?: string | number;
-    selectedValue?: string | number; // DropDown 兼容性
+    value?: string;
+    selectedValue?: string; // DropDown 兼容别名
     options?: Option[];
     placeholder?: string;
     autoWidth?: boolean;
+    /**
+     * popover 相对触发器的水平对齐。缺省按 autoWidth 推导：紧凑触发器（autoWidth）
+     * 在本设计系统里恒靠行右侧，故右边缘对齐（end）、向左生长，避免贴窗右缘被挤偏；
+     * 全宽触发器则左对齐（start，左右边缘本就与触发器重合）。
+     */
+    align?: "start" | "center" | "end";
     disabled?: boolean;
+    /** standalone 错误态；在 FormField 内则由 FormField 接管。 */
+    invalid?: boolean;
     size?: "sm" | "md" | "lg";
     class?: string;
     onChange?: (value: string) => void;
-    onSelect?: (value: string, option: Option) => void; // DropDown 兼容性
-    showIcon?: boolean; // 是否显示下拉箭头，默认 true
+    onSelect?: (value: string, option: Option) => void; // DropDown 兼容
+    /** 自定义 trailing 图标（默认 ChevronsUpDown）。 */
     icon?: Snippet;
-    children?: Snippet;
   }
 
   let {
     label = "",
     value = $bindable(""),
-    selectedValue = $bindable(), // DropDown 兼容性
+    selectedValue = $bindable(),
     options = [],
     placeholder = "",
     autoWidth = false,
+    align,
     disabled = false,
+    invalid = false,
     size = "md",
     class: className = "",
     onChange = () => {},
     onSelect,
-    showIcon = true,
     icon,
-    children,
   }: Props = $props();
 
-  // 兼容 DropDown 的 selectedValue prop
-  const internalValue = $derived(selectedValue !== undefined ? selectedValue : value);
+  // selectedValue 优先（DropDown 兼容），否则用 value。
+  const current = $derived(
+    (selectedValue !== undefined ? selectedValue : value) ?? "",
+  );
+  const selectedLabel = $derived(
+    options.find((o) => o.value === current)?.label ?? "",
+  );
 
-  const sizeClasses = {
-    sm: "px-2 py-1 text-xs",
-    md: "px-3 py-2 text-sm",
-    lg: "px-4 py-3 text-base",
-  };
+  function handleValueChange(v: string) {
+    if (selectedValue !== undefined) selectedValue = v;
+    else value = v;
+    onChange(v);
+    if (onSelect) {
+      const opt = options.find((o) => o.value === v);
+      if (opt) onSelect(v, opt);
+    }
+  }
 
-  // 图标大小
-  const iconSizes = {
-    sm: 14,
-    md: 16,
-    lg: 18,
-  };
-
-  // 是否显示图标（自定义图标或默认图标）
-  const hasIcon = $derived(showIcon || icon);
-
-  const id = `select-${Math.random().toString(36).slice(2, 11)}`;
-
-  // FormField 内时接管 id / aria / error 态，并抑制自渲 label（容器统一提供）。
+  // FormField 内时接管 id / aria-invalid / describedby。
   const ff = getFormField();
-  const controlId = $derived(ff ? ff.id : id);
-  const invalid = $derived(ff ? ff.invalid : false);
+  const fallbackId = `select-${Math.random().toString(36).slice(2, 11)}`;
+  const controlId = $derived(ff ? ff.id : fallbackId);
+  const isInvalid = $derived(ff ? ff.invalid : invalid);
   const describedby = $derived(ff ? ff.describedby : undefined);
   const showOwnLabel = $derived(!ff && !!label);
 
-  function handleChange(e: Event) {
-    const target = e.currentTarget as HTMLSelectElement;
-    const newValue = target.value;
+  const triggerSize = {
+    sm: "h-7 px-2 text-xs",
+    md: "h-8 px-3 text-sm",
+    lg: "h-10 px-4 text-base",
+  };
 
-    // 更新 value
-    if (selectedValue !== undefined) {
-      selectedValue = newValue;
-    } else {
-      value = newValue;
-    }
-
-    // 调用回调
-    onChange(newValue);
-
-    // DropDown 兼容：调用 onSelect
-    if (onSelect) {
-      const option = options.find((opt) => opt.value === newValue);
-      if (option) {
-        onSelect(newValue, option);
-      }
-    }
-  }
+  const contentAlign = $derived(align ?? (autoWidth ? "end" : "start"));
 </script>
 
-<div class="inline-flex flex-col gap-1 {className}">
+<div class={cn("inline-flex flex-col gap-1", autoWidth ? "" : "w-full", className)}>
   {#if showOwnLabel}
     <label for={controlId} class="text-sm font-medium text-base-content/80">
       {label}
     </label>
   {/if}
 
-  <div class="relative {autoWidth ? 'inline-flex' : 'w-full'}">
-    <select
+  <Select.Root
+    type="single"
+    value={current}
+    onValueChange={handleValueChange}
+    items={options}
+    {disabled}
+  >
+    <Select.Trigger
       id={controlId}
-      value={internalValue}
-      {disabled}
-      onchange={handleChange}
-      aria-invalid={invalid ? "true" : undefined}
+      aria-invalid={isInvalid ? "true" : undefined}
       aria-describedby={describedby}
-      class:is-error={invalid}
-      class="field field--soft appearance-none {autoWidth
-        ? 'w-auto min-w-fit'
-        : 'w-full'} {sizeClasses[size]} {hasIcon
-        ? size === 'sm'
-          ? 'pr-6'
-          : 'pr-8'
-        : size === 'sm'
-          ? 'pr-2'
-          : 'pr-3'} cursor-pointer"
+      class={cn(
+        "inline-flex items-center justify-between gap-1.5 rounded-md border bg-transparent whitespace-nowrap text-base-content outline-none cursor-pointer transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+        "border-[var(--field-border)] enabled:hover:border-[var(--field-border-hover)]",
+        "focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-[var(--field-border-hover)]",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        "aria-invalid:border-error aria-invalid:ring-2 aria-invalid:ring-error/20",
+        autoWidth ? "w-auto min-w-fit" : "w-full",
+        triggerSize[size],
+      )}
     >
-      {#if placeholder}
-        <option value="" disabled selected>{placeholder}</option>
+      <span class={selectedLabel ? "truncate" : "truncate text-base-content/50"}>
+        {selectedLabel || placeholder}
+      </span>
+      {#if icon}
+        {@render icon()}
+      {:else}
+        <ChevronsUpDown
+          size={size === "sm" ? 14 : 16}
+          class="shrink-0 text-base-content/50"
+        />
       {/if}
+    </Select.Trigger>
 
-      {#each options as opt (opt.value)}
-        <option value={opt.value}>{opt.label}</option>
-      {/each}
-
-      {#if children}
-        {@render children()}
-      {/if}
-    </select>
-
-    {#if hasIcon}
-      <div
-        class="absolute right-2 top-1/2 -translate-y-1/2 text-base-content/60 pointer-events-none"
+    <Select.Portal>
+      <Select.Content
+        sideOffset={6}
+        align={contentAlign}
+        collisionPadding={8}
+        class="z-[var(--z-popover)] max-h-72 min-w-[var(--bits-floating-anchor-width)] overflow-y-auto rounded-md border border-[var(--hairline)] bg-[var(--bg-card)] shadow-lg outline-none"
       >
-        {#if icon}
-          {@render icon()}
-        {:else}
-          <ChevronsUpDown size={iconSizes[size]} />
-        {/if}
-      </div>
-    {/if}
-  </div>
+        <Select.Viewport class="p-1">
+          {#each options as opt (opt.value)}
+            <Select.Item
+              value={opt.value}
+              label={opt.label}
+              disabled={opt.disabled}
+              class="relative flex cursor-pointer select-none items-center rounded-md py-1.5 pl-2 pr-8 text-sm text-base-content outline-none transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] data-highlighted:bg-base-300 data-disabled:pointer-events-none data-disabled:opacity-50"
+            >
+              {#snippet children({ selected })}
+                <span class="truncate">{opt.label}</span>
+                {#if selected}
+                  <Check size={15} class="absolute right-2 text-primary" />
+                {/if}
+              {/snippet}
+            </Select.Item>
+          {/each}
+        </Select.Viewport>
+      </Select.Content>
+    </Select.Portal>
+  </Select.Root>
 </div>

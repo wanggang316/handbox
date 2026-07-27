@@ -8,25 +8,53 @@
 - 带有 `onclick` / `onChange` 等回调的组件，优先走对应 prop。按钮类组件已统一为 runes（`$props`），事件一律走 `onclick` prop，不再支持 `on:click` 事件转发。
 - 颜色一律通过语义化 `variant` prop 表达，已移除 `bgColor` / `hoverColor` / `textColor` 这类 color-as-prop API。
 
+## 设计契约
+
+下列契约是所有 `ui/` 原子组件的横切规范；视觉与工程细则以 `docs/ui-design.md` 的 *Engineering Conventions* 一节为准，本文只做落地约束。
+
+- **样式真源**：组件通过 `ui/utils.ts` 的 `cn()` 合并类名，变体表集中在 `ui/variants.ts`（`tailwind-variants`）。`Button` 为参考实现——原子件不再各自携带 scoped `<style>` 皮肤；调用方的 `class` / `customClass` 经 `cn()` 后置覆盖，可靠压过内部变体。
+- **variant 语义化**：颜色意图只由 `variant` 表达（`primary` / `secondary` / `gray` / `ghost` / `clear` / `danger` / `accent` / `neutral`），禁止传入裸 utility 或颜色值。
+- **size 阶梯**：控件高度对齐固定阶梯 `xs`(h-6) / `sm`(h-7) / `md`(h-8~9) / `lg`(h-10)，禁止逐组件魔法高度。
+- **状态契约（全站一套）**：
+  - 焦点：`focus-visible:` 键盘焦点环（2px `primary` @ ~50% 不透明度），不用裸 `focus:`。
+  - 禁用：统一 `disabled:opacity-60 disabled:cursor-not-allowed`（`0.6` 为唯一禁用透明度）。
+  - 校验：表单控件经 `aria-invalid` + `aria-describedby` 联动行内错误节点。
+- **token 红线（禁硬编码）**：
+  - 动效：`duration-[var(--dur-fast|base|slow)]` + `ease-[var(--ease-out|standard)]`，禁 `duration-200` / `0.15s` 等裸值。
+  - 层级：`var(--z-dropdown|overlay|modal|popover|toast)`，禁 `z-[9999]` / `z-50`。
+  - 颜色：daisyUI 语义 utility（`bg-base-*` / `text-base-content` / `bg-primary` / `bg-error`…），禁裸色板（`bg-red-500` / `bg-white` / `text-gray-*`）。彩底文字用配套 `-content` token（如 `text-primary-content`），**严禁把 `base-100` 当前景**（它是 canvas 背景，作前景会跨主题反转失明）。
+- **复用文化**：业务层只组合原子组件，禁止手搓裸 `<button>` / `<input>` / 下拉菜单 / Modal 脚手架；缺件先补进 `ui/` 再复用，不 fork 本地副本。
+- **验收台**：`/settings/components` 画廊按 `variant × size × state` 双主题渲染每个原子件，是本设计系统的回归基线。
+
 ## 按钮类
-- `Button`：基础按钮。Props: `variant`（`primary` | `secondary` | `gray` | `danger` | `ghost` | `clear`）, `size`, `disabled`, `type`, `customClass`, `onclick`。
-- `RoundButton`：圆角按钮。Props: `label`, `icon`, `loading`, `variant`（`primary` | `accent` | `danger` | `secondary`）, `size`, `rounded`, `fontSize`, `customClass`, `onclick`。
-- `CircleButton`：圆形图标按钮。Props: `icon`, `iconSize`, `ariaLabel`, `variant`（`neutral`（默认）| `secondary`）, `size`, `rounded`, `customClass`, `onclick`。
-- `IconButton`：方形图标按钮。Props: `icon`, `iconSize`, `strokeWidth`, `ariaLabel`, `variant`（`ghost`，默认）, `size`, `rounded`, `customClass`, `onclick`。
-- `ArrowButton`：文本 + 下拉箭头。Props: `label`, `icon`, `iconSize`, `onclick`。
+
+只有一个按钮组件 `Button`——文字、图标、圆形、药丸按钮都由它的 `variant × size × shape` 表达（吸收了原 IconButton / CircleButton / RoundButton / ArrowButton）。图标作 `children` 传入。
+
+- `Button`：唯一按钮组件。Props:
+  - `variant`：`primary` | `secondary` | `gray` | `danger` | `accent` | `neutral` | `ghost` | `clear` | `link`（默认 `primary`）
+  - `size`：`sm` | `md` | `lg` | `icon` | `icon-sm` | `icon-lg`（`icon*` 为方形图标按钮；默认 `md`）
+  - `shape`：`default` | `pill`（`pill` = 全圆角，用于药丸 / 圆形图标按钮）
+  - `loading`（内置 spinner，自动禁用）, `disabled`, `type`, `class` / `customClass`（别名）, `ariaLabel`, `title`, `elementRef`, `onclick`, `children`
+  - 用法约定：图标按钮 = `size="icon*"` + 图标作 children；圆形 = `size="icon" shape="pill"`；药丸 = `shape="pill"`。
+- `MenuButton`：侧栏 / 列表菜单项（非通用按钮，见「导航与布局」）。
 - `TrafficLightsRedButton`：窗口关闭按钮样式。Props: `onClick`。
 
 示例：
 ```svelte
 <Button variant="primary" onclick={handleClick}>保存</Button>
-<RoundButton label="确认" variant="accent" onclick={handleConfirm} />
-<CircleButton icon={Box} ariaLabel="图标按钮" />
+<Button shape="pill" variant="accent" loading={submitting} onclick={handleConfirm}>确认</Button>
+<Button variant="clear" size="icon-sm" ariaLabel="设置" onclick={openSettings}>
+  <Settings size={16} />
+</Button>
+<Button variant="neutral" size="icon" shape="pill" ariaLabel="发送" onclick={send}>
+  <ArrowUp size={18} />
+</Button>
 ```
 
 ## 表单类
 - `Input`：文本输入框。Props: `label`, `placeholder`, `type`, `value`（`$bindable`）, `onInput`, `disabled`, `required`, `error`。`error` 非空时显示行内错误文案并联动 `aria-invalid` / `aria-describedby`；`required` 渲染 `*` 标记并设 `aria-required`。
 - `Textarea`：多行输入。Props: `value`, `placeholder`, `rows`, `disabled`, `readonly`, `maxlength`, `minlength`, `required`, `showCharCount`。
-- `Select`：下拉框。Props: `options`, `value` / `selectedValue`, `placeholder`, `autoWidth`, `disabled`, `size`, `onChange` / `onSelect`。
+- `Select`：下拉框。**全自定义样式**（基于 bits-ui，非原生 `<select>`——展开列表也走设计系统皮肤，双主题一致）。Props: `options`（`{ value, label, disabled? }[]`）, `value` / `selectedValue`（bindable）, `placeholder`, `autoWidth`, `disabled`, `invalid`（FormField 外的独立错误态）, `size`（`sm`|`md`|`lg`）, `align`（popover 水平对齐 `start`|`center`|`end`；缺省按 `autoWidth` 推导——紧凑触发器右对齐、全宽左对齐）, `onChange` / `onSelect`, `icon`（自定义 trailing 图标 snippet）。选项内容只由 `options` 提供，不再接受 `<option>` children。
 - `Toggle`：开关。Props: `checked`, `onChange`, `onChangeBefore`, `id`, `disabled`。
 - `Slider`：滑杆。Props: `value`, `min`, `max`, `step`, `label`, `formatValue`, `description`。
 - `LabeledSlider`：带左右标签与刻度。Props: `value`, `min`, `max`, `step`, `leftLabel`, `rightLabel`, `scaleMarks`, `showValue`, `showScaleMarks`。

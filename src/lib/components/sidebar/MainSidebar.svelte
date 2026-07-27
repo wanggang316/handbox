@@ -10,6 +10,7 @@
     Bot,
     Settings,
     User,
+    LogIn,
     LogOut,
     Download,
     Clock,
@@ -45,6 +46,7 @@
   let showUserMenu = $state(false);
   let userMenuX = $state(0);
   let userMenuY = $state(0);
+  let userMenuWidth = $state(0);
   let userMenuTrigger: HTMLDivElement | null = null;
 
   // 设置页在主窗口内渲染，直接路由跳转。
@@ -61,13 +63,12 @@
       return;
     }
 
-    if (event instanceof MouseEvent) {
-      userMenuX = event.clientX;
-      userMenuY = event.clientY;
-    } else if (userMenuTrigger) {
+    // 锚定到侧边栏用户区域：左对齐、宽度与内容区一致，从上方弹出
+    if (userMenuTrigger) {
       const rect = userMenuTrigger.getBoundingClientRect();
-      userMenuX = rect.left;
+      userMenuX = rect.left + 8;
       userMenuY = rect.top;
+      userMenuWidth = rect.width - 16;
     }
     showUserMenu = true;
   }
@@ -118,7 +119,7 @@
       icon={Clock}
       iconSize={16}
       isActive={currentRoute === "/jobs"}
-      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content font-normal"
       onclick={() => handleJobsClick()}
     />
     <MenuButton
@@ -126,7 +127,7 @@
       icon={Bot}
       iconSize={16}
       isActive={currentRoute === "/agents"}
-      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content/70 hover:text-base-content font-normal"
+      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content font-normal"
       onclick={() => handleAgentClick()}
     />
   </div>
@@ -165,13 +166,13 @@
 
   {#if showUserMenu}
     <div
-      class="user-context-menu fixed z-[10020] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
-      style="left: {userMenuX}px; top: {userMenuY}px; transform: translateY(calc(-100% - 8px));"
+      class="user-context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1"
+      style="left: {userMenuX}px; top: {userMenuY}px; width: {userMenuWidth}px; transform: translateY(calc(-100% - 4px));"
       role="menu"
     >
       {#if currentUser.isLoggedIn}
         <button
-          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
           onclick={handleMenuAccount}
         >
           <User size={14} />
@@ -179,9 +180,10 @@
         </button>
       {:else}
         <button
-          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+          class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
           onclick={handleMenuLogin}
         >
+          <LogIn size={14} />
           {t("common.login")}
         </button>
       {/if}
@@ -189,7 +191,7 @@
       <div class="border-t border-base-300 my-1 mx-2"></div>
 
       <button
-        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-base-100 flex items-center gap-2 whitespace-nowrap"
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
         onclick={handleMenuSettings}
       >
         <Settings size={14} />

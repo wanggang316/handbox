@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from "svelte";
 
-	import RoundButton from "../ui/RoundButton.svelte";
+	import Button from "$lib/components/ui/Button.svelte";
 	import Modal from "../ui/Modal.svelte";
 	import { t } from "$lib/i18n";
 
@@ -75,18 +75,18 @@
 
 		<!-- 底部按钮 -->
 		<div class="flex items-center justify-end gap-3 px-6 py-3">
-			<RoundButton
-				customClass="w-18"
-				label={t("common.cancel")}
+			<Button
+				class="w-18"
+				size="lg"
 				variant="secondary"
 				onclick={handleClose}
-			></RoundButton>
-			<RoundButton
-				customClass="w-18"
-				label={t("provider.confirm")}
+			>{t("common.cancel")}</Button>
+			<Button
+				class="w-18"
+				size="lg"
 				onclick={handleConfirm}
 				disabled={isLoading}
-			></RoundButton>
+			>{t("provider.confirm")}</Button>
 		</div>
 	</div>
 </Modal>

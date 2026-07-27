@@ -16,7 +16,7 @@
   import { onDestroy, tick } from "svelte";
   import { fly } from "svelte/transition";
   import { goto } from "$app/navigation";
-  import CircleButton from "$lib/components/ui/CircleButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import ModelSelectModal from "./ModelSelectModal.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { t } from "$lib/i18n";
@@ -913,24 +913,28 @@
         {/if}
       </div>
       {#if running}
-        <CircleButton
-          icon={Square}
-          iconSize={16}
-          size="w-8 h-8"
-          customClass="enabled:hover:opacity-90"
+        <Button
+          variant="neutral"
+          size="icon"
+          shape="pill"
+          class="enabled:hover:opacity-90"
           ariaLabel={t("agent.input.stop")}
           onclick={handleStop}
-        />
+        >
+          <Square size={16} />
+        </Button>
       {:else}
-        <CircleButton
-          icon={ArrowUp}
-          iconSize={18}
-          size="w-8 h-8"
-          customClass="enabled:hover:opacity-90"
+        <Button
+          variant="neutral"
+          size="icon"
+          shape="pill"
+          class="enabled:hover:opacity-90"
           ariaLabel={t("agent.input.send")}
           disabled={awaitingApproval}
           onclick={sendAgentRun}
-        />
+        >
+          <ArrowUp size={18} />
+        </Button>
       {/if}
     </div>
   </div>

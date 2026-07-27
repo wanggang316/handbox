@@ -213,7 +213,7 @@
   .sidebar-wrapper {
     flex-shrink: 0;
     min-width: 0;
-    transition: width 0s linear, margin 0.25s ease-in-out;
+    transition: width 0s linear, margin var(--dur-base) ease-in-out;
     overflow: hidden;
   }
 
@@ -224,7 +224,7 @@
   }
 
   .sidebar-wrapper:not(.dragging) {
-    transition: width 0.25s ease-in-out, margin 0.25s ease-in-out;
+    transition: width var(--dur-base) ease-in-out, margin var(--dur-base) ease-in-out;
   }
 
   .main-content {
@@ -232,7 +232,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    transition: width 0.25s ease-in-out;
+    transition: width var(--dur-base) ease-in-out;
     /* Linear 主布局：内容卡贴 top/right/bottom 三边窗口，左侧 hairline 边 + 两角圆角 */
     background-color: var(--bg-card);
     border-left: 1px solid var(--hairline);

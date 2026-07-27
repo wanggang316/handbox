@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from "$lib/components/ui/Modal.svelte";
-  import RoundButton from "$lib/components/ui/RoundButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import { updateState } from "$lib/states/update.svelte";
   import { t } from "$lib/i18n";
   import { Download } from "@lucide/svelte";
@@ -68,7 +68,7 @@
         <div class="h-1.5 w-full overflow-hidden rounded-full bg-base-300">
           {#if hasTotal}
             <div
-              class="h-full rounded-full bg-primary transition-[width] duration-150"
+              class="h-full rounded-full bg-primary transition-[width] duration-[var(--dur-base)]"
               style={`width:${percent}%`}
             ></div>
           {:else}
@@ -80,24 +80,20 @@
 
     <!-- 操作按钮 -->
     <div class="flex items-center justify-end gap-3">
-      <RoundButton
-        label={t("update.remindLater")}
-        size="h-8"
-        fontSize="text-sm"
+      <Button
+        size="md"
         variant="secondary"
-        customClass="px-5"
+        class="px-5"
         disabled={downloading}
         onclick={handleLater}
-      />
-      <RoundButton
-        label={downloading ? t("update.updating") : t("update.updateNow")}
-        size="h-8"
-        fontSize="text-sm"
+      >{t("update.remindLater")}</Button>
+      <Button
+        size="md"
         variant="primary"
-        customClass="px-5"
+        class="px-5"
         disabled={downloading}
         onclick={handleUpdateNow}
-      />
+      >{downloading ? t("update.updating") : t("update.updateNow")}</Button>
     </div>
   </div>
 </Modal>

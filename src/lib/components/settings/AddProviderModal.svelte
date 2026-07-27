@@ -10,7 +10,7 @@
   import TableGroup from "../ui/table/TableGroup.svelte";
   import TextRow from "../ui/table/TextRow.svelte";
   import SelectRow from "../ui/table/SelectRow.svelte";
-  import RoundButton from "../ui/RoundButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
   import Modal from "../ui/Modal.svelte";
   import { toastActions } from "$lib/states/toast.svelte";
   import { showAppError } from "$lib/utils";
@@ -249,19 +249,19 @@
 
     <!-- 底部按钮：CTA 走默认 primary（薰衣草紫），取消用 surface-2 lift -->
     <div class="flex items-center justify-end gap-3 px-5 py-3">
-      <RoundButton
-        customClass="w-18"
-        label={t("common.cancel")}
+      <Button
+        class="w-18"
+        size="lg"
         variant="secondary"
         onclick={handleClose}
-      ></RoundButton>
-      <RoundButton
-        customClass="w-18"
-        label={isEditMode ? t("common.save") : t("provider.confirm")}
+      >{t("common.cancel")}</Button>
+      <Button
+        class="w-18"
+        size="lg"
         onclick={handleConfirm}
         disabled={isLoading || !canSave}
         loading={isLoading}
-      ></RoundButton>
+      >{isEditMode ? t("common.save") : t("provider.confirm")}</Button>
     </div>
   </div>
 </Modal>

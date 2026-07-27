@@ -54,7 +54,7 @@
     onmouseenter={show}
     onmouseleave={hide}
     style={tooltipStyle}
-    class="fixed z-[9999] w-64 -translate-x-1/2 -translate-y-full rounded-lg border border-base-300 bg-base-100 p-3 shadow-lg"
+    class="fixed z-[var(--z-popover)] w-64 -translate-x-1/2 -translate-y-full rounded-lg border border-base-300 bg-base-100 p-3 shadow-lg"
     transition:fly={{ y: 8, duration: 200, opacity: 0 }}
   >
     <p

@@ -189,12 +189,9 @@
     label={t("jobs.target.kindLabel")}
     value={target.kind}
     onChange={handleKindChange}
+    options={KIND_ITEMS}
     class="w-full"
-  >
-    {#each KIND_ITEMS as item (item.value)}
-      <option value={item.value}>{item.label}</option>
-    {/each}
-  </Select>
+  />
 
   {#if promptTarget}
     <!-- Prompt：模型（弹窗选择，成对写入 provider/model）+ prompt 文本 -->
@@ -256,28 +253,14 @@
           <span>{t("jobs.target.agentEmpty")}</span>
         </div>
       {:else}
-        <!-- 样式对齐 Select（field--soft 浅底 + 右侧上下箭头），与 Target type 一致 -->
-        <div class="relative w-full">
-          <select
-            aria-label={t("jobs.target.agentLabel")}
-            aria-invalid={agentInvalid}
-            value={agentTarget.agentId}
-            onchange={(e) =>
-              handleAgentChange((e.currentTarget as HTMLSelectElement).value)}
-            class="field field--soft w-full cursor-pointer appearance-none px-3 py-2 pr-8 text-sm"
-            class:is-error={agentInvalid}
-          >
-            <option value="" disabled>{t("jobs.target.agentSelect")}</option>
-            {#each agents as agent (agent.id)}
-              <option value={agent.id}>{agent.name}</option>
-            {/each}
-          </select>
-          <div
-            class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-base-content/60"
-          >
-            <ChevronsUpDown size={14} />
-          </div>
-        </div>
+        <Select
+          value={agentTarget.agentId}
+          onChange={handleAgentChange}
+          options={agents.map((a) => ({ value: a.id ?? "", label: a.name }))}
+          placeholder={t("jobs.target.agentSelect")}
+          invalid={agentInvalid}
+          class="w-full"
+        />
       {/if}
       {#if agentInvalid}
         <span class="text-xs text-error">{t("jobs.target.agentRequired")}</span>
