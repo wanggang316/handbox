@@ -55,7 +55,7 @@ export interface BuildQuickSessionInput {
  *
  * The request mirrors `AgentProjectList.handleCreateSessionInProject`:
  *  - `modelId` / `providerId` come from the resolution (in-panel pick or default);
- *  - `enabledTools` = `defaultEnabledTools`, falling back to all 7 built-ins when
+ *  - `enabledTools` = `defaultEnabledTools`, falling back to all built-ins when
  *    settings have not loaded;
  *  - NO `projectId` → the backend gives the session a sandbox working dir.
  */

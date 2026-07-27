@@ -30,6 +30,7 @@ use crate::services::agent_permission::{
 };
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::skills::Skill;
+use crate::services::web_search;
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest, AgentService,
     AgentSessionService, CodingRunSink, GenUiService, McpService, ProviderService, SettingsService,
@@ -391,7 +392,31 @@ async fn assemble_and_drive(
         mcp.build_mcp_agent_tools(&servers)
     };
 
-    let mut session = build_agent_session(&config, Some(approval_emitter), mcp_tools)?;
+    // Web-search tool: session opt-in via `enabled_tools` + a configured API
+    // key. Injected through `extra_tools` (like the MCP tools) because it is
+    // not a coding-agent built-in `select_enabled_tools` knows about. No key →
+    // the tool is simply not registered, so the model never sees it and the
+    // run proceeds without it.
+    let mut extra_tools = mcp_tools;
+    if config
+        .enabled_tools
+        .iter()
+        .any(|t| t == web_search::WEB_SEARCH_TOOL_NAME)
+    {
+        let web_search_settings = settings.get_settings()?.agent.web_search;
+        if web_search_settings.api_key.trim().is_empty() {
+            tracing::debug!(
+                "[agent_run_stream] web_search enabled but no API key configured; tool skipped"
+            );
+        } else {
+            extra_tools.push(web_search::create_web_search_tool(
+                web_search_settings.provider,
+                web_search_settings.api_key,
+            ));
+        }
+    }
+
+    let mut session = build_agent_session(&config, Some(approval_emitter), extra_tools)?;
 
     // --- (3) 续聊上下文（M3: JSONL 为权威源）。
     //

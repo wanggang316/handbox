@@ -62,6 +62,10 @@ export const settingsZh = {
   // Agent 工具页
   "settings.agentTools.title": "Agent 工具",
   "settings.agentTools.description": "新建 Agent 会话默认启用的工具。已存在的会话不受影响。",
+  "settings.agentTools.webSearch.title": "网络搜索",
+  "settings.agentTools.webSearch.provider": "搜索服务商",
+  "settings.agentTools.webSearch.apiKey": "API Key",
+  "settings.agentTools.webSearch.apiKeyPlaceholder": "tvly-...",
 
   // 技能页
   "settings.skills.title": "技能",

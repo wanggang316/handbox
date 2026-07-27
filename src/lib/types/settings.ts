@@ -74,10 +74,17 @@ export interface QuickToolsSettings {
   selectionBlacklist: SelectionBlacklist;
 }
 
+// Web 搜索设置（agent web_search 工具的搜索服务商配置）
+export interface WebSearchSettings {
+  provider: string; // 搜索服务商标识（当前仅 "tavily"）
+  apiKey: string; // 搜索服务商 API Key（空串 = 未配置，工具不注册）
+}
+
 // Agent 设置
 export interface AgentSettings {
-  defaultEnabledTools: string[]; // 新建 Agent 会话默认启用的内置工具(coding-agent 注册名)
+  defaultEnabledTools: string[]; // 新建 Agent 会话默认启用的内置工具(注册名，含 web_search)
   defaultEditorId?: string | null; // "Open in ..." 的默认应用 target id（见 api/openIn.ts）
+  webSearch?: WebSearchSettings; // web_search 工具的搜索服务商配置（缺省 = 未配置）
 }
 
 // 快捷动作设置

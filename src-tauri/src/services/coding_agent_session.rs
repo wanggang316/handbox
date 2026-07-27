@@ -106,6 +106,8 @@ pub struct HandBoxAgentSessionConfig {
     /// tools are registered against the session (see
     /// [`select_enabled_tools`]). Following the legacy `agent_tools::build_tools`
     /// convention, an empty list means "no tool enabled" (not "all enabled").
+    /// Non-built-in names (e.g. `web_search`) are ignored here — agent_run
+    /// resolves those into `extra_tools` before construction.
     pub enabled_tools: Vec<String>,
     /// Tool names requiring approval this session: the `mcp__server__tool` names
     /// of manual-execution MCP servers. Populated by agent_run; empty default =

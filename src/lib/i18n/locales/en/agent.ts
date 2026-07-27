@@ -83,6 +83,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.tool.grep": "grep",
   "agent.tool.find": "find",
   "agent.tool.ls": "ls",
+  "agent.tool.web_search": "web_search",
 
   // Tool-call card (AgentToolCallCard)
   "agent.toolCall.executing": "Running",

@@ -67,6 +67,10 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.agentTools.title": "Agent Tools",
   "settings.agentTools.description":
     "Tools enabled by default for new Agent sessions. Existing sessions are unaffected.",
+  "settings.agentTools.webSearch.title": "Web Search",
+  "settings.agentTools.webSearch.provider": "Search provider",
+  "settings.agentTools.webSearch.apiKey": "API Key",
+  "settings.agentTools.webSearch.apiKeyPlaceholder": "tvly-...",
 
   // Skills page
   "settings.skills.title": "Skills",
