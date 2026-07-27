@@ -16,6 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.4.2] - 2026-07-28
+
+### Added
+- Agents can now search the web with a built-in Web Search tool. Choose the
+  search provider and add your API key in Settings → Agent Tools.
+
+### Changed
+- A more polished, consistent interface: buttons and dropdown menus now share
+  one refined design across the app, and the brand color has shifted to a
+  deeper blue.
+
+### Fixed
+- Menus and pop-ups no longer show mismatched colors when the app theme
+  differs from the system theme.
+- Dropdown menus now open aligned with the control that triggered them.
+- The red used for destructive actions is now easier to read in light mode.
+
+
 ## [0.4.1] - 2026-07-22
 
 ### Added
