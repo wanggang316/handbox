@@ -112,7 +112,6 @@
 
     <div class="flex justify-end gap-4">
       <Button
-        shape="pill"
         class="w-18"
         size="lg"
         variant="secondary"
@@ -120,7 +119,6 @@
       >{t("common.cancel")}</Button>
 
       <Button
-        shape="pill"
         class="w-18"
         size="lg"
         onclick={handleSave}

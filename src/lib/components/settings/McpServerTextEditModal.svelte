@@ -76,14 +76,12 @@
 		<!-- 底部按钮 -->
 		<div class="flex items-center justify-end gap-3 px-6 py-3">
 			<Button
-				shape="pill"
 				class="w-18"
 				size="lg"
 				variant="secondary"
 				onclick={handleClose}
 			>{t("common.cancel")}</Button>
 			<Button
-				shape="pill"
 				class="w-18"
 				size="lg"
 				onclick={handleConfirm}

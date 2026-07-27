@@ -81,7 +81,6 @@
     <!-- 操作按钮 -->
     <div class="flex items-center justify-end gap-3">
       <Button
-        shape="pill"
         size="md"
         variant="secondary"
         class="px-5"
@@ -89,7 +88,6 @@
         onclick={handleLater}
       >{t("update.remindLater")}</Button>
       <Button
-        shape="pill"
         size="md"
         variant="primary"
         class="px-5"

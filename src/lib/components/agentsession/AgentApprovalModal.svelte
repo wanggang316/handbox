@@ -226,21 +226,18 @@
       class="flex items-center justify-end gap-3 px-6 pt-3 pb-4 border-t border-[var(--hairline)]"
     >
       <Button
-        shape="pill"
         class="w-20"
         size="md"
         variant="secondary"
         onclick={() => onRespond(request, "deny")}
       >{t("agent.approval.deny")}</Button>
       <Button
-        shape="pill"
         class="w-24"
         size="md"
         variant="secondary"
         onclick={() => onRespond(request, "allow_once")}
       >{t("agent.approval.allowOnce")}</Button>
       <Button
-        shape="pill"
         class="w-28"
         size="md"
         variant="primary"

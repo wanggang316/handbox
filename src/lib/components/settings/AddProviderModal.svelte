@@ -250,14 +250,12 @@
     <!-- 底部按钮：CTA 走默认 primary（薰衣草紫），取消用 surface-2 lift -->
     <div class="flex items-center justify-end gap-3 px-5 py-3">
       <Button
-        shape="pill"
         class="w-18"
         size="lg"
         variant="secondary"
         onclick={handleClose}
       >{t("common.cancel")}</Button>
       <Button
-        shape="pill"
         class="w-18"
         size="lg"
         onclick={handleConfirm}
