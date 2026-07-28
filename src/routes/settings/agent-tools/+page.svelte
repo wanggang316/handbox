@@ -18,15 +18,14 @@
   const webSearchProviderOptions = [{ value: "tavily", label: "Tavily" }];
 
   // 分组展示：第一组只列 coding-agent 内置工具；web_search 与其服务商配置同组；
-  // 其余扩展工具（render_card / render_app / skill）在「扩展工具」组，各带一行说明。
+  // render_card / render_app 归「UI 扩展」组；skill 单独一组。各带一行说明。
   const EXTENSION_IDS = ["web_search", "render_card", "render_app", "skill"];
   const codingAgentTools = BUILTIN_TOOLS.filter(
     (tool) => !EXTENSION_IDS.includes(tool.id),
   );
-  const extensionTools = $derived([
+  const uiExtensionTools = $derived([
     { id: "render_card", label: t("agent.tool.render_card"), desc: t("settings.agentTools.renderCardDesc") },
     { id: "render_app", label: t("agent.tool.render_app"), desc: t("settings.agentTools.renderAppDesc") },
-    { id: "skill", label: t("agent.tool.skill"), desc: t("settings.agentTools.skillDesc") },
   ]);
 
   function webSearchSnapshot(provider: string, apiKey: string): string {
@@ -150,12 +149,12 @@
 
   <div class="flex flex-col gap-y-1 mt-2">
     <p class="text-sm font-medium text-base-content">
-      {t("settings.agentTools.extensions.title")}
+      {t("settings.agentTools.uiExtensions.title")}
     </p>
   </div>
 
   <TableGroup>
-    {#each extensionTools as tool (tool.id)}
+    {#each uiExtensionTools as tool (tool.id)}
       <SwitchRow
         label={tool.label}
         description={tool.desc}
@@ -163,5 +162,20 @@
         onChange={(checked) => handleToggle(tool.id, checked)}
       />
     {/each}
+  </TableGroup>
+
+  <div class="flex flex-col gap-y-1 mt-2">
+    <p class="text-sm font-medium text-base-content">
+      {t("settings.agentTools.skill.title")}
+    </p>
+  </div>
+
+  <TableGroup>
+    <SwitchRow
+      label={t("agent.tool.skill")}
+      description={t("settings.agentTools.skillDesc")}
+      checked={isEnabled("skill")}
+      onChange={(checked) => handleToggle("skill", checked)}
+    />
   </TableGroup>
 </div>
