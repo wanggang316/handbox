@@ -28,10 +28,9 @@ use crate::models::AppError;
 use crate::services::agent_permission::{
     respond_to_approval, ApprovalDecision, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
 };
-use crate::services::agent_tools;
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
+use crate::services::extensions::{render_app, render_card, web_search};
 use crate::services::skills::Skill;
-use crate::services::web_search;
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest, AgentService,
     AgentSessionService, CodingRunSink, GenUiService, McpService, ProviderService, SettingsService,
@@ -426,16 +425,16 @@ async fn assemble_and_drive(
     if config
         .enabled_tools
         .iter()
-        .any(|t| t == agent_tools::TOOL_RENDER_CARD)
+        .any(|t| t == render_card::TOOL_RENDER_CARD)
     {
-        extra_tools.push(agent_tools::make_render_card_tool());
+        extra_tools.push(render_card::make_render_card_tool());
     }
     if config
         .enabled_tools
         .iter()
-        .any(|t| t == agent_tools::TOOL_RENDER_APP)
+        .any(|t| t == render_app::TOOL_RENDER_APP)
     {
-        extra_tools.push(agent_tools::make_render_app_tool());
+        extra_tools.push(render_app::make_render_app_tool());
     }
 
     let mut session = build_agent_session(&config, Some(approval_emitter), extra_tools)?;

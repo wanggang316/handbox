@@ -1,4 +1,4 @@
-//! web_search — HandBox's built-in web-search agent tool.
+//! web_search — HandBox's web-search extension tool.
 //!
 //! Constructed HandBox-side (like the MCP tools) and injected into the
 //! coding-agent session via `build_agent_session`'s `extra_tools` — it is NOT

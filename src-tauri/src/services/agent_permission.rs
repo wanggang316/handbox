@@ -38,7 +38,7 @@
 //!
 //! HOW THE BOUNDARY IS JUDGED
 //! --------------------------
-//! Path containment reuses [`agent_tools::resolve_in_sandbox`], HandBox's
+//! Path containment reuses [`resolve_in_sandbox`], HandBox's
 //! existing strict resolver: it rejects `~`, collapses `..`, canonicalizes
 //! (resolving symlinks), and verifies component-wise containment under the
 //! canonical root. The `Cancel` reason is GENERIC — it never echoes the
@@ -57,7 +57,7 @@ use hand_coding_agent::{
 };
 use tokio::sync::oneshot;
 
-use crate::services::agent_tools::resolve_in_sandbox;
+use crate::services::sandbox::resolve_in_sandbox;
 
 /// Emitter handle the [`PermissionExtension`] uses to push an approval request
 /// to the frontend. Constructed by the IPC layer to wrap `window.emit(

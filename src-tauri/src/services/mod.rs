@@ -6,11 +6,11 @@ pub mod agent_permission;
 pub mod agent_project;
 pub mod agent_run_types;
 pub mod agent_session;
-pub mod agent_tools;
 pub mod auth;
 pub mod catalog_sync;
 pub mod coding_agent_runtime;
 pub mod coding_agent_session;
+pub mod extensions;
 pub mod genui;
 pub mod hand_ai_catalog;
 pub mod job;
@@ -21,6 +21,7 @@ pub mod model;
 pub mod model_runtime;
 pub mod provider;
 pub mod quick_action;
+pub mod sandbox;
 pub mod selection;
 pub mod title_gen;
 pub mod settings;
@@ -28,7 +29,6 @@ pub mod skill_service;
 pub mod skills;
 pub mod storage;
 pub mod user_session;
-pub mod web_search;
 
 // 重新导出服务
 pub use crate::storage::Database;

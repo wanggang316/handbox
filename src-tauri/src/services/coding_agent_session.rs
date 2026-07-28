@@ -32,9 +32,8 @@ use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
 use crate::services::agent_permission::{ApprovalEmitter, PermissionExtension, SandboxExtension};
-use crate::services::agent_tools;
+use crate::services::extensions;
 use crate::services::model_runtime::{self, ChatOptions};
-use crate::services::web_search;
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
 /// HandBox-side inputs needed to construct a coding-agent session.
@@ -105,7 +104,7 @@ pub struct HandBoxAgentSessionConfig {
     pub thinking_level: Option<String>,
     /// HandBox's per-session enabled-tool list: coding-agent registered names
     /// (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`) plus the extension-tool
-    /// ids ([`EXTENSION_TOOL_IDS`]). Only the named built-ins are registered
+    /// ids ([`extensions::EXTENSION_TOOL_IDS`]). Only the named built-ins are registered
     /// against the session (see [`select_enabled_tools`]); an empty list means
     /// "no tool enabled" (not "all enabled"). Extension ids are resolved
     /// elsewhere: `web_search`/`render_card`/`render_app` into `extra_tools` by
@@ -221,7 +220,7 @@ pub fn build_agent_session(
             || !config
                 .enabled_tools
                 .iter()
-                .any(|t| t == agent_tools::TOOL_SKILL),
+                .any(|t| t == extensions::TOOL_SKILL),
         extra_skill_dirs: Vec::new(),
         // Sandbox: persist under the Tauri app data dir, never ~/.hand. The
         // resume path resolves `<base_dir>/sessions/<flattened-cwd>/<id>.jsonl`,
@@ -273,18 +272,6 @@ pub fn build_agent_session(
     Ok(session)
 }
 
-/// Extension-tool ids that legitimately ride `enabled_tools` but are NOT
-/// coding-agent built-ins, so [`select_enabled_tools`] must not warn on them:
-/// `web_search` / `render_card` / `render_app` are injected via `extra_tools`
-/// by agent_run, `skill` gates the coding-agent skill pipeline in
-/// [`build_agent_session`].
-pub const EXTENSION_TOOL_IDS: [&str; 4] = [
-    web_search::WEB_SEARCH_TOOL_NAME,
-    agent_tools::TOOL_RENDER_CARD,
-    agent_tools::TOOL_RENDER_APP,
-    agent_tools::TOOL_SKILL,
-];
-
 /// Translate a single persisted `enabled_tools` entry to its coding-agent
 /// registered name, accounting for sessions MIGRATED from the pre-M4 SQLite
 /// store (M3 migration kept their `enabled_tools` verbatim, by the OLD native
@@ -329,7 +316,7 @@ fn remap_legacy_tool_name(name: &str) -> &str {
 /// pre-M4 SQLite store (whose `enabled_tools` carry OLD native names like
 /// `read_file` / `list_directory`) enables the expected coding-agent built-ins
 /// (`read` / `ls`) instead of silently losing all its tools. Extension-tool ids
-/// ([`EXTENSION_TOOL_IDS`]) are skipped silently — they are legitimate
+/// ([`extensions::EXTENSION_TOOL_IDS`]) are skipped silently — they are legitimate
 /// `enabled_tools` entries resolved outside this filter. Old names with no
 /// counterpart (`web_fetch`) and genuinely unknown names contribute no tool —
 /// they are ignored with a `warn` log rather than failing construction.
@@ -344,7 +331,7 @@ pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
     let mut wanted: Vec<&str> = enabled
         .iter()
         .map(|name| remap_legacy_tool_name(name.as_str()))
-        .filter(|name| !EXTENSION_TOOL_IDS.contains(name))
+        .filter(|name| !extensions::EXTENSION_TOOL_IDS.contains(name))
         .collect();
 
     let selected: Vec<AgentTool> = create_default_tools(cwd)
@@ -715,7 +702,7 @@ mod tests {
     fn extension_tool_ids_select_no_builtin() {
         let cwd = TempDir::new().unwrap();
         let mut enabled: Vec<&str> = vec!["read"];
-        enabled.extend(EXTENSION_TOOL_IDS);
+        enabled.extend(extensions::EXTENSION_TOOL_IDS);
         let names = tool_names(cwd.path(), &enabled);
         assert_eq!(
             names,
