@@ -109,6 +109,12 @@
     </p>
   </div>
 
+  <div class="flex flex-col gap-y-1">
+    <p class="text-sm font-medium text-base-content">
+      {t("settings.agentTools.system.title")}
+    </p>
+  </div>
+
   <TableGroup>
     {#each codingAgentTools as tool (tool.id)}
       <SwitchRow
