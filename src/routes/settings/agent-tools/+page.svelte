@@ -17,8 +17,16 @@
 
   const webSearchProviderOptions = [{ value: "tavily", label: "Tavily" }];
 
-  // web_search 与其服务商配置同组展示；第一组只列 coding-agent 内置工具。
-  const codingAgentTools = BUILTIN_TOOLS.filter((tool) => tool.id !== "web_search");
+  // 分组展示：第一组只列 coding-agent 内置工具；web_search 与其服务商配置同组；
+  // render_card / render_app 归「UI 扩展」组；skill 单独一组。各带一行说明。
+  const EXTENSION_IDS = ["web_search", "render_card", "render_app", "skill"];
+  const codingAgentTools = BUILTIN_TOOLS.filter(
+    (tool) => !EXTENSION_IDS.includes(tool.id),
+  );
+  const uiExtensionTools = $derived([
+    { id: "render_card", label: t("agent.tool.render_card"), desc: t("settings.agentTools.renderCardDesc") },
+    { id: "render_app", label: t("agent.tool.render_app"), desc: t("settings.agentTools.renderAppDesc") },
+  ]);
 
   function webSearchSnapshot(provider: string, apiKey: string): string {
     return JSON.stringify({ provider, apiKey });
@@ -101,6 +109,12 @@
     </p>
   </div>
 
+  <div class="flex flex-col gap-y-1">
+    <p class="text-sm font-medium text-base-content">
+      {t("settings.agentTools.system.title")}
+    </p>
+  </div>
+
   <TableGroup>
     {#each codingAgentTools as tool (tool.id)}
       <SwitchRow
@@ -137,5 +151,37 @@
         bind:value={webSearchApiKey}
       />
     {/if}
+  </TableGroup>
+
+  <div class="flex flex-col gap-y-1 mt-2">
+    <p class="text-sm font-medium text-base-content">
+      {t("settings.agentTools.uiExtensions.title")}
+    </p>
+  </div>
+
+  <TableGroup>
+    {#each uiExtensionTools as tool (tool.id)}
+      <SwitchRow
+        label={tool.label}
+        description={tool.desc}
+        checked={isEnabled(tool.id)}
+        onChange={(checked) => handleToggle(tool.id, checked)}
+      />
+    {/each}
+  </TableGroup>
+
+  <div class="flex flex-col gap-y-1 mt-2">
+    <p class="text-sm font-medium text-base-content">
+      {t("settings.agentTools.skill.title")}
+    </p>
+  </div>
+
+  <TableGroup>
+    <SwitchRow
+      label={t("agent.tool.skill")}
+      description={t("settings.agentTools.skillDesc")}
+      checked={isEnabled("skill")}
+      onChange={(checked) => handleToggle("skill", checked)}
+    />
   </TableGroup>
 </div>

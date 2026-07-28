@@ -182,8 +182,8 @@ fn default_web_search_provider() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSettings {
-    /// 新建 Agent 会话默认启用的内置工具(coding-agent 注册名 + `web_search`)。
-    /// 默认全 8 个。
+    /// 新建 Agent 会话默认启用的工具：7 个 coding-agent 内置 + HandBox 扩展工具
+    /// (`web_search` / `render_card` / `render_app` / `skill`)。默认全开。
     #[serde(default = "default_agent_enabled_tools")]
     pub default_enabled_tools: Vec<String>,
     /// "Open in ..." 的默认应用 target id（见 commands/open_in.rs）。
@@ -215,6 +215,9 @@ fn default_agent_enabled_tools() -> Vec<String> {
         "find",
         "ls",
         "web_search",
+        "render_card",
+        "render_app",
+        "skill",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -427,9 +430,10 @@ mod tests {
         assert_eq!(value["webSearch"]["apiKey"], "tvly-secret");
     }
 
-    // The default enabled-tool list carries web_search after the 7 built-ins.
+    // The default enabled-tool list carries the extension tools after the 7
+    // built-ins.
     #[test]
-    fn default_agent_tools_include_web_search() {
+    fn default_agent_tools_include_extension_tools() {
         assert_eq!(
             AgentSettings::default().default_enabled_tools,
             vec![
@@ -440,7 +444,10 @@ mod tests {
                 "grep",
                 "find",
                 "ls",
-                "web_search"
+                "web_search",
+                "render_card",
+                "render_app",
+                "skill"
             ]
         );
     }

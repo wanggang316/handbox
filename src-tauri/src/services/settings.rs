@@ -707,7 +707,7 @@ mod tests {
     }
 
     // Fresh environment: agent.defaultEnabledTools defaults to all 7 builtin
-    // tools plus web_search, in registration order.
+    // tools plus the extension tools, in registration order.
     #[test]
     fn fresh_env_defaults_to_all_agent_tools() {
         let dir = TempDir::new().unwrap();
@@ -722,7 +722,10 @@ mod tests {
                 "grep",
                 "find",
                 "ls",
-                "web_search"
+                "web_search",
+                "render_card",
+                "render_app",
+                "skill"
             ]
         );
     }
@@ -752,7 +755,10 @@ mod tests {
                 "grep",
                 "find",
                 "ls",
-                "web_search"
+                "web_search",
+                "render_card",
+                "render_app",
+                "skill"
             ]
         );
     }
@@ -787,7 +793,10 @@ mod tests {
                 "grep",
                 "find",
                 "ls",
-                "web_search"
+                "web_search",
+                "render_card",
+                "render_app",
+                "skill"
             ]
         );
     }

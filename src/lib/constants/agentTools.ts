@@ -1,7 +1,7 @@
 /**
  * Built-in agent tools — the single source of truth for the tools'
  * registration names, ordering and display labels: the 7 coding-agent
- * built-ins plus HandBox's own `web_search`. Consumed by both the
+ * built-ins plus HandBox's extension tools. Consumed by both the
  * "Agent 工具" settings page (global default) and the per-session tool popover
  * in AgentInput, so the two views always list the same tools in the same order.
  *
@@ -19,6 +19,9 @@ import {
   FileSearch,
   FolderTree,
   Globe,
+  PanelTop,
+  AppWindow,
+  Sparkles,
 } from "@lucide/svelte";
 import type { MessageKey } from "$lib/i18n";
 import { BUILTIN_TOOL_IDS } from "./builtinToolIds";
@@ -42,6 +45,9 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   { id: "find", labelKey: "agent.tool.find", icon: FileSearch, requiresWorkingDir: true },
   { id: "ls", labelKey: "agent.tool.ls", icon: FolderTree, requiresWorkingDir: true },
   { id: "web_search", labelKey: "agent.tool.web_search", icon: Globe, requiresWorkingDir: false },
+  { id: "render_card", labelKey: "agent.tool.render_card", icon: PanelTop, requiresWorkingDir: false },
+  { id: "render_app", labelKey: "agent.tool.render_app", icon: AppWindow, requiresWorkingDir: false },
+  { id: "skill", labelKey: "agent.tool.skill", icon: Sparkles, requiresWorkingDir: false },
 ];
 
 /**

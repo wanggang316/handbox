@@ -1,7 +1,9 @@
 /**
  * Built-in agent tool ids — the icon-free source of truth for the tools'
  * registration names in canonical order: the 7 coding-agent built-ins plus
- * HandBox's own `web_search` (registered backend-side via `extra_tools`).
+ * HandBox's extension tools (`web_search` / `render_card` / `render_app` are
+ * registered backend-side via `extra_tools`; `skill` gates the coding-agent
+ * skill pipeline).
  *
  * Split out of `agentTools.ts` so pure, icon-free modules (e.g. the
  * quick-action session-request builder and its Node-environment Vitest suite)
@@ -23,4 +25,7 @@ export const BUILTIN_TOOL_IDS: string[] = [
   "find",
   "ls",
   "web_search",
+  "render_card",
+  "render_app",
+  "skill",
 ];

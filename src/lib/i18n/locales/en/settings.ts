@@ -71,6 +71,12 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.agentTools.webSearch.provider": "Search provider",
   "settings.agentTools.webSearch.apiKey": "API Key",
   "settings.agentTools.webSearch.apiKeyPlaceholder": "tvly-...",
+  "settings.agentTools.system.title": "System",
+  "settings.agentTools.uiExtensions.title": "UI",
+  "settings.agentTools.skill.title": "Skill",
+  "settings.agentTools.renderCardDesc": "Render interactive HTML cards inline in the conversation",
+  "settings.agentTools.renderAppDesc": "Build full HTML apps in a side panel (preview + source)",
+  "settings.agentTools.skillDesc": "Let the model discover and load skills on demand",
 
   // Skills page
   "settings.skills.title": "Skills",
