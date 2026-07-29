@@ -45,7 +45,7 @@
   async function handleOpenChangelog(): Promise<void> {
     try {
       await openInBrowser(
-        "https://github.com/wanggang/handbox/blob/main/CHANGELOG.md"
+        "https://github.com/wanggang316/handbox/blob/main/CHANGELOG.md"
       );
     } catch (error) {
       console.error("Failed to open changelog:", error);
