@@ -22,6 +22,17 @@
     if (path) navigationState.remember(path);
   });
 
+  // WebView 自带的右键菜单是浏览器语义（Look Up / Translate / Search with
+  // Google / Inspect Element），出现在桌面应用里既突兀又暴露 web 外壳。全局压掉，
+  // 只在可编辑控件里放行——那里的剪切 / 拷贝 / 粘贴 / 拼写建议是真实需求。
+  // 应用自己的右键菜单（如 sidebar 会话行）在各自 handler 里已 preventDefault，
+  // 不经过这里。开发期查元素改用 ⌥⌘I。
+  function handleContextMenu(event: MouseEvent) {
+    const target = event.target as Element | null;
+    if (target?.closest("input, textarea, [contenteditable='true']")) return;
+    event.preventDefault();
+  }
+
   onMount(() => {
     if (!browser) {
       return () => {
@@ -126,6 +137,8 @@
     };
   });
 </script>
+
+<svelte:window oncontextmenu={handleContextMenu} />
 
 {@render children()}
 
