@@ -725,18 +725,18 @@ pre.code-block--compact {
 .field:hover:not(:disabled):not(:focus):not(:focus-visible) {
   border-color: var(--field-border-hover);
 }
+/* focus 不改主色、不打 ring：可编辑控件被鼠标点击也算 :focus-visible，主色描边会在
+   正常输入的全程亮着，观感上就是一圈「多出来的边框」。文本控件的焦点指示交给光标，
+   这里只把边框提到 hover 强度。没有光标的控件（Button / Select 触发器 / Checkbox /
+   Radio）保留各自的键盘焦点环——那只在 Tab 导航时出现。 */
 .field:focus,
 .field:focus-visible {
   outline: none;
-  border-color: var(--field-focus);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+  border-color: var(--field-border-hover);
 }
+/* 错误态排在 focus 之后：同特异性、后来居上，聚焦时红色描边不被 hover 灰盖掉。 */
 .field.is-error {
   border-color: var(--field-error);
-}
-.field.is-error:focus,
-.field.is-error:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-error) 30%, transparent);
 }
 .field:disabled {
   opacity: 0.5;
@@ -750,6 +750,11 @@ pre.code-block--compact {
 .field--soft:hover:not(:disabled):not(:focus):not(:focus-visible) {
   border-color: transparent;
   background: var(--base-300);
+}
+/* 无边框变体聚焦时也不描边——否则一圈边框会凭空冒出来，破坏「结构靠底色」的观感。 */
+.field--soft:focus,
+.field--soft:focus-visible {
+  border-color: transparent;
 }
 
 /* Checkbox / Radio 皮肤：bits-ui 的 Checkbox.Root / RadioGroup.Item 会带

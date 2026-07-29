@@ -176,7 +176,7 @@
         <textarea
           bind:value={specInput}
           spellcheck="false"
-          class="w-full flex-1 min-h-96 rounded-lg border border-base-300 bg-base-100 p-3 font-mono text-xs leading-relaxed text-base-content focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+          class="w-full flex-1 min-h-96 rounded-lg border border-base-300 bg-base-100 p-3 font-mono text-xs leading-relaxed text-base-content focus:outline-none focus:border-[var(--field-border-hover)] resize-none"
         ></textarea>
       </div>
 
