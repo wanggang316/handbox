@@ -189,8 +189,8 @@
   });
 </script>
 
-<!-- 消息流是正文：用户气泡、markdown 回复、工具卡片正文、错误文案都要能选中拷贝
-     （其中的按钮由全局规则保持不可选）。 -->
+<!-- The message stream is content: bubbles, markdown replies, tool-card bodies
+     and error text must all be selectable (buttons stay unselectable globally). -->
 <div bind:this={messagesContainer} class="flex-1 overflow-y-auto select-text">
   <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
     <!-- Committed messages. messages is append-only (the reducer only appends
@@ -246,12 +246,13 @@
               <div class="mt-2 space-y-2">
                 {#each assistantToolCalls(message) as block (block.id)}
                   {#if block.name === RENDER_CARD_TOOL_NAME}
-                    <!-- render_card 是纯呈现型工具：其 arguments 即卡片内容，
-                         渲染为内联 sandbox 卡片而非通用工具卡。 -->
+                    <!-- render_card is purely presentational: its arguments are
+                         the card, so it renders as an inline sandbox card
+                         rather than a generic tool card. -->
                     <HtmlCard toolCall={toolCallView(block)} />
                   {:else if block.name === RENDER_APP_TOOL_NAME}
-                    <!-- render_app：timeline 只渲染可点击 pill，应用本体在
-                         右侧 AppPanel（点击 / run 期间自动打开）。 -->
+                    <!-- render_app: the timeline shows only a clickable pill;
+                         the app itself lives in the side AppPanel. -->
                     <AppPill
                       toolCall={toolCallView(block)}
                       {sessionId}

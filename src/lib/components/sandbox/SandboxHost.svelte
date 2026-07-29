@@ -25,7 +25,7 @@
      * inline — height always follows content (no clamp: an inner scrollbar
      * would break the "card blends into the conversation" contract; the page
      * scrolls instead), for in-timeline cards; fill — stretches to the
-     * container (artifact panel, M2).
+     * container, for the artifact panel.
      */
     mode?: "inline" | "fill";
     /** Accessible iframe title. */
