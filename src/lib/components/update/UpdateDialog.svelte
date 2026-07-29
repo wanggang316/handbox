@@ -2,6 +2,7 @@
   import Modal from "$lib/components/ui/Modal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import { updateState } from "$lib/states/update.svelte";
+  import { renderMarkdown, markdownInteractions } from "$lib/utils";
   import { t } from "$lib/i18n";
   import { Download } from "@lucide/svelte";
 
@@ -46,11 +47,13 @@
       </div>
     </div>
 
+    <!-- Release notes: latest.json's `notes`, authored as Keep a Changelog Markdown. -->
     {#if updateState.info?.body}
       <div
-        class="mb-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-base-300/50 p-3 text-[12px] leading-relaxed text-base-content/80 select-text"
+        class="update-notes markdown-content mb-4 max-h-48 overflow-auto rounded-lg bg-base-300/50 p-3 text-[12px] text-base-content/80 select-text"
+        use:markdownInteractions
       >
-        {updateState.info.body}
+        {@html renderMarkdown(updateState.info.body)}
       </div>
     {/if}
 
@@ -93,3 +96,49 @@
     </div>
   </div>
 </Modal>
+
+<style>
+  /* Compact the global markdown typography for this narrow dialog, and restore
+     the list markers Tailwind preflight strips. */
+  .update-notes > :global(:first-child) {
+    margin-top: 0;
+  }
+
+  .update-notes :global(h1),
+  .update-notes :global(h2),
+  .update-notes :global(h3),
+  .update-notes :global(h4),
+  .update-notes :global(h5),
+  .update-notes :global(h6) {
+    margin: 0.75rem 0 0.25rem;
+    border: none;
+    padding: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--base-content);
+  }
+
+  .update-notes :global(p),
+  .update-notes :global(ul),
+  .update-notes :global(ol) {
+    margin: 0.25rem 0;
+    line-height: 1.6;
+  }
+
+  .update-notes :global(ul),
+  .update-notes :global(ol) {
+    padding-left: 1.1rem;
+  }
+
+  .update-notes :global(ul) {
+    list-style: disc;
+  }
+
+  .update-notes :global(ol) {
+    list-style: decimal;
+  }
+
+  .update-notes :global(li) {
+    margin: 0.125rem 0;
+  }
+</style>

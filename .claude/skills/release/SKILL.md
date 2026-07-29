@@ -258,14 +258,18 @@ gh release view vX.Y.Z --json assets -q '.assets[].name'   # confirm DMG/app + l
 Tell the user:
 - CI status (queued / running / passed / failed).
 - The release is **auto-published** — no manual publish needed.
-- **Known gap:** the GitHub Release *body* is hardcoded to
-  `Release vX.Y.Z` by the workflow, so the page won't show the
-  changelog. To enrich it after publish (optional):
-  ```bash
-  gh release edit vX.Y.Z --notes-file <(awk '/^## \[X.Y.Z\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md)
-  ```
 - Confirm `latest.json` is attached — without it, auto-update silently
   does nothing for existing users.
+- Confirm its `notes` carries the changelog — that field, not the
+  Release page body, is what the in-app update dialog renders:
+  ```bash
+  gh release view vX.Y.Z --json body -q .body        # Release page
+  curl -sL https://github.com/wanggang316/handbox/releases/latest/download/latest.json | jq -r .notes
+  ```
+  Both are fed by the workflow's `Extract changelog section` step, so an
+  empty `notes` means `CHANGELOG.md` had no `## [X.Y.Z]` section when the
+  tag was pushed (the step logs a warning and falls back to `Release vX.Y.Z`).
+  Editing the release body afterwards does **not** rewrite `latest.json`.
 
 If CI fails, **do not** delete the tag or force-push without explicit
 user approval — diagnose first (`gh run view --log-failed`).

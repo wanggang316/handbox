@@ -13,12 +13,39 @@ jobs:
       contents: write
     outputs:
       release_id: ${{ steps.create-release.outputs.result }}
+      notes: ${{ steps.changelog.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
+
+      # The release body and the updater manifest's `notes` are two independent
+      # sinks — tauri-action builds latest.json from its own releaseBody input,
+      # never from the release on GitHub. Extract once here, feed both.
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes=$(awk -v ver="## [$version]" '
+            index($0, ver) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d')
+
+          if [ -z "$notes" ]; then
+            echo "::warning::No CHANGELOG.md section for $version; falling back to a bare release note"
+            notes="Release ${GITHUB_REF_NAME}"
+          fi
+
+          {
+            echo 'notes<<CHANGELOG_EOF'
+            echo "$notes"
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         id: create-release
         uses: actions/github-script@v7
+        env:
+          RELEASE_NOTES: ${{ steps.changelog.outputs.notes }}
         with:
           script: |
             const { data } = await github.rest.repos.createRelease({
@@ -26,7 +53,7 @@ jobs:
               repo: context.repo.repo,
               tag_name: '${{ github.ref_name }}',
               name: 'handbox ${{ github.ref_name }}',
-              body: 'Release ${{ github.ref_name }}',
+              body: process.env.RELEASE_NOTES,
               draft: true,
               prerelease: false
             })
@@ -116,6 +143,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseBody: ${{ needs.create-release.outputs.notes }}
           args: ${{ matrix.args }}
 
   publish-release:
