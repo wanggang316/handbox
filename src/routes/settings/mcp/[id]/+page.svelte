@@ -230,7 +230,8 @@
   </header>
 
   <!-- 主要内容区域 -->
-  <main class="flex-grow overflow-y-auto p-6 pr-8">
+  <!-- 详情页正文：连接错误、工具入参名、资源 URI 都是用户会拷走排查的数据。 -->
+  <main class="flex-grow overflow-y-auto p-6 pr-8 select-text">
     {#if server}
       <!-- 基本信息卡片 -->
       <TableGroup>

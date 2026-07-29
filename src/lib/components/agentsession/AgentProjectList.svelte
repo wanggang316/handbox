@@ -533,7 +533,7 @@
     </div>
   {:else}
     <button
-      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 select-none {session.id ===
+      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"

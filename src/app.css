@@ -119,6 +119,36 @@ body {
   outline: none;
 }
 
+/* 桌面应用的选中语义：界面 chrome（导航项、列表行、组头）默认不可选中。
+   浏览器「万物皆可选」的默认在原生外壳里是负担——右键或双击控件会把标签
+   文字高亮起来，暴露出这是个 web 视图。正文内容与可编辑控件按需 opt-in。 */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 控件标签永不可选。规则直接命中元素，因此能压过正文容器（.select-text 等）
+   传下来的继承值——内容区里的按钮（工具卡片头、折叠开关）保持原生控件手感。 */
+button,
+[role="button"],
+summary {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 正文内容可选：可编辑控件、逐字文本（pre / code：日志、技能正文、模型 ID
+   这类存在的意义就是被拷走）、以及 markdown 正文，在哪出现都能选中。
+   成片的正文区域（消息流、划词结果面板）在容器上标 select-text 即可。 */
+input,
+textarea,
+[contenteditable="true"],
+pre,
+code,
+.markdown-content {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* 浅色主题（默认） */
 :root {
   --base-100: var(--color-base-100);
