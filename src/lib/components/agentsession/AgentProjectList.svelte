@@ -7,7 +7,6 @@
     Copy,
     Folder,
     FolderOpen,
-    Hash,
     Loader2,
     MessagesSquare,
     PencilLine,
@@ -780,7 +779,7 @@
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
       onclick={handleCopyId}
     >
-      <Hash size={14} />
+      <Copy size={14} />
       {t("agent.list.copyId")}
     </button>
 
