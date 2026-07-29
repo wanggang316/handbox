@@ -148,7 +148,7 @@ impl DangerousDenyExtension {
                 name: DANGEROUS_DENY_EXTENSION_NAME.to_string(),
                 version: "0.1.0".to_string(),
                 description: Some(
-                    "Denies dangerous tools (write/edit/bash) until the M2 approval flow exists."
+                    "Denies dangerous tools (write/edit/bash) when no approval surface exists."
                         .to_string(),
                 ),
                 capabilities: ExtensionCapabilities {
@@ -1029,14 +1029,14 @@ mod tests {
                     );
                     assert!(
                         reason.contains("not yet available"),
-                        "{tool} cancel reason must mark approval as unavailable in M1, got: {reason:?}"
+                        "{tool} cancel reason must mark approval as unavailable, got: {reason:?}"
                     );
                     assert!(
                         reason.contains(tool),
                         "{tool} cancel reason should name the denied tool, got: {reason:?}"
                     );
                 }
-                other => panic!("{tool} must be Cancelled under the M1 deny stub, got {other:?}"),
+                other => panic!("{tool} must be Cancelled by the dangerous-deny ext, got {other:?}"),
             }
         }
     }
@@ -1588,7 +1588,7 @@ mod tests {
         );
         assert_ne!(
             m.name, DANGEROUS_DENY_EXTENSION_NAME,
-            "permission ext name must differ from the M1 deny stub"
+            "permission ext name must differ from the dangerous-deny ext"
         );
         assert!(
             m.capabilities.before_tool_call,
@@ -1628,7 +1628,7 @@ mod tests {
         }
         assert!(
             recorded.lock().unwrap().is_empty(),
-            "read-only tools must NEVER emit an approval request (VAL-CAPERM-012)"
+            "read-only tools must NEVER emit an approval request"
         );
     }
 
@@ -1925,7 +1925,7 @@ mod tests {
         assert_cancel_no_leak(&decision, &outside_dir);
         assert!(
             recorded.lock().unwrap().is_empty(),
-            "an out-of-sandbox ls must NOT emit an approval request (VAL-CAPERM-022)"
+            "an out-of-sandbox ls must NOT emit an approval request"
         );
     }
 
@@ -2003,7 +2003,7 @@ mod tests {
                 .unwrap()
                 .values()
                 .any(|p| p.session_id == session_b),
-            "session B's pending entry must survive A's response (VAL-CAPERM-023)"
+            "session B's pending entry must survive A's response"
         );
 
         // Clean up B's parked await so the test task does not leak.
@@ -2043,7 +2043,7 @@ mod tests {
         assert_eq!(
             recorded.lock().unwrap().len(),
             2,
-            "a denied tool re-prompts on re-send (VAL-CAPERM-020)"
+            "a denied tool re-prompts on re-send"
         );
     }
 }

@@ -35,7 +35,7 @@ const EXPANSION_COMPONENTS = [
   "InfoTooltip",
 ] as const;
 
-describe("buildGenerativeUiPrompt — component coverage (VAL-CATALOG-008)", () => {
+describe("buildGenerativeUiPrompt — component coverage", () => {
   const prompt = buildGenerativeUiPrompt(uiCatalog);
   const descriptions = uiCatalog.data.components as Record<
     string,
@@ -60,7 +60,7 @@ describe("buildGenerativeUiPrompt — component coverage (VAL-CATALOG-008)", () 
   });
 });
 
-describe("buildGenerativeUiPrompt — whole-spec contract (VAL-CATALOG-009)", () => {
+describe("buildGenerativeUiPrompt — whole-spec contract", () => {
   const prompt = buildGenerativeUiPrompt(uiCatalog);
 
   it("instructs whole-spec output (root + elements)", () => {
@@ -86,7 +86,7 @@ describe("buildGenerativeUiPrompt — whole-spec contract (VAL-CATALOG-009)", ()
   });
 });
 
-describe("generative-ui-prompt.txt drift guard (VAL-INJECT-005)", () => {
+describe("generative-ui-prompt.txt drift guard", () => {
   it("the committed resource is byte-identical to the builder output", () => {
     // Path is relative to the repo root = the Vitest working directory.
     const committed = readFileSync(

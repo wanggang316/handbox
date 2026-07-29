@@ -45,7 +45,7 @@ const resolved: QuickActionModelResolution = {
 };
 
 describe("buildQuickSessionRequest", () => {
-  it("uses the resolved model/provider on the request (VAL-COMMS-007/020)", () => {
+  it("uses the resolved model/provider on the request", () => {
     const decision = buildQuickSessionRequest({
       resolution: resolved,
       defaultEnabledTools: ["read"],
@@ -82,7 +82,7 @@ describe("buildQuickSessionRequest", () => {
     }
   });
 
-  it("sets enabledTools to defaultEnabledTools (VAL-COMMS-019)", () => {
+  it("sets enabledTools to defaultEnabledTools", () => {
     const tools = ["read", "grep", "ls"];
     const decision = buildQuickSessionRequest({
       resolution: resolved,
@@ -127,7 +127,7 @@ describe("buildQuickSessionRequest", () => {
     }
   });
 
-  it("surfaces the empty-state decision and creates no request (VAL-COMMS-006)", () => {
+  it("surfaces the empty-state decision and creates no request", () => {
     const decision = buildQuickSessionRequest({
       resolution: { available: false, reason: "no-default" },
       defaultEnabledTools: BUILTIN_TOOL_IDS,

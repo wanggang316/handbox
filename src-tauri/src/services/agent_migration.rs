@@ -1180,7 +1180,7 @@ mod tests {
 
         assert!(
             !table_exists(&db, "agent_session_messages").await,
-            "VAL-CASESS-023: legacy transcript table must be dropped"
+            "legacy transcript table must be dropped"
         );
         assert!(
             table_exists(&db, "agent_sessions").await,
@@ -1255,7 +1255,7 @@ mod tests {
 
         assert!(
             table_exists(&db, "agent_session_messages").await,
-            "VAL-CASESS-023: a failed migration must leave the transcript table intact (no drop)"
+            "a failed migration must leave the transcript table intact (no drop)"
         );
     }
 

@@ -78,7 +78,7 @@ describe("buildAccelerator", () => {
     }
   });
 
-  it("rejects a modifier-only chord (just Cmd) — VAL-SETTINGS-005", () => {
+  it("rejects a modifier-only chord (just Cmd)", () => {
     const result = buildAccelerator(
       makeEvent({ code: "MetaLeft", metaKey: true }),
     );
@@ -103,7 +103,7 @@ describe("buildAccelerator", () => {
     }
   });
 
-  it("rejects a bare key with no modifier (just K) — VAL-SETTINGS-018", () => {
+  it("rejects a bare key with no modifier (just K)", () => {
     const result = buildAccelerator(makeEvent({ code: "KeyK" }));
 
     expect(result).toEqual({ valid: false, reason: "no-modifier" });
@@ -158,12 +158,12 @@ describe("validateAccelerator", () => {
     expect(validateAccelerator("Ctrl+Digit1")).toBe(true);
   });
 
-  it("rejects a modifier-only string — VAL-SETTINGS-005", () => {
+  it("rejects a modifier-only string", () => {
     expect(validateAccelerator("CmdOrCtrl")).toBe(false);
     expect(validateAccelerator("CmdOrCtrl+Shift")).toBe(false);
   });
 
-  it("rejects a bare key string — VAL-SETTINGS-018", () => {
+  it("rejects a bare key string", () => {
     expect(validateAccelerator("KeyK")).toBe(false);
     expect(validateAccelerator("Space")).toBe(false);
   });
