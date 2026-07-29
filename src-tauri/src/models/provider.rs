@@ -1,10 +1,7 @@
-// 供应商相关数据模型
-
 use crate::models::ModelResponse;
 use crate::storage::types::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
 
-/// 添加供应商请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct AddProviderRequest {
     pub name: String,
@@ -14,14 +11,12 @@ pub struct AddProviderRequest {
     pub enabled: Option<bool>,
 }
 
-/// 供应商切换请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToggleProviderRequest {
     pub provider_id: UUID,
     pub enabled: bool,
 }
 
-/// 带有模型的供应商响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderWithModels {
     pub id: UUID,

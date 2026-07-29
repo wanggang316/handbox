@@ -1,19 +1,14 @@
-// 数据库服务实现
-
 use crate::models::AppError;
 use sqlx::{migrate::MigrateDatabase, sqlite::SqlitePoolOptions, Sqlite, SqlitePool};
 use std::path::Path;
 
-/// 数据库服务
 #[derive(Clone)]
 pub struct Database {
     pool: SqlitePool,
 }
 
 impl Database {
-    /// 创建数据库服务实例
     pub async fn new(db_path: &Path) -> Result<Self, AppError> {
-        // 确保父目录存在
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 AppError::internal_error(&format!("Failed to create database directory: {}", e))
@@ -22,7 +17,6 @@ impl Database {
 
         let db_url = format!("sqlite://{}", db_path.display());
 
-        // 如果数据库文件不存在，创建它
         if !Sqlite::database_exists(&db_url).await.unwrap_or(false) {
             match Sqlite::create_database(&db_url).await {
                 Ok(()) => tracing::info!("Database created successfully at {}", db_path.display()),
@@ -35,9 +29,8 @@ impl Database {
             }
         }
 
-        // 创建连接池 - 使用单连接避免锁定问题
         let pool = SqlitePoolOptions::new()
-            .max_connections(1) // 使用单连接避免锁定
+            .max_connections(1) // single connection avoids SQLite locking issues
             .min_connections(1)
             .connect(&db_url)
             .await
@@ -45,7 +38,6 @@ impl Database {
                 AppError::internal_error(&format!("Failed to connect to database: {}", e))
             })?;
 
-        // 配置 SQLite 特定设置
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
             .await
@@ -63,7 +55,6 @@ impl Database {
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to set busy timeout: {}", e)))?;
 
-        // 运行迁移
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
@@ -74,12 +65,10 @@ impl Database {
         Ok(Self { pool })
     }
 
-    /// 获取数据库连接池
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
-    /// 健康检查
     pub async fn health_check(&self) -> Result<(), AppError> {
         sqlx::query("SELECT 1")
             .fetch_one(&self.pool)
@@ -91,7 +80,6 @@ impl Database {
         Ok(())
     }
 
-    /// 获取数据库统计信息
     pub async fn get_stats(&self) -> Result<DatabaseStats, AppError> {
         let provider_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM providers")
             .fetch_one(&self.pool)
@@ -112,7 +100,6 @@ impl Database {
     }
 }
 
-/// 数据库统计信息
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DatabaseStats {
     pub provider_count: i32,
@@ -439,8 +426,8 @@ mod tests {
                     500,
                     500
                 ),
-                // BINARY collation: '我' (0xE6..) sorts after 'd' (0x64), so the
-                // unicode path lists last. Name must come out intact.
+                // BINARY collation: the CJK path (0xE6..) sorts after 'd' (0x64),
+                // so it lists last. Name must come out intact.
                 (
                     "/Users/me/我的 项目 🚀".to_string(),
                     "我的 项目 🚀".to_string(),

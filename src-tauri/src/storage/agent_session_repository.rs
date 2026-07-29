@@ -1,8 +1,6 @@
-// Agent Session 数据访问层
-//
-// Agent 模式会话及其 transcript 的持久化层，建立在 `agent_sessions` /
-// `agent_session_messages` 两张表之上。与 Chat 模式的 `session_repository`
-// 完全独立。
+// Persistence for Agent-mode sessions and their transcripts, built on the
+// `agent_sessions` / `agent_session_messages` tables. Independent of
+// chat-mode storage.
 
 use crate::models::AppError;
 use crate::storage::types::{AgentSession, AgentSessionMessage, Timestamp, UUID};
@@ -10,7 +8,6 @@ use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
-/// Agent Session 仓储层
 #[derive(Clone)]
 pub struct AgentSessionRepository {
     db: Arc<Database>,
@@ -21,10 +18,8 @@ impl AgentSessionRepository {
         Self { db }
     }
 
-    /// 创建 Agent Session
-    ///
-    /// NOTE: 已废弃的 `enabled_skills` 列保留在 schema 中但不再读写——新行
-    /// 该列恒为 NULL（VAL-DEPRECATE-009）。
+    /// The deprecated `enabled_skills` column stays in the schema but is never
+    /// read or written — new rows leave it NULL.
     pub async fn create_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
@@ -64,7 +59,6 @@ impl AgentSessionRepository {
         Ok(())
     }
 
-    /// 获取 Agent Session 列表（按 updated_at 降序）
     pub async fn list_sessions(
         &self,
         limit: i32,
@@ -92,7 +86,6 @@ impl AgentSessionRepository {
         Ok(sessions)
     }
 
-    /// 根据 ID 获取 Agent Session
     pub async fn get_session_by_id(
         &self,
         session_id: &UUID,
@@ -117,7 +110,6 @@ impl AgentSessionRepository {
         }
     }
 
-    /// 更新 Agent Session
     pub async fn update_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
@@ -173,14 +165,16 @@ impl AgentSessionRepository {
         Ok(())
     }
 
-    /// 就地重指会话到另一个 AgentDefinition 时的整行改写（`reinstantiate_from_definition`
-    /// 专用）。
+    /// Whole-row rewrite used only by `reinstantiate_from_definition` to
+    /// re-point a session at another AgentDefinition in place.
     ///
-    /// 与通用的 [`update_session`] 的关键区别：本方法**会**改写 `agent_definition_id`
-    /// 与 `project_id` —— 重实例化是这两个「create 时写死」字段在受控入口下的唯一
-    /// 例外（用户在尚无消息的会话上切换 Agent，等价于按新定义重建）。与 `update_session`
-    /// 一致，`message_count` / `last_message_at` 仍被刻意省略（保留既有 transcript
-    /// 计数，由 `append_message` 独家维护）。
+    /// Key difference from the generic [`update_session`]: this DOES rewrite
+    /// `agent_definition_id` and `project_id` — reinstantiation is the single
+    /// controlled exception to those write-once-at-create fields (switching
+    /// the Agent on a message-less session is equivalent to recreating it from
+    /// the new definition). Like `update_session`, `message_count` /
+    /// `last_message_at` stay deliberately omitted; `append_message` remains
+    /// their sole writer.
     pub async fn reinstantiate_session(&self, session: &AgentSession) -> Result<(), AppError> {
         let enabled_tools_json = serde_json::to_string(&session.enabled_tools)
             .map_err(|e| AppError::validation_error(&format!("Invalid enabled tools: {}", e)))?;
@@ -224,7 +218,7 @@ impl AgentSessionRepository {
         Ok(())
     }
 
-    /// 重命名 Agent Session（同时刷新 updated_at）
+    /// Renaming also bumps `updated_at`.
     pub async fn rename_session(&self, session_id: &UUID, name: &str) -> Result<(), AppError> {
         let now = Self::now_ms();
 
@@ -249,31 +243,22 @@ impl AgentSessionRepository {
         Ok(())
     }
 
-    /// 删除 Agent Session（显式级联删除其 transcript）
+    /// Deletes a session and its transcript rows in one transaction.
     ///
-    /// # 为什么显式删除而不依赖 `ON DELETE CASCADE`？
+    /// The transcript is deleted explicitly rather than through
+    /// `ON DELETE CASCADE`, so no orphan rows survive regardless of the
+    /// connection's `PRAGMA foreign_keys` state.
     ///
-    /// 这里在同一个事务里先删除全部 `agent_session_messages`，再删除
-    /// `agent_sessions` 行。显式级联是一种防御性写法，与连接的
-    /// `PRAGMA foreign_keys` 状态无关：无论 FK 强制开启与否（sqlx 默认 FK=ON），
-    /// transcript 行都会被原子地清除，保证不会留下孤儿 transcript 行。
-    ///
-    /// # 为什么 transcript 删除要容忍表缺失？
-    ///
-    /// `m3-project-delete-and-drop` 在迁移成功后会一次性 `DROP TABLE
-    /// agent_session_messages`（transcript 此后由 JSONL 权威保存，命令层另行删除
-    /// `<id>.jsonl`）。表被 drop 之后，这条遗留 transcript DELETE 已无目标，必须是
-    /// 安全 no-op——否则「no such table」会让整个会话删除以 INTERNAL_ERROR 失败。
-    /// 这里先探测表是否存在（`sqlite_master`，在事务内读以与后续 DELETE 看到一致
-    /// 的 schema），存在才发 DELETE；表缺失时直接跳过，绝不触发缺表错误、也不影响
-    /// 后续删除会话行与 commit。
+    /// The legacy `agent_session_messages` table is absent once transcripts live in
+    /// JSONL, so its existence is probed via `sqlite_master` inside the transaction
+    /// (same schema view as the DELETE) and the DELETE skipped when it is gone —
+    /// "no such table" would otherwise fail the whole session delete. The
+    /// `<id>.jsonl` file is removed by the command layer.
     pub async fn delete_session(&self, session_id: &UUID) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {
             AppError::internal_error(&format!("Failed to begin transaction: {}", e))
         })?;
 
-        // 1. 先删除该会话的全部 transcript 行（显式级联），但仅在遗留 transcript
-        //    表仍存在时执行：迁移后该表被 drop，DELETE 应是安全 no-op。
         if legacy_transcript_table_exists(&mut tx).await? {
             sqlx::query("DELETE FROM agent_session_messages WHERE session_id = $1")
                 .bind(session_id)
@@ -287,7 +272,6 @@ impl AgentSessionRepository {
                 })?;
         }
 
-        // 2. 再删除会话行本身
         let result = sqlx::query("DELETE FROM agent_sessions WHERE id = $1")
             .bind(session_id)
             .execute(&mut *tx)
@@ -297,8 +281,7 @@ impl AgentSessionRepository {
             })?;
 
         if result.rows_affected() == 0 {
-            // 会话不存在：回滚（此时无任何写入），返回 NotFound。
-            // transcript 删除是按 session_id 限定的，因此其它会话不受影响。
+            // Unknown session: roll back so the transcript delete never lands.
             tx.rollback().await.map_err(|e| {
                 AppError::internal_error(&format!("Failed to rollback transaction: {}", e))
             })?;
@@ -315,14 +298,9 @@ impl AgentSessionRepository {
         Ok(())
     }
 
-    /// 向 transcript 追加一条消息。
-    ///
-    /// 在同一个事务内：
-    /// 1. 为该会话分配 gap-free 单调递增的 `seq`（`COALESCE(MAX(seq), -1) + 1`，从 0 起）。
-    /// 2. 插入消息行。
-    /// 3. 更新会话的 `message_count`(+1)、`last_message_at`、`updated_at`。
-    ///
-    /// 返回完整写入的 `AgentSessionMessage`。
+    /// Appends a message and updates the session counters in one transaction, so
+    /// `message_count` / `last_message_at` never drift from the transcript. `seq` is
+    /// allocated per session as gap-free and monotonic, starting at 0.
     pub async fn append_message(
         &self,
         session_id: &UUID,
@@ -337,7 +315,6 @@ impl AgentSessionRepository {
             AppError::internal_error(&format!("Failed to begin transaction: {}", e))
         })?;
 
-        // 1. 计算下一个 seq（gap-free，从 0 起）
         let seq_row = sqlx::query(
             "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM agent_session_messages WHERE session_id = $1",
         )
@@ -348,7 +325,6 @@ impl AgentSessionRepository {
 
         let seq: i64 = seq_row.try_get("next_seq")?;
 
-        // 2. 插入消息
         let id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
             r#"
@@ -368,7 +344,6 @@ impl AgentSessionRepository {
             AppError::internal_error(&format!("Failed to append agent session message: {}", e))
         })?;
 
-        // 3. 更新会话计数与时间戳（同一逻辑操作）
         sqlx::query(
             r#"
             UPDATE agent_sessions
@@ -398,16 +373,14 @@ impl AgentSessionRepository {
         })
     }
 
-    /// 获取某个会话的全部 transcript（按 seq 升序）
+    /// Full transcript of a session in `seq` order.
     ///
-    /// 这是 JSONL 读路径（`agent_session_messages` 命令）的 SQLite 回退分支：仅
-    /// 在会话**没有** JSONL 文件时被调用——M3 迁移**跳过空会话**，所以一个无消息
-    /// 的会话既无 JSONL 也（迁移+drop 之后）无 `agent_session_messages` 表。
-    /// `m3-project-delete-and-drop` 在迁移成功后会一次性 `DROP TABLE
-    /// agent_session_messages`，此后该回退会遇到「no such table」。这本身是正确
-    /// 后置态（transcript 已全量迁入 JSONL；空会话本就无消息），因此这里把
-    /// **表缺失**显式映射为空 transcript（`Ok(vec![])`），而非冒泡为 INTERNAL_ERROR
-    /// 白屏整条 timeline。其它 DB 故障照常冒泡。
+    /// This is the SQLite fallback of the transcript read path, reached only for
+    /// legacy sessions without a JSONL transcript. On databases where
+    /// `agent_session_messages` has already been dropped, a missing table is the
+    /// correct post-state (such a session has no messages), so it maps to an empty
+    /// transcript instead of bubbling up as INTERNAL_ERROR and blanking the whole
+    /// timeline. Every other DB failure still bubbles.
     pub async fn list_messages(
         &self,
         session_id: &UUID,
@@ -423,10 +396,7 @@ impl AgentSessionRepository {
             .await
         {
             Ok(rows) => rows,
-            // The legacy transcript table has been dropped post-migration: an
-            // empty (JSONL-less) session has no messages, so report none rather
-            // than erroring. Only a genuinely-missing `agent_session_messages`
-            // table is swallowed; any other DB error still bubbles up.
+            // Only a missing `agent_session_messages` table is swallowed.
             Err(e) if is_missing_legacy_table(&e) => return Ok(Vec::new()),
             Err(e) => {
                 return Err(AppError::internal_error(&format!(
@@ -436,22 +406,20 @@ impl AgentSessionRepository {
             }
         };
 
-        // 逐行隔离 payload 解析（VAL-PERSIST-012）：单条 payload 的存储 JSON 文本
-        // 损坏（例如被外部写入非法 JSON）时记录并跳过该行，而非让整批 transcript
-        // 加载失败、白屏整条 timeline；其余行照常返回，保持 seq 升序。
+        // Payload parsing is isolated per row: one corrupt payload is logged and
+        // skipped instead of failing the whole transcript load.
         let mut messages = Vec::new();
         for row in rows {
             match Self::row_to_message(row) {
                 Ok(Some(message)) => messages.push(message),
-                Ok(None) => {}           // 坏 payload 行：已记录并跳过
-                Err(e) => return Err(e), // 真实的 DB 列读取故障：照常冒泡
+                Ok(None) => {}           // corrupt payload: already logged
+                Err(e) => return Err(e), // real column-read failure
             }
         }
 
         Ok(messages)
     }
 
-    /// 当前时间（毫秒）
     fn now_ms() -> i64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -459,14 +427,12 @@ impl AgentSessionRepository {
             .as_millis() as i64
     }
 
-    // 辅助方法：将数据库行转换为 AgentSession
-    //
-    // 可空列必须用显式的 `try_get::<Option<T>, _>(...)?` 读取，绝不能用
-    // `try_get::<T, _>(...).ok()`：sqlx-sqlite 对 SQL NULL 解码进非 Option
-    // 类型时返回 `Ok(0)` / `Ok("")` 而不是 Err（见测试
-    // `test_sqlx_sqlite_null_decode_footgun_probe`），`.ok()` 习语因此把
-    // NULL 悄悄变成 `Some(0)` / `Some("")`，wire 上携带 0/"" 而非 null。
-    // last_message_at 曾因此让无消息会话显示「56 年前」并沉底（VAL-GROUP-003）。
+    // Nullable columns must be read as `try_get::<Option<T>, _>(...)?`, never as
+    // `try_get::<T, _>(...).ok()`: sqlx-sqlite decodes SQL NULL into a non-Option
+    // type as `Ok(0)` / `Ok("")` rather than an error (see
+    // `test_sqlx_sqlite_null_decode_footgun_probe`), so the `.ok()` idiom turns NULL
+    // into `Some(0)` / `Some("")` and puts 0/"" on the wire instead of null — which
+    // renders a messageless session as a 1970 `last_message_at`.
     fn row_to_session(&self, row: sqlx::sqlite::SqliteRow) -> Result<AgentSession, AppError> {
         let enabled_tools_json: Option<String> = row.try_get("enabled_tools")?;
         let enabled_tools: Vec<String> = if let Some(json) = enabled_tools_json {
@@ -508,11 +474,9 @@ impl AgentSessionRepository {
         })
     }
 
-    // 辅助方法：将数据库行转换为 AgentSessionMessage。
-    //
-    // 区分两类失败：DB 列读取错误（基础设施故障）冒泡为 `Err`；唯独 payload 存储
-    // 的 JSON 文本损坏（无法 parse）返回 `Ok(None)`，由 `list_messages` 跳过该行，
-    // 以实现损坏行的优雅降级（VAL-PERSIST-012）。
+    // Two failure kinds are kept apart: a column-read error bubbles as `Err`, while
+    // an unparsable stored payload returns `Ok(None)` so `list_messages` can skip
+    // just that row.
     fn row_to_message(
         row: sqlx::sqlite::SqliteRow,
     ) -> Result<Option<AgentSessionMessage>, AppError> {
@@ -548,13 +512,11 @@ impl AgentSessionRepository {
 /// Whether the legacy `agent_session_messages` transcript table still exists in
 /// the given transaction's connection.
 ///
-/// `m3-project-delete-and-drop` drops this table once, after the one-time
-/// migration moves every transcript into JSONL. Cascading transcript DELETEs in
-/// `delete_session` / `delete_project` therefore probe first — issuing the DELETE
-/// only when the table is present — so a post-drop delete is a safe no-op rather
-/// than a "no such table" error that fails the whole delete. Queried via
-/// `sqlite_master` (the schema catalog) inside the same transaction so it sees
-/// the exact schema the subsequent DELETE would.
+/// The table is dropped once every transcript lives in JSONL, so the cascading
+/// transcript DELETEs in `delete_session` / `delete_project` probe first and issue
+/// the DELETE only when the table is present — otherwise a "no such table" error
+/// would fail the whole delete. Read from `sqlite_master` (the schema catalog)
+/// inside the same transaction, so it sees the exact schema the DELETE would.
 ///
 /// `pub(crate)` so `agent_project_repository::delete_project` reuses the same
 /// probe rather than duplicating the gating logic.
@@ -578,7 +540,7 @@ pub(crate) async fn legacy_transcript_table_exists(
 }
 
 /// Whether a sqlx error is SQLite's "no such table: agent_session_messages",
-/// raised after `m3-project-delete-and-drop` drops the legacy transcript table.
+/// which happens once the legacy transcript table has been dropped.
 ///
 /// Matched on the database error text rather than a code: sqlx-sqlite surfaces
 /// SQLITE_ERROR (code 1) for a missing table with the table name only in the
@@ -636,7 +598,7 @@ mod tests {
         }
     }
 
-    /// 统计某会话的 transcript 行数（用于断言无孤儿行）
+    /// Transcript row count for a session, used to assert no orphans remain.
     async fn count_messages(db: &Database, session_id: &str) -> i64 {
         let row = sqlx::query(
             "SELECT COUNT(*) AS count FROM agent_session_messages WHERE session_id = $1",
@@ -648,9 +610,9 @@ mod tests {
         row.try_get::<i64, _>("count").unwrap()
     }
 
-    /// Empirical probe documenting the sqlx-sqlite NULL-decode footgun that
-    /// caused VAL-GROUP-003: decoding SQL NULL into a NON-Option type does NOT
-    /// error — it yields `Ok(0)` for i64 and `Ok("")` for String. The
+    /// Empirical probe documenting the sqlx-sqlite NULL-decode footgun: decoding
+    /// SQL NULL into a NON-Option type does NOT error — it yields `Ok(0)` for i64
+    /// and `Ok("")` for String. The
     /// `try_get(...).ok()` idiom therefore silently turns NULL into `Some(0)` /
     /// `Some("")` instead of `None`. This is why `row_to_session` must read
     /// nullable columns with an explicit `try_get::<Option<T>, _>(...)?`.
@@ -697,10 +659,10 @@ mod tests {
         assert_eq!(row.try_get::<Option<String>, _>("model_id").unwrap(), None);
     }
 
-    /// VAL-GROUP-003 regression: a messageless session whose optional columns
-    /// are all NULL must round-trip create→get→list as `None` — not `Some(0)`
-    /// for last_message_at (which rendered "56 years ago" and sank the session
-    /// to the bottom of the list) and not `Some("")` for the TEXT fields.
+    /// A messageless session whose optional columns are all NULL must round-trip
+    /// create→get→list as `None` — not `Some(0)` for last_message_at (which renders
+    /// as a 1970 timestamp and sinks the session to the bottom of the list) and not
+    /// `Some("")` for the TEXT fields.
     #[tokio::test]
     async fn test_messageless_session_null_columns_round_trip_as_none() {
         let (db, _temp_dir) = create_test_db().await;
@@ -842,9 +804,8 @@ mod tests {
         assert!(repo.get_session_by_id(&session.id).await.unwrap().is_none());
     }
 
-    /// VAL-DEPRECATE-009: new sessions never write the deactivated
-    /// enabled_skills column — it stays SQL NULL after create AND after a
-    /// full-row update_session.
+    /// New sessions never write the deactivated enabled_skills column — it stays
+    /// SQL NULL after create AND after a full-row update_session.
     #[tokio::test]
     async fn test_new_sessions_leave_enabled_skills_column_null() {
         let (db, _temp_dir) = create_test_db().await;
@@ -883,8 +844,8 @@ mod tests {
         );
     }
 
-    /// VAL-DEPRECATE-004 / VAL-DEPRECATE-005: the deactivated column is kept in
-    /// the schema (no 049 drop migration) — PRAGMA table_info still lists it.
+    /// The deactivated column is kept in the schema (never dropped by a migration),
+    /// so PRAGMA table_info still lists it.
     #[tokio::test]
     async fn test_enabled_skills_column_still_in_schema() {
         let (db, _temp_dir) = create_test_db().await;
@@ -903,9 +864,8 @@ mod tests {
         );
     }
 
-    /// VAL-DEPRECATE-010: legacy rows whose enabled_skills column holds a real
-    /// value, NULL, or non-JSON garbage all load via get AND list without error —
-    /// the column is never parsed anymore.
+    /// Legacy rows whose enabled_skills column holds a real value, NULL, or non-JSON
+    /// garbage all load via get AND list without error — the column is never parsed.
     #[tokio::test]
     async fn test_legacy_enabled_skills_column_values_load_without_error() {
         let (db, _temp_dir) = create_test_db().await;
@@ -987,9 +947,8 @@ mod tests {
         );
     }
 
-    /// VAL-DEPRECATE-010: a row written through the legacy column set (pre-048,
-    /// no enabled_skills column value) loads with every other column unchanged.
-    /// Simulated here by an INSERT that omits the enabled_skills column entirely.
+    /// A legacy row carrying no enabled_skills value loads with every other column
+    /// unchanged; simulated by an INSERT that omits the column entirely.
     #[tokio::test]
     async fn test_legacy_row_without_enabled_skills_loads_and_preserves_other_columns() {
         let (db, _temp_dir) = create_test_db().await;
@@ -1063,7 +1022,7 @@ mod tests {
         assert_ne!(stale_last_message_at, after_appends.last_message_at);
 
         // Now the user edits a field (rename + thinking-level change) using the
-        // STALE snapshot — exactly the read-modify-write that previously raced.
+        // STALE snapshot — the read-modify-write this guard is about.
         let mut edit = stale.clone();
         edit.name = "Renamed Mid-Run".to_string();
         edit.thinking_level = Some("low".to_string());
@@ -1136,8 +1095,8 @@ mod tests {
         );
     }
 
-    /// VAL-PERSIST-009: delete_session removes session AND all transcript rows
-    /// even with `PRAGMA foreign_keys` OFF (explicit delete, not FK cascade).
+    /// delete_session removes the session AND all transcript rows even with
+    /// `PRAGMA foreign_keys` OFF (explicit delete, not FK cascade).
     #[tokio::test]
     async fn test_delete_session_explicit_cascade_with_fk_off() {
         let (db, _temp_dir) = create_test_db().await;
@@ -1188,8 +1147,8 @@ mod tests {
         );
     }
 
-    /// VAL-PERSIST-010: deleting session A leaves session B's
-    /// message_count / last_message_at exactly unchanged.
+    /// Deleting session A leaves session B's message_count / last_message_at
+    /// exactly unchanged.
     #[tokio::test]
     async fn test_delete_session_sibling_isolation() {
         let (db, _temp_dir) = create_test_db().await;
@@ -1254,8 +1213,8 @@ mod tests {
         assert_eq!(count_messages(db_arc.as_ref(), &session_a.id).await, 0);
     }
 
-    /// VAL-SESSION-015: deleting an already-removed id is a clean NotFound,
-    /// no panic, no orphan rows, and other sessions are unaffected.
+    /// Deleting an already-removed id is a clean NotFound: no panic, no orphan rows,
+    /// other sessions unaffected.
     #[tokio::test]
     async fn test_delete_session_double_delete_is_clean() {
         let (db, _temp_dir) = create_test_db().await;
@@ -1302,12 +1261,11 @@ mod tests {
         assert_eq!(err2.code, "NOT_FOUND");
     }
 
-    /// Drop-then-delete regression (the gap 691292d missed): after the legacy
-    /// `agent_session_messages` table is dropped post-migration, `delete_session`
-    /// must still succeed — removing the `agent_sessions` row and returning
-    /// `Ok(())` rather than failing with "no such table" → INTERNAL_ERROR. The
-    /// transcript's authoritative copy lives in JSONL by then; the stale table
-    /// DELETE must be a safe no-op.
+    /// On a database where the legacy `agent_session_messages` table has been
+    /// dropped, `delete_session` must still succeed — removing the `agent_sessions`
+    /// row — rather than failing with "no such table" → INTERNAL_ERROR. The
+    /// authoritative transcript lives in JSONL there, so the stale table DELETE has
+    /// to be a safe no-op.
     #[tokio::test]
     async fn test_delete_session_succeeds_after_legacy_table_dropped() {
         let (db, _temp_dir) = create_test_db().await;
@@ -1325,7 +1283,7 @@ mod tests {
         }
         assert_eq!(count_messages(db_arc.as_ref(), &session.id).await, 3);
 
-        // Model the post-migration state: drop the legacy transcript table.
+        // Model a JSONL-only database: drop the legacy transcript table.
         sqlx::query("DROP TABLE agent_session_messages")
             .execute(db_arc.pool())
             .await
@@ -1388,8 +1346,8 @@ mod tests {
         assert_eq!(reloaded_session.last_message_at, Some(now + 3));
     }
 
-    /// VAL-PERSIST-007/008: a long transcript (>200 messages) loads completely
-    /// in strict seq order — no silent truncation / pagination in list_messages.
+    /// A long transcript (>200 messages) loads completely in strict seq order — no
+    /// silent truncation / pagination in list_messages.
     #[tokio::test]
     async fn test_list_messages_long_transcript_full_no_truncation() {
         let (db, _temp_dir) = create_test_db().await;
@@ -1422,14 +1380,11 @@ mod tests {
         assert_eq!(seqs, expected);
     }
 
-    /// VAL-CASESS-019 (backend leg): a session whose `project_id` points at a
-    /// project that no longer exists (a DANGLING reference) still appears in
-    /// `list_sessions`. The list query is a plain `SELECT ... FROM agent_sessions`
-    /// with NO join onto `agent_projects`, so a dangling project_id can never
-    /// filter the session row out — the row survives and the frontend
-    /// `groupSessions` buckets it under "ungrouped". Losing the row here would
-    /// make the session vanish entirely instead of falling into the ungrouped
-    /// bucket.
+    /// A session whose `project_id` points at a project that no longer exists still
+    /// appears in `list_sessions`: the query is a plain `SELECT ... FROM
+    /// agent_sessions` with NO join onto `agent_projects`, so a dangling project_id
+    /// can never filter the row out. The frontend then buckets it as "ungrouped";
+    /// losing the row here would make the session vanish entirely.
     #[tokio::test]
     async fn test_list_sessions_keeps_session_with_dangling_project_id() {
         let (db, _temp_dir) = create_test_db().await;
@@ -1483,19 +1438,17 @@ mod tests {
         assert_eq!(fetched.id, "dangling");
     }
 
-    /// VAL-CASESS-023 (fallback-tolerance leg): after `m3-project-delete-and-drop`
-    /// drops the legacy `agent_session_messages` table, the SQLite transcript
-    /// fallback (`list_messages`, taken only when a session has no JSONL file —
-    /// e.g. an empty session the migration skipped) must return an empty Vec
-    /// rather than erroring with "no such table". The dropped table is the
-    /// correct post-migration state; an empty session genuinely has no messages.
+    /// Once the legacy `agent_session_messages` table is dropped, the SQLite
+    /// transcript fallback (`list_messages`, taken only for a session with no JSONL
+    /// file) must return an empty Vec rather than erroring with "no such table":
+    /// such a session genuinely has no messages.
     #[tokio::test]
     async fn test_list_messages_returns_empty_when_legacy_table_dropped() {
         let (db, _temp_dir) = create_test_db().await;
         let db_arc = Arc::new(db);
         let repo = AgentSessionRepository::new(db_arc.clone());
 
-        // Drop the legacy transcript table to model the post-migration state.
+        // Drop the legacy transcript table to model a JSONL-only database.
         sqlx::query("DROP TABLE agent_session_messages")
             .execute(db_arc.pool())
             .await
@@ -1532,9 +1485,8 @@ mod tests {
         );
     }
 
-    /// VAL-PERSIST-012: a row whose stored payload is malformed JSON is skipped
-    /// on load; the rest of the transcript still returns (graceful degrade, no
-    /// whole-batch failure / white screen).
+    /// A row whose stored payload is malformed JSON is skipped on load; the rest of
+    /// the transcript still returns instead of the whole batch failing.
     #[tokio::test]
     async fn test_list_messages_skips_corrupt_payload_row() {
         let (db, _temp_dir) = create_test_db().await;

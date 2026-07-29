@@ -27,11 +27,6 @@
 //   detached `tokio::spawn`; a slow or panicking job neither stalls nor kills
 //   the tick loop.
 //
-// Out of scope here: retry / timeout-override / notifications (M4). This drives
-// the existing `JobExecutor::execute`; it does not modify the executor's
-// dispatch logic (the M2 run-now feature relocated the in-flight set onto the
-// executor so every trigger path shares one gate).
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -366,14 +361,10 @@ mod tests {
     use tauri::test::MockRuntime;
     use tempfile::tempdir;
 
-    // ---- Pure-function tests (no DB / no runtime): the core scheduling logic ----
-    //
     // Timing behaviour (a real 30s tick, OS sleep/wake) cannot be reproduced in a
     // unit test, so the decision logic is factored into `next_run_after` and the
-    // in-flight set operations, which ARE unit-testable. End-to-end timing is
-    // left to the milestone validator.
+    // in-flight set operations, which ARE unit-testable.
 
-    /// every-minute cron yields a next occurrence strictly in the future.
     #[test]
     fn next_run_after_returns_future_occurrence() {
         let now = current_timestamp();
@@ -423,13 +414,11 @@ mod tests {
         );
     }
 
-    /// invalid cron -> None (job becomes unscheduled rather than panicking).
+    /// Invalid cron -> None: the job becomes unscheduled rather than panicking.
     #[test]
     fn next_run_after_invalid_cron_is_none() {
         assert_eq!(next_run_after("not-a-cron", current_timestamp()), None);
     }
-
-    // ---- DB-backed scheduler tests ----
 
     struct TestEnv {
         scheduler: JobScheduler<MockRuntime>,
@@ -520,7 +509,7 @@ mod tests {
     }
 
     /// A tick fires a due, enabled job: it produces an execution and advances
-    /// next_run_at past now. (Covers due-selection + dispatch + advancement.)
+    /// next_run_at past now.
     #[tokio::test]
     async fn tick_fires_due_enabled_job_and_advances_next_run() {
         let env = setup().await;
@@ -624,9 +613,9 @@ mod tests {
         );
     }
 
-    /// After an execution completes, the in-flight slot is released so the job
-    /// can fire again on a later occurrence (panic/crash release is the same
-    /// RAII path, exercised by the unit test above).
+    /// After an execution completes the in-flight slot is released, so the job
+    /// can fire again on a later occurrence. Panic/crash release is the same
+    /// RAII path.
     #[tokio::test]
     async fn in_flight_slot_released_after_run() {
         let env = setup().await;

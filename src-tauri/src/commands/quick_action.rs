@@ -1,12 +1,13 @@
-//! Quick Action 浮层窗口的 show / hide / toggle 命令。
+//! Show / hide / toggle commands for the Quick Action overlay window.
 //!
-//! 这些命令是后续 global hotkey（以及 devtools 手测）的调用入口。show / toggle
-//! 在显示时从 `AppHandle::cursor_position()` 取得**物理像素**的全局鼠标位置，交由
-//! 面板模块换算并定位到鼠标所在显示器。非 macOS 下提供 no-op stub。
+//! Entry points for the global hotkey (and devtools manual testing). show /
+//! toggle read the global mouse position in **physical pixels** from
+//! `AppHandle::cursor_position()`; the panel module converts it and positions
+//! the panel on the display under the cursor. Non-macOS builds get no-op stubs.
 
 use crate::models::error::AppError;
 
-/// 取得全局鼠标的物理像素位置；失败时回退到 (0, 0)。
+/// Global mouse position in physical pixels; falls back to (0, 0) on failure.
 #[cfg(target_os = "macos")]
 fn cursor_phys_position(app: &tauri::AppHandle) -> (f64, f64) {
     match app.cursor_position() {
@@ -18,7 +19,6 @@ fn cursor_phys_position(app: &tauri::AppHandle) -> (f64, f64) {
     }
 }
 
-/// 显示 Quick Action 浮层。
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn quick_action_show(app: tauri::AppHandle) -> Result<(), AppError> {
@@ -29,7 +29,6 @@ pub async fn quick_action_show(app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 隐藏 Quick Action 浮层。
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn quick_action_hide(app: tauri::AppHandle) -> Result<(), AppError> {
@@ -39,7 +38,6 @@ pub async fn quick_action_hide(app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 切换 Quick Action 浮层可见性。
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn quick_action_toggle(app: tauri::AppHandle) -> Result<(), AppError> {
@@ -68,11 +66,12 @@ pub async fn quick_action_toggle(_app: tauri::AppHandle) -> Result<(), AppError>
     Ok(())
 }
 
-/// 重新注册唤起 Quick Action 浮层的全局快捷键。
+/// Re-registers the global shortcut that summons the Quick Action overlay.
 ///
-/// 反注册先前记录的加速键、注册新加速键，使被替换的旧组合彻底失活（设置页 live
-/// rebind 调用此命令实现）。注册失败返回结构化 [`AppError`]，前端据此提示用户更
-/// 换组合。
+/// Unregisters the previously recorded accelerator before registering the new
+/// one, so a replaced combination is fully deactivated (the settings page's
+/// live rebind calls this). A registration failure returns a structured
+/// [`AppError`] so the frontend can prompt for a different combination.
 #[tauri::command]
 pub async fn quick_action_register_shortcut(
     app: tauri::AppHandle,
@@ -81,19 +80,21 @@ pub async fn quick_action_register_shortcut(
     crate::services::quick_action::register_shortcut(&app, &accelerator)
 }
 
-/// 反注册 Quick Action 全局快捷键（设置页「启用 Quick Action」关闭时调用）。
-/// 幂等：未注册时是 no-op。
+/// Unregisters the Quick Action global shortcut (called when the settings page
+/// disables Quick Action). Idempotent: a no-op when not registered.
 #[tauri::command]
 pub async fn quick_action_unregister_shortcut(app: tauri::AppHandle) -> Result<(), AppError> {
     crate::services::quick_action::unregister_shortcut(&app)
 }
 
-/// 「在对话中继续」的后端：把主窗口带到前台并通知前端导航到指定 chat 会话。
+/// Backend for "continue in chat": brings the main window to the front and
+/// tells the frontend to navigate to the given chat session.
 ///
-/// 取消最小化、显示并聚焦 `main` 窗口，随后向该窗口发送 `quick-action-open-chat`
-/// 事件，载荷为 `chat_id`。前端监听器据此路由到 `/chat?id=<chatId>`（浮层创建的是
-/// 真实持久化的 chat 会话）。`main` 窗口始终存在（关闭仅隐藏），若意外缺失则返回结构化
-/// [`AppError`]。
+/// Unminimizes, shows, and focuses the `main` window, then emits
+/// `quick-action-open-chat` with `chat_id`; the frontend listener routes to
+/// `/chat?id=<chatId>` (the overlay creates a real persisted chat session).
+/// The `main` window always exists (close only hides it); if it is unexpectedly
+/// missing, a structured [`AppError`] is returned.
 #[tauri::command]
 pub async fn quick_action_continue_in_chat(
     app: tauri::AppHandle,

@@ -1,31 +1,13 @@
-// Scheduled-job executor.
+// Scheduled-job executor: runs one job and persists the outcome. Targets:
+// `agent` (mint an isolated session from a template, drive one run) and
+// `prompt` (one-shot non-streaming chat). Each trigger writes exactly one
+// `job_executions` row — inserted as `running`, then finalized in place.
+// `next_run_at` belongs to the scheduler and is never recomputed here.
 //
-// Runs one job and persists the outcome. It dispatches the two supported
-// targets: `agent` (mint a fresh isolated agent session from a template and
-// drive one run via the coding-agent path) and `prompt` (create a fresh chat
-// and send a one-shot non-streaming message).
-//
-// One trigger produces exactly ONE `job_executions` row: a `running` row is
-// inserted up front, then the SAME row is finalized in place to its terminal
-// state (success / failed). Job-level run statistics (run_count / last_run_at /
-// last_status / failure_count) are updated afterwards.
-//
-// Out of scope here (left to other milestones): the scheduler loop (M1
-// scheduler feature drives this executor) and job-level timeout/retry overrides
-// (M4). `next_run_at` is NOT recomputed here — that belongs to the scheduler;
-// this executor preserves the job's existing `next_run_at` when writing run
-// statistics.
-//
-// Re-entrancy ownership (M2 run-now): the executor owns the single in-flight set
-// (`Arc<Mutex<HashSet<JobId>>>`) shared by EVERY trigger path. A caller (the
-// scheduler tick or the `job_run_now` command) reserves a job's slot via
-// [`JobExecutor::try_claim`] BEFORE dispatching; the returned [`InFlightGuard`]
-// releases the slot on drop (normal return OR panic-unwind). Because both the
-// scheduler and run-now claim against the SAME set on the SAME executor
-// instance, a job whose execution is still in flight cannot be re-dispatched by
-// any path — the at-most-one-concurrent-run guarantee. `execute` itself does NOT
-// touch the set; claiming is the caller's responsibility so the scheduler can
-// decide (under the claim) whether to advance `next_run_at` before dispatching.
+// Re-entrancy: callers reserve a job via [`JobExecutor::try_claim`] BEFORE
+// dispatching; the returned [`InFlightGuard`] releases on drop (including
+// panic-unwind), so at most one run per job is in flight across every trigger
+// path. `execute` itself never touches the in-flight set.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -49,20 +31,13 @@ use tauri::{AppHandle, Emitter, Runtime, Wry};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{oneshot, Mutex};
 
-/// Frontend event channel: emitted when an execution's lifecycle state changes
-/// (a `running` row is written, then the SAME row reaches its terminal state).
-/// The app wires an `AppHandle` so the executor — which runs on the background
-/// scheduler / run-now paths, with no `Window` — can broadcast to every window.
+/// Emitted when an execution's lifecycle state changes; the executor has no
+/// `Window`, so it broadcasts via `AppHandle` to every window.
 pub const JOB_EXECUTED_EVENT: &str = "job_executed";
 
-/// Payload of [`JOB_EXECUTED_EVENT`]. `jobId` lets the `/jobs` list refresh the
-/// matching card; `executionId` lets the open detail timeline flip the matching
-/// row in place (matched by id, so expansion / scroll are preserved). `status`
-/// is the row's current state (`running` on start, terminal on completion).
-///
-/// The frontend treats the `job_execution_list` command as the source of truth
-/// and uses this event only as a refresh trigger — a missed event cannot corrupt
-/// state (VAL-HISTORY-030).
+/// Payload of [`JOB_EXECUTED_EVENT`]. The frontend treats `job_execution_list`
+/// as the source of truth and uses this event only as a refresh trigger, so a
+/// missed event cannot corrupt state.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobExecutedEvent {
@@ -71,59 +46,43 @@ pub struct JobExecutedEvent {
     pub status: ExecutionStatus,
 }
 
-/// The terminal outcome of dispatching a job's target, before it is persisted.
-///
-/// `status` is always a terminal state (success / failed / timeout). The other
-/// fields mirror the `job_executions` columns that `finalize` writes.
+/// Terminal outcome of dispatching a job's target; fields mirror the
+/// `job_executions` columns that `finalize` writes.
 struct DispatchOutcome {
     status: ExecutionStatus,
     stdout: Option<String>,
     stderr: Option<String>,
     exit_code: Option<i32>,
     error: Option<String>,
-    /// Opaque reference to an external result (e.g. a session id). Set by the agent / prompt targets to a
-    /// session / chat id; `None` when the target produced none.
+    /// Opaque reference to an external result (session / chat id); `None` when
+    /// the target produced none.
     result_ref: Option<String>,
 }
 
-/// Runs a single job and records the result.
-///
-/// Generic over the Tauri `Runtime` to match the optional `AppHandle<R>` used to
-/// broadcast execution events; the app wiring manages a `JobExecutor<Wry>` so the
-/// scheduler / run-now features can take it as Tauri `State`.
+/// Runs a single job and records the result. Generic over the Tauri `Runtime`
+/// to match the optional `AppHandle<R>`; the app wires a `JobExecutor<Wry>`.
 pub struct JobExecutor<R: Runtime = Wry> {
     jobs: JobRepository,
     executions: JobExecutionRepository,
-    /// Ids of jobs with an execution currently in flight. The single shared
-    /// re-entrancy gate: the scheduler tick and the `job_run_now` command both
-    /// claim against this set on the SAME executor instance (cloned via its
-    /// `Arc`), so a job already running cannot be re-dispatched by any path.
-    /// Claimed via [`JobExecutor::try_claim`]; released by [`InFlightGuard`].
+    /// Ids of jobs with an execution in flight — the single re-entrancy gate
+    /// shared by every trigger path. Claimed via [`JobExecutor::try_claim`];
+    /// released by [`InFlightGuard`].
     in_flight: Arc<Mutex<HashSet<String>>>,
-    /// Optional handle used to broadcast [`JOB_EXECUTED_EVENT`] to all windows
-    /// when an execution starts and completes. `None` in unit tests (the
-    /// `MockRuntime` setup builds the executor without one) so emit is a clean
-    /// no-op and the existing executor tests are untouched; the app wiring
-    /// injects a real handle via [`JobExecutor::with_app_handle`].
+    /// Broadcasts [`JOB_EXECUTED_EVENT`] on execution start / completion.
+    /// `None` in unit tests, making emit a no-op.
     app_handle: Option<AppHandle<R>>,
-    /// Collaborators for both `prompt` and `agent` targets: resolve the agent template,
-    /// mint a fresh isolated agent session from it, and drive one run to completion.
-    /// The `prompt` target reuses this engine as a pure-dialog agent (no tools,
-    /// no working dir). `None` in the unit wiring (`from_db`) so the bare unit
-    /// wiring keeps building; the app injects real handles via
-    /// [`JobExecutor::with_agent_services`]. When absent, any dispatch fails with
-    /// a stable "not configured" error rather than panicking — the same shape as
-    /// any other failure.
+    /// Collaborators for the `prompt` and `agent` targets (the `prompt` target
+    /// reuses the agent engine as a pure-dialog agent). `None` in the bare unit
+    /// wiring; dispatch then fails with a stable "not configured" error rather
+    /// than panicking.
     agent_services: Option<AgentServices>,
 }
-
 
 /// The collaborators the `agent` target needs, bundled so the field stays a
 /// single `Option`. All are `Arc`-shared (cheap clones); none is generic over
 /// the Tauri `Runtime`.
 ///
-/// The native `AgentRuntime` was retired on main; the executor now drives an
-/// agent run through the coding-agent [`build_agent_session`] +
+/// An agent run is driven through the coding-agent [`build_agent_session`] +
 /// [`drive_agent_run`](crate::services::drive_agent_run) path, exactly like the
 /// foreground `agent_run_stream` command but headless (no `Window`). `agents`
 /// resolves the agent template referenced by the target; `sessions` mints the
@@ -192,7 +151,6 @@ impl<R: Runtime> JobExecutor<R> {
         self
     }
 
-
     /// Inject the collaborators the `agent` target needs (resolve the template,
     /// mint a fresh session, drive one run to completion through the coding-agent
     /// session path). Consuming builder used by the app wiring; without it
@@ -218,7 +176,7 @@ impl<R: Runtime> JobExecutor<R> {
     /// Broadcast a [`JOB_EXECUTED_EVENT`] when one is wired. A clean no-op when
     /// no `AppHandle` is attached (unit tests) and best-effort otherwise: an
     /// emit failure is logged and swallowed, never failing the execution — the
-    /// `job_execution_list` command stays the source of truth (VAL-HISTORY-030).
+    /// `job_execution_list` command stays the source of truth.
     fn emit_executed(&self, job_id: &str, execution_id: &str, status: ExecutionStatus) {
         let Some(handle) = self.app_handle.as_ref() else {
             return;
@@ -247,7 +205,7 @@ impl<R: Runtime> JobExecutor<R> {
     /// raised AFTER the row + job statistics are already persisted, so a missing
     /// macOS permission (or any other send error) degrades gracefully — it is
     /// logged and swallowed, never panicking and never blocking the execution
-    /// flow (VAL-ROBUST-021). The persisted failure_count / history are
+    /// flow. The persisted failure_count / history are
     /// unaffected by whether the banner reaches the screen.
     fn notify_failure_threshold(&self, job_name: &str, failure_count: i32) {
         let Some(handle) = self.app_handle.as_ref() else {
@@ -280,7 +238,7 @@ impl<R: Runtime> JobExecutor<R> {
                 // Graceful degradation: no banner is shown (e.g. macOS
                 // notification permission not granted), but the failure was
                 // already recorded. Surface a hint on stdout/log; do NOT block
-                // or fail the run (VAL-ROBUST-021).
+                // or fail the run.
                 tracing::warn!(
                     "[job_executor] failure-threshold notification not delivered for job '{}' (permission missing or notification error): {}",
                     job_name,
@@ -324,7 +282,7 @@ impl<R: Runtime> JobExecutor<R> {
     pub async fn run_now(&self, job: &Job) -> Result<JobExecution, AppError> {
         let _guard = self.try_claim(&job.id).await.ok_or_else(|| {
             // A `CONFLICT` rather than a failed execution row: nothing ran, so
-            // we must NOT write a second row (VAL-HISTORY-028). The frontend
+            // we must NOT write a second row. The frontend
             // also disables the button while a run is in flight; this is the
             // server-side backstop against a racing double-click.
             AppError::with_hint(
@@ -342,31 +300,30 @@ impl<R: Runtime> JobExecutor<R> {
     /// Execute `job` and persist the outcome, retrying a failed/timed-out run
     /// with exponential backoff up to the job's `max_retries`.
     ///
-    /// The whole retry envelope is ONE `job_executions` row (VAL-HISTORY-032):
+    /// The whole retry envelope is ONE `job_executions` row:
     /// a single `running` row is inserted up front, the target is dispatched up
     /// to `max_retries + 1` times inside that row, and the SAME row is finalized
     /// once to its terminal state carrying the FINAL `attempt`. Job statistics
     /// are updated once per envelope: `run_count + 1` always (one trigger),
     /// while `failure_count` (the continuous-failure counter) is reset on a
     /// terminal success and incremented on a terminal failure — but only for a
-    /// scheduled trigger; a manual trigger leaves `failure_count` untouched
-    /// (VAL-ROBUST-024).
+    /// scheduled trigger; a manual trigger leaves `failure_count` untouched.
     ///
     /// Attempt numbering starts at 1; `max_retries = N` allows up to `N + 1`
     /// attempts. Between attempt `k` and `k + 1` the task sleeps
     /// `retry_delay_secs * 2^(k-1)` seconds (base, 2·base, 4·base, …); a
     /// `retry_delay_secs = 0` collapses every backoff to zero so the envelope
     /// still converges in a bounded number of attempts without busy-looping
-    /// forever (VAL-ROBUST-012). The sleep lives inside this task, so an app
+    /// forever. The sleep lives inside this task, so an app
     /// shutdown that drops the task discards a pending backoff — a late retry is
-    /// never replayed on restart (VAL-ROBUST-014).
+    /// never replayed on restart.
     ///
     /// Re-entrancy is the CALLER's responsibility: callers that need the
     /// at-most-one-concurrent-run guarantee must hold a slot from
     /// [`try_claim`] (or call [`run_now`], which does) for the duration of this
     /// call — which now spans the WHOLE envelope (every attempt and every
     /// backoff sleep), so a tick that fires mid-backoff is skipped by the
-    /// in-flight guard rather than opening a second row (VAL-ROBUST-013/015).
+    /// in-flight guard rather than opening a second row.
     ///
     /// A dispatch failure (a provider / agent error, a timeout, or an
     /// unsupported target) is NOT propagated as
@@ -377,7 +334,7 @@ impl<R: Runtime> JobExecutor<R> {
     /// If the job is deleted mid-envelope (between attempts), the envelope is
     /// aborted cleanly: the `running` row was cascade-deleted with the job
     /// (FK `ON DELETE CASCADE`), so there is nothing to finalize and no new
-    /// execution is started (VAL-ROBUST-025). The deletion is surfaced as an
+    /// execution is started. The deletion is surfaced as an
     /// `Err(not_found)`.
     pub async fn execute(&self, job: &Job, trigger: Trigger) -> Result<JobExecution, AppError> {
         let exec_id = uuid::Uuid::new_v4().to_string();
@@ -410,7 +367,7 @@ impl<R: Runtime> JobExecutor<R> {
             let outcome = self.dispatch_with_timeout(job).await;
 
             // A success terminates the envelope immediately, keeping the attempt
-            // number it succeeded on (preserving the failure trail, ROBUST-016).
+            // number it succeeded on, preserving the failure trail.
             if matches!(outcome.status, ExecutionStatus::Success) {
                 break outcome;
             }
@@ -422,7 +379,7 @@ impl<R: Runtime> JobExecutor<R> {
 
             // Back off before the next attempt: base * 2^(attempt-1). A zero
             // base yields zero delay (bounded, no busy-loop). The sleep is in
-            // this task, so a shutdown drops it (no late replay, ROBUST-014).
+            // this task, so a shutdown drops it (no late replay).
             let delay = backoff_delay(job.retry_delay_secs, attempt);
             tracing::info!(
                 "[job_executor] job {} attempt {} failed ({:?}); retrying in {:?}",
@@ -437,8 +394,7 @@ impl<R: Runtime> JobExecutor<R> {
 
             // If the job was deleted during the backoff, the running row was
             // cascade-deleted with it. Abort cleanly: do not start another
-            // attempt and do not try to finalize a row that no longer exists
-            // (VAL-ROBUST-025).
+            // attempt and do not try to finalize a row that no longer exists.
             match self.jobs.get(&job.id).await {
                 Ok(Some(_)) => {}
                 Ok(None) => {
@@ -476,7 +432,7 @@ impl<R: Runtime> JobExecutor<R> {
         // Update job-level run statistics. `run_count` advances once per
         // envelope. `failure_count` is the CONTINUOUS-failure counter: a
         // scheduled success resets it, a scheduled failure increments it, and a
-        // manual run never touches it (VAL-ROBUST-017/018/024). `next_run_at` is
+        // manual run never touches it. `next_run_at` is
         // preserved as-is; the scheduler owns cron recomputation.
         let failure_update = failure_count_update(trigger, outcome.status);
         self.jobs
@@ -497,7 +453,7 @@ impl<R: Runtime> JobExecutor<R> {
         // `== threshold` crossing is detected correctly however the caller holds
         // the job. Fires once when the chain first hits the threshold, stays
         // silent on further failures, and re-arms after a success resets the
-        // counter (VAL-ROBUST-019/020). A read failure here must not fail the
+        // counter. A read failure here must not fail the
         // run (the row is already finalized): log and skip the notification.
         match self.jobs.get(&job.id).await {
             Ok(Some(updated)) => {
@@ -553,20 +509,19 @@ impl<R: Runtime> JobExecutor<R> {
     ///
     /// The timeout is enforced on the EXECUTION side (here), decoupled from the
     /// scheduler's 30s tick, so a `timeout > tick interval` is honored at the
-    /// threshold rather than at the next tick (VAL-ROBUST-007). `0` means no
-    /// bound — the dispatch runs to its natural end (VAL-ROBUST-008).
+    /// threshold rather than at the next tick. `0` means no
+    /// bound — the dispatch runs to its natural end.
     ///
     /// When the bound elapses the execution is interrupted near the threshold
-    /// and recorded as a `timeout` outcome (VAL-ROBUST-004). Orphan cleanup is
+    /// and recorded as a `timeout` outcome. Orphan cleanup is
     /// per-target:
     /// - prompt: dropping the future cancels the in-flight non-streaming send;
     ///   the chat and (already-persisted) user message stay reachable, no
-    ///   running session is left behind (VAL-ROBUST-006 / VAL-ROBUST-022).
+    ///   running session is left behind.
     /// - agent: the run is driven inside `dispatch_agent`, which on timeout
     ///   issues the cooperative `abort_run` for the minted session so the agent
     ///   loop unwinds and the driver fires its single `closed`, and the same job
-    ///   can be triggered again — no orphan running turn (VAL-ROBUST-006 /
-    ///   VAL-ROBUST-022).
+    ///   can be triggered again — no orphan running turn.
     ///
     /// Never returns `Err`: a failed or timed-out dispatch is a terminal
     /// `DispatchOutcome` so the caller can finalize one consistent row.
@@ -601,7 +556,7 @@ impl<R: Runtime> JobExecutor<R> {
                 match timeout {
                     // Dropping the timed-out future cancels the in-flight send;
                     // the chat + persisted user message remain reachable, no
-                    // running session leaks (VAL-ROBUST-006).
+                    // running session leaks.
                     Some(dur) => match tokio::time::timeout(dur, dispatch).await {
                         Ok(outcome) => outcome,
                         Err(_) => DispatchOutcome::timeout(job.exec_timeout_secs),
@@ -621,16 +576,16 @@ impl<R: Runtime> JobExecutor<R> {
     ///
     /// On success the outcome's `result_ref` points at the minted session; on
     /// failure it still points at the session IF one was created, so a partial
-    /// transcript stays reachable (VAL-TARGET-023). The final assistant message's
-    /// text (if present) is extracted as `stdout` for backward compatibility with
-    /// the legacy chat path (VAL-TARGET-034).
+    /// transcript stays reachable. The final assistant message's
+    /// text (if present) is extracted as `stdout` for compatibility with
+    /// the legacy chat path.
     ///
     /// SECURITY: the provider is pre-validated (deleted / disabled / missing key)
     /// and every error is run through [`sanitize_agent_dispatch_error`] /
     /// [`provider_failure_message`] before it is persisted, so no raw upstream
     /// URL, `Authorization` header, or API key fragment can reach the
     /// `job_executions.error` column or any window — raw detail goes to
-    /// `tracing` only (VAL-TARGET-026 / VAL-TARGET-027).
+    /// `tracing` only.
     async fn dispatch_prompt(
         &self,
         job_name: &str,
@@ -810,14 +765,13 @@ impl<R: Runtime> JobExecutor<R> {
     /// coding-agent session path, then classify the terminal outcome from the
     /// persisted JSONL transcript.
     ///
-    /// Flow (VAL-TARGET-006 / 020 / 021 / 024 / 031):
+    /// Flow:
     /// 1. resolve the template (`AgentService::get_agent`); a missing template is
-    ///    a distinct "template missing" failure with NO session created
-    ///    (VAL-TARGET-020);
+    ///    a distinct "template missing" failure with NO session created;
     /// 2. resolve a usable provider for the template's model — the template
     ///    stores only a model id — failing pre-flight with a model/config-class
     ///    error (distinct from "template missing") when the model is unset or no
-    ///    enabled provider serves it (VAL-TARGET-021), again with NO session
+    ///    enabled provider serves it, again with NO session
     ///    created;
     /// 3. load the resolved provider's row (needed to construct the coding-agent
     ///    session); a provider that vanished between resolution and load is a
@@ -836,7 +790,7 @@ impl<R: Runtime> JobExecutor<R> {
     ///    oneshot to block until the turn ends;
     /// 6. classify: a run-level error envelope (`on_error`, e.g. the provider /
     ///    model was removed) OR an in-band-error terminal assistant turn
-    ///    (`stopReason == "error"`, VAL-TARGET-024) is `failed`; otherwise
+    ///    (`stopReason == "error"`) is `failed`; otherwise
     ///    `success`. In EVERY post-session outcome `result_ref` points at the
     ///    minted session so its (possibly partial) transcript stays reachable.
     ///
@@ -855,8 +809,7 @@ impl<R: Runtime> JobExecutor<R> {
     /// so the agent loop unwinds at its next await point, synthesizes a
     /// `stopReason=aborted` terminal turn, and the driver fires the single
     /// `closed` — no orphan running turn, the job can fire again. A `timeout`
-    /// outcome is returned with `result_ref` pointing at the minted session
-    /// (VAL-ROBUST-006 / VAL-ROBUST-022).
+    /// outcome is returned with `result_ref` pointing at the minted session.
     async fn dispatch_agent(
         &self,
         agent_id: &str,
@@ -872,7 +825,7 @@ impl<R: Runtime> JobExecutor<R> {
         };
 
         // 1. Resolve the agent template. A missing template is a distinct
-        //    failure class (VAL-TARGET-020) — no session is created.
+        //    failure class — no session is created.
         let agent = match services.agents.get_agent(agent_id.to_string()).await {
             Ok(agent) => agent,
             Err(e) => {
@@ -891,7 +844,7 @@ impl<R: Runtime> JobExecutor<R> {
         //    per job (the Agent definition no longer carries one), so we find an
         //    enabled provider whose catalog still serves that model id. An unset
         //    model (empty — e.g. a pre-model row) or a removed provider/model is a
-        //    model/config-class failure (VAL-TARGET-021), distinct from a missing
+        //    model/config-class failure, distinct from a missing
         //    template — and still no session is created. The `agent` template is
         //    still used below for its system prompt / sampling config.
         let provider_id = match self.resolve_agent_provider(model_id).await {
@@ -917,16 +870,16 @@ impl<R: Runtime> JobExecutor<R> {
             }
         };
 
-        // 4. Mint a fresh, isolated SQLite session row from the template
-        //    (VAL-TARGET-006). It carries the resolved model + provider so the
-        //    coding-agent session built from it resolves the same pair, plus the
-        //    template's system prompt / sampling config.
+        // 4. Mint a fresh, isolated SQLite session row from the template. It
+        //    carries the resolved model + provider so the coding-agent session
+        //    built from it resolves the same pair, plus the template's system
+        //    prompt / sampling config.
         let request = CreateAgentSessionRequest {
             name: agent_session_name(&agent.name),
             project_id: project_id.map(str::to_string),
-            // The job session is instantiated from this agent definition — record
-            // the provenance back-link (P3). Jobs keep their own working_dir/tool
-            // wiring for now rather than routing through working_dir_mode.
+            // Provenance back-link to the agent definition. Jobs keep their own
+            // working_dir/tool wiring rather than routing through
+            // working_dir_mode.
             agent_definition_id: Some(agent.id.clone()),
             model_id: Some(model_id),
             provider_id: Some(provider_id),
@@ -936,7 +889,7 @@ impl<R: Runtime> JobExecutor<R> {
             max_tokens: agent.max_tokens,
             working_dir: None,
             enabled_tools: None,
-            // P1: jobs don't bind MCP yet; P3 will inherit the template's mcp_servers.
+            // Jobs do not bind MCP servers.
             mcp_servers: None,
             tool_execution_mode: None,
         };
@@ -1024,7 +977,7 @@ impl<R: Runtime> JobExecutor<R> {
         // point, synthesizes a `stopReason=aborted` terminal turn, and the
         // driver fires the single `closed` (closed-once holds on the abort path
         // too) — no orphan running turn, the job can fire again. The minted
-        // session stays referenced (VAL-ROBUST-006 / VAL-ROBUST-022).
+        // session stays referenced.
         let run_error = match timeout {
             Some(dur) => match tokio::time::timeout(dur, signal).await {
                 Ok(result) => result.unwrap_or(None),
@@ -1061,7 +1014,7 @@ impl<R: Runtime> JobExecutor<R> {
         }
 
         // Read the persisted JSONL transcript to detect an in-band error
-        // terminal turn (VAL-TARGET-024): the run returns `Ok` but the final
+        // terminal turn: the run returns `Ok` but the final
         // assistant message carries `stopReason == "error"`. The transcript
         // lives under the session's `base_dir` (app_data_dir) keyed by its cwd
         // (the writer side, `config_from_rows`), so we resolve the same cwd here.
@@ -1089,7 +1042,7 @@ impl<R: Runtime> JobExecutor<R> {
     /// Read a minted session's persisted JSONL transcript for terminal-outcome
     /// classification.
     ///
-    /// M3 made JSONL the authoritative transcript store; the coding-agent session
+    /// JSONL is the authoritative transcript store: the coding-agent session
     /// the run drove appends its turns to `<app_data_dir>/sessions/
     /// <flattened-cwd>/<session_id>.jsonl`. The cwd is resolved exactly as the
     /// writer side does ([`config_from_rows`] roots a session with no working dir
@@ -1115,7 +1068,7 @@ impl<R: Runtime> JobExecutor<R> {
     /// model catalog still serves that exact id, matching how an agent session is
     /// launched from the UI (a model is always picked together with its provider).
     /// Resolution is offline (DB catalog only): `Err` carries the precise failure
-    /// class for VAL-TARGET-021 — `NoModel` when the job has no model set (empty),
+    /// class — `NoModel` when the job has no model set (empty),
     /// `ModelRemoved` when no provider serves it. An enabled provider is preferred;
     /// a match found only under a disabled provider still surfaces as a config
     /// failure (the run could not proceed).
@@ -1219,8 +1172,8 @@ fn timeout_duration(exec_timeout_secs: i64) -> Option<Duration> {
 ///
 /// A `retry_delay_secs <= 0` yields a zero delay (no inter-attempt wait), so a
 /// `retry_delay_secs = 0` job still retries — back to back — and converges in a
-/// bounded number of attempts rather than busy-looping forever
-/// (VAL-ROBUST-012). The exponent is saturated so a large `attempt` cannot
+/// bounded number of attempts rather than busy-looping forever.
+/// The exponent is saturated so a large `attempt` cannot
 /// overflow the shift; the resulting seconds are saturated into the `Duration`.
 fn backoff_delay(retry_delay_secs: i64, attempt: i32) -> Duration {
     if retry_delay_secs <= 0 || attempt < 1 {
@@ -1238,7 +1191,7 @@ fn backoff_delay(retry_delay_secs: i64, attempt: i32) -> Duration {
 /// notification. A job's `failure_count` (the continuous-failure counter)
 /// crossing exactly this value raises one banner; subsequent failures in the
 /// same chain stay silent until a success resets the counter and the chain
-/// climbs back across the threshold (VAL-ROBUST-019/020).
+/// climbs back across the threshold.
 const FAILURE_NOTIFY_THRESHOLD: i32 = 3;
 
 /// Whether a finalized envelope should raise the continuous-failure desktop
@@ -1247,10 +1200,10 @@ const FAILURE_NOTIFY_THRESHOLD: i32 = 3;
 /// Fires exactly once per failure chain: a scheduled failure increments
 /// `failure_count` by exactly 1, so the new value equals `threshold` on one and
 /// only one envelope — the moment the chain first crosses it. The 4th, 5th, …
-/// failures land on `threshold + 1`, `threshold + 2`, … and stay silent
-/// (VAL-ROBUST-019). A terminal success resets the counter to 0, so a fresh
-/// chain climbing back to `threshold` fires again — the throttle re-arms with
-/// the reset, no extra state required (VAL-ROBUST-020).
+/// failures land on `threshold + 1`, `threshold + 2`, … and stay silent.
+/// A terminal success resets the counter to 0, so a fresh chain climbing back
+/// to `threshold` fires again — the throttle re-arms with the reset, no extra
+/// state required.
 ///
 /// A MANUAL trigger never participates: it leaves `failure_count` untouched, so
 /// it can never produce the `== threshold` crossing. The explicit trigger guard
@@ -1263,10 +1216,10 @@ fn should_notify_failure(new_failure_count: i32, threshold: i32, trigger: Trigge
 /// counter (`failure_count`), which is distinct from the cumulative trigger
 /// counter (`run_count`):
 /// - a MANUAL trigger never participates — its outcome leaves `failure_count`
-///   untouched (VAL-ROBUST-024);
+///   untouched;
 /// - a SCHEDULED success resets the counter to 0 (the failure chain is broken,
-///   even though the row keeps its `attempt > 1` trail, VAL-ROBUST-016);
-/// - a SCHEDULED failure/timeout increments it (VAL-ROBUST-017/018).
+///   even though the row keeps its `attempt > 1` trail);
+/// - a SCHEDULED failure/timeout increments it.
 fn failure_count_update(trigger: Trigger, status: ExecutionStatus) -> FailureCountUpdate {
     match trigger {
         Trigger::Manual => FailureCountUpdate::Unchanged,
@@ -1408,7 +1361,7 @@ enum AgentFailure {
 /// Map an [`AgentFailure`] to a stable, user-facing message. Carries no secret
 /// material and no raw provider/template detail. The "template missing" message
 /// is deliberately distinct from the model/config-class ones so the two are
-/// distinguishable (VAL-TARGET-020 vs VAL-TARGET-021).
+/// distinguishable.
 fn agent_failure_message(failure: AgentFailure) -> String {
     match failure {
         AgentFailure::TemplateMissing => {
@@ -1459,7 +1412,7 @@ enum AgentRunResult {
     /// The run completed without an in-band error terminal turn.
     Success,
     /// The final assistant turn carries `stopReason == "error"` — the run ended
-    /// with an in-band error but the transcript is persisted (VAL-TARGET-024).
+    /// with an in-band error but the transcript is persisted.
     InBandError,
 }
 
@@ -1724,7 +1677,6 @@ mod tests {
             .expect("seed provider");
     }
 
-
     /// Build an enabled `Job` with the given target and a future `next_run_at`.
     async fn make_job(id: &str, target: JobTarget) -> Job {
         let now = current_timestamp();
@@ -1851,8 +1803,8 @@ mod tests {
         assert_eq!(rows[0].status, "failed");
     }
 
-    // VAL-TARGET-019 (end-to-end): a prompt whose provider does not exist in the
-    // DB is failed with the deleted-provider message — and NO session is created
+    // End-to-end: a prompt whose provider does not exist in the DB is failed
+    // with the deleted-provider message — and NO session is created
     // (the pre-flight short-circuits before session creation), so no result_ref.
     #[tokio::test]
     async fn prompt_missing_provider_fails_before_session() {
@@ -1888,8 +1840,8 @@ mod tests {
         assert_eq!(sessions, 0);
     }
 
-    // VAL-TARGET-018 (end-to-end): a disabled provider is failed before the run,
-    // with the disabled message and no session.
+    // End-to-end: a disabled provider is failed before the run, with the
+    // disabled message and no session.
     #[tokio::test]
     async fn prompt_disabled_provider_fails_before_session() {
         let env = with_agent_services(setup().await);
@@ -1912,8 +1864,8 @@ mod tests {
         assert!(exec.result_ref.is_none());
     }
 
-    // VAL-TARGET-017 (end-to-end): an enabled provider with a blank key is failed
-    // before the run with the missing-key message and no session.
+    // End-to-end: an enabled provider with a blank key is failed before the run
+    // with the missing-key message and no session.
     #[tokio::test]
     async fn prompt_keyless_provider_fails_before_session() {
         let env = with_agent_services(setup().await);
@@ -1936,8 +1888,8 @@ mod tests {
         assert!(exec.result_ref.is_none());
     }
 
-    // VAL-TARGET-023 + VAL-TARGET-030 + VAL-TARGET-035 (end-to-end, offline): a
-    // provider that passes the pre-flight but whose model does NOT resolve under
+    // End-to-end (offline): a provider that passes the pre-flight but whose
+    // model does NOT resolve under
     // the catalog provider type fails the run-level envelope. The outcome is
     // `failed` with a model-class sanitized error, and `result_ref` points at
     // the minted session — the JSONL transcript persists any partial turns.
@@ -1975,14 +1927,14 @@ mod tests {
         assert!(!err.contains("prov_ok"));
         assert!(!err.contains("sk-live"));
 
-        // result_ref points at the minted session (VAL-TARGET-023).
+        // result_ref points at the minted session.
         assert!(
             exec.result_ref.is_some(),
             "result_ref points at the minted session"
         );
     }
 
-    // ---- prompt dispatch pure helpers (VAL-TARGET-017/018/019/026/027/035) ----
+    // ---- prompt dispatch pure helpers ----
 
     fn sample_provider(enabled: bool, api_key: &str) -> Provider {
         Provider {
@@ -1997,8 +1949,8 @@ mod tests {
         }
     }
 
-    // VAL-TARGET-019: a deleted provider (get_provider => Err) is classified as
-    // a deleted-provider failure.
+    // A deleted provider (get_provider => Err) is classified as a
+    // deleted-provider failure.
     #[test]
     fn classify_provider_err_is_deleted() {
         let err = AppError::validation_error("Provider not found");
@@ -2008,7 +1960,7 @@ mod tests {
         );
     }
 
-    // VAL-TARGET-018: an existing-but-disabled provider is classified as
+    // An existing-but-disabled provider is classified as
     // disabled (checked before the key, so a disabled keyless provider is still
     // reported as disabled — the first actionable problem).
     #[test]
@@ -2023,8 +1975,7 @@ mod tests {
         );
     }
 
-    // VAL-TARGET-017: an enabled provider with a blank/whitespace key is a
-    // missing-key failure.
+    // An enabled provider with a blank/whitespace key is a missing-key failure.
     #[test]
     fn classify_provider_missing_key() {
         let p = sample_provider(true, "");
@@ -2043,7 +1994,7 @@ mod tests {
         assert_eq!(classify_provider(Ok(&p)), None);
     }
 
-    // VAL-TARGET-026: classifying a provider never reads the key value — the
+    // Classifying a provider never reads the key value — the
     // three pre-flight failure messages carry no key material whatsoever.
     #[test]
     fn provider_failure_messages_carry_no_secret() {
@@ -2099,7 +2050,7 @@ mod tests {
         );
     }
 
-    // ---- Manual run-now + shared in-flight re-entrancy (M2) ----
+    // ---- Manual run-now + shared in-flight re-entrancy ----
 
     /// `try_claim` is the single re-entrancy gate: the first claim succeeds, a
     /// second for the same id while the first guard is held is rejected, and
@@ -2145,8 +2096,7 @@ mod tests {
         );
     }
 
-    // VAL-HISTORY-004 / VAL-HISTORY-013: a manual run produces exactly one
-    // execution row with trigger = manual.
+    // A manual run produces exactly one execution row with trigger = manual.
     #[tokio::test]
     async fn run_now_records_a_manual_execution_row() {
         let env = setup().await;
@@ -2182,7 +2132,7 @@ mod tests {
         assert_eq!(env.executor.in_flight_len().await, 0);
     }
 
-    // VAL-HISTORY-027: a disabled job (enabled = 0) still runs manually and
+    // A disabled job (enabled = 0) still runs manually and
     // writes a manual row — disabling only stops automatic scheduling.
     #[tokio::test]
     async fn run_now_runs_disabled_job() {
@@ -2207,7 +2157,7 @@ mod tests {
         assert_eq!(rows[0].status, "failed");
     }
 
-    // VAL-HISTORY-028: while an execution is in flight, a second run-now is
+    // While an execution is in flight, a second run-now is
     // rejected with a CONFLICT and writes NO second row (no concurrent running
     // rows). We hold the slot by claiming it directly (the guard simulates an
     // active run), then assert the second run-now bounces without persisting.
@@ -2253,7 +2203,7 @@ mod tests {
         assert_eq!(exec.status, ExecutionStatus::Failed);
     }
 
-    // ---- History pruning wired into the execution write path (M2) ----
+    // ---- History pruning wired into the execution write path ----
 
     /// Seed `count` already-finalized executions for a job WITHOUT going through
     /// a child process, with ascending `started_at` so FIFO order is well
@@ -2290,7 +2240,7 @@ mod tests {
         ids
     }
 
-    // VAL-HISTORY-021: a job sitting at exactly N executions is NOT pruned —
+    // A job sitting at exactly N executions is NOT pruned —
     // running `execute` once more would push it to N+1, but the wired prune
     // (after finalize) trims back to N, and the row count stays at N. Here we
     // seed N-1 then let `execute` write the Nth row through the real path; the
@@ -2321,7 +2271,7 @@ mod tests {
         );
     }
 
-    // VAL-HISTORY-022 / VAL-HISTORY-023: the (N+1)th execution drops exactly the
+    // The (N+1)th execution drops exactly the
     // oldest row (FIFO by started_at) and the persisted count stabilizes at N —
     // no transient N+1 is left behind. We seed N rows, then execute once: the
     // wired prune (after finalize) trims the oldest back to N.
@@ -2355,7 +2305,7 @@ mod tests {
         );
     }
 
-    // VAL-HISTORY-023 (count guard): even across several executions past the
+    // Count guard: even across several executions past the
     // limit, the persisted row count for the job never exceeds N at any point a
     // caller could observe it — the prune runs inside each `execute`.
     #[tokio::test]
@@ -2381,7 +2331,7 @@ mod tests {
         assert_eq!(read_rows(&env, "job_cap").await.len() as i64, limit);
     }
 
-    // VAL-HISTORY-024: pruning is per-job — driving job A over the limit does not
+    // Pruning is per-job — driving job A over the limit does not
     // touch job B's history. We park B at N rows, push A past the limit via
     // `execute`, and assert B is untouched.
     #[tokio::test]
@@ -2420,7 +2370,7 @@ mod tests {
         );
     }
 
-    // VAL-HISTORY-025: a still-running row for the same job is never pruned by an
+    // A still-running row for the same job is never pruned by an
     // execute that overflows the finalized history. We inject an oldest running
     // row directly, fill the finalized history to N, then execute once more; the
     // running row must survive (prune only trims finalized rows).
@@ -2464,7 +2414,7 @@ mod tests {
         );
     }
 
-    // VAL-HISTORY-026: deleting a job cascades to its job_executions rows
+    // Deleting a job cascades to its job_executions rows
     // (FK ON DELETE CASCADE; sqlx keeps foreign_keys = ON). We run the job once
     // through the real path, assert a row exists, delete the job, and assert the
     // raw execution count is zero.
@@ -2503,7 +2453,7 @@ mod tests {
         assert_eq!(count, 0, "deleting the job cascades away its executions");
     }
 
-    // ---- Realtime `job_executed` event contract (M2) ----
+    // ---- Realtime `job_executed` event contract ----
 
     // The event channel name and payload shape are the wire contract the
     // frontend listens on; a typo or a casing drift silently breaks the
@@ -2565,8 +2515,7 @@ mod tests {
     // The in-flight set is SHARED across every clone of an executor (it lives
     // behind an `Arc`): a slot claimed on one handle is seen as occupied by a
     // clone. This is what makes the scheduler (which clones the executor) and
-    // the run-now command (a separate State handle, also a clone) share ONE
-    // gate — the core of VAL-HISTORY-028.
+    // the run-now command (a separate State handle, also a clone) share ONE gate.
     #[tokio::test]
     async fn in_flight_set_is_shared_across_clones() {
         let env = setup().await;
@@ -2595,7 +2544,7 @@ mod tests {
         );
     }
 
-    // ---- agent dispatch (VAL-TARGET-006 / 020 / 021 / 024 / 031) ----
+    // ---- agent dispatch ----
 
     use crate::services::{AgentService, AgentSessionService};
     use crate::storage::types::AgentSessionMessage;
@@ -2685,7 +2634,7 @@ mod tests {
         }
     }
 
-    // VAL-TARGET-020 (end-to-end): an agent target whose template id does not
+    // End-to-end: an agent target whose template id does not
     // resolve is failed with the distinct "template missing" message — and NO
     // session is created (the pre-flight short-circuits), so no result_ref.
     #[tokio::test]
@@ -2716,14 +2665,14 @@ mod tests {
         assert_eq!(sessions, 0);
     }
 
-    // VAL-TARGET-021 (end-to-end): a template that exists but has no model
+    // End-to-end: a template that exists but has no model
     // selected is failed with a model-class message — distinct from the
     // template-missing message — and no session is created.
     #[tokio::test]
     async fn agent_template_without_model_fails_with_model_class_error() {
         let env = with_agent_services(setup().await);
         let agent_id = seed_agent(&env).await;
-        // Empty model on the target → the "no model selected" class (VAL-TARGET-021).
+        // Empty model on the target → the "no model selected" class.
         let job = make_job("job_a_nomodel", agent_target(&agent_id, "", "go")).await;
         seed_job(&env, &job).await;
 
@@ -2734,7 +2683,7 @@ mod tests {
             exec.error.as_deref(),
             Some(agent_failure_message(AgentFailure::NoModel).as_str())
         );
-        // Distinct from the template-missing class (VAL-TARGET-020 vs 021).
+        // Distinct from the template-missing class.
         assert_ne!(
             exec.error.as_deref(),
             Some(agent_failure_message(AgentFailure::TemplateMissing).as_str())
@@ -2742,7 +2691,7 @@ mod tests {
         assert!(exec.result_ref.is_none());
     }
 
-    // VAL-TARGET-021 (end-to-end): a template whose model is served by no
+    // End-to-end: a template whose model is served by no
     // provider (provider/model removed) is failed with the model-removed class
     // — distinct from the template-missing class — and no session is created.
     #[tokio::test]
@@ -2768,7 +2717,7 @@ mod tests {
         assert!(exec.result_ref.is_none());
     }
 
-    // VAL-TARGET-021 (resolution): a model that survives ONLY under a DISABLED
+    // Resolution: a model that survives ONLY under a DISABLED
     // provider is a config-class failure (the run could not proceed), distinct
     // from a clean "model removed". No enabled provider serves the model.
     #[tokio::test]
@@ -2790,7 +2739,7 @@ mod tests {
         assert!(exec.result_ref.is_none());
     }
 
-    // VAL-TARGET-006 (resolution): an enabled provider serving the template's
+    // Resolution: an enabled provider serving the template's
     // model is resolved as the run's provider. Exercised directly through the
     // pre-flight resolver (a real run needs an LLM).
     #[tokio::test]
@@ -2820,7 +2769,7 @@ mod tests {
         assert_eq!(err, AgentFailure::ConfigError);
     }
 
-    // VAL-TARGET-020 / 021: each agent failure class maps to a stable, distinct,
+    // Each agent failure class maps to a stable, distinct,
     // secret-free message. Template-missing is distinguishable from every
     // model/config class.
     #[test]
@@ -2836,7 +2785,7 @@ mod tests {
             assert!(!msg.is_empty());
             assert!(!msg.contains("sk-"));
         }
-        // Template-missing is distinct from each model/config class (020 vs 021).
+        // Template-missing is distinct from each model/config class.
         let template_missing = agent_failure_message(AgentFailure::TemplateMissing);
         for other in [
             AgentFailure::NoModel,
@@ -2847,7 +2796,7 @@ mod tests {
         }
     }
 
-    // VAL-TARGET-027 (agent path): each AppError code maps to a stable message
+    // Agent path: each AppError code maps to a stable message
     // that contains no raw URL, Bearer token, or key fragment.
     #[test]
     fn sanitize_agent_dispatch_error_drops_raw_detail() {
@@ -2873,7 +2822,7 @@ mod tests {
         assert_ne!(model_msg, sanitize_agent_dispatch_error(&generic));
     }
 
-    // ---- transcript classification (VAL-TARGET-024 / 031) ----
+    // ---- transcript classification ----
 
     /// Build a persisted assistant transcript row with the given `stopReason`.
     fn assistant_row(seq: i64, stop_reason: &str) -> AgentSessionMessage {
@@ -2906,7 +2855,7 @@ mod tests {
         }
     }
 
-    // VAL-TARGET-024: a transcript whose terminal assistant turn carries
+    // A transcript whose terminal assistant turn carries
     // `stopReason == "error"` classifies as an in-band error (failed), even
     // though the run returned Ok and the transcript is persisted.
     #[test]
@@ -2965,7 +2914,7 @@ mod tests {
         );
     }
 
-    // VAL-TARGET-031: the unicode initial instruction is preserved byte-for-byte
+    // The unicode initial instruction is preserved byte-for-byte
     // in a persisted user turn — classification reads stopReason, never mutating
     // the user content. (The runtime persists the user turn verbatim; here we
     // assert the transcript shape the executor reads back is unicode-safe.)
@@ -3032,12 +2981,12 @@ mod tests {
         // are covered by the `build_oneshot_signal` tests above.
     }
 
-    // ---- exec timeout (VAL-ROBUST-004/005/006/007/008/022, VAL-TARGET-036) ----
+    // ---- exec timeout ----
 
     // `exec_timeout_secs == 0` (or, defensively, negative) means no bound — no
     // `tokio::time::timeout` wrapper is applied. `> 0` maps to a `Duration` of
     // that many seconds. This is the single switch that decides whether a
-    // dispatch is bounded (VAL-ROBUST-008).
+    // dispatch is bounded.
     #[test]
     fn timeout_duration_zero_is_unbounded_positive_is_bounded() {
         assert_eq!(timeout_duration(0), None, "0 => no timeout bound");
@@ -3080,7 +3029,7 @@ mod tests {
         assert!(outcome.error.as_deref().unwrap().contains("15"));
     }
 
-    // ---- retry backoff (VAL-ROBUST-009..018/023..025, VAL-HISTORY-032) ----
+    // ---- retry backoff ----
     //
     // The dispatch vehicle is the fail-clean `prompt_target()`: every attempt
     // returns a terminal "not configured" failure, so an envelope retries up to
@@ -3088,7 +3037,7 @@ mod tests {
     // child invocations (there is no child process), so retry counting is
     // asserted via the persisted `attempt` on the single envelope row.
 
-    // ---- backoff_delay pure law (exponential, base 2; ROBUST-009/012) ----
+    // ---- backoff_delay pure law (exponential, base 2) ----
 
     // The gap before the k-th retry is base * 2^(k-1): base, 2·base, 4·base, …
     // (`attempt` is the 1-based number of the attempt that just failed).
@@ -3109,7 +3058,7 @@ mod tests {
     }
 
     // A zero (or negative) base collapses every backoff to zero: retries run
-    // back-to-back, with no inter-attempt wait (VAL-ROBUST-012).
+    // back-to-back, with no inter-attempt wait.
     #[test]
     fn backoff_delay_zero_base_is_zero() {
         for attempt in 1..=5 {
@@ -3126,7 +3075,7 @@ mod tests {
         assert!(d.as_secs() > 0, "saturated delay is still positive");
     }
 
-    // ---- failure_count_update mapping (ROBUST-016/017/018/024) ----
+    // ---- failure_count_update mapping ----
 
     // Scheduled success resets the continuous-failure chain; scheduled
     // failure/timeout increments it; a manual run never touches it.
@@ -3157,7 +3106,7 @@ mod tests {
         }
     }
 
-    // ---- continuous-failure notification decision (ROBUST-019/020/021) ----
+    // ---- continuous-failure notification decision ----
 
     // The threshold constant is the documented value (3): the body / tests and
     // the validator all key off this number.
@@ -3166,7 +3115,7 @@ mod tests {
         assert_eq!(FAILURE_NOTIFY_THRESHOLD, 3);
     }
 
-    // VAL-ROBUST-019: a scheduled failure chain fires EXACTLY once — at the
+    // A scheduled failure chain fires EXACTLY once — at the
     // envelope whose new failure_count equals the threshold. Counts below the
     // threshold are silent, and the 4th, 5th, … failures (count > threshold)
     // stay silent too. Because each scheduled failure increments by exactly 1,
@@ -3185,7 +3134,7 @@ mod tests {
         assert!(!should_notify_failure(100, t, Trigger::Schedule));
     }
 
-    // VAL-ROBUST-020: a success resets failure_count to 0, so the counter climbs
+    // A success resets failure_count to 0, so the counter climbs
     // from scratch and crosses the threshold again on a fresh chain — the
     // throttle re-arms with the reset, with no extra state. Counting up 0,1,2,3
     // a SECOND time still yields exactly one `== threshold` crossing.
@@ -3226,7 +3175,7 @@ mod tests {
         );
     }
 
-    // VAL-ROBUST-019 (end-to-end persisted view): driving an always-failing
+    // End-to-end persisted view: driving an always-failing
     // SCHEDULED job through three envelopes climbs failure_count 1 → 2 → 3, and
     // the third envelope is the single one whose persisted count equals the
     // threshold (the crossing). The 4th and 5th envelopes land on 4 and 5, past
@@ -3237,7 +3186,7 @@ mod tests {
         let env = setup().await;
         // No AppHandle in the unit wiring, so the banner is a no-op — but the
         // failure_count / history accounting (and the crossing) is unaffected,
-        // which is exactly the graceful-degradation guarantee (ROBUST-021).
+        // which is exactly the graceful-degradation guarantee.
         assert!(
             env.executor.app_handle.is_none(),
             "unit executor has no AppHandle; notifications are a clean no-op here"
@@ -3287,13 +3236,12 @@ mod tests {
         assert!(rows.iter().all(|r| r.status == "failed"));
     }
 
-    // VAL-ROBUST-021: the banner path is graceful-degradation by construction —
+    // The banner path is graceful-degradation by construction:
     // `notify_failure_threshold` is a clean no-op without an AppHandle and never
     // panics or blocks, so a scheduled failure chain crossing the threshold
     // still finalizes the row and bumps failure_count exactly as it would with a
-    // working desktop. (A REAL macOS permission-denied banner is probed by the
-    // milestone validator with computer-use; here we prove the executor never
-    // depends on the banner reaching the screen.)
+    // working desktop — the executor never depends on the banner reaching the
+    // screen.
     #[tokio::test]
     async fn notification_degradation_never_blocks_execution() {
         let env = setup().await;
@@ -3399,7 +3347,7 @@ mod tests {
         );
     }
 
-    // VAL-ROBUST-009 + VAL-HISTORY-032: a job that fails every attempt is retried
+    // A job that fails every attempt is retried
     // up to max_retries+1 times, and the WHOLE envelope is ONE row finalized to
     // `failed` with the final attempt recorded — never one row per attempt. The
     // fail-clean prompt vehicle fails on every attempt, so the terminal
@@ -3417,7 +3365,7 @@ mod tests {
         assert_eq!(exec.status, ExecutionStatus::Failed);
         assert_eq!(exec.attempt, 4, "max_retries=3 => terminal attempt 4");
 
-        // ONE row for the whole envelope (HISTORY-032), recording attempt 4.
+        // ONE row for the whole envelope, recording attempt 4.
         let rows = read_rows(&env, "job_retry_fail").await;
         assert_eq!(rows.len(), 1, "attempt=4 envelope is still ONE history row");
         assert_eq!(rows[0].status, "failed");
@@ -3435,7 +3383,7 @@ mod tests {
         assert_eq!(after.failure_count, 1, "terminal failure increments");
     }
 
-    // VAL-ROBUST-010: max_retries=0 makes the first failure terminal — one
+    // max_retries=0 makes the first failure terminal — one
     // attempt=1 failed row, no retry.
     #[tokio::test]
     async fn zero_retries_fails_on_first_attempt() {
@@ -3456,7 +3404,7 @@ mod tests {
         assert_eq!(rows[0].attempt, 1);
     }
 
-    // VAL-ROBUST-017: all retries fail => terminal `failed` and failure_count +1.
+    // All retries fail => terminal `failed` and failure_count +1.
     #[tokio::test]
     async fn all_retries_fail_increments_failure_count() {
         let env = setup().await;
@@ -3480,7 +3428,7 @@ mod tests {
         assert_eq!(after.failure_count, 1);
     }
 
-    // VAL-ROBUST-023 + VAL-ROBUST-024: a manual run_now also retries on failure,
+    // A manual run_now also retries on failure,
     // but a terminal manual failure leaves failure_count untouched (manual runs
     // do not participate in continuous-failure tracking).
     #[tokio::test]
@@ -3508,7 +3456,7 @@ mod tests {
 
         assert_eq!(exec.trigger, Trigger::Manual);
         assert_eq!(exec.status, ExecutionStatus::Failed);
-        // The manual run still RETRIED (ROBUST-023): 3 attempts for 2 retries.
+        // The manual run still RETRIED: 3 attempts for 2 retries.
         assert_eq!(exec.attempt, 3, "manual run retries up to max_retries+1");
 
         let after = env
@@ -3518,14 +3466,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        // failure_count is untouched by the manual failure (ROBUST-024).
+        // failure_count is untouched by the manual failure.
         assert_eq!(
             after.failure_count, 1,
             "manual failure does not bump the chain"
         );
     }
 
-    // VAL-ROBUST-012: retry_delay_secs=0 converges in a bounded number of
+    // retry_delay_secs=0 converges in a bounded number of
     // attempts (no busy-loop / no infinite retries) and returns promptly. With
     // max_retries=5 a back-to-back failing envelope must run exactly 6 attempts
     // and finish far faster than any backoff would allow.
@@ -3551,7 +3499,7 @@ mod tests {
         );
     }
 
-    // VAL-ROBUST-013/015 (in-flight, retry leg): the WHOLE retry envelope is held
+    // In-flight, retry leg: the WHOLE retry envelope is held
     // under one in-flight claim, so a concurrent run_now (the scheduler tick uses
     // the same gate) fired WHILE the envelope is mid-backoff is rejected with a
     // CONFLICT and opens NO second row. We use a non-zero base so the envelope
@@ -3617,7 +3565,7 @@ mod tests {
         assert_eq!(rows[0].status, "failed");
     }
 
-    // VAL-ROBUST-025: deleting the job mid-envelope (during a backoff) aborts the
+    // Deleting the job mid-envelope (during a backoff) aborts the
     // retry cleanly — no further attempt runs, the cascade removes the running
     // row (no leftover running row), and no new execution row appears after the
     // delete. The envelope surfaces the deletion as a not_found Err.

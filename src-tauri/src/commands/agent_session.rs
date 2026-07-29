@@ -1,15 +1,14 @@
-// Agent Session 相关 IPC 命令
+// Agent-session CRUD commands, delegating to `AgentSessionService`.
 //
-// Agent 模式会话的 CRUD 命令层，委托给 `AgentSessionService`。仅会话 CRUD 与
-// transcript 读取；runtime / run / streaming / tools 属于后续 feature。
-//
-// M3 数据来源（双源并存，前端透明）：
-//  - 会话**配置**（model/provider/tools/project 挂靠 等）权威源仍是 SQLite
-//    （`agent_sessions` 行）—— grouping 依赖的 projectId 等只在此。
-//  - 会话**活动**（messageCount / lastMessageAt / 标题）与 **transcript** 的
-//    权威源是 JSONL（coding-agent SessionManager 落盘）。`agent_session_list`
-//    用 JSONL 活动元数据覆盖 SQLite 行对应字段；`agent_session_messages` 直接
-//    读 JSONL，无 JSONL 文件（pre-M3 老会话）时回退 SQLite transcript。
+// Two data sources coexist (transparent to the frontend):
+//  - Session CONFIG (model/provider/tools/project linkage, …) is authoritative
+//    in SQLite (`agent_sessions` rows) — e.g. the projectId used for grouping
+//    lives only there.
+//  - Session ACTIVITY (messageCount / lastMessageAt / title) and the transcript
+//    are authoritative in JSONL (written by the coding-agent SessionManager).
+//    `agent_session_list` overlays JSONL activity onto the SQLite rows;
+//    `agent_session_messages` reads the JSONL directly, falling back to the
+//    SQLite transcript for legacy sessions without a JSONL file.
 
 use crate::models::AppError;
 use crate::services::{
@@ -22,7 +21,6 @@ use crate::storage::types::{
 };
 use tauri::{AppHandle, Manager, State};
 
-/// 创建新的 Agent Session
 #[tauri::command]
 pub async fn agent_session_create(
     request: CreateAgentSessionRequest,
@@ -31,11 +29,10 @@ pub async fn agent_session_create(
     agent_session_service.create_session(request).await
 }
 
-/// 从一个 AgentDefinition 实例化 Agent Session
-///
-/// 统一收口：`/agent` 路由经此创建任意定义（含内置 chat / coding）的会话——
-/// definition 提供能力集与默认参数，`overrides` 携带实例化时才确定的工作目录 /
-/// 模型 / provider / 名称。详见 [`AgentSessionService::create_session_from_definition`]。
+/// Instantiates a session from an AgentDefinition (incl. built-in chat/coding):
+/// the definition supplies the capability set and defaults, `overrides` carries
+/// instantiation-time working dir / model / provider / name. See
+/// [`AgentSessionService::create_session_from_definition`].
 #[tauri::command]
 pub async fn agent_session_create_from_definition(
     definition_id: UUID,
@@ -47,11 +44,11 @@ pub async fn agent_session_create_from_definition(
         .await
 }
 
-/// 将一个已存在的空会话就地重指到另一个 AgentDefinition（不新建会话行）
-///
-/// 前端仅在会话尚无任何消息时调用：用户在输入框切换 Agent 而当前会话「一句话
-/// 都没说过」，直接把它重指到新定义（重新快照能力集、改写 provenance），保留
-/// 会话 id 与 transcript。详见 [`AgentSessionService::reinstantiate_from_definition`]。
+/// Repoints an existing EMPTY session to another AgentDefinition in place (no
+/// new session row). The frontend only calls this while the session has no
+/// messages: switching agents re-snapshots the capability set and rewrites
+/// provenance while keeping the session id and transcript. See
+/// [`AgentSessionService::reinstantiate_from_definition`].
 #[tauri::command]
 pub async fn agent_session_reinstantiate_from_definition(
     session_id: UUID,
@@ -64,12 +61,10 @@ pub async fn agent_session_reinstantiate_from_definition(
         .await
 }
 
-/// 获取 Agent Session 列表
-///
-/// SQLite 提供配置行（含顺序：updated_at DESC）；JSONL 提供活动元数据
-/// （messageCount / lastMessageAt / 标题），逐行 overlay 到对应会话上，使侧栏的
-/// 计数与最近活动时间反映真实 transcript（JSONL 为权威）。无 JSONL 文件的老会话
-/// 保留其 SQLite 字段不变。
+/// SQLite supplies the config rows (and the ordering: updated_at DESC); JSONL
+/// supplies activity metadata (messageCount / lastMessageAt / title), overlaid
+/// per row so the sidebar reflects the real transcript. Sessions without a JSONL
+/// file keep their SQLite fields.
 #[tauri::command]
 pub async fn agent_session_list(
     limit: Option<i32>,
@@ -85,11 +80,9 @@ pub async fn agent_session_list(
     Ok(sessions)
 }
 
-/// 获取 Agent Session 详情
-///
-/// 同 `agent_session_list`：在 SQLite 行上 overlay JSONL 活动元数据，使
-/// `refreshAfterRun`（前端 `getAgentSession`）在 run 结束后拿到真实的 messageCount
-/// / lastMessageAt（不再依赖已不更新这两列的 SQLite append 路径）。
+/// Same as `agent_session_list`: overlays JSONL activity onto the SQLite row so
+/// a post-run refresh (frontend `getAgentSession`) sees the real messageCount /
+/// lastMessageAt — the SQLite append path does not update those columns.
 #[tauri::command]
 pub async fn agent_session_get(
     session_id: UUID,
@@ -102,7 +95,7 @@ pub async fn agent_session_get(
     Ok(session)
 }
 
-/// 解析 Tauri 应用数据目录（JSONL 持久化根 `base_dir`）。
+/// Resolves the Tauri app data dir (the JSONL persistence root).
 fn resolve_app_data_dir(app_handle: &AppHandle) -> Result<std::path::PathBuf, AppError> {
     app_handle
         .path()
@@ -110,12 +103,12 @@ fn resolve_app_data_dir(app_handle: &AppHandle) -> Result<std::path::PathBuf, Ap
         .map_err(|e| AppError::internal_error(&format!("failed to resolve app data dir: {e}")))
 }
 
-/// 用 JSONL 活动元数据 overlay 一个 SQLite 会话行（就地）。
+/// Overlays JSONL activity metadata onto a SQLite session row in place.
 ///
-/// JSONL 有该会话文件时：messageCount / lastMessageAt 取 JSONL（权威活动源），
-/// 若 JSONL 携带 session 标签（agent 重命名）则覆盖 name。无 JSONL 文件（pre-M3
-/// 老会话）或读取失败时：保持 SQLite 字段不变（优雅回退，绝不让一个坏文件
-/// 拖垮整个列表）。
+/// With a JSONL file, messageCount / lastMessageAt come from JSONL (the
+/// activity authority), and a JSONL session label overrides name. No JSONL file
+/// (legacy session) or a read failure keeps the SQLite fields — one bad file
+/// must never take down the whole list.
 fn overlay_jsonl_activity(session: &mut AgentSession, app_data_dir: &std::path::Path) {
     let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), app_data_dir);
     match agent_jsonl_store::session_activity(app_data_dir, &cwd, &session.id) {
@@ -126,7 +119,7 @@ fn overlay_jsonl_activity(session: &mut AgentSession, app_data_dir: &std::path::
                 session.name = name;
             }
         }
-        // 无 JSONL（老会话）或读取错误：保留 SQLite 值，不阻断列表。
+        // No JSONL (legacy session): keep the SQLite values.
         Ok(None) => {}
         Err(e) => {
             tracing::warn!(
@@ -137,20 +130,18 @@ fn overlay_jsonl_activity(session: &mut AgentSession, app_data_dir: &std::path::
     }
 }
 
-/// 重命名 Agent Session（M3：SQLite name + JSONL label 双写）。
+/// Renames a session: dual-write of the SQLite name and a JSONL label.
 ///
-/// SQLite `name` 是 fallback 名字源；但 `agent_session_list` / `agent_session_get`
-/// 的 overlay 在 JSONL 携带 session 标签时用它覆盖 `name`（JSONL 为活动权威源）。
-/// 因此仅写 SQLite 的旧 rename 会被该会话已有的 JSONL 旧标签（agent 自动取的标题）
-/// 盖掉，重命名视觉上不生效。这里在 SQLite 写成功之后，对该会话的 JSONL **追加**
-/// 一条 label（最新 label 胜），使 overlay 反映用户输入的新名。
+/// SQLite `name` is the fallback name source, but the list/get overlay replaces
+/// it whenever the session's JSONL carries a label — writing SQLite alone would
+/// be visually undone by an older auto-generated JSONL label. So after the
+/// SQLite write succeeds, a label is **appended** to the session's JSONL (latest
+/// label wins), making the overlay reflect the user's new name.
 ///
-/// side-effect 诚实：JSONL 写入失败降级为 warn 日志、不让整个 rename 失败——
-/// SQLite 仍是 fallback 名字源，与 overlay「JSONL 读失败保留 SQLite 值」的容错
-/// 姿态一致。返回**经 overlay** 的 session（与 list/get 一致），使前端直接拿到新名。
-///
-/// `app_handle` 是 Tauri 注入参数（前端透明），用于解析 app_data_dir 与该会话的
-/// JSONL 路径。
+/// The JSONL write is best-effort: a failure degrades to a warn log without
+/// failing the rename — SQLite remains the fallback name source, matching the
+/// overlay's read-failure posture. Returns the **overlaid** session (consistent
+/// with list/get) so the frontend gets the new name directly.
 #[tauri::command]
 pub async fn agent_session_rename(
     session_id: UUID,
@@ -158,19 +149,17 @@ pub async fn agent_session_rename(
     app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<AgentSession, AppError> {
-    // SQLite 权威写入（fallback 名字源）先行。
+    // SQLite (fallback name source) writes first.
     let mut session = agent_session_service
         .rename_session(session_id, name.clone())
         .await?;
 
-    // 把新名同时写进 JSONL label，使 overlay 反映新名而非旧 label。best-effort：
-    // 失败不阻断 rename（SQLite 已写成功），只记 warn。
+    // Best-effort JSONL label write; a failure must not fail the rename.
     let app_data_dir = resolve_app_data_dir(&app_handle)?;
     let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
     // Pass the session's real created_at so a first-ever rename (which may be the
     // session's first on-disk write) seeds the JSONL header with the creation
-    // time rather than the rename moment, keeping createdAt == header.timestamp
-    // (VAL-CASESS-007 / VAL-CASESS-008).
+    // time rather than the rename moment, keeping createdAt == header.timestamp.
     if let Err(e) =
         agent_jsonl_store::append_label(&app_data_dir, &cwd, &session.id, &name, session.created_at)
     {
@@ -180,17 +169,18 @@ pub async fn agent_session_rename(
         );
     }
 
-    // 返回经 overlay 的 session（与 list/get 一致）：刚写的 label 让 name 即新名。
+    // Return the overlaid session: the just-written label makes name the new name.
     overlay_jsonl_activity(&mut session, &app_data_dir);
     Ok(session)
 }
 
-/// 为会话生成标题：用会话自身的 model/provider 对「首条用户消息」做一次性 LLM
-/// 补全，蒸馏出短标题，再走与 rename 相同的落盘路径（SQLite 权威名 + JSONL label +
-/// overlay 返回）。自动（首条消息后）与手动（右键菜单）两条路径共用本命令。
+/// Generates a session title: one LLM completion over the first user message,
+/// using the session's own model/provider, then the same persistence path as
+/// rename (SQLite name + JSONL label + overlaid return). Shared by the automatic
+/// (after the first message) and manual (context menu) paths.
 ///
-/// 失败情形（无 provider/model、无用户消息、模型报错/空结果）返回 AppError，
-/// 前端据此提示且**不**改名。
+/// Failures (no provider/model, no user message, model error / empty result)
+/// return an AppError; the frontend surfaces it and does **not** rename.
 #[tauri::command]
 pub async fn agent_session_generate_title(
     session_id: UUID,
@@ -209,7 +199,7 @@ pub async fn agent_session_generate_title(
         .ok_or_else(|| AppError::validation_error("会话未选择模型，无法生成标题"))?;
     let provider = provider_service.get_provider(&provider_id).await?;
 
-    // 首条用户消息文本（transcript 权威源是 JSONL）。
+    // First user message text (the JSONL is the transcript authority).
     let app_data_dir = resolve_app_data_dir(&app_handle)?;
     let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
     let source_text = agent_jsonl_store::load_transcript(&app_data_dir, &cwd, &session.id)?
@@ -228,13 +218,13 @@ pub async fn agent_session_generate_title(
     )
     .await
     .map_err(|e| {
-        // 真实原因会被前端通用 hint 遮盖，这里落一条日志便于诊断。
+        // The real cause is hidden behind the frontend's generic hint; log it.
         tracing::warn!(session_id = %session.id, error = %e, "session title generation failed");
         e
     })?;
 
-    // 与 agent_session_rename 相同的落盘：SQLite 权威名先行，再 JSONL label（best-effort），
-    // 返回经 overlay 的 session 供前端直接更新侧栏。
+    // Same persistence as agent_session_rename: SQLite name first, then a
+    // best-effort JSONL label, returning the overlaid session.
     let mut session = agent_session_service
         .rename_session(session_id, title.clone())
         .await?;
@@ -254,8 +244,9 @@ pub async fn agent_session_generate_title(
     Ok(session)
 }
 
-/// 从一条持久化的用户消息 payload（序列化后的 hand-ai `Message::User`）抽取纯文本。
-/// `content` 可能是字符串（`UserContent::Text`）或内容块数组（`UserContent::Blocks`）。
+/// Extracts plain text from a persisted user-message payload (a serialized
+/// hand-ai `Message::User`); `content` may be a string (`UserContent::Text`) or
+/// an array of content blocks (`UserContent::Blocks`).
 fn extract_user_text(payload: &serde_json::Value) -> Option<String> {
     match payload.get("content")? {
         serde_json::Value::String(s) => {
@@ -289,7 +280,7 @@ fn extract_user_text(payload: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// 更新 Agent Session 单个字段（镜像 `agent_update_field`）
+/// Updates a single session field (mirrors `agent_update_field`).
 #[tauri::command]
 pub async fn agent_session_update_field(
     session_id: UUID,
@@ -304,10 +295,11 @@ pub async fn agent_session_update_field(
         .await
 }
 
-/// 将 IPC 字段名 + JSON 值解析为 `AgentSessionParameter`。
+/// Parses an IPC field name + JSON value into an `AgentSessionParameter`.
 ///
-/// 未知字段（包括已废弃的 `"enabledSkills"`）一律返回 VALIDATION_ERROR，
-/// 此时参数从未构造、service 从未被调用，因此不会写入任何行。
+/// Unknown fields (including the unsupported `"enabledSkills"`) return
+/// VALIDATION_ERROR; the parameter is never constructed and the service is
+/// never called, so nothing is written.
 fn parse_session_parameter(
     field_name: &str,
     value: serde_json::Value,
@@ -385,34 +377,30 @@ fn parse_session_parameter(
     Ok(parameter)
 }
 
-/// 删除 Agent Session（M3：同时清理其 JSONL transcript 文件）。
+/// Deletes a session, including its JSONL transcript file.
 ///
-/// 顺序：先中止该会话可能存在的活跃 run（`coding_agent_runtime::abort_run` 对无
-/// 活跃 run 是 no-op），这样删除后不会再有 `agent_stream_event { sessionId:
-/// <deleted> }` 抵达前端；
-/// 再 best-effort 删除其 JSONL 文件（M3 后 transcript 落在 JSONL，仅删 SQLite 行
-/// 会在磁盘留下孤儿 `<id>.jsonl`）；最后删 SQLite 行（**权威**，决定列表是否还
-/// 显示该行）。即便 JSONL 删除失败（warn），SQLite 删除成功即保证「行消失」。
+/// Order: abort any active run first (`abort_run` is a no-op when idle) so no
+/// `agent_stream_event` for the deleted session reaches the frontend afterwards;
+/// then best-effort delete the JSONL file (deleting only the SQLite row would
+/// leave an orphan `<id>.jsonl` on disk); finally delete the SQLite row — the
+/// **authority** that decides whether the list still shows the session. Even if
+/// the JSONL delete fails (warn), a successful SQLite delete removes the row.
 ///
-/// `app_handle` 是 Tauri 注入参数（前端透明），用于解析 app_data_dir 与该会话的
-/// JSONL 路径；为此需先取一次 session 拿 `working_dir` → cwd。会话不存在时
-/// `get_session` 返回 NOT_FOUND（与旧行为一致：删一个不存在的会话报错）。
+/// Fetches the session first for `working_dir` → JSONL cwd; a missing session
+/// makes `get_session` return NOT_FOUND.
 #[tauri::command]
 pub async fn agent_session_delete(
     session_id: UUID,
     app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<(), AppError> {
-    // 先取 session 拿 working_dir 以解析 JSONL cwd（也借此对不存在的会话报 NOT_FOUND）。
     let session = agent_session_service
         .get_session(session_id.clone())
         .await?;
 
-    // 中止该会话可能存在的活跃 run（coding-agent 驱动的进程级注册表；无活跃 run
-    // 时是干净的 no-op），再删 transcript / SQLite 行。
     abort_run(&session_id);
 
-    // best-effort 清理 JSONL 文件，不阻断权威的 SQLite 删除。
+    // Best-effort JSONL cleanup; must not block the authoritative SQLite delete.
     let app_data_dir = resolve_app_data_dir(&app_handle)?;
     let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
     if let Err(e) = agent_jsonl_store::delete_session_file(&app_data_dir, &cwd, &session_id) {
@@ -425,13 +413,14 @@ pub async fn agent_session_delete(
     agent_session_service.delete_session(session_id).await
 }
 
-/// 获取 Agent Session 的 transcript（M3: JSONL 为权威源）。
+/// Returns the session transcript; the JSONL is the source of truth.
 ///
-/// 优先读该会话的 JSONL transcript（`<app_data_dir>/sessions/<flattened-cwd>/
-/// <id>.jsonl`，经 SessionManager `build_context` 还原，含工具调用与思考块——它们
-/// 内嵌在 assistant 消息的 content blocks 内）。该会话尚无 JSONL 文件（pre-M3 老
-/// 会话，只有 SQLite transcript）时，回退到 SQLite。JSONL 读取硬失败（罕见，如文件
-/// 损坏到 open 报错）时同样回退 SQLite，避免单个坏文件白屏整条 timeline。
+/// Reads the session's JSONL transcript (`<app_data_dir>/sessions/
+/// <flattened-cwd>/<id>.jsonl`, restored via SessionManager `build_context`,
+/// incl. tool calls and thinking blocks embedded in assistant content blocks).
+/// Falls back to SQLite for legacy sessions without a JSONL file, and on a hard
+/// JSONL read failure (rare, e.g. a file corrupt enough that open errors) so a
+/// single bad file cannot blank the whole timeline.
 #[tauri::command]
 pub async fn agent_session_messages(
     session_id: UUID,
@@ -446,9 +435,9 @@ pub async fn agent_session_messages(
 
     match agent_jsonl_store::load_transcript(&app_data_dir, &cwd, &session_id) {
         Ok(Some(rows)) => Ok(rows),
-        // 无 JSONL 文件：pre-M3 老会话 → 回退 SQLite transcript。
+        // No JSONL file: legacy session → fall back to the SQLite transcript.
         Ok(None) => agent_session_service.list_messages(session_id).await,
-        // JSONL 存在但读取硬失败：记录并回退 SQLite，避免白屏。
+        // JSONL exists but read hard-failed: log and fall back to SQLite.
         Err(e) => {
             tracing::warn!(
                 session_id = %session_id,
@@ -459,7 +448,7 @@ pub async fn agent_session_messages(
     }
 }
 
-/// 将 JSON 值解析为 `Option<String>`：null -> None，字符串 -> Some，其它 -> 校验错误。
+/// null -> None, string -> Some, anything else -> validation error.
 fn parse_optional_string(
     value: &serde_json::Value,
     field: &str,
@@ -480,8 +469,7 @@ fn parse_optional_string(
 mod tests {
     use super::*;
 
-    /// VAL-DEPRECATE-006 (inverted from the old presence test): `"enabledSkills"`
-    /// is no longer a known field — every value shape falls into the
+    /// `"enabledSkills"` is not a known field — every value shape falls into the
     /// Unknown-field VALIDATION_ERROR. The parameter is never constructed, the
     /// service is never invoked, so no row can be written.
     #[test]
@@ -511,9 +499,8 @@ mod tests {
         }
     }
 
-    /// VAL-DEPRECATE-003: removing the enabledSkills branch leaves every other
-    /// field mapping intact — thinkingLevel / enabledTools / workingDir /
-    /// modelId still parse into their parameter variants.
+    /// The other field mappings — thinkingLevel / enabledTools / workingDir /
+    /// modelId — parse into their parameter variants.
     #[test]
     fn other_field_mappings_survive_enabled_skills_removal() {
         match parse_session_parameter("thinkingLevel", serde_json::json!("high")) {

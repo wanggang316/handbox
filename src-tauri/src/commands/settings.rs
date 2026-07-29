@@ -1,5 +1,3 @@
-// 设置相关 IPC 命令
-
 use crate::models::{
     AppError, AppSettings, ExportSettingsOptions, ImportSettingsRequest, UpdateSettingsRequest,
 };

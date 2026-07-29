@@ -1,5 +1,3 @@
-// 工具函数模块
-
 pub mod accessibility;
 pub mod app_info;
 pub mod cron;

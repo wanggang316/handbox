@@ -1,5 +1,3 @@
-// 供应商服务实现
-
 use crate::models::{AddProviderRequest, AppError};
 use crate::services::{Database, ModelService};
 use crate::storage::types::{Model, Provider, Timestamp, UUID};
@@ -8,7 +6,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-/// 供应商服务
 #[derive(Clone)]
 pub struct ProviderService {
     provider_repo: ProviderRepository,
@@ -16,7 +13,6 @@ pub struct ProviderService {
 }
 
 impl ProviderService {
-    /// 创建新的供应商服务实例.
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             provider_repo: ProviderRepository::new(Arc::clone(&db)),
@@ -24,18 +20,16 @@ impl ProviderService {
         }
     }
 
-    /// 初始化模型数据库（在服务启动时调用）
     pub fn initialize_model_database() {
-        // 新的动态组装系统不需要预先初始化配置
+        // The LLM client is assembled on demand, so there is nothing to preload.
         tracing::info!("Dynamic LLM client system ready");
     }
 
-    /// 创建供应商并预填 hand-ai 目录中的模型。
+    /// Creates a provider and prefills its models from the hand-ai catalog.
     ///
-    /// 注意（M2-T4 起）: 此函数不再做 API Key 验证 ——
-    /// `fetch_and_sync_models` 已切换为静态目录读取（无网络）。
-    /// 错误的 API Key 会在首次实际对话时才被发现。
-    /// TODO(post-M3): 添加一次性轻量探测来恢复 API Key 校验。
+    /// The API key is not verified here: `fetch_and_sync_models` reads a static catalog
+    /// without any network call, so a bad key only surfaces on the first real request.
+    /// TODO: add a lightweight one-shot probe to restore API key validation.
     pub async fn create_provider(&self, config: AddProviderRequest) -> Result<Provider, AppError> {
         let provider = Provider {
             id: Uuid::new_v4().to_string(),
@@ -48,10 +42,8 @@ impl ProviderService {
             updated_at: self.current_timestamp(),
         };
 
-        // 模型获取成功，创建供应商
         self.provider_repo.create_provider(&provider).await?;
 
-        // 拉取 hand-ai 目录中的模型并写入 DB（不再含 API Key 校验; M2-T4）。
         self.model_service
             .fetch_and_sync_models(&provider, false)
             .await?;
@@ -64,10 +56,7 @@ impl ProviderService {
         Ok(provider)
     }
 
-    /// 创建供应商，不预填模型。
-    ///
-    /// 注意（M2-T4 起）: `create_provider` 本身也不再做 API Key 验证，
-    /// 因此这两个函数的差别仅在「是否预填模型目录」。仅供测试使用。
+    /// Test-only variant that stores the provider row without prefilling the model catalog.
     #[cfg(test)]
     async fn create_provider_without_validation(
         &self,
@@ -88,7 +77,6 @@ impl ProviderService {
         Ok(provider)
     }
 
-    /// 更新供应商
     pub async fn update_provider(
         &self,
         provider_id: &UUID,
@@ -96,7 +84,7 @@ impl ProviderService {
     ) -> Result<Provider, AppError> {
         let existing_provider = self.get_provider(provider_id).await?;
 
-        // 检查是否有关键配置变更
+        // Connection-level changes invalidate the model rows synced for this provider.
         let should_refresh_models = config.api_key != existing_provider.api_key
             || config.base_url != existing_provider.base_url
             || config.provider_type != existing_provider.provider_type;
@@ -112,14 +100,12 @@ impl ProviderService {
             updated_at: self.current_timestamp(),
         };
 
-        // 关键配置变更时刷新 hand-ai 目录映射的模型行（不再含 API Key 校验; M2-T4）。
         if should_refresh_models {
             self.model_service
                 .fetch_and_sync_models(&updated_provider, true)
                 .await?;
         }
 
-        // 模型同步成功（或无需同步），更新供应商
         self.provider_repo
             .update_provider(&updated_provider)
             .await?;
@@ -137,7 +123,6 @@ impl ProviderService {
         Ok(updated_provider)
     }
 
-    /// 获取单个供应商
     pub async fn get_provider(&self, provider_id: &UUID) -> Result<Provider, AppError> {
         self.provider_repo
             .get_provider_by_id(provider_id)
@@ -145,12 +130,10 @@ impl ProviderService {
             .ok_or_else(|| AppError::validation_error("Provider not found"))
     }
 
-    /// 获取所有供应商
     pub async fn list_providers(&self) -> Result<Vec<Provider>, AppError> {
         self.provider_repo.list_providers().await
     }
 
-    /// 获取单个模型
     pub async fn get_model(
         &self,
         provider_id: &str,
@@ -159,33 +142,25 @@ impl ProviderService {
         self.model_service.get_model(provider_id, model_id).await
     }
 
-    /// 删除供应商
     pub async fn delete_provider(&self, provider_id: &UUID) -> Result<(), AppError> {
         self.provider_repo.delete_provider(provider_id).await
     }
 
-    /// 切换供应商启用状态
     pub async fn toggle_provider(
         &self,
         provider_id: &UUID,
         enabled: bool,
     ) -> Result<Provider, AppError> {
-        // 先获取供应商
         let mut provider = self.get_provider(provider_id).await?;
 
-        // 更新启用状态
         provider.enabled = enabled;
         provider.updated_at = self.current_timestamp();
 
-        // 保存到数据库
         self.provider_repo.update_provider(&provider).await?;
 
         Ok(provider)
     }
 
-    // === 私有辅助方法 ===
-
-    /// 获取当前时间戳
     fn current_timestamp(&self) -> Timestamp {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -286,8 +261,8 @@ mod tests {
                 AddProviderRequest {
                     name: "Updated".to_string(),
                     provider_type: "google".to_string(),
-                    base_url: "https://api.google.com".to_string(), // 保持不变，避免触发验证
-                    api_key: "original".to_string(),                // 保持不变，避免触发验证
+                    base_url: "https://api.google.com".to_string(), // unchanged: avoids model resync
+                    api_key: "original".to_string(), // unchanged: avoids model resync
                     enabled: Some(true),
                 },
             )

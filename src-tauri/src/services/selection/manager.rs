@@ -22,10 +22,6 @@ use crate::services::SettingsService;
 use crate::utils::accessibility::get_ax_selected_text;
 use crate::utils::{get_frontmost_app_info, FrontmostAppInfo};
 
-// ============================================================================
-// 入口和事件监听
-// ============================================================================
-
 #[cfg(target_os = "macos")]
 pub fn setup_selection(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     init_menu_panel(app);
@@ -37,23 +33,20 @@ pub fn setup_selection(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-/// Mouse 监听和处理模块
 #[cfg(target_os = "macos")]
 fn setup_mouce_observer(app_handle: AppHandle) {
     let mut mouse = Mouse::new();
     let handle_clone = app_handle.clone();
 
-    // 在独立线程中运行，因为 hook 是阻塞的
+    // Run on a dedicated thread; the hook blocks.
     std::thread::spawn(move || {
-        // 使用 mouce 监听全局事件
         let _ = mouse.hook(Box::new(move |event| {
             match event {
-                // 1. 滚动事件：直接触发隐藏
                 mouce::common::MouseEvent::Scroll(_, _) => {
                     hide_menu_panel(&handle_clone);
                 }
-                // 2. 左键点击：如果是按下（Press），通常也需要隐藏
-                //    但如果菜单面板或内容面板正在显示，不隐藏（让用户可以在面板上操作）
+                // On left press hide the content panel, unless a panel is showing
+                // (let the user interact with it).
                 mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
                     record_mouse_press();
 
@@ -61,30 +54,28 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                         hide_content_panel(&handle_clone);
                     }
                 }
-                // 3. 左键松开：这是你划词逻辑的触发点
+                // Left release drives the selection flow.
                 mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
-                    // 先处理设置面板：允许在设置面板内操作
+                    // Settings panel first: keep it open while the mouse is inside it.
                     if is_settings_panel_visible() {
                         if is_mouse_inside_settings_panel() {
                             return;
                         }
                         hide_settings_panel(&handle_clone);
                     }
-                    // 如果内容面板正在显示
                     if is_content_panel_visible() {
-                        // 如果置顶，完全不处理（用户只能通过关闭按钮关闭）
+                        // Pinned: only the close button dismisses the panel.
                         if is_content_panel_pinned() {
                             return;
                         }
-                        // 如果鼠标在面板内，不隐藏（允许用户在面板上选择文字）
+                        // Mouse inside the panel: let the user select text there.
                         if is_mouse_inside_content_panel() {
                             return;
                         }
-                        // 非置顶且鼠标在面板外：延迟检查后隐藏
+                        // Clicked outside: hide after a short grace period.
                         let h = handle_clone.clone();
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            // 如果面板仍可见、非置顶且鼠标不在面板内，则隐藏
                             if is_content_panel_visible() && !is_content_panel_pinned() && !is_mouse_inside_content_panel() {
                                 tracing::info!("-----> hiding content panel (clicked outside)");
                                 hide_content_panel(&h);
@@ -93,17 +84,16 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                         return;
                     }
 
-                    // 如果菜单面板正在显示，延迟检查是否需要隐藏
                     if is_menu_panel_visible() {
-                        // 延迟检查是否需要隐藏（给按钮的 onclick 时间执行，onclick 会调用 hide_menu_panel）
+                        // Delay the check so a button's onclick can run first; it
+                        // calls hide_menu_panel itself.
                         let h: AppHandle = handle_clone.clone();
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            // 如果面板仍可见且设置面板未打开，则隐藏并触发新的选词逻辑
                             if is_menu_panel_visible() && !is_settings_panel_visible() {
                                 tracing::info!("hiding menu panel (clicked outside)");
                                 hide_menu_panel(&h);
-                                // 只有拖动选择才触发新的选词逻辑
+                                // Only a fresh drag or double-click starts a new selection.
                                 if should_trigger_selection() {
                                     tracing::info!("---------------------------------------------------------");
                                     trigger_selection_logic(&h);
@@ -113,17 +103,14 @@ fn setup_mouce_observer(app_handle: AppHandle) {
                         return;
                     }
 
-                    // 都不可见时，正常触发选择逻辑
                     if should_trigger_selection() {
                         tracing::info!("---------------------------------------------------------");
                         trigger_selection_logic(&handle_clone);
                     }
                 }
                 mouce::common::MouseEvent::RelativeMove(_x, _y) => {
-                    // tracing::info!("======> x: {}, y: {}", x, y);
                 }
                 mouce::common::MouseEvent::AbsoluteMove(_x, _y) => {
-                    // tracing::info!("-----> x: {}, y: {}", x, y);
                 }
                 _ => {}
             }
@@ -131,42 +118,35 @@ fn setup_mouce_observer(app_handle: AppHandle) {
     });
 }
 
-// ============================================================================
-// 鼠标按下状态（用于判断拖动选择和双击选择）
-// ============================================================================
-
-/// 本次鼠标按下的位置
+/// Position of the current mouse press.
 static MOUSE_PRESS_X: AtomicU64 = AtomicU64::new(0);
 static MOUSE_PRESS_Y: AtomicU64 = AtomicU64::new(0);
-/// 本次鼠标按下的时间戳（毫秒）
+/// Timestamp of the current mouse press, in milliseconds.
 static MOUSE_PRESS_TIME: AtomicU64 = AtomicU64::new(0);
 
-/// 上一次鼠标按下的位置（用于双击检测）
+/// Position of the previous mouse press, used for double-click detection.
 static PREV_MOUSE_PRESS_X: AtomicU64 = AtomicU64::new(0);
 static PREV_MOUSE_PRESS_Y: AtomicU64 = AtomicU64::new(0);
-/// 上一次鼠标按下的时间戳（用于双击检测）
+/// Timestamp of the previous mouse press, used for double-click detection.
 static PREV_MOUSE_PRESS_TIME: AtomicU64 = AtomicU64::new(0);
 
-/// 判断为拖动选择的最小距离（像素）
+/// Minimum travel, in pixels, that counts as a drag selection.
 const MIN_DRAG_DISTANCE: i32 = 5;
-/// 双击的最大时间间隔（毫秒）
+/// Maximum gap, in milliseconds, between two presses of a double click.
 const DOUBLE_CLICK_MS: u64 = 500;
 
-/// 记录鼠标按下状态（保存上一次状态，更新本次状态）
+/// Records the current press, rolling the previous one forward.
 fn record_mouse_press() {
-    // 先保存上一次的按下位置和时间
     PREV_MOUSE_PRESS_TIME.store(MOUSE_PRESS_TIME.load(Ordering::Relaxed), Ordering::Relaxed);
     PREV_MOUSE_PRESS_X.store(MOUSE_PRESS_X.load(Ordering::Relaxed), Ordering::Relaxed);
     PREV_MOUSE_PRESS_Y.store(MOUSE_PRESS_Y.load(Ordering::Relaxed), Ordering::Relaxed);
 
-    // 记录本次鼠标按下位置
     let mouse = Mouse::new();
     if let Ok((x, y)) = mouse.get_position() {
         MOUSE_PRESS_X.store(x as u64, Ordering::Relaxed);
         MOUSE_PRESS_Y.store(y as u64, Ordering::Relaxed);
     }
 
-    // 记录本次鼠标按下时间
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -174,7 +154,8 @@ fn record_mouse_press() {
     MOUSE_PRESS_TIME.store(now, Ordering::Relaxed);
 }
 
-/// 检查当前鼠标位置与按下位置的距离是否超过阈值（判断是拖动选择还是单纯点击）
+/// True when the cursor travelled far enough from the press point to count as a
+/// drag rather than a plain click.
 fn is_drag_selection() -> bool {
     let mouse = Mouse::new();
     if let Ok((x, y)) = mouse.get_position() {
@@ -187,39 +168,34 @@ fn is_drag_selection() -> bool {
     false
 }
 
-/// 检查是否为双击选择（两次点击间隔小于阈值且位置接近）
+/// True when the last two presses were close enough in time and space to be a
+/// double click.
 fn is_double_click_selection() -> bool {
     let current_time = MOUSE_PRESS_TIME.load(Ordering::Relaxed);
     let prev_time = PREV_MOUSE_PRESS_TIME.load(Ordering::Relaxed);
 
-    // 检查两次按下的时间间隔是否在双击阈值内
     if current_time > prev_time && current_time - prev_time < DOUBLE_CLICK_MS {
-        // 检查两次按下的位置是否接近
         let press_x = MOUSE_PRESS_X.load(Ordering::Relaxed) as i32;
         let press_y = MOUSE_PRESS_Y.load(Ordering::Relaxed) as i32;
         let prev_x = PREV_MOUSE_PRESS_X.load(Ordering::Relaxed) as i32;
         let prev_y = PREV_MOUSE_PRESS_Y.load(Ordering::Relaxed) as i32;
         let dx = (press_x - prev_x).abs();
         let dy = (press_y - prev_y).abs();
-        // 双击时两次点击位置应该很接近
         return dx <= MIN_DRAG_DISTANCE && dy <= MIN_DRAG_DISTANCE;
     }
     false
 }
 
-/// 判断是否应该触发选择逻辑（拖动选择或双击选择）
 fn should_trigger_selection() -> bool {
     is_drag_selection() || is_double_click_selection()
 }
 
 fn trigger_selection_logic(handle: &AppHandle) {
-    // 检查功能是否启用
     if !is_selection_toolbar_enabled(handle) {
         return;
     }
 
     let mouse = Mouse::new();
-    // 使用 mouce 获取当前位置，替代之前的 Swift 传参
     if let Ok((x, y)) = mouse.get_position() {
         let handle_clone: AppHandle = handle.clone();
         tauri::async_runtime::spawn(async move {
@@ -261,9 +237,6 @@ fn trigger_selection_logic(handle: &AppHandle) {
     }
 }
 
-// ============================================================================
-// Keyboard 监听和处理模块
-// ============================================================================
 fn setup_keyboard_monitor(handle: AppHandle<Wry>) {
     std::thread::spawn(move || {
         if let Ok(tap) = core_graphics::event::CGEventTap::new(
@@ -272,7 +245,7 @@ fn setup_keyboard_monitor(handle: AppHandle<Wry>) {
             core_graphics::event::CGEventTapOptions::Default,
             vec![CGEventType::KeyDown],
             move |_, _, event| {
-                // 如果 content panel 可见，不处理键盘事件（允许复制等操作）
+                // Leave keys alone while the content panel is up, so copy works there.
                 if is_content_panel_visible() {
                     return None;
                 }
@@ -301,9 +274,6 @@ fn setup_keyboard_monitor(handle: AppHandle<Wry>) {
     });
 }
 
-// ============================================================================
-// 检查选中文本工具栏功能是否启用
-// ============================================================================
 fn is_selection_toolbar_enabled(handle: &AppHandle) -> bool {
     let settings_service: tauri::State<'_, SettingsService> = handle.state();
     match settings_service.get_settings() {

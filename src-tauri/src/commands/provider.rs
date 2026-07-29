@@ -1,11 +1,8 @@
-// 供应商相关 IPC 命令
-
 use crate::models::{AddProviderRequest, AppError, ProviderWithModels, ToggleProviderRequest};
 use crate::services::{ModelService, ProviderService};
 use crate::storage::types::{Provider, UUID};
 use tauri::State;
 
-/// 获取供应商列表
 #[tauri::command]
 pub async fn provider_list(
     provider_service: State<'_, ProviderService>,
@@ -13,7 +10,6 @@ pub async fn provider_list(
     provider_service.list_providers().await
 }
 
-/// 获取供应商详情
 #[tauri::command]
 pub async fn provider_get(
     provider_id: UUID,
@@ -22,7 +18,6 @@ pub async fn provider_get(
     provider_service.get_provider(&provider_id).await
 }
 
-/// 创建供应商
 #[tauri::command]
 pub async fn provider_create(
     config: AddProviderRequest,
@@ -31,7 +26,6 @@ pub async fn provider_create(
     provider_service.create_provider(config).await
 }
 
-/// 更新供应商配置
 #[tauri::command]
 pub async fn provider_update(
     provider_id: UUID,
@@ -43,7 +37,6 @@ pub async fn provider_update(
     provider_service.update_provider(&provider_id, config).await
 }
 
-/// 删除供应商
 #[tauri::command]
 pub async fn provider_delete(
     provider_id: UUID,
@@ -52,7 +45,6 @@ pub async fn provider_delete(
     provider_service.delete_provider(&provider_id).await
 }
 
-/// 切换供应商启用状态
 #[tauri::command]
 pub async fn provider_toggle(
     request: ToggleProviderRequest,
@@ -63,7 +55,6 @@ pub async fn provider_toggle(
         .await
 }
 
-/// 获取所有供应商及其模型列表
 #[tauri::command]
 pub async fn provider_list_with_models(
     refresh_from_remote: Option<bool>,
@@ -79,12 +70,11 @@ pub async fn provider_list_with_models(
 
     let provider_ids: Vec<String> = providers.iter().map(|p| p.id.clone()).collect();
 
-    // 批量获取所有模型
     let models_map = model_service
         .get_providers_models_batch(&provider_ids, refresh_from_remote)
         .await?;
 
-    // 组装结果，保持原有顺序
+    // Assemble the result preserving the provider order.
     let result = providers
         .into_iter()
         .map(|provider| {

@@ -10,12 +10,12 @@ use serde::{Deserialize, Serialize};
 use super::{Timestamp, UUID};
 
 /// Default execution timeout in seconds. `0` means no timeout (unbounded run).
-/// The timeout-interrupt behaviour is implemented by the exec-timeout feature;
-/// this layer only stores/validates/defaults the value.
+/// Timeout interruption is enforced by the job executor; this layer only
+/// stores/validates/defaults the value.
 pub const DEFAULT_EXEC_TIMEOUT_SECS: i64 = 0;
 
 /// Default maximum retry attempts. `0` means no retries.
-/// The retry-backoff behaviour is implemented by the retry-backoff feature.
+/// Retry/backoff behaviour is enforced by the job executor.
 pub const DEFAULT_MAX_RETRIES: i64 = 0;
 
 /// Default delay between retries in seconds.
@@ -32,10 +32,10 @@ pub enum JobTarget {
     /// Send an initial message to an Agent (optionally scoped to a project).
     Agent {
         agent_id: UUID,
-        /// Model to run the agent with. The Agent definition no longer carries a
-        /// model (it's chosen per run), so an agent-targeted job stores its own —
-        /// mirroring `Prompt`. `#[serde(default)]` keeps pre-existing rows (which
-        /// lack it) deserializable; an empty model then fails the run cleanly as a
+        /// Model to run the agent with. Agent definitions don't carry a model
+        /// (it's chosen per run), so an agent-targeted job stores its own —
+        /// mirroring `Prompt`. `#[serde(default)]` keeps legacy rows without it
+        /// deserializable; an empty model then fails the run cleanly as a
         /// config error at dispatch, prompting the user to pick one.
         #[serde(default)]
         model_id: String,
@@ -54,7 +54,7 @@ pub enum JobTarget {
 }
 
 /// How a `Prompt` target manages its chat session. Currently a new session is
-/// created for every run; the enum exists so M-later features can extend it
+/// created for every run; the enum exists so future strategies can be added
 /// without changing the stored JSON shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -120,10 +120,10 @@ pub struct Job {
     pub run_count: i32,
     pub failure_count: i32,
     /// Per-run timeout in seconds; `0` means no timeout (see
-    /// [`DEFAULT_EXEC_TIMEOUT_SECS`]). Enforcement is the exec-timeout feature's.
+    /// [`DEFAULT_EXEC_TIMEOUT_SECS`]). Enforced by the job executor.
     pub exec_timeout_secs: i64,
     /// Maximum retry attempts after a failed run; `0` means no retries (see
-    /// [`DEFAULT_MAX_RETRIES`]). Enforcement is the retry-backoff feature's.
+    /// [`DEFAULT_MAX_RETRIES`]). Enforced by the job executor.
     pub max_retries: i64,
     /// Delay between retries in seconds (see [`DEFAULT_RETRY_DELAY_SECS`]).
     pub retry_delay_secs: i64,
@@ -213,9 +213,8 @@ mod tests {
 
     #[test]
     fn job_target_optional_fields_default() {
-        // Agent with no project and no model (a pre-existing row from before the
-        // model was stored on the target): model_id defaults to "" and project is
-        // None, keeping old rows deserializable.
+        // Agent config without project or model (legacy rows): model_id
+        // defaults to "" and project to None, keeping old rows deserializable.
         let agent = JobTarget::from_db_parts(
             "agent",
             r#"{"agentId":"ag1","initialMessage":"hi"}"#,

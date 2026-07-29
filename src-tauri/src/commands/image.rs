@@ -1,32 +1,18 @@
-/**
- * 图片相关命令
- *
- * 提供图片代理加载功能，解决第三方图片服务（如 Google）的访问限制问题
- */
 use crate::models::error::AppError;
 use reqwest::header::{HeaderMap, HeaderValue, REFERER, USER_AGENT};
 
-/// 代理加载图片
+/// Loads an external image through the backend, bypassing WebView access
+/// restrictions of third-party image hosts (e.g. Google).
 ///
-/// 通过后端代理方式加载外部图片，避免 WebView 的访问限制
-///
-/// # 参数
-/// - `url`: 图片 URL
-///
-/// # 返回
-/// - `Vec<u8>`: 图片二进制数据
-///
-/// # 错误
-/// - `VALIDATION_ERROR`: URL 格式无效
-/// - `NETWORK_ERROR`: 网络请求失败
-/// - `RATE_LIMIT`: 被限流（429）
+/// # Errors
+/// - `VALIDATION_ERROR`: invalid or non-HTTPS URL
+/// - `NETWORK_ERROR`: request failure or non-OK status
+/// - `RATE_LIMIT`: throttled (429); `AUTH_ERROR`: 401/403
 #[tauri::command]
 pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
-    // 验证 URL 格式
     let parsed_url = reqwest::Url::parse(&url)
         .map_err(|e| AppError::validation_error(&format!("无效的图片 URL: {e}")))?;
 
-    // 只允许 HTTPS 协议
     if parsed_url.scheme() != "https" {
         return Err(AppError::with_hint(
             "VALIDATION_ERROR",
@@ -35,7 +21,6 @@ pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
         ));
     }
 
-    // 构建 HTTP 客户端
     let client_builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
     #[cfg(test)]
     let client_builder = client_builder.no_proxy();
@@ -43,10 +28,9 @@ pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
         .build()
         .map_err(|e| AppError::internal_error(&format!("创建 HTTP 客户端失败: {e}")))?;
 
-    // 构建请求头
     let mut headers = HeaderMap::new();
 
-    // 使用标准浏览器 User-Agent
+    // Browser-like User-Agent: some image hosts reject non-browser clients.
     headers.insert(
         USER_AGENT,
         HeaderValue::from_static(
@@ -54,7 +38,7 @@ pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
         ),
     );
 
-    // 添加 Referer 头（模拟浏览器访问）
+    // Google-hosted images expect a plausible Referer.
     if parsed_url
         .host_str()
         .unwrap_or("")
@@ -66,7 +50,6 @@ pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
         );
     }
 
-    // 发起请求
     let response = client
         .get(url.clone())
         .headers(headers)
@@ -74,7 +57,6 @@ pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
         .await
         .map_err(|e| AppError::network_error(&format!("图片请求失败: {e}")))?;
 
-    // 检查响应状态
     let status = response.status();
     if !status.is_success() {
         return Err(match status.as_u16() {
@@ -88,7 +70,6 @@ pub async fn image_proxy(url: String) -> Result<Vec<u8>, AppError> {
         });
     }
 
-    // 获取图片数据
     let bytes = response
         .bytes()
         .await

@@ -1,51 +1,50 @@
-//! "Open in ..." —— 把 Agent 会话的工作目录在外部 editor / terminal / 文件管理器中打开。
+//! "Open in ...": open an agent session's working directory in an external
+//! editor / terminal / file manager.
 //!
-//! 设计取向（对齐 codans 的 NSWorkspace 思路，落到 Tauri/Rust）：
-//! - **探测交给后端**：扫描标准 app 目录，命中已安装的 `.app` 即视为可用 target
-//!   （确定性、可单测、零子进程）。
-//! - **启动交给后端 `open(1)`**：用进程直呼系统 launcher，绕开 opener/shell 插件的
-//!   capability scope —— 工作目录是任意用户路径，opener 的 `$APPDATA/**` scope 不适用，
-//!   而后端进程不受 capability 约束。
-//! - 注册表 macOS 专属（`cfg` 门控）；其它平台仅给一个「文件管理器」target。
+//! - Probing happens in the backend: scan the standard app dirs; an installed
+//!   `.app` is an available target (deterministic, unit-testable, no subprocess).
+//! - Launching goes through the backend via `open(1)`, bypassing the
+//!   opener/shell plugins' capability scope — the working dir is an arbitrary
+//!   user path, which the opener's `$APPDATA/**` scope does not cover, while a
+//!   backend process is not capability-constrained.
+//! - The registry is macOS-only (`cfg`-gated); other platforms get a single
+//!   "file manager" target.
 
 use crate::models::AppError;
 use std::path::Path;
 
-/// 一个可见于前端下拉的「打开目标」。
+/// An "open in" target shown in the frontend dropdown.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenInTarget {
-    /// 稳定 id，前端回灌给 `open_in_open` 以解析启动方式。
+    /// Stable id the frontend passes back to `open_in_open`.
     pub id: String,
-    /// 展示名（如 "Visual Studio Code"）。
+    /// Display name (e.g. "Visual Studio Code").
     pub name: String,
-    /// 分类，便于前端分组 / 选图标：`editor` / `terminal` / `system`。
+    /// Category for grouping / icon selection: `editor` / `terminal` / `system`.
     pub kind: String,
-    /// 应用图标（`data:image/png;base64,...`）。取不到时为 `None`，前端回退到内置图标。
+    /// App icon as a `data:image/png;base64,...` URI; `None` makes the frontend
+    /// fall back to its built-in icon.
     pub icon: Option<String>,
 }
 
-/// Finder / 系统文件管理器这个「总是可用」的 target id。
+/// Id of the always-available Finder / system file manager target.
 const SYSTEM_TARGET_ID: &str = "system";
 
-/// Finder 应用路径，用于给「系统」target 取真实图标（macOS）。
+/// Finder app path, used to fetch the real icon for the system target.
 #[cfg(target_os = "macos")]
 const FINDER_APP_PATH: &str = "/System/Library/CoreServices/Finder.app";
-
-// ---------------------------------------------------------------------------
-// macOS：注册表 + 探测
-// ---------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
 struct AppEntry {
     id: &'static str,
     name: &'static str,
     kind: &'static str,
-    /// `.app` bundle 名候选（含 `.app` 后缀），任一命中即视为已安装。
+    /// Candidate `.app` bundle names (with suffix); any hit counts as installed.
     bundles: &'static [&'static str],
 }
 
-/// 已知 editor / terminal 注册表（macOS）。新增编辑器只需在此追加一行。
+/// Known editor / terminal registry (macOS); adding an editor is one new entry.
 #[cfg(target_os = "macos")]
 const REGISTRY: &[AppEntry] = &[
     // Editors
@@ -172,7 +171,8 @@ const REGISTRY: &[AppEntry] = &[
     },
 ];
 
-/// 探测 `.app` 时扫描的标准目录（含 Apple 自带 app 与用户级安装）。
+/// Standard directories scanned for `.app` bundles (incl. Apple-shipped apps
+/// and per-user installs).
 #[cfg(target_os = "macos")]
 fn app_search_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs = vec![
@@ -187,7 +187,8 @@ fn app_search_dirs() -> Vec<std::path::PathBuf> {
     dirs
 }
 
-/// 在标准目录中解析某 entry 的 `.app` 绝对路径；任一 bundle 候选命中即返回。
+/// Resolves an entry's `.app` absolute path in the standard directories;
+/// returns on the first bundle-candidate hit.
 #[cfg(target_os = "macos")]
 fn resolve_app_path(bundles: &[&str]) -> Option<std::path::PathBuf> {
     for dir in app_search_dirs() {
@@ -203,7 +204,7 @@ fn resolve_app_path(bundles: &[&str]) -> Option<std::path::PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn list_targets() -> Vec<OpenInTarget> {
-    // Finder 总在首位（必装，作为兜底）。
+    // Finder always comes first (always installed; the fallback).
     let mut out = vec![OpenInTarget {
         id: SYSTEM_TARGET_ID.to_string(),
         name: "Finder".to_string(),
@@ -223,19 +224,20 @@ fn list_targets() -> Vec<OpenInTarget> {
     out
 }
 
-/// 图标渲染像素尺寸（约 32pt 显示的 @2x），固定输出以约束 PNG 体积。
+/// Icon render size in pixels (@2x for a ~32pt display); fixed to bound PNG size.
 #[cfg(target_os = "macos")]
 const ICON_RENDER_PX: isize = 64;
 
-/// 取某个 `.app` 的图标并编码为 PNG data URI。
+/// Fetches an `.app` icon and encodes it as a PNG data URI.
 ///
-/// 走 AppKit `NSWorkspace::iconForFile`（而非读 `.icns`）—— 现代应用图标常存于
-/// 编译后的 `Assets.car` 里，只有 Launch Services 解析得到的 `NSImage` 才完整。
-/// 把 `NSImage` 重绘进一个固定 `ICON_RENDER_PX` 像素的离屏 bitmap 再编码 PNG：
-/// 源图常含 512/1024px 表示，直接编码会得到 MB 级体积；定尺重绘把单图压到约几 KB。
-/// 取不到返回 `None`。
+/// Uses AppKit `NSWorkspace::iconForFile` rather than reading `.icns`: modern
+/// app icons often live in a compiled `Assets.car`, and only the Launch
+/// Services-resolved `NSImage` is complete. The `NSImage` is redrawn into a
+/// fixed `ICON_RENDER_PX` offscreen bitmap before PNG-encoding: sources often
+/// carry 512/1024px representations that would encode to MB-scale output, while
+/// the fixed-size redraw keeps each icon at a few KB. Returns `None` on failure.
 #[cfg(target_os = "macos")]
-#[allow(deprecated)] // iconForFile: 在新 SDK 标记弃用，但替代 API 需 UTType，成本更高。
+#[allow(deprecated)] // iconForFile: is deprecated in newer SDKs, but the replacement needs UTType and costs more.
 fn app_icon_data_uri(app_path: &Path) -> Option<String> {
     use base64::Engine;
     use objc2::rc::autoreleasepool;
@@ -253,7 +255,8 @@ fn app_icon_data_uri(app_path: &Path) -> Option<String> {
         let ns_path = NSString::from_str(path_str);
         let image = workspace.iconForFile(&ns_path);
 
-        // 建一个 ICON_RENDER_PX² 的空 RGBA(8bit) 离屏 bitmap（planes=nil → 自动分配）。
+        // Empty ICON_RENDER_PX² RGBA(8-bit) offscreen bitmap (planes = null →
+        // auto-allocated).
         let color_space: &NSColorSpaceName = unsafe { NSDeviceRGBColorSpace };
         let rep = unsafe {
             NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
@@ -271,7 +274,8 @@ fn app_icon_data_uri(app_path: &Path) -> Option<String> {
             )
         }?;
 
-        // 用该 bitmap 作后备建离屏图形上下文，把 image 画满整个矩形。
+        // Offscreen graphics context backed by the bitmap; draw the image over
+        // the full rect.
         let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
         NSGraphicsContext::saveGraphicsState_class();
         NSGraphicsContext::setCurrentContext(Some(&context));
@@ -307,16 +311,12 @@ fn list_targets() -> Vec<OpenInTarget> {
     }]
 }
 
-// ---------------------------------------------------------------------------
-// 启动
-// ---------------------------------------------------------------------------
-
 #[cfg(target_os = "macos")]
 async fn launch(dir: &Path, target_id: &str) -> Result<(), AppError> {
     use tokio::process::Command;
 
     let status = if target_id == SYSTEM_TARGET_ID {
-        // `open <dir>` 在 Finder 中打开该文件夹窗口。
+        // `open <dir>` opens the folder in a Finder window.
         Command::new("open").arg(dir).status().await
     } else {
         let entry = REGISTRY
@@ -326,7 +326,7 @@ async fn launch(dir: &Path, target_id: &str) -> Result<(), AppError> {
         let app = resolve_app_path(entry.bundles).ok_or_else(|| {
             AppError::validation_error(&format!("应用未安装: {}", entry.name))
         })?;
-        // `open -a <app> <dir>`：用指定 app 打开工作目录。
+        // `open -a <app> <dir>`: open the working dir with the given app.
         Command::new("open")
             .arg("-a")
             .arg(&app)
@@ -348,7 +348,8 @@ async fn launch(dir: &Path, target_id: &str) -> Result<(), AppError> {
 async fn launch(dir: &Path, _target_id: &str) -> Result<(), AppError> {
     use tokio::process::Command;
 
-    // Windows 的 `explorer` 即使成功也常返回非零退出码，故只判进程能否拉起。
+    // Windows `explorer` often exits non-zero even on success, so only check
+    // that the process spawns.
     #[cfg(target_os = "windows")]
     let spawned = Command::new("explorer").arg(dir).spawn();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -359,18 +360,16 @@ async fn launch(dir: &Path, _target_id: &str) -> Result<(), AppError> {
         .map_err(|e| AppError::internal_error(&format!("启动失败: {e}")))
 }
 
-// ---------------------------------------------------------------------------
-// IPC 命令
-// ---------------------------------------------------------------------------
-
-/// 列出当前系统可用的「打开目标」（已安装的 editor / terminal + 系统文件管理器）。
+/// Lists the available open targets: installed editors / terminals plus the
+/// system file manager.
 #[tauri::command]
 pub async fn open_in_list_targets() -> Result<Vec<OpenInTarget>, AppError> {
     Ok(list_targets())
 }
 
-/// 在指定 target 中打开目录 `path`（须为已存在目录）。`target_id` 来自
-/// `open_in_list_targets` 返回项的 `id`；`"system"` 走系统文件管理器。
+/// Opens directory `path` (must be an existing directory) in the given target.
+/// `target_id` comes from `open_in_list_targets`; `"system"` uses the system
+/// file manager.
 #[tauri::command]
 pub async fn open_in_open(path: String, target_id: String) -> Result<(), AppError> {
     let dir = Path::new(&path);
@@ -381,10 +380,6 @@ pub async fn open_in_open(path: String, target_id: String) -> Result<(), AppErro
     }
     launch(dir, &target_id).await
 }
-
-// ---------------------------------------------------------------------------
-// 测试
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -425,8 +420,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn app_icon_data_uri_is_png_data_uri_when_available() {
-        // 不强求一定取到（无窗口服务器的极端环境可能取不到），但取到时必须是
-        // 合法的 PNG data URI——以此守住 FFI / 编码路径不回归。
+        // The icon may be unavailable (e.g. no window server), but when present
+        // it must be a valid PNG data URI — guarding the FFI / encoding path.
         if let Some(uri) = app_icon_data_uri(Path::new(FINDER_APP_PATH)) {
             assert!(uri.starts_with("data:image/png;base64,"));
             assert!(uri.len() > "data:image/png;base64,".len() + 16);
@@ -436,7 +431,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn list_targets_attaches_finder_icon() {
-        // Finder 必装，其图标在常规 macOS 上应可取到。
+        // Finder is always installed; its icon should resolve on normal macOS.
         let targets = list_targets();
         let finder = targets
             .iter()

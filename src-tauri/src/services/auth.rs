@@ -7,7 +7,6 @@ use tiny_http::{Response, Server};
 use tokio::task;
 use url::Url;
 
-/// Google OAuth 配置
 pub struct GoogleOAuthConfig {
     pub client_id: String,
     pub client_secret: String,
@@ -15,7 +14,6 @@ pub struct GoogleOAuthConfig {
 }
 
 impl GoogleOAuthConfig {
-    /// 从环境变量加载配置
     pub fn from_env() -> Result<Self, AppError> {
         let client_id = std::env::var("GOOGLE_CLIENT_ID").map_err(|_| AppError {
             code: "CONFIG_ERROR".to_string(),
@@ -46,7 +44,6 @@ impl GoogleOAuthConfig {
     }
 }
 
-/// Google Token 响应
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -56,23 +53,20 @@ struct TokenResponse {
     expires_in: u64,
 }
 
-/// Google ID Token Claims
 #[derive(Debug, Deserialize)]
 struct GoogleIdTokenClaims {
-    sub: String,             // Google User ID
-    email: String,           // 用户邮箱
-    name: Option<String>,    // 用户名
-    picture: Option<String>, // 头像 URL
+    sub: String, // Google User ID
+    email: String,
+    name: Option<String>,
+    picture: Option<String>,
 }
 
-/// Google OAuth 服务
 pub struct GoogleOAuthService {
     config: GoogleOAuthConfig,
     http_client: OnceCell<reqwest::Client>,
 }
 
 impl GoogleOAuthService {
-    /// 创建新的 OAuth 服务实例
     pub fn new() -> Result<Self, AppError> {
         let config = GoogleOAuthConfig::from_env()?;
 
@@ -92,7 +86,6 @@ impl GoogleOAuthService {
         })
     }
 
-    /// 生成授权 URL
     pub fn generate_auth_url(&self) -> Result<String, AppError> {
         let mut auth_url =
             Url::parse("https://accounts.google.com/o/oauth2/v2/auth").map_err(|e| AppError {
@@ -108,12 +101,12 @@ impl GoogleOAuthService {
             .append_pair("response_type", "code")
             .append_pair("scope", "openid email profile")
             .append_pair("access_type", "offline")
-            .append_pair("prompt", "consent"); // 确保总是返回 refresh_token
+            .append_pair("prompt", "consent"); // forces Google to return a refresh_token
 
         Ok(auth_url.to_string())
     }
 
-    /// 启动本地回调服务器监听授权码
+    /// Waits on a local redirect server for the authorization code; times out after 120s.
     pub async fn start_callback_server(&self) -> Result<String, AppError> {
         let bind_address = format!("127.0.0.1:{}", self.config.redirect_port);
         let server = Server::http(&bind_address).map_err(|e| AppError {
@@ -124,14 +117,12 @@ impl GoogleOAuthService {
 
         tracing::info!("OAuth 回调服务器已启动: http://{}", bind_address);
 
-        // 使用 tokio::task::spawn_blocking 在后台运行阻塞的 HTTP 服务器
+        // tiny_http is blocking, so keep it off the async runtime.
         let code = task::spawn_blocking(move || {
-            // 设置 120 秒超时
             match server.recv_timeout(Duration::from_secs(120)) {
                 Ok(Some(req)) => {
                     tracing::info!("收到回调请求: {}", req.url());
 
-                    // 解析授权码并进行 URL 解码
                     let code = req
                         .url()
                         .split('?')
@@ -143,7 +134,6 @@ impl GoogleOAuthService {
                                 .and_then(|c| c.split('=').nth(1))
                         })
                         .and_then(|encoded_code| {
-                            // URL 解码授权码
                             urlencoding::decode(encoded_code).ok().map(|s| s.to_string())
                         });
 
@@ -153,7 +143,6 @@ impl GoogleOAuthService {
                         tracing::error!("未能解析授权码");
                     }
 
-                    // 返回友好的 HTML 响应
                     let html_response = r#"
                         <!DOCTYPE html>
                         <html>
@@ -258,7 +247,6 @@ impl GoogleOAuthService {
         })
     }
 
-    /// 使用授权码交换访问令牌
     async fn exchange_code_for_token(&self, code: &str) -> Result<TokenResponse, AppError> {
         let redirect_uri = self.config.redirect_uri();
 
@@ -309,9 +297,7 @@ impl GoogleOAuthService {
             })
     }
 
-    /// 验证并解析 ID Token
     async fn verify_id_token(&self, id_token: &str) -> Result<GoogleIdTokenClaims, AppError> {
-        // 1. 解码 header 获取 kid (key id)
         let header = decode_header(id_token).map_err(|e| AppError {
             code: "TOKEN_INVALID".to_string(),
             message: format!("ID Token header 无效: {}", e),
@@ -324,7 +310,6 @@ impl GoogleOAuthService {
             hint: None,
         })?;
 
-        // 2. 获取 Google 的公钥
         let jwks_url = "https://www.googleapis.com/oauth2/v3/certs";
         let client = self.http_client()?;
         let jwks: serde_json::Value = client
@@ -344,7 +329,7 @@ impl GoogleOAuthService {
                 hint: None,
             })?;
 
-        // 3. 找到匹配的公钥
+        // Pick the JWK whose kid matches the token header.
         let key = jwks["keys"]
             .as_array()
             .and_then(|keys| keys.iter().find(|k| k["kid"].as_str() == Some(&kid)))
@@ -354,7 +339,6 @@ impl GoogleOAuthService {
                 hint: None,
             })?;
 
-        // 4. 提取 n 和 e 用于 RSA 验证
         let n = key["n"].as_str().ok_or_else(|| AppError {
             code: "TOKEN_INVALID".to_string(),
             message: "公钥缺少 n 参数".to_string(),
@@ -367,7 +351,6 @@ impl GoogleOAuthService {
             hint: None,
         })?;
 
-        // 5. 验证 token
         let decoding_key = DecodingKey::from_rsa_components(n, e).map_err(|e| AppError {
             code: "TOKEN_INVALID".to_string(),
             message: format!("创建解码密钥失败: {}", e),
@@ -388,16 +371,13 @@ impl GoogleOAuthService {
         Ok(token_data.claims)
     }
 
-    /// 完整的 Google 登录流程
     pub async fn google_login(&self, code: &str) -> Result<AuthResponse, AppError> {
-        // 1. 交换授权码获取 token
         let token_response = self.exchange_code_for_token(code).await?;
         tracing::info!(
             "成功获取 access_token，expires_in: {}",
             token_response.expires_in
         );
 
-        // 2. 验证并解析 ID token
         let claims = self.verify_id_token(&token_response.id_token).await?;
         tracing::info!("ID Token 验证成功");
         tracing::info!(
@@ -407,15 +387,14 @@ impl GoogleOAuthService {
             claims.name
         );
 
-        // 3. 构建用户对象
         let timestamp = chrono::Utc::now().to_rfc3339();
 
         let user = User {
-            id: claims.sub.clone(), // 使用 Google User ID
+            id: claims.sub.clone(),
             username: claims.name.clone().unwrap_or_else(|| claims.email.clone()),
             email: claims.email.clone(),
             avatar: claims.picture.clone(),
-            is_pro: false, // 默认非 Pro 用户
+            is_pro: false,
             created_at: timestamp.clone(),
             updated_at: timestamp,
         };
@@ -427,7 +406,6 @@ impl GoogleOAuthService {
             user.email
         );
 
-        // 4. 构建认证响应
         let auth_response = AuthResponse {
             user,
             access_token: token_response.access_token,
@@ -462,7 +440,6 @@ mod tests {
     #[tokio::test]
     async fn test_generate_auth_url() {
         let _lock = ENV_GUARD.lock().unwrap();
-        // 设置测试环境变量
         std::env::set_var("GOOGLE_CLIENT_ID", "test_client_id");
         std::env::set_var("GOOGLE_CLIENT_SECRET", "test_secret");
         std::env::remove_var("OAUTH_REDIRECT_PORT");
@@ -484,7 +461,6 @@ mod tests {
             Some(&"openid email profile".to_string())
         );
 
-        // 清理环境
         std::env::remove_var("GOOGLE_CLIENT_ID");
         std::env::remove_var("GOOGLE_CLIENT_SECRET");
     }

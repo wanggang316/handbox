@@ -1,7 +1,6 @@
 //! Process-based MCP transport implementation.
 //!
-//! This module handles spawning MCP servers as child processes and establishing
-//! communication via stdio.
+//! Spawns MCP servers as child processes and communicates over stdio.
 
 use std::path::Path;
 
@@ -11,11 +10,9 @@ use tokio::process::Command;
 
 use super::{types::ProcessConfig, utils::resolve_command_path};
 
-/// Process transport for MCP servers
 pub struct ProcessTransport;
 
 impl ProcessTransport {
-    /// Create a new process transport with the given configuration
     pub async fn new(config: ProcessConfig) -> Result<TokioChildProcess> {
         tracing::info!("Creating MCP process transport");
         tracing::info!("> command: {}", config.command);
@@ -23,21 +20,18 @@ impl ProcessTransport {
         tracing::info!("> working_dir: {:?}", config.working_dir);
         tracing::info!("> env: {:?}", config.env);
 
-        // Parse and resolve the command
         let (program, parsed_args) = parse_command_with_args(&config.command, &config.args)?;
         let resolved_program = resolve_command_path(&program)?;
 
         tracing::info!("program: {} (resolved to: {})", program, resolved_program);
         tracing::info!("parsed_args: {:?}", parsed_args);
 
-        // Build the command
         let mut cmd = Command::new(&resolved_program);
 
         if !parsed_args.is_empty() {
             cmd.args(&parsed_args);
         }
 
-        // Set working directory if specified and not empty
         if let Some(ref working_dir) = config.working_dir {
             let working_dir: &String = working_dir;
             if !working_dir.trim().is_empty() {
@@ -51,13 +45,11 @@ impl ProcessTransport {
             }
         }
 
-        // Set environment variables
         if !config.env.is_empty() {
             cmd.envs(&config.env);
             tracing::info!("Set {} environment variables", config.env.len());
         }
 
-        // Create the transport
         TokioChildProcess::new(cmd).with_context(|| {
             format!(
                 "Failed to start MCP server process: {} {}",
@@ -68,14 +60,12 @@ impl ProcessTransport {
     }
 }
 
-/// Parse command string and combine with additional arguments
 fn parse_command_with_args(command: &str, extra_args: &[String]) -> Result<(String, Vec<String>)> {
     let trimmed = command.trim();
     if trimmed.is_empty() {
         return Err(anyhow::anyhow!("MCP server command cannot be empty"));
     }
 
-    // Parse the command string using shell-like syntax
     let parts = shlex::split(trimmed)
         .ok_or_else(|| anyhow::anyhow!("Failed to parse MCP server command: {}", command))?;
 

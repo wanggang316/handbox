@@ -1,12 +1,9 @@
-// Model 数据访问层
-
 use crate::models::AppError;
 use crate::storage::types::Model;
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
-/// Model 仓储层
 #[derive(Clone)]
 pub struct ModelRepository {
     db: Arc<Database>,
@@ -17,7 +14,6 @@ impl ModelRepository {
         Self { db }
     }
 
-    /// 创建模型
     pub async fn create_model(&self, model: &Model) -> Result<(), AppError> {
         let features_json = model.features_to_json();
 
@@ -87,7 +83,8 @@ impl ModelRepository {
         Ok(())
     }
 
-    /// 同步供应商的模型列表（保留用户设置的状态）
+    /// Replaces a provider's model list while preserving per-model user state
+    /// (enabled/favorite).
     pub async fn sync_provider_models(
         &self,
         provider_id: &str,
@@ -97,7 +94,7 @@ impl ModelRepository {
             AppError::internal_error(&format!("Failed to start transaction: {}", e))
         })?;
 
-        // 1. 获取现有模型的用户状态（enabled, favorite）
+        // Snapshot user state before replacing the rows.
         let existing_states =
             sqlx::query(r#"SELECT id, enabled, favorite FROM models WHERE provider_id = $1"#)
                 .bind(provider_id)
@@ -107,7 +104,6 @@ impl ModelRepository {
                     AppError::internal_error(&format!("Failed to get existing model states: {}", e))
                 })?;
 
-        // 构建状态映射表（model_id -> (enabled, favorite)）
         let mut state_map: std::collections::HashMap<String, (bool, bool)> =
             std::collections::HashMap::new();
         for row in existing_states {
@@ -124,7 +120,6 @@ impl ModelRepository {
         }
         tracing::info!("Built state map for {} existing models", state_map.len());
 
-        // 2. 删除该供应商的所有现有模型
         sqlx::query(r#"DELETE FROM models WHERE provider_id = $1"#)
             .bind(provider_id)
             .execute(&mut *tx)
@@ -133,7 +128,6 @@ impl ModelRepository {
                 AppError::internal_error(&format!("Failed to delete existing models: {}", e))
             })?;
 
-        // 3. 插入新模型，保留用户状态
         tracing::info!("Inserting {} new models", new_models.len());
         for model in new_models {
             let features_json = model.features_to_json();
@@ -146,7 +140,6 @@ impl ModelRepository {
             let max_parameters_json = model.max_parameters_to_json();
             let supported_methods_json = model.supported_methods_to_json();
 
-            // 从状态映射中获取用户设置的状态，如果没有则使用默认值
             let (enabled, favorite) = match state_map.get(&model.id) {
                 Some((e, f)) => {
                     tracing::debug!(
@@ -230,7 +223,6 @@ impl ModelRepository {
         Ok(())
     }
 
-    /// 批量创建模型
     pub async fn create_models(&self, models: &[Model]) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {
             AppError::internal_error(&format!("Failed to start transaction: {}", e))
@@ -311,7 +303,6 @@ impl ModelRepository {
         Ok(())
     }
 
-    /// 获取供应商的所有模型
     pub async fn get_models_by_provider(&self, provider_id: &str) -> Result<Vec<Model>, AppError> {
         let query = r#"
             SELECT
@@ -359,7 +350,6 @@ impl ModelRepository {
         Ok(models)
     }
 
-    /// 批量获取多个供应商的所有模型
     pub async fn get_models_by_providers(
         &self,
         provider_ids: &[String],
@@ -368,7 +358,6 @@ impl ModelRepository {
             return Ok(Vec::new());
         }
 
-        // 动态构建 IN 子句的占位符
         let placeholders = provider_ids
             .iter()
             .enumerate()
@@ -428,7 +417,6 @@ impl ModelRepository {
         Ok(models)
     }
 
-    /// 根据 provider 和 model_id 获取单个模型
     pub async fn get_model(
         &self,
         provider_id: &str,
@@ -474,7 +462,6 @@ impl ModelRepository {
         row.map(|r| self.row_to_model(r)).transpose()
     }
 
-    /// 更新模型启用状态
     pub async fn toggle_model(
         &self,
         provider_id: &str,
@@ -501,7 +488,6 @@ impl ModelRepository {
         Ok(())
     }
 
-    /// 更新模型收藏状态
     pub async fn toggle_favorite_model(
         &self,
         provider_id: &str,
@@ -530,7 +516,6 @@ impl ModelRepository {
         Ok(())
     }
 
-    /// 删除供应商的所有模型
     pub async fn delete_models_by_provider(&self, provider_id: &str) -> Result<(), AppError> {
         sqlx::query("DELETE FROM models WHERE provider_id = $1")
             .bind(provider_id)
@@ -541,7 +526,6 @@ impl ModelRepository {
         Ok(())
     }
 
-    // 辅助方法：将数据库行转换为 Model
     fn row_to_model(&self, row: sqlx::sqlite::SqliteRow) -> Result<Model, AppError> {
         let features_json: String = row.try_get("supported_features")?;
         let supported_features = Model::features_from_json(&features_json).map_err(|e| {

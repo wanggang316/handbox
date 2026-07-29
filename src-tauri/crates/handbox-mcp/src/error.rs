@@ -10,19 +10,14 @@ pub enum McpClientError {
     /// Transport creation failed (e.g., process spawn, HTTP connection)
     TransportCreation(String),
 
-    /// Client initialization failed
     ClientInitialize(rmcp::service::ClientInitializeError),
 
-    /// Service operation failed
     Service(rmcp::service::ServiceError),
 
-    /// Runtime error (task join error)
     Runtime(tokio::task::JoinError),
 
-    /// Invalid tool arguments provided
     InvalidToolArguments(String),
 
-    /// Client shutdown failed
     Shutdown(String),
 }
 
@@ -37,7 +32,6 @@ impl std::error::Error for McpClientError {
     }
 }
 
-// Implement From traits for automatic conversion
 impl From<rmcp::service::ClientInitializeError> for McpClientError {
     fn from(e: rmcp::service::ClientInitializeError) -> Self {
         Self::ClientInitialize(e)
@@ -66,21 +60,18 @@ impl fmt::Display for McpClientError {
                         // Replace DynamicTransportError with clean underlying error
                         write!(f, "Send message error {}, when {}", error.error, context)
                     }
-                    // For all other errors, use their Display implementation
                     _ => write!(f, "{}", e),
                 }
             }
             Self::Service(e) => {
                 match e {
                     rmcp::service::ServiceError::McpError(mcp_err) => {
-                        // MCP errors use their own message
                         write!(f, "{}", mcp_err.message)
                     }
                     rmcp::service::ServiceError::TransportSend(dyn_err) => {
                         // Replace DynamicTransportError with clean underlying error
                         write!(f, "Transport send error: {}", dyn_err.error)
                     }
-                    // For all other errors, use their Display implementation
                     _ => write!(f, "{}", e),
                 }
             }
@@ -140,5 +131,4 @@ impl McpClientError {
     }
 }
 
-/// Result type for MCP client operations.
 pub type McpClientResult<T> = Result<T, McpClientError>;

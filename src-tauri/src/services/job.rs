@@ -6,9 +6,8 @@
 // - name must be non-empty after trimming (duplicates across ids are allowed);
 // - `JobTarget` must be complete for its kind.
 //
-// This feature does NOT wire the scheduler/executor: `next_run_at` is computed
-// optimistically from the cron on create/update when possible, but a NULL value
-// is acceptable and left for the scheduler feature to fill.
+// `next_run_at` is computed optimistically from the cron on create/update when
+// possible; a NULL value is acceptable and is filled in by the scheduler.
 
 use std::sync::Arc;
 
@@ -184,13 +183,11 @@ impl JobService {
         self.get(id).await
     }
 
-    /// List a job's execution history, newest-first (delegated to the
-    /// repository ordering). An empty history yields an empty vec, not an error,
-    /// so the detail modal can render its "no executions" empty state.
-    ///
-    /// Any in-progress (`running`) execution is returned alongside finalized
-    /// rows because the repository reads from `job_executions` directly, so the
-    /// timeline reflects live runs without depending on event subscriptions.
+    /// List a job's execution history, newest-first. An empty history yields an
+    /// empty vec, not an error, so the detail modal can render its "no
+    /// executions" empty state. In-progress (`running`) rows are returned
+    /// alongside finalized ones, so the timeline reflects live runs without
+    /// depending on event subscriptions.
     pub async fn list_executions(
         &self,
         job_id: UUID,
@@ -205,7 +202,7 @@ impl JobService {
     }
 }
 
-/// Trim the name and reject an empty result. Returns the trimmed name on success.
+/// Trim the name and reject an empty result.
 fn validate_name(name: &str) -> Result<String, AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -262,9 +259,9 @@ struct Robustness {
     retry_delay_secs: i64,
 }
 
-/// Resolve the robustness fields: each `None` falls back to its named default,
-/// and any negative value is rejected with `VALIDATION_ERROR` (VAL-ROBUST-003).
-/// `0` is a valid, meaningful value (no timeout / no retries) and is preserved.
+/// Resolve the robustness fields: each `None` falls back to its named default
+/// and any negative value is rejected with `VALIDATION_ERROR`. `0` is a valid,
+/// meaningful value (no timeout / no retries) and is preserved.
 fn validate_robustness(
     exec_timeout_secs: Option<i64>,
     max_retries: Option<i64>,
@@ -308,9 +305,7 @@ fn current_timestamp() -> Timestamp {
         .as_millis() as i64
 }
 
-/// Wrap a raw database handle in a `JobService`, used by the app wiring. Builds
-/// both the definition repository and the execution-history repository over the
-/// same pool.
+/// Wrap a raw database handle in a `JobService`, used by the app wiring.
 impl JobService {
     pub fn from_db(db: Arc<crate::storage::Database>) -> Self {
         Self::new(
@@ -415,7 +410,6 @@ mod tests {
     async fn create_rejects_prompt_missing_fields() {
         let (service, _tmp) = create_service().await;
 
-        // Missing provider_id.
         let no_provider = JobTarget::Prompt {
             provider_id: "".to_string(),
             model_id: "gpt-4".to_string(),
@@ -431,7 +425,6 @@ mod tests {
             "VALIDATION_ERROR"
         );
 
-        // Missing model_id.
         let no_model = JobTarget::Prompt {
             provider_id: "openai".to_string(),
             model_id: "".to_string(),
@@ -515,7 +508,6 @@ mod tests {
     async fn crud_roundtrip_via_service() {
         let (service, _tmp) = create_service().await;
 
-        // create
         let created = service
             .create(create_request("Original", prompt_target()))
             .await
@@ -523,16 +515,14 @@ mod tests {
         assert_eq!(created.name, "Original");
         assert_eq!(created.run_count, 0);
 
-        // get
         let fetched = service.get(created.id.clone()).await.expect("get");
         assert_eq!(fetched.id, created.id);
         assert_eq!(fetched.target, prompt_target());
 
-        // list
         let listed = service.list(Some(10), Some(0)).await.expect("list");
         assert_eq!(listed.len(), 1);
 
-        // update (definition fields replaced, statistics preserved)
+        // Definition fields are replaced; run statistics survive.
         let updated = service
             .update(
                 created.id.clone(),
@@ -559,14 +549,12 @@ mod tests {
         assert_eq!(updated.max_retries, 3);
         assert_eq!(updated.retry_delay_secs, 45);
 
-        // set_enabled toggles back on
         let toggled = service
             .set_enabled(created.id.clone(), true)
             .await
             .expect("set_enabled");
         assert!(toggled.enabled);
 
-        // delete
         service.delete(created.id.clone()).await.expect("delete");
         let err = service
             .get(created.id)
@@ -593,8 +581,6 @@ mod tests {
             .await
             .expect("create");
 
-        // A job that has never run yields an empty history (not an error), so the
-        // detail modal can render its "no executions" empty state.
         let history = service
             .list_executions(job.id, None, None)
             .await
@@ -705,8 +691,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_applies_robustness_defaults_when_omitted() {
-        // Omitting the robustness fields yields the named defaults persisted to
-        // the row (VAL-ROBUST-002): 0/0/60, never an unexpected NULL.
+        // Omitting the robustness fields persists the named defaults (0/0/60) to
+        // the row, never an unexpected NULL.
         let (service, _tmp) = create_service().await;
         let job = service
             .create(create_request("Job", prompt_target()))
@@ -726,7 +712,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_persists_explicit_robustness_values() {
-        // VAL-ROBUST-001: supplied values are stored and read back verbatim.
+        // Supplied values are stored and read back verbatim.
         let (service, _tmp) = create_service().await;
         let mut req = create_request("Job", prompt_target());
         req.exec_timeout_secs = Some(300);
@@ -742,8 +728,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_rejects_negative_robustness_values() {
-        // VAL-ROBUST-003: a negative timeout / retries / delay is rejected and
-        // no out-of-range row is written.
+        // A negative timeout / retries / delay is rejected and no out-of-range row
+        // is written.
         let (service, _tmp) = create_service().await;
 
         let mut neg_timeout = create_request("Job", prompt_target());
@@ -803,7 +789,6 @@ mod tests {
 
     #[tokio::test]
     async fn update_rejects_negative_robustness_values() {
-        // VAL-ROBUST-003 on the update path.
         let (service, _tmp) = create_service().await;
         let created = service
             .create(create_request("Job", prompt_target()))

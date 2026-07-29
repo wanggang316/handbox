@@ -1,9 +1,6 @@
-// Agent Session 服务实现
-//
-// Agent 模式会话的 CRUD 业务逻辑层，建立在 `AgentSessionRepository` 之上，
-// 与 Chat 模式的 `SessionService` / 预设 `AgentService` 完全独立。
-// 仅负责会话 CRUD 与 transcript 读取；runtime / run / streaming / tools
-// 属于后续 feature，不在此层实现。
+// Agent-mode session CRUD service on top of `AgentSessionRepository`, independent
+// of the chat-mode `SessionService` and the preset `AgentService`. Only session
+// CRUD and transcript reads live here; runtime/run/streaming/tools live elsewhere.
 
 use crate::models::AppError;
 use crate::services::Database;
@@ -14,7 +11,7 @@ use crate::storage::types::{
 use crate::storage::{AgentProjectRepository, AgentRepository, AgentSessionRepository};
 use std::sync::Arc;
 
-/// Agent Session 可更新参数类型（镜像 `AgentParameter`，按字段更新）
+/// Updatable session fields (mirrors `AgentParameter`, one field per update).
 pub enum AgentSessionParameter {
     Name(String),
     ModelId(Option<String>),
@@ -29,15 +26,14 @@ pub enum AgentSessionParameter {
     ToolExecutionMode(Option<String>),
 }
 
-/// Agent Session 服务
 #[derive(Clone)]
 pub struct AgentSessionService {
     repository: AgentSessionRepository,
-    /// 直接持有 project 仓储层（而非 `AgentProjectService`）：create 挂靠
-    /// project 时只需按 id 解析一行，轻依赖即可，避免 service 间环状耦合。
+    /// Repository rather than `AgentProjectService`: create only resolves one
+    /// project row by id, keeping the dependency light and avoiding service coupling.
     projects: AgentProjectRepository,
-    /// 直接持有 agent（AgentDefinition）仓储层：`create_session_from_definition`
-    /// 实例化时按 id 解析一行定义即可，同样取轻依赖而非整个 `AgentService`。
+    /// Repository rather than `AgentService`: instantiation only resolves one
+    /// definition row by id.
     definitions: AgentRepository,
 }
 
@@ -50,21 +46,10 @@ impl AgentSessionService {
         }
     }
 
-    /// 创建 Agent Session
-    ///
-    /// `project_id` 挂靠：若提供（空字符串视为未设置），则按 id 解析 project
-    /// （不存在 -> `NOT_FOUND`），并要求 `project.path` 当前仍 canonicalize
-    /// 回它自己且是目录——目录未被删除、也未被换成 symlink（否则
-    /// `VALIDATION_ERROR`）。校验失败一律不写入任何行。
-    /// 通过后把 `project.path`（创建时已 canonical）复制进 `working_dir`，
-    /// **覆盖** 请求中的 working_dir——project 优先，runtime 的 working_dir
-    /// 消费点因此零改动。
-    ///
-    /// 无 `project_id` 时行为不变：`working_dir` 若提供，则必须是一个
-    /// **绝对路径** 且能 canonicalize 到一个 **已存在的目录**（symlink-to-dir
-    /// 解析为其 canonical 目标后被接受）。存储 canonical 绝对路径。非绝对路径 /
-    /// 不存在的路径 / 指向文件（非目录）的路径一律以 `AppError` 拒绝，且不写入
-    /// 任何行。空字符串 / None 视为未设置，存储为 null。
+    /// Project attach wins: resolve `project_id` (empty = unset; `NOT_FOUND` if
+    /// missing), require its path to still canonicalize to itself as a directory,
+    /// and copy it into `working_dir`, overriding the request; otherwise validate
+    /// `working_dir` directly. Any validation failure writes no row.
     pub async fn create_session(
         &self,
         request: CreateAgentSessionRequest,
@@ -99,26 +84,10 @@ impl AgentSessionService {
         Ok(session)
     }
 
-    /// 从一个 AgentDefinition 实例化会话。
-    ///
-    /// 取定义的**能力集**与默认参数做一次性快照，再叠加 `overrides` 里实例化时
-    /// 才确定的字段，最终复用 [`create_session`] 落库（同一套 working_dir /
-    /// project 校验与 canonical 化）：
-    /// - `enabled_tools ← definition.builtin_tools`（空集 = 纯对话，不注册内置工具）
-    /// - `mcp_servers ← definition.mcp_servers`
-    /// - `system_prompt` / `temperature` / `max_tokens` / `thinking_level` /
-    ///   `tool_execution_mode` 取自定义
-    /// - `model_id` / `provider_id`：`overrides` 优先，否则取定义默认（内置 chat
-    ///   定义 provider 为空，必须由 `overrides.provider_id` 选定）
-    /// - `name`：`overrides` 优先（去空白后非空），否则取 `definition.name`
-    ///
-    /// `working_dir_mode` 决定工作目录策略，在委托 `create_session` 之前先行裁决：
-    /// - `"none"`：强制纯对话——忽略传入的 `project_id` / `working_dir`（均置空）。
-    /// - `"required"`：`project_id` 或 `working_dir` 至少给其一（非空），否则
-    ///   `VALIDATION_ERROR`；具体路径有效性仍由 `create_session` 校验。
-    /// - `"optional"`（含旧定义 / NULL）：原样透传，有则用、无则空。
-    ///
-    /// 落库的会话带 `agent_definition_id = Some(definition_id)` 回指其来源定义。
+    /// Instantiate a session from an AgentDefinition: snapshot its capability set
+    /// (`enabled_tools` ← `builtin_tools`) and defaults, apply `overrides`
+    /// (name/model/provider win), let `working_dir_mode` arbitrate the working dir,
+    /// then delegate to [`create_session`] with an `agent_definition_id` back-link.
     pub async fn create_session_from_definition(
         &self,
         definition_id: UUID,
@@ -136,17 +105,15 @@ impl AgentSessionService {
         self.create_session(request).await
     }
 
-    /// 将一个**已存在**会话就地重指到另一个 AgentDefinition —— 不新建会话行。
+    /// Re-point an existing session at another AgentDefinition in place, without
+    /// creating a row. Callers only take this path while the session has no
+    /// messages, so id / created_at / transcript are preserved while the
+    /// capability set, defaults and `agent_definition_id` are re-snapshotted —
+    /// the only sanctioned rewrite of that provenance link outside create.
     ///
-    /// 语义：调用方（前端）仅在会话**尚无任何消息**时走此路径——用户切换 Agent
-    /// 而当前会话「一句话都没说过」，没必要新建空会话，直接把它重指到新定义。
-    /// 按新定义重新快照能力集与默认参数、并改写 `agent_definition_id`（这是
-    /// provenance 链接在 create 之外**唯一**允许被重写的受控入口）；会话 id、
-    /// created_at、message_count、last_message_at、transcript 一律保留。
-    ///
-    /// 参数取舍：新定义未指定 model/provider（如内置 chat）时保留会话当前值；
-    /// 工作目录先沿用会话现有挂靠，再由新定义的 `working_dir_mode` 裁决
-    /// （mode="none" 清空；"required" 下现有目录即满足校验）。
+    /// Model/provider fall back to the session's current values when the new
+    /// definition pins none; the working dir is inherited and then arbitrated by
+    /// the new definition's `working_dir_mode`.
     pub async fn reinstantiate_from_definition(
         &self,
         session_id: UUID,
@@ -163,8 +130,8 @@ impl AgentSessionService {
                 AppError::not_found(&format!("Agent definition not found: {}", definition_id))
             })?;
 
-        // overrides 未显式指定工作目录时，默认沿用会话现有挂靠；随后交由
-        // build_instantiation_request 按新定义的 working_dir_mode 裁决。
+        // Absent an explicit override, inherit the session's current attachment;
+        // build_instantiation_request then applies the new working_dir_mode.
         let overrides = InstantiateAgentSessionRequest {
             project_id: overrides.project_id.or_else(|| session.project_id.clone()),
             working_dir: overrides.working_dir.or_else(|| session.working_dir.clone()),
@@ -179,9 +146,9 @@ impl AgentSessionService {
         session.name = request.name;
         session.project_id = project_id;
         session.working_dir = working_dir;
-        // 新定义未定 model/provider 时保留会话现值。定义列可能是空串（内置 chat
-        // 的 model/provider seed 为 ""）而非 NULL，故空串按「未定」处理才不会用一个
-        // 空模型盖掉会话已选的真实模型。
+        // Keep the session's model/provider when the definition pins none. Those
+        // columns can be "" rather than NULL, so an empty string must count as
+        // unset or a real selected model would be overwritten with nothing.
         let non_empty = |v: Option<String>| v.filter(|s| !s.is_empty());
         session.model_id = non_empty(request.model_id).or(session.model_id);
         session.provider_id = non_empty(request.provider_id).or(session.provider_id);
@@ -198,18 +165,17 @@ impl AgentSessionService {
         Ok(session)
     }
 
-    /// 从 AgentDefinition + overrides 组装一次实例化的 `CreateAgentSessionRequest`。
+    /// Assemble a `CreateAgentSessionRequest` from a definition plus overrides.
     ///
-    /// `working_dir_mode` 裁决工作目录策略（`"none"` 强制清空；`"required"` 要求
-    /// overrides 至少给 project/working_dir 其一，否则 `VALIDATION_ERROR`；
-    /// `"optional"`/NULL 原样透传），快照能力集（`enabled_tools←builtin_tools`、
-    /// `mcp_servers`）与默认参数，overrides 覆盖 name/project/workingDir/model/
-    /// provider。create 与 reinstantiate 共用此组装，杜绝两条路径漂移。
+    /// `working_dir_mode` arbitrates the directory: `"none"` forces null,
+    /// `"required"` demands a project or working_dir (else `VALIDATION_ERROR`),
+    /// `"optional"`/NULL passes through. Shared by create and reinstantiate so
+    /// the two paths cannot drift.
     fn build_instantiation_request(
         definition: &Agent,
         overrides: InstantiateAgentSessionRequest,
     ) -> Result<CreateAgentSessionRequest, AppError> {
-        // 空字符串与 None 等同「未提供」——create 的下游校验也是这样处理。
+        // An empty string counts as "not provided", matching create's validation.
         let is_set = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.is_empty());
         let (project_id, working_dir) =
             match definition.working_dir_mode.as_deref().unwrap_or("optional") {
@@ -236,8 +202,8 @@ impl AgentSessionService {
             name,
             project_id,
             agent_definition_id: Some(definition.id.clone()),
-            // 模型已与 AgentDefinition 解耦：会话不再从定义快照 model，仅取 overrides
-            // （实例化时由 UI 选）。provider 仍可由定义提供默认（内置行为空）。
+            // Model is decoupled from the definition: it comes only from the
+            // overrides (picked in the UI). Provider may still take a default.
             model_id: overrides.model_id,
             provider_id: overrides
                 .provider_id
@@ -253,11 +219,10 @@ impl AgentSessionService {
         })
     }
 
-    /// 解析 `project_id` 挂靠与 `working_dir`，返回 canonical 化后的
-    /// `(project_id, working_dir)`。project 优先：给定则按 id 解析并复核其 path
-    /// 仍 canonicalize 回自身且是目录；否则回落到直接校验 `working_dir`（绝对
-    /// 路径 + 已存在目录）。空字符串 / None 视为未设置。create 与 reinstantiate
-    /// 共用同一套校验，杜绝漂移。
+    /// Resolve `(project_id, working_dir)` in canonical form. A project wins: it
+    /// is looked up by id and its path re-checked as a canonical directory;
+    /// otherwise `working_dir` is validated directly. Empty string / None mean
+    /// unset. Shared by create and reinstantiate so the two cannot drift.
     async fn resolve_project_and_working_dir(
         &self,
         project_id: Option<String>,
@@ -278,9 +243,9 @@ impl AgentSessionService {
                         AppError::not_found(&format!("Agent project not found: {}", pid))
                     })?;
 
-                // project.path 创建时已 canonical；此处复核它当前仍 canonicalize
-                // 回它自己且是目录：目录可能在创建 project 后被删除，或被换成
-                // 指向别处的 symlink（canonicalize 结果将不再等于自身）。
+                // project.path was canonical when stored; re-check that it still
+                // canonicalizes to itself and is a directory — it may have been
+                // deleted or replaced by a symlink pointing elsewhere.
                 let still_canonical = std::fs::canonicalize(&project.path)
                     .map(|c| c == std::path::Path::new(&project.path) && c.is_dir())
                     .unwrap_or(false);
@@ -301,10 +266,9 @@ impl AgentSessionService {
         }
     }
 
-    /// 获取 Agent Session 列表（按 updated_at 降序）
-    ///
-    /// 不传 `limit` 即全量返回：前端分组侧栏按 project 分组消费完整列表，
-    /// 默认值绝不能静默截断（`i32::MAX` 对 SQLite 的 LIMIT 等效于无上限）。
+    /// Sessions ordered by updated_at desc. Omitting `limit` returns everything:
+    /// the sidebar groups the full list by project, so the default must never
+    /// truncate silently (`i32::MAX` is effectively unbounded for SQLite).
     pub async fn list_sessions(
         &self,
         limit: Option<i32>,
@@ -315,7 +279,6 @@ impl AgentSessionService {
         self.repository.list_sessions(limit, offset).await
     }
 
-    /// 获取 Agent Session 详情
     pub async fn get_session(&self, session_id: UUID) -> Result<AgentSession, AppError> {
         match self.repository.get_session_by_id(&session_id).await? {
             Some(session) => Ok(session),
@@ -326,7 +289,6 @@ impl AgentSessionService {
         }
     }
 
-    /// 重命名 Agent Session
     pub async fn rename_session(
         &self,
         session_id: UUID,
@@ -336,7 +298,8 @@ impl AgentSessionService {
         self.get_session(session_id).await
     }
 
-    /// 统一的单字段更新方法（镜像 `agent_update_field`）
+    /// Single entry point for updating one session field (mirrors
+    /// `agent_update_field`).
     pub async fn update_session_field(
         &self,
         session_id: UUID,
@@ -353,7 +316,8 @@ impl AgentSessionService {
             AgentSessionParameter::Temperature(temp) => session.temperature = temp,
             AgentSessionParameter::MaxTokens(max_tokens) => session.max_tokens = max_tokens,
             AgentSessionParameter::WorkingDir(working_dir) => {
-                // 复用与 create 一致的校验：保证存储的总是 canonical 绝对目录或 null。
+                // Same validation as create, so storage always holds a canonical
+                // absolute directory or null.
                 session.working_dir = Self::validate_working_dir(working_dir.as_deref())?;
             }
             AgentSessionParameter::EnabledTools(tools) => session.enabled_tools = tools,
@@ -366,12 +330,12 @@ impl AgentSessionService {
         Ok(session)
     }
 
-    /// 删除 Agent Session（仓储层显式级联删除其 transcript）
+    /// Deletes the session; the repository cascades its transcript.
     pub async fn delete_session(&self, session_id: UUID) -> Result<(), AppError> {
         self.repository.delete_session(&session_id).await
     }
 
-    /// 获取某个会话的全部 transcript（按 seq 升序）
+    /// Full transcript of a session, ordered by seq.
     pub async fn list_messages(
         &self,
         session_id: UUID,
@@ -379,13 +343,9 @@ impl AgentSessionService {
         self.repository.list_messages(&session_id).await
     }
 
-    /// 校验并规范化 `working_dir`。
-    ///
-    /// - `None` 或空字符串 -> `Ok(None)`（存储 null）。
-    /// - 非绝对路径 -> `Err`（即使能相对于 cwd 解析，也必须拒绝）。
-    /// - canonicalize 失败（不存在）-> `Err`。
-    /// - canonical 目标不是目录（如指向文件）-> `Err`。
-    /// - 否则 -> `Ok(Some(canonical_absolute_path))`。
+    /// Validate and canonicalize `working_dir`. None / empty store as null;
+    /// relative, missing, or non-directory paths are rejected; anything else
+    /// yields its canonical absolute path.
     fn validate_working_dir(working_dir: Option<&str>) -> Result<Option<String>, AppError> {
         let raw = match working_dir {
             None | Some("") => return Ok(None),
@@ -394,7 +354,8 @@ impl AgentSessionService {
 
         let path = std::path::Path::new(raw);
 
-        // 必须是绝对路径：相对路径即便能相对 cwd canonicalize 也一律拒绝，保持确定性。
+        // Relative paths are rejected even when they resolve against cwd, so the
+        // stored path stays deterministic.
         if !path.is_absolute() {
             return Err(AppError::with_hint(
                 "VALIDATION_ERROR",
@@ -403,7 +364,8 @@ impl AgentSessionService {
             ));
         }
 
-        // canonicalize 会解析 symlink 并要求路径存在；失败即视为不存在。
+        // canonicalize resolves symlinks and requires existence; a failure here
+        // means the path is not there.
         let canonical = std::fs::canonicalize(path).map_err(|_| {
             AppError::with_hint(
                 "VALIDATION_ERROR",
@@ -439,7 +401,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    /// 测试用数据库（持有 TempDir 以保证文件存活）
+    /// Test database; the returned TempDir must outlive it.
     async fn create_test_database() -> (Arc<Database>, TempDir) {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let db_path = temp_dir.path().join("test.db");
@@ -477,12 +439,9 @@ mod tests {
         row.try_get::<i64, _>("count").unwrap()
     }
 
-    // --- P3: create_session_from_definition (instantiate from AgentDefinition) ---
-
-    /// builtin-coding (migration 058 seed) instantiates with the full seven-tool
-    /// capability set snapshotted into `enabled_tools`, its manual tool-execution
-    /// policy, the provided working dir (required mode), and an
-    /// `agent_definition_id` back-link.
+    /// builtin-coding instantiates with the full seven-tool capability set
+    /// snapshotted into `enabled_tools`, its manual tool-execution policy, the
+    /// provided working dir, and an `agent_definition_id` back-link.
     #[tokio::test]
     async fn from_definition_builtin_coding_snapshots_capability_set() {
         let (db, _guard) = create_test_database().await;
@@ -608,8 +567,6 @@ mod tests {
         assert_eq!(count_rows(&db, "agent_sessions").await, 0);
     }
 
-    // --- reinstantiate_from_definition: in-place re-point of an empty session ---
-
     /// Re-pointing an existing session to another definition mutates it in place:
     /// same id, no new row, provenance + capability set re-snapshotted from the new
     /// definition. coding -> chat drops the seven tools and the working dir (chat is
@@ -714,8 +671,6 @@ mod tests {
         assert_eq!(count_rows(&db, "agent_sessions").await, 0);
     }
 
-    // --- VAL-SESSION-003: valid existing absolute dir is stored canonicalized ---
-
     #[tokio::test]
     async fn create_session_accepts_existing_absolute_dir_and_stores_canonical() {
         let (db, _guard) = create_test_database().await;
@@ -766,8 +721,6 @@ mod tests {
         let created = service.create_session(req).await.expect("create failed");
         assert_eq!(created.working_dir, Some(canonical_target));
     }
-
-    // --- VAL-SESSION-004: invalid working_dir rejected, no row written ---
 
     #[tokio::test]
     async fn create_session_rejects_missing_path_and_writes_no_row() {
@@ -845,8 +798,6 @@ mod tests {
         assert_eq!(created_empty.working_dir, None);
     }
 
-    // --- VAL-CREATE-010 + project attach: create_session with project_id ---
-
     #[tokio::test]
     async fn create_session_with_project_copies_path_and_overrides_working_dir() {
         let (db, _guard) = create_test_database().await;
@@ -908,14 +859,9 @@ mod tests {
         assert_eq!(created.working_dir, Some(project.path));
     }
 
-    /// VAL-CASESS-006 — two sessions whose working directories canonicalize to
-    /// the SAME path are grouped under one project: project get-or-create keys
-    /// off the canonical path, so a second create for the same directory (here
-    /// reached via a symlink alias) returns the same `project_id`, and both
-    /// sessions therefore carry the same `project_id` the sidebar groups by.
-    /// This is the data-layer geology under the frontend `groupSessions`
-    /// grouping; the grouping itself depends only on the SQLite `project_id` and
-    /// is unaffected by JSONL persistence.
+    /// Two sessions whose working directories canonicalize to the same path land
+    /// in one project: get-or-create keys off the canonical path, so a symlink
+    /// alias returns the same `project_id` the sidebar groups by.
     #[tokio::test]
     async fn sessions_in_same_canonical_dir_share_one_project_id() {
         let (db, _guard) = create_test_database().await;
@@ -965,18 +911,9 @@ mod tests {
         assert_eq!(count_rows(&db, "agent_projects").await, 1);
     }
 
-    /// VAL-CASESS-010 — three user-equivalent but byte-different cwd forms for
-    /// the SAME directory all collapse into ONE project bucket (not three):
-    ///   1. plain absolute path        `/foo`
-    ///   2. the same path + trailing slash `/foo/`
-    ///   3. a symlink alias that canonicalizes to `/foo`
-    /// `validate_project_path` runs `std::fs::canonicalize`, which normalizes the
-    /// trailing slash away and resolves the symlink, so the project get-or-create
-    /// keys all three off the SAME canonical path → the SAME `project_id`. The
-    /// existing `sessions_in_same_canonical_dir_share_one_project_id` test covers
-    /// the plain + symlink forms; this adds the trailing-slash form (and re-states
-    /// the full three-way invariant) so a regression in trailing-slash
-    /// normalization would split one project into two buckets here.
+    /// Three byte-different but user-equivalent cwd forms of one directory —
+    /// plain path, trailing slash, symlink alias — all collapse into a single
+    /// project bucket, because `validate_project_path` canonicalizes first.
     #[tokio::test]
     async fn cwd_trailing_slash_and_symlink_forms_share_one_project_bucket() {
         let (db, _guard) = create_test_database().await;
@@ -1083,14 +1020,12 @@ mod tests {
         assert_eq!(created.working_dir, None);
     }
 
-    // --- sidebar consumer: default list must not silently truncate ---
-
     #[tokio::test]
     async fn list_sessions_default_limit_does_not_truncate() {
         let (db, _guard) = create_test_database().await;
         let service = AgentSessionService::new(db);
 
-        // 60 sessions exceeds the previous default limit of 50.
+        // Comfortably more than any plausible page-size default.
         let total = 60;
         for i in 0..total {
             service
@@ -1103,8 +1038,6 @@ mod tests {
         assert_eq!(listed.len(), total, "default list must return all sessions");
     }
 
-    // --- CRUD roundtrip via the service ---
-
     #[tokio::test]
     async fn service_crud_roundtrip() {
         let (db, _guard) = create_test_database().await;
@@ -1115,22 +1048,18 @@ mod tests {
             .await
             .unwrap();
 
-        // List
         let listed = service.list_sessions(Some(10), Some(0)).await.unwrap();
         assert_eq!(listed.len(), 1);
 
-        // Get
         let got = service.get_session(created.id.clone()).await.unwrap();
         assert_eq!(got.name, "Roundtrip");
 
-        // Rename
         let renamed = service
             .rename_session(created.id.clone(), "Renamed".to_string())
             .await
             .unwrap();
         assert_eq!(renamed.name, "Renamed");
 
-        // Update field
         let updated = service
             .update_session_field(
                 created.id.clone(),
@@ -1140,19 +1069,16 @@ mod tests {
             .unwrap();
         assert_eq!(updated.thinking_level, Some("high".to_string()));
 
-        // Messages (empty transcript)
         let msgs = service.list_messages(created.id.clone()).await.unwrap();
         assert!(msgs.is_empty());
 
-        // Delete
         service.delete_session(created.id.clone()).await.unwrap();
         let err = service.get_session(created.id).await.expect_err("gone");
         assert_eq!(err.code, "NOT_FOUND");
     }
 
-    /// VAL-DEPRECATE-008 / VAL-DEPRECATE-009: a create request still carrying
-    /// the deprecated enabledSkills key succeeds (serde ignores unknown keys)
-    /// and the deactivated DB column stays NULL.
+    /// A create request still carrying the deprecated enabledSkills key succeeds
+    /// (serde ignores unknown keys) and leaves the dead column NULL.
     #[tokio::test]
     async fn create_with_deprecated_enabled_skills_key_succeeds_and_column_stays_null() {
         let (db, _guard) = create_test_database().await;
@@ -1175,9 +1101,8 @@ mod tests {
         assert_eq!(column, None, "new sessions must leave enabled_skills NULL");
     }
 
-    /// VAL-DEPRECATE-003: removing the EnabledSkills variant leaves every other
-    /// field mapping intact — thinkingLevel / enabledTools / workingDir /
-    /// modelId still persist through update_session_field.
+    /// thinkingLevel / enabledTools / workingDir / modelId all persist through
+    /// update_session_field.
     #[tokio::test]
     async fn update_field_other_parameters_persist_after_variant_removal() {
         let (db, _guard) = create_test_database().await;
@@ -1225,20 +1150,9 @@ mod tests {
         assert_eq!(err.code, "NOT_FOUND");
     }
 
-    // --- VAL-SESSION-011 + VAL-SESSION-012 ---
-    //
-    // VAL-SESSION-011 (structural): the service holds ONLY an
-    // `AgentSessionRepository` — it cannot reach chat `SessionService` /
-    // preset `AgentService` / chat/preset repos. This is enforced by the
-    // single-field struct above and is asserted here by exercising the full
-    // create+delete path through the public API (no chat/preset surface
-    // exists on this type to invoke).
-    //
-    // VAL-SESSION-012 (data): a create+delete cycle against a DB that already
-    // contains preset `agents` rows leaves that table's COUNT unchanged. The
-    // chat `sessions`/`messages` rows this assertion also covered are gone now
-    // that migration 060 dropped those tables, so only the preset invariant
-    // remains.
+    // A create+delete cycle against a DB that already holds preset `agents` rows
+    // leaves that table's COUNT unchanged: this service reaches no preset
+    // surface at all.
     #[tokio::test]
     async fn create_delete_cycle_leaves_preset_agents_table_unchanged() {
         let (db, _guard) = create_test_database().await;
@@ -1259,9 +1173,8 @@ mod tests {
         .await
         .unwrap();
 
-        // agents = 1 user row + 2 builtin AgentDefinitions (builtin-chat /
-        // builtin-coding) seeded by migration 058. The create+delete invariant
-        // below compares before vs after, so it stays correct regardless.
+        // 1 user row + the 2 seeded builtin definitions (builtin-chat /
+        // builtin-coding).
         let agents_before = count_rows(&db, "agents").await;
         assert_eq!(agents_before, 3);
 

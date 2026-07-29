@@ -1,12 +1,9 @@
-// GenUI 数据访问层
-
 use crate::models::AppError;
 use crate::storage::types::{GenUi, UUID};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
-/// GenUI 仓储层
 #[derive(Clone)]
 pub struct GenUiRepository {
     db: Arc<Database>,
@@ -17,7 +14,6 @@ impl GenUiRepository {
         Self { db }
     }
 
-    /// 创建 GenUI
     pub async fn create_genui(&self, genui: &GenUi) -> Result<(), AppError> {
         let query = r#"
             INSERT INTO genui (id, name, spec, created_at, updated_at)
@@ -37,7 +33,6 @@ impl GenUiRepository {
         Ok(())
     }
 
-    /// 获取 GenUI 列表
     pub async fn list_genui(&self, limit: i32, offset: i32) -> Result<Vec<GenUi>, AppError> {
         let query = r#"
             SELECT id, name, spec, created_at, updated_at
@@ -59,7 +54,6 @@ impl GenUiRepository {
         Ok(items)
     }
 
-    /// 根据 ID 获取 GenUI
     pub async fn get_genui_by_id(&self, id: &UUID) -> Result<Option<GenUi>, AppError> {
         let query = r#"
             SELECT id, name, spec, created_at, updated_at
@@ -78,7 +72,6 @@ impl GenUiRepository {
         }
     }
 
-    /// 更新 GenUI（名称 + spec）
     pub async fn update_genui(&self, genui: &GenUi) -> Result<(), AppError> {
         let query = r#"
             UPDATE genui SET name = $1, spec = $2, updated_at = $3
@@ -104,7 +97,8 @@ impl GenUiRepository {
         Ok(())
     }
 
-    /// 删除 GenUI。先把所有引用它的 agent 的 `genui_id` 置空，避免悬挂引用，再删除本体。
+    /// Clears `genui_id` on any agent referencing it (no dangling refs), then
+    /// deletes the row.
     pub async fn delete_genui(&self, id: &UUID) -> Result<(), AppError> {
         sqlx::query("UPDATE agents SET genui_id = NULL WHERE genui_id = $1")
             .bind(id)
@@ -127,7 +121,6 @@ impl GenUiRepository {
         Ok(())
     }
 
-    // 辅助方法：将数据库行转换为 GenUi
     fn row_to_genui(row: sqlx::sqlite::SqliteRow) -> Result<GenUi, AppError> {
         Ok(GenUi {
             id: row.try_get("id")?,

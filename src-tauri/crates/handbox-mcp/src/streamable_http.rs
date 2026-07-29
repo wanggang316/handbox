@@ -13,12 +13,10 @@ use rmcp::transport::StreamableHttpClientTransport;
 use super::sse::SseTransport;
 use super::types::StreamableHttpConfig;
 
-/// Streamable HTTP transport for MCP servers
 #[allow(clippy::module_name_repetitions)]
 pub struct StreamableHttpTransport;
 
 impl StreamableHttpTransport {
-    /// Create a new streamable HTTP transport for the given configuration
     pub fn connect(
         config: &StreamableHttpConfig,
     ) -> Result<StreamableHttpClientTransport<reqwest::Client>> {

@@ -2,54 +2,17 @@
 //! [`AgentSession`] and map its events onto HandBox's existing three Tauri
 //! channels (`agent_stream_event` / `agent_stream_closed` / `agent_stream_error`).
 //!
-//! This is the platform-shift proof feature: a prompt runs end-to-end on
-//! `hand_coding_agent::AgentSession`. The now-retired native `AgentRuntime` loop
-//! drove this path before M4; this module is now the SOLE Agent-mode run driver,
-//! while the *frontend* contract stays byte-for-byte the same. The event
-//! payloads, channel names, the closed-exactly-once invariant, and the sanitized
-//! error envelope preserve the original native-runtime semantics so the UI never
-//! has to know which engine drove the turn.
+//! Contract the frontend depends on: run events forward verbatim, a run-level
+//! error emits a sanitized envelope BEFORE the terminal signal, and
+//! `agent_stream_closed` fires EXACTLY ONCE. Session-lifecycle signals
+//! (compaction / session-info) ride a separate `agent_session_lifecycle`
+//! channel so they can never enter the run-event reducer or disturb that
+//! invariant.
 //!
-//! Drive strategy (A — `subscribe` direct-drive):
-//! - The session is `subscribe`d to a callback that unwraps
-//!   [`AgentSessionEvent::Agent`] into the inner `AgentEvent` and emits it on
-//!   `agent_stream_event` as `{ sessionId, event }`. The `AgentEvent` here is
-//!   the very type the HandBox frontend already consumes (same git+tag dedup as
-//!   `hand-agent`), so `serde_json::to_value(event)` produces the identical
-//!   shape the legacy sink produced.
-//! - `CompactionStart` / `CompactionEnd` / `SessionInfoChanged` are out-of-band
-//!   *session lifecycle* signals — they are NOT run events and must never enter
-//!   the `agent_stream_event` reducer (doing so would risk the closed-once
-//!   invariant and pollute the `AgentEvent` union). They are surfaced on a
-//!   SEPARATE Tauri channel (`agent_session_lifecycle`) as a tagged
-//!   `{ sessionId, kind, .. }` payload so the frontend can render a
-//!   distinguishable "整理上下文中" compaction indicator and reflect a renamed
-//!   session in the sidebar without reopen. `CompactionEnd`'s `summary` is
-//!   carried on the wire but is DELIBERATELY NOT rendered into the timeline:
-//!   the indicator is the only visible artifact, the conversation continues
-//!   in-line, and the turn still closes exactly once.
-//! - `AgentSessionEvent::Error(_)` is rare — the error main-path is
-//!   `send_message` returning `Err` — so it is logged; the run still closes
-//!   exactly once below.
-//! - After subscribing, the background task awaits `session.send_message`.
-//!   On `Err` it emits a sanitized `{ sessionId, error }` envelope BEFORE the
-//!   terminal closed signal; on either outcome it emits `agent_stream_closed`
-//!   EXACTLY ONCE.
-//!
-//! Concurrency: `send_message` takes `&mut self`, so the background task OWNS
-//! the session for the turn. The abort / steer handles
-//! ([`AgentSession::cancel_handle`] / [`AgentSession::steering_queue_handle`])
-//! are cloned out BEFORE the session is moved into the task and returned to the
-//! caller — once the session moves, it is unreachable. `drive_agent_run`
-//! registers those handles in a process-level [`run_controls`] registry keyed
-//! by `session_id` and removes the entry at the single closed emit site (so the
-//! registration lifetime exactly brackets the run). [`abort_run`] flips the
-//! cancel token through that registry; [`steer_run`] pushes a user [`Message`]
-//! onto the steering queue, which the agent loop drains at the next mid-turn
-//! boundary (so a mid-run send joins the CURRENT turn, never a follow-up).
-//!
-//! Session persistence stays in-memory for this feature (the session is built
-//! with `no_session = true`; JSONL persistence is M3).
+//! `send_message` borrows the session `&mut`, so the driver task owns it for the
+//! turn; the cancel and steering handles are cloned out first and kept in the
+//! process-level [`run_controls`] registry, registered on entry and removed at
+//! the closed emit site, so [`abort_run`] / [`steer_run`] reach a live run only.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -64,56 +27,36 @@ use crate::models::AppError;
 use crate::services::agent_run_types::AgentRunAttachment;
 
 /// What a single [`AgentSessionEvent`] maps to on HandBox's event surface.
-///
-/// Pulling the mapping out of the `subscribe` closure makes the policy
-/// directly unit-testable without spawning a task or touching the network:
-/// feed a synthetic `AgentSessionEvent` in, assert which side of the contract
-/// it lands on.
+/// Kept out of the `subscribe` closure so the policy is unit-testable without
+/// spawning a task or touching the network.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MappedEvent {
     /// Forward the inner `AgentEvent` JSON on `agent_stream_event` as the
     /// `event` field of `{ sessionId, event }`.
     Forward(Value),
     /// A session-lifecycle signal (compaction / session-info) emitted on the
-    /// SEPARATE `agent_session_lifecycle` channel as `{ sessionId, .. }` with
-    /// the carried fields merged in (the `kind` tag is set by the lifecycle
-    /// classifier below). Never enters the `agent_stream_event` reducer.
+    /// SEPARATE `agent_session_lifecycle` channel as `{ sessionId, kind, .. }`.
+    /// Never enters the `agent_stream_event` reducer.
     Lifecycle(Value),
     /// An out-of-band signal with no frontend surface (a session `Error`):
     /// logged for diagnostics and dropped.
     Logged,
 }
 
-/// Per-image byte cap enforced at the IPC boundary (CLAUDE.md「输入验证必须完备」).
-/// The frontend already limits attachments to 10 MiB, but the backend never
-/// trusts the frontend: an oversize image is defensively dropped so unbounded
-/// bytes never get base64'd into the model context. Preserves the bound the
-/// retired native runtime enforced at the same IPC boundary.
+/// Per-image byte cap enforced at the IPC boundary. The frontend already limits
+/// attachments, but the backend never trusts it: an oversize image is dropped so
+/// unbounded bytes never get base64'd into the model context.
 const ATTACHMENT_BYTE_CAP: usize = 10 * 1024 * 1024;
-/// Per-turn attachment count cap. Attachments beyond this count are dropped so a
-/// pathological request cannot blow up the assembled message. Preserves the
-/// retired native runtime's count bound.
+/// Per-turn attachment count cap, so a pathological request cannot blow up the
+/// assembled message.
 const ATTACHMENT_MAX_COUNT: usize = 16;
 
 /// Validate `attachments` at the IPC boundary and convert the surviving images
 /// into `ImageContent` blocks for `send_message_with_images`.
 ///
-/// An earlier version of this driver consumed only the prompt text and dropped
-/// attachments entirely; this preserves the native runtime's IPC-boundary
-/// discipline (VAL-CARUN-018) so the same images that reached the model under
-/// the old engine reach it under the new one, with the identical caps:
-///
-/// - non-`image/*` mimes are dropped (the frontend filters to `image/*`; this
-///   is belt-and-suspenders);
-/// - an image larger than [`ATTACHMENT_BYTE_CAP`] is dropped (no unbounded
-///   bytes base64'd into context);
-/// - only the first [`ATTACHMENT_MAX_COUNT`] attachments are considered; the
-///   tail is dropped.
-///
-/// Every drop is SILENT — the turn still runs (an all-dropped batch yields an
-/// empty `Vec`, and the caller falls back to the plain-text path). Each
-/// surviving image's bytes are base64 STANDARD encoded into an `ImageContent`,
-/// matching the user-message assembly the native runtime performed.
+/// Non-`image/*` mimes, images over [`ATTACHMENT_BYTE_CAP`], and everything past
+/// [`ATTACHMENT_MAX_COUNT`] are dropped SILENTLY — the turn still runs, and an
+/// all-dropped batch yields an empty `Vec` that falls back to plain text.
 pub fn images_from_attachments(attachments: &[AgentRunAttachment]) -> Vec<ImageContent> {
     let mut images: Vec<ImageContent> =
         Vec::with_capacity(attachments.len().min(ATTACHMENT_MAX_COUNT));
@@ -142,20 +85,15 @@ const INBAND_ERROR_REDACTION: &str = "the model returned an error";
 /// Scrub the in-band `errorMessage` from any assistant message inside a
 /// serialized `AgentEvent` value, in place.
 ///
-/// SECURITY (the in-band leg of the never-echo-raw-provider-text contract): an
-/// `AssistantMessage` finalized with `stopReason == "error"` carries an
-/// `errorMessage` set by the upstream transport from the raw provider response
-/// body. That message rides an `Ok` stream (it is NOT a run-level `Err`, so it
-/// never passes through [`sanitize_coding_agent_error`]) and would otherwise be
-/// forwarded VERBATIM to the frontend. We replace only the `errorMessage` field
-/// with a generic constant, leaving every other field — crucially the message's
-/// text `content` — untouched, so already-streamed assistant text is preserved
-/// (VAL-CARUN-010) while the raw upstream body never leaks (VAL-CARUN-013).
+/// SECURITY (in-band leg of the never-echo-raw-provider-text contract): an
+/// error-stopped `AssistantMessage` carries an `errorMessage` taken from the raw
+/// provider body, and it rides an `Ok` stream, so it never passes through
+/// [`sanitize_coding_agent_error`]. Only that field is replaced; every other
+/// field — crucially the text `content` — is left untouched, so already-streamed
+/// assistant text survives while the upstream body never leaks.
 ///
-/// The scrub walks every `message` / `messages` an `AgentEvent` variant can
-/// carry (`MessageEnd` / `MessageStart` / `MessageUpdate` / `TurnEnd` /
-/// `AgentEnd`), redacting only objects whose `stopReason == "error"` — a normal
-/// finished turn (`stopReason == "stop"`) never has an `errorMessage` and is
+/// The scrub walks every `message` / `messages` an `AgentEvent` can carry and
+/// touches only objects whose `stopReason == "error"`; a normal finished turn is
 /// left byte-for-byte unchanged.
 fn redact_inband_error_messages(event_json: &mut Value) {
     /// Redact one message object if it is an error-stopped assistant message.
@@ -184,27 +122,19 @@ fn redact_inband_error_messages(event_json: &mut Value) {
 
 /// Map an [`AgentSessionEvent`] to its HandBox event-surface action.
 ///
-/// - `Agent(e)` → `Forward(serde_json::to_value(e))`: the inner `AgentEvent`
-///   serializes to exactly the shape the legacy sink produced (same
-///   `#[serde(tag = "type", rename_all = "snake_case", rename_all_fields =
-///   "camelCase")]` type), so the frontend contract is unchanged — EXCEPT that
-///   an in-band `errorMessage` (raw upstream body on a `stopReason == "error"`
-///   message) is scrubbed before forwarding (see
-///   [`redact_inband_error_messages`]), never echoing provider text to the UI.
-/// - `CompactionStart` / `CompactionEnd` / `SessionInfoChanged` →
-///   `Lifecycle(payload)`: a tagged `{ kind, .. }` value routed to the SEPARATE
-///   `agent_session_lifecycle` channel (compaction indicator + sidebar rename),
-///   never into the `agent_stream_event` reducer.
-/// - `Error(_)` → `Logged`: a bare session error string has no frontend surface
-///   (the run-level error main-path is `send_message` returning `Err`), so it
-///   is observed for diagnostics and dropped.
+/// - `Agent(e)` → `Forward`: the inner `AgentEvent` serializes to exactly the
+///   shape the frontend consumes, except that an in-band `errorMessage` is
+///   scrubbed first (see [`redact_inband_error_messages`]).
+/// - `CompactionStart` / `CompactionEnd` / `SessionInfoChanged` → `Lifecycle`:
+///   a tagged `{ kind, .. }` value for the separate lifecycle channel (compaction
+///   indicator + sidebar rename), never the run-event reducer.
+/// - `Error(_)` → `Logged`: a bare session error has no frontend surface, since
+///   the run-level error path is `send_message` returning `Err`.
 fn map_session_event(event: &AgentSessionEvent) -> MappedEvent {
     match event {
         AgentSessionEvent::Agent(agent_event) => {
-            // The inner `AgentEvent` is the same type the frontend already
-            // consumes; a serialize failure is structural and must never break
-            // the stream — fall back to a diagnostic object (mirrors the legacy
-            // sink's serializeError fallback).
+            // A serialize failure is structural and must never break the
+            // stream — fall back to a diagnostic object.
             let mut value = serde_json::to_value(agent_event.as_ref())
                 .unwrap_or_else(|e| json!({ "type": "serializeError", "message": e.to_string() }));
             // SECURITY: scrub any in-band raw-provider `errorMessage` before it
@@ -213,11 +143,9 @@ fn map_session_event(event: &AgentSessionEvent) -> MappedEvent {
             redact_inband_error_messages(&mut value);
             MappedEvent::Forward(value)
         }
-        // Session-lifecycle signals → the dedicated `agent_session_lifecycle`
-        // channel. `kind` is the discriminator the frontend narrows on. The
-        // `summary` on `CompactionEnd` is carried for completeness but is NOT
-        // rendered into the timeline (the indicator is the only visible
-        // artifact — stable summary destination, VAL-CARUN-019).
+        // Lifecycle signals → the dedicated channel; `kind` is the discriminator
+        // the frontend narrows on. `CompactionEnd`'s `summary` rides the wire
+        // but is deliberately not rendered into the timeline.
         AgentSessionEvent::CompactionStart => {
             MappedEvent::Lifecycle(json!({ "kind": "compaction_start" }))
         }
@@ -235,20 +163,15 @@ fn map_session_event(event: &AgentSessionEvent) -> MappedEvent {
 /// Map a run-level [`CodingAgentError`] to a **sanitized** [`AppError`]
 /// `{ code, message, hint }` for the `agent_stream_error` envelope.
 ///
-/// SECURITY: same discipline the native runtime's error sanitizer enforced —
-/// never echo raw provider / transport error text (it can carry an API key or a
-/// credentialed URL). Each variant maps to a stable AppError code plus a
-/// generic-but-useful hint. The `CodingAgentError::Agent` arm delegates to the
-/// exact same `AgentError` classification the legacy path uses, so the error
-/// codes the frontend sees are identical across engines.
+/// SECURITY: never echo raw provider / transport error text — it can carry an
+/// API key or a credentialed URL. Each variant maps to a stable AppError code
+/// plus a generic-but-useful hint.
 fn sanitize_coding_agent_error(err: &CodingAgentError) -> AppError {
     use hand_agent::AgentError;
     use hand_ai_model::ClientError;
 
     match err {
-        // The model loop failed at run level. Reuse the exact AgentError
-        // classification the legacy runtime applies so the frontend sees the
-        // same codes regardless of which engine drove the turn.
+        // The model loop failed at run level; classify by `AgentError`.
         CodingAgentError::Agent(agent_err) => match agent_err {
             AgentError::Client(client_err) => match client_err {
                 ClientError::ProviderNotFound { model_id, .. } => AppError::with_hint(
@@ -275,9 +198,8 @@ fn sanitize_coding_agent_error(err: &CodingAgentError) -> AppError {
             }
             _ => AppError::internal_error("the agent run failed to complete"),
         },
-        // Session/settings/tool/serialization/io/other lifecycle failures from
-        // the coding-agent layer. These originate from our own assembly, not
-        // from raw provider text, but still take a generic internal code.
+        // Session/settings/tool/serialization/io failures from the coding-agent
+        // layer: our own assembly, but still a generic internal code.
         _ => AppError::internal_error("the agent run failed to complete"),
     }
 }
@@ -285,12 +207,11 @@ fn sanitize_coding_agent_error(err: &CodingAgentError) -> AppError {
 /// Event sink for a coding-agent run — the single choke point through which a
 /// driven turn reaches HandBox's three Tauri channels.
 ///
-/// Shape mirrors the native runtime's run sink deliberately: `on_event` receives
-/// `{ sessionId, event }`, `on_closed` receives the terminal `{ sessionId }`
-/// EXACTLY ONCE, and the optional `on_error` receives the sanitized
-/// `{ sessionId, error }` envelope BEFORE `on_closed`. When `on_error` is
-/// absent the envelope falls back to `on_event` so the error still reaches the
-/// UI without introducing a second closed emit site.
+/// `on_event` receives `{ sessionId, event }`, `on_closed` the terminal
+/// `{ sessionId }` EXACTLY ONCE, and the optional `on_error` the sanitized
+/// `{ sessionId, error }` envelope BEFORE `on_closed`. Without `on_error` the
+/// envelope falls back to `on_event`, so the error still reaches the UI without
+/// a second closed emit site.
 #[derive(Clone)]
 pub struct CodingRunSink {
     on_event: Arc<dyn Fn(Value) + Send + Sync>,
@@ -335,15 +256,9 @@ impl CodingRunSink {
     }
 }
 
-/// Abort / steer handles for a driven run, cloned out before the session was
-/// moved into the background task.
-///
-/// `send_message` borrows the session `&mut`, so once the task owns the session
-/// it is unreachable. [`abort_run`] flips the cancel token and [`steer_run`]
-/// pushes onto the steering queue through these handles while the turn is in
-/// flight, reaching the live run via the process-level [`run_controls`]
-/// registry (`drive_agent_run` registers them on entry and removes the entry at
-/// the closed emit site).
+/// Abort / steer handles for a driven run, cloned out before the session moves
+/// into the background task — afterwards the `&mut self` borrow inside
+/// `send_message` makes the session unreachable.
 pub struct RunDriveHandles {
     /// Shared cancellation token — `cancel()` it to abort the in-flight turn
     /// (identical semantics to `AgentSession::abort`).
@@ -355,30 +270,21 @@ pub struct RunDriveHandles {
     pub task: JoinHandle<()>,
 }
 
-/// Live steer / abort controls for one driven run.
-///
-/// Holds the two shared handles cloned out of the `AgentSession` before it
-/// moved into the driver task (see [`RunDriveHandles`]). Both are
-/// `Arc<std::sync::Mutex<..>>` — the SAME `Arc`s the in-flight `send_message`
-/// wired into its cancel token and `get_steering_messages` closure — so flipping
-/// `cancel` or pushing onto `steering` here reaches the running turn directly.
+/// Live steer / abort controls for one driven run. These are the SAME `Arc`s the
+/// in-flight `send_message` wired into its cancel token and
+/// `get_steering_messages` closure, so touching them reaches the running turn.
 struct RunControl {
     cancel: Arc<Mutex<hand_agent::CancellationToken>>,
     steering: Arc<Mutex<Vec<Message>>>,
 }
 
-/// Process-level `session_id → RunControl` registry for coding-agent driven
-/// runs.
+/// Process-level `session_id → RunControl` registry.
 ///
-/// Companion to `commands::agent_run::active_coding_runs` (the one-run-per-
-/// session set): that set gates concurrency, this map carries the live steer /
-/// abort handles. A process-level `OnceLock<Mutex<HashMap<..>>>` is used for the
-/// same reason — the `AgentSession` is owned by the background driver task for
-/// the turn, so there is no instance-level place to hang per-run state that the
-/// stateless command handlers can reach. `drive_agent_run` inserts on entry and
-/// removes the entry at the single closed emit site, so an entry exists for
-/// exactly the run's lifetime. [`steer_run`] / [`abort_run`] look the run up
-/// here; an absent entry (no active run) is a clean no-op.
+/// Companion to `commands::agent_run::active_coding_runs`: that set gates
+/// concurrency, this map carries the live steer / abort handles. It is
+/// process-level because the driver task owns the session for the turn, leaving
+/// nowhere instance-level for the stateless command handlers to reach. An entry
+/// exists for exactly the run's lifetime; an absent entry is a clean no-op.
 fn run_controls() -> &'static Mutex<HashMap<String, RunControl>> {
     static CONTROLS: OnceLock<Mutex<HashMap<String, RunControl>>> = OnceLock::new();
     CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -386,16 +292,11 @@ fn run_controls() -> &'static Mutex<HashMap<String, RunControl>> {
 
 /// Inject `text` as a user [`Message`] into the session's IN-FLIGHT turn.
 ///
-/// Preserves the native runtime's `steer` contract:
-/// - empty / whitespace-only `text` is a no-op — nothing is enqueued;
-/// - a session with no active run in the registry is a CLEAN no-op (the front
-///   end may race a steer against a run that just ended naturally; returning an
-///   error would turn that benign race into noise);
-/// - otherwise the message is pushed onto the run's steering queue, which the
-///   agent loop drains at the next mid-turn boundary via `get_steering_messages`
-///   — so it joins the CURRENT turn as a user message and never spawns a second
-///   concurrent run. The follow-up queue is deliberately NOT touched, so a
-///   mid-run send is never auto-continued after the turn ends (VAL-CARUN-021).
+/// Empty / whitespace-only text enqueues nothing, and a session with no active
+/// run is a CLEAN no-op — the frontend may race a steer against a run that just
+/// ended. Otherwise the message joins the CURRENT turn via the steering queue,
+/// which the agent loop drains at the next mid-turn boundary; the follow-up
+/// queue is deliberately untouched so nothing auto-continues after the turn.
 pub fn steer_run(session_id: &str, text: String) {
     if text.trim().is_empty() {
         return;
@@ -410,27 +311,17 @@ pub fn steer_run(session_id: &str, text: String) {
 /// Abort the session's in-flight turn by flipping its cancellation token AND
 /// fail-closing any approval the turn is parked on.
 ///
-/// Preserves the native runtime's `abort` contract: an unknown / already-
-/// finished session is a CLEAN no-op (the front end may race an abort against a
-/// run that just ended). The token reached here is the SAME one the in-flight
-/// `send_message` is driving on, so cancelling it makes the agent loop unwind at
-/// its next await point and synthesize a `stopReason=aborted` terminal turn; the
-/// driver task's `send_message` then resolves and the sink emits
-/// `agent_stream_closed` EXACTLY ONCE (the closed-once invariant holds on the
-/// abort path too). The registry entry is NOT removed here — removal stays owned
-/// by the driver task's closed emit site, so a stale abort can't drop a live
-/// entry out from under a still-running turn.
+/// An unknown / already-finished session is a CLEAN no-op. Cancelling the token
+/// makes the agent loop unwind at its next await point and synthesize a
+/// `stopReason=aborted` turn, so `agent_stream_closed` still fires exactly once.
+/// The registry entry is NOT removed here — removal stays owned by the driver
+/// task's closed emit site, so a stale abort cannot drop a live entry.
 ///
-/// PENDING-APPROVAL FAIL-CLOSE (VAL-CAPERM-016): the permission hook awaits the
-/// user's decision on a BARE `rx.await` that does NOT race the cancel token, so
-/// flipping the token alone cannot unblock a turn parked waiting for consent on a
-/// write/edit/bash call. We therefore ALSO
-/// [`deny_pending_for_session`](crate::services::agent_permission::deny_pending_for_session):
-/// it drops the pending sender(s) for this session, resolving the await to a
-/// fail-closed `Cancel` so the pending dangerous tool is guaranteed NOT to
-/// execute — and a late user "allow" arriving after the abort finds no entry (a
-/// clean no-op), so it can never run the tool post-abort either. A session with
-/// no pending approval is a clean no-op on that leg.
+/// PENDING-APPROVAL FAIL-CLOSE: the permission hook awaits the user's decision
+/// on a bare `rx.await` that does not race the cancel token, so the token alone
+/// cannot unblock a turn parked on consent. Dropping the pending sender resolves
+/// that await to a fail-closed `Cancel`, guaranteeing the dangerous tool never
+/// runs; a late "allow" then finds no entry and is likewise a no-op.
 pub fn abort_run(session_id: &str) {
     let controls = run_controls().lock().unwrap();
     if let Some(control) = controls.get(session_id) {
@@ -440,15 +331,13 @@ pub fn abort_run(session_id: &str) {
     // ordering two unrelated process-global locks under one critical section.
     drop(controls);
     // Fail-close any approval the (now-cancelled) turn is parked on, so the bare
-    // approval await unblocks and the dangerous tool never runs (VAL-CAPERM-016).
+    // approval await unblocks and the dangerous tool never runs.
     crate::services::agent_permission::deny_pending_for_session(session_id);
 }
 
-/// Register a run's steer / abort controls under `session_id`.
-///
-/// Called by `drive_agent_run` immediately after the handles are cloned out of
-/// the session and before the driver task is spawned, so a steer / abort issued
-/// the instant the command returns already reaches the run.
+/// Register a run's steer / abort controls under `session_id`. Called before the
+/// driver task is spawned, so a steer / abort issued the instant the command
+/// returns already reaches the run.
 fn register_run(
     session_id: &str,
     cancel: Arc<Mutex<hand_agent::CancellationToken>>,
@@ -469,24 +358,17 @@ fn deregister_run(session_id: &str) {
 
 /// Drive one prompt turn through `session`, mapping its events onto `sink`.
 ///
-/// Non-blocking: subscribes the session, captures its abort / steer handles,
-/// spawns the driver task, and returns immediately with [`RunDriveHandles`].
-/// The turn runs in the background; events arrive asynchronously via `sink`.
+/// Non-blocking: returns [`RunDriveHandles`] immediately while the turn runs in
+/// the background and events arrive asynchronously via `sink`.
 ///
-/// Lifecycle guarantees (the sacred closed-once invariant):
-/// - every `AgentSessionEvent::Agent(e)` is forwarded on `on_event` as
-///   `{ sessionId, event }` in emission order;
-/// - session-lifecycle signals (compaction / session-info) are routed to the
-///   sink's lifecycle channel, NEVER onto `on_event`, so the closed-once
-///   invariant and the `AgentEvent` reducer are untouched;
-/// - on `send_message` → `Err`, a sanitized `{ sessionId, error }` envelope is
-///   emitted (via `on_error`, or `on_event` as fallback) BEFORE closing;
-/// - `on_closed` fires EXACTLY ONCE with `{ sessionId }`, regardless of Ok/Err.
+/// Lifecycle guarantees:
+/// - `Agent` events forward on `on_event` as `{ sessionId, event }` in order;
+/// - lifecycle signals go to the sink's lifecycle channel, never `on_event`;
+/// - a run-level `Err` emits the sanitized envelope BEFORE closing;
+/// - `on_closed` fires EXACTLY ONCE, regardless of Ok/Err.
 ///
-/// `images` carries the IPC-validated image attachments for this turn (see
-/// [`images_from_attachments`]); an empty `Vec` drives the plain-text path
-/// (`send_message_with_images(text, None)` ≡ `send_message(text)`), so a turn
-/// whose attachments were all dropped at the boundary still runs normally.
+/// An empty `images` drives the plain-text path, so a turn whose attachments
+/// were all dropped at the boundary still runs normally.
 pub fn drive_agent_run(
     mut session: AgentSession,
     session_id: String,
@@ -494,18 +376,15 @@ pub fn drive_agent_run(
     images: Vec<ImageContent>,
     sink: CodingRunSink,
 ) -> RunDriveHandles {
-    // Capture abort / steer handles BEFORE the session moves into the task —
-    // afterwards the `&mut self` borrow inside `send_message` makes the session
-    // itself unreachable. Register them so `steer_run` / `abort_run` reach this
-    // run; the entry is removed at the closed emit site below.
+    // Capture the handles BEFORE the session moves into the task, and register
+    // them so `steer_run` / `abort_run` reach this run; the entry is removed at
+    // the closed emit site below.
     let cancel = session.cancel_handle();
     let steering = session.steering_queue_handle();
     register_run(&session_id, Arc::clone(&cancel), Arc::clone(&steering));
 
-    // Subscribe the event forwarder. The callback is `Fn + Send + Sync +
-    // 'static`; it captures the sink's event channel and the session id, and is
-    // invoked synchronously by the session for each emitted event during
-    // `send_message`.
+    // The subscribed callback is invoked synchronously by the session for each
+    // event emitted during `send_message`.
     let event_sink = Arc::clone(&sink.on_event);
     let lifecycle_sink = sink.on_lifecycle.clone();
     let event_session = session_id.clone();
@@ -517,8 +396,7 @@ pub fn drive_agent_run(
                     "event": event_json,
                 }));
             }
-            // Lifecycle signals go to their dedicated channel, with `sessionId`
-            // merged into the tagged payload. Never onto `on_event`.
+            // Dedicated channel only, with `sessionId` merged into the payload.
             MappedEvent::Lifecycle(mut payload) => {
                 if let Some(emit_lifecycle) = &lifecycle_sink {
                     if let Some(obj) = payload.as_object_mut() {
@@ -547,9 +425,8 @@ pub fn drive_agent_run(
     let closed_session = session_id;
 
     let task = tokio::spawn(async move {
-        // Drive exactly one turn. Streaming events have already been forwarded
-        // through the subscribe callback by the time this resolves. An empty
-        // `images` collapses to the plain-text path (`None` ≡ `send_message`).
+        // Streaming events have already been forwarded through the subscribe
+        // callback by the time this resolves.
         let images_arg = if images.is_empty() {
             None
         } else {
@@ -557,9 +434,9 @@ pub fn drive_agent_run(
         };
         let result = session.send_message_with_images(&input, images_arg).await;
 
-        // Run-level Err: emit the sanitized envelope BEFORE closing (no
-        // assistant content on this path). An in-band stop_reason=error turn is
-        // an `Ok` and never reaches here, so we never double-report it.
+        // Emit the sanitized envelope BEFORE closing. An in-band
+        // stop_reason=error turn is an `Ok` and never reaches here, so an error
+        // is never reported twice.
         if let Err(err) = &result {
             let app_error = sanitize_coding_agent_error(err);
             let envelope = json!({
@@ -574,15 +451,11 @@ pub fn drive_agent_run(
             }
         }
 
-        // Terminal close — the single closed emit site. Fires exactly once for
-        // both Ok and Err.
+        // The single closed emit site: fires exactly once for both Ok and Err.
         on_closed(json!({ "sessionId": closed_session }));
 
-        // Run is over: drop its steer / abort controls so the registration
-        // lifetime exactly brackets the run and the next run for this session
-        // can register cleanly. Sequenced after the closed emit so a steer /
-        // abort observing the run as still-registered always targets a live
-        // turn.
+        // Deregister after the closed emit, so a steer / abort that observes the
+        // run as still-registered always targets a live turn.
         deregister_run(&deregister_session);
     });
 
@@ -602,8 +475,8 @@ mod tests {
     };
     use std::sync::Mutex as StdMutex;
 
-    /// Build a finished assistant `Message` carrying `text` (mirrors the legacy
-    /// runtime's test helper) so synthetic `AgentEvent`s look realistic.
+    /// A finished assistant `Message` carrying `text`, so synthetic
+    /// `AgentEvent`s look realistic.
     fn assistant_message(text: &str) -> Message {
         Message::Assistant(AssistantMessage {
             role: "assistant".into(),
@@ -650,10 +523,9 @@ mod tests {
         })
     }
 
-    /// An ABORTED-turn assistant `Message`, byte-for-byte the shape hand-agent's
-    /// `synthesize_aborted_message` produces: empty content, `Usage::default()`
-    /// (all zeros), `stop_reason = Aborted`. The frontend keys its
-    /// usage-suppression off exactly this shape (VAL-CARUN-008).
+    /// An aborted-turn assistant `Message`, matching what hand-agent's
+    /// `synthesize_aborted_message` produces: empty content, zeroed usage,
+    /// `stop_reason = Aborted`. The frontend's usage suppression keys off it.
     fn aborted_assistant_message() -> Message {
         Message::Assistant(AssistantMessage {
             role: "assistant".into(),
@@ -696,22 +568,16 @@ mod tests {
         }
     }
 
-    /// Replays a scripted `AgentSessionEvent` sequence through the SAME
-    /// subscribe-callback + terminal-close logic `drive_agent_run` uses, but
-    /// without an `AgentSession` or the network. This lets us assert the event
-    /// mapping → `{ sessionId, event }` shape and closed-exactly-once on a
-    /// fake/mock event stream (the feature's required mapping unit test).
-    ///
-    /// `error` mirrors a `send_message` outcome: `Some(err)` exercises the
-    /// envelope-before-closed path; `None` is the happy path.
+    /// Replays a scripted event sequence through the same subscribe-callback +
+    /// terminal-close logic `drive_agent_run` uses, without an `AgentSession` or
+    /// the network. `error` mirrors a `send_message` outcome: `Some` exercises
+    /// the envelope-before-closed path.
     fn replay_through_sink(
         session_id: &str,
         sink: &CodingRunSink,
         events: Vec<AgentSessionEvent>,
         error: Option<CodingAgentError>,
     ) {
-        // 1) Each subscribed event maps and forwards exactly as the real
-        //    callback does.
         for event in &events {
             match map_session_event(event) {
                 MappedEvent::Forward(event_json) => (sink.on_event)(json!({
@@ -729,8 +595,8 @@ mod tests {
                 MappedEvent::Logged => {}
             }
         }
-        // 2) Terminal sequencing: error envelope (if any) BEFORE the single
-        //    closed emit — the same ordering as the spawned task.
+        // Terminal sequencing: error envelope BEFORE the single closed emit,
+        // matching the spawned task.
         if let Some(err) = &error {
             let envelope = json!({
                 "sessionId": session_id,
@@ -744,8 +610,8 @@ mod tests {
         (sink.on_closed)(json!({ "sessionId": session_id }));
     }
 
-    /// The required mapping unit test: a fake `AgentSessionEvent::Agent` stream
-    /// maps to `{ sessionId, event }` shapes and produces EXACTLY ONE closed.
+    /// An `AgentSessionEvent::Agent` stream maps to `{ sessionId, event }`
+    /// shapes and produces EXACTLY ONE closed.
     #[test]
     fn agent_events_map_to_session_event_shape_and_close_once() {
         let session_id = "sess-abc";
@@ -767,8 +633,8 @@ mod tests {
         let captured = sink.events.lock().unwrap();
         assert_eq!(captured.len(), 3, "every Agent event is forwarded");
 
-        // Each forwarded payload is exactly `{ sessionId, event }` and the
-        // event carries the snake_case `type` tag the frontend already reads.
+        // Each payload is exactly `{ sessionId, event }`, the event carrying the
+        // snake_case `type` tag the frontend reads.
         let first = &captured[0];
         assert_eq!(first.get("sessionId").unwrap(), session_id);
         assert_eq!(
@@ -781,37 +647,25 @@ mod tests {
             "agent_end"
         );
 
-        // EXACTLY ONE closed; no error envelope on the happy path.
         assert_eq!(sink.closed.lock().unwrap().len(), 1, "closed exactly once");
         assert_eq!(sink.errors.lock().unwrap().len(), 0, "no error on Ok path");
-        // The closed payload is `{ sessionId }`.
         assert_eq!(
             sink.closed.lock().unwrap()[0].get("sessionId").unwrap(),
             session_id
         );
     }
 
-    /// VAL-CARUN-008 (per-turn usage; aborted/error turns don't carry
-    /// misleading non-zero usage). The driver forwards `AgentEvent`s verbatim,
-    /// so the usage the frontend renders is exactly the `AssistantMessage.usage`
-    /// hand-agent put on the finalized turn. This pins the wire contract the
-    /// frontend's usage-suppression predicate (`AgentTimeline.hasUsage`) keys off:
-    ///   - a NORMAL finalized turn forwards its real, non-zero usage and
-    ///     `stopReason: "stop"`;
-    ///   - an ABORTED turn forwards `usage` all-zeros (input/output/totalTokens
-    ///     == 0) with `stopReason: "aborted"` — never the previous turn's
-    ///     numbers. So an aborted turn can NEVER surface a stale / misleading
-    ///     non-zero usage downstream.
+    /// Pins the usage wire contract the frontend's suppression predicate keys
+    /// off: a normal finalized turn forwards its real non-zero usage, while an
+    /// aborted turn forwards all zeros — never the preceding turn's numbers.
     #[test]
     fn forwarded_message_end_usage_is_real_for_normal_turn_and_zero_for_aborted() {
         let session_id = "sess-usage";
         let sink = CapturingSink::default();
         let run_sink = sink.clone().into_run_sink();
 
-        // Turn 1: a normal turn that consumed real tokens. Turn 2: an aborted
-        // turn (synthesized aborted message). The aborted turn must NOT inherit
-        // turn 1's usage — hand-agent zeroes it at the source; we assert the
-        // forwarded shape reflects that.
+        // Turn 1 consumed real tokens; turn 2 is aborted and must not inherit
+        // turn 1's usage.
         let events = vec![
             AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd {
                 message: assistant_message_with_usage(123, 45),
@@ -834,8 +688,7 @@ mod tests {
         assert_eq!(normal_usage.get("output").unwrap(), 45);
         assert_eq!(normal_usage.get("totalTokens").unwrap(), 168);
 
-        // Aborted turn: zeros across the board + stopReason "aborted". Crucially
-        // NOT turn 1's 123/45 — no carry-over, no misleading non-zero usage.
+        // Aborted turn: zeros across the board, not turn 1's 123/45.
         let aborted = captured[1].get("event").unwrap().get("message").unwrap();
         assert_eq!(aborted.get("stopReason").unwrap(), "aborted");
         let aborted_usage = aborted.get("usage").unwrap();
@@ -844,11 +697,8 @@ mod tests {
         assert_eq!(aborted_usage.get("totalTokens").unwrap(), 0);
     }
 
-    /// Out-of-band session-lifecycle events (compaction / session-info) and a
-    /// bare session error are NOT forwarded onto `agent_stream_event`; lifecycle
-    /// signals land on the dedicated lifecycle channel instead, and the run
-    /// still closes exactly once (closed-once is independent of lifecycle —
-    /// VAL-CARUN-019).
+    /// Lifecycle events and a bare session error never reach
+    /// `agent_stream_event`; the run still closes exactly once.
     #[test]
     fn out_of_band_events_are_not_forwarded_but_run_still_closes_once() {
         let session_id = "sess-oob";
@@ -869,14 +719,12 @@ mod tests {
 
         replay_through_sink(session_id, &run_sink, events, None);
 
-        // Only the single Agent event was forwarded onto the run-event channel.
         assert_eq!(
             sink.events.lock().unwrap().len(),
             1,
             "only Agent events reach agent_stream_event"
         );
-        // The three lifecycle signals (compaction start/end + session-info)
-        // landed on the dedicated lifecycle channel; the bare Error did not.
+        // The bare Error reaches neither channel.
         assert_eq!(
             sink.lifecycle.lock().unwrap().len(),
             3,
@@ -885,11 +733,9 @@ mod tests {
         assert_eq!(sink.closed.lock().unwrap().len(), 1, "closed exactly once");
     }
 
-    /// Lifecycle signals reach the dedicated lifecycle channel as a tagged
-    /// `{ sessionId, kind, .. }` payload — the wire shape the frontend narrows
-    /// on to render the compaction indicator and update the sidebar title
-    /// (VAL-CARUN-019 / VAL-CARUN-020). Crucially they NEVER land on the run
-    /// event channel.
+    /// Lifecycle signals reach their channel as a tagged `{ sessionId, kind, .. }`
+    /// payload — the shape the frontend narrows on for the compaction indicator
+    /// and sidebar title — and never land on the run-event channel.
     #[test]
     fn lifecycle_signals_carry_session_id_and_kind_on_lifecycle_channel() {
         let session_id = "sess-lifecycle";
@@ -908,7 +754,6 @@ mod tests {
 
         replay_through_sink(session_id, &run_sink, events, None);
 
-        // Nothing leaked onto the run-event channel.
         assert_eq!(
             sink.events.lock().unwrap().len(),
             0,
@@ -918,7 +763,6 @@ mod tests {
         let lifecycle = sink.lifecycle.lock().unwrap();
         assert_eq!(lifecycle.len(), 3, "all three lifecycle signals captured");
 
-        // Every payload carries the session id + a discriminating kind.
         for payload in lifecycle.iter() {
             assert_eq!(payload.get("sessionId").unwrap(), session_id);
             assert!(payload.get("kind").and_then(Value::as_str).is_some());
@@ -939,9 +783,7 @@ mod tests {
         let sink = CapturingSink::default();
         let run_sink = sink.clone().into_run_sink();
 
-        // A ProviderNotFound under the model loop — the canonical run-level
-        // error. The raw text would carry the model id; the sanitized code is
-        // AUTH_ERROR and the message references only the (non-secret) model id.
+        // ProviderNotFound under the model loop: the canonical run-level error.
         let err = CodingAgentError::Agent(AgentError::Client(
             hand_ai_model::ClientError::ProviderNotFound {
                 api: Api::OpenAICompletions,
@@ -951,32 +793,27 @@ mod tests {
 
         replay_through_sink(session_id, &run_sink, vec![], Some(err));
 
-        // Envelope landed on the dedicated error channel, not on on_event.
+        // The envelope lands on the dedicated error channel, not on on_event.
         let errors = sink.errors.lock().unwrap();
         assert_eq!(errors.len(), 1, "one sanitized error envelope");
         assert_eq!(errors[0].get("sessionId").unwrap(), session_id);
         let error_obj = errors[0].get("error").unwrap();
         assert_eq!(error_obj.get("code").unwrap(), "AUTH_ERROR");
-        // No assistant events on this path; closed still fires exactly once.
         assert_eq!(sink.events.lock().unwrap().len(), 0);
         assert_eq!(sink.closed.lock().unwrap().len(), 1, "closed exactly once");
     }
 
-    /// VAL-CARUN-010 (driver leg): a mid-run disconnect that surfaces as a
-    /// run-level `Err` (e.g. a proxy 502 / connection reset → NETWORK_ERROR) does
-    /// NOT retract the assistant text already forwarded before the break. The
-    /// previously emitted events stay on `agent_stream_event`; the sanitized
-    /// envelope is ADDITIVE and lands before the single closed signal. (The
-    /// frontend likewise never clears `streamingText` on error/closed, so the
-    /// partial answer remains visible.)
+    /// A mid-run disconnect surfacing as a run-level `Err` does NOT retract the
+    /// assistant text already forwarded: the sanitized envelope is additive and
+    /// lands before the single closed signal.
     #[test]
     fn mid_run_error_does_not_retract_already_forwarded_text() {
         let session_id = "sess-disconnect";
         let sink = CapturingSink::default();
         let run_sink = sink.clone().into_run_sink();
 
-        // Streamed text arrives, THEN the connection drops mid-stream and the
-        // run resolves to a run-level NETWORK error (no terminal MessageEnd).
+        // Text streams, then the connection drops and the run resolves to a
+        // run-level NETWORK error.
         let streamed = vec![
             AgentSessionEvent::Agent(Box::new(AgentEvent::AgentStart)),
             AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd {
@@ -990,7 +827,6 @@ mod tests {
 
         replay_through_sink(session_id, &run_sink, streamed, Some(disconnect));
 
-        // The two streamed events were forwarded and remain — nothing retracted.
         let events = sink.events.lock().unwrap();
         assert_eq!(
             events.len(),
@@ -1009,7 +845,7 @@ mod tests {
         assert_eq!(text, "answer streamed before the drop");
         drop(events);
 
-        // The envelope is additive and carries the normalized NETWORK code.
+        // The envelope carries the normalized NETWORK code.
         let errors = sink.errors.lock().unwrap();
         assert_eq!(errors.len(), 1, "exactly one error envelope");
         assert_eq!(
@@ -1018,7 +854,6 @@ mod tests {
         );
         drop(errors);
 
-        // closed-once holds on this path too (VAL-CARUN-009).
         assert_eq!(sink.closed.lock().unwrap().len(), 1, "closed exactly once");
     }
 
@@ -1032,16 +867,13 @@ mod tests {
             MappedEvent::Forward(_)
         ));
 
-        // CompactionStart → lifecycle { kind: "compaction_start" }.
         let MappedEvent::Lifecycle(start) = map_session_event(&AgentSessionEvent::CompactionStart)
         else {
             panic!("CompactionStart must map to a lifecycle signal");
         };
         assert_eq!(start.get("kind").unwrap(), "compaction_start");
 
-        // CompactionEnd → lifecycle { kind: "compaction_end", summary }. The
-        // summary rides the wire but the frontend does not render it (it only
-        // toggles the indicator off) — stable summary destination.
+        // The summary rides the wire but the frontend only toggles the indicator.
         let MappedEvent::Lifecycle(end) = map_session_event(&AgentSessionEvent::CompactionEnd {
             summary: "compacted 12 messages".into(),
         }) else {
@@ -1050,7 +882,6 @@ mod tests {
         assert_eq!(end.get("kind").unwrap(), "compaction_end");
         assert_eq!(end.get("summary").unwrap(), "compacted 12 messages");
 
-        // SessionInfoChanged → lifecycle { kind: "session_info_changed", name }.
         let MappedEvent::Lifecycle(info) =
             map_session_event(&AgentSessionEvent::SessionInfoChanged {
                 name: Some("renamed session".into()),
@@ -1061,22 +892,12 @@ mod tests {
         assert_eq!(info.get("kind").unwrap(), "session_info_changed");
         assert_eq!(info.get("name").unwrap(), "renamed session");
 
-        // A bare session error has no frontend surface → Logged.
         assert_eq!(
             map_session_event(&AgentSessionEvent::Error("x".into())),
             MappedEvent::Logged
         );
     }
 
-    // --- attachment IPC-boundary validation (VAL-CARUN-018) ---
-    //
-    // The new coding-agent driver path now runs the SAME cap/count/non-image
-    // discipline the legacy `agent_runtime` enforced, so an oversize / overflow
-    // / non-image attachment is silently dropped and never reaches the model
-    // context. These tests pin `images_from_attachments` directly (no session,
-    // no network).
-
-    /// An `image/*` attachment in [`AgentRunAttachment`] shape.
     fn image_attachment(name: &str, mime: &str, data: &[u8]) -> AgentRunAttachment {
         AgentRunAttachment {
             name: name.to_string(),
@@ -1085,8 +906,6 @@ mod tests {
         }
     }
 
-    /// A normal-size image survives validation and is base64 STANDARD encoded
-    /// into an `ImageContent` carrying its mime — the happy path the model sees.
     #[test]
     fn normal_image_survives_and_is_base64_encoded() {
         let raw = b"\x89PNG\r\n\x1a\n fake png bytes";
@@ -1096,7 +915,6 @@ mod tests {
         assert_eq!(images[0].data, BASE64_STANDARD.encode(raw));
     }
 
-    /// A non-image attachment is silently dropped — never base64'd into context.
     #[test]
     fn non_image_attachment_is_dropped() {
         let images =
@@ -1104,7 +922,6 @@ mod tests {
         assert!(images.is_empty(), "non-image attachments are dropped");
     }
 
-    /// A mix of image + non-image keeps ONLY the image blocks (VAL-CARUN-018).
     #[test]
     fn mixed_attachments_keep_only_images() {
         let images = images_from_attachments(&[
@@ -1117,8 +934,6 @@ mod tests {
         assert_eq!(images[1].mime_type, "image/jpeg");
     }
 
-    /// An oversize image (> `ATTACHMENT_BYTE_CAP`) is dropped while a normal
-    /// image in the same batch survives — unbounded bytes never enter context.
     #[test]
     fn oversize_image_is_dropped_normal_kept() {
         let small = vec![0u8; 32];
@@ -1131,8 +946,6 @@ mod tests {
         assert_eq!(images[0].data, BASE64_STANDARD.encode(&small));
     }
 
-    /// Attachment count is bounded to `ATTACHMENT_MAX_COUNT`; the tail beyond
-    /// the cap is dropped (VAL-CARUN-018 over-count).
     #[test]
     fn overflow_attachment_count_is_truncated() {
         let attachments: Vec<AgentRunAttachment> = (0..(ATTACHMENT_MAX_COUNT + 5))
@@ -1146,9 +959,8 @@ mod tests {
         );
     }
 
-    /// An empty batch (or one where every attachment was dropped) yields an
-    /// empty `Vec`, so the driver falls back to the plain-text path and the
-    /// turn still runs normally (VAL-CARUN-018: dropped, but the run still goes).
+    /// An empty batch, or one where everything was dropped, yields an empty
+    /// `Vec`, so the driver falls back to the plain-text path and still runs.
     #[test]
     fn all_dropped_attachments_yield_empty_so_turn_still_runs() {
         let images = images_from_attachments(&[]);
@@ -1164,8 +976,8 @@ mod tests {
         );
     }
 
-    /// Assert a sanitized `AppError` never echoes any of `secrets` in either its
-    /// `message` or its `hint` — the never-leak contract applied to every case.
+    /// Assert a sanitized `AppError` echoes none of `secrets` in its `message`
+    /// or `hint`.
     fn assert_no_leak(err: &AppError, secrets: &[&str]) {
         for secret in secrets {
             assert!(
@@ -1182,15 +994,12 @@ mod tests {
         }
     }
 
-    /// The sanitizer maps EVERY error family to a stable code (AUTH / NETWORK /
-    /// RATE_LIMIT / INTERNAL) and never echoes raw transport text (security: no
-    /// API key / credentialed URL / upstream body leakage). Covers the full
-    /// classification table the frontend's error rendering keys off
-    /// (VAL-CARUN-011/012/013).
+    /// The sanitizer maps every error family to a stable code (AUTH / NETWORK /
+    /// RATE_LIMIT / INTERNAL) and never echoes raw transport text — no API key,
+    /// credentialed URL, or upstream body may leak.
     #[test]
     fn sanitizer_maps_codes_without_leaking_raw_text() {
-        // A credentialed URL + key fragment + upstream body the raw transport
-        // text could carry; none of these may appear in any sanitized output.
+        // Things raw transport text could carry; none may appear in any output.
         let secrets = [
             "sk-secret",
             "sk-proj-LEAK",
@@ -1198,8 +1007,6 @@ mod tests {
             "Incorrect API key provided",
         ];
 
-        // --- Proxy transport: status → AUTH / RATE_LIMIT / NETWORK ---
-        // 401 → AUTH_ERROR.
         let proxy_401 = CodingAgentError::Agent(AgentError::Proxy {
             status: 401,
             message: "https://api.example.com/v1?key=sk-secret rejected".to_string(),
@@ -1208,7 +1015,7 @@ mod tests {
         assert_eq!(e.code, "AUTH_ERROR");
         assert_no_leak(&e, &secrets);
 
-        // 403 → AUTH_ERROR (authorization failure shares the auth code).
+        // An authorization failure shares the auth code.
         let proxy_403 = CodingAgentError::Agent(AgentError::Proxy {
             status: 403,
             message: "Incorrect API key provided: sk-proj-LEAK".to_string(),
@@ -1217,7 +1024,6 @@ mod tests {
         assert_eq!(e.code, "AUTH_ERROR");
         assert_no_leak(&e, &secrets);
 
-        // 429 → RATE_LIMIT.
         let proxy_429 = CodingAgentError::Agent(AgentError::Proxy {
             status: 429,
             message: "too many requests, key sk-secret".to_string(),
@@ -1226,8 +1032,8 @@ mod tests {
         assert_eq!(e.code, "RATE_LIMIT");
         assert_no_leak(&e, &secrets);
 
-        // Any other status (500 / timeout / connection drop arrive here) →
-        // NETWORK_ERROR. This is the mid-disconnect run-level error code.
+        // Any other status (500 / timeout / connection drop) is NETWORK_ERROR —
+        // the mid-disconnect run-level code.
         let proxy_500 = CodingAgentError::Agent(AgentError::Proxy {
             status: 502,
             message: "upstream connection reset to https://api.example.com/v1?key=sk-secret"
@@ -1237,9 +1043,7 @@ mod tests {
         assert_eq!(e.code, "NETWORK_ERROR");
         assert_no_leak(&e, &secrets);
 
-        // --- Client errors: provider/auth/stream-empty ---
-        // ProviderNotFound → AUTH_ERROR; only the (non-secret) model id is
-        // referenced, never a key.
+        // ProviderNotFound may reference the non-secret model id, never a key.
         let provider_not_found = CodingAgentError::Agent(AgentError::Client(
             hand_ai_model::ClientError::ProviderNotFound {
                 api: Api::OpenAICompletions,
@@ -1254,7 +1058,6 @@ mod tests {
         );
         assert_no_leak(&e, &secrets);
 
-        // StreamEndedWithoutResult → NETWORK_ERROR (premature stream end).
         let stream_ended = CodingAgentError::Agent(AgentError::Client(
             hand_ai_model::ClientError::StreamEndedWithoutResult,
         ));
@@ -1262,15 +1065,15 @@ mod tests {
         assert_eq!(e.code, "NETWORK_ERROR");
         assert_no_leak(&e, &secrets);
 
-        // --- Aborted-as-Err → INTERNAL_ERROR (the normal abort path is an Ok
-        // aborted turn; an Err-shaped abort still gets a non-leaking code). ---
+        // The normal abort path is an Ok aborted turn; an Err-shaped abort still
+        // gets a non-leaking code.
         let aborted = CodingAgentError::Agent(AgentError::Aborted);
         let e = sanitize_coding_agent_error(&aborted);
         assert_eq!(e.code, "INTERNAL_ERROR");
         assert_no_leak(&e, &secrets);
 
-        // --- AgentError catch-all (SchemaValidation / InvalidState / Other):
-        // text originates from our own code, but still takes a generic code. ---
+        // Catch-all AgentError text comes from our own code but still takes a
+        // generic code.
         let other_agent = CodingAgentError::Agent(AgentError::Other(
             "lifecycle failure mentioning sk-secret".to_string(),
         ));
@@ -1278,7 +1081,6 @@ mod tests {
         assert_eq!(e.code, "INTERNAL_ERROR");
         assert_no_leak(&e, &secrets);
 
-        // --- Non-Agent coding-agent lifecycle variants all → INTERNAL_ERROR. ---
         for err in [
             CodingAgentError::Session("no session found, key sk-secret".to_string()),
             CodingAgentError::Settings("bad settings sk-secret".to_string()),
@@ -1292,19 +1094,12 @@ mod tests {
         }
     }
 
-    /// VAL-CARUN-013 (in-band leg): an `Ok`-stream assistant message finalized
-    /// with `stopReason == "error"` carries the raw upstream response body in its
-    /// `errorMessage` (set by the proxy transport). The driver forwards it via
-    /// `MessageEnd`, NOT through the run-level sanitizer — so it must be scrubbed
-    /// at the mapping layer. This pins: (a) the `errorMessage` is replaced with a
-    /// generic constant (no raw upstream body / key fragment leaks), and (b) the
-    /// already-streamed text `content` is preserved verbatim (VAL-CARUN-010 —
-    /// mid-disconnect text is never erased, whether the break lands before or
-    /// after MessageEnd).
+    /// An error-stopped assistant message rides an `Ok` stream and so bypasses
+    /// the run-level sanitizer: its `errorMessage` must be scrubbed at the
+    /// mapping layer while the already-streamed text survives verbatim.
     #[test]
     fn inband_error_message_is_scrubbed_but_text_is_preserved() {
-        // The raw upstream body a 401 proxy phase-2 read could carry: it echoes
-        // the offending key fragment, exactly what must not reach the UI.
+        // The raw upstream body a 401 could carry, echoing the offending key.
         let raw_upstream = "Incorrect API key provided: sk-proj-LEAK-1234";
         let mut error_msg = assistant_message("partial answer before the drop");
         if let Message::Assistant(m) = &mut error_msg {
@@ -1321,7 +1116,6 @@ mod tests {
         };
 
         let message = value.get("message").expect("MessageEnd carries a message");
-        // (a) errorMessage scrubbed — no raw body / key fragment leaks.
         let forwarded_err = message
             .get("errorMessage")
             .and_then(Value::as_str)
@@ -1335,15 +1129,13 @@ mod tests {
             "in-band errorMessage must not echo the raw upstream body: {forwarded_err}"
         );
         assert_eq!(forwarded_err, INBAND_ERROR_REDACTION);
-        // The error signal itself is preserved so the frontend still renders the
-        // turn as errored.
+        // The error signal survives so the frontend still renders the turn as
+        // errored.
         assert_eq!(
             message.get("stopReason").and_then(Value::as_str),
             Some("error")
         );
 
-        // (b) Already-streamed text is preserved verbatim — the disconnect does
-        // not erase visible content.
         let text = message
             .get("content")
             .and_then(Value::as_array)
@@ -1354,9 +1146,8 @@ mod tests {
         assert_eq!(text, "partial answer before the drop");
     }
 
-    /// A NORMAL finished turn (`stopReason == "stop"`, no `errorMessage`) is left
-    /// byte-for-byte unchanged by the in-band scrub — the redaction only touches
-    /// error-stopped messages and never disturbs a healthy turn's payload.
+    /// The scrub touches only error-stopped messages; a normal finished turn is
+    /// left byte-for-byte unchanged.
     #[test]
     fn inband_scrub_leaves_normal_turn_untouched() {
         let event = AgentSessionEvent::Agent(Box::new(AgentEvent::MessageEnd {
@@ -1377,20 +1168,15 @@ mod tests {
         );
     }
 
-    // --- run-control registry (m1-steer-abort) ---
-    //
-    // The registry is process-global, so each test uses a FRESH random
-    // `session_id` (uuid) to stay isolated from every other test in the binary.
+    // The run-control registry is process-global, so each test below uses a
+    // fresh random `session_id` to stay isolated from the rest of the binary.
 
-    /// A fresh, registry-unique session id.
     fn fresh_session_id() -> String {
         uuid::Uuid::new_v4().to_string()
     }
 
-    /// Register a run with empty (but shared) cancel + steering handles, mirroring
-    /// what `drive_agent_run` registers. Returns clones of both handles so the
-    /// test can inspect them the way the live `send_message` turn would observe
-    /// them (same `Arc`).
+    /// Register a run the way `drive_agent_run` does, returning clones of both
+    /// handles so a test observes the same `Arc`s the live turn would.
     fn register_test_run(
         session_id: &str,
     ) -> (
@@ -1403,14 +1189,12 @@ mod tests {
         (cancel, steering)
     }
 
-    /// True if the registry currently holds an entry for `session_id`.
     fn is_registered(session_id: &str) -> bool {
         run_controls().lock().unwrap().contains_key(session_id)
     }
 
-    /// `register_run` makes the run reachable; `deregister_run` removes exactly
-    /// that entry. This is the lifetime contract `drive_agent_run` relies on:
-    /// register on entry, deregister at the closed emit site.
+    /// The lifetime contract `drive_agent_run` relies on: register on entry,
+    /// deregister at the closed emit site.
     #[test]
     fn register_then_deregister_brackets_the_run() {
         let session_id = fresh_session_id();
@@ -1423,8 +1207,8 @@ mod tests {
         assert!(!is_registered(&session_id), "absent after deregister");
     }
 
-    /// `steer_run` pushes a user `Message` onto the SAME steering queue the live
-    /// turn drains — so a mid-run steer joins the current turn as a user message.
+    /// `steer_run` pushes onto the SAME queue the live turn drains, so a mid-run
+    /// steer joins the current turn as a user message.
     #[test]
     fn steer_enqueues_user_message_onto_active_runs_queue() {
         let session_id = fresh_session_id();
@@ -1443,8 +1227,7 @@ mod tests {
         deregister_run(&session_id);
     }
 
-    /// Empty / whitespace-only steer text is a clean no-op: nothing is enqueued,
-    /// the active run is left undisturbed (VAL-CARUN-017).
+    /// Blank steer text enqueues nothing and leaves the active run undisturbed.
     #[test]
     fn steer_with_blank_text_is_noop() {
         let session_id = fresh_session_id();
@@ -1461,14 +1244,12 @@ mod tests {
         deregister_run(&session_id);
     }
 
-    /// Steering a session with no active run is a clean no-op — no panic, no
-    /// error, nothing enqueued anywhere (VAL-CARUN-017). The front end may race
-    /// a steer against a run that just ended.
+    /// Steering a session with no active run is a clean no-op; the frontend may
+    /// race a steer against a run that just ended.
     #[test]
     fn steer_with_no_active_run_is_noop() {
         let session_id = fresh_session_id();
         assert!(!is_registered(&session_id));
-        // Must not panic and must not create a registry entry.
         steer_run(&session_id, "hello".to_string());
         assert!(
             !is_registered(&session_id),
@@ -1476,10 +1257,9 @@ mod tests {
         );
     }
 
-    /// `abort_run` flips the SAME cancellation token the live turn drives on, so
-    /// the agent loop unwinds at its next await point and the run finishes
-    /// "aborted" (VAL-CARUN-005's mechanism). The registry entry is NOT removed
-    /// by abort — removal stays owned by the closed emit site.
+    /// `abort_run` flips the SAME token the live turn drives on, so the agent
+    /// loop unwinds and the run finishes "aborted". The entry is NOT removed —
+    /// removal stays owned by the closed emit site.
     #[test]
     fn abort_cancels_the_runs_token_without_deregistering() {
         let session_id = fresh_session_id();
@@ -1502,8 +1282,7 @@ mod tests {
         deregister_run(&session_id);
     }
 
-    /// Aborting a session with no active run is a clean no-op (no panic, no
-    /// error) — same benign-race tolerance as the blank-steer path.
+    /// Aborting a session with no active run is a clean no-op.
     #[test]
     fn abort_with_no_active_run_is_noop() {
         let session_id = fresh_session_id();
@@ -1512,23 +1291,16 @@ mod tests {
         assert!(!is_registered(&session_id));
     }
 
-    /// VAL-CAPERM-016 (abort承重, end-to-end, REALISTIC id mismatch) — `abort_run`
-    /// not only flips the cancel token but ALSO fail-closes any approval the turn
-    /// is parked on. The permission hook awaits on a BARE `rx.await` that does not
-    /// race the cancel token, so without the second leg the awaiting tool call
-    /// would hang and a late "allow" could still run the tool.
+    /// `abort_run` must also fail-close a parked approval: the permission hook
+    /// awaits on a bare `rx.await` that does not race the cancel token, so
+    /// without that leg the tool call would hang and a late "allow" could still
+    /// run it.
     ///
-    /// This test reproduces the PRODUCTION wiring the old version masked: the
-    /// permission hook is driven with the coding-agent's INTERNAL in-memory
-    /// `ExtensionContext.session_id` (an `s_…`-style id minted by
-    /// `SessionManager::in_memory()` because HandBox builds sessions with
-    /// `no_session: true`), which is DELIBERATELY DIFFERENT from the HandBox
-    /// session UUID `abort_run` is called with. The extension is constructed with
-    /// the HandBox UUID, so it keys its pending registry off THAT — meaning the
-    /// abort can match and drop the entry even though the cx id differs. The OLD
-    /// test faked `cx.session_id == abort id`, hiding the bug where production
-    /// keyed the registry off the (mismatched) cx id and the abort never matched
-    /// → permanent hang.
+    /// Mirrors the production wiring where the hook is driven with the
+    /// coding-agent's internal in-memory `ExtensionContext.session_id`, which
+    /// differs from the HandBox session UUID `abort_run` is called with. The
+    /// pending registry must therefore key off the extension's HandBox id, or
+    /// the abort can never match.
     #[tokio::test]
     async fn abort_run_unblocks_a_pending_approval_to_cancel() {
         use crate::services::agent_permission::{PermissionExtension, APPROVAL_REQUEST_EVENT};
@@ -1539,19 +1311,16 @@ mod tests {
         // The HandBox DB session UUID: what the IPC layer passes to `abort_run`
         // and what `build_agent_session` threads into the PermissionExtension.
         let handbox_session_id = fresh_session_id();
-        // The coding-agent's INTERNAL in-memory session id: what the host actually
-        // puts in `cx.session_id` for this turn. UNRELATED to the HandBox UUID —
-        // exactly the mismatch the production hang stemmed from.
+        // What the host actually puts in `cx.session_id` for this turn: the
+        // coding-agent's internal id, unrelated to the HandBox UUID.
         let coding_agent_internal_id = format!("s_{}_internal", uuid::Uuid::new_v4());
         assert_ne!(
             handbox_session_id, coding_agent_internal_id,
             "the cx id and the HandBox id must differ — this is the production reality"
         );
 
-        // Register the run's controls (as `drive_agent_run` would) under the
-        // HandBox UUID, so `abort_run(handbox_session_id)` finds the session and
-        // flips its token. The pending-approval fail-close is keyed off the SAME
-        // HandBox UUID.
+        // Register under the HandBox UUID, as `drive_agent_run` would, so the
+        // abort finds the session; the approval fail-close uses that same key.
         let (_cancel, _steering) = register_test_run(&handbox_session_id);
 
         // A recording emitter so we can wait for the approval request to land
@@ -1562,8 +1331,8 @@ mod tests {
             Arc::new(move |payload| sink.lock().unwrap().push(payload));
         assert_eq!(APPROVAL_REQUEST_EVENT, "agent_approval_request");
 
-        // The extension is keyed off the HandBox UUID (as build_agent_session
-        // wires it), NOT the cx id the hook is driven with.
+        // Keyed off the HandBox UUID (as build_agent_session wires it), not the
+        // cx id the hook is driven with.
         let ext = Arc::new(PermissionExtension::new(
             handbox_session_id.clone(),
             Some(emitter),
@@ -1571,9 +1340,8 @@ mod tests {
         let hook_ext = Arc::clone(&ext);
         let hook_cx_id = coding_agent_internal_id.clone();
         let task = tokio::spawn(async move {
-            // The host passes the coding-agent INTERNAL id here — different from
-            // the HandBox UUID. The pending registry must key off the ext's
-            // HandBox id, or this await can never be unblocked by the abort.
+            // The host passes the coding-agent internal id here, so the pending
+            // registry must key off the ext's HandBox id for the abort to land.
             let cx = ExtensionContext {
                 cwd: Path::new("/tmp").to_path_buf(),
                 session_id: hook_cx_id,
@@ -1601,17 +1369,16 @@ mod tests {
             !recorded.lock().unwrap().is_empty(),
             "the dangerous tool must have emitted an approval request before abort"
         );
-        // The emitted sessionId is the HandBox UUID (what the frontend routes by),
-        // not the coding-agent internal id — pin that the payload carries the
-        // right key.
+        // The emitted sessionId must be the HandBox UUID the frontend routes by,
+        // not the coding-agent internal id.
         assert_eq!(
             recorded.lock().unwrap()[0].get("sessionId").unwrap(),
             &Value::String(handbox_session_id.clone()),
             "the approval request must carry the HandBox session id, not the cx id"
         );
 
-        // Abort with the HandBox UUID: flips the token AND fail-closes the pending
-        // approval keyed off that same UUID (the cx id is irrelevant to the match).
+        // Abort with the HandBox UUID: flips the token AND fail-closes the
+        // pending approval keyed off that same UUID.
         abort_run(&handbox_session_id);
 
         let decision = task
@@ -1626,9 +1393,8 @@ mod tests {
         deregister_run(&handbox_session_id);
     }
 
-    /// After a run deregisters (its closed emit site fired), a steer / abort for
-    /// that session is again a clean no-op — no residue leaks into the next run.
-    /// This underpins VAL-CARUN-006 (abort-then-resend starts a clean new turn).
+    /// Once a run deregisters, a steer / abort for that session is again a clean
+    /// no-op, so no residue leaks into the next run.
     #[test]
     fn steer_after_deregister_does_not_resurrect_the_run() {
         let session_id = fresh_session_id();

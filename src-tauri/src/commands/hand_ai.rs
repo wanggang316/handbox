@@ -1,7 +1,6 @@
 // Tauri IPC bridge over hand-ai's provider/model catalog.
 //
-// Gated by the `hand-ai` feature flag (default-on as of the
-// dissolve-handbox-llm migration). The catalog itself lives in
+// Gated by the `hand-ai` feature flag (default-on). The catalog itself lives in
 // `crate::services::hand_ai_catalog`; this file is only the IPC adaptor.
 
 use crate::services::hand_ai_catalog::{self, HandAiProviderInfo};

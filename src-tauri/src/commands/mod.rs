@@ -1,4 +1,3 @@
-// IPC 命令模块
 pub mod accessibility;
 pub mod agent;
 pub mod agent_project;
@@ -22,7 +21,6 @@ pub mod settings;
 pub mod skill;
 pub mod window;
 
-// 重新导出所有命令
 pub use accessibility::*;
 pub use agent::*;
 pub use agent_project::*;

@@ -1,5 +1,3 @@
-// 设置服务实现
-
 use crate::models::{
     AccountSettings, AgentSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
     QuickActionSettings, QuickToolsSettings, ShortcutConfig, SkillSettings, Theme, ThemeColor,
@@ -13,10 +11,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub struct SettingsService {
     storage: Arc<StorageService>,
     /// Serializes every load→mutate→save critical section across clones so a
-    /// concurrent writer cannot overwrite another writer's freshly saved
-    /// state (security audit M-1: the disabled list must not fail open by
-    /// race). Held only at the public entry points — never re-acquired by
-    /// internal helpers, so there is no re-entrant deadlock.
+    /// concurrent writer cannot overwrite another writer's freshly saved state
+    /// (the disabled list must not fail open by race). Held only at the public
+    /// entry points — never re-acquired by internal helpers, so there is no
+    /// re-entrant deadlock.
     write_lock: Arc<Mutex<()>>,
 }
 
@@ -86,13 +84,9 @@ impl SettingsService {
     }
 
     /// Set a skill's global disabled flag in `skills.disabled` via a whole-file
-    /// read-modify-write.
-    ///
-    /// `disabled = true` appends the name unless an equal entry already exists
-    /// (dedup on insert); `disabled = false` removes every equal entry. All
-    /// other list entries — orphans, duplicates, whitespace — are opaque
-    /// storage and stay verbatim, and every other settings section round-trips
-    /// untouched through the same load/save path as any settings update.
+    /// read-modify-write. Disabling dedups on insert; enabling removes every
+    /// equal entry. Other list entries — orphans, duplicates, whitespace — are
+    /// opaque storage and round-trip verbatim.
     pub fn set_skill_disabled(&self, name: &str, disabled: bool) -> Result<AppSettings, AppError> {
         let _guard = self.lock_writes()?;
         let mut settings = self.load_or_default()?;
@@ -155,11 +149,10 @@ impl SettingsService {
 
     /// Persist the settings atomically: write a uniquely named temp file in
     /// the same directory, then `rename` it over config.json (atomic on the
-    /// same filesystem). A failed serialize or write leaves the original
-    /// file byte-for-byte intact — readers never observe a torn config
-    /// (security audit L-1). The suffix is process-id + an in-process
-    /// counter + per-call entropy (nanosecond timestamp) so concurrent saves
-    /// never collide on the temp name even after PID reuse.
+    /// same filesystem). A failed serialize or write leaves the original file
+    /// byte-for-byte intact — readers never observe a torn config. The temp
+    /// suffix (pid + in-process counter + nanosecond entropy) keeps concurrent
+    /// saves from colliding even after PID reuse.
     fn save_settings(&self, settings: &AppSettings) -> Result<(), AppError> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -277,8 +270,8 @@ mod tests {
         dir.path().join("config.json")
     }
 
-    /// A valid pre-revamp config: the four legacy sections present, no
-    /// `skills` section at all.
+    /// A valid config.json with the four legacy sections present and no
+    /// `skills` section (as written by older app versions).
     fn config_without_skills_section() -> String {
         let mut value = serde_json::to_value(default_settings()).unwrap();
         let map = value.as_object_mut().unwrap();
@@ -297,9 +290,6 @@ mod tests {
             .to_string()
     }
 
-    // VAL-CONFIG-001 (storage half): fresh environment, no settings ever
-    // written → skills.disabled defaults to empty, and the auto-written
-    // config.json carries an empty (or absent) skills.disabled.
     #[test]
     fn fresh_env_defaults_to_empty_disabled_list() {
         let dir = TempDir::new().unwrap();
@@ -317,8 +307,8 @@ mod tests {
         );
     }
 
-    // VAL-CONFIG-013: a valid config.json missing the `skills` section parses
-    // without error via serde(default) → all enabled.
+    // A config.json missing the `skills` section parses via serde(default) →
+    // all skills enabled.
     #[test]
     fn missing_skills_section_parses_with_all_enabled() {
         let dir = TempDir::new().unwrap();
@@ -328,10 +318,9 @@ mod tests {
         assert!(settings.skills.disabled.is_empty());
     }
 
-    // VAL-CONFIG-008 / VAL-CONFIG-011 (storage half): the disabled list is
-    // opaque storage — orphan, duplicate, empty and whitespace entries persist
-    // verbatim across an unrelated settings update (no prune, no
-    // normalization, no dedup).
+    // The disabled list is opaque storage — orphan, duplicate, empty and
+    // whitespace entries persist verbatim across an unrelated settings update
+    // (no prune, no normalization, no dedup).
     #[test]
     fn disabled_entries_persist_verbatim_across_unrelated_update() {
         let dir = TempDir::new().unwrap();
@@ -363,8 +352,6 @@ mod tests {
         assert_eq!(written["skills"]["disabled"], entries);
     }
 
-    // VAL-CONFIG-017: corrupt (non-JSON) config.json → structured
-    // INTERNAL_ERROR, file not silently overwritten.
     #[test]
     fn corrupt_config_returns_internal_error_and_keeps_file() {
         let dir = TempDir::new().unwrap();
@@ -380,8 +367,6 @@ mod tests {
         );
     }
 
-    // VAL-CONFIG-016: structurally illegal skills.disabled (non-array, or a
-    // non-string element) → structured INTERNAL_ERROR, file untouched.
     #[test]
     fn illegal_disabled_shape_returns_internal_error() {
         for bad in [
@@ -407,7 +392,7 @@ mod tests {
 
     /// Snapshot the four legacy sections as serde values for
     /// "other sections untouched" assertions (value equivalence after a
-    /// serialization round-trip, per the validation contract).
+    /// serialization round-trip).
     fn legacy_sections(settings: &AppSettings) -> [(&'static str, serde_json::Value); 4] {
         [
             ("general", serde_json::to_value(&settings.general).unwrap()),
@@ -420,8 +405,8 @@ mod tests {
         ]
     }
 
-    // VAL-CONFIG-003: disabling a skill writes its name into the config.json
-    // `skills.disabled` array while every other section stays value-identical.
+    // Disabling a skill writes its name into the config.json `skills.disabled`
+    // array while every other section stays value-identical.
     #[test]
     fn set_skill_disabled_true_writes_name_and_preserves_other_sections() {
         let dir = TempDir::new().unwrap();
@@ -448,8 +433,7 @@ mod tests {
         }
     }
 
-    // VAL-CONFIG-004: re-enabling removes the name (all equal entries) from
-    // the persisted list.
+    // Re-enabling removes the name (all equal entries) from the persisted list.
     #[test]
     fn set_skill_disabled_false_removes_all_equal_entries() {
         let dir = TempDir::new().unwrap();
@@ -492,8 +476,8 @@ mod tests {
         assert_eq!(updated.skills.disabled, vec!["alpha"]);
     }
 
-    // VAL-CONFIG-006 / VAL-CONFIG-007: back-to-back disables of distinct
-    // skills read-modify-write the list — no lost update, both names persist.
+    // Back-to-back disables of distinct skills read-modify-write the list —
+    // no lost update, both names persist.
     #[test]
     fn back_to_back_disables_keep_both_names() {
         let dir = TempDir::new().unwrap();
@@ -510,8 +494,8 @@ mod tests {
         );
     }
 
-    // VAL-CONFIG-005: the list survives a "restart" — a fresh service over
-    // the same data dir (config.json is the durable store) reads it back.
+    // The list survives a "restart" — a fresh service over the same data dir
+    // (config.json is the durable store) reads it back.
     #[test]
     fn disabled_list_survives_service_restart() {
         let dir = TempDir::new().unwrap();
@@ -541,12 +525,11 @@ mod tests {
         );
     }
 
-    // VAL-CONFIG-018 + L-1 (security audit): a disk-write failure surfaces as
-    // a structured INTERNAL_ERROR — no panic — and, because saving goes
-    // through a same-directory temp file + rename, the original config.json
-    // is left byte-for-byte intact. A read-only *directory* blocks temp-file
-    // creation (the write failure point under atomic replacement) while the
-    // config file itself stays readable.
+    // A disk-write failure surfaces as a structured INTERNAL_ERROR — no panic —
+    // and, because saving goes through a same-directory temp file + rename, the
+    // original config.json is left byte-for-byte intact. A read-only *directory*
+    // blocks temp-file creation (the write failure point under atomic
+    // replacement) while the config file itself stays readable.
     #[cfg(unix)]
     #[test]
     fn set_skill_disabled_write_failure_returns_structured_error() {
@@ -851,12 +834,10 @@ mod tests {
         assert_eq!(settings.quick_action.shortcut, "CmdOrCtrl+Shift+Space");
     }
 
-    // VAL-SETTINGS-012: persisting a quickAction value via the SettingsService
-    // update path (the code path the `settings_update` command calls) SUCCEEDS
-    // — it does NOT return `VALIDATION_ERROR: 未知设置分组` — and a subsequent
-    // `get_settings` on the SAME service (the `settings_get` path) returns the
-    // new value. This is the user-observable update→get round-trip, distinct
-    // from the low-level merge_json unit: it exercises the closed section enum,
+    // Persisting a quickAction value through the update path (what the
+    // `settings_update` command calls) must succeed instead of failing with the
+    // unknown-section VALIDATION_ERROR, and a following `get_settings` on the
+    // same service must return the new value. Exercises the closed section enum,
     // the save, and the read back together.
     #[test]
     fn update_quick_action_then_get_round_trips_without_unknown_section_error() {
@@ -886,9 +867,9 @@ mod tests {
         );
     }
 
-    // VAL-SETTINGS-012 (error-branch guard): an unknown section IS rejected with
-    // VALIDATION_ERROR, so the success above is a real acceptance of
-    // "quickAction" and not a path that swallows every section.
+    // Error-branch guard: an unknown section IS rejected with VALIDATION_ERROR,
+    // so the success above is a real acceptance of "quickAction" and not a path
+    // that swallows every section.
     #[test]
     fn update_unknown_section_is_rejected_with_validation_error() {
         let dir = TempDir::new().unwrap();
@@ -902,9 +883,9 @@ mod tests {
         assert_eq!(err.message, "未知设置分组");
     }
 
-    // The closed section enum recognizes "quickAction" in both update and
-    // reset (NOT VALIDATION_ERROR 未知设置分组), and the new shortcut
-    // round-trips through config.json via a fresh service.
+    // The closed section enum recognizes "quickAction" in both update and reset
+    // (no unknown-section VALIDATION_ERROR), and the new shortcut round-trips
+    // through config.json via a fresh service.
     #[test]
     fn update_and_reset_recognize_quick_action_section() {
         let dir = TempDir::new().unwrap();

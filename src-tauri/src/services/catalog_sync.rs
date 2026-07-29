@@ -1,18 +1,9 @@
 //! Runtime refresh of hand-ai's model catalog.
 //!
-//! HandBox depends entirely on hand-ai's catalog for the model list (no local
-//! synthesis, no HandBox-side `/v1/models` polling). The `hand-ai-model` crate
-//! ships an embedded baseline snapshot compiled in at the pinned version, but
-//! hand-ai also publishes a daily-regenerated catalog as a GitHub Release
-//! asset. Wiring hand-ai's `catalog_refresh` API keeps HandBox's in-memory
-//! catalog fresh **without a dependency bump** — so models hand-ai added
-//! upstream after our pinned snapshot (e.g. OpenRouter's full tool-capable
-//! list, including the `~*-latest` pointer aliases) resolve at chat time.
-//!
-//! The data source stays hand-ai; this only upgrades the catalog from "static
-//! embedded" to "embedded baseline + runtime hot-swap". Layering (hand-ai's):
-//! `embedded baseline > local cache > remote`, every step degrading
-//! gracefully — on any error the in-memory catalog is left untouched.
+//! Keeps the in-memory catalog fresh without a dependency bump, so models
+//! hand-ai adds after our pinned snapshot still resolve at chat time. Layering
+//! is hand-ai's — `embedded baseline > local cache > remote` — and every step
+//! degrades gracefully: on any error the in-memory catalog is left untouched.
 
 use std::time::Duration;
 
@@ -20,27 +11,16 @@ use std::time::Duration;
 const CATALOG_URL: &str =
     "https://github.com/wanggang316/hand-ai/releases/download/catalog/models.json";
 
-/// Re-fetch interval. hand-ai regenerates daily; matching that keeps the
-/// catalog within a day of upstream without hammering the endpoint — an
-/// unchanged catalog costs a single `304` via the cached ETag.
+/// Matches hand-ai's daily regeneration cadence. An unchanged catalog costs a
+/// single `304` via the cached ETag.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Start catalog sync **entirely in the background**.
-///
-/// Spawned so it never sits on the startup critical path: service registration
-/// and the foreground (session list, model list) must not wait on catalog I/O.
-/// The foreground serves DB-cached data immediately; the catalog primes from
-/// the local cache and refreshes from hand-ai's Release asset behind it, and
-/// subsequent `get_model` / `get_models` reads (chat resolution, model sync)
-/// pick up the fresher catalog without a restart.
-///
-/// Every step degrades gracefully — on any error the in-memory catalog is left
-/// untouched and the embedded baseline / previously-installed data keeps
-/// serving.
+/// Runs entirely in the background so catalog I/O never sits on the startup
+/// critical path; later `get_model` / `get_models` reads pick up the fresher
+/// catalog without a restart.
 pub fn spawn() {
     tauri::async_runtime::spawn(async {
-        // Prime from the local cache first (a prior run's fetched catalog), so
-        // it's active before the slower network refresh lands.
+        // A prior run's catalog is active before the slower network refresh lands.
         prime_from_cache();
 
         loop {
@@ -60,10 +40,8 @@ pub fn spawn() {
     });
 }
 
-/// Load the last-fetched catalog from the local cache (`~/.hand-ai`) into the
-/// in-memory registry. No-op (the embedded baseline stays active) when no cache
-/// exists. Runs inside [`spawn`]'s background task — never on the foreground
-/// critical path.
+/// Loads the last-fetched catalog (`~/.hand-ai`) into the in-memory registry.
+/// No-op when no cache exists: the embedded baseline stays active.
 fn prime_from_cache() {
     if hand_ai_model::load_cached_catalog() {
         tracing::info!("Loaded hand-ai catalog from local cache (~/.hand-ai)");
@@ -89,14 +67,9 @@ mod tests {
 
     #[test]
     fn refresh_interval_is_daily() {
-        // Matches hand-ai's daily regeneration cadence.
         assert_eq!(REFRESH_INTERVAL, Duration::from_secs(86_400));
     }
 
-    /// Live verification (network + writes the real `~/.hand-ai` cache).
-    /// Run explicitly:
-    ///   cargo test --lib services::catalog_sync::tests::refresh_resolves \
-    ///       -- --ignored --exact
     /// Proves the wired URL pulls a catalog where the embedded baseline's
     /// OpenRouter gap (e.g. the `~*-latest` aliases) is filled.
     #[tokio::test]

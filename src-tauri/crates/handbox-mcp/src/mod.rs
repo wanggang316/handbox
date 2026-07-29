@@ -1,9 +1,5 @@
 //! MCP client utilities for connecting to Model Context Protocol servers.
 //!
-//! This module provides a modern, clean client implementation following the official
-//! Rust SDK patterns. It supports process-based connections with robust error handling
-//! and connection management.
-//!
 //! # Examples
 //!
 //! ## Basic usage with process transport
@@ -32,7 +28,6 @@ mod streamable_http;
 pub mod types;
 mod utils;
 
-// Re-export the main interfaces
 pub use client::McpClient;
 pub use error::{McpClientError, McpClientResult};
 pub use types::{
@@ -40,5 +35,4 @@ pub use types::{
     McpResource, McpTool, ProcessConfig, SseConfig, StreamableHttpConfig,
 };
 
-// Re-export utilities that might be useful for advanced users
 pub use utils::{create_server_display_name, resolve_command_path, validate_server_config};

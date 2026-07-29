@@ -1,12 +1,7 @@
-// Scheduled-job 数据访问层
-//
-// 两个仓储：
-// - `JobRepository`：`jobs` 表 CRUD + due-selection 查询 + 运行后统计字段更新。
-// - `JobExecutionRepository`：插入 running 行、原地更新到终态、按 job 列出、
-//   FIFO 裁剪到最近 N 行、启动时 reconcile 残留 running 行。
-//
-// 这是 commands / executor / scheduler 的数据基础。本模块只提供方法 + 单测；
-// 「写入即 prune」「启动即 reconcile」的接线分别属 history-pruning / scheduler。
+// Data access for scheduled jobs: `JobRepository` (definitions in `jobs`) and
+// `JobExecutionRepository` (run history in `job_executions`). This layer only
+// exposes the operations; pruning after a write and reconciling stale `running`
+// rows on startup are wired up by the scheduler.
 
 use crate::models::AppError;
 use crate::storage::types::{ExecutionStatus, Job, JobExecution, JobTarget, Timestamp, Trigger};
@@ -14,13 +9,12 @@ use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
-/// `job_executions` 默认 FIFO 历史上限：每个 job 保留最近 N 行执行记录。
+/// Default FIFO history cap: how many `job_executions` rows each job keeps.
 pub const DEFAULT_EXECUTION_HISTORY_LIMIT: i64 = 100;
 
-/// `ExecutionStatus` 的 `last_status` / `status` 列字符串表示。
-///
-/// 与 `job.rs` 的 serde `snake_case` 线格式一致，但在仓储层显式映射，避免
-/// 依赖 serde_json 的引号包裹，并把 DB 列字符串约定收敛在数据访问层。
+/// Column encoding for the `last_status` / `status` columns. Matches the serde
+/// `snake_case` wire format of `job.rs`, but is mapped explicitly here so the DB
+/// string convention stays owned by the data-access layer.
 fn execution_status_as_str(status: ExecutionStatus) -> &'static str {
     match status {
         ExecutionStatus::Running => "running",
@@ -30,8 +24,8 @@ fn execution_status_as_str(status: ExecutionStatus) -> &'static str {
     }
 }
 
-/// 把 DB 列字符串解析回 `ExecutionStatus`，未知值视为数据损坏返回错误，
-/// 避免把无效状态静默吞掉。
+/// Decode the column back into `ExecutionStatus`; an unknown value is treated as
+/// data corruption and returned as an error rather than silently swallowed.
 fn execution_status_from_str(value: &str) -> Result<ExecutionStatus, AppError> {
     match value {
         "running" => Ok(ExecutionStatus::Running),
@@ -45,21 +39,21 @@ fn execution_status_from_str(value: &str) -> Result<ExecutionStatus, AppError> {
     }
 }
 
-/// 一次运行结束后对 `failure_count`（连续失败计数）的更新意图。
+/// How a finished run should update `failure_count`.
 ///
-/// `failure_count` 与 `run_count`（累计触发计数）语义不同：前者是「连续」失败，
-/// 一旦成功就清零；后者只增不减。手动触发完全不参与连续失败统计。
+/// `failure_count` counts *consecutive* failures and resets on success, unlike
+/// `run_count`, which only ever grows. Manual triggers never take part in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureCountUpdate {
-    /// 一次（自动调度的）失败/超时收尾：`failure_count + 1`。
+    /// Scheduled failure/timeout: `failure_count + 1`.
     Increment,
-    /// 一次（自动调度的）成功收尾：`failure_count` 清零（连续失败链中断）。
+    /// Scheduled success: clear `failure_count`, breaking the failure streak.
     Reset,
-    /// 不改动 `failure_count`（手动触发：不计入连续失败统计）。
+    /// Leave `failure_count` alone (manual trigger).
     Unchanged,
 }
 
-/// `Trigger` 的 `trigger` 列字符串表示。
+/// Column encoding for the `trigger` column.
 fn trigger_as_str(trigger: Trigger) -> &'static str {
     match trigger {
         Trigger::Schedule => "schedule",
@@ -67,7 +61,6 @@ fn trigger_as_str(trigger: Trigger) -> &'static str {
     }
 }
 
-/// 把 DB 列字符串解析回 `Trigger`。
 fn trigger_from_str(value: &str) -> Result<Trigger, AppError> {
     match value {
         "schedule" => Ok(Trigger::Schedule),
@@ -79,7 +72,7 @@ fn trigger_from_str(value: &str) -> Result<Trigger, AppError> {
     }
 }
 
-/// Job 定义仓储层（`jobs` 表）。
+/// Repository for job definitions (`jobs` table).
 #[derive(Clone)]
 pub struct JobRepository {
     db: Arc<Database>,
@@ -90,7 +83,7 @@ impl JobRepository {
         Self { db }
     }
 
-    /// 创建一个 job。`target` 拆成 `target_kind` + `target_config` 两列存储。
+    /// `target` is stored split across the `target_kind` + `target_config` columns.
     pub async fn create(&self, job: &Job) -> Result<(), AppError> {
         let (target_kind, target_config) = job
             .target
@@ -133,7 +126,6 @@ impl JobRepository {
         Ok(())
     }
 
-    /// 按 id 获取一个 job，不存在返回 `None`。
     pub async fn get(&self, id: &str) -> Result<Option<Job>, AppError> {
         let row = sqlx::query(JOB_SELECT_COLUMNS_WITH_WHERE_ID)
             .bind(id)
@@ -144,7 +136,7 @@ impl JobRepository {
         row.map(Self::row_to_job).transpose()
     }
 
-    /// 分页列出 jobs，按 `created_at` 降序（最新优先）。
+    /// Paginated, newest first (`created_at` descending).
     pub async fn list(&self, limit: i64, offset: i64) -> Result<Vec<Job>, AppError> {
         let query = format!(
             "{} ORDER BY created_at DESC LIMIT $1 OFFSET $2",
@@ -161,8 +153,8 @@ impl JobRepository {
         rows.into_iter().map(Self::row_to_job).collect()
     }
 
-    /// 全量更新一个 job 的定义字段（不触碰运行统计，那由 `update_after_run`/
-    /// `set_enabled` 负责）。返回的 `not_found` 用于 id 不存在的情形。
+    /// Replaces the definition fields only; run statistics stay untouched and are
+    /// owned by `update_after_run` / `set_enabled`. Unknown id yields `not_found`.
     pub async fn update(&self, job: &Job) -> Result<(), AppError> {
         let (target_kind, target_config) = job
             .target
@@ -203,8 +195,8 @@ impl JobRepository {
         Ok(())
     }
 
-    /// 删除一个 job。`job_executions` 通过 FK `ON DELETE CASCADE` 一并删除
-    /// （需连接上 `PRAGMA foreign_keys = ON`，sqlx 默认开启）。
+    /// `job_executions` rows go with it via FK `ON DELETE CASCADE`, which requires
+    /// `PRAGMA foreign_keys = ON` on the connection (sqlx enables it by default).
     pub async fn delete(&self, id: &str) -> Result<(), AppError> {
         let result = sqlx::query("DELETE FROM jobs WHERE id = $1")
             .bind(id)
@@ -219,7 +211,7 @@ impl JobRepository {
         Ok(())
     }
 
-    /// 启用/禁用一个 job，并刷新 `updated_at`。
+    /// Toggles a job and refreshes `updated_at`.
     pub async fn set_enabled(
         &self,
         id: &str,
@@ -241,16 +233,12 @@ impl JobRepository {
         Ok(())
     }
 
-    /// 一次运行结束后写入统计：`last_run_at` / `last_status` / `next_run_at`，
-    /// 并把 `run_count`（累计触发）自增 1。`failure_count`（连续失败）的改动由
-    /// caller 通过 [`FailureCountUpdate`] 显式决定：
-    /// - [`FailureCountUpdate::Increment`]：自动调度的失败/超时 → `+1`；
-    /// - [`FailureCountUpdate::Reset`]：自动调度的成功 → 清零（连续失败链中断）；
-    /// - [`FailureCountUpdate::Unchanged`]：手动触发 → 不参与连续失败统计。
+    /// Records run statistics and bumps `run_count` by one; the caller decides how
+    /// `failure_count` moves via [`FailureCountUpdate`].
     ///
-    /// 一次（可能含多次重试的）触发即一个 envelope，对 `run_count` 只 `+1`，与
-    /// 内部尝试次数无关。`next_run_at` 由 caller（scheduler）算好后传入；本层不
-    /// 重算 cron。
+    /// One trigger is one envelope, so `run_count` grows by 1 regardless of how many
+    /// retries happened inside it. `next_run_at` is computed by the caller (the
+    /// scheduler); this layer never evaluates cron.
     pub async fn update_after_run(
         &self,
         id: &str,
@@ -260,8 +248,7 @@ impl JobRepository {
         next_run_at: Option<Timestamp>,
         updated_at: Timestamp,
     ) -> Result<(), AppError> {
-        // `failure_count` 的写法因意图而异：递增/清零用一条 SQL 表达式即可，
-        // 「不变」则完全不在 SET 子句里碰它。
+        // `Unchanged` must leave the column out of the SET clause entirely.
         let failure_count_expr = match failure_count_update {
             FailureCountUpdate::Increment => "failure_count = failure_count + 1,",
             FailureCountUpdate::Reset => "failure_count = 0,",
@@ -300,7 +287,7 @@ impl JobRepository {
         Ok(())
     }
 
-    /// 设置一个 job 的下次运行时间（caller 重算 cron 后调用）。
+    /// Stores a next run time the caller has already computed from the cron expr.
     pub async fn recompute_next_run(
         &self,
         id: &str,
@@ -325,10 +312,8 @@ impl JobRepository {
         Ok(())
     }
 
-    /// 返回所有到期 job：`enabled = 1 AND next_run_at <= now`，按 `next_run_at`
-    /// 升序（最该跑的先返回）。命中 `idx_jobs_enabled_next`。
-    ///
-    /// `next_run_at IS NULL` 的 job（尚未排程）不会被选中。
+    /// Due jobs (`enabled` and `next_run_at <= now`), most overdue first; served by
+    /// `idx_jobs_enabled_next`. Unscheduled jobs (`next_run_at IS NULL`) never match.
     pub async fn list_due(&self, now: Timestamp) -> Result<Vec<Job>, AppError> {
         let query = format!(
             "{} WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= $1 \
@@ -345,7 +330,7 @@ impl JobRepository {
         rows.into_iter().map(Self::row_to_job).collect()
     }
 
-    /// 把数据库行还原为 `Job`，包括从两列重建多态 `target`。
+    /// Rebuilds the polymorphic `target` from its two columns.
     fn row_to_job(row: sqlx::sqlite::SqliteRow) -> Result<Job, AppError> {
         let target_kind: String = row
             .try_get("target_kind")
@@ -357,7 +342,7 @@ impl JobRepository {
             AppError::internal_error(&format!("Failed to parse job target: {}", e))
         })?;
 
-        // 可空 last_status 列：NULL -> None，非空字符串解析为枚举。
+        // Nullable column: decode into `Option<String>` first, then parse the enum.
         let last_status: Option<String> = row.try_get("last_status").map_err(|e| {
             AppError::internal_error(&format!("Failed to read last_status: {}", e))
         })?;
@@ -417,7 +402,7 @@ impl JobRepository {
     }
 }
 
-/// `jobs` 的 SELECT 列清单（不含 WHERE/ORDER）。
+/// `jobs` column list; callers append their own WHERE / ORDER clauses.
 const JOB_SELECT_COLUMNS: &str = r#"
     SELECT id, name, description, target_kind, target_config, cron_expr, timezone,
            enabled, last_run_at, next_run_at, last_status, run_count, failure_count,
@@ -426,7 +411,6 @@ const JOB_SELECT_COLUMNS: &str = r#"
     FROM jobs
 "#;
 
-/// `jobs` 单行按 id 查询。
 const JOB_SELECT_COLUMNS_WITH_WHERE_ID: &str = r#"
     SELECT id, name, description, target_kind, target_config, cron_expr, timezone,
            enabled, last_run_at, next_run_at, last_status, run_count, failure_count,
@@ -435,7 +419,7 @@ const JOB_SELECT_COLUMNS_WITH_WHERE_ID: &str = r#"
     FROM jobs WHERE id = $1
 "#;
 
-/// Job 执行记录仓储层（`job_executions` 表）。
+/// Repository for run history (`job_executions` table).
 #[derive(Clone)]
 pub struct JobExecutionRepository {
     db: Arc<Database>,
@@ -446,10 +430,9 @@ impl JobExecutionRepository {
         Self { db }
     }
 
-    /// 插入一行 `running` 执行记录（一次运行的起点），返回该行 id。
-    ///
-    /// 终态字段（stdout/stderr/exit_code/error/result_ref/ended_at/duration）此时
-    /// 全部为 NULL，由 `finalize` 原地补齐。
+    /// Opens a run: inserts a `running` row and returns its id. The outcome columns
+    /// (stdout/stderr/exit_code/error/result_ref/ended_at/duration) stay NULL until
+    /// `finalize` fills them in on the same row.
     pub async fn insert_running(
         &self,
         id: &str,
@@ -485,14 +468,11 @@ impl JobExecutionRepository {
         Ok(id.to_string())
     }
 
-    /// 把同一行执行记录原地更新到终态，并写入最终 `attempt`。
+    /// Closes a run in place. `status` must be terminal (success/failed/timeout);
+    /// passing `Running` is rejected so a finished row can never go back to running.
     ///
-    /// `status` 必须是终态之一（success/failed/timeout）；传入 `Running` 视为调用方
-    /// 错误并拒绝，以免把一行「完成」回退成运行中。
-    ///
-    /// `attempt` 是该 envelope 实际跑到的最后一次尝试编号（从 1 计；首次失败即
-    /// 终态时为 1，重试 N 次后为 N+1）。一次触发只对应一行，所以这里把行内的
-    /// `attempt` 列更新为终态尝试编号，而非每次重试新开一行。
+    /// Retries reuse the same row, so `attempt` is overwritten with the last attempt
+    /// number reached (1-based: 1 when the first try was already terminal).
     #[allow(clippy::too_many_arguments)]
     pub async fn finalize(
         &self,
@@ -544,7 +524,7 @@ impl JobExecutionRepository {
         Ok(())
     }
 
-    /// 列出一个 job 的执行记录，最新优先（按 `started_at` 降序，id 作次序稳定项）。
+    /// Newest first (`started_at` descending, id as a stable tiebreaker).
     pub async fn list_for_job(
         &self,
         job_id: &str,
@@ -569,13 +549,10 @@ impl JobExecutionRepository {
         rows.into_iter().map(Self::row_to_execution).collect()
     }
 
-    /// 把某个 job 的执行历史 FIFO 裁剪到最近 `keep` 行（按 `started_at`）。
-    ///
-    /// 永不删除仍处于 `running` 的行（避免裁掉正在进行的运行）；只在已完成的行
-    /// 超过上限时删除最旧的。返回被删除的行数。
+    /// FIFO-trims a job's history to the most recent `keep` rows by `started_at` and
+    /// returns how many were deleted. Rows still `running` are never counted nor
+    /// deleted, so an in-flight run cannot be pruned away.
     pub async fn prune_to(&self, job_id: &str, keep: i64) -> Result<u64, AppError> {
-        // 选出该 job 的所有非 running 行，按 started_at 降序（最新优先），
-        // 删除排在 `keep` 之后的（最旧的）。running 行完全不参与。
         let query = r#"
             DELETE FROM job_executions
             WHERE id IN (
@@ -598,10 +575,9 @@ impl JobExecutionRepository {
         Ok(result.rows_affected())
     }
 
-    /// 启动时 reconcile：把所有残留 `running` 的执行行标记为给定终态
-    /// （通常是 `Failed`，表示上次进程退出时被中断）。返回受影响行数。
-    ///
-    /// 仅在调用方明确写入接线（scheduler 启动）时使用；本层只提供能力。
+    /// Marks every leftover `running` row with the given terminal status (normally
+    /// `Failed`: the previous process exited mid-run) and returns the row count.
+    /// Meant to be called once at scheduler startup.
     pub async fn reconcile_stale_running(
         &self,
         status: ExecutionStatus,
@@ -614,7 +590,7 @@ impl JobExecutionRepository {
             ));
         }
 
-        // duration = ended_at - started_at，确保非负。
+        // Clamp the derived duration at 0 in case of clock skew.
         let query = r#"
             UPDATE job_executions SET
                 status = $1,
@@ -637,8 +613,8 @@ impl JobExecutionRepository {
         Ok(result.rows_affected())
     }
 
-    /// 把数据库行还原为 `JobExecution`。可空列以 `Option` 解码，避免把 NULL
-    /// decode 进非 Option 字段而 panic。
+    /// Nullable columns must decode into `Option` fields: decoding SQL NULL into a
+    /// non-Option type is a sqlx error, not a default value.
     fn row_to_execution(row: sqlx::sqlite::SqliteRow) -> Result<JobExecution, AppError> {
         let status_str: String = row
             .try_get("status")
@@ -693,7 +669,7 @@ impl JobExecutionRepository {
     }
 }
 
-/// `job_executions` 的 SELECT 列清单（不含 WHERE/ORDER）。
+/// `job_executions` column list; callers append their own WHERE / ORDER clauses.
 const EXECUTION_SELECT_COLUMNS: &str = r#"
     SELECT id, job_id, status, trigger, attempt, stdout, stderr, exit_code, error,
            result_ref, started_at, ended_at, duration, created_at
@@ -706,7 +682,7 @@ mod tests {
     use crate::storage::types::{Job, JobTarget, SessionStrategy};
     use tempfile::tempdir;
 
-    /// 建一个临时 SQLite 库并跑全部迁移（含 049/050 的 jobs/job_executions）。
+    /// Temp SQLite database with all migrations applied.
     async fn create_test_db() -> (Database, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");

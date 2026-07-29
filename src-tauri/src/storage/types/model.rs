@@ -5,7 +5,6 @@ use crate::models::llm_types::ModelPricing;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// 模态枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelModality {
@@ -18,7 +17,6 @@ pub enum ModelModality {
     Video,
 }
 
-/// 模型信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
     pub id: String,

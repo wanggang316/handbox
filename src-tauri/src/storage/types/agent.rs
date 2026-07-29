@@ -3,10 +3,9 @@ use super::mcp::McpServerConfig;
 use crate::models::llm_types::SessionReasoningConfig;
 use serde::{Deserialize, Serialize};
 
-// Agent 推理配置 - 复用 Session 的推理配置
 pub type AgentReasoningConfig = SessionReasoningConfig;
 
-/// Agent 实体 - 可复用的 AI 助手配置
+/// A reusable AI assistant configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
@@ -20,39 +19,45 @@ pub struct Agent {
     pub system_prompt: Option<String>,
     pub mcp_servers: Vec<McpServerConfig>,
     pub skills: Vec<String>,
-    /// 是否启用生成式 UI。`None` 等同「关闭」（旧行 / NULL 列）。
+    /// Whether generative UI is enabled. `None` (legacy rows / NULL column)
+    /// means off.
     pub generative_ui: Option<bool>,
-    /// 关联的 GenUI（具名 JSON-Render spec）id。`None` 表示未关联（旧行 / NULL 列）；
-    /// 引用的 GenUI 被删除后由仓储层置空，悬挂 id 在前端表单中显示为「未关联」。
+    /// Linked GenUI (named JSON-Render spec) id. `None` = unlinked (legacy
+    /// rows / NULL column). The repository clears it when the referenced GenUI
+    /// is deleted; a dangling id shows as "unlinked" in the frontend form.
     pub genui_id: Option<UUID>,
-    // ── AgentDefinition 扩展（migration 058）：能力集 + 运行策略 + 展示 ──
-    /// 选定的 provider id。`None`（旧行 / 内置行）表示实例化时再由 UI 选择。
+    /// Selected provider id. `None` (legacy/builtin rows) = picked in the UI
+    /// at instantiation time.
     pub provider_id: Option<String>,
-    /// lucide 图标名（列表/选择器展示用）。
+    /// Lucide icon name.
     pub icon: Option<String>,
-    /// 一句话描述。
     pub description: Option<String>,
-    /// 是否为内置 AgentDefinition（`builtin-chat` / `builtin-coding`）。内置行在
-    /// service 层受保护：不可删除、不可改名。NULL/0 旧行解码为 `false`。
+    /// Built-in AgentDefinition (`builtin-chat` / `builtin-coding`). Built-in
+    /// rows are protected in the service layer: no delete, no rename. NULL/0
+    /// legacy rows decode as `false`.
     pub builtin: bool,
-    /// 启用的内置工具名（coding-agent 注册名：read/write/edit/bash/grep/find/ls）。
-    /// 空集 = 纯对话（不注册任何内置工具）。NULL 列解码为空 `Vec`。
+    /// Enabled built-in tool names (coding-agent registry names:
+    /// read/write/edit/bash/grep/find/ls). Empty = chat-only, no built-in
+    /// tools registered. NULL columns decode as an empty `Vec`.
     pub builtin_tools: Vec<String>,
-    /// 工作目录策略：`"required"` | `"optional"` | `"none"`。`None` 旧行按 optional 处理。
+    /// `"required"` | `"optional"` | `"none"`. `None` legacy rows behave as
+    /// optional.
     pub working_dir_mode: Option<String>,
-    /// 工具执行默认策略：`"auto"` | `"manual"`。`None` 旧行按 auto 处理。
+    /// Default tool execution policy: `"auto"` | `"manual"`. `None` legacy
+    /// rows behave as auto.
     pub tool_execution_mode: Option<String>,
-    /// coding-agent thinking level。`None` 走引擎默认。
+    /// coding-agent thinking level. `None` = engine default.
     pub thinking_level: Option<String>,
-    /// 启动提示语（starter prompts）。NULL 列解码为空 `Vec`。
+    /// Starter prompts. NULL columns decode as an empty `Vec`.
     pub starters: Vec<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
 
-/// 创建 Agent（AgentDefinition）请求。`Default` 让调用方只填关心的字段
-/// （`CreateAgentRequest { name, ..Default::default() }`），新增字段零签名扰动。
-/// `builtin` 不在请求里——用户创建的 agent 恒为非内置；内置行只由 migration seed。
+/// `Default` lets callers set only the fields they care about
+/// (`CreateAgentRequest { name, ..Default::default() }`). `builtin` is absent
+/// on purpose: user-created agents are never built-in; built-in rows are only
+/// seeded by migrations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentRequest {
@@ -77,7 +82,6 @@ pub struct CreateAgentRequest {
     pub starters: Option<Vec<String>>,
 }
 
-/// 更新 Agent 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAgentRequest {
@@ -138,9 +142,10 @@ mod tests {
         assert_eq!(agent.generative_ui, deserialized.generative_ui);
     }
 
-    /// 锁定 JS<->Rust 线缆键：serde camelCase 把 `generative_ui` 转成 `generativeUi`
-    /// （小写 `i`），而非 `generativeUI`。前端 `generativeUi?: boolean` 必须与之匹配。
-    /// 键名不符会通过纯 Rust 的 round-trip，却在边界静默丢值。
+    /// serde camelCase maps `generative_ui` to `generativeUi` (lowercase `i`),
+    /// not `generativeUI`; the frontend's `generativeUi?: boolean` must match.
+    /// A mismatched key survives a pure-Rust round-trip but silently drops the
+    /// value at the JS boundary.
     #[test]
     fn agent_generative_ui_wire_key_is_camel_case() {
         let agent = Agent {

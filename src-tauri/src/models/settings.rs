@@ -1,9 +1,6 @@
-// 设置相关数据模型
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// 主题类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
@@ -12,7 +9,6 @@ pub enum Theme {
     System,
 }
 
-/// 主题色
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeColor {
@@ -27,7 +23,6 @@ pub enum ThemeColor {
     System,
 }
 
-/// 语言
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Language {
     #[serde(rename = "zh-CN")]
@@ -36,7 +31,6 @@ pub enum Language {
     EnUS,
 }
 
-/// 快捷键配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutConfig {
@@ -45,7 +39,6 @@ pub struct ShortcutConfig {
     pub switch_model: Option<String>,
 }
 
-/// 通用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneralSettings {
@@ -56,20 +49,18 @@ pub struct GeneralSettings {
     pub shortcuts: ShortcutConfig,
 }
 
-/// 翻译设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslationSettings {
-    /// 翻译使用的 Session ID
+    /// Cached chat session used for translation.
     pub session_id: Option<String>,
-    /// 创建 `session_id` 时使用的 Agent 定义 ID。`None` = 内置回落
-    /// （builtin-chat 加硬编码翻译 prompt）。与 `quickTools.translationAgentId`
-    /// 不一致时，前端判定缓存会话失效并重建。
+    /// Agent definition ID `session_id` was created with. `None` = built-in
+    /// fallback (builtin-chat + hard-coded translation prompt). If it differs
+    /// from `quickTools.translationAgentId`, the frontend recreates the session.
     #[serde(default)]
     pub agent_id: Option<String>,
 }
 
-/// MCP 服务器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MCPServer {
@@ -81,14 +72,12 @@ pub struct MCPServer {
     pub env: Option<HashMap<String, String>>,
 }
 
-/// MCP 设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MCPSettings {
     pub servers: Vec<MCPServer>,
 }
 
-/// 用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInfo {
@@ -99,7 +88,6 @@ pub struct UserInfo {
     pub is_premium: Option<bool>,
 }
 
-/// 账户设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSettings {
@@ -107,17 +95,15 @@ pub struct AccountSettings {
     pub is_logged_in: bool,
 }
 
-/// 禁用的应用信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisabledAppInfo {
     pub bundle_id: String,
     pub name: String,
-    /// 图标数据的 base64 编码（data URL 格式，如 "data:image/png;base64,..."）
+    /// Icon as a base64 data URL (e.g. "data:image/png;base64,...").
     pub icon: Option<String>,
 }
 
-/// 快捷工具设置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectionBlacklist {
@@ -127,40 +113,38 @@ pub struct SelectionBlacklist {
     pub apps: Vec<DisabledAppInfo>,
 }
 
-/// 快捷工具设置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickToolsSettings {
-    /// 选中文本时显示工具栏
     #[serde(default)]
     pub show_toolbar_on_selection: bool,
-    /// 划词「翻译」使用的 Agent 定义 ID。`None` = 内置回落（builtin-chat +
-    /// 硬编码翻译 prompt）。
+    /// Agent definition ID for the selection "translate" tool. `None` =
+    /// built-in fallback (builtin-chat + hard-coded translation prompt).
     #[serde(default)]
     pub translation_agent_id: Option<String>,
-    /// 选词工具黑名单
     #[serde(default)]
     pub selection_blacklist: SelectionBlacklist,
 }
 
-/// Skill 设置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillSettings {
-    /// 全局禁用的 skill 名单（按 name 精确匹配；不透明存储：孤儿/重复/空白
-    /// 条目原样保留，不归一化、不去重、不清理）
+    /// Globally disabled skill names (exact match). Stored opaquely: orphaned,
+    /// duplicate, or blank entries are kept verbatim — no normalization.
     #[serde(default)]
     pub disabled: Vec<String>,
 }
 
-/// Web 搜索设置（agent `web_search` 工具的搜索服务商配置）
+/// Search-provider config for the agent `web_search` tool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSearchSettings {
-    /// 搜索服务商标识。当前仅支持 `"tavily"`；字段保留以便后续扩展。
+    /// Search provider id. Only `"tavily"` is supported today; kept as a
+    /// field for future providers.
     #[serde(default = "default_web_search_provider")]
     pub provider: String,
-    /// 搜索服务商 API Key。空串 = 未配置，`web_search` 工具不注册。
+    /// Provider API key. Empty = unconfigured; the `web_search` tool is not
+    /// registered.
     #[serde(default)]
     pub api_key: String,
 }
@@ -178,19 +162,18 @@ fn default_web_search_provider() -> String {
     "tavily".to_string()
 }
 
-/// Agent 设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSettings {
-    /// 新建 Agent 会话默认启用的工具：7 个 coding-agent 内置 + HandBox 扩展工具
-    /// (`web_search` / `render_card` / `render_app` / `skill`)。默认全开。
+    /// Tools enabled by default for new agent sessions: the coding-agent
+    /// built-ins plus HandBox's extension tools (`web_search` / `render_card` /
+    /// `render_app` / `skill`). All are on by default.
     #[serde(default = "default_agent_enabled_tools")]
     pub default_enabled_tools: Vec<String>,
-    /// "Open in ..." 的默认应用 target id（见 commands/open_in.rs）。
-    /// `None` = 未设默认，前端回退到首个可用 editor/terminal。
+    /// Default "Open in ..." target id (see commands/open_in.rs). `None` =
+    /// unset; the frontend falls back to the first available editor/terminal.
     #[serde(default)]
     pub default_editor_id: Option<String>,
-    /// `web_search` 工具的搜索服务商配置。
     #[serde(default)]
     pub web_search: WebSearchSettings,
 }
@@ -224,20 +207,20 @@ fn default_agent_enabled_tools() -> Vec<String> {
     .collect()
 }
 
-/// 快捷动作设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickActionSettings {
-    /// 是否启用 Quick Action（全局快捷键唤起浮层）。禁用时不注册全局快捷键。
+    /// When disabled, the global shortcut is not registered.
     #[serde(default = "default_quick_action_enabled")]
     pub enabled: bool,
-    /// 唤起快捷动作面板的全局快捷键(Tauri global-shortcut 加速键语法)。
+    /// Global shortcut that opens the quick-action panel (Tauri
+    /// global-shortcut accelerator syntax).
     #[serde(default = "default_quick_action_shortcut")]
     pub shortcut: String,
-    /// 快捷动作默认使用的模型 ID。`None` = 未设默认，由默认模型解析器回退。
+    /// Default model ID. `None` = unset; the default-model resolver decides.
     #[serde(default)]
     pub model_id: Option<String>,
-    /// 快捷动作默认使用的供应商 ID。`None` = 未设默认，由默认模型解析器回退。
+    /// Default provider ID. `None` = unset; the default-model resolver decides.
     #[serde(default)]
     pub provider_id: Option<String>,
 }
@@ -261,7 +244,6 @@ fn default_quick_action_shortcut() -> String {
     "CmdOrCtrl+Shift+Space".to_string()
 }
 
-/// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -279,14 +261,12 @@ pub struct AppSettings {
     pub quick_action: QuickActionSettings,
 }
 
-/// 设置更新请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateSettingsRequest {
     pub section: String,
     pub data: serde_json::Value,
 }
 
-/// 导出设置选项
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExportSettingsOptions {
     pub include_providers: Option<bool>,
@@ -294,7 +274,6 @@ pub struct ExportSettingsOptions {
     pub include_shortcuts: Option<bool>,
 }
 
-/// 导入设置请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct ImportSettingsRequest {
     pub data: String,

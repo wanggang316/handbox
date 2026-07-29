@@ -1,13 +1,9 @@
 //! Types for MCP client operations.
-//!
-//! This module contains all the type definitions used by the MCP client,
-//! providing a clean separation between data types and implementation logic.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Configuration for process-based MCP connections
 #[derive(Debug, Clone)]
 pub struct ProcessConfig {
     pub command: String,
@@ -17,7 +13,6 @@ pub struct ProcessConfig {
 }
 
 impl ProcessConfig {
-    /// Create a new process configuration with the given command
     pub fn new(command: impl Into<String>) -> Self {
         Self {
             command: command.into(),
@@ -27,26 +22,22 @@ impl ProcessConfig {
         }
     }
 
-    /// Add arguments to the command
     pub fn with_args(mut self, args: Vec<String>) -> Self {
         self.args = args;
         self
     }
 
-    /// Set the working directory
     pub fn with_working_dir(mut self, dir: impl Into<String>) -> Self {
         self.working_dir = Some(dir.into());
         self
     }
 
-    /// Set environment variables
     pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
         self.env = env;
         self
     }
 }
 
-/// Configuration for SSE-based MCP connections
 #[derive(Debug, Clone)]
 pub struct SseConfig {
     pub endpoint: String,
@@ -56,7 +47,6 @@ pub struct SseConfig {
 }
 
 impl SseConfig {
-    /// Create a new SSE configuration with the given endpoint
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
@@ -66,13 +56,11 @@ impl SseConfig {
         }
     }
 
-    /// Add HTTP headers
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.headers = headers;
         self
     }
 
-    /// Set request timeout
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = Some(timeout_ms);
         self
@@ -85,7 +73,6 @@ impl SseConfig {
     }
 }
 
-/// Configuration for streamable HTTP MCP connections
 #[derive(Debug, Clone)]
 pub struct StreamableHttpConfig {
     pub endpoint: String,
@@ -95,7 +82,6 @@ pub struct StreamableHttpConfig {
 }
 
 impl StreamableHttpConfig {
-    /// Create a new HTTP configuration with the given endpoint
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
@@ -105,67 +91,51 @@ impl StreamableHttpConfig {
         }
     }
 
-    /// Add HTTP headers
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.headers = headers;
         self
     }
 
-    /// Set request timeout
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = Some(timeout_ms);
         self
     }
 
-    /// Control whether requests can be stateless
     pub fn with_allow_stateless(mut self, allow_stateless: bool) -> Self {
         self.allow_stateless = allow_stateless;
         self
     }
 }
 
-/// Connection type for MCP servers
 #[derive(Debug, Clone)]
 pub enum ConnectionConfig {
-    /// Process-based connection
     Process(ProcessConfig),
-    /// Server-Sent Events connection
     Sse(SseConfig),
-    /// Streamable HTTP connection
     Http(StreamableHttpConfig),
 }
 
 impl ConnectionConfig {
-    /// Create a process connection config
     pub fn process(command: impl Into<String>) -> Self {
         Self::Process(ProcessConfig::new(command))
     }
 
-    /// Create an SSE connection config
     pub fn sse(endpoint: impl Into<String>) -> Self {
         Self::Sse(SseConfig::new(endpoint))
     }
 
-    /// Create a streamable HTTP connection config
     pub fn http(endpoint: impl Into<String>) -> Self {
         Self::Http(StreamableHttpConfig::new(endpoint))
     }
 }
 
-/// Client connection status
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConnectionStatus {
-    /// Not connected
     Disconnected,
-    /// Connecting to server
     Connecting,
-    /// Successfully connected
     Connected,
-    /// Connection error
     Error(String),
 }
 
-/// MCP client statistics
 #[derive(Debug, Clone, Default)]
 pub struct ClientStats {
     pub tools_called: u64,
@@ -176,32 +146,26 @@ pub struct ClientStats {
 }
 
 impl ClientStats {
-    /// Create new stats
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Mark that a tool was called
     pub fn tool_called(&mut self) {
         self.tools_called += 1;
     }
 
-    /// Mark that a resource was read
     pub fn resource_read(&mut self) {
         self.resources_read += 1;
     }
 
-    /// Mark that a prompt was requested
     pub fn prompt_requested(&mut self) {
         self.prompts_requested += 1;
     }
 
-    /// Mark an error occurred
     pub fn error_occurred(&mut self) {
         self.errors += 1;
     }
 
-    /// Set connection time
     pub fn set_connected(&mut self, timestamp: i64) {
         self.connected_since = Some(timestamp);
     }
@@ -308,7 +272,6 @@ mod tests {
         assert_eq!(stats.connected_since, Some(1234567890));
     }
 }
-/// Tool metadata returned from MCP servers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpTool {
@@ -320,7 +283,6 @@ pub struct McpTool {
     pub annotations: HashMap<String, Value>,
 }
 
-/// Prompt metadata returned from MCP servers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpPrompt {
@@ -330,7 +292,6 @@ pub struct McpPrompt {
     pub arguments: Vec<McpPromptArgument>,
 }
 
-/// Prompt argument metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpPromptArgument {
@@ -339,7 +300,6 @@ pub struct McpPromptArgument {
     pub required: Option<bool>,
 }
 
-/// Resource metadata returned from MCP servers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpResource {
@@ -352,7 +312,6 @@ pub struct McpResource {
     pub annotations: HashMap<String, Value>,
 }
 
-/// MCP 错误详情
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpErrorDetail {

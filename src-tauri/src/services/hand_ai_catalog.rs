@@ -1,36 +1,26 @@
 // Catalog bridge over hand-ai's provider / model registry.
 //
-// HandBox-side mirror of hand-ai's `get_providers` + `get_models` +
-// per-provider/per-api `capabilities()` introspection (hand-ai issue #31,
-// commit 66222a3). The DTOs here are the wire shape the Tauri IPC
-// command returns to the frontend.
-//
-// Behind the `hand-ai` feature flag so default builds don't pay the
+// The DTOs here are the wire shape the Tauri IPC command returns to the
+// frontend. Behind the `hand-ai` feature flag so default builds don't pay the
 // hand-ai compile cost.
 
 use serde::Serialize;
 
 use hand_ai_model::{self as model, types::Provider};
 
-/// One provider entry surfaced to the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct HandAiProviderInfo {
-    /// Stable string id (e.g. "openai", "anthropic", "bedrock"). Matches
-    /// `Provider::as_str`.
+    /// Stable string id, matching `Provider::as_str`.
     pub id: String,
-    /// API base URL the AddProvider UI uses as the default. Taken from the
-    /// first model in the catalog; empty when the provider has no models
-    /// registered yet.
+    /// Default base URL for the AddProvider UI. Taken from the first model in
+    /// the catalog; empty when the provider has no models registered yet.
     pub default_base_url: String,
-    /// Vendor-level intrinsic facts.
     pub capabilities: HandAiProviderCaps,
-    /// Models hand-ai knows about for this provider.
     pub models: Vec<HandAiModelInfo>,
 }
 
-/// Provider-level capabilities, mirrored from hand-ai's
-/// `ProviderCapabilities` plus aggregated per-model rollups that the UI
-/// chip needs (e.g. "this provider has at least one multimodal model").
+/// Mirrors hand-ai's `ProviderCapabilities` plus per-model rollups the UI chips
+/// need.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct HandAiProviderCaps {
     pub api_key_auth: bool,
@@ -42,7 +32,6 @@ pub struct HandAiProviderCaps {
     pub any_model_reasoning: bool,
 }
 
-/// One model entry surfaced to the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct HandAiModelInfo {
     pub id: String,
@@ -59,9 +48,7 @@ pub struct HandAiModelInfo {
     pub input_modalities: Vec<String>,
 }
 
-/// Enumerate every provider hand-ai knows about with its capabilities and
-/// model catalog. Pure function — no I/O, no state. Called by the Tauri
-/// command in `src/commands/hand_ai.rs`.
+/// Pure read over hand-ai's in-memory registry — no I/O, no state.
 pub fn list_providers() -> Vec<HandAiProviderInfo> {
     model::get_providers()
         .into_iter()
@@ -118,11 +105,8 @@ fn model_info(m: model::Model) -> HandAiModelInfo {
     }
 }
 
-/// Serialize an `Api` enum variant to its kebab-case wire form.
-///
-/// hand-ai's `Api` enum uses `#[serde(rename_all = "kebab-case")]`, so we
-/// roundtrip through serde rather than re-typing the table here — if
-/// hand-ai adds a variant we surface the new id automatically.
+/// Roundtrips through serde (hand-ai's `Api` is `rename_all = "kebab-case"`)
+/// rather than re-typing the table, so new upstream variants surface for free.
 fn api_id_str(api: &model::Api) -> String {
     serde_json::to_value(api)
         .ok()
@@ -192,9 +176,8 @@ mod tests {
 
     #[test]
     fn provider_aggregates_multimodal_when_any_model_supports_image() {
-        // Build a fake provider info from synthesized models and verify the
-        // aggregation rule directly (don't depend on hand-ai's static catalog
-        // shape, which evolves).
+        // Synthesized models: the aggregation rule must not be verified against
+        // hand-ai's static catalog shape, which evolves.
         let mut info = HandAiProviderInfo {
             id: "x".into(),
             default_base_url: String::new(),

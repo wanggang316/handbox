@@ -1,13 +1,10 @@
-// Agent 相关 IPC 命令
-
 use crate::models::AppError;
 use crate::services::{AgentParameter, AgentService};
 use crate::storage::types::{Agent, AgentReasoningConfig, UUID};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-/// 把一个 JSON 值解析为可空字符串字段：`null` -> `None`，字符串 -> `Some`，
-/// 其余类型 -> 校验错误。供 `agent_update_field` 的可空字符串分支复用。
+/// null -> None, string -> Some, anything else -> validation error.
 fn optional_string(value: &serde_json::Value, field: &str) -> Result<Option<String>, AppError> {
     if value.is_null() {
         Ok(None)
@@ -36,7 +33,6 @@ pub struct AgentCreateRequest {
     pub genui_id: Option<UUID>,
 }
 
-/// 创建新的 Agent
 #[tauri::command]
 pub async fn agent_create(
     request: AgentCreateRequest,
@@ -59,7 +55,6 @@ pub async fn agent_create(
         .await
 }
 
-/// 获取 Agent 列表
 #[tauri::command]
 pub async fn agent_list(
     limit: Option<i32>,
@@ -69,7 +64,6 @@ pub async fn agent_list(
     agent_service.list_agents(limit, offset).await
 }
 
-/// 获取 Agent 详情
 #[tauri::command]
 pub async fn agent_get(
     agent_id: UUID,
@@ -78,7 +72,6 @@ pub async fn agent_get(
     agent_service.get_agent(agent_id).await
 }
 
-/// 更新 Agent 单个字段
 #[tauri::command]
 pub async fn agent_update_field(
     agent_id: UUID,
@@ -243,7 +236,6 @@ pub async fn agent_update_field(
     agent_service.update_agent_parameter(agent_id, parameter).await
 }
 
-/// 更新 Agent 名称
 #[tauri::command]
 pub async fn agent_update_name(
     agent_id: UUID,
@@ -255,7 +247,6 @@ pub async fn agent_update_name(
         .await
 }
 
-/// 删除 Agent
 #[tauri::command]
 pub async fn agent_delete(
     agent_id: UUID,

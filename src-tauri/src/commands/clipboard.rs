@@ -15,12 +15,10 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
-/// 复制图片文件到剪贴板
 #[command]
 pub async fn clipboard_copy_image(path: String) -> Result<(), AppError> {
     let image_path = Path::new(&path);
 
-    // 检查文件是否存在
     if !image_path.exists() {
         return Err(AppError {
             code: "FILE_NOT_FOUND".to_string(),
@@ -28,24 +26,21 @@ pub async fn clipboard_copy_image(path: String) -> Result<(), AppError> {
         });
     }
 
-    // 读取图片文件
     let image_data = std::fs::read(image_path).map_err(|e| AppError {
         code: "READ_ERROR".to_string(),
         message: format!("Failed to read image file: {}", e),
     })?;
 
-    // 使用 image crate 来解码图片
     let img = image::load_from_memory(&image_data).map_err(|e| AppError {
         code: "DECODE_ERROR".to_string(),
         message: format!("Failed to decode image: {}", e),
     })?;
 
-    // 转换为 RGBA8 格式
+    // arboard expects raw RGBA8.
     let rgba_img = img.to_rgba8();
     let (width, height) = rgba_img.dimensions();
     let rgba_data = rgba_img.into_raw();
 
-    // 使用 arboard 复制到剪贴板
     let mut clipboard = arboard::Clipboard::new().map_err(|e| AppError {
         code: "CLIPBOARD_ERROR".to_string(),
         message: format!("Failed to access clipboard: {}", e),

@@ -1,78 +1,9 @@
-//! agent_migration — one-shot SQLite→JSONL materialization of legacy agent
-//! transcripts.
-//!
-//! M3 makes the coding-agent JSONL file the authoritative transcript store, but
-//! every agent session created before M3 lives only in the SQLite
-//! `agent_session_messages` table. This module replays each such transcript into
-//! its `<id>.jsonl` once, so that the post-M3 read path (`agent_jsonl_store::
-//! load_transcript` / `session_activity`) sees the full history — title,
-//! activity time, project grouping, and per-message content all preserved.
-//!
-//! Why this is a pure replay with NO field remapping: the SQLite
-//! `agent_session_messages.payload` column already holds a serialized
-//! [`hand_ai_model::Message`] (the legacy runtime deserializes it verbatim at
-//! `agent_runtime.rs:542`). The JSONL writer consumes the SAME
-//! `hand_ai_model::Message` type (same `model` crate, same git tag, deduped by
-//! Cargo). So migrating one message is exactly: deserialize the payload into a
-//! `Message`, then write it back as a JSONL message entry. ToolCall / ToolResult
-//! / thinking blocks are content blocks INSIDE the `Message`, so they ride
-//! through the round-trip untouched (VAL-CASESS-014).
-//!
-//! Why NOT `SessionManager::append_message`: that helper stamps the entry-level
-//! `timestamp` with `Utc::now()`, and `build_session_info` derives a session's
-//! last-activity key (`SessionInfo.modified`) from the max entry timestamp. A
-//! whole-library migration would therefore collapse every session's activity key
-//! to the migration moment and DESTROY relative session ordering (VAL-CASESS-012).
-//! So the migration writes through [`crate::services::agent_jsonl_store::
-//! append_message_at`], which records the SQLite per-message `created_at` as the
-//! entry timestamp — keeping each session's activity key equal to its
-//! pre-migration `last_message_at`.
-//!
-//! Robustness (this feature — `m3-migration-robustness`):
-//!   - Per-row corrupt-skip (VAL-CASESS-015): a single transcript row whose
-//!     payload is not a valid `Message` is dropped (logged + counted) while the
-//!     session's OTHER rows still migrate. A session is only left wholly
-//!     unmaterialized when it has NO migratable row at all.
-//!   - Completeness-aware idempotency (VAL-CASESS-025): the "already migrated?"
-//!     test is no longer "does `<id>.jsonl` exist" but "does a COMPLETE
-//!     `<id>.jsonl` exist" — a file that is header-less (corrupt) or whose
-//!     message count disagrees with the (good) SQLite rows is REWRITTEN, so a
-//!     half-written / crashed-mid-migration file converges to one complete copy.
-//!   - Atomic full-file write: each session's transcript is rebuilt and
-//!     committed via [`write_transcript_atomic`] (temp file + rename), so a
-//!     crash leaves either the prior complete file or no leftover — never a
-//!     truncated official `<id>.jsonl` (VAL-CASESS-020 / VAL-CASESS-025).
-//!   - Sibling isolation: a per-session fatal error (e.g. a transient IO error
-//!     listing or writing one session) is logged + counted and the loop moves
-//!     on, so one bad session never aborts the whole migration.
-//!
-//! Gated one-time drop of the legacy transcript table (`m3-project-delete-and-drop`,
-//! VAL-CASESS-023):
-//!   - M3 is dual-source: `agent_sessions` (per-session config + ordering) and
-//!     `agent_projects` (grouping) stay the LIVE authoritative source — the JSONL
-//!     `SessionHeader` cannot hold HandBox's per-session config — so those two
-//!     tables are NEVER dropped. Only `agent_session_messages` is now redundant:
-//!     its transcript is fully materialized into JSONL and the coding-agent run
-//!     path no longer writes it (no double-write).
-//!   - The drop is GATED on the table's own existence — "does
-//!     `agent_session_messages` exist?" IS the "has migration completed?" flag,
-//!     so no separate marker is needed. Existence ⇒ run the migration, then (only
-//!     on a successful pass) `DROP TABLE IF EXISTS agent_session_messages`.
-//!     Absence ⇒ skip both (already done), which also stops the every-startup
-//!     re-scan and avoids reading a dropped table.
-//!   - ORDERING IS LOAD-BEARING: migrate-then-drop. A failed migration leaves the
-//!     table in place (transcript preserved) — the drop is IRREVERSIBLE but safe
-//!     only because the data already lives in JSONL (VAL-CASESS-013 count parity).
-//!
-//! Unchanged design choices carried from `m3-migration-core`:
-//!   - An empty session (zero SQLite messages) builds NO JSONL file — it stays
-//!     correctly anchored to its SQLite `created_at` via the sidebar's
-//!     `lastMessageAt ?? createdAt` coalescing.
-//!   - The session TITLE is never written as a JSONL label: the dual-source
-//!     overlay keeps the SQLite `name` authoritative whenever no JSONL label is
-//!     present, so writing one would only add an edge case (VAL-CASESS-012).
-//!   - The per-message entry timestamp is the SQLite row's `created_at`, NOT the
-//!     wall clock, so relative session ordering is preserved (VAL-CASESS-012).
+//! One-shot SQLite→JSONL materialization of legacy agent transcripts: rows in
+//! `agent_session_messages` already hold serialized [`hand_ai_model::Message`]s,
+//! replayed once into each session's authoritative `<id>.jsonl` with entry
+//! timestamps taken from the row's `created_at` so session ordering survives.
+//! That table's existence is the "migration pending" flag and it is dropped
+//! after a successful pass; `agent_sessions` / `agent_projects` stay live.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -87,42 +18,34 @@ use crate::services::agent_jsonl_store::{
 use crate::storage::types::AgentSession;
 use crate::storage::{AgentSessionRepository, Database};
 
-/// Page size for walking the full session list. `list_sessions` is paginated
-/// (limit/offset); we drain every page so a large legacy library migrates in
-/// full rather than only its first page.
+/// Page size for draining the paginated `list_sessions`, so a large legacy
+/// library migrates in full rather than only its first page.
 const SESSION_PAGE_SIZE: i32 = 500;
 
 /// Outcome of a migration pass. Counts let the caller log how much was
 /// materialized vs. skipped (and how much was repaired) without re-querying.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MigrationReport {
-    /// Sessions that had no complete `<id>.jsonl` yet and were materialized into
-    /// a fresh one this pass.
+    /// Sessions materialized into a fresh `<id>.jsonl` this pass.
     pub migrated_sessions: usize,
-    /// Sessions whose `<id>.jsonl` already existed AND was complete (its message
-    /// count matched the good SQLite rows) — skipped unchanged (idempotent
-    /// re-run, or a post-M3 native session).
+    /// Sessions whose `<id>.jsonl` already existed AND was complete — skipped
+    /// unchanged (idempotent re-run, or a natively JSONL-backed session).
     pub skipped_existing: usize,
-    /// Sessions whose `<id>.jsonl` existed but was INCOMPLETE — header-less
-    /// (corrupt) or a message-count mismatch (a half-written / crashed-mid-
-    /// migration file) — and so was REWRITTEN to a complete copy this pass
-    /// (VAL-CASESS-025).
+    /// Sessions whose `<id>.jsonl` existed but was INCOMPLETE (header-less or a
+    /// message-count mismatch) and so was REWRITTEN to a complete copy.
     pub rewritten_sessions: usize,
-    /// Sessions skipped because they had zero SQLite messages (no JSONL built —
-    /// they stay anchored to their SQLite created_at).
+    /// Sessions with zero SQLite messages: no JSONL is built, they stay anchored
+    /// to their SQLite created_at.
     pub skipped_empty: usize,
-    /// Sessions left wholly unmaterialized because EVERY one of their SQLite
-    /// payloads failed to deserialize into a `Message` (so there was nothing
-    /// migratable). A session with a MIX of good and bad rows is migrated with
-    /// its good rows; only an all-bad session lands here.
+    /// Sessions left wholly unmaterialized because EVERY payload failed to
+    /// deserialize into a `Message`; a session with a MIX of good and bad rows
+    /// migrates its good rows instead.
     pub skipped_undeserializable: usize,
-    /// Individual transcript ROWS dropped because their payload could not be
-    /// deserialized into a `Message` (VAL-CASESS-015). Counted across all
-    /// sessions; the session's other rows still migrate.
+    /// Individual transcript ROWS dropped as undeserializable; the session's
+    /// other rows still migrate.
     pub skipped_rows: usize,
-    /// Sessions skipped because a per-session fatal error (e.g. a transient IO
-    /// error reading or writing it) was logged and the migration moved on rather
-    /// than aborting the whole pass — sibling sessions are unaffected.
+    /// Sessions skipped after a per-session fatal error (e.g. transient IO): it
+    /// is logged and counted rather than aborting the pass, so siblings survive.
     pub errored_sessions: usize,
     /// Total `Message` rows written across all migrated/rewritten sessions.
     pub messages_migrated: usize,
@@ -130,27 +53,11 @@ pub struct MigrationReport {
 
 /// Replay every legacy SQLite agent transcript into its `<id>.jsonl` once.
 ///
-/// `base_dir` is the Tauri app-data dir: it is simultaneously the JSONL base
-/// directory AND the cwd fallback for a session with no `working_dir` — exactly
-/// the role it plays for the writer (`coding_agent_session::config_from_rows` →
-/// `session_cwd`). The cwd a session's JSONL is keyed by MUST be derived through
-/// the same [`session_cwd`] the writer uses, or the post-M3 reader would look in
-/// the wrong `<flattened-cwd>` subdir and report every migrated session as
-/// transcript-less.
-///
-/// Per session:
-///   1. List its SQLite messages (seq-ascending).
-///   2. Zero messages → skip (no JSONL file; stays anchored to created_at).
-///   3. `<id>.jsonl` already exists → skip (idempotent; also covers post-M3
-///      native sessions, which have no SQLite messages anyway).
-///   4. Otherwise seed the header (stamping the session's SQLite `created_at`)
-///      and write each deserialized payload back as a JSONL message entry, in
-///      seq order, stamping each entry timestamp from the row's `created_at`.
-///
-/// The session title is deliberately NOT written as a label (the SQLite `name`
-/// stays the authoritative display name via the overlay). The legacy SQLite
-/// tables are NOT dropped — migration is an additive materialization so it can
-/// be re-run and rolled back; dropping the legacy tables is a later milestone.
+/// The cwd a session's JSONL is keyed by MUST come from the same
+/// [`session_cwd`] the writer uses (`base_dir` is both the JSONL base and the
+/// no-`working_dir` fallback), or the reader looks in the wrong
+/// `<flattened-cwd>` subdir. No JSONL label is written, so the SQLite `name`
+/// stays the authoritative display name.
 pub async fn migrate_sqlite_sessions_to_jsonl(
     db: Arc<Database>,
     base_dir: &Path,
@@ -163,10 +70,8 @@ pub async fn migrate_sqlite_sessions_to_jsonl(
         let page = repository.list_sessions(SESSION_PAGE_SIZE, offset).await?;
         let page_len = page.len();
         for session in &page {
-            // Sibling isolation (VAL-CASESS-015): a fatal error migrating ONE
-            // session is logged + counted, never propagated — the loop moves on
-            // so a single bad session can't abort the whole pass and strand its
-            // siblings unmigrated.
+            // Sibling isolation: a fatal error migrating ONE session is logged
+            // + counted, never propagated, so it cannot abort the whole pass.
             if let Err(e) = migrate_one_session(&repository, base_dir, session, &mut report).await {
                 tracing::warn!(
                     session_id = %session.id,
@@ -186,13 +91,11 @@ pub async fn migrate_sqlite_sessions_to_jsonl(
     Ok(report)
 }
 
-/// Outcome of the gated migrate-then-drop entry point (VAL-CASESS-023).
+/// Outcome of the gated migrate-then-drop entry point.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MigrateAndDropReport {
-    /// `true` when the legacy `agent_session_messages` table existed on entry, so
-    /// this pass ran the migration and (on success) dropped it. `false` when the
-    /// table was already absent and the whole pass was skipped (idempotent
-    /// second startup).
+    /// `true` when the legacy table existed on entry, so this pass migrated and
+    /// (on success) dropped it; `false` when it was already absent.
     pub ran: bool,
     /// The migration pass result, present only when `ran` is true.
     pub migration: Option<MigrationReport>,
@@ -200,23 +103,12 @@ pub struct MigrateAndDropReport {
     pub dropped: bool,
 }
 
-/// Gated one-time migration + drop of the legacy transcript table (VAL-CASESS-023).
+/// Gated one-time migration + drop of the legacy transcript table.
 ///
 /// The presence of `agent_session_messages` IS the "migration not yet complete"
-/// flag, so no separate marker is needed:
-///   - table present → materialize every legacy transcript into JSONL, then (only
-///     if the migration pass returned `Ok`) `DROP TABLE IF EXISTS
-///     agent_session_messages`. `agent_sessions` / `agent_projects` are LEFT
-///     intact — they are the live config + grouping source under M3's dual-source
-///     model and dropping them would destroy the app.
-///   - table absent → skip both (already migrated + dropped on an earlier
-///     startup). This stops the every-startup re-scan and never reads a dropped
-///     table.
-///
-/// Ordering is load-bearing: migrate THEN drop. A migration error leaves the
-/// table in place (the transcript is preserved and the pass can be retried on the
-/// next startup) — the irreversible drop only runs after the data is safely in
-/// JSONL.
+/// flag: present → migrate then drop, absent → skip both. Ordering is
+/// load-bearing — a migration error leaves the table (and the transcript) in
+/// place for a retry on the next startup.
 pub async fn migrate_and_drop_legacy_if_present(
     db: Arc<Database>,
     base_dir: &Path,
@@ -237,10 +129,8 @@ pub async fn migrate_and_drop_legacy_if_present(
     })
 }
 
-/// Whether the legacy `agent_session_messages` transcript table still exists.
-///
-/// Queried via `sqlite_master` (the schema catalog) rather than a `PRAGMA`, so a
-/// single boolean answers "has the one-time migration + drop already run?".
+/// Whether the legacy `agent_session_messages` transcript table still exists —
+/// a single boolean answering "has the one-time migration + drop already run?".
 async fn legacy_transcript_table_exists(db: &Database) -> Result<bool, AppError> {
     let row = sqlx::query(
         "SELECT COUNT(*) AS c FROM sqlite_master \
@@ -258,13 +148,9 @@ async fn legacy_transcript_table_exists(db: &Database) -> Result<bool, AppError>
     Ok(count > 0)
 }
 
-/// Drop the redundant legacy transcript table `agent_session_messages`.
-///
-/// IRREVERSIBLE — the caller MUST only invoke this after a SUCCESSFUL migration
-/// pass (the transcript already lives in JSONL). `agent_sessions` /
-/// `agent_projects` are deliberately untouched: they remain the live config +
-/// grouping source under M3's dual-source model. `IF EXISTS` keeps a double-run
-/// safe (a no-op when the table is already gone).
+/// IRREVERSIBLE — only call after a SUCCESSFUL migration pass (the transcript
+/// already lives in JSONL). `agent_sessions` / `agent_projects` are deliberately
+/// untouched: they remain the live config + grouping source.
 async fn drop_legacy_transcript_table(db: &Database) -> Result<(), AppError> {
     sqlx::query("DROP TABLE IF EXISTS agent_session_messages")
         .execute(db.pool())
@@ -278,10 +164,9 @@ async fn drop_legacy_transcript_table(db: &Database) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Materialize a single session's transcript, updating `report` in place. Pulled
-/// out of the page loop so per-session fault handling wraps one well-defined
-/// unit and a fatal error here is isolated to this session (the caller catches
-/// it, counts `errored_sessions`, and continues with siblings).
+/// Materialize a single session's transcript, updating `report` in place. A
+/// fatal error here is isolated to this session: the caller counts it as
+/// `errored_sessions` and continues with siblings.
 async fn migrate_one_session(
     repository: &AgentSessionRepository,
     base_dir: &Path,
@@ -290,18 +175,15 @@ async fn migrate_one_session(
 ) -> Result<(), AppError> {
     let messages = repository.list_messages(&session.id).await?;
 
-    // (1) Empty session → no JSONL file; the sidebar coalesces to created_at.
+    // Empty session → no JSONL file; the sidebar coalesces to created_at.
     if messages.is_empty() {
         report.skipped_empty += 1;
         return Ok(());
     }
 
-    // (2) Per-ROW corrupt-skip (VAL-CASESS-015): deserialize every payload, but a
-    // single bad row is dropped (logged + counted) rather than aborting the whole
-    // session. The session's GOOD rows still migrate; only an all-bad session is
-    // left unmaterialized. Each good message carries the SQLite row's `created_at`
-    // — the entry-level timestamp that keeps the migrated session's last-activity
-    // key equal to its pre-migration value (VAL-CASESS-012).
+    // A single bad row is dropped (logged + counted) rather than aborting the
+    // session. Each good message carries the SQLite row's `created_at` so the
+    // migrated session keeps its pre-migration last-activity key.
     let mut decoded: Vec<(Message, i64)> = Vec::with_capacity(messages.len());
     for row in &messages {
         match serde_json::from_value::<Message>(row.payload.clone()) {
@@ -319,8 +201,8 @@ async fn migrate_one_session(
         }
     }
 
-    // (3) Nothing migratable (every row was corrupt): leave the session wholly
-    // unmaterialized so a re-run after a fix can still migrate it cleanly.
+    // Nothing migratable: leave the session unmaterialized so a re-run after a
+    // fix can still migrate it cleanly.
     if decoded.is_empty() {
         report.skipped_undeserializable += 1;
         return Ok(());
@@ -329,17 +211,9 @@ async fn migrate_one_session(
     let cwd = session_cwd(session.working_dir.as_deref(), base_dir);
     let path = session_path(base_dir, &cwd, &session.id);
 
-    // (4) Completeness-aware idempotency (VAL-CASESS-025). The "already migrated?"
-    // test is not "does the file exist" but "does a COMPLETE file exist":
-    //   - absent              → write (fresh materialization)
-    //   - present + complete  → skip   (re-run no-op; never doubles a transcript)
-    //   - present + incomplete→ rewrite (header-less corrupt file, or a message
-    //                            count that disagrees with the good rows — i.e. a
-    //                            half-written / crashed-mid-migration file)
-    // "Complete" = `session_activity` reads a header (Some) AND its `message_count`
-    // equals the number of good rows we are about to write. The rewrite is atomic
-    // (temp file + rename), so even repairing a corrupt file never exposes a
-    // truncated official file.
+    // Completeness-aware idempotency: the "already migrated?" test is not "does
+    // the file exist" but "does a COMPLETE file exist", so a header-less or
+    // count-mismatched half-written file is atomically rewritten, not skipped.
     if path.exists() {
         match completeness(base_dir, &cwd, &session.id, decoded.len()) {
             Completeness::Complete => {
@@ -355,10 +229,8 @@ async fn migrate_one_session(
         }
     }
 
-    // (5) Fresh materialization: write the whole transcript in one atomic step.
-    // The header stamps the SQLite created_at (not now); each entry stamps its
-    // SQLite per-row created_at, so on-disk order and activity key match the
-    // source exactly.
+    // The header stamps the SQLite created_at (not now) and each entry its own
+    // row's created_at, so on-disk order and activity key match the source.
     let migrated = decoded.len();
     write_transcript_atomic(base_dir, &cwd, &session.id, session.created_at, &decoded)?;
     report.migrated_sessions += 1;
@@ -366,8 +238,7 @@ async fn migrate_one_session(
     Ok(())
 }
 
-/// Whether an existing `<id>.jsonl` is a complete materialization of the
-/// `expected_messages` good SQLite rows.
+/// Whether an existing `<id>.jsonl` fully materializes the good SQLite rows.
 enum Completeness {
     /// Header reads AND message count matches — leave it untouched.
     Complete,
@@ -375,14 +246,9 @@ enum Completeness {
     Incomplete,
 }
 
-/// Classify an existing `<id>.jsonl` as complete vs. incomplete for the
-/// migration's completeness-aware idempotency (VAL-CASESS-025).
-///
-/// A read error (a file so corrupt the upstream parser cannot even open it, or a
-/// header-less file → `Ok(None)`) is treated as INCOMPLETE: the safe action is
-/// to rewrite from the authoritative SQLite rows rather than trust an unreadable
-/// file. Only a file that both reads a header AND reports exactly
-/// `expected_messages` is considered complete.
+/// A read error or a header-less file counts as INCOMPLETE: rewriting from the
+/// authoritative SQLite rows is safer than trusting an unreadable file. Only a
+/// file that reads a header AND reports exactly `expected_messages` is complete.
 fn completeness(
     base_dir: &Path,
     cwd: &Path,
@@ -393,8 +259,7 @@ fn completeness(
         Ok(Some(activity)) if activity.message_count as usize == expected_messages => {
             Completeness::Complete
         }
-        // Header-less / corrupt (None), a count mismatch, or an unreadable file:
-        // rewrite from SQLite to converge on a complete transcript.
+        // Header-less, count mismatch, or unreadable: rewrite from SQLite.
         _ => Completeness::Incomplete,
     }
 }
@@ -450,8 +315,7 @@ mod tests {
         serde_json::to_value(Message::User(UserMessage::new_text(text.to_string()))).unwrap()
     }
 
-    /// An assistant Message carrying a text block, a thinking block, AND a tool
-    /// call — the content-fidelity fixture for VAL-CASESS-014.
+    /// Content-fidelity fixture: text, thinking, and tool-call blocks together.
     fn assistant_with_tool_and_thinking(text: &str, timestamp: u64) -> Message {
         Message::Assistant(AssistantMessage {
             role: "assistant".into(),
@@ -481,8 +345,6 @@ mod tests {
         })
     }
 
-    /// Count the SQLite transcript rows for a session — the migration parity
-    /// baseline (VAL-CASESS-013).
     async fn sqlite_message_count(db: &Database, session_id: &str) -> i64 {
         sqlx::query("SELECT COUNT(*) AS c FROM agent_session_messages WHERE session_id = $1")
             .bind(session_id)
@@ -493,8 +355,6 @@ mod tests {
             .unwrap()
     }
 
-    /// VAL-CASESS-013: a migrated session's JSONL message count equals its
-    /// original SQLite `count(*)` — every message replayed, none lost.
     #[tokio::test]
     async fn migration_preserves_message_count_per_session() {
         let (db, base) = test_db().await;
@@ -534,10 +394,8 @@ mod tests {
         );
     }
 
-    /// VAL-CASESS-014: a session whose transcript carries tool calls and a
-    /// thinking block migrates with those content blocks intact — `load_transcript`
-    /// restores them (not a text-only flattening), and the per-message
-    /// content-block count matches the original.
+    /// `load_transcript` restores the content blocks rather than flattening to
+    /// text, so the per-message block count matches the original.
     #[tokio::test]
     async fn migration_preserves_tool_calls_and_thinking_blocks() {
         let (db, base) = test_db().await;
@@ -609,13 +467,9 @@ mod tests {
         assert!(types.contains(&"text"), "text block survives: {types:?}");
     }
 
-    /// VAL-CASESS-012 (ordering leg): after migration the relative activity
-    /// ordering across sessions equals the pre-migration ordering. The
-    /// pre-migration key is `coalesce(last_message_at, created_at)`; the
-    /// post-migration key is the max JSONL entry timestamp, which the migration
-    /// stamps from each message's SQLite `created_at`. Seed three sessions whose
-    /// latest-message `created_at` strictly increase and assert the
-    /// post-migration `session_activity` sort matches.
+    /// The SQLite key is `coalesce(last_message_at, created_at)`; the JSONL key
+    /// is the max entry timestamp, stamped from each message's SQLite
+    /// `created_at`. Both must order the sessions identically.
     #[tokio::test]
     async fn migration_preserves_relative_session_order() {
         let (db, base) = test_db().await;
@@ -624,11 +478,9 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
         let cwd_str = cwd.to_string_lossy().into_owned();
 
-        // Three sessions with distinct, strictly-increasing latest-message times.
-        // Created in a deliberately scrambled order so the assertion can't pass
-        // by accident of insertion order. The `created_at` passed to
-        // append_message is both the SQLite last_message_at AND the JSONL entry
-        // timestamp the migration replays — the cross-source activity key.
+        // Deliberately scrambled creation order so the assertion can't pass by
+        // accident of insertion order. Each `created_at` is both the SQLite
+        // last_message_at and the JSONL entry timestamp the migration replays.
         let specs = [
             ("sess-mid", "Mid", 2_000_000_000_000_i64),
             ("sess-old", "Old", 1_000_000_000_000_i64),
@@ -668,7 +520,6 @@ mod tests {
                 )
             })
             .collect();
-        // Sort by activity descending — must reproduce expected_desc exactly.
         activities.sort_by(|a, b| b.1.cmp(&a.1));
         let sorted_ids: Vec<&str> = activities.iter().map(|(id, _)| *id).collect();
         assert_eq!(
@@ -678,9 +529,8 @@ mod tests {
         );
     }
 
-    /// VAL-CASESS-012 (title leg) + empty-session leg: a migrated session writes
-    /// NO JSONL label (so the overlay keeps the SQLite name authoritative), and a
-    /// session with zero SQLite messages builds no JSONL file at all.
+    /// No JSONL label is written (so the overlay keeps the SQLite name
+    /// authoritative), and a session with zero messages builds no file at all.
     #[tokio::test]
     async fn migration_writes_no_label_and_skips_empty_sessions() {
         let (db, base) = test_db().await;
@@ -689,7 +539,6 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
         let cwd_str = cwd.to_string_lossy().into_owned();
 
-        // One session with a message, one empty.
         let with_msg = session_row("sess-titled", "My Title", Some(&cwd_str), 1_700_000_000_000);
         repo.create_session(&with_msg).await.unwrap();
         repo.append_message(&with_msg.id, "user", &user_payload("hi"), 1_700_000_000_001)
@@ -707,7 +556,6 @@ mod tests {
 
         let jsonl_cwd = session_cwd(Some(&cwd_str), base.path());
 
-        // The migrated session has no JSONL label → overlay keeps SQLite name.
         let act = session_activity(base.path(), &jsonl_cwd, &with_msg.id)
             .unwrap()
             .unwrap();
@@ -716,7 +564,6 @@ mod tests {
             "migration must not write a JSONL label; SQLite name stays authoritative"
         );
 
-        // The empty session built no JSONL file.
         assert!(
             session_activity(base.path(), &jsonl_cwd, &empty.id)
                 .unwrap()
@@ -725,9 +572,7 @@ mod tests {
         );
     }
 
-    /// Idempotency: running the migration twice over the same DB does not double
-    /// the JSONL transcript and does not rebuild the file — the second pass skips
-    /// every already-materialized session.
+    /// A second pass neither doubles the transcript nor rewrites the file.
     #[tokio::test]
     async fn migration_is_idempotent_on_rerun() {
         let (db, base) = test_db().await;
@@ -791,9 +636,8 @@ mod tests {
         );
     }
 
-    /// A session with no `working_dir` (rooted at the app-data dir) migrates and
-    /// reads back: the migration's cwd derivation matches the writer's
-    /// `session_cwd(None, base_dir)` fallback, so the reader finds the file.
+    /// The migration's cwd derivation matches the writer's `session_cwd(None,
+    /// base_dir)` fallback, so the reader finds the file.
     #[tokio::test]
     async fn migration_handles_session_with_no_working_dir() {
         let (db, base) = test_db().await;
@@ -821,11 +665,9 @@ mod tests {
         assert_eq!(rows.len(), 1);
     }
 
-    /// VAL-CASESS-024: a JSONL session's project group name is derived from its
-    /// (canonicalized) cwd via the SAME `default_project_name` algorithm the
-    /// SQLite `agent_projects.name` uses — and a trailing-slash variant of the
-    /// same directory canonicalizes to the identical basename. Root `/` (empty
-    /// basename) falls back to the full path.
+    /// A JSONL session's project group name comes from the same
+    /// `default_project_name` the SQLite `agent_projects.name` uses, so every
+    /// spelling of one cwd must derive the identical name.
     #[test]
     fn project_basename_is_cross_source_consistent_after_canonicalize() {
         use crate::services::agent_project::default_project_name;
@@ -852,7 +694,6 @@ mod tests {
         );
         assert_eq!(name_plain, "proj", "basename of the canonical path");
 
-        // Root path: empty basename falls back to the full path.
         assert_eq!(
             default_project_name("/"),
             "/",
@@ -860,19 +701,14 @@ mod tests {
         );
     }
 
-    /// A payload that is valid JSON but NOT a valid hand-agent `Message` — used
-    /// to seed a corrupt transcript row that `serde_json::from_value::<Message>`
-    /// will reject. Appending it through the repository assigns it a real seq and
-    /// stores it like any other row.
+    /// Valid JSON that is NOT a valid hand-agent `Message`, so
+    /// `serde_json::from_value::<Message>` rejects it.
     fn corrupt_payload() -> serde_json::Value {
         serde_json::json!({ "not": "a message", "shape": [1, 2, 3] })
     }
 
-    /// VAL-CASESS-015: a session whose transcript interleaves CORRUPT rows
-    /// (payloads that are not valid `Message`s) among valid ones migrates its
-    /// GOOD rows while dropping (and counting) only the bad rows — it is no
-    /// longer left wholly unmaterialized. A separate sibling session migrates
-    /// cleanly and is unaffected by its neighbor's corruption.
+    /// Interleaved corrupt rows are dropped and counted while the session's good
+    /// rows migrate; a sibling session is unaffected by the corruption.
     #[tokio::test]
     async fn migration_skips_corrupt_rows_and_keeps_the_rest_and_siblings() {
         let (db, base) = test_db().await;
@@ -918,7 +754,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Both sessions materialized; A kept its 3 good rows, dropped 2 bad rows.
         assert_eq!(report.migrated_sessions, 2, "both sessions materialized");
         assert_eq!(
             report.skipped_rows, 2,
@@ -942,10 +777,8 @@ mod tests {
         assert_eq!(b_rows.len(), 2, "sibling B is unaffected by A's corruption");
     }
 
-    /// VAL-CASESS-015 (all-bad leg): a session whose EVERY payload is corrupt is
-    /// left wholly unmaterialized (no JSONL file) and counted as
-    /// `skipped_undeserializable`, while its good sibling still migrates. A
-    /// re-run after the data is fixed could then migrate it cleanly.
+    /// An all-corrupt session builds no file and is counted as
+    /// `skipped_undeserializable`; its good sibling still migrates.
     #[tokio::test]
     async fn migration_leaves_all_corrupt_session_unmaterialized_but_not_siblings() {
         let (db, base) = test_db().await;
@@ -999,11 +832,8 @@ mod tests {
         );
     }
 
-    /// VAL-CASESS-025 (half-migration crash → converge): a session left with a
-    /// HALF-WRITTEN `<id>.jsonl` (header + fewer messages than SQLite, as if the
-    /// migration was killed mid-write) is REWRITTEN on the next pass to a single
-    /// COMPLETE transcript whose message count equals the SQLite count — never a
-    /// doubled or still-truncated file.
+    /// A file with fewer messages than SQLite (as if killed mid-write) is
+    /// rewritten to one complete transcript — never doubled, never truncated.
     #[tokio::test]
     async fn migration_rewrites_a_half_written_file_to_a_complete_one() {
         use crate::services::agent_jsonl_store::write_transcript_atomic;
@@ -1029,8 +859,7 @@ mod tests {
         let sqlite_count = sqlite_message_count(&db, &session.id).await;
         assert_eq!(sqlite_count, 4);
 
-        // Simulate a crash mid-migration: an existing file with only the first
-        // TWO of the four messages.
+        // Simulate a crash mid-migration: a file with only 2 of the 4 messages.
         let jsonl_cwd = session_cwd(Some(&cwd_str), base.path());
         let partial = vec![
             (
@@ -1081,7 +910,6 @@ mod tests {
             "after rewrite the JSONL count equals the SQLite count exactly"
         );
 
-        // Exactly one official .jsonl file and no stray temp leftover.
         let dir = crate::services::agent_jsonl_store::session_dir(base.path(), &jsonl_cwd);
         let entries: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
@@ -1094,10 +922,8 @@ mod tests {
         assert!(tmp.is_empty(), "no temp ghost remains: {tmp:?}");
     }
 
-    /// VAL-CASESS-025 (corrupt-header leg): an existing `<id>.jsonl` whose header
-    /// is corrupt (so `session_activity` reads `None`) is REWRITTEN on the next
-    /// pass to a complete, readable transcript — a header-less ghost converges to
-    /// one good file.
+    /// A file whose header is corrupt (so `session_activity` reads `None`) is
+    /// rewritten to a complete, readable transcript.
     #[tokio::test]
     async fn migration_rewrites_a_corrupt_header_file() {
         let (db, base) = test_db().await;
@@ -1147,13 +973,9 @@ mod tests {
         assert_eq!(rows.len(), 3, "the rewrite produced the full transcript");
     }
 
-    /// VAL-CASESS-017: running the migration TWICE neither doubles a transcript
-    /// nor rebuilds an already-complete file, and a get-or-create on the same
-    /// project path between passes does not reset the existing project's
-    /// `created_at` / `name`. (The migration itself never touches projects;
-    /// project grouping is derived at read time. This guards the two pieces 017
-    /// rests on: idempotent transcript materialization + get-or-create that
-    /// preserves an existing project.)
+    /// A get-or-create on the same project path between two passes must not
+    /// reset the existing project's `created_at` / `name` — the migration never
+    /// touches projects, grouping is derived at read time.
     #[tokio::test]
     async fn migration_rerun_is_idempotent_and_does_not_reset_an_existing_project() {
         use crate::services::agent_project::AgentProjectService;
@@ -1177,7 +999,6 @@ mod tests {
             .unwrap();
         }
 
-        // First migration pass.
         let first = migrate_sqlite_sessions_to_jsonl(db.clone(), base.path())
             .await
             .unwrap();
@@ -1193,7 +1014,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Second migration pass: nothing doubles, the complete file is skipped.
         let second = migrate_sqlite_sessions_to_jsonl(db.clone(), base.path())
             .await
             .unwrap();
@@ -1216,22 +1036,15 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 3, "the transcript was not doubled");
 
-        // get-or-create on the SAME path returns the same row unchanged.
         let again = project_service.create_project(canonical_str).await.unwrap();
         assert_eq!(again.id, created.id, "same path → same project");
         assert_eq!(again.created_at, created.created_at, "created_at not reset");
         assert_eq!(again.name, created.name, "name not reset");
     }
 
-    /// VAL-CASESS-020 (migration leg): when the JSONL base directory is read-only
-    /// so a session's transcript genuinely cannot be written, the migration does
-    /// NOT abort or leave a half-written file — it logs + counts the session as
-    /// `errored_sessions` and moves on. No `<id>.jsonl` is materialized, the
-    /// SQLite source is untouched (no ghost rows), and the overall pass still
-    /// returns `Ok` so other (writable) work is not blocked.
-    ///
-    /// `#[cfg(unix)]` + a non-root self-skip, since stripping the write bit is a
-    /// no-op for root.
+    /// An unwritable JSONL dir counts the session as `errored_sessions` and moves
+    /// on: no file left behind, SQLite untouched, pass still `Ok`. Self-skips
+    /// when not root, since stripping the write bit is a no-op for root.
     #[cfg(unix)]
     #[tokio::test]
     async fn migration_into_readonly_dir_errors_session_without_leaving_a_file() {
@@ -1240,9 +1053,8 @@ mod tests {
         let (db, base) = test_db().await;
         let repo = AgentSessionRepository::new(db.clone());
 
-        // A session with no working_dir → its JSONL would land under
-        // `<base>/sessions/<flattened-base>/`. We make `base` itself read-only so
-        // the `sessions/` subtree cannot be created/written.
+        // No working_dir → the JSONL lands under `<base>/sessions/...`, so making
+        // `base` itself read-only makes that whole subtree unwritable.
         let session = session_row("sess-ro", "ReadOnly", None, 1_700_000_000_000);
         repo.create_session(&session).await.unwrap();
         for i in 0..2 {
@@ -1284,8 +1096,6 @@ mod tests {
         restore.set_mode(0o755);
         std::fs::set_permissions(base.path(), restore).unwrap();
 
-        // No JSONL was written (the session reads back as transcript-less), and
-        // the SQLite source rows are intact (no ghosting).
         let jsonl_cwd = session_cwd(None, base.path());
         assert!(
             load_transcript(base.path(), &jsonl_cwd, &session.id)
@@ -1300,8 +1110,6 @@ mod tests {
         );
     }
 
-    /// Whether a table exists in the SQLite schema catalog — a direct probe the
-    /// gated-drop tests use to assert table presence/absence.
     async fn table_exists(db: &Database, name: &str) -> bool {
         let c: i64 = sqlx::query(
             "SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'table' AND name = $1",
@@ -1315,11 +1123,9 @@ mod tests {
         c > 0
     }
 
-    /// VAL-CASESS-023: with the legacy `agent_session_messages` table present,
-    /// the gated entry migrates every transcript into JSONL (count parity per
-    /// session), then DROPS the legacy table — while LEAVING `agent_sessions` and
-    /// `agent_projects` intact (the live config + grouping source under M3's
-    /// dual-source model must never be dropped).
+    /// The gated entry migrates every transcript (count parity per session) then
+    /// drops the legacy table, LEAVING `agent_sessions` / `agent_projects`
+    /// intact — the live config + grouping source must never be dropped.
     #[tokio::test]
     async fn gated_migration_drops_only_the_legacy_transcript_table() {
         let (db, base) = test_db().await;
@@ -1357,7 +1163,6 @@ mod tests {
         let sqlite_count = sqlite_message_count(&db, &session.id).await;
         assert_eq!(sqlite_count, 5);
 
-        // Precondition: the legacy table exists.
         assert!(
             table_exists(&db, "agent_session_messages").await,
             "precondition: legacy table present"
@@ -1373,7 +1178,6 @@ mod tests {
         );
         assert_eq!(report.migration.as_ref().unwrap().migrated_sessions, 1);
 
-        // The legacy transcript table is gone; the config + grouping tables stay.
         assert!(
             !table_exists(&db, "agent_session_messages").await,
             "VAL-CASESS-023: legacy transcript table must be dropped"
@@ -1387,7 +1191,6 @@ mod tests {
             "agent_projects (grouping) must NOT be dropped"
         );
 
-        // The migrated JSONL message count equals the original SQLite count.
         let jsonl_cwd = session_cwd(Some(&cwd_str), base.path());
         let rows = load_transcript(base.path(), &jsonl_cwd, &session.id)
             .unwrap()
@@ -1402,10 +1205,8 @@ mod tests {
         assert!(repo.get_session_by_id(&session.id).await.unwrap().is_some());
     }
 
-    /// VAL-CASESS-023 (second-startup gate): once the legacy table is gone, a
-    /// second gated pass skips both migration and drop entirely (the table's
-    /// absence IS the "already done" flag) — no error, no re-scan, no re-read of
-    /// a dropped table.
+    /// The table's absence IS the "already done" flag: a second gated pass skips
+    /// both migration and drop — no error, no re-scan, no read of a dropped table.
     #[tokio::test]
     async fn gated_migration_second_run_skips_when_table_absent() {
         let (db, base) = test_db().await;
@@ -1429,11 +1230,9 @@ mod tests {
         assert!(table_exists(&db, "agent_projects").await);
     }
 
-    /// VAL-CASESS-023 (migrate-then-drop ordering): if the migration pass returns
-    /// an error, the legacy table is NOT dropped — the transcript is preserved so
-    /// the irreversible drop only happens after the data is safely in JSONL.
-    /// A failing migration is injected by deleting the `agent_sessions` table so
-    /// the migration's first `list_sessions` query errors.
+    /// A failed migration must leave the legacy table in place — the
+    /// irreversible drop only happens once the data is safely in JSONL. Failure
+    /// is injected by dropping `agent_sessions` so `list_sessions` errors.
     #[tokio::test]
     async fn gated_migration_does_not_drop_when_migration_fails() {
         let (db, base) = test_db().await;
@@ -1454,19 +1253,14 @@ mod tests {
             .expect_err("a failing migration must surface an error");
         assert_eq!(err.code, "INTERNAL_ERROR");
 
-        // The transcript table was NOT dropped — the migration failed first.
         assert!(
             table_exists(&db, "agent_session_messages").await,
             "VAL-CASESS-023: a failed migration must leave the transcript table intact (no drop)"
         );
     }
 
-    /// VAL-CASESS-022: two distinct HandBox session ids write to their OWN
-    /// `<id>.jsonl` files and never cross-contaminate. Each session's transcript
-    /// reads back exactly its own messages — proving the per-session-id JSONL
-    /// keying isolates concurrent runs (no shared mutable transcript state). The
-    /// GUI concurrency leg is left to user-test; this is the backend isolation
-    /// proof.
+    /// Per-session-id JSONL keying isolates concurrent runs: two ids never
+    /// cross-contaminate each other's transcript.
     #[tokio::test]
     async fn concurrent_sessions_write_isolated_transcripts() {
         use crate::services::agent_jsonl_store::append_message_at;
@@ -1512,7 +1306,6 @@ mod tests {
         )
         .unwrap();
 
-        // Each session reads back ONLY its own messages — no crossover.
         let rows_a = load_transcript(base.path(), &cwd, id_a).unwrap().unwrap();
         let rows_b = load_transcript(base.path(), &cwd, id_b).unwrap().unwrap();
         assert_eq!(rows_a.len(), 4, "A has its own 4 messages");
@@ -1544,7 +1337,6 @@ mod tests {
         assert_eq!(act_a.message_count, 4);
         assert_eq!(act_b.message_count, 3);
 
-        // Two distinct files on disk, one per session id.
         let dir = crate::services::agent_jsonl_store::session_dir(base.path(), &cwd);
         let jsonl: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()

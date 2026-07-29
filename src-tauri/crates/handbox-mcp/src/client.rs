@@ -1,7 +1,7 @@
 //! High-level MCP client interface.
 //!
-//! This module provides a clean, modern client interface for connecting to MCP servers
-//! over stdio child processes, SSE endpoints, or streamable HTTP transports.
+//! Connects to MCP servers over stdio child processes, SSE endpoints, or
+//! streamable HTTP transports.
 
 use std::sync::{Arc, Mutex};
 
@@ -25,7 +25,6 @@ use super::{
     utils::convert_tool,
 };
 
-/// High-level MCP client that can connect via different transports
 pub struct McpClient {
     service: RunningService<RoleClient, ClientInfo>,
     stats: Arc<Mutex<ClientStats>>,
@@ -33,7 +32,6 @@ pub struct McpClient {
 }
 
 impl McpClient {
-    /// Connect to an MCP server using the provided configuration
     pub async fn connect(config: ConnectionConfig) -> McpClientResult<Self> {
         match config {
             ConnectionConfig::Process(process_config) => {
@@ -44,7 +42,6 @@ impl McpClient {
         }
     }
 
-    /// Connect to an MCP server using process transport
     pub async fn connect_process(config: ProcessConfig) -> McpClientResult<Self> {
         let stats = ClientStats::new();
 
@@ -56,20 +53,17 @@ impl McpClient {
         let client_info = create_client_info();
         let service = client_info.serve(transport).await?;
 
-        // Log connection info
         let server_info = service.peer();
         tracing::info!("Connected to MCP server: {:#?}", server_info);
 
         Ok(Self::from_service(service, stats))
     }
 
-    /// Connect to an MCP server using SSE transport
     pub async fn connect_sse(config: SseConfig) -> McpClientResult<Self> {
         tracing::info!("Attempting SSE connection to: {}", config.endpoint);
 
         let stats = ClientStats::new();
 
-        // Create the SSE transport
         let transport = SseTransport::connect(&config).await.map_err(|e| {
             tracing::error!("Failed to create SSE transport: {}", e);
             McpClientError::TransportCreation(e.to_string())
@@ -78,14 +72,12 @@ impl McpClient {
         let client_info = create_client_info();
         let service = client_info.serve(transport).await?;
 
-        // Log connection info
         let server_info = service.peer();
         tracing::info!("Connected to MCP server via SSE: {:#?}", server_info);
 
         Ok(Self::from_service(service, stats))
     }
 
-    /// Connect to an MCP server using streamable HTTP transport
     pub async fn connect_http(config: StreamableHttpConfig) -> McpClientResult<Self> {
         tracing::info!(
             "Attempting streamable HTTP connection to: {}",
@@ -108,7 +100,6 @@ impl McpClient {
         Ok(Self::from_service(service, stats))
     }
 
-    /// List all tools exposed by the connected MCP server
     pub async fn list_tools(&self) -> McpClientResult<Vec<McpTool>> {
         let tools = self.service.list_all_tools().await.map_err(|e| {
             tracing::error!("Failed to list MCP tools: {}", e);
@@ -118,7 +109,6 @@ impl McpClient {
         Ok(tools.into_iter().map(convert_tool).collect())
     }
 
-    /// Call a tool by name with optional JSON arguments
     pub async fn call_tool(
         &self,
         name: &str,
@@ -154,7 +144,6 @@ impl McpClient {
         result
     }
 
-    /// List all resources exposed by the server
     pub async fn list_resources(&self) -> McpClientResult<Vec<rmcp::model::Resource>> {
         self.service.list_all_resources().await.map_err(|e| {
             tracing::error!("Failed to list MCP resources: {}", e);
@@ -162,7 +151,6 @@ impl McpClient {
         })
     }
 
-    /// Read a specific resource
     pub async fn read_resource(
         &self,
         uri: &str,
@@ -184,7 +172,6 @@ impl McpClient {
         result
     }
 
-    /// List all prompts exposed by the server
     pub async fn list_prompts(&self) -> McpClientResult<Vec<rmcp::model::Prompt>> {
         self.service.list_all_prompts().await.map_err(|e| {
             tracing::error!("Failed to list MCP prompts: {}", e);
@@ -192,7 +179,6 @@ impl McpClient {
         })
     }
 
-    /// Get a specific prompt
     pub async fn get_prompt(
         &self,
         name: &str,
@@ -216,22 +202,18 @@ impl McpClient {
         result
     }
 
-    /// Get current connection status
     pub fn status(&self) -> ConnectionStatus {
         self.status.lock().unwrap().clone()
     }
 
-    /// Get client statistics
     pub fn stats(&self) -> ClientStats {
         self.stats.lock().unwrap().clone()
     }
 
-    /// Get server information
     pub fn server_info(&self) -> &rmcp::service::Peer<rmcp::service::RoleClient> {
         self.service.peer()
     }
 
-    /// Gracefully shutdown the client connection
     pub async fn shutdown(self) -> McpClientResult<()> {
         *self.status.lock().unwrap() = ConnectionStatus::Disconnected;
 
@@ -242,12 +224,10 @@ impl McpClient {
         Ok(())
     }
 
-    /// Get raw service for advanced operations
     pub fn service(&self) -> &RunningService<RoleClient, ClientInfo> {
         &self.service
     }
 
-    // Private helper methods for stats tracking
     fn from_service(
         service: RunningService<RoleClient, ClientInfo>,
         mut stats: ClientStats,
@@ -288,7 +268,6 @@ impl McpClient {
     }
 }
 
-/// Create default client info
 fn create_client_info() -> ClientInfo {
     let mut info = ClientInfo::default();
     info.client_info.name = "handbox".into();

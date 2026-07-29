@@ -1,12 +1,9 @@
-// Agent 数据访问层
-
 use crate::models::AppError;
 use crate::storage::types::{Agent, McpServerConfig, UUID};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
-/// Agent 仓储层
 #[derive(Clone)]
 pub struct AgentRepository {
     db: Arc<Database>,
@@ -17,7 +14,6 @@ impl AgentRepository {
         Self { db }
     }
 
-    /// 创建 Agent
     pub async fn create_agent(&self, agent: &Agent) -> Result<(), AppError> {
         let mcp_servers_json = serde_json::to_string(&agent.mcp_servers)
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
@@ -72,7 +68,6 @@ impl AgentRepository {
         Ok(())
     }
 
-    /// 获取 Agent 列表
     pub async fn list_agents(&self, limit: i32, offset: i32) -> Result<Vec<Agent>, AppError> {
         let query = r#"
             SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
@@ -94,7 +89,6 @@ impl AgentRepository {
         Ok(agents)
     }
 
-    /// 根据 ID 获取 Agent
     pub async fn get_agent_by_id(&self, agent_id: &UUID) -> Result<Option<Agent>, AppError> {
         let query = r#"
             SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
@@ -114,7 +108,6 @@ impl AgentRepository {
         }
     }
 
-    /// 更新 Agent
     pub async fn update_agent(&self, agent: &Agent) -> Result<(), AppError> {
         let mcp_servers_json = serde_json::to_string(&agent.mcp_servers)
             .map_err(|e| AppError::validation_error(&format!("Invalid MCP servers: {}", e)))?;
@@ -172,7 +165,6 @@ impl AgentRepository {
         Ok(())
     }
 
-    /// 删除 Agent
     pub async fn delete_agent(&self, agent_id: &UUID) -> Result<(), AppError> {
         let result = sqlx::query("DELETE FROM agents WHERE id = $1")
             .bind(agent_id)
@@ -187,9 +179,10 @@ impl AgentRepository {
         Ok(())
     }
 
-    /// 从所有 Agent 中移除指定 MCP 服务器的引用
+    /// Removes references to the given MCP server from all agents; returns the
+    /// number of agents updated.
     pub async fn remove_mcp_server_from_agents(&self, server_id: &str) -> Result<i32, AppError> {
-        // 获取所有包含该服务器的 Agent
+        // Coarse LIKE prefilter; exact matching happens via `retain` below.
         let query = r#"
             SELECT id, mcp_servers
             FROM agents
@@ -218,11 +211,9 @@ impl AgentRepository {
                 let mut mcp_servers: Vec<McpServerConfig> =
                     serde_json::from_str(&json).unwrap_or_default();
 
-                // 移除指定服务器
                 let original_len = mcp_servers.len();
                 mcp_servers.retain(|config| config.server_id != server_id);
 
-                // 只有在实际移除了服务器时才更新
                 if mcp_servers.len() < original_len {
                     let updated_json = serde_json::to_string(&mcp_servers).map_err(|e| {
                         AppError::internal_error(&format!("Failed to serialize MCP servers: {}", e))
@@ -255,7 +246,6 @@ impl AgentRepository {
         Ok(updated_count)
     }
 
-    // 辅助方法：将数据库行转换为 Agent
     fn row_to_agent(&self, row: sqlx::sqlite::SqliteRow) -> Result<Agent, AppError> {
         let mcp_servers_json: Option<String> = row.try_get("mcp_servers")?;
         let mcp_servers: Vec<McpServerConfig> = if let Some(json) = mcp_servers_json {
@@ -278,21 +268,20 @@ impl AgentRepository {
             Vec::new()
         };
 
-        // 明确处理 NULL 值
         let temperature: Option<f32> = row.try_get::<Option<f32>, _>("temperature")?;
         let top_p: Option<f32> = row.try_get::<Option<f32>, _>("top_p")?;
         let top_k: Option<i32> = row.try_get::<Option<i32>, _>("top_k")?;
         let max_tokens: Option<i32> = row.try_get::<Option<i32>, _>("max_tokens")?;
-        // Option<bool> 显式解码：SQL NULL -> None（旧行），INTEGER 0/1 -> Some(false/true)。
+        // Decode as Option: SQL NULL (legacy rows) -> None, INTEGER 0/1 -> Some.
         let generative_ui: Option<bool> = row.try_get::<Option<bool>, _>("generative_ui")?;
-        // Option<String> 显式解码：SQL NULL -> None（旧行 / 未关联）。
+        // SQL NULL -> None (legacy rows / unlinked).
         let genui_id: Option<String> = row.try_get::<Option<String>, _>("genui_id")?;
 
-        // ── AgentDefinition 扩展列（migration 058），全部 NULL-safe 解码 ──
+        // AgentDefinition columns are all decoded NULL-safe for legacy rows.
         let provider_id: Option<String> = row.try_get::<Option<String>, _>("provider_id")?;
         let icon: Option<String> = row.try_get::<Option<String>, _>("icon")?;
         let description: Option<String> = row.try_get::<Option<String>, _>("description")?;
-        // builtin：SQL NULL（旧行）-> false；INTEGER 1 -> true。
+        // builtin: SQL NULL (legacy rows) -> false.
         let builtin: bool = row.try_get::<Option<bool>, _>("builtin")?.unwrap_or(false);
         let builtin_tools_json: Option<String> = row.try_get("builtin_tools")?;
         let builtin_tools: Vec<String> = if let Some(json) = builtin_tools_json {
@@ -557,7 +546,7 @@ mod tests {
         }
     }
 
-    // VAL-AGENT-001: generative_ui round-trips through create -> get -> update -> get.
+    // generative_ui round-trips through create -> get -> update -> get.
     #[tokio::test]
     async fn test_agent_generative_ui_round_trip() {
         let (db, _temp_dir) = create_test_db().await;
@@ -583,8 +572,8 @@ mod tests {
         assert_eq!(after.generative_ui, Some(false));
     }
 
-    // VAL-AGENT-002: an old row with generative_ui NULL decodes to None on both
-    // read paths (get_agent_by_id + list_agents) without a sqlx decode error.
+    // An old row with generative_ui NULL decodes to None on both read paths
+    // (get_agent_by_id + list_agents) without a sqlx decode error.
     #[tokio::test]
     async fn test_agent_generative_ui_null_decodes_to_none() {
         let (db, _temp_dir) = create_test_db().await;

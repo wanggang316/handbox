@@ -1,13 +1,10 @@
-// 加密工具函数
-
 use crate::models::AppError;
 
-/// 生成 UUID
 pub fn generate_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// API Key 脱敏显示
+/// Mask an API key for display, keeping only the leading `prefix_length` chars.
 pub fn mask_api_key(api_key: &str, prefix_length: usize) -> String {
     if api_key.len() <= prefix_length {
         "*".repeat(api_key.len())
@@ -18,7 +15,6 @@ pub fn mask_api_key(api_key: &str, prefix_length: usize) -> String {
     }
 }
 
-/// 验证 API Key 格式
 pub fn validate_api_key(api_key: &str) -> Result<(), AppError> {
     if api_key.is_empty() {
         return Err(AppError::validation_error("API Key cannot be empty"));
@@ -69,14 +65,4 @@ mod tests {
         // Contains spaces
         assert!(validate_api_key("sk-123 456").is_err());
     }
-
-    // #[test]
-    // fn test_keychain_service_and_account() {
-    //     // 钥匙串功能测试暂时禁用
-    // }
-
-    // #[tokio::test]
-    // async fn test_keychain_operations() {
-    //     // 钥匙串功能测试暂时禁用
-    // }
 }

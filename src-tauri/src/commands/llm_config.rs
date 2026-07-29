@@ -1,9 +1,7 @@
-// LLM 配置相关 IPC 命令
-
 use crate::config::llm_config::get_global_llm_config;
 use crate::models::{AppError, ProviderConfig, ProviderConfigsResponse};
 
-/// 获取所有可用的供应商配置（用于前端添加/编辑供应商）
+/// Returns all available provider configs for the frontend's add/edit provider UI.
 #[tauri::command]
 pub async fn get_provider_configs() -> Result<ProviderConfigsResponse, AppError> {
     let config = get_global_llm_config();
@@ -40,7 +38,6 @@ pub async fn get_provider_configs() -> Result<ProviderConfigsResponse, AppError>
     })
 }
 
-/// 根据供应商类型获取具体配置
 #[tauri::command]
 pub async fn get_provider_config_by_type(
     provider_type: String,
@@ -69,22 +66,19 @@ mod tests {
     async fn test_get_provider_configs() {
         let result = get_provider_configs().await.unwrap();
 
-        // 验证基本结构
         assert!(!result.providers.is_empty());
         assert!(!result.custom_providers.is_empty());
 
-        // 验证第一个供应商有 type_name 字段
         let first_provider = &result.providers[0];
         assert!(!first_provider.type_name.is_empty());
         assert!(!first_provider.default_name.is_empty());
 
-        // 验证 type_name 和 default_name 可能不同（对于某些供应商）
+        // type_name and default_name may differ for some providers.
         println!(
             "First provider: type_name='{}', default_name='{}'",
             first_provider.type_name, first_provider.default_name
         );
 
-        // 验证自定义供应商
         let first_custom = &result.custom_providers[0];
         assert!(!first_custom.type_name.is_empty());
         assert!(!first_custom.default_name.is_empty());

@@ -2,11 +2,9 @@ use super::common::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// 供应商实体
-///
-/// `api_key` 是敏感信息：本类型**手写 `Debug`** 而非 `derive`，确保任何调试 /
-/// 日志输出（`{:?}`、`tracing` 字段等）都不会泄漏完整密钥——只显示是否已设置 +
-/// 末 4 位用于排查。`Serialize` 仍输出完整 key（前端/IPC 需要它），与日志路径无关。
+/// `api_key` is sensitive: `Debug` is hand-written so `{:?}`/log output never
+/// leaks the full key (only set-ness + last 4 chars). `Serialize` still emits
+/// the full key — the frontend/IPC needs it.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub id: UUID,
@@ -34,8 +32,8 @@ impl fmt::Debug for Provider {
     }
 }
 
-/// 把密钥脱敏为可安全打印的占位：空 → `<unset>`，否则 `***` + 末 4 位
-/// （按 char 取，避免在非 ASCII 边界 panic）。
+/// Redacts a secret for printing: empty → `<unset>`, else `***` + last 4
+/// chars (taken per char to avoid panics on non-ASCII boundaries).
 fn redact_secret(key: &str) -> String {
     if key.is_empty() {
         return "<unset>".to_string();

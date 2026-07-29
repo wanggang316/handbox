@@ -1,6 +1,3 @@
-// HandBox Tauri 应用主入口
-
-// 声明模块
 pub mod commands;
 pub mod config;
 pub mod menu;
@@ -28,13 +25,11 @@ use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 加载环境变量
     if let Err(e) = dotenvy::dotenv() {
-        // .env 文件不存在不是致命错误，只记录日志
+        // A missing .env file is not fatal; just log it.
         eprintln!("Warning: Failed to load .env file: {}", e);
     }
 
-    // 初始化日志系统
     if let Err(e) = logger::init_logger() {
         eprintln!("Failed to initialize logger: {}", e);
     } else {
@@ -62,36 +57,33 @@ pub fn run() {
 
     #[cfg(target_os = "macos")]
     {
-        // 初始化 NSPanel 插件
         builder = builder.plugin(tauri_nspanel::init());
     }
 
     builder
         .setup(|app| {
-            // 创建菜单
             let menu = crate::menu::create_menu(app.handle()).expect("Failed to create menu");
             app.set_menu(menu).expect("Failed to set menu");
 
-            // Setup tray icon and menu
             if let Err(e) = setup_tray(app.handle()) {
                 eprintln!("Failed to setup tray: {}", e);
             }
 
-            // 创建选择面板 (NSPanel) - 必须在setup中同步创建
+            // Selection panels (NSPanel) must be created synchronously in setup.
             #[cfg(target_os = "macos")]
             {
                 if let Err(e) = setup_selection(app.handle()) {
                     tracing::error!("Failed to setup selection panels: {e}");
                     eprintln!("Failed to setup selection panels: {e}");
-                    // 不退出应用，因为选择面板是可选功能
+                    // Selection panels are optional; keep the app running.
                 }
 
-                // 创建 Quick Action 浮层 (NSPanel) - 同步创建于主线程，
-                // 因为 to_panel 依赖 tauri.conf.json 预声明的 quick_action 窗口。
+                // Quick Action overlay (NSPanel): created synchronously on the main
+                // thread because to_panel relies on the quick_action window
+                // pre-declared in tauri.conf.json.
                 crate::services::selection::quick_action_panel::init_panel(app.handle());
             }
 
-            // 异步初始化服务
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = initialize_services(&app_handle).await {
@@ -100,9 +92,10 @@ pub fn run() {
                 }
             });
 
-            // 主窗口以 visible:false 启动、由前端首帧绘制完成后 show()（消除启动
-            // 黑屏/白屏闪）。此处兜底：前端若启动失败（JS 异常/资源缺失），4 秒后
-            // 强制显示窗口，避免"应用无窗口可见"。
+            // The main window starts hidden (visible:false) and is shown by the
+            // frontend after first paint to avoid a startup flash. Fallback: if the
+            // frontend fails to boot, force-show after 4s so the app is never
+            // windowless.
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -129,10 +122,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            // 调试命令
             debug_check_file,
             // debug_show_selection_overlay,
-            // 选择相关命令
             selection_hide_menu_panel,
             selection_show_content_panel,
             selection_hide_content_panel,
@@ -145,7 +136,6 @@ pub fn run() {
             selection_disable_global,
             selection_get_disabled_apps,
             selection_remove_disabled_app,
-            // Quick Action 浮层命令
             quick_action_show,
             quick_action_hide,
             quick_action_toggle,
@@ -159,7 +149,6 @@ pub fn run() {
             // selection_overlay_lock,
             // selection_overlay_dismiss,
             // selection_overlay_set_interactive,
-            // 认证相关命令
             auth_start_google_oauth,
             auth_google_login,
             auth_logout,
@@ -167,20 +156,18 @@ pub fn run() {
             auth_get_user,
             auth_update_profile,
             auth_validate_token,
-            // Agent 相关命令
             agent_create,
             agent_list,
             agent_get,
             agent_update_field,
             agent_update_name,
             agent_delete,
-            // GenUI（具名 JSON-Render UI spec CRUD）命令
+            // GenUI: named JSON-Render UI spec CRUD
             genui_create,
             genui_list,
             genui_get,
             genui_update,
             genui_delete,
-            // Agent Session（Agent 模式会话 CRUD）命令
             agent_session_create,
             agent_session_create_from_definition,
             agent_session_reinstantiate_from_definition,
@@ -191,22 +178,19 @@ pub fn run() {
             agent_session_update_field,
             agent_session_delete,
             agent_session_messages,
-            // Agent Project（按工作目录分组会话）命令
+            // Agent projects: sessions grouped by working directory
             agent_project_create,
             agent_project_list,
             agent_project_rename,
             agent_project_delete,
-            // "Open in ..."（在外部 editor/terminal/Finder 中打开工作目录）
+            // "Open in ...": open a working directory in an external editor/terminal/Finder
             open_in_list_targets,
             open_in_open,
-            // Agent 模式 run 命令
             agent_run_stream,
             agent_run_abort,
             agent_run_steer,
             agent_approval_respond,
-            // 窗口管理命令
             open_settings_window,
-            // 供应商相关命令
             provider_list,
             provider_get,
             provider_create,
@@ -214,12 +198,10 @@ pub fn run() {
             provider_delete,
             provider_toggle,
             provider_list_with_models,
-            // 模型相关命令
             model_list_by_provider,
             model_toggle,
             model_toggle_favorite,
             model_add,
-            // MCP 管理命令
             mcp_list_servers,
             mcp_create_server,
             mcp_update_server,
@@ -227,10 +209,8 @@ pub fn run() {
             mcp_toggle_server,
             mcp_refresh_server,
             mcp_update_tool_enabled,
-            // Skill 管理命令
             skill_list,
             skill_set_disabled,
-            // 设置相关命令
             settings_get,
             settings_update,
             settings_reset,
@@ -239,12 +219,10 @@ pub fn run() {
             settings_validate_mcp,
             settings_test_mcp_server,
             settings_system_info,
-            // 单词相关命令
-            // LLM 配置相关命令
+            // LLM config (llm_config.json) lookups
             get_provider_configs,
             get_provider_config_by_type,
             hand_ai_list_providers,
-            // 定时任务相关命令
             job_preview_schedule,
             job_create,
             job_list,
@@ -254,15 +232,11 @@ pub fn run() {
             job_set_enabled,
             job_execution_list,
             job_run_now,
-            // 剪贴板相关命令
             clipboard_copy_image,
-            // 图片相关命令
             image_proxy,
-            // 辅助功能权限命令
             accessibility_check_permission,
             accessibility_request_permission,
             accessibility_open_settings,
-            // 选择相关命令
             selection_show_content_panel,
             selection_hide_content_panel,
         ])
@@ -270,20 +244,16 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// 初始化服务
 async fn initialize_services(
     app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 获取应用数据目录
     let data_dir = app
         .path()
         .app_data_dir()
         .expect("Failed to get app data directory");
 
-    // 初始化存储服务
     let storage_service = Arc::new(StorageService::new(data_dir.clone())?);
 
-    // 允许前端通过 asset protocol 访问生成的媒体目录
     let media_root = data_dir.join("generated_media");
     std::fs::create_dir_all(&media_root)
         .map_err(|e| format!("Failed to create generated media directory: {e}"))?;
@@ -298,7 +268,6 @@ async fn initialize_services(
         .allow_directory(&attachments_root, true)
         .map_err(|e| format!("Failed to allow asset protocol for attachments: {e}"))?;
 
-    // 初始化数据库服务
     let db_path = storage_service.get_database_path();
     let database_service = Arc::new(
         Database::new(&db_path)
@@ -309,7 +278,6 @@ async fn initialize_services(
     let llm_config_value = crate::config::llm_config::LlmConfig::load_from_app(app);
     crate::config::llm_config::install_global_llm_config(llm_config_value.clone());
 
-    // 初始化各个服务
     let provider_service = ProviderService::new(database_service.clone());
     let provider_service_shared = Arc::new(provider_service.clone());
 
@@ -320,11 +288,11 @@ async fn initialize_services(
     let settings_service = SettingsService::new(storage_service.clone());
 
     // Register the Quick Action global hotkey from the persisted
-    // `quickAction.shortcut`. This runs in the ASYNC service-init path (after
+    // `quickAction.shortcut`. This runs in the async service-init path (after
     // SettingsService exists) — an early-launch press before this completes is
-    // the accepted no-op (VAL-OVERLAY-015). A failed registration is LOGGED and
-    // swallowed so the app still launches (VAL-OVERLAY-016); the structured
-    // AppError surfaces via the re-register command instead.
+    // an accepted no-op. A failed registration is logged and swallowed so the
+    // app still launches; the structured AppError surfaces via the re-register
+    // command instead.
     #[cfg(target_os = "macos")]
     {
         match settings_service.get_settings() {
@@ -350,31 +318,26 @@ async fn initialize_services(
         }
     }
 
-    // 初始化用户会话服务
     let user_session_service = UserSessionService::new(database_service.clone());
 
-    // 从数据库恢复上次的用户会话
     if let Err(e) = user_session_service.load_session_from_db().await {
         tracing::warn!("恢复用户会话失败: {:?}", e);
     }
 
-    // 初始化 Agent 服务
     let agent_service = AgentService::new(database_service.clone());
 
-    // 初始化 GenUI 服务（具名 JSON-Render UI spec 的 CRUD）
+    // GenUI: CRUD for named JSON-Render UI specs.
     let genui_service = GenUiService::new(database_service.clone());
 
-    // 初始化 Agent Session 服务（Agent 模式会话 CRUD）
     let agent_session_service = AgentSessionService::new(database_service.clone());
 
-    // 初始化 Agent Project 服务（按工作目录分组 Agent 模式会话）
+    // Agent projects group agent-mode sessions by working directory.
     let agent_project_service = AgentProjectService::new(database_service.clone());
 
-    // 初始化 Skill 服务（解析三个 scope 根：app-data + user；project 按 run 解析）。
-    // app-data: <app_data_dir>/skills；user: ~/.agents/skills（home_dir 解析失败时
-    // 退回一个不存在的根，使 user scope 静默为空而非阻断启动）。
-    // 提前于执行器构造：执行器的 agent 目标需要一个 AgentRuntime，而 runtime
-    // 装配需要 skill_service。
+    // Skill scopes: app-data (<app_data_dir>/skills) + user (~/.agents/skills);
+    // the project scope resolves per run. On home_dir failure, fall back to a
+    // nonexistent root so the user scope is silently empty instead of blocking
+    // startup. Built before the job executor, whose AgentRuntime needs it.
     let skill_appdata_root = data_dir.join("skills");
     let skill_user_root = app
         .path()
@@ -386,17 +349,19 @@ async fn initialize_services(
         skill_user_root,
     ));
 
-    // 一次性把 pre-M3 的 SQLite agent transcript 物化为 JSONL，迁移成功后 drop
-    // 已冗余的 `agent_session_messages` 表（VAL-CASESS-023）。门控在该表的存在性
-    // 上——表存在 ⇒ 迁移 + drop；表不存在 ⇒ 已完成、整体跳过（不再每次启动重扫、
-    // 也不读已 drop 的表）。**只 drop transcript 表**：`agent_sessions` /
-    // `agent_projects` 是 M3 dual-source 下的活配置 + 分组源，绝不 drop。
+    // One-time materialization of legacy SQLite agent transcripts into JSONL;
+    // on success the redundant `agent_session_messages` table is dropped. Gated
+    // on that table's existence: present => migrate + drop; absent => done,
+    // skip entirely (no per-startup rescan). Only the transcript table is
+    // dropped — `agent_sessions` / `agent_projects` remain the live config +
+    // grouping source, never drop them.
     //
-    // 必须在 run 命令可被调用、任何 run 发生之前同步完成：否则老会话首次
-    // run 只会落新 turn，丢失历史（m3-jsonl-persistence 标注的竞态）。data_dir 同时
-    // 充当 JSONL base 与无 working_dir 会话的 cwd 回退（与写入侧 config_from_rows /
-    // session_cwd 一致）。迁移整体失败只记录、不阻断启动——逐会话容错留给
-    // m3-migration-robustness；迁移失败时**不会** drop（保住 transcript）。
+    // Must finish before any run command executes, or an old session's first
+    // run would persist only the new turn and lose its history. data_dir
+    // doubles as the JSONL base and the cwd fallback for sessions without a
+    // working_dir (matching config_from_rows / session_cwd on the write side).
+    // A failed migration is logged without blocking startup and does NOT drop
+    // the table, so transcripts are preserved.
     match crate::services::migrate_and_drop_legacy_if_present(database_service.clone(), &data_dir)
         .await
     {
@@ -419,16 +384,15 @@ async fn initialize_services(
         }
     }
 
-    // 初始化定时任务服务（Job CRUD + 校验）
     let job_service = JobService::from_db(database_service.clone());
 
-    // 初始化任务执行器（执行一个任务并落库）。注入 AppHandle，使执行开始/完成时各
-    // emit 一次 `job_executed` 事件供前端实时刷新；注入 prompt 目标协作者（headless：
-    // 每次新建 chat + 非流式发送 + provider 预校验）；注入 agent 目标协作者（headless：
-    // 每次新建独立 agent session、经 coding-agent 驱动一轮、从 JSONL transcript 分类）。
-    // agent 协作者复用与前台命令同源的服务，并把 data_dir 作为 coding-agent session 的
-    // base_dir / 无 working_dir 会话的 cwd 回退（与前台命令经 Window PathResolver 解析
-    // app_data_dir 等价；后台执行器无 Window，故直接传入）。
+    // Runs one job and persists the result; the AppHandle lets it emit
+    // `job_executed` on start/finish for live frontend refresh. Prompt target:
+    // headless fresh chat, non-streaming send, provider pre-validated. Agent
+    // target: headless fresh agent session driven one coding-agent round,
+    // classified from its JSONL transcript; it reuses the foreground services,
+    // with data_dir as the coding-agent base_dir / cwd fallback (the background
+    // executor has no Window to resolve app_data_dir through).
     let job_executor = JobExecutor::from_db(database_service.clone())
         .with_app_handle(app.clone())
         .with_agent_services(
@@ -438,13 +402,10 @@ async fn initialize_services(
             data_dir.clone(),
         );
 
-    // 初始化定时任务调度器（后台 tick loop，驱动到点任务自动执行）。
-    // 复用执行器（clone 走 Arc 字段，不 clone 服务本体）。启动接线在
-    // initialize_services 末尾：reconcile 残留 running → 按 now 重算 next_run_at
-    // → 启动 tick loop。
+    // Background tick loop that fires due jobs. Cloning the executor clones its
+    // Arc fields, not the services themselves.
     let job_scheduler = JobScheduler::from_db(database_service.clone(), job_executor.clone());
 
-    // 将服务注册到应用状态
     app.manage(storage_service);
     app.manage(provider_service);
     app.manage(model_service);
@@ -469,12 +430,14 @@ async fn initialize_services(
     // aliases) resolve at chat time once the refresh lands. No local synthesis.
     crate::services::catalog_sync::spawn();
 
-    // 启动定时任务调度。仅在应用运行期间调度（关闭即停、重启按 now 重算、不补跑）。
-    // 顺序：migrations/services 已就绪 → ① reconcile 上次进程残留的 running 执行行
-    // （崩溃或正常退出都可能留下，无活进程，标 failed）→ ② 对每个 enabled job 按
-    // 当前 now 重算 next_run_at（仅取下一个 > now 的 cron occurrence，错过的触发不
-    // 补跑、过期任务不在启动即跑）→ ③ 启动后台 tick loop（固定 30s，DB 为唯一事实
-    // 来源，每 tick 重读）。reconcile / recompute 失败只告警、不阻断启动与 tick。
+    // Start job scheduling. Jobs run only while the app runs: missed triggers
+    // are never caught up; next_run_at is recomputed from "now" on restart.
+    // Order: (1) reconcile `running` execution rows left by a previous process
+    // (no live process — mark failed); (2) recompute next_run_at for every
+    // enabled job, taking only the next cron occurrence > now (overdue jobs do
+    // not fire at startup); (3) start the fixed 30s tick loop (DB is the single
+    // source of truth, re-read every tick). Reconcile/recompute failures warn
+    // but never block startup or the tick loop.
     {
         let scheduler = job_scheduler;
         tauri::async_runtime::spawn(async move {

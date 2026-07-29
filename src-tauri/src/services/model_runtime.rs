@@ -1,14 +1,12 @@
 // model_runtime — provider/model resolution + stream-option building, shared
 // by the chat dispatch path and the coding-agent session constructor.
 //
-// These helpers were lifted out of `chat_engine` so the survivors that outlive
-// the chat backend — the agent session constructor (`coding_agent_session`) and
-// the model catalog refresh (`services::model`) — can resolve a
-// `hand_ai_model::Model` template and build `SimpleStreamOptions` without
-// depending on the chat streaming engine. The carrier types
-// (`ChatOptions` / `ChatTool` / `HydratedAttachment`) live here too because
-// `build_stream_options` consumes `ChatOptions`; `chat_engine` re-exports them
-// for its own (soon-to-be-removed) streaming callers.
+// These helpers stay independent of the chat streaming engine so the agent
+// session constructor (`coding_agent_session`) and the model catalog refresh
+// (`services::model`) can resolve a `hand_ai_model::Model` template and build
+// `SimpleStreamOptions` without it. The carrier types (`ChatOptions` /
+// `ChatTool` / `HydratedAttachment`) live here because `build_stream_options`
+// consumes `ChatOptions`; `chat_engine` re-exports them for its own callers.
 
 use std::collections::HashMap;
 
@@ -70,10 +68,6 @@ pub fn list_catalog_models(provider_type: &str) -> Vec<crate::storage::types::Mo
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// Model lookup + options building
-// ---------------------------------------------------------------------------
-
 /// Resolve a `Model` template by `provider_id` (== provider_type) + `model_id`.
 ///
 /// Catalog providers resolve from hand-ai's static catalog. Custom providers
@@ -90,16 +84,14 @@ pub(crate) fn resolve_model_template(
     if let Some(api) = custom_api_for_provider_type(provider_id) {
         return Ok(synthesize_custom_model(model_id, api));
     }
-    // OpenRouter is a dynamic model aggregator: it fronts thousands of upstream
-    // models that come and go (incl. ":free" variants), so hand-ai's *static*
-    // catalog snapshot is necessarily incomplete and can lag the user's locally
-    // synced model list — selecting such a model (e.g. `deepseek/deepseek-v4-flash:free`)
-    // otherwise errored "not registered" before the request was even attempted.
-    // The provider API is the real authority here, so synthesize an OpenAI-protocol
-    // template (OpenRouter speaks OpenAI completions; `base_url` is filled in by
-    // `resolve_model` from the provider config) and let OpenRouter validate the id.
-    // Fixed-catalog providers (openai, anthropic, …) keep erroring on unknown ids.
-    // Fixes Chat + Agent identically.
+    // OpenRouter is a dynamic aggregator fronting thousands of upstream models
+    // that come and go (incl. ":free" variants), so hand-ai's *static* catalog
+    // snapshot is necessarily incomplete and can lag the user's locally synced
+    // model list. The provider API is the real authority: synthesize an
+    // OpenAI-protocol template (OpenRouter speaks OpenAI completions; `base_url`
+    // is filled in by `resolve_model` from the provider config) and let
+    // OpenRouter validate the id. Fixed-catalog providers (openai, anthropic, …)
+    // keep erroring on unknown ids.
     if provider_id == "openrouter" {
         return Ok(synthesize_custom_model(
             model_id,
@@ -184,9 +176,9 @@ fn synthesize_custom_model(model_id: &str, api: model::Api) -> model::Model {
 }
 
 #[allow(clippy::field_reassign_with_default)]
-// StreamOptions and SimpleStreamOptions are #[non_exhaustive] in hand_ai_model
-// (since #32 / commit 7994163). FRU (`..Default::default()`) is illegal from
-// outside the defining crate, so we mutate-default.
+// StreamOptions and SimpleStreamOptions are #[non_exhaustive] in hand_ai_model,
+// so FRU (`..Default::default()`) is illegal from outside the defining crate —
+// hence mutate-a-default instead.
 pub(crate) fn build_stream_options(options: &ChatOptions, api_key: &str) -> SimpleStreamOptions {
     let mut base = StreamOptions::default();
     base.api_key = Some(api_key.to_string());
@@ -212,10 +204,6 @@ fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
         _ => None,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Translation: hand_ai_model::Model → storage::types::Model
-// ---------------------------------------------------------------------------
 
 fn hand_ai_to_handbox_model(
     provider_id: &str,
@@ -268,33 +256,21 @@ fn hand_ai_to_handbox_model(
     }
 }
 
-/// Map a hand-ai `Api` enum value to the short chat-method tags that
-/// HandBox's UI uses to pick a parameter set. Pre-dissolve, only the
-/// OpenRouter adapter populated this field (with `"completions"`); the
-/// other legacy fetchers left it `None`, so existing DB rows for OpenAI
-/// / Anthropic providers may also be empty in the same way. After M2-T4
-/// rewired through hand-ai's catalog every freshly-synced provider
-/// must populate it explicitly or `is_method_supported` short-circuits
-/// to false and `get_provider_models` silently filters every model out
-/// at the IPC boundary (the bug that hid all 3 Cerebras models from
-/// the picker until this fix).
+/// Map a hand-ai `Api` value to the short chat-method tags the UI uses to pick
+/// a parameter set. Every synced provider must get a non-empty result: an empty
+/// one makes `is_method_supported` false, and `get_provider_models` then filters
+/// every model out at the IPC boundary. Older DB rows may still hold `None`.
 fn supported_methods_for_api(api: model::Api) -> Vec<String> {
     use model::Api;
     match api {
-        // OpenAI-Completions wire family.
         Api::OpenAICompletions | Api::MistralConversations => vec!["completions".to_string()],
-        // OpenAI-Responses wire family.
         Api::OpenAIResponses | Api::AzureOpenAiResponses | Api::OpenAICodexResponses => {
             vec!["responses".to_string()]
         }
-        // Native Anthropic / Bedrock-Converse. The UI parameter set is
-        // identical to OpenAI Completions (temperature / top_p / max_tokens /
-        // streaming), and the actual chat wire dispatch is owned by hand-ai's
-        // Client based on `Model.api`, not by this string. Tagging as
-        // `"completions"` lets `ChatMethod::Completions` pick up its base
-        // parameter rendering for these providers.
+        // Anthropic / Bedrock-Converse share OpenAI Completions' UI parameter set
+        // (temperature / top_p / max_tokens / streaming); the actual wire
+        // dispatch is owned by hand-ai's Client via `Model.api`, not this tag.
         Api::AnthropicMessages | Api::BedrockConverseStream => vec!["completions".to_string()],
-        // Google native Generate-Content family.
         Api::GoogleGenerativeAi | Api::GoogleGeminiCli | Api::GoogleVertex => {
             vec!["google_generate_content".to_string()]
         }
@@ -309,10 +285,9 @@ mod tests {
 
     #[test]
     fn supported_methods_for_api_covers_every_variant() {
-        // Pin the per-Api mapping so a new hand-ai Api variant forces an
-        // explicit decision here (the exhaustive match in
-        // `supported_methods_for_api` already guarantees compile-time
-        // failure; this test pins runtime semantics for the existing set).
+        // The exhaustive match already forces a compile-time decision for a new
+        // hand-ai Api variant; this pins the runtime semantics of the existing
+        // set.
         use hand_ai_model::Api;
 
         assert_eq!(
@@ -365,12 +340,10 @@ mod tests {
 
     #[test]
     fn openrouter_model_absent_from_catalog_synthesizes() {
-        // Regression (Stage-3 user-test): creating an agent/chat session with an
-        // OpenRouter model the local sync cached but the *current* static catalog
-        // no longer lists (e.g. `deepseek/deepseek-v4-flash:free`) errored
-        // "not registered under provider 'openrouter'". OpenRouter is a dynamic
-        // aggregator, so resolve now synthesizes an OpenAI-protocol template and
-        // defers id validation to the provider API.
+        // An OpenRouter model the local sync cached but the current static catalog
+        // does not list must still resolve: the aggregator, not the catalog, is
+        // the authority on ids, so resolution synthesizes a template instead of
+        // erroring "not registered under provider 'openrouter'".
         assert!(
             hand_ai_model::get_model("openrouter", "deepseek/deepseek-v4-flash:free").is_none(),
             "precondition: model is genuinely absent from the static catalog"

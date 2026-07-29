@@ -1,10 +1,11 @@
 use super::common::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
 
-/// GenUI 实体 - 一份具名、可复用的 JSON-Render UI spec。
+/// A named, reusable JSON-Render UI spec.
 ///
-/// `spec` 是原样的 spec JSON 文本（前端经 `explainSpec` 校验后保存），后端视其为
-/// 不透明字符串、从不解析其内部结构。Chat agent 可通过 `agents.genui_id` 关联到它。
+/// `spec` is the raw spec JSON text (validated by the frontend via
+/// `explainSpec`); the backend treats it as an opaque string and never parses
+/// it. Chat agents can reference it through `agents.genui_id`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenUi {
@@ -15,7 +16,6 @@ pub struct GenUi {
     pub updated_at: Timestamp,
 }
 
-/// 创建 GenUI 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateGenUiRequest {
@@ -23,7 +23,6 @@ pub struct CreateGenUiRequest {
     pub spec: String,
 }
 
-/// 更新 GenUI 请求（按需更新名称 / spec）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateGenUiRequest {
@@ -52,8 +51,9 @@ mod tests {
         assert_eq!(genui.spec, deserialized.spec);
     }
 
-    /// 锁定 JS<->Rust 线缆键：serde camelCase 把 `created_at` 转成 `createdAt`，
-    /// 单词字段（id/name/spec）保持原样。前端类型必须与之匹配。
+    /// Locks the JS<->Rust wire keys: serde camelCase maps `created_at` to
+    /// `createdAt`; single-word fields (id/name/spec) stay as-is. Frontend
+    /// types must match.
     #[test]
     fn genui_wire_keys_are_camel_case() {
         let genui = GenUi {

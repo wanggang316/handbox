@@ -1,12 +1,9 @@
-// 模型相关 IPC 命令
-
 use crate::models::{
     AppError, ListModelsRequest, ModelResponse, ToggleModelFavoriteRequest, ToggleModelRequest,
 };
 use crate::services::ModelService;
 use tauri::State;
 
-/// 获取供应商模型列表
 #[tauri::command]
 pub async fn model_list_by_provider(
     request: ListModelsRequest,
@@ -19,7 +16,6 @@ pub async fn model_list_by_provider(
         .await
 }
 
-/// 切换模型启用状态
 #[tauri::command]
 pub async fn model_toggle(
     request: ToggleModelRequest,
@@ -30,7 +26,6 @@ pub async fn model_toggle(
         .await
 }
 
-/// 切换模型收藏状态
 #[tauri::command]
 pub async fn model_toggle_favorite(
     request: ToggleModelFavoriteRequest,
@@ -41,7 +36,8 @@ pub async fn model_toggle_favorite(
         .await
 }
 
-/// 为自定义供应商手动添加模型（自定义端点的模型不在 hand-ai 目录中）。
+/// Manually adds a model for a custom provider (custom-endpoint models are not
+/// in the hand-ai catalog).
 #[tauri::command]
 pub async fn model_add(
     provider_id: String,

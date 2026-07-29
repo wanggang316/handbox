@@ -8,7 +8,6 @@ let package = Package(
         .library(name: "macos-obs", type: .static, targets: ["macos-obs"]),
     ],
     dependencies: [
-        // 必须引入这个包来提供 SRString 等类型支持
         .package(url: "https://github.com/Brendonovich/swift-rs", from: "1.0.0")
     ],
     targets: [
