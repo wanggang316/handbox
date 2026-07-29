@@ -1,3 +1,4 @@
+
 import { apiCall } from "./index";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
@@ -98,11 +99,7 @@ export async function listExecutions(
   limit?: number,
   offset?: number,
 ): Promise<JobExecution[]> {
-  return apiCall<JobExecution[]>("job_execution_list", {
-    jobId,
-    limit,
-    offset,
-  });
+  return apiCall<JobExecution[]>("job_execution_list", { jobId, limit, offset });
 }
 
 /**
