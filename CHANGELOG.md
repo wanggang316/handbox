@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.4.3] - 2026-07-29
+
+### Added
+- Agents can now show interactive HTML cards right inside the conversation.
+- Agents can build small apps that open in a side panel, with a live preview
+  and a code view.
+- Settings → Agent Tools now lets you toggle these UI abilities and on-demand
+  skill loading for new sessions.
+
+
 ## [0.4.2] - 2026-07-28
 
 ### Added
