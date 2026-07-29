@@ -1,8 +1,8 @@
 /**
- * jobs 命名空间文案（由迁移子代理填充；zh 为权威）。
+ * jobs namespace strings (zh is canonical).
  */
 export const jobsZh = {
-  // 页面
+  // Page
   "jobs.title": "任务",
   "jobs.count": "{n} 个",
   "jobs.create": "新建任务",
@@ -16,7 +16,7 @@ export const jobsZh = {
   "jobs.delete.confirmMessage": "确定要删除这个任务吗？此操作无法撤销。",
   "jobs.delete.failed": "删除失败，请重试",
 
-  // 卡片
+  // Card
   "jobs.target.agent": "Agent",
   "jobs.target.prompt": "Prompt",
   "jobs.view.aria": "查看任务 {name} 详情",
@@ -28,18 +28,18 @@ export const jobsZh = {
   "jobs.card.runCount": "运行次数：{n}",
   "jobs.card.failureCount": "失败 {n} 次",
 
-  // 执行状态
+  // Execution status
   "jobs.status.running": "运行中",
   "jobs.status.success": "成功",
   "jobs.status.failed": "失败",
   "jobs.status.timeout": "超时",
   "jobs.status.disabled": "已禁用",
 
-  // 触发方式
+  // Trigger
   "jobs.trigger.schedule": "定时",
   "jobs.trigger.manual": "手动",
 
-  // 详情
+  // Detail
   "jobs.detail.title": "任务详情",
   "jobs.detail.nextRun": "下次运行：",
   "jobs.detail.runCount": "运行 {n} 次",
@@ -55,7 +55,7 @@ export const jobsZh = {
   "jobs.detail.checkingResult": "检查结果…",
   "jobs.detail.jumpToResult": "跳转到结果",
 
-  // 表单
+  // Form
   "jobs.form.editTitle": "编辑任务",
   "jobs.form.createTitle": "新建任务",
   "jobs.form.appClosedNotice": "定时任务仅在应用运行时触发；应用关闭期间不会执行。",
@@ -89,7 +89,7 @@ export const jobsZh = {
   "jobs.form.save": "保存",
   "jobs.form.createAction": "创建",
 
-  // 调度编辑器
+  // Schedule editor
   "jobs.schedule.tabQuick": "快捷",
   "jobs.schedule.tabAdvanced": "高级 Cron",
   "jobs.schedule.frequency": "频率",
@@ -117,7 +117,7 @@ export const jobsZh = {
   "jobs.schedule.calculating": "计算中…",
   "jobs.schedule.noOccurrences": "近期无可执行时间",
 
-  // 目标选择器
+  // Target picker
   "jobs.target.kindLabel": "目标类型",
   "jobs.target.modelLabel": "模型",
   "jobs.target.modelRequired": "请选择供应商与模型",

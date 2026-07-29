@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * Agent 会话头部：显示当前会话的 项目（可选）/ 标题。
-   * 由 `agentSessionState.currentSession` 驱动，故重新打开会话时即可见。
+   * Agent session header: shows the session's optional project and title.
+   * Driven by `agentSessionState.currentSession`, so it appears on reopen.
    */
   import {
     FolderOpen,
@@ -23,8 +23,8 @@
 
   const session = $derived(agentSessionState.currentSession);
 
-  // 所属项目名（可选）：projects 由侧栏 AgentProjectList 加载，此处响应式读取；
-  // 未挂项目或列表未就绪时为 null，仅显示标题。
+  // Optional project name: projects are loaded by the sidebar AgentProjectList
+  // and read reactively here; null (no project / list not ready) shows title only.
   const projectName = $derived.by(() => {
     const projectId = session?.projectId;
     if (!projectId) return null;
@@ -33,24 +33,22 @@
     );
   });
 
-  // ============================================
-  // "Open in ..." 分体按钮 + 下拉
-  // ============================================
-  // 把当前会话工作目录在外部 editor / terminal / Finder 中打开。探测、取图标与
-  // 启动都在后端（commands/open_in.rs）；目标清单按已安装 app 维度缓存（会话内
-  // 不变），有工作目录的会话挂载时即预取，使分体按钮能立刻显示默认应用图标。
+  // "Open in ..." split button: opens the session working dir in an external
+  // editor / terminal / Finder. Probing, icons and launching live in the
+  // backend (commands/open_in.rs); the target list is cached per installed-app
+  // set and prefetched on mount so the default-app icon shows immediately.
   let openInMenuOpen = $state(false);
   let openInTargets = $state<OpenInTarget[] | null>(null);
   let openInLoading = $state(false);
   let openInError = $state<string | null>(null);
 
-  // 已存的默认应用 id（持久化在 agent 设置里，跨会话 / 重启生效）。
+  // Stored default app id (persisted in agent settings, survives restarts).
   const defaultEditorId = $derived(
     settingsState.settings?.agent?.defaultEditorId ?? null,
   );
 
-  // 解析默认 target：已存默认仍可用则取之；否则回退到首个 editor/terminal；
-  // 再不行取首个（通常是 Finder）。供分体按钮的主操作使用。
+  // Resolve the default target: the stored default if still available, else
+  // the first editor/terminal, else the first target (usually Finder).
   const resolvedDefault = $derived.by((): OpenInTarget | null => {
     const targets = openInTargets;
     if (!targets || targets.length === 0) return null;
@@ -81,8 +79,8 @@
     }
   }
 
-  // 有工作目录时即预取目标清单与设置，使分体按钮的默认应用图标无需等点击。
-  // 两个加载都幂等（targets 自带去重守卫，loadSettings 命中缓存即返回）。
+  // Prefetch targets and settings when a working dir exists, so the default
+  // app icon needs no click. Both loads are idempotent.
   $effect(() => {
     if (session?.workingDir) {
       void loadOpenInTargets();
@@ -91,7 +89,7 @@
   });
 
   function toggleOpenInMenu(event: MouseEvent) {
-    // 阻止冒泡到 window 的 click-outside（否则刚打开即被关闭）。
+    // Don't bubble to the window click-outside handler, which would instantly close it.
     event.stopPropagation();
     if (openInMenuOpen) {
       closeOpenInMenu();
@@ -107,7 +105,7 @@
     openInError = null;
   }
 
-  // 仅打开、不改默认（分体按钮主操作 / 一次性）。成功收起菜单，失败留错误条。
+  // Open without changing the default. Success closes the menu; failure keeps it open.
   async function openTarget(target: OpenInTarget) {
     const dir = session?.workingDir;
     if (!dir) return;
@@ -115,13 +113,13 @@
       await openInTarget(dir, target.id);
       closeOpenInMenu();
     } catch (error) {
-      // 启动失败不静默：菜单留在原地、错误条可见。
+      // Launch failure is not silent: the menu stays with a visible error bar.
       openInError = error instanceof Error ? error.message : String(error);
     }
   }
 
-  // 从下拉选择：打开；若是 editor/terminal 则记为默认（「默认编辑器」语义不含
-  // Finder）。持久化失败不阻断打开，仅记日志。
+  // Dropdown pick: open, and remember editor/terminal picks as the default
+  // ("default editor" excludes Finder). Persist failure never blocks opening.
   async function pickTarget(target: OpenInTarget) {
     if (target.kind !== "system" && target.id !== defaultEditorId) {
       settingsState
@@ -139,7 +137,7 @@
     if (openInMenuOpen) closeOpenInMenu();
   }
 
-  // 点击菜单外任意处关闭（closest 检查同 AgentProjectList 菜单）。
+  // Close on any click outside the popover.
   function handleWindowClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
     if (openInMenuOpen && !target.closest(".openin-popover")) {
@@ -147,9 +145,9 @@
     }
   }
 
-  // 会话切换时关闭 Open-in 菜单（targets 与系统相关、不随会话变，但悬置的
-  // 菜单留到新会话会造成心智错位）。
-  // 用普通 let 记上一次 id：非响应式，避免在 effect 内自我触发。
+  // Close the Open-in menu on session switch: a menu left open over a new
+  // session is confusing. The last id is a plain (non-reactive) let so the
+  // effect does not retrigger itself.
   let lastOpenInSessionId: string | null = null;
   $effect(() => {
     const id = session?.id ?? null;
@@ -161,8 +159,9 @@
 </script>
 
 {#if session}
-  <!-- 侧栏收起时主内容顶到窗口左缘：给头部让出红绿灯 + 侧栏开关的位置
-       （toggle 位于 left:100px，按钮宽约 30px），padding 过渡与侧栏动画同步。 -->
+  <!-- With the sidebar collapsed, pad the header past the traffic lights and
+       sidebar toggle (toggle at left:100px, ~30px wide); the padding transition
+       matches the sidebar animation. -->
   <header
     class="flex items-center gap-3 px-4 py-2.5 border-b border-base-300 shrink-0 transition-[padding-left] duration-[var(--dur-base)] {uiState.sidebarOpen
       ? ''
@@ -180,14 +179,14 @@
       </span>
     </div>
 
-    <!-- z-[10000]：header 顶部条带被 TitleBar 的 .drag-region（fixed,
-         height:50px, z-index:9999）覆盖，按钮 mousedown 会触发窗口拖拽而非
-         点击；提升到拖拽层之上（镜像 TitleBar 自身按钮的 z-index:10000
-         模式），popover 卡片随容器一并抬升，内部交互不被吞。 -->
+    <!-- z-[10000]: the TitleBar .drag-region (fixed, height:50px, z-index:9999)
+         covers this strip, so button mousedown would drag the window instead of
+         clicking. Lift above the drag layer (same as TitleBar's own buttons);
+         the popover rises with the container so its interactions aren't eaten. -->
     <div class="relative z-[10000] ml-auto shrink-0 flex items-center gap-1">
-      <!-- Open in …：把工作目录在外部 editor / terminal / Finder 中打开。
-           分体按钮——左：在默认应用打开（显示其真实图标）；右：展开应用列表。
-           仅当会话有工作目录时出现（无目录则无从打开）。 -->
+      <!-- Open in… split button: left opens the default app (showing its real
+           icon), right expands the app list. Only shown when the session has a
+           working directory. -->
       {#if session.workingDir}
         <div
           class="flex items-center rounded-md overflow-hidden border border-base-300/60"
@@ -276,5 +275,5 @@
   </header>
 {/if}
 
-<!-- 全局监听：Esc / 点击菜单外关闭（按钮 click 已 stopPropagation） -->
+<!-- Close on Escape / outside click (the trigger click already stopPropagation). -->
 <svelte:window onkeydown={handleWindowKeydown} onclick={handleWindowClick} />

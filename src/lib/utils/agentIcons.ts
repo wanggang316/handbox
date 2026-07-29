@@ -1,9 +1,9 @@
 /**
- * Agent 图标：精选 Lucide 图标集 + 名字→组件解析
+ * Curated Lucide icon set for agents, plus name → component resolution.
  *
- * agent.icon 持久化为 Lucide 的 kebab-case 图标名（如 "bot" / "sparkles"）。
- * 选择器与渲染共用本模块：`AGENT_ICONS` 供表单网格，`resolveAgentIcon` 供列表 /
- * 侧栏按名反查组件（未命中 / 为空回退到 Bot），二者同源避免映射漂移。
+ * agent.icon persists the Lucide kebab-case name (e.g. "bot"). The picker grid
+ * (`AGENT_ICONS`) and renderers (`resolveAgentIcon`) share this module so the
+ * mapping cannot drift; empty/unknown names fall back to Bot.
  */
 
 import {
@@ -41,16 +41,16 @@ import {
   Blocks,
 } from "@lucide/svelte";
 
-/** 所有 Lucide 图标组件同型，用 Bot 的类型统一约束（规避 Component 变型问题）。 */
+/** All Lucide icons share one shape; Bot's type stands in for it (avoids Component variance issues). */
 export type LucideIcon = typeof Bot;
 
 export interface AgentIconOption {
-  /** 持久化到 agent.icon 的 kebab-case 图标名。 */
+  /** Kebab-case Lucide name persisted to agent.icon. */
   name: string;
   Icon: LucideIcon;
 }
 
-/** 表单可选图标（顺序即网格呈现顺序）。 */
+/** Picker options; array order is the grid order. */
 export const AGENT_ICONS: AgentIconOption[] = [
   { name: "bot", Icon: Bot },
   { name: "bot-message-square", Icon: BotMessageSquare },
@@ -86,14 +86,12 @@ export const AGENT_ICONS: AgentIconOption[] = [
   { name: "star", Icon: Star },
 ];
 
-/** 缺省 / 未识别图标名时使用的图标。 */
 export const DEFAULT_AGENT_ICON: LucideIcon = Bot;
 
 const ICON_BY_NAME = new Map<string, LucideIcon>(
   AGENT_ICONS.map((o) => [o.name, o.Icon]),
 );
 
-/** 把 agent.icon 名解析为图标组件；空 / 未识别回退到默认 Bot。 */
 export function resolveAgentIcon(name?: string | null): LucideIcon {
   return (name ? ICON_BY_NAME.get(name) : undefined) ?? DEFAULT_AGENT_ICON;
 }

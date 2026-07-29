@@ -8,14 +8,14 @@
 
   let { children } = $props();
 
-  // 统一页头：按当前路由从导航表取标题（子路由归属其顶级项）。
+  // Shared header: resolve the title from the nav table (child routes map to
+  // their top-level item).
   const currentTitle = $derived(
     findSettingsNavItem($page.url.pathname)?.title ?? "",
   );
 
-  // 设置页面不需要侧边栏切换功能，传递空函数
+  // Settings has no sidebar toggle; pass a no-op to satisfy TitleBar
   function handleToggle() {
-    // 空函数 - 设置页面不需要侧边栏切换功能
   }
 </script>
 
@@ -29,7 +29,7 @@
   <main
     class="flex-1 overflow-auto bg-[color:var(--bg-canvas)] border-l border-[var(--hairline)] rounded-tl-xl rounded-bl-xl"
   >
-    <!-- 内容列限宽：设置内容不随窗口拉满（对齐 Linear/Codex 的设置页阅读宽度） -->
+    <!-- Constrain the content column: settings don't stretch with the window -->
     <div class="mx-auto w-full max-w-3xl">
       {#if currentTitle}
         <div class="px-6 pb-2 pr-8 pt-14">

@@ -135,7 +135,7 @@
   /* purposely ignored */
 }
 
-/* 推理过程的特殊样式 - 深色模式 */
+/* Reasoning content — dark mode */
 [data-theme="dark"] .reasoning-content {
   color: color-mix(in oklch, var(--base-content) 60%, transparent);
 }

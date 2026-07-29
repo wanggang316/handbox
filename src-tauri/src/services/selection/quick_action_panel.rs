@@ -1,16 +1,14 @@
-//! Quick Action 浮层窗口（macOS NSPanel）。
+//! Quick Action overlay window (macOS NSPanel): frameless, transparent,
+//! always-on-top and non-activating, so it floats above full-screen apps without
+//! switching Space. It centers on the upper third of the monitor under the
+//! cursor and hides itself when it resigns key.
 //!
-//! 与 `content_panel.rs` 同源：frameless / transparent / always-on-top /
-//! non-activating，可悬浮于 macOS 全屏应用之上而不离开当前 Space，居中于鼠标
-//! 所在显示器的上三分之一，失焦（resign-key）自动隐藏。`show_panel` 先定位再
-//! `window.show()`；`hide_panel` 先把窗口移到屏外再 `window.hide()`，避免下次
-//! 显示时在旧位置闪烁。
-//!
-//! 可见性标志在派发到主线程之前先行写入（进程级 `AtomicBool`），使其他线程能
-//! 快速、无锁地感知状态。
+//! The visibility flag is written before dispatching to the main thread so other
+//! threads can observe the state lock-free.
 
-// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
-// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+// The panel_event! DSL requires an explicit `-> ()` (Obj-C void delegate), which
+// trips clippy::unused_unit inside the macro expansion; only a module-level allow
+// reaches macro-generated code.
 #![allow(clippy::unused_unit)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,19 +19,18 @@ use tauri_nspanel::{
     tauri_panel, CollectionBehavior, PanelLevel, StyleMask, TrackingAreaOptions, WebviewWindowExt,
 };
 
-/// 跟踪 Quick Action 面板是否可见。
 static QUICK_ACTION_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 
 const PANEL_LABEL: &str = "quick_action";
 
-/// 面板逻辑尺寸（须与 tauri.conf.json 中的窗口声明保持一致）。
+/// Logical panel size; must stay in sync with the window in tauri.conf.json.
 const PANEL_WIDTH: f64 = 720.0;
 const PANEL_HEIGHT: f64 = 480.0;
 
 tauri_panel! {
     panel!(QuickActionPanel {
         config: {
-            can_become_key_window: true, // 接收键盘输入（后续 composer 需要）
+            can_become_key_window: true, // accepts keyboard input
             can_become_main_window: false,
         }
         with: {
@@ -57,17 +54,16 @@ tauri_panel! {
 pub fn init_panel(app_handle: &AppHandle) {
     tracing::info!("Setting up quick action panel");
 
-    // 容错初始化：若 tauri.conf.json 与运行时漂移导致 quick_action 窗口缺失或
-    // NSPanel 转换失败，记录并提前返回，让应用正常启动（仅浮层不可用），而不是
-    // panic 整个 app（与 lib.rs / setup_selection 的 log-and-continue 一致）。
+    // A missing window or a failed NSPanel conversion only disables the overlay;
+    // log and return so the rest of the app still starts.
     let Some(window) = app_handle.get_webview_window(PANEL_LABEL) else {
         tracing::error!(
             "quick action window '{PANEL_LABEL}' not found; overlay disabled (check tauri.conf.json)"
         );
         return;
     };
-    // Raycast 式磨砂背景：原生 NSVisualEffectView（vibrancy），随系统外观自适应。
-    // 半透明卡片叠加其上即得到 frosted-glass 观感；radius 与卡片圆角一致以裁剪材质。
+    // Native NSVisualEffectView vibrancy backdrop that follows the system
+    // appearance; the radius matches the card corner so the material is clipped.
     let _ = window.set_effects(
         tauri::window::EffectsBuilder::new()
             .effect(tauri::window::Effect::Popover)
@@ -86,16 +82,16 @@ pub fn init_panel(app_handle: &AppHandle) {
         }
     };
     panel.set_level(PanelLevel::Floating.value());
-    // can_join_all_spaces + full_screen_auxiliary：悬浮于全屏 app 之上且不切走 Space
-    // (VAL-OVERLAY-005)。
+    // Float above full-screen apps without switching the active Space.
     panel.set_collection_behavior(
         CollectionBehavior::new()
             .can_join_all_spaces()
             .full_screen_auxiliary()
             .value(),
     );
-    // nonactivating：显示面板不抢占前台 app 的激活态 (VAL-OVERLAY-021 的 frameless
-    // 体验由 decorations:false + transparent:true + 此 style mask 共同保证)。
+    // Nonactivating: showing the panel must not steal activation from the
+    // frontmost app; combined with decorations:false + transparent:true it also
+    // yields the frameless look.
     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
     panel.set_corner_radius(14.0);
 
@@ -105,7 +101,7 @@ pub fn init_panel(app_handle: &AppHandle) {
         tracing::debug!("Quick action panel became key window");
     });
 
-    // 失焦自动隐藏（VAL-OVERLAY-004）。先写可见性标志，再派发主线程隐藏。
+    // Auto-hide on focus loss: clear the flag first, then dispatch the hide.
     let handle_for_resign = app_handle.clone();
     handler.window_did_resign_key(move |_| {
         if QUICK_ACTION_PANEL_VISIBLE.load(Ordering::Relaxed) {
@@ -127,20 +123,20 @@ pub fn init_panel(app_handle: &AppHandle) {
     panel.set_event_handler(Some(handler.as_ref()));
 }
 
-/// 显示面板：根据鼠标所在显示器把面板水平居中、置于上三分之一并边缘夹紧，然后
-/// `make_key_and_order_front` 取得键盘焦点。`cursor_phys_x` / `cursor_phys_y` 为
-/// **物理像素**坐标系下的全局鼠标位置（来自 `AppHandle::cursor_position()`）。
+/// Positions the panel on the monitor under the cursor and takes keyboard focus.
+/// `cursor_phys_x` / `cursor_phys_y` are global **physical** pixel coordinates,
+/// as returned by `AppHandle::cursor_position()`.
 #[cfg(target_os = "macos")]
 pub fn show_panel(handle: &AppHandle, cursor_phys_x: f64, cursor_phys_y: f64) {
-    // 立即更新标志（resign-key handler 据此判断是否需要隐藏）。
+    // Set before dispatching: the resign-key handler reads this to decide.
     QUICK_ACTION_PANEL_VISIBLE.store(true, Ordering::Relaxed);
 
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
-            // 在物理坐标系下解析鼠标所在显示器，再换算到逻辑坐标系（点）。
-            // `set_position(LogicalPosition)` 与 `calculate_panel_position` 都工作
-            // 在逻辑坐标系。面板居中于显示器（与鼠标 x 无关），故这里只取显示器矩形。
+            // Resolve the monitor in physical space, then stay in logical points:
+            // `set_position` and `calculate_panel_position` both expect them. Only
+            // the monitor rect matters — the panel centers on the display, not the cursor.
             let (frame, _cursor_logical_x) =
                 resolve_cursor_monitor(&window, cursor_phys_x, cursor_phys_y);
             let (target_x, target_y) = calculate_panel_position(frame, PANEL_WIDTH, PANEL_HEIGHT);
@@ -148,20 +144,22 @@ pub fn show_panel(handle: &AppHandle, cursor_phys_x: f64, cursor_phys_y: f64) {
             let _ = window.set_position(LogicalPosition::new(target_x, target_y));
             let _ = window.show();
 
-            // 取得键盘焦点，使 resign-key 自动隐藏成立 (VAL-OVERLAY-004)。
+            // Key focus is what makes the resign-key auto-hide fire at all.
             if let Ok(panel) = window.to_panel::<QuickActionPanel>() {
                 panel.make_key_and_order_front();
             }
 
-            // 通知前端：本次召唤把浮层重置为全新空白状态（一次召唤 = 一个一回合文档）。
-            // show_panel 是所有召唤的必经路径，比 nonactivating panel 不可靠的 AppKit
-            // key 通知更稳妥。
+            // Tell the frontend to reset to a blank state — one summon is one
+            // single-turn document. Emitted here because show_panel is the only
+            // entry point; AppKit key notifications are unreliable for a
+            // nonactivating panel.
             let _ = window.emit("quick-action-shown", ());
         }
     });
 }
 
-/// 隐藏面板：先移到屏外避免下次显示闪烁，再 `hide()`。
+/// Moves the panel off-screen before hiding, so the next show cannot flash at
+/// the stale position.
 #[cfg(target_os = "macos")]
 pub fn hide_panel(handle: &AppHandle) {
     QUICK_ACTION_PANEL_VISIBLE.store(false, Ordering::Relaxed);
@@ -175,8 +173,7 @@ pub fn hide_panel(handle: &AppHandle) {
     });
 }
 
-/// 切换面板可见性。`cursor_phys_x` / `cursor_phys_y`（物理像素）仅在转为显示时
-/// 用于定位。
+/// Toggles visibility; the physical cursor coordinates are only used when showing.
 #[cfg(target_os = "macos")]
 pub fn toggle(handle: &AppHandle, cursor_phys_x: f64, cursor_phys_y: f64) {
     if is_panel_visible() {
@@ -186,12 +183,11 @@ pub fn toggle(handle: &AppHandle, cursor_phys_x: f64, cursor_phys_y: f64) {
     }
 }
 
-/// 检查 Quick Action 面板是否可见。
 pub fn is_panel_visible() -> bool {
     QUICK_ACTION_PANEL_VISIBLE.load(Ordering::Relaxed)
 }
 
-/// 一个显示器在逻辑坐标系下的矩形（点为单位，原点在左上）。
+/// A monitor rect in logical coordinates (points, origin top-left).
 #[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MonitorFrame {
@@ -201,8 +197,8 @@ pub struct MonitorFrame {
     pub height: f64,
 }
 
-/// 一块显示器在**物理坐标系**下的几何（origin/size 为物理像素）加上 DPI scale。
-/// 作为 `select_monitor` 的纯输入，便于在不依赖 tauri 运行时的情况下做单元测试。
+/// Monitor geometry in **physical** pixels plus its DPI scale; a runtime-free
+/// input for `select_monitor` so the selection logic stays unit-testable.
 #[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy)]
 struct MonitorInfo {
@@ -215,7 +211,6 @@ struct MonitorInfo {
 
 #[cfg(any(target_os = "macos", test))]
 impl MonitorInfo {
-    /// 用该屏 scale 把物理矩形换算到逻辑坐标系（点）。
     fn logical_frame(&self) -> MonitorFrame {
         MonitorFrame {
             x: self.pos_x / self.scale,
@@ -225,7 +220,6 @@ impl MonitorInfo {
         }
     }
 
-    /// 在物理空间判断鼠标是否落在此屏内。
     fn contains_phys(&self, cursor_phys_x: f64, cursor_phys_y: f64) -> bool {
         cursor_phys_x >= self.pos_x
             && cursor_phys_x < self.pos_x + self.width_phys
@@ -234,12 +228,10 @@ impl MonitorInfo {
     }
 }
 
-/// 纯函数：在已知显示器集合中为鼠标挑选目标显示器，返回其**逻辑**矩形与鼠标的
-/// **逻辑** x。回退顺序（least-surprise）：
-/// 1. 包含鼠标的显示器；
-/// 2. 主显示器（`primary_index`）——鼠标落在所有屏之外时，浮层落在主屏而非任意一块；
-/// 3. 第一块可用显示器；
-/// 4. `None`（无任何显示器，由调用方给出虚拟矩形）。
+/// Picks the target monitor for the cursor and returns its **logical** rect plus
+/// the cursor's **logical** x. Fallback order: the monitor containing the cursor,
+/// then `primary_index` (a cursor outside every screen lands on the main display
+/// rather than an arbitrary one), then the first monitor, then `None`.
 #[cfg(any(target_os = "macos", test))]
 fn select_monitor(
     monitors: &[MonitorInfo],
@@ -261,11 +253,9 @@ fn select_monitor(
     monitors.first().map(to_result)
 }
 
-/// 在物理坐标系下找到包含鼠标的显示器，返回其**逻辑**矩形与鼠标的**逻辑** x。
-/// 多显示器在物理空间匹配（各屏 DPI 可能不同），匹配后用该屏 scale 统一换算到
-/// 逻辑坐标系。鼠标落在所有屏之外时优先回退到主显示器，再退到第一块可用显示器，
-/// 最后退回到以鼠标为中心、面板大小的一块虚拟矩形（保证 `calculate_panel_position`
-/// 仍能给出可见结果）。
+/// Resolves the cursor's monitor into its **logical** rect and the cursor's
+/// **logical** x. Matching happens in physical space because displays can have
+/// different DPI; the matched monitor's scale then converts to points.
 #[cfg(target_os = "macos")]
 fn resolve_cursor_monitor(
     window: &tauri::WebviewWindow,
@@ -284,7 +274,7 @@ fn resolve_cursor_monitor(
             })
             .collect();
 
-        // 主显示器在 available_monitors 中的下标（用于鼠标落空时的回退）。
+        // Index of the primary monitor, used when the cursor is off every screen.
         let primary_index = window.primary_monitor().ok().flatten().and_then(|primary| {
             let p = primary.position();
             infos
@@ -297,7 +287,8 @@ fn resolve_cursor_monitor(
         }
     }
 
-    // 极端回退：假设 scale = 1，以鼠标为中心给出一块刚好容纳面板的矩形。
+    // No monitors at all: assume scale 1 and fake a panel-sized rect around the
+    // cursor so positioning still yields a visible result.
     (
         MonitorFrame {
             x: cursor_phys_x - PANEL_WIDTH / 2.0,
@@ -309,27 +300,21 @@ fn resolve_cursor_monitor(
     )
 }
 
-/// 纯函数：在给定显示器矩形内，把面板水平居中于**显示器**、纵向置于上三分之一处，
-/// 并夹紧到屏幕范围内使其完整可见。
-///
-/// - 水平：居中于鼠标所在**显示器**（VAL-OVERLAY-008，与鼠标 x 无关），随后夹紧到
-///   `[x, x+width-panel]` 使其不越界（VAL-OVERLAY-009）；当面板比屏幕宽时退化为左
-///   对齐屏幕原点。
-/// - 纵向：目标顶边设在显示器高度约 20% 处（“上三分之一”，VAL-OVERLAY-001），同样
-///   夹紧到屏内。
+/// Centers the panel horizontally on the **display** (independent of the cursor
+/// x) with its top edge at ~20% of the display height, clamping both axes so the
+/// panel stays fully on screen. A panel wider than the screen left-aligns to the
+/// display origin instead of going out of bounds.
 #[cfg(any(target_os = "macos", test))]
 fn calculate_panel_position(
     frame: MonitorFrame,
     panel_width: f64,
     panel_height: f64,
 ) -> (f64, f64) {
-    // 水平居中于显示器（而非鼠标），随后整体夹紧进屏幕。
     let mut target_x = frame.x + (frame.width - panel_width) / 2.0;
     let min_x = frame.x;
     let max_x = (frame.x + frame.width - panel_width).max(min_x);
     target_x = target_x.clamp(min_x, max_x);
 
-    // 纵向：上三分之一。顶边设在屏幕高度约 20% 处。
     let mut target_y = frame.y + frame.height * 0.2;
     let min_y = frame.y;
     let max_y = (frame.y + frame.height - panel_height).max(min_y);
@@ -353,7 +338,6 @@ mod tests {
 
     #[test]
     fn centers_horizontally_on_display_in_upper_third() {
-        // 1920x1080 主屏：面板水平居中于显示器，顶边在屏高约 20% 处（上三分之一）。
         let (x, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 1080.0), 720.0, 480.0);
         assert_eq!(x, (1920.0 - 720.0) / 2.0); // 600.0 — display center
         assert_eq!(y, 1080.0 * 0.2); // 216.0 — upper third, not mid-screen
@@ -361,46 +345,40 @@ mod tests {
 
     #[test]
     fn horizontal_center_independent_of_cursor() {
-        // 修复回归点：水平位置与鼠标 x 无关，永远是显示器中心。
-        // （bug 复现：鼠标 x=629 时旧逻辑把面板中心放到 629；x=1600 时夹紧到 1200。
-        //  现在两者都应给出 (1920 - 720) / 2 = 600。）
+        // The horizontal position is always the display center, never the cursor x.
         let f = frame(0.0, 0.0, 1920.0, 1080.0);
         let (x_left, _) = calculate_panel_position(f, 720.0, 480.0);
         let (x_right, _) = calculate_panel_position(f, 720.0, 480.0);
         assert_eq!(x_left, 600.0);
         assert_eq!(x_right, 600.0);
-        // 面板水平中心 == 显示器水平中心。
         assert_eq!(x_left + 720.0 / 2.0, 0.0 + 1920.0 / 2.0);
     }
 
     #[test]
     fn clamps_when_display_center_would_overflow() {
-        // 面板比屏幕窄但接近：居中后两侧仍应留在屏内（夹紧不改变已合法的居中值）。
+        // Panel nearly as wide as the screen: clamping must not move a valid center.
         let (x, _) = calculate_panel_position(frame(0.0, 0.0, 800.0, 1080.0), 720.0, 480.0);
-        assert_eq!(x, (800.0 - 720.0) / 2.0); // 40.0，完整可见
+        assert_eq!(x, (800.0 - 720.0) / 2.0); // 40.0, fully visible
         assert!(x >= 0.0);
         assert!(x + 720.0 <= 800.0);
     }
 
     #[test]
     fn stays_fully_on_screen_vertically() {
-        // 矮屏：20% 处加面板高度会越过底界，纵向应夹紧到 (height - panel)。
         let (_, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 600.0), 720.0, 480.0);
-        // 0.2 * 600 = 120, 120 + 480 = 600 == 600 → 仍恰好可见，不夹紧。
+        // 0.2 * 600 = 120, 120 + 480 = 600 → exactly fits, no clamping.
         assert_eq!(y, 120.0);
     }
 
     #[test]
     fn clamps_vertically_on_short_display() {
-        // 更矮的屏：20% 顶边加面板高度越界，纵向夹紧到 (height - panel)。
         let (_, y) = calculate_panel_position(frame(0.0, 0.0, 1920.0, 500.0), 720.0, 480.0);
-        // 0.2 * 500 = 100, 100 + 480 = 580 > 500 → 夹紧到 500 - 480 = 20
+        // 0.2 * 500 = 100, 100 + 480 = 580 > 500 → clamped to 500 - 480 = 20
         assert_eq!(y, 20.0);
     }
 
     #[test]
     fn honors_monitor_origin_offset() {
-        // 第二块显示器原点在 (1920, 0)：定位应相对该显示器原点居中。
         let (x, y) = calculate_panel_position(frame(1920.0, 0.0, 1920.0, 1080.0), 720.0, 480.0);
         assert_eq!(x, 1920.0 + (1920.0 - 720.0) / 2.0); // 1920 + 600
         assert_eq!(y, 1080.0 * 0.2); // 216.0
@@ -408,7 +386,6 @@ mod tests {
 
     #[test]
     fn negative_origin_monitor_centers_within_bounds() {
-        // 左侧扩展屏原点为负：居中应相对该屏原点（负坐标），并完整落在屏内。
         let (x, _) = calculate_panel_position(frame(-1920.0, 0.0, 1920.0, 1080.0), 720.0, 480.0);
         assert_eq!(x, -1920.0 + (1920.0 - 720.0) / 2.0); // -1920 + 600 = -1320
         assert!(x >= -1920.0);
@@ -417,7 +394,7 @@ mod tests {
 
     #[test]
     fn panel_wider_than_screen_left_aligns() {
-        // 面板比屏幕宽：max_x 退化为 min_x，应左对齐屏幕原点而非产生越界负值。
+        // max_x degrades to min_x, so the panel left-aligns instead of going negative.
         let (x, _) = calculate_panel_position(frame(0.0, 0.0, 600.0, 1080.0), 720.0, 480.0);
         assert_eq!(x, 0.0);
     }
@@ -434,7 +411,6 @@ mod tests {
 
     #[test]
     fn select_monitor_prefers_monitor_under_cursor() {
-        // 鼠标落在第二块屏内：忽略 primary，选包含鼠标的那块。
         let monitors = [
             monitor(0.0, 0.0, 1920.0, 1080.0, 1.0),
             monitor(1920.0, 0.0, 1920.0, 1080.0, 1.0),
@@ -447,7 +423,6 @@ mod tests {
 
     #[test]
     fn select_monitor_falls_back_to_primary_when_cursor_outside_all() {
-        // 鼠标在所有屏之外：回退到 primary（下标 1），而非第一块。
         let monitors = [
             monitor(0.0, 0.0, 1920.0, 1080.0, 1.0),
             monitor(1920.0, 0.0, 1920.0, 1080.0, 1.0),
@@ -458,7 +433,6 @@ mod tests {
 
     #[test]
     fn select_monitor_falls_back_to_first_when_no_primary() {
-        // 鼠标在所有屏之外且无 primary 信息：回退到第一块可用显示器。
         let monitors = [
             monitor(0.0, 0.0, 1920.0, 1080.0, 1.0),
             monitor(1920.0, 0.0, 1920.0, 1080.0, 1.0),
@@ -469,13 +443,11 @@ mod tests {
 
     #[test]
     fn select_monitor_returns_none_when_empty() {
-        // 无任何显示器：返回 None，由调用方给出虚拟矩形。
         assert!(select_monitor(&[], None, 0.0, 0.0).is_none());
     }
 
     #[test]
     fn select_monitor_converts_to_logical_with_scale() {
-        // Retina 屏（scale=2）：逻辑矩形与逻辑鼠标 x 应除以 scale。
         let monitors = [monitor(0.0, 0.0, 3840.0, 2160.0, 2.0)];
         let (frame, cursor_logical_x) =
             select_monitor(&monitors, Some(0), 1920.0, 1080.0).expect("a monitor");

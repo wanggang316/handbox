@@ -1,5 +1,5 @@
 /**
- * 供应商相关状态管理 - 使用 Svelte 5 runes
+ * Provider state - Svelte 5 runes.
  */
 
 import type {
@@ -16,10 +16,7 @@ import * as modelApi from "../api/model";
 import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriEnvironment, getTauriEnvironmentInfo } from "../utils/tauri";
 
-/**
- * 使用 Tauri 2 的 emit() API 向所有窗口广播事件
- * emit() 会自动将事件发送到所有窗口，无需手动遍历
- */
+/** Broadcast the providers-updated event to all windows via Tauri 2's emit() API. */
 async function emitProvidersUpdated(
   payload: Record<string, unknown>,
 ): Promise<void> {
@@ -41,7 +38,7 @@ async function emitProvidersUpdated(
       "[emitProvidersUpdated] Emitting providers:updated event with payload:",
       payload,
     );
-    // Tauri 2: emit() 自动广播到所有窗口
+    // Tauri 2: emit() broadcasts to all windows automatically.
     await emit("providers:updated", payload);
     console.log(
       "[emitProvidersUpdated] Event emitted successfully to all windows",
@@ -54,7 +51,7 @@ async function emitProvidersUpdated(
   }
 }
 
-// 供应商配置模板（从后端获取）
+// Provider config templates (fetched from the backend).
 export let providerConfigs = $state<{
   providers: ProviderConfig[];
   custom_providers: ProviderConfig[];
@@ -63,7 +60,6 @@ export let providerConfigs = $state<{
   custom_providers: [],
 });
 
-// 获取供应商配置信息的工具函数
 export function getProviderConfig(
   providerType: string,
 ): ProviderConfig | undefined {
@@ -73,17 +69,19 @@ export function getProviderConfig(
   ].find((t) => t.provider_type === providerType);
 }
 
-// 判断某供应商类型是否为自定义（openai-compatible / anthropic-compatible 等）。
-// 自定义端点不在 hand-ai 目录中，模型需手动添加。
+// Whether a provider type is custom (openai-compatible / anthropic-compatible,
+// etc.). Custom endpoints are not in the hand-ai catalog; models must be added
+// manually.
 export function isCustomProviderType(providerType: string): boolean {
   return providerConfigs.custom_providers.some(
     (t) => t.provider_type === providerType,
   );
 }
 
-// 供应商图标：统一使用 models.dev 的远程 SVG，按 provider_type 取，不再用本地图标。
-// models.dev 对任意 slug 都返回有效 SVG —— 已知 provider 给真 logo，未知 provider
-// 给通用占位图 —— 因此无需处理 404 / broken image。
+// Provider icons come from models.dev remote SVGs keyed by provider_type (no
+// local icons). models.dev returns a valid SVG for any slug — a real logo for
+// known providers, a generic placeholder for unknown ones — so no 404 /
+// broken-image handling is needed.
 export function providerLogoUrl(
   providerType: string | undefined,
 ): string | undefined {
@@ -91,16 +89,13 @@ export function providerLogoUrl(
   return `https://models.dev/logos/${providerType}.svg`;
 }
 
-// 获取供应商图标
 export function getProviderIcon(provider: Provider): string | undefined {
   return providerLogoUrl(provider.provider_type);
 }
 
-// 根据 providerId 获取供应商配置
 export function getProviderConfigById(
   providerId: string,
 ): ProviderConfig | undefined {
-  // 先从当前 provider 列表中查找对应的供应商
   const provider =
     providerState.providers.find((p) => p.id === providerId) ||
     providerState.providersWithModels.find((p) => p.id === providerId);
@@ -112,7 +107,6 @@ export function getProviderConfigById(
   return undefined;
 }
 
-// 根据 providerId 获取供应商图标
 export function getProviderIconById(providerId: string): string | undefined {
   const provider =
     providerState.providers.find((p) => p.id === providerId) ||
@@ -120,32 +114,28 @@ export function getProviderIconById(providerId: string): string | undefined {
   return providerLogoUrl(provider?.provider_type);
 }
 
-// 全局状态对象
 export const providerState = $state({
-  // 供应商列表
   providers: [] as Provider[],
 
-  // 当前选中的供应商（用于详情页面和编辑）
+  // Selected provider for the detail page.
   currentProvider: null as Provider | null,
 
-  // 正在编辑的供应商（用于模态框）
+  // Provider being edited in the modal.
   editingProvider: null as Provider | null,
 
-  // currentProvider的模型
+  // Models of the current provider.
   currentModels: [] as Model[],
 
-  // 带模型的供应商列表（用于聊天功能）
+  // Providers with their models (for chat features).
   providersWithModels: [] as ProviderWithModels[],
   providersWithModelsNeedRefresh: true,
 
-  // 加载状态
   isLoading: false,
   isLoadingWithModels: false,
 
-  // 获取模型列表状态
+  // Provider id whose model list is being fetched, or null.
   isFetchingModels: null as UUID | null,
 
-  // 错误状态
   error: null as string | null,
 });
 
@@ -170,12 +160,10 @@ function markProvidersWithModelsDirty(
 
 let providersUpdatedUnlisten: UnlistenFn | null = null;
 
-// 派生状态：已启用的供应商（函数形式）
 export function getEnabledProviders(): Provider[] {
   return providerState.providers.filter((p) => p.enabled);
 }
 
-// 派生状态：所有可用模型（带供应商信息）
 export function getAllModels(): ModelWithProvider[] {
   return providerState.providersWithModels.flatMap((provider) =>
     provider.models.map((model) => ({
@@ -186,12 +174,10 @@ export function getAllModels(): ModelWithProvider[] {
   );
 }
 
-// 派生状态：收藏模型
 export function getFavoriteModels(): ModelWithProvider[] {
   return getAllModels().filter((model) => model.favorite);
 }
 
-// 获取供应商下拉选项组
 export function getProviderDropdownOptions() {
   const preProviderOptions = providerConfigs.providers.map((provider) => ({
     value: provider.provider_type,
@@ -219,41 +205,25 @@ export function getProviderDropdownOptions() {
   ];
 }
 
-// 供应商状态管理辅助函数
 export const providerStateActions = {
-  /**
-   * 设置当前供应商（用于详情页面）
-   */
   setCurrentProvider(provider: Provider | null): void {
     providerState.currentProvider = provider;
   },
 
-  /**
-   * 根据ID设置当前供应商
-   */
   setCurrentProviderById(providerId: UUID): Provider | null {
     const provider = providerState.providers.find((p) => p.id === providerId);
     providerState.currentProvider = provider || null;
     return provider || null;
   },
 
-  /**
-   * 开始编辑供应商（用于模态框）
-   */
   startEditProvider(provider: Provider | null): void {
     providerState.editingProvider = provider;
   },
 
-  /**
-   * 结束编辑供应商
-   */
   endEditProvider(): void {
     providerState.editingProvider = null;
   },
 
-  /**
-   * 更新当前供应商信息（用于实时更新UI）
-   */
   updateCurrentProvider(updatedProvider: Provider): void {
     if (
       providerState.currentProvider &&
@@ -263,18 +233,13 @@ export const providerStateActions = {
     }
   },
 
-  /**
-   * 刷新当前供应商的详细信息（包括模型列表）
-   */
   async refreshCurrentProvider(): Promise<void> {
     if (providerState.currentProvider && providerState.currentProvider.id) {
       const providerId = providerState.currentProvider.id;
       try {
-        // 重新获取供应商信息
         const updatedProvider = await providerActions.getProvider(providerId);
         providerState.currentProvider = updatedProvider;
 
-        // 强制刷新模型列表
         await providerActions.fetchProviderModels(providerId, true);
       } catch (error) {
         console.error("Failed to refresh current provider:", error);
@@ -282,22 +247,13 @@ export const providerStateActions = {
     }
   },
 
-  /**
-   * 清除所有选中状态
-   */
   clearSelection(): void {
     providerState.currentProvider = null;
     providerState.editingProvider = null;
   },
 };
 
-/**
- * 供应商操作
- */
 export const providerActions = {
-  /**
-   * 加载供应商配置模板
-   */
   async loadProviderConfigs(): Promise<void> {
     try {
       const configs = await providerApi.getProviderConfigs();
@@ -305,13 +261,10 @@ export const providerActions = {
       providerConfigs.custom_providers = configs.custom_providers;
     } catch (error) {
       console.error("Failed to load provider templates:", error);
-      // 不抛出错误，因为这不应该阻止应用启动
+      // Do not rethrow — this must not block app startup.
     }
   },
 
-  /**
-   * 加载供应商列表
-   */
   async loadProviders(): Promise<void> {
     try {
       providerState.isLoading = true;
@@ -327,11 +280,9 @@ export const providerActions = {
   },
 
   /**
-   * 加载带模型的供应商列表（用于聊天功能）
-   */
-  /**
-   * 加载带模型的供应商列表
-   * @param refreshFromRemote 当为 true 时，会先从远程拉取最新模型并同步数据库；默认仅从本地数据库读取
+   * Load providers with their models.
+   * @param refreshFromRemote when true, pull the latest models from the remote
+   *   and sync the database first; by default read from the local database only.
    */
   async loadProvidersWithModels(refreshFromRemote = false): Promise<void> {
     try {
@@ -358,23 +309,16 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 获取单个供应商
-   */
   async getProvider(providerId: string): Promise<Provider> {
     const response = await providerApi.getProvider(providerId);
     return response;
   },
 
-  /**
-   * 创建供应商
-   */
   async createProvider(config: AddProviderRequest): Promise<Provider> {
     try {
       providerState.isLoading = true;
       const provider = await providerApi.createProvider(config);
 
-      // 添加到列表
       providerState.providers.push(provider);
       markProvidersWithModelsDirty("provider-created", {
         providerId: provider.id,
@@ -390,9 +334,6 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 更新供应商
-   */
   async updateProvider(
     providerId: UUID,
     config: Partial<AddProviderRequest>,
@@ -404,7 +345,6 @@ export const providerActions = {
         config,
       );
 
-      // 更新列表中的供应商
       const index = providerState.providers.findIndex(
         (p) => p.id === providerId,
       );
@@ -421,20 +361,15 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 删除供应商
-   */
   async deleteProvider(providerId: UUID): Promise<void> {
     try {
       providerState.isLoading = true;
       await providerApi.deleteProvider(providerId);
 
-      // 从列表中移除
       providerState.providers = providerState.providers.filter(
         (p) => p.id !== providerId,
       );
 
-      // 如果是当前选中的供应商，清空选择
       if (providerState.currentProvider?.id === providerId) {
         providerStateActions.clearSelection();
       }
@@ -448,9 +383,6 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 获取供应商模型列表
-   */
   async fetchProviderModels(
     providerId: UUID,
     refreshFromRemote = false,
@@ -462,7 +394,6 @@ export const providerActions = {
         refreshFromRemote,
       );
 
-      // 更新当前模型列表
       providerState.currentModels = models;
 
       const providersWithModelsIndex =
@@ -476,9 +407,8 @@ export const providerActions = {
         };
       }
 
-      // 移除了错误的标志设置
-      // 远程刷新后数据已经是最新的，不需要标记为需要刷新
-      // loadProvidersWithModels 成功后会自动设置 providersWithModelsNeedRefresh = false
+      // Intentionally no needsRefresh flag here: after a remote refresh the
+      // data is already current.
     } catch (error) {
       providerState.error =
         error instanceof Error ? error.message : "获取模型列表失败";
@@ -488,9 +418,7 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 为自定义供应商手动添加模型，并刷新该供应商的模型列表。
-   */
+  /** Manually add a model to a custom provider and refresh its model list. */
   async addModel(
     providerId: UUID,
     modelId: string,
@@ -498,9 +426,9 @@ export const providerActions = {
   ): Promise<void> {
     try {
       await modelApi.addModel(providerId, modelId, name);
-      // 刷新当前模型列表，让新模型出现
       await providerActions.fetchProviderModels(providerId, false);
-      // 标记带模型的供应商缓存需刷新，使聊天选择弹窗能看到新模型
+      // Mark the providers-with-models cache dirty so the chat model picker
+      // sees the new model.
       markProvidersWithModelsDirty("model-added", { providerId, modelId });
     } catch (error) {
       providerState.error =
@@ -509,9 +437,6 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 启用/禁用供应商
-   */
   async toggleProvider(providerId: UUID, enabled: boolean): Promise<void> {
     try {
       const updatedProvider = await providerApi.toggleProvider(
@@ -550,9 +475,6 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 启用/禁用模型
-   */
   async toggleModel(
     providerId: UUID,
     modelId: string,
@@ -561,7 +483,6 @@ export const providerActions = {
     try {
       await modelApi.toggleModel(providerId, modelId, enabled);
 
-      // 更新当前模型状态
       const index = providerState.currentModels.findIndex(
         (m) => m.id === modelId,
       );
@@ -602,9 +523,6 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 切换模型收藏状态
-   */
   async toggleModelFavorite(
     providerId: UUID,
     modelId: string,
@@ -614,7 +532,6 @@ export const providerActions = {
     try {
       await modelApi.toggleModelFavorite(providerId, modelId, favorite);
 
-      // 更新当前模型状态 (currentModels)
       const currentIndex = providerState.currentModels.findIndex(
         (m) => m.id === modelId,
       );
@@ -657,23 +574,14 @@ export const providerActions = {
     }
   },
 
-  /**
-   * 根据模型ID查找模型
-   */
   findModel(modelId: string): Model | undefined {
     return providerState.currentModels.find((m) => m.id === modelId);
   },
 
-  /**
-   * 清除错误状态
-   */
   clearError(): void {
     providerState.error = null;
   },
 
-  /**
-   * 重置所有状态
-   */
   reset(): void {
     providerState.providers = [];
     providerState.currentProvider = null;
@@ -686,15 +594,14 @@ export const providerActions = {
     providerState.error = null;
     providerState.providersWithModelsNeedRefresh = true;
 
-    // 重置模板
     providerConfigs.providers = [];
     providerConfigs.custom_providers = [];
   },
 };
 
 /**
- * 注册 providers:updated 事件监听器
- * 应该在组件 onMount 时调用，确保 Tauri 环境已准备好
+ * Register the providers:updated listener. Call from a component's onMount so
+ * the Tauri environment is ready.
  */
 export async function setupProvidersUpdatedListener(): Promise<void> {
   console.log("[setupProvidersUpdatedListener] Setting up listener...");
@@ -732,8 +639,8 @@ export async function setupProvidersUpdatedListener(): Promise<void> {
         "[providersUpdatedListener] providers:updated event received",
         event,
       );
-      // 仅标记需要刷新，不自动加载
-      // 让各个组件根据自己的需要在打开时检查并加载
+      // Only mark for refresh, no auto-load; components check and load on
+      // open as they need.
       providerState.providersWithModelsNeedRefresh = true;
       console.log(
         "[providersUpdatedListener] Set providersWithModelsNeedRefresh to true",
@@ -750,9 +657,6 @@ export async function setupProvidersUpdatedListener(): Promise<void> {
   }
 }
 
-/**
- * 清理事件监听器
- */
 export function cleanupProvidersUpdatedListener(): void {
   if (providersUpdatedUnlisten) {
     console.log("[cleanupProvidersUpdatedListener] Cleaning up listener");

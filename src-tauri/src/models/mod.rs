@@ -1,5 +1,3 @@
-// 数据模型模块
-
 pub mod error;
 pub mod llm_config;
 pub mod llm_types;
@@ -9,7 +7,6 @@ pub mod provider;
 pub mod settings;
 pub mod user;
 
-// 重新导出常用类型
 pub use error::*;
 pub use llm_config::*;
 pub use mcp::*;

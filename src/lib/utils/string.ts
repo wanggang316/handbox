@@ -1,18 +1,8 @@
-/**
- * 字符串处理工具函数
- */
-
-/**
- * 首字母大写
- */
 export function capitalize(str: string): string {
   if (!str) return str;
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-/**
- * 转换为驼峰命名
- */
 export function toCamelCase(str: string): string {
   return str
     .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => {
@@ -21,9 +11,6 @@ export function toCamelCase(str: string): string {
     .replace(/\s+/g, '');
 }
 
-/**
- * 转换为短横线命名
- */
 export function toKebabCase(str: string): string {
   return str
     .replace(/([a-z])([A-Z])/g, '$1-$2')
@@ -31,9 +18,6 @@ export function toKebabCase(str: string): string {
     .toLowerCase();
 }
 
-/**
- * 转换为下划线命名
- */
 export function toSnakeCase(str: string): string {
   return str
     .replace(/([a-z])([A-Z])/g, '$1_$2')
@@ -41,25 +25,16 @@ export function toSnakeCase(str: string): string {
     .toLowerCase();
 }
 
-/**
- * 移除 HTML 标签
- */
 export function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '');
 }
 
-/**
- * 转义 HTML
- */
 export function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
 
-/**
- * 解析查询参数
- */
 export function parseQueryString(queryString: string): Record<string, string> {
   const params: Record<string, string> = {};
   const urlParams = new URLSearchParams(queryString);
@@ -71,9 +46,6 @@ export function parseQueryString(queryString: string): Record<string, string> {
   return params;
 }
 
-/**
- * 生成随机字符串
- */
 export function generateRandomString(length: number): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
@@ -85,9 +57,6 @@ export function generateRandomString(length: number): string {
   return result;
 }
 
-/**
- * 高亮文本中的关键词
- */
 export function highlightKeywords(text: string, keywords: string[], className = 'highlight'): string {
   if (!keywords.length) return text;
   
@@ -95,16 +64,11 @@ export function highlightKeywords(text: string, keywords: string[], className = 
   return text.replace(regex, `<span class="${className}">$1</span>`);
 }
 
-/**
- * 转义正则表达式特殊字符
- */
 function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * 计算字符串相似度 (Levenshtein Distance)
- */
+/** Normalized similarity in [0, 1] based on Levenshtein distance. */
 export function calculateSimilarity(str1: string, str2: string): number {
   const matrix: number[][] = [];
   const len1 = str1.length;

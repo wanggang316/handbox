@@ -23,7 +23,7 @@
   import Tabs from "$lib/components/ui/Tabs.svelte";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
-  // 当前激活的标签页：Agents / GenUI。返回链接通过 ?tab=genui 直接定位到 GenUI 列表。
+  // Back links can deep-link the GenUI tab via ?tab=genui
   let activeTab = $state<"agents" | "genui">(
     $page.url.searchParams.get("tab") === "genui" ? "genui" : "agents"
   );
@@ -36,11 +36,9 @@
   let showDeleteConfirm = $state(false);
   let selectedAgent = $state<Agent | null>(null);
 
-  // GenUI 删除确认
   let showGenuiDeleteConfirm = $state(false);
   let selectedGenui = $state<GenUi | null>(null);
 
-  // 创建 / 编辑走二级页（不再使用 Modal）。
   function openCreate() {
     goto("/agents/new");
   }
@@ -69,11 +67,11 @@
   async function handleUseAgent(agent: Agent) {
     if (!agent.id) return;
     try {
-      // 从 AgentDefinition 实例化统一的 Agent Session（能力集 + 工作目录策略由后端裁决）
+      // Instantiate a session from the definition; the backend decides
+      // capabilities and working-dir policy.
       const session = await agentSessionActions.createSessionFromDefinition(
         agent.id,
       );
-      // 跳转到统一的 Agent 会话页
       goto(`/agent?id=${session.id}`);
     } catch (error) {
       console.error("Failed to create session from agent:", error);
@@ -82,7 +80,8 @@
 
   async function handleCloneAgent(agent: Agent) {
     try {
-      // 内置 Agent 可被克隆为自定义 Agent；create 不接受能力字段，需逐项写入。
+      // Builtin agents can be cloned into custom ones; create doesn't accept
+      // capability fields, so write them one by one afterwards.
       const newAgent = await agentActions.createAgent({
         name: `${agent.name} 副本`,
         temperature: agent.temperature,
@@ -152,7 +151,6 @@
     return genuiState.genuis.find((g) => g.id === agent.genuiId)?.name ?? null;
   }
 
-  // ── GenUI 标签页操作 ──────────────────────────────────────────────────────
   function openGenuiEditor(genui: GenUi) {
     goto(`/genui/${genui.id}`);
   }
@@ -172,7 +170,7 @@
       await genuiActions.deleteGenui(selectedGenui.id);
       showGenuiDeleteConfirm = false;
       selectedGenui = null;
-      // 关联可能被后端清空，刷新 Agent 列表以反映最新状态
+      // The backend may have cleared agent associations; refresh the list
       await agentActions.loadAgents();
     } catch (error) {
       console.error("Failed to delete GenUI:", error);
@@ -197,7 +195,7 @@
 
   <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
     <div class="mx-auto w-full max-w-3xl">
-      <!-- 页头随内容滚动（Codex 式），顶部只固定 Tabs -->
+      <!-- Header scrolls with the content; only the Tabs stay fixed at top -->
       {#if activeTab === "agents"}
         <div class="pb-5 pt-6">
           <PageHeader
@@ -238,8 +236,8 @@
         </div>
       {/if}
     {#if activeTab === "agents"}
-      <!-- Spinner 仅在冷启动（列表为空）时顶替内容；已有缓存则立即渲染、后台刷新
-           不 blank，避免每次导航都闪一下 spinner（感知为切换延迟）。 -->
+      <!-- Spinner replaces content only on cold start (empty list); with cache,
+           render immediately and refresh in background to avoid a spinner flash. -->
       {#if agentState.isLoading && agentState.agents.length === 0}
         <div class="flex items-center justify-center h-full">
           <Spinner size={28} />
@@ -253,7 +251,6 @@
           <p class="text-sm mt-2">{t("agent.manage.emptyHint")}</p>
         </div>
       {:else}
-        <!-- 列表：一行一个 Agent（图标 + 名称/描述 + 徽标 + 日期 + hover 操作） -->
         <div
           class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-panel)]"
         >
@@ -289,7 +286,6 @@
                   {/if}
                 </div>
               </div>
-              <!-- 操作：hover / 键盘聚焦时显现 -->
               <div
                 class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
               >
@@ -329,7 +325,6 @@
         </div>
       {/if}
     {:else}
-      <!-- GenUI 标签页 -->
       {#if genuiState.isLoading}
         <div class="flex items-center justify-center h-full">
           <Spinner size={28} />
@@ -343,7 +338,6 @@
           <p class="text-sm mt-2">点击右上角「新建 GenUI」创建第一个模板</p>
         </div>
       {:else}
-        <!-- 列表：一行一个 GenUI（图标 + 名称 + hover 操作），与 Agents 列表一致 -->
         <div
           class="flex flex-col divide-y divide-[var(--hairline)] overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--bg-panel)]"
         >
@@ -361,7 +355,6 @@
                   {genui.name}
                 </h3>
               </div>
-              <!-- 操作：hover / 键盘聚焦时显现 -->
               <div
                 class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
               >
@@ -389,7 +382,6 @@
   </div>
 </div>
 
-<!-- 删除 Agent 确认框 -->
 <ConfirmModal
   title={t("agent.manage.deleteTitle")}
   message={t("agent.manage.deleteConfirm")}
@@ -400,7 +392,6 @@
   onConfirm={handleDelete}
 />
 
-<!-- 删除 GenUI 确认框 -->
 <ConfirmModal
   title="删除 GenUI"
   message="确认要删除这份 GenUI 吗？引用它的 Agent 将自动解除关联。此操作不可撤销。"

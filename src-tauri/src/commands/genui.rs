@@ -1,11 +1,8 @@
-// GenUI 相关 IPC 命令
-
 use crate::models::AppError;
 use crate::services::GenUiService;
 use crate::storage::types::{CreateGenUiRequest, GenUi, UpdateGenUiRequest, UUID};
 use tauri::State;
 
-/// 创建新的 GenUI
 #[tauri::command]
 pub async fn genui_create(
     request: CreateGenUiRequest,
@@ -14,7 +11,6 @@ pub async fn genui_create(
     genui_service.create_genui(request.name, request.spec).await
 }
 
-/// 获取 GenUI 列表
 #[tauri::command]
 pub async fn genui_list(
     limit: Option<i32>,
@@ -24,7 +20,6 @@ pub async fn genui_list(
     genui_service.list_genui(limit, offset).await
 }
 
-/// 获取 GenUI 详情
 #[tauri::command]
 pub async fn genui_get(
     genui_id: UUID,
@@ -33,7 +28,6 @@ pub async fn genui_get(
     genui_service.get_genui(genui_id).await
 }
 
-/// 更新 GenUI（名称 / spec）
 #[tauri::command]
 pub async fn genui_update(
     genui_id: UUID,
@@ -45,7 +39,6 @@ pub async fn genui_update(
         .await
 }
 
-/// 删除 GenUI
 #[tauri::command]
 pub async fn genui_delete(
     genui_id: UUID,

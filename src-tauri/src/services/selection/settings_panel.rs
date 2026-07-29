@@ -1,5 +1,6 @@
-// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
-// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+// The panel_event! DSL requires an explicit `-> ()` (Obj-C void delegate), which
+// trips clippy::unused_unit inside the macro expansion; only a module-level allow
+// reaches macro-generated code.
 #![allow(clippy::unused_unit)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,9 +11,8 @@ use tauri_nspanel::{
     tauri_panel, CollectionBehavior, PanelLevel, StyleMask, TrackingAreaOptions, WebviewWindowExt
 };
 
-/// 跟踪设置面板是否可见
+/// Read from the mouse-hook thread, so it must stay lock-free.
 static SETTINGS_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
-/// 跟踪鼠标是否在面板内部
 static MOUSE_INSIDE_PANEL: AtomicBool = AtomicBool::new(false);
 
 const PANEL_LABEL: &str = "selection_settings";
@@ -108,7 +108,6 @@ pub fn become_key_window(handle: &AppHandle) {
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
             if let Ok(panel) = window.to_panel::<SelectionSettingsPanel>() {
                 panel.make_key_and_order_front();
-                // panel.show_and_make_key();
             } else {
                 let _ = window.set_focus();
             }

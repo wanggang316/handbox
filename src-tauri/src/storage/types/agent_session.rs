@@ -2,17 +2,17 @@ use super::common::{Timestamp, UUID};
 use super::mcp::McpServerConfig;
 use serde::{Deserialize, Serialize};
 
-/// Agent Session 实体 - Agent 模式下的会话实例
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSession {
     pub id: UUID,
     pub name: String,
-    /// 所属 Agent Project（可选）。仅在创建时写入，之后不可经 update 改写。
+    /// Owning Agent Project. Written only at creation; never changed via update.
     pub project_id: Option<UUID>,
-    /// 实例化此会话的 AgentDefinition id（可选）。`create_session_from_definition`
-    /// 写入回指；直接经 `create_session` 创建或旧会话为 `None`。与 `project_id`
-    /// 同为创建时一次性写入，generic update 路径绝不改写。
+    /// AgentDefinition this session was instantiated from (set by
+    /// `create_session_from_definition`; `None` for direct `create_session` or
+    /// legacy sessions). Creation-only, like `project_id`: the generic update
+    /// path never writes it.
     pub agent_definition_id: Option<UUID>,
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
@@ -31,7 +31,7 @@ pub struct AgentSession {
     pub updated_at: Timestamp,
 }
 
-/// Agent Session 消息 - payload 存储序列化后的 hand-agent Message
+/// `payload` stores a serialized hand-agent Message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionMessage {
@@ -43,16 +43,16 @@ pub struct AgentSessionMessage {
     pub created_at: Timestamp,
 }
 
-/// 创建 Agent Session 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentSessionRequest {
     pub name: String,
-    /// 可选：挂靠到某个 Agent Project。提供时 working_dir 取 project.path
-    /// （覆盖请求中的 working_dir），项目不存在 / 目录已失效则拒绝创建。
+    /// Optional Agent Project to attach to. When set, working_dir comes from
+    /// project.path (overriding the request's working_dir); creation is
+    /// rejected if the project is missing or its directory is gone.
     pub project_id: Option<UUID>,
-    /// 可选：实例化来源 AgentDefinition id。由 `create_session_from_definition`
-    /// 填充；直接调 `create_session` 的前端路径留空。
+    /// Source AgentDefinition id, filled by `create_session_from_definition`;
+    /// frontend paths calling `create_session` directly leave it empty.
     pub agent_definition_id: Option<UUID>,
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
@@ -66,17 +66,19 @@ pub struct CreateAgentSessionRequest {
     pub tool_execution_mode: Option<String>,
 }
 
-/// 从 AgentDefinition 实例化会话的请求。
+/// Instantiates a session from an AgentDefinition.
 ///
-/// definition 提供能力集（builtin_tools / mcp_servers）与默认参数（model /
-/// provider / system_prompt / sampling / thinking_level / tool_execution_mode）；
-/// 本请求只携带实例化时才确定的覆盖项。`Default` 让前端只填关心的字段。
+/// The definition supplies the capability set (builtin_tools / mcp_servers)
+/// and defaults (model / provider / system_prompt / sampling / thinking_level /
+/// tool_execution_mode); this request only carries overrides decided at
+/// instantiation time. `Default` lets the frontend fill just what it needs.
 ///
-/// - `name`：留空则取 definition.name。
-/// - `project_id` / `working_dir`：受 definition.working_dir_mode 约束
-///   （`required` 必须二选一、`none` 一律忽略、`optional` 有则用无则空）。
-/// - `model_id` / `provider_id`：覆盖 definition 的同名默认（内置 chat 定义
-///   provider 为空，必须在此选定）。
+/// - `name`: empty falls back to definition.name.
+/// - `project_id` / `working_dir`: constrained by definition.working_dir_mode
+///   (`required`: exactly one must be given; `none`: always ignored;
+///   `optional`: used when present).
+/// - `model_id` / `provider_id`: override the definition defaults (the builtin
+///   chat definition has no provider, so one must be picked here).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstantiateAgentSessionRequest {
@@ -87,7 +89,6 @@ pub struct InstantiateAgentSessionRequest {
     pub provider_id: Option<String>,
 }
 
-/// 更新 Agent Session 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAgentSessionRequest {
@@ -137,8 +138,7 @@ mod tests {
         assert!(json.contains("\"projectId\""));
         assert!(json.contains("\"agentDefinitionId\""));
         assert!(json.contains("\"enabledTools\""));
-        // VAL-DEPRECATE-007 (inverted from VAL-PERSIST-010): the deprecated
-        // enabledSkills key must be ABSENT from the wire JSON.
+        // The deprecated enabledSkills key must be ABSENT from the wire JSON.
         assert!(!json.contains("\"enabledSkills\""));
         assert!(json.contains("\"messageCount\""));
         assert!(json.contains("\"lastMessageAt\""));
@@ -152,10 +152,10 @@ mod tests {
         assert_eq!(session.message_count, deserialized.message_count);
     }
 
-    /// VAL-GROUP-003 wire shape: a messageless session must serialize
-    /// `lastMessageAt` as JSON null — never 0. A literal 0 short-circuits the
-    /// frontend's `lastMessageAt ?? createdAt` coalescing and renders the
-    /// session as "56 years ago", sinking it to the bottom of the list.
+    /// A messageless session must serialize `lastMessageAt` as JSON null — never 0.
+    /// A literal 0 short-circuits the frontend's `lastMessageAt ?? createdAt`
+    /// coalescing and renders the session as a 1970 timestamp, sinking it to the
+    /// bottom of the list.
     #[test]
     fn agent_session_messageless_serializes_last_message_at_as_null() {
         let session = AgentSession {
@@ -191,8 +191,7 @@ mod tests {
         assert!(json.contains("\"modelId\":null"));
         assert!(json.contains("\"projectId\":null"));
         assert!(json.contains("\"workingDir\":null"));
-        // VAL-DEPRECATE-007 (inverted from VAL-PERSIST-010): no enabledSkills
-        // key on the wire at all — not even an empty [].
+        // No enabledSkills key on the wire at all — not even an empty [].
         assert!(!json.contains("\"enabledSkills\""));
 
         let deserialized: AgentSession = serde_json::from_str(&json).expect("deserialize");
@@ -233,9 +232,8 @@ mod tests {
         assert!(req.enabled_tools.is_none());
     }
 
-    /// VAL-DEPRECATE-008: a create/update request still carrying the deprecated
-    /// enabledSkills key deserializes fine — serde ignores unknown keys, so old
-    /// frontends keep working.
+    /// A create/update request still carrying the deprecated enabledSkills key
+    /// deserializes fine — serde ignores unknown keys, so old frontends keep working.
     #[test]
     fn requests_ignore_deprecated_enabled_skills_key() {
         let json = r#"{"name": "Test Session", "enabledSkills": ["pdf", "csv"]}"#;

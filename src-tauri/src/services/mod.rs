@@ -1,4 +1,3 @@
-// 服务层模块
 pub mod agent;
 pub mod agent_jsonl_store;
 pub mod agent_migration;
@@ -30,7 +29,6 @@ pub mod skills;
 pub mod storage;
 pub mod user_session;
 
-// 重新导出服务
 pub use crate::storage::Database;
 pub use agent::{AgentParameter, AgentService};
 pub use agent_migration::{

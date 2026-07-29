@@ -30,17 +30,14 @@
   let showEditModal = $state(false);
   let confirmModalRef: any;
 
-  // 记录每个项目的展开状态
   let expandedTools = $state<Record<string, boolean>>({});
   let expandedPrompts = $state<Record<string, boolean>>({});
   let expandedResources = $state<Record<string, boolean>>({});
 
-  // 获取当前服务器
   const server = $derived<McpServer | undefined>(
     mcpState.servers.find((s) => s.id === serverId)
   );
 
-  // 表单数据
   let formData = $state({
     enabled: false,
   });
@@ -71,7 +68,6 @@
     }
   }
 
-  // 监听服务器变化，更新表单数据
   $effect(() => {
     if (server) {
       formData = {
@@ -83,7 +79,7 @@
   async function handleToggle(enabled: boolean) {
     if (!server) return;
 
-    // 乐观更新UI
+    // Optimistic update; roll back on failure
     const previousState = formData.enabled;
     formData.enabled = enabled;
 
@@ -95,7 +91,6 @@
       );
     } catch (error) {
       console.error("Failed to toggle MCP server:", error);
-      // 发生错误时回滚UI状态
       formData.enabled = previousState;
     }
   }
@@ -130,7 +125,6 @@
     if (data.mode === "update" && server) {
       await mcpActions.updateServer(server.id, data.data);
       console.log("MCP server updated successfully");
-      // 刷新服务器数据
       await mcpActions.loadServers(true);
     } else if (data.mode === "create") {
       await mcpActions.createServer(data.data);
@@ -153,7 +147,7 @@
       goto("/settings/mcp");
     } catch (error) {
       console.error("Failed to delete MCP server:", error);
-      // 删除失败时触发关闭动画
+      // Delete failed: close the dialog with its animation
       confirmModalRef?.modalRef?.handleClose();
     }
   }
@@ -198,10 +192,9 @@
         enabled,
       });
 
-      // 强制刷新服务器列表，确保列表页和详情页数据同步
+      // Force-refresh the server list to keep list and detail pages in sync
       await mcpActions.loadServers(true);
 
-      // 通知其他窗口 MCP 工具已更新
       mcpActions.notifyMcpServersUpdated("mcp-tool-toggled", {
         serverId: server.id,
         toolName,
@@ -213,9 +206,7 @@
   }
 </script>
 
-<!-- 页面布局：与 provider 详情页面一致 -->
 <div class="flex flex-col h-screen">
-  <!-- 粘性导航栏 -->
   <header class="text-base-content py-2 px-4 flex-shrink-0">
     <Button
       variant="secondary"
@@ -229,11 +220,10 @@
     </Button>
   </header>
 
-  <!-- 主要内容区域 -->
-  <!-- 详情页正文：连接错误、工具入参名、资源 URI 都是用户会拷走排查的数据。 -->
+  <!-- Connection errors, tool argument names and resource URIs are all data
+       users copy out to debug, so this pane is selectable. -->
   <main class="flex-grow overflow-y-auto p-6 pr-8 select-text">
     {#if server}
-      <!-- 基本信息卡片 -->
       <TableGroup>
         <div class="px-6 py-4">
           <div class="flex items-center justify-between">
@@ -272,7 +262,6 @@
         </div>
       </TableGroup>
 
-      <!-- 同步时间信息 -->
       {#if server.lastSyncAt}
         <div class="px-6 mt-2 mb-4 flex justify-end">
           <span class="text-xs text-base-content/60">
@@ -281,7 +270,6 @@
         </div>
       {/if}
 
-      <!-- 错误信息展示 -->
       {#if server.status === "error" && server.lastError}
         <div class="mt-4 p-4 rounded-lg bg-error/10 border border-error/20">
           <div
@@ -292,7 +280,6 @@
         </div>
       {/if}
 
-      <!-- Tab 导航（仅在非错误状态时显示） -->
       {#if server.status !== "error"}
         <Tabs
           value={activeTab}
@@ -306,7 +293,6 @@
           }}
         />
 
-        <!-- Tab 内容 -->
         {#if activeTab === "tools"}
           {#if server.tools.length === 0}
             <div class="text-center text-sm py-8 text-base-content/70">
@@ -330,7 +316,7 @@
                         onChange={(enabled) =>
                           handleToolToggle(tool.name, enabled)}
                       />
-                      <!-- 工具开关不受服务器启用状态影响，可以随时配置 -->
+                      <!-- Tool toggles stay configurable regardless of the server's enabled state -->
                     </div>
 
                     {#if tool.inputSchema && typeof tool.inputSchema === "object" && "properties" in tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0}
@@ -513,7 +499,6 @@
   </main>
 </div>
 
-<!-- 编辑弹窗 -->
 <McpServerFormModal
   open={showEditModal}
   {server}
@@ -521,7 +506,6 @@
   onSave={handleSaveServer}
 />
 
-<!-- 删除确认弹窗 -->
 <ConfirmModal
   bind:this={confirmModalRef}
   open={showDeleteConfirm}

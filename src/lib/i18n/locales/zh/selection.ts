@@ -1,16 +1,16 @@
 /**
- * selection 命名空间文案（由迁移子代理填充；zh 为权威）。
+ * selection namespace strings (zh is canonical).
  */
 export const selectionZh = {
-  // settings 面板
+  // settings panel
   "selection.hideUntilRestart": "隐藏至重启此应用",
   "selection.disableForApp": "在此应用禁用",
   "selection.disableGlobal": "全局禁用",
-  // 模式
+  // modes
   "selection.modeShow": "显示",
   "selection.modeTranslate": "翻译",
   "selection.modeAi": "问 AI",
-  // content 面板
+  // content panel
   "selection.unpin": "取消置顶",
   "selection.pin": "置顶",
   "selection.translating": "翻译中...",

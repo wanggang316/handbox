@@ -16,17 +16,15 @@
   import { showAppError } from "$lib/utils";
   import { t } from "$lib/i18n";
 
-  // 使用 $props() 替代 export let
   const { open = false, onClose } = $props<{
     open?: boolean;
     onClose?: () => void;
   }>();
   
-  // 使用统一的状态管理
   const editProvider = $derived(providerState.editingProvider);
   const isEditMode = $derived(editProvider !== null);
 
-  // 原始数据，用于检测变化
+  // Baseline for change detection in edit mode.
   let originalData = $state({
     name: "",
     provider_type: "",
@@ -34,7 +32,6 @@
     api_key: "",
   });
 
-  // 使用 $state 定义响应式状态
   let formData = $state({
     name: "",
     provider_type: "openai",
@@ -45,31 +42,27 @@
   let isLoading = $state(false);
   let errors = $state<Record<string, string>>({});
 
-  // 检测是否可以保存
   const canSave = $derived(
     !isEditMode 
-      ? // 创建模式：所有必填字段都要有值
+      ? // create mode: all required fields present
         !!(formData.name?.trim() && 
            formData.provider_type?.trim() && 
            formData.base_url?.trim() && 
            formData.api_key?.trim())
-      : // 编辑模式：至少有一个字段发生变化
+      : // edit mode: at least one field changed
         (formData.name !== originalData.name ||
          formData.provider_type !== originalData.provider_type ||
          formData.base_url !== originalData.base_url ||
          formData.api_key !== originalData.api_key)
   );
   
-  // Modal 引用
   let modalRef: Modal;
 
-  // 使用统一的工具函数获取供应商分组，并扁平化为选项列表
   const providerOptions = $derived(() => {
     const groups = getProviderDropdownOptions();
     return groups.flatMap(group => group.options);
   });
 
-  // 简化的错误处理，使用后端标准化错误码
   function handleError(error: unknown) {
     console.error("Operation failed:", error);
     showAppError(error, {
@@ -103,7 +96,6 @@
   
   function onModalClose() {
     providerStateActions.endEditProvider();
-    // 通知父组件关闭模态框
     onClose?.();
   }
 
@@ -124,20 +116,17 @@
       };
 
       if (isEditMode && editProvider && editProvider.id) {
-        // 编辑模式：更新供应商
         console.log("Updating provider with config:", config);
         await providerActions.updateProvider(editProvider.id, config);
         console.log("Provider updated successfully");
         
-        // 编辑模式：刷新当前供应商的详细信息（包括可能更新的模型列表）
+        // Refresh the current provider's details (the model list may have changed).
         await providerStateActions.refreshCurrentProvider();
       } else {
-        // 创建模式：创建新供应商
         console.log("Creating provider with config:", config);
         const newProvider = await providerActions.createProvider(config);
         console.log("Provider created successfully:", newProvider);
       }
-      // 成功后显示成功提示并关闭
       toastActions.success(
         isEditMode ? t("provider.updateSuccess") : t("provider.createSuccess")
       );
@@ -152,14 +141,14 @@
   function selectProviderType(type: string) {
     formData.provider_type = type;
     
-    // 如果选择了预定义供应商，自动填充名称
+    // Predefined provider types auto-fill name and base URL.
     const selectedProviderConfig = getProviderConfig(type);
     if (selectedProviderConfig) {
       formData.name = selectedProviderConfig.default_name;
       formData.base_url = selectedProviderConfig.default_base_url;
     } else {
-      // 如果没有找到配置，清空名称让用户自己填写
-      // 获取所有配置的默认名称
+      // Unknown type: clear the name only if it is empty or still a preset
+      // default, preserving a user-typed custom name.
       const allGroups = getProviderDropdownOptions();
       const currentConfigNames = allGroups.flatMap(group => group.options.map(opt => opt.label));
       if (formData.name === '' || currentConfigNames.includes(formData.name)) {
@@ -169,13 +158,10 @@
     }
   }
 
-  // 使用 $effect 替代 $: 响应式语句
-  // 当模态框打开时初始化表单数据
   $effect(() => {
     if (open) {
       initializeFormData();
     } else {
-      // 当模态框关闭时重置表单数据和状态
       formData = {
         name: "",
         provider_type: "openai",
@@ -183,15 +169,12 @@
         api_key: "",
       };
       errors = {};
-      // 确保结束编辑状态
       providerStateActions.endEditProvider();
     }
   });
   
-  // 抽取初始化逻辑为单独的函数
   function initializeFormData() {
     if (isEditMode && editProvider) {
-      // 编辑模式：记录原始数据
       originalData = {
         name: editProvider.name,
         provider_type: editProvider.provider_type,
@@ -206,13 +189,11 @@
       };
       console.log("editProvider", editProvider);
     } else if (!isEditMode && formData.provider_type === "openai" && formData.name === "") {
-      // 创建模式的默认初始化
       const defaultProviderConfig = getProviderConfig("openai");
       if (defaultProviderConfig) {
         formData.name = defaultProviderConfig.default_name;
         formData.base_url = defaultProviderConfig.default_base_url;
       }
-      // 创建模式重置原始数据
       originalData = {
         name: "",
         provider_type: "openai",
@@ -224,9 +205,8 @@
 </script>
 
 <Modal bind:this={modalRef} {open} onClose={onModalClose} showCloseButton={false}>
-  <!-- 弹窗内容容器：surface 与边框由 Modal.svelte 统一提供 -->
+  <!-- Surface and border are provided by Modal.svelte -->
   <div class="w-md max-w-md max-h-[80vh] flex flex-col">
-    <!-- 头部 -->
     <div class="flex items-center justify-between px-5 py-3.5">
       <h2 class="text-base font-medium tracking-tight text-base-content">{isEditMode ? t("provider.editProviderTitle") : t("provider.addProviderTitle")}</h2>
     </div>
@@ -247,7 +227,6 @@
       </TableGroup>
     </div>
 
-    <!-- 底部按钮：CTA 走默认 primary（薰衣草紫），取消用 surface-2 lift -->
     <div class="flex items-center justify-end gap-3 px-5 py-3">
       <Button
         class="w-18"

@@ -3,15 +3,15 @@
 
   const FORMFIELD_KEY = Symbol("formfield");
 
-  // 由 FormField 提供、供内部表单控件（Input / Textarea / Select / Checkbox …）读取，
-  // 从而共享同一 id（label 关联）、aria-describedby（error / hint）与 error 态。
+  // Provided by FormField so inner controls (Input / Textarea / Select / Checkbox ...)
+  // share one id (label association), aria-describedby (error / hint), and error state.
   export interface FormFieldContext {
     readonly id: string;
     readonly describedby: string | undefined;
     readonly invalid: boolean;
   }
 
-  // 控件在 FormField 内时返回 context，否则 undefined（独立使用，行为不变）。
+  // Returns the context inside a FormField, undefined when the control is used standalone.
   export function getFormField(): FormFieldContext | undefined {
     return getContext(FORMFIELD_KEY);
   }
@@ -25,7 +25,7 @@
     required?: boolean;
     error?: string;
     hint?: string;
-    // 不传则自动生成；用于把 label[for] 关联到内部控件。
+    // Auto-generated when omitted; links label[for] to the inner control.
     id?: string;
     children: Snippet;
   }
@@ -44,7 +44,7 @@
   const errorId = $derived(`${fieldId}-error`);
   const hintId = $derived(`${fieldId}-hint`);
 
-  // getter 让 describedby / invalid 随 error / hint 响应式更新。
+  // Getters keep describedby / invalid reactive to error / hint changes.
   setContext<FormFieldContext>(FORMFIELD_KEY, {
     get id() {
       return fieldId;

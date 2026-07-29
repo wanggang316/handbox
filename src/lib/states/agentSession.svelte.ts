@@ -1,9 +1,9 @@
 /**
- * Agent Session 状态管理 - Svelte 5 runes
+ * Agent session state - Svelte 5 runes.
  *
- * 遵循本项目 store 约定：模块级 `$state` 变量 + getter/setter 暴露的
- * 状态对象 + 一个动作对象。仅负责 session 的 CRUD 与列表交互，
- * run / timeline 由后续 feature 承担。
+ * Follows the project's store conventions: module-level `$state` variables +
+ * a getter/setter state object + one actions object. Handles only session
+ * CRUD and list interactions; run / timeline state lives in agentRun.
  */
 
 import type {
@@ -18,20 +18,20 @@ import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
 import { agentState } from "./agent.svelte";
 
-// ============================================
-// Agent Session 状态 - 使用 Svelte 5 runes
-// ============================================
 let sessions = $state<AgentSession[]>([]);
 let currentSession = $state<AgentSession | null>(null);
 let isLoading = $state(false);
 
-// 已自动生成过标题的会话 id（每会话仅自动生成一次；失败会移除以允许重试）。
+// Session ids whose title was auto-generated (once per session; removed on
+// failure to allow a retry).
 const autoTitledSessions = new Set<string>();
 
 /**
- * 会话首个 run 结束后按需自动生成标题。仅当：这是首个 run、尚未自动生成过、且当前
- * 名称仍等于来源 Agent 的默认名（说明用户未手动命名）时触发一次。后台进行、失败静默
- * ——用户始终可通过右键菜单手动生成。这样绝不覆盖用户手动设置的标题。
+ * Auto-generate a title after a session's first run, only when: it is the
+ * first run, no auto-generation happened yet, and the current name still
+ * equals the source agent's default name (i.e. the user has not renamed it).
+ * Runs in the background and fails silently — the user can always generate
+ * manually via the context menu. A manually set title is never overwritten.
  */
 async function maybeAutoGenerateTitle(
   id: string,
@@ -43,7 +43,8 @@ async function maybeAutoGenerateTitle(
   const agent = agentDefinitionId
     ? agentState.agents.find((a) => a.id === agentDefinitionId)
     : undefined;
-  // 无法解析来源 Agent（无 / 悬挂 agentDefinitionId），或名称已非默认名：不自动改名。
+  // Source agent unresolvable (missing / dangling agentDefinitionId), or the
+  // name is no longer the default: do not auto-rename.
   if (!agent || agent.name !== currentName) return;
 
   autoTitledSessions.add(id);
@@ -79,9 +80,7 @@ export const agentSessionState = {
 };
 
 export const agentSessionActions = {
-  /**
-   * 加载 Agent Session 列表（后端已按 updatedAt DESC 返回，原样保留顺序）。
-   */
+  /** Load the session list (backend returns updatedAt DESC; order kept as-is). */
   async loadSessions(): Promise<void> {
     try {
       isLoading = true;
@@ -94,9 +93,7 @@ export const agentSessionActions = {
     }
   },
 
-  /**
-   * 创建新的 Agent Session：插入列表顶部并设为当前。
-   */
+  /** Create a new agent session: insert at the top and set as current. */
   async createSession(
     config: CreateAgentSessionRequest,
   ): Promise<AgentSession> {
@@ -116,11 +113,12 @@ export const agentSessionActions = {
   },
 
   /**
-   * 从 AgentDefinition 实例化会话：插入列表顶部并设为当前。
+   * Instantiate a session from an AgentDefinition: insert at the top and set
+   * as current.
    *
-   * 统一的「用此 Agent」入口，取代 chat 侧的 `createSessionFromAgent`。
-   * 能力集快照与工作目录策略由后端按 definition 裁决；`overrides` 仅覆盖
-   * name/project/workingDir/model/provider。
+   * The single "use this agent" entry point. The capability snapshot and
+   * working-dir policy are decided by the backend from the definition;
+   * `overrides` only covers name/project/workingDir/model/provider.
    */
   async createSessionFromDefinition(
     definitionId: UUID,
@@ -145,10 +143,13 @@ export const agentSessionActions = {
   },
 
   /**
-   * 就地把一个已存在会话重指到另一个 AgentDefinition（不新建会话）。
+   * Re-point an existing session at another AgentDefinition in place (no new
+   * session).
    *
-   * 用于「当前会话尚无消息时切换 Agent」：复用现有会话 id，由后端重新快照能力集
-   * 与参数、改写 provenance。就地替换列表中对应项并同步当前会话（id 不变、不重排）。
+   * Used to switch agents while the current session has no messages yet:
+   * reuses the session id while the backend re-snapshots capabilities and
+   * parameters and rewrites provenance. Replaces the list entry in place and
+   * syncs the current session (same id, no reorder).
    */
   async reinstantiateFromDefinition(
     sessionId: UUID,
@@ -170,9 +171,6 @@ export const agentSessionActions = {
     return updated;
   },
 
-  /**
-   * 重命名 Agent Session。
-   */
   async renameSession(id: UUID, name: string): Promise<void> {
     const updated = await agentSessionApi.renameAgentSession(id, name);
     const index = sessions.findIndex((session) => session.id === id);
@@ -185,8 +183,10 @@ export const agentSessionActions = {
   },
 
   /**
-   * 为会话生成标题（后端一次性 LLM 补全 + 落盘），并把返回的会话回填到列表与
-   * 当前会话。失败向上抛，由调用方决定提示与否（自动路径静默，手动路径可提示）。
+   * Generate a session title (backend one-shot LLM completion + persist) and
+   * write the returned session back to the list and current session. Failures
+   * propagate so callers decide whether to notify (auto path stays silent,
+   * manual path may toast).
    */
   async generateTitle(id: UUID): Promise<AgentSession> {
     const updated = await agentSessionApi.generateAgentSessionTitle(id);
@@ -200,9 +200,7 @@ export const agentSessionActions = {
     return updated;
   },
 
-  /**
-   * 删除 Agent Session：从列表移除；若为当前会话则清空当前。
-   */
+  /** Delete a session: remove from the list; clear current if it was current. */
   async deleteSession(id: UUID): Promise<void> {
     try {
       isLoading = true;
@@ -219,9 +217,7 @@ export const agentSessionActions = {
     }
   },
 
-  /**
-   * 更新 Agent Session 的单个字段（同步本地列表与当前会话）。
-   */
+  /** Update a single session field (syncs the local list and current session). */
   async updateField(
     id: UUID,
     field: AgentSessionField,
@@ -242,19 +238,22 @@ export const agentSessionActions = {
   },
 
   /**
-   * 即时应用会话名变更（VAL-CARUN-020）：会话名经后端 `SessionInfoChanged{name}`
-   * 生命周期信号变更时，由 `agentRunStore` 的会话名变更回调以该会话 id + 新名调用，
-   * 就地更新侧栏列表对应项与当前会话的标题，无需重开 / 手动刷新。
+   * Apply a session-name change immediately: when the name changes via the
+   * backend `SessionInfoChanged{name}` lifecycle signal, `agentRunStore`'s
+   * name-change callback invokes this with the session id + new name to update
+   * the sidebar list entry and current session title in place, without a
+   * reopen / manual refresh.
    *
-   * 纯本地状态更新（不发网络请求，不重排顺序——只换标题）。该会话不在列表内
-   * （例如已删除）则为干净 no-op。`name` 为 null（清空标题）时回退为空串，使
-   * 侧栏渲染不出现 `undefined`/破裂的占位。
+   * Pure local state update (no network request, no reorder — title only).
+   * A session not in the list (e.g. deleted) is a clean no-op. A null `name`
+   * (cleared title) falls back to the empty string so the sidebar never
+   * renders `undefined` / a broken placeholder.
    */
   applySessionName(id: UUID, name: string | null): void {
     const nextName = name ?? "";
     const index = sessions.findIndex((session) => session.id === id);
     if (index === -1) {
-      // 不在列表内：干净 no-op（不创建幽灵条目）。
+      // Not in the list: clean no-op (no ghost entry).
       return;
     }
     sessions[index] = { ...sessions[index], name: nextName };
@@ -263,9 +262,7 @@ export const agentSessionActions = {
     }
   },
 
-  /**
-   * 将列表中已存在的某个会话设为当前（不触发网络请求）。
-   */
+  /** Set an already-listed session as current (no network request). */
   setCurrentById(id: UUID): AgentSession | null {
     const session = sessions.find((item) => item.id === id) ?? null;
     currentSession = session;
@@ -273,47 +270,53 @@ export const agentSessionActions = {
   },
 
   /**
-   * 一次 run 结束后刷新某会话的侧栏元数据（VAL-PERSIST-011）。
+   * Refresh a session's sidebar metadata after a run ends.
    *
-   * run 期间后端按 message_end 追加 transcript 并 bump 该会话的 `messageCount` /
-   * `lastMessageAt` / `updatedAt`，但前端列表持有的是 run 之前的快照。`agent_stream_closed`
-   * 抵达时调用本方法重新拉取该会话详情，更新列表内对应项与当前会话，并按
-   * `updatedAt DESC` 重排到顶部 —— 使计数 / 最近时间 / 顺序无需手动刷新即更新。
+   * During a run the backend appends the transcript on message_end and bumps
+   * the session's `messageCount` / `lastMessageAt` / `updatedAt`, but the
+   * frontend list holds the pre-run snapshot. When `agent_stream_closed`
+   * arrives, this refetches the session, updates the list entry and current
+   * session, and moves it to the top per `updatedAt DESC` — so counts /
+   * recency / ordering update without a manual refresh.
    *
-   * 该会话不在列表内（例如已被删除）则为干净 no-op；重拉撞上 NOT_FOUND
-   * （abort 收尾先于 delete IPC 回包的竞态）则静默移除该行；其余错误仅记录、
-   * 不抛出，避免影响 run 终结的其它收尾。
+   * A session not in the list (e.g. already deleted) is a clean no-op; a
+   * NOT_FOUND on refetch (abort cleanup racing the delete IPC reply) silently
+   * removes the row; other errors are only logged, never thrown, so the rest
+   * of run-termination cleanup is unaffected.
    */
   async refreshAfterRun(id: UUID): Promise<void> {
     const prev = sessions.find((session) => session.id === id);
     if (!prev) {
-      // 已删除（或从未在列表内）的会话：静默 no-op（GROUP-018 / CROSS-008）。
-      // 不发起重拉——对已删 id 的 agent_session_get 必然 NOT_FOUND，
-      // 落进下方 catch 会留下无意义的 console.error 噪音。
+      // Deleted (or never listed) session: silent no-op. Do not refetch —
+      // agent_session_get on a deleted id is guaranteed NOT_FOUND and would
+      // only leave pointless console.error noise via the catch below.
       return;
     }
-    // 在重拉刷新 messageCount 之前捕获「是否首个 run」，供自动起标题判定。
+    // Capture "was this the first run" before the refetch refreshes
+    // messageCount, for the auto-title decision.
     const wasFirstRun = prev.messageCount === 0;
     const agentDefinitionId = prev.agentDefinitionId;
     try {
       const updated = await agentSessionApi.getAgentSession(id);
       const others = sessions.filter((session) => session.id !== id);
       if (others.length === sessions.length) {
-        // await 期间被删除：不插入幽灵条目。
+        // Deleted during the await: do not insert a ghost entry.
         return;
       }
-      // 置顶 + 刷新元数据（重拉对象携带后端最新 lastMessageAt，
-      // groupSessions 据活动键自动把它排到组内第一并上浮该组）。
+      // Move to top + refresh metadata (the refetched object carries the
+      // backend's latest lastMessageAt; groupSessions sorts it first in its
+      // group and floats the group by the activity key).
       sessions = [updated, ...others];
       if (currentSession?.id === id) {
         currentSession = updated;
       }
-      // 首个 run 后按需自动生成标题（后台、失败静默、绝不覆盖手动标题）。
+      // Auto-generate a title after the first run (background, silent on
+      // failure, never overwrites a manual title).
       void maybeAutoGenerateTitle(id, wasFirstRun, updated.name, agentDefinitionId);
     } catch (error) {
       if (normalizeError(error).code === "NOT_FOUND") {
         // Session deleted while refreshing (abort-closed raced the delete IPC):
-        // drop the stale row silently — no ghost, no console noise (CROSS-008).
+        // drop the stale row silently — no ghost, no console noise.
         sessions = sessions.filter((session) => session.id !== id);
         return;
       }

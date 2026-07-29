@@ -1,15 +1,15 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  // 页面级统一 Header：Agents / Jobs / 设置各页共用同一套标题排版。
+  // Shared page-level header so every page uses the same title typography.
   interface Props {
     title: string;
-    /** 标题旁的补充信息（如数量） */
+    /** Supplementary info next to the title (e.g. a count). */
     meta?: string;
     description?: string;
-    /** 右侧操作区（按钮等） */
+    /** Right-side action area (buttons etc.). */
     actions?: Snippet;
-    /** 标题区下方扩展行（搜索框等） */
+    /** Extension row below the title area (search box etc.). */
     children?: Snippet;
   }
 

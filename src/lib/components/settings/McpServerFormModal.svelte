@@ -71,20 +71,16 @@
   const BLANK_ENTRY = (): EnvEntry => ({ key: "", value: "" });
   const BLANK_HEADER = (): HeaderEntry => ({ key: "", value: "" });
 
-  // 传输方式分段控件的选项
   const CONNECTION_OPTIONS = [
     { value: "stdio", labelKey: "provider.connectionStdio" },
     { value: "sse", labelKey: "provider.connectionSse" },
     { value: "http", labelKey: "provider.connectionHttp" },
   ] as const;
 
-  // 表单数据
   let formData = $state<FormState>({ ...EMPTY_FORM });
 
-  // 检查是否为编辑模式
   const isEditMode = $derived(server !== null);
 
-  // 检查是否可以保存
   const canSave = $derived.by(() => {
     const hasName = formData.name.trim();
     const hasValidConnection = formData.connectionType === 'stdio'
@@ -127,14 +123,13 @@
     errors = {};
   }
 
-  // 当弹窗打开或 server 变化时，重新初始化表单
   $effect(() => {
     if (open) {
       initialiseForm(server);
     }
   });
 
-  // 置 open = false 即触发 Modal 关闭动画
+  // Setting open = false triggers the Modal close animation.
   function closeModal() {
     open = false;
   }
@@ -143,7 +138,6 @@
     onClose?.();
   }
 
-  // 环境变量操作
   function addEnvEntry() {
     envEntries = [...envEntries, BLANK_ENTRY()];
   }
@@ -160,7 +154,6 @@
     );
   }
 
-  // HTTP 头部操作
   function addHeaderEntry() {
     headerEntries = [...headerEntries, BLANK_HEADER()];
   }
@@ -180,12 +173,10 @@
   function validate(): boolean {
     const nextErrors: Record<string, string> = {};
 
-    // 验证名称
     if (!formData.name.trim()) {
       nextErrors.name = t("provider.validateMcpName");
     }
 
-    // 验证连接配置
     if (formData.connectionType === 'stdio') {
       if (!formData.command.trim()) {
         nextErrors.command = t("provider.validateCommand");
@@ -194,7 +185,6 @@
       if (!formData.endpoint.trim()) {
         nextErrors.endpoint = t("provider.validateEndpoint");
       }
-      // 验证超时时间
       if (formData.timeoutMs && isNaN(Number(formData.timeoutMs))) {
         nextErrors.timeoutMs = t("provider.validateTimeout");
       }
@@ -204,7 +194,7 @@
     return Object.keys(nextErrors).length === 0;
   }
 
-  // 解析参数（支持换行或逗号分隔）
+  // Args may be separated by newlines or commas.
   function parseArgs(): string[] {
     return formData.argsText
       .split(/\r?\n|,/)
@@ -212,7 +202,6 @@
       .filter(Boolean);
   }
 
-  // 解析环境变量
   function parseEnv(): Record<string, string> {
     return envEntries.reduce<Record<string, string>>((acc, entry) => {
       const key = entry.key.trim();
@@ -221,7 +210,6 @@
     }, {});
   }
 
-  // 解析 HTTP 头部
   function parseHeaders(): Record<string, string> {
     return headerEntries.reduce<Record<string, string>>((acc, entry) => {
       const key = entry.key.trim();
@@ -237,7 +225,6 @@
 
     try {
       if (server) {
-        // 更新模式
         const updatePayload: UpdateMcpServerRequest = {
           name: formData.name.trim(),
           displayName: formData.displayName.trim() || undefined,
@@ -260,7 +247,6 @@
 
         await onSave?.({ mode: "update", data: updatePayload });
       } else {
-        // 创建模式
         const createPayload: CreateMcpServerRequest = {
           name: formData.name.trim(),
           displayName: formData.displayName.trim() || undefined,
@@ -283,7 +269,6 @@
         await onSave?.({ mode: "create", data: createPayload });
       }
 
-      // 保存成功，关闭弹窗
       closeModal();
     } catch (error) {
       showAppError(error, {
@@ -305,7 +290,6 @@
   submitDisabled={isSubmitting || !canSave}
   onSubmit={handleConfirm}
 >
-  <!-- 名称区：大标题式唯一名称 + 次行显示名称 -->
   <div class="flex flex-col gap-1">
     <input
       class="modal-title-input"
@@ -323,13 +307,11 @@
     />
   </div>
 
-  <!-- 启用行 -->
   <div class="mt-4 flex items-center justify-between">
     <span class="text-sm text-base-content/80">{t("common.enabled")}</span>
     <Toggle bind:checked={formData.enabled} />
   </div>
 
-  <!-- 传输方式分段控件 -->
   <div class="mt-5 flex rounded-lg border border-[var(--hairline)] p-0.5">
     {#each CONNECTION_OPTIONS as option (option.value)}
       <button
@@ -380,7 +362,6 @@
         />
       </label>
 
-      <!-- 环境变量 key/value 列表 -->
       <div class="flex flex-col gap-2">
         <span class="form-section-label">{t("provider.envVars")}</span>
         {#each envEntries as entry, index (index)}
@@ -447,7 +428,6 @@
         {/if}
       </label>
 
-      <!-- HTTP 头部 key/value 列表 -->
       <div class="flex flex-col gap-2">
         <span class="form-section-label">{t("provider.httpHeaders")}</span>
         {#each headerEntries as entry, index (index)}

@@ -27,6 +27,9 @@ src-tauri/target
 # Tauri generated schemas
 src-tauri/gen/schemas/
 
+# Swift Package Manager build output (swift-rs builds macos-obs via build.rs)
+src-tauri/macos-obs/.build/
+
 /.svelte-kit
 /build
 /package

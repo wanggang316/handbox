@@ -11,7 +11,6 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn load_tray_icon() -> tauri::image::Image<'static> {
-  // Load PNG from bytes and convert to RGBA
   let png_data = include_bytes!("../icons/logo-tray-32.png");
   let decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(png_data)).unwrap();
   let (width, height) = decoder.dimensions();
@@ -26,23 +25,19 @@ fn load_tray_icon() -> tauri::image::Image<'static> {
 }
 
 fn build_tray_menu(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-  // Create menu items
   let open_item = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
   let do_something_item =
     MenuItem::with_id(app, "do_something", "Do Something...", true, None::<&str>)?;
   let separator = PredefinedMenuItem::separator(app)?;
   let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-  // Build menu
   let menu = Menu::with_items(
     app,
     &[&open_item, &do_something_item, &separator, &quit_item],
   )?;
 
-  // Load tray icon
   let tray_icon = load_tray_icon();
 
-  // Create tray icon (only created once at startup)
   let _tray = TrayIconBuilder::new()
     .icon(tray_icon)
     .icon_as_template(true)
@@ -83,17 +78,3 @@ fn show_main_window(app: &AppHandle) {
     let _ = window.set_focus();
   }
 }
-
-// Example: open a specific view by emitting an event to the frontend.
-// Uncomment and adapt when you need a menu item to navigate to a page or open a modal.
-//
-// fn show_main_window_with_view(app: &AppHandle) {
-//   if let Some(window) = app.get_webview_window("main") {
-//     let _ = window.unminimize();
-//     let _ = window.show();
-//     let _ = window.set_focus();
-//
-//     // Emit an event that the frontend listens to, e.g. to open a modal or navigate to a route.
-//     let _ = window.emit("open-some-view", ());
-//   }
-// }

@@ -416,7 +416,7 @@ describe("resolveSpec — per-component prop validation", () => {
  * spec, so the chat bubble can show a loading placeholder instead of rendering
  * a half-finished JSON blob. It must fire on partial spec fragments yet stay
  * silent on prose, plain config JSON, and any other JSON that lacks the spec's
- * `root`/`elements` markers. Boundaries pinned here trace to VAL-STREAM-003.
+ * `root`/`elements` markers.
  */
 describe("looksLikeStreamingSpec", () => {
   it("is TRUE for a partial, unclosed spec fragment (bare JSON)", () => {
@@ -479,7 +479,7 @@ describe("looksLikeStreamingSpec", () => {
  * unclosed, `resolveSpec` is null and the heuristic is true → placeholder; once
  * the spec closes and validates, `resolveSpec` hits → render; a closed spec
  * with an unregistered component fails `resolveSpec` → markdown fallback. This
- * suite pins that transition (VAL-STREAM-001 logic) on the pure functions.
+ * suite pins that transition on the pure functions.
  */
 describe("specHit transition (resolveSpec × looksLikeStreamingSpec)", () => {
   it("partial spec → resolveSpec null AND heuristic true (⇒ placeholder)", () => {

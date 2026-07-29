@@ -3,13 +3,13 @@
 
   interface Props {
     label?: string;
-    description?: string; // 左侧 label 下的副标题（Linear 式设置行）
-    icon?: any; // Lucide 图标组件
+    description?: string; // subtitle under the left label (Linear-style settings row)
+    icon?: any; // Lucide icon component
     layout?: "horizontal" | "vertical";
     py?: string;
-    rightContent?: any; // 标题行右边的内容
-    helpText?: string; // 可选的帮助提示文本，显示为问号图标
-    error?: string; // 可选的字段级错误，行内显示在控件下方
+    rightContent?: any; // content at the right of the header row
+    helpText?: string; // shown as a question-mark tooltip icon
+    error?: string; // field-level error rendered inline below the control
     children?: any;
   }
 

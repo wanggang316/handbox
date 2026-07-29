@@ -1,25 +1,16 @@
 /**
- * Agent 模式类型定义 - 镜像后端 Rust 形状
- *
- * 三个来源严格对齐（field names / discriminator values 必须逐字一致，
- * 否则下游 timeline reducer 解析会失配）：
- *  - `storage/types/agent_session.rs`（`#[serde(rename_all = "camelCase")]`）
- *  - hand-agent `AgentEvent`（`tag = "type"`, snake_case variants, camelCase fields）
+ * Mirrors the backend Rust shapes. Field names and discriminator values must
+ * match these sources verbatim, or the timeline reducer misparses:
+ *  - `storage/types/agent_session.rs` (serde camelCase)
+ *  - hand-agent `AgentEvent` (`tag = "type"`, snake_case variants, camelCase fields)
  *  - hand-agent / model `Message` / `AssistantContentBlock` / `Usage`
- *    （`Message` 以 `role` 标签；`AssistantContentBlock` 以 `type` 标签且为 lowercase）
+ *    (`Message` tagged by `role`; `AssistantContentBlock` tagged by `type`, lowercase)
  */
 
 import type { UUID, Timestamp } from "./index";
 import type { McpServerConfig } from "./llm";
 
-// ---------------------------------------------------------------------------
-// hand-agent / model Message（payload 的实际形状）
-// ---------------------------------------------------------------------------
-
-/**
- * Token 用量与成本（model crate `Usage`）。
- * 字段经 serde rename 为 camelCase（`cacheRead`/`cacheWrite`/`totalTokens`）。
- */
+/** Token usage and cost (model crate `Usage`); fields serde-renamed to camelCase. */
 export interface UsageCost {
   input: number;
   output: number;
@@ -37,19 +28,19 @@ export interface Usage {
   cost: UsageCost;
 }
 
-/** 助手停止原因（model crate `StopReason`，`rename_all = "camelCase"`）。 */
+/** Model crate `StopReason` (`rename_all = "camelCase"`). */
 export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 
 /**
- * 文本内容块（model crate `TextContent`）。
- * `content_type` 在 Rust 侧 `#[serde(skip)]`，外层 tag 已携带 `type`，故不在 wire 上。
+ * Model crate `TextContent`. `content_type` is `#[serde(skip)]` in Rust —
+ * the outer tag already carries `type`, so it is not on the wire.
  */
 export interface TextContent {
   text: string;
   textSignature?: string;
 }
 
-/** 思考内容块（model crate `ThinkingContent`）。 */
+/** Model crate `ThinkingContent`. */
 export interface ThinkingContent {
   thinking: string;
   thinkingSignature?: string;
@@ -57,10 +48,8 @@ export interface ThinkingContent {
 }
 
 /**
- * 工具调用内容块（model crate `ToolCall`）。
- *
- * 命名为 `AgentToolCall`（而非裸 `ToolCall`）以在共享 barrel 中保持无歧义 ——
- * 它是 agent/model 的内容块。
+ * Model crate `ToolCall`. Named `AgentToolCall` rather than bare `ToolCall`
+ * to stay unambiguous in the shared barrel.
  */
 export interface AgentToolCall {
   id: string;
@@ -70,11 +59,9 @@ export interface AgentToolCall {
 }
 
 /**
- * 助手内容块判别联合（model crate `AssistantContentBlock`，
- * `#[serde(tag = "type", rename_all = "lowercase")]`）。
- *
- * 注意 `rename_all = "lowercase"` 把变体 `ToolCall` 序列化为 `"toolcall"`
- * （全小写、无分隔符）—— 与 hand-ai web-ui 观察到的 server 形状一致。
+ * Model crate `AssistantContentBlock` (`#[serde(tag = "type", rename_all =
+ * "lowercase")]`). Note `lowercase` serializes the `ToolCall` variant as
+ * `"toolcall"` — all lowercase, no separator.
  */
 export type AssistantContentBlock =
   | ({ type: "text" } & TextContent)
@@ -82,8 +69,8 @@ export type AssistantContentBlock =
   | ({ type: "toolcall" } & AgentToolCall);
 
 /**
- * 用户消息内容（model crate `UserContent`，`#[serde(untagged)]`）：
- * 纯文本字符串，或内容块数组。
+ * User message content (model crate `UserContent`, `#[serde(untagged)]`):
+ * a plain string or an array of content blocks.
  */
 export interface ImageContent {
   data: string;
@@ -96,18 +83,18 @@ export type UserContentBlock =
 
 export type UserContent = string | UserContentBlock[];
 
-/** 工具结果内容块（model crate `ToolResultContent`，`tag = "type"`, lowercase）。 */
+/** Model crate `ToolResultContent` (`tag = "type"`, lowercase). */
 export type ToolResultContent =
   | ({ type: "text" } & TextContent)
   | ({ type: "image" } & ImageContent);
 
-/** 用户消息（model crate `UserMessage`）。`role` 在 Rust 侧 skip，由外层 Message tag 提供。 */
+/** Model crate `UserMessage`; `role` is skipped in Rust — the outer `Message` tag provides it. */
 export interface UserMessage {
   content: UserContent;
   timestamp: number;
 }
 
-/** 助手消息（model crate `AssistantMessage`）。 */
+/** Model crate `AssistantMessage`. */
 export interface AssistantMessage {
   content: AssistantContentBlock[];
   api: string;
@@ -122,7 +109,7 @@ export interface AssistantMessage {
   diagnostics?: unknown[];
 }
 
-/** 工具结果消息（model crate `ToolResultMessage`）。 */
+/** Model crate `ToolResultMessage`. */
 export interface ToolResultMessage {
   toolCallId: string;
   toolName: string;
@@ -133,10 +120,8 @@ export interface ToolResultMessage {
 }
 
 /**
- * 任意会话消息判别联合（model crate `Message`，
- * `#[serde(tag = "role", rename_all = "camelCase")]`）。
- *
- * 这是 `AgentSessionMessage.payload` 的精确类型 —— 序列化后的 hand-agent Message。
+ * Model crate `Message` (`#[serde(tag = "role", rename_all = "camelCase")]`)
+ * — the exact type of `AgentSessionMessage.payload`.
  */
 export type AgentMessage =
   | ({ role: "user" } & UserMessage)
@@ -144,11 +129,10 @@ export type AgentMessage =
   | ({ role: "toolResult" } & ToolResultMessage);
 
 /**
- * 流式增量事件（model crate `AssistantMessageEvent`，
- * `tag = "type"`, snake_case variants, camelCase fields）。
- *
- * `message_update` 携带的 delta。每个变体都带 `partial`（当前累积的助手消息）；
- * `*_delta` 变体额外带 `delta` 文本，`done`/`error` 带终结消息。
+ * Streaming deltas carried by `message_update` (model crate
+ * `AssistantMessageEvent`, `tag = "type"`, snake_case variants, camelCase
+ * fields). Every variant includes `partial`, the assistant message
+ * accumulated so far.
  */
 export type AssistantMessageEvent =
   | { type: "start"; partial: AssistantMessage }
@@ -194,13 +178,7 @@ export type AssistantMessageEvent =
   | { type: "done"; reason: StopReason; message: AssistantMessage }
   | { type: "error"; reason: StopReason; error: AssistantMessage };
 
-// ---------------------------------------------------------------------------
-// Agent 运行事件（hand-agent `AgentEvent`）
-// ---------------------------------------------------------------------------
-
-/**
- * 工具结果（hand-agent `ToolResult`）—— `ToolExecutionEnd`/`Update` 的 payload。
- */
+/** hand-agent `ToolResult` — payload of `tool_execution_end` / `_update`. */
 export interface ToolResult {
   content: ToolResultContent[];
   details?: unknown;
@@ -208,11 +186,8 @@ export interface ToolResult {
 }
 
 /**
- * Agent 运行期事件判别联合（hand-agent `AgentEvent`，
- * `#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]`）。
- *
- * 在 `type` 上判别：narrowing `type === "tool_execution_end"` 得到
- * `toolCallId`/`toolName`/`result`/`isError`。
+ * hand-agent `AgentEvent` (`#[serde(tag = "type", rename_all = "snake_case",
+ * rename_all_fields = "camelCase")]`); discriminate on `type`.
  */
 export type AgentEvent =
   | { type: "agent_start" }
@@ -251,18 +226,13 @@ export type AgentEvent =
       isError: boolean;
     };
 
-// ---------------------------------------------------------------------------
-// Agent Session 实体（storage/types/agent_session.rs）
-// ---------------------------------------------------------------------------
-
-/** Agent Session 实体 - Agent 模式下的会话实例。 */
+/** Mirrors `storage/types/agent_session.rs`. */
 export interface AgentSession {
   id: UUID;
-  /** 所属 Agent Project（可选；后端 `project_id: Option<UUID>` 序列化为 camelCase）。 */
   projectId?: UUID;
   /**
-   * 实例化来源的 AgentDefinition id（创建时一次性写入的 provenance 链接，
-   * 后端 `agent_definition_id: Option<UUID>`）。update 路径永不重写。
+   * Provenance link to the AgentDefinition this session was instantiated
+   * from; written once at creation, never rewritten by updates.
    */
   agentDefinitionId?: UUID;
   name: string;
@@ -284,8 +254,8 @@ export interface AgentSession {
 }
 
 /**
- * Agent Session 消息 - `payload` 是序列化后的 hand-agent Message。
- * 类型化为 `AgentMessage` 联合，使 timeline reducer 无需 `any` 即可消费。
+ * `payload` is the serialized hand-agent Message, typed as the `AgentMessage`
+ * union so the timeline reducer can consume it without `any`.
  */
 export interface AgentSessionMessage {
   id: UUID;
@@ -296,13 +266,12 @@ export interface AgentSessionMessage {
   createdAt: Timestamp;
 }
 
-/** 创建 Agent Session 请求。 */
 export interface CreateAgentSessionRequest {
   name: string;
   /**
-   * 可选：挂靠到某个 Agent Project（后端 `project_id: Option<UUID>`）。
-   * 提供时后端以 project.path 覆盖 workingDir；项目不存在 → NOT_FOUND，
-   * 项目目录已失效 → VALIDATION_ERROR，均不写入任何行。
+   * When provided, the backend overrides workingDir with project.path.
+   * Missing project → NOT_FOUND; stale project directory → VALIDATION_ERROR;
+   * neither writes a row.
    */
   projectId?: UUID;
   modelId?: string;
@@ -318,11 +287,11 @@ export interface CreateAgentSessionRequest {
 }
 
 /**
- * 从 AgentDefinition 实例化会话的覆盖项（后端 `InstantiateAgentSessionRequest`）。
- *
- * 全部可选：缺省时由 definition 的快照决定。后端按 definition 的 `workingDirMode`
- * 裁决工作目录策略（"none" 强制纯对话、"required" 缺工作上下文则报错、"optional"/
- * NULL 透传），再以这里给出的字段覆盖快照。
+ * Overrides for instantiating a session from an AgentDefinition (mirrors the
+ * backend request). All optional — the definition snapshot fills the gaps.
+ * The backend resolves the working-dir policy from the definition's
+ * `workingDirMode` ("none" forces plain chat, "required" errors without a
+ * working context, "optional"/NULL passes through), then applies these fields.
  */
 export interface InstantiateAgentSessionRequest {
   name?: string;
@@ -332,7 +301,6 @@ export interface InstantiateAgentSessionRequest {
   providerId?: string;
 }
 
-/** 更新 Agent Session 请求。 */
 export interface UpdateAgentSessionRequest {
   name?: string;
   modelId?: string;
@@ -347,16 +315,11 @@ export interface UpdateAgentSessionRequest {
   toolExecutionMode?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Tauri 流式事件 payload（commands/agent_run.rs）
-// ---------------------------------------------------------------------------
-
 /**
- * 随本回合输入一并发送的图片附件（镜像后端 `AgentRunAttachment`）。
- *
- * `data` 是原始字节序列（`number[]`，serde 把 Rust `Vec<u8>` 反序列化自此）。
- * 仅 `image/*` mime 由后端装配成 `ImageContent` 块；前端在选图时已按 image/*
- * 过滤，后端再防御性跳过非图片。
+ * Image attachment sent with a turn's input (mirrors the backend
+ * `AgentRunAttachment`). `data` is raw bytes (`number[]` → Rust `Vec<u8>`).
+ * Only `image/*` mimes are assembled into `ImageContent` blocks; the frontend
+ * pre-filters on selection and the backend defensively skips non-images.
  */
 export interface AgentRunAttachment {
   name: string;
@@ -364,13 +327,13 @@ export interface AgentRunAttachment {
   data: number[];
 }
 
-/** `agent_stream_event` 的 payload：每条 AgentEvent 携 sessionId 发出。 */
+/** `agent_stream_event` payload: one AgentEvent tagged with its sessionId. */
 export interface AgentStreamEventPayload {
   sessionId: UUID;
   event: AgentEvent;
 }
 
-/** `agent_stream_error` 的 payload：run-level sanitized 错误 envelope（在 closed 之前）。 */
+/** `agent_stream_error` payload: run-level sanitized error envelope, emitted before closed. */
 export interface AgentStreamErrorPayload {
   sessionId: UUID;
   error: {
@@ -380,26 +343,20 @@ export interface AgentStreamErrorPayload {
   };
 }
 
-/** `agent_stream_closed` 的 payload：回合终结信号（每个 run 恰好一次）。 */
+/** `agent_stream_closed` payload: run-termination signal, exactly once per run. */
 export interface AgentStreamClosedPayload {
   sessionId: UUID;
 }
 
 /**
- * `agent_approval_request` 的 payload：危险工具（write/edit/bash）调用时后端
- * `PermissionExtension` emit 的审批请求（services/agent_permission.rs，键逐字一致）。
+ * `agent_approval_request` payload, emitted when a dangerous tool
+ * (write/edit/bash) is called; the backend then awaits a decision keyed by
+ * `requestId` (uuid v4; duplicate or unknown ids are idempotent no-ops).
+ * `callId` matches the transcript's toolCallId.
  *
- * 后端在 emit 后 await 一个以 `requestId` 为键的 oneshot；前端弹窗据此渲染工具名 +
- * 完整参数，用户决策经 `agent_approval_respond(requestId, allow)` 回灌：allow=true →
- * 工具执行（Continue）、false → 工具被 Cancel（模型收被拒结果）。重复 / 未知
- * `requestId` 在后端是幂等 no-op。
- *
- *  - `sessionId`：发起调用的会话（弹窗按此分键，使待审批只暂停对应会话的对话）。
- *  - `callId`：本次工具调用 id（与 transcript 的 toolCallId 同源；当前弹窗仅作幂等键）。
- *  - `toolName`：coding-agent 注册名（`write` / `edit` / `bash`），弹窗映射为中文 label。
- *  - `args`：将执行的**完整**参数（bash 的 command 串、write/edit 的 path + content），
- *    弹窗据此完整呈现——展示值即执行值，不得截断到看不出危险性（VAL-CAPERM-002）。
- *  - `requestId`：决策回灌的幂等键（uuid v4）。
+ * `args` is the complete argument set about to execute (bash command string,
+ * write/edit path + content). The approval dialog must render it in full —
+ * what is shown is what runs, never truncated past judging its danger.
  */
 export interface AgentApprovalRequest {
   sessionId: UUID;
@@ -410,28 +367,25 @@ export interface AgentApprovalRequest {
 }
 
 /**
- * 工具审批决策（含作用域）—— 镜像后端 `ApprovalDecision`
- * （services/agent_permission.rs，`#[serde(rename_all = "snake_case")]`）。
- * 经 `agent_approval_respond(requestId, decision)` 回灌；wire 值逐字一致：
- *  - `"deny"`：拒绝本次调用，工具被 Cancel（模型收被拒结果）。
- *  - `"allow_once"`：本次允许（Continue），不记忆；同工具下次仍弹窗。
- *  - `"allow_always"`：本次允许且**本会话**始终允许该工具（按 sessionId 键控的
- *    进程内存集），同会话同工具后续调用不再弹窗、直接执行。仅内存、不落 DB/文件
- *    → 不跨会话、不跨重启。
+ * Mirrors the backend `ApprovalDecision` (serde snake_case); wire values verbatim.
+ *  - `"deny"`: reject this call; the tool is cancelled and the model receives
+ *    a rejected result.
+ *  - `"allow_once"`: allow this call only; the same tool prompts again next time.
+ *  - `"allow_always"`: allow this call and whitelist the tool for the rest of
+ *    this session (in-memory set keyed by sessionId — not persisted, so it
+ *    does not survive across sessions or restarts).
  */
 export type ApprovalDecision = "deny" | "allow_once" | "allow_always";
 
 /**
- * `agent_session_lifecycle` 的 payload：会话生命周期信号，与三条 run 通道并列、
- * 独立——这些不是 run 事件，不进 `agent_stream_event` reducer，故不影响 closed-once。
- * 后端 `map_session_event` 把 coding-agent 的 `AgentSessionEvent::CompactionStart`/
- * `CompactionEnd`/`SessionInfoChanged` 映射到此判别联合（`kind` 判别）。
- *
- *  - `compaction_start`：自动压缩开始；前端据此展示「整理上下文中」指示。
- *  - `compaction_end`：压缩结束；`summary` 为上下文摘要，**有意不渲染进时间线**
- *    （仅用于关闭指示，去向稳定——VAL-CARUN-019），对话续行。
- *  - `session_info_changed`：会话元数据（当前仅 name/label）变更；前端据此即时
- *    更新侧栏该会话标题，无需重开（VAL-CARUN-020）。`name` 可为 null（清空标题）。
+ * `agent_session_lifecycle` payload, discriminated on `kind`. Independent of
+ * the run channels — these are not run events and never enter the
+ * `agent_stream_event` reducer, so closed-once is unaffected.
+ *  - `compaction_start`: auto-compaction began; drives the "compacting" hint.
+ *  - `compaction_end`: `summary` is the context digest — intentionally never
+ *    rendered into the timeline, only used to clear the hint.
+ *  - `session_info_changed`: session metadata (currently only name) changed;
+ *    updates the sidebar title in place. `name` may be null (title cleared).
  */
 export type AgentSessionLifecyclePayload =
   | { sessionId: UUID; kind: "compaction_start" }

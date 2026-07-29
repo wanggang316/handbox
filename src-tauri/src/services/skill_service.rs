@@ -1,27 +1,18 @@
 //! Runtime-facing facade over the skill library ([`crate::services::skills`]).
 //!
-//! The discovery module ([`discover_skills`]) is pure over a list of
-//! `(root, scope)` pairs; this service owns the *policy* of which three roots
-//! exist and in what priority order, and resolves the project root per run from
-//! the session's `working_dir`. It is constructed once at startup with the two
-//! fixed (app-data + user) roots already resolved to absolute [`PathBuf`]s and
-//! managed in app state as a shared service.
-//!
-//! Priority is **lowest → highest**: `[(appdata, AppData), (user, User),
-//! (project, Project)]`, matching [`discover_skills`]'s documented contract so a
-//! project-scoped skill shadows a same-named user/app-data one.
+//! Owns the *policy* of which roots exist and their priority, **lowest →
+//! highest**: `[(appdata, AppData), (user, User), (project, Project)]`, matching
+//! [`discover_skills`]'s contract so a project-scoped skill shadows a same-named
+//! user/app-data one.
 
 use std::path::{Path, PathBuf};
 
 use crate::services::skills::{discover_skills, Skill, SkillError, SourceScope};
 
-/// Resolves the three skill scope roots and runs discovery over them.
-///
-/// The app-data root (`<app_data_dir>/skills`) and the user root
-/// (`~/.agents/skills`) are fixed for the process lifetime and injected at
-/// construction. The project root is derived per call from the run's
-/// `working_dir` (`<working_dir>/.handbox/skills`), so the highest-priority
-/// scope tracks whichever directory the agent session is operating in.
+/// Resolves the skill scope roots and runs discovery over them. The two fixed
+/// roots are injected at construction; the project root is derived per call from
+/// the run's `working_dir`, so the highest-priority scope tracks whichever
+/// directory the agent session is operating in.
 pub struct SkillService {
     /// `<app_data_dir>/skills` — lowest priority scope.
     appdata_root: PathBuf,
@@ -30,9 +21,8 @@ pub struct SkillService {
 }
 
 impl SkillService {
-    /// Construct with the two fixed roots already resolved to absolute paths.
-    /// The production caller resolves these from Tauri's `PathResolver`
-    /// (`app_data_dir()` + `home_dir()`); see `initialize_services`.
+    /// Both roots must already be resolved to absolute paths (production
+    /// resolves them from Tauri's `PathResolver`; see `initialize_services`).
     pub fn new(appdata_root: PathBuf, user_root: PathBuf) -> Self {
         Self {
             appdata_root,
@@ -40,21 +30,15 @@ impl SkillService {
         }
     }
 
-    /// The project skill root for a given working directory, or `None` when the
-    /// working directory is absent or empty. `<working_dir>/.handbox/skills`.
     fn project_root(working_dir: Option<&Path>) -> Option<PathBuf> {
         working_dir
             .filter(|p| !p.as_os_str().is_empty())
             .map(|p| p.join(".handbox").join("skills"))
     }
 
-    /// Resolve the scope roots for a run in **lowest → highest** priority order:
-    /// `[(appdata, AppData), (user, User), (project, Project)]`. The project
-    /// entry is omitted when `working_dir` is `None`/empty.
-    ///
-    /// Returned in exactly the order [`discover_skills`] expects (earlier =
-    /// lower priority), so a project skill shadows a same-named user/app-data
-    /// one during dedup.
+    /// Roots in exactly the order [`discover_skills`] expects (earlier = lower
+    /// priority). The project entry is omitted when `working_dir` is
+    /// `None`/empty.
     pub fn resolve_roots(&self, working_dir: Option<&Path>) -> Vec<(PathBuf, SourceScope)> {
         let mut roots = Vec::with_capacity(3);
         roots.push((self.appdata_root.clone(), SourceScope::AppData));
@@ -65,28 +49,19 @@ impl SkillService {
         roots
     }
 
-    /// Discover all skills across the resolved scope roots for this run.
-    ///
-    /// Thin pass-through to [`discover_skills`]: returns `(skills, errors)`
-    /// where `skills` is deduped by name (highest scope wins) and sorted
-    /// alphabetically, and `errors` are non-fatal diagnostics the caller may
-    /// log without aborting the run.
+    /// `skills` is deduped by name (highest scope wins) and sorted; `errors` are
+    /// non-fatal diagnostics the caller may log without aborting the run.
     pub fn discover(&self, working_dir: Option<&Path>) -> (Vec<Skill>, Vec<SkillError>) {
         discover_skills(&self.resolve_roots(working_dir))
     }
 
-    /// Test-only constructor injecting an explicit root list. Lets unit tests
-    /// point the two fixed roots at tempdirs (or use [`SkillService::empty`])
-    /// without resolving real OS paths.
     #[cfg(test)]
     pub fn for_test(appdata_root: PathBuf, user_root: PathBuf) -> Self {
         Self::new(appdata_root, user_root)
     }
 
-    /// Test-only constructor whose fixed roots point at non-existent paths, so
-    /// discovery finds nothing from app-data/user (missing roots are silently
-    /// skipped). Used to inject an inert skill service into the agent-runtime
-    /// tests that do not exercise skills.
+    /// Inert service for tests that do not exercise skills: the roots do not
+    /// exist, and missing roots are silently skipped by discovery.
     #[cfg(test)]
     pub fn empty() -> Self {
         Self::new(
@@ -102,7 +77,6 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Write `<root>/<dir>/SKILL.md` with frontmatter description + body.
     fn write_skill(root: &Path, dir: &str, description: &str, body: &str) {
         let skill_dir = root.join(dir);
         fs::create_dir_all(&skill_dir).unwrap();
@@ -171,7 +145,6 @@ mod tests {
         let (skills, errors) = svc.discover(Some(proj.path()));
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
-        // alpha is shadowed by the project scope (highest priority); beta is user.
         let by: std::collections::HashMap<_, _> =
             skills.iter().map(|s| (s.name.as_str(), s)).collect();
         assert_eq!(by.len(), 2);

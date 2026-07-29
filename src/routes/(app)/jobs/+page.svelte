@@ -20,11 +20,9 @@
   let deleting = $state(false);
   let deleteError = $state<string | null>(null);
 
-  // 详情 Modal 状态：点卡片主体打开，展示执行历史时间线。
   let showDetailModal = $state(false);
   let detailJob = $state<Job | null>(null);
 
-  // 搜索按名称、大小写不敏感
   const filteredJobs = $derived.by(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return jobStore.jobs;
@@ -32,8 +30,8 @@
   });
 
   /**
-   * 启停桥接：拨动开关时尝试写后端。成功返回 true 落定开关视觉，
-   * 失败返回 false 让 Toggle 回滚到原状态（onChangeBefore 语义）。
+   * Toggle bridge: write the backend on switch. Return true to commit the
+   * visual state, false so the Toggle rolls back (onChangeBefore semantics).
    */
   async function handleToggleEnabled(job: Job, next: boolean): Promise<boolean> {
     if (!job.id) return false;
@@ -46,7 +44,6 @@
     }
   }
 
-  // 创建 / 编辑走二级页（不再使用 Modal）。
   function handleCreate() {
     goto("/jobs/new");
   }
@@ -78,7 +75,7 @@
     deleteError = null;
   }
 
-  // ConfirmModal 以 {@html message} 渲染；后端错误文案虽非用户输入，仍转义后再注入。
+  // ConfirmModal renders {@html message}; escape backend error text before injecting
   function escapeHtml(text: string): string {
     return text
       .replace(/&/g, "&amp;")
@@ -100,7 +97,8 @@
       await jobStore.delete(deletingJob.id);
       closeDeleteConfirm();
     } catch (e) {
-      // 删除失败：行保留（store 不移除），错误就地展示在确认框内，不关闭。
+      // Delete failed: keep the row (store untouched) and show the error inside
+      // the confirm dialog without closing it.
       console.error("Failed to delete job:", e);
       deleteError = jobStore.error ?? t("jobs.delete.failed");
     } finally {
@@ -109,15 +107,16 @@
   }
 
   onMount(() => {
-    // job_list 失败时 store 会记录 error，模板渲染可见错误而非无限 spinner。
+    // On job_list failure the store records the error so the template shows it
+    // instead of an endless spinner.
     jobStore.load().catch((e) => {
       console.error("Failed to load jobs:", e);
     });
 
-    // 订阅执行事件：某任务执行开始/完成时，原地刷新对应卡片的上次状态/运行次数
-    // （VAL-HISTORY-015/016）。`refresh` 经 `job_get`（事实来源）拉最新值并按 id
-    // upsert——已在列表中的任务原地替换，顺序稳定不重排（VAL-HISTORY-019）；
-    // 错过的事件不致错乱，因为下次事件或重开 modal 都会重新对账（030）。
+    // Subscribe to execution events: refresh the affected card's last status /
+    // run count in place. `refresh` pulls the latest via job_get and upserts by
+    // id — existing rows are replaced in place, order stays stable. Missed
+    // events self-heal: the next event or reopening the modal reconciles.
     let unlisten: (() => void) | undefined;
     listenJobExecuted(({ jobId }) => {
       jobStore.refresh(jobId).catch((e) => {
@@ -131,7 +130,6 @@
         console.error("Failed to subscribe to job_executed:", e);
       });
 
-    // 组件卸载时取消订阅，避免离开 /jobs 后泄漏监听器。
     return () => {
       unlisten?.();
     };
@@ -139,7 +137,7 @@
 </script>
 
 <div class="h-full flex flex-col bg-[var(--bg-canvas)]">
-  <!-- 页头随内容滚动（Codex 式） -->
+  <!-- Header scrolls with the content -->
   <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-12">
     <div class="mx-auto w-full max-w-3xl">
     <div class="pb-5 pt-2">
@@ -173,8 +171,8 @@
       </div>
     </PageHeader>
     </div>
-    <!-- Spinner 仅在冷启动（列表为空）时顶替内容；已有缓存则立即渲染、后台刷新
-         不 blank，避免每次导航都闪一下 spinner（感知为切换延迟）。 -->
+    <!-- Spinner replaces content only on cold start (empty list); with cache,
+         render immediately and refresh in background to avoid a spinner flash. -->
     {#if jobStore.isLoading && jobStore.jobs.length === 0}
       <div class="flex items-center justify-center h-full">
         <Spinner size={28} />
@@ -224,14 +222,12 @@
   </div>
 </div>
 
-<!-- 任务详情 Modal（执行历史时间线） -->
 <JobDetailModal
   open={showDetailModal}
   job={detailJob}
   onClose={closeDetailModal}
 />
 
-<!-- 删除确认模态框 -->
 <ConfirmModal
   title={t("jobs.delete.confirmTitle")}
   message={deleteMessage}

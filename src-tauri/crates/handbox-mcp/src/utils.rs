@@ -1,7 +1,4 @@
 //! Utility functions for MCP client operations.
-//!
-//! This module contains helper functions for command resolution, data conversion,
-//! and other common operations used by MCP clients.
 
 use std::collections::HashMap;
 
@@ -26,7 +23,6 @@ const NVM_PATHS: &[&str] = &[
 pub fn resolve_command_path(command: &str) -> Result<String> {
     tracing::debug!("Resolving command path for: {}", command);
 
-    // First, try to find the command using the `which` command
     if let Ok(output) = std::process::Command::new("which").arg(command).output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -41,7 +37,6 @@ pub fn resolve_command_path(command: &str) -> Result<String> {
     if command == "npx" || command == "npm" || command == "node" {
         tracing::debug!("Searching for Node.js tool in common paths");
 
-        // First try standard system paths
         for base_path in NODE_COMMAND_PATHS {
             let full_path = format!("{}/{}", base_path, command);
             if std::path::Path::new(&full_path).exists() {
@@ -50,7 +45,6 @@ pub fn resolve_command_path(command: &str) -> Result<String> {
             }
         }
 
-        // Then try NVM paths with home directory
         if let Ok(home) = std::env::var("HOME") {
             for nvm_path in NVM_PATHS {
                 let full_path = format!("{}{}/{}", home, nvm_path, command);
@@ -80,12 +74,10 @@ pub fn resolve_command_path(command: &str) -> Result<String> {
     }
 
     // If all else fails, return the original command and let the system try to find it
-    // This provides a fallback for commands that might be in PATH but not found by our search
     tracing::debug!("Using fallback for command: {}", command);
     Ok(command.to_string())
 }
 
-/// Convert an RMCP tool to our internal McpTool representation
 pub fn convert_tool(tool: RmcpTool) -> McpTool {
     let RmcpTool {
         name,
@@ -111,18 +103,15 @@ pub fn convert_tool(tool: RmcpTool) -> McpTool {
     }
 }
 
-/// Validate MCP server configuration parameters
 pub fn validate_server_config(
     command: &str,
     working_dir: &Option<String>,
     env: &HashMap<String, String>,
 ) -> Result<()> {
-    // Validate command
     if command.trim().is_empty() {
         return Err(anyhow!("MCP server command cannot be empty"));
     }
 
-    // Validate working directory if provided
     if let Some(dir) = working_dir {
         if !dir.trim().is_empty() {
             let path = std::path::Path::new(dir);
@@ -133,7 +122,6 @@ pub fn validate_server_config(
         }
     }
 
-    // Validate environment variables
     for (key, _value) in env {
         if key.trim().is_empty() {
             return Err(anyhow!("Environment variable key cannot be empty"));
@@ -143,7 +131,6 @@ pub fn validate_server_config(
     Ok(())
 }
 
-/// Create a display name for MCP server configuration
 pub fn create_server_display_name(command: &str, args: &[String], name: Option<&str>) -> String {
     if let Some(name) = name {
         if !name.trim().is_empty() {
@@ -151,7 +138,6 @@ pub fn create_server_display_name(command: &str, args: &[String], name: Option<&
         }
     }
 
-    // Extract meaningful parts from command
     let command_part = if command.contains('/') {
         command.split('/').last().unwrap_or(command)
     } else {
@@ -161,7 +147,6 @@ pub fn create_server_display_name(command: &str, args: &[String], name: Option<&
     if args.is_empty() {
         command_part.to_string()
     } else {
-        // Include relevant arguments in display name
         let relevant_args: Vec<&str> = args
             .iter()
             .filter(|arg| !arg.starts_with('-'))

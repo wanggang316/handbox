@@ -42,7 +42,7 @@
 
   let { session }: Props = $props();
 
-  // 思考强度档位（thinkingLevel 为后端自由文本字段）。
+  // Thinking-effort levels (thinkingLevel is a free-text backend field).
   // $derived so labels re-render on language switch.
   const thinkingLevelOptions = $derived([
     {
@@ -71,16 +71,16 @@
     },
   ]);
 
-  // 单张图片软上限（10 MiB）。超限的图片不阻塞 UI，仅静默跳过并提示，避免把
-  // 巨大的字节数组塞进 IPC 导致界面卡死/挂起（VAL-RUN-018）。
+  // Soft per-image limit (10 MiB). Oversized images are skipped with a hint
+  // instead of pushing huge byte arrays through IPC, which can hang the UI.
   const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
   let input = $state("");
   let textareaRef: HTMLTextAreaElement;
   let modelPrompt = $state<string | null>(null);
 
-  // 选中的图片附件（仅 image/*）。`previewUrl` 用 object URL 渲染缩略图，
-  // 移除/发送/卸载时统一 revoke 以免内存泄漏。
+  // Image attachments (image/* only). `previewUrl` is an object URL for the
+  // thumbnail; revoked on remove/send/unmount to avoid leaks.
   type AttachmentWithPreview = {
     id: string;
     name: string;
@@ -91,7 +91,8 @@
   let attachments = $state<AttachmentWithPreview[]>([]);
   let fileInputRef: HTMLInputElement | null = null;
 
-  // 会话存的是 modelId/providerId；picker 需要 ModelWithProvider，故从目录反查。
+  // The session stores modelId/providerId; the picker needs ModelWithProvider,
+  // so look it up in the catalog.
   const selectedModel = $derived<ModelWithProvider | null>(
     session.modelId && session.providerId
       ? (getAllModels().find(
@@ -103,7 +104,6 @@
   const selectedModelIcon = $derived(
     selectedModel ? getProviderIconById(selectedModel.provider_id) : undefined,
   );
-  // 模型选择 Modal（系统既有的搜索/收藏/分组模型选择器）开合。
   let modelModalOpen = $state(false);
 
   const thinkingLevel = $derived(session.thinkingLevel ?? "off");
@@ -112,8 +112,8 @@
       thinkingLevelOptions[0].label,
   );
 
-  // 推理强度自定义菜单（镜像 Agent 选择器的弹层模式）。hover 项驱动底部描述区，
-  // 未 hover 时回落到当前选中项的描述。
+  // Thinking-effort menu: the hovered item drives the footer description,
+  // falling back to the selected item's when nothing is hovered.
   let thinkingMenuOpen = $state(false);
   let thinkingMenuHover = $state<string | null>(null);
   const thinkingMenuDesc = $derived(
@@ -124,7 +124,7 @@
     ).desc,
   );
 
-  // 点击外部关闭（镜像 Agent 菜单）。菜单内点击经 stopPropagation 不冒泡到 window。
+  // Close on outside click; clicks inside the menu stopPropagation and never reach window.
   $effect(() => {
     if (!thinkingMenuOpen) return;
     const handler = () => (thinkingMenuOpen = false);
@@ -134,7 +134,7 @@
 
   function toggleThinkingMenu(event: MouseEvent) {
     event.stopPropagation();
-    // stopPropagation 使另一弹层的「点击外部关闭」失效，故显式互斥。
+    // stopPropagation defeats the other popover's outside-click close, so close it explicitly.
     agentMenuOpen = false;
     thinkingMenuHover = null;
     thinkingMenuOpen = !thinkingMenuOpen;
@@ -146,14 +146,12 @@
     handleThinkingChange(value);
   }
 
-  // ── Agent 选择器（把 Agents 页的「使用」搬进输入框左下角）──────────────────
-  //    显示当前会话来源 Agent 名；点开向上弹出 AgentDefinition 列表，选中他者即
-  //    从该定义实例化一个新会话并跳转过去（等价于在 Agents 页点「使用」）。选中
-  //    当前会话自身来源的 Agent 为干净 no-op —— 不重复新建空会话。
+  // Agent picker: selecting another definition instantiates a new session from
+  // it and navigates there; re-selecting the current one is a no-op.
   let agentMenuOpen = $state(false);
 
-  // 当前会话来源 Agent（据 agentDefinitionId 从已加载列表反查；未加载/已删除/
-  // 无 provenance 时为 null，按钮回落到「选择 Agent」占位）。
+  // Source Agent of this session; null when unloaded/deleted/absent, in which
+  // case the trigger falls back to the "select agent" placeholder.
   const currentAgent = $derived<Agent | null>(
     session.agentDefinitionId
       ? (agentState.agents.find((a) => a.id === session.agentDefinitionId) ??
@@ -163,15 +161,14 @@
   const currentAgentLabel = $derived(
     currentAgent?.name ?? t("agent.input.selectAgent"),
   );
-  // 触发按钮图标取实际 Agent 配置的图标（无来源 Agent / 未设置时回退默认 Bot）。
   const CurrentAgentIcon = $derived(resolveAgentIcon(currentAgent?.icon));
 
-  // 是否显示「工作目录」选择：仅当会话来源 Agent 的 workingDirMode ≠ "none"
-  // （required / optional / 旧定义 NULL 均需要工作目录，只有纯对话 "none" 不需要）。
+  // Show the working-dir picker unless workingDirMode is "none" (required /
+  // optional / NULL definitions all take a working directory).
   const showWorkingDir = $derived(
     !!currentAgent && currentAgent.workingDirMode !== "none",
   );
-  // 工作目录展示名：取路径末段（basename）便于在紧凑按钮里显示；未设置为 null。
+  // Working-dir basename fits the compact button; null when unset.
   const workingDirName = $derived.by(() => {
     const dir = session.workingDir;
     if (!dir) return null;
@@ -179,9 +176,9 @@
     return parts.length > 0 ? parts[parts.length - 1] : dir;
   });
 
-  // lazy-load Agent 列表（/agent 路由本身不加载它；两个内置 Agent 恒被 seed，故
-  // length===0 即「尚未加载」的可靠代理）。打开选择器时、或会话已有来源 Agent 时
-  // （后者用于解析 workingDirMode 以决定是否显示工作目录选择）都触发加载。
+  // Lazy-load agents (the /agent route doesn't). Builtin agents are always
+  // seeded, so length === 0 reliably means "not loaded yet". Also load when the
+  // session has a source agent, to resolve workingDirMode for the dir picker.
   $effect(() => {
     if (
       (agentMenuOpen || session.agentDefinitionId) &&
@@ -193,7 +190,7 @@
     }
   });
 
-  // 点击外部关闭（镜像工具菜单）。菜单内点击经 stopPropagation 不冒泡到 window。
+  // Close on outside click; clicks inside the menu stopPropagation and never reach window.
   $effect(() => {
     if (!agentMenuOpen) return;
     const handler = () => (agentMenuOpen = false);
@@ -203,7 +200,7 @@
 
   function toggleAgentMenu(event: MouseEvent) {
     event.stopPropagation();
-    // stopPropagation 使另一弹层的「点击外部关闭」失效，故显式互斥。
+    // stopPropagation defeats the other popover's outside-click close, so close it explicitly.
     thinkingMenuOpen = false;
     agentMenuOpen = !agentMenuOpen;
   }
@@ -211,13 +208,12 @@
   async function selectAgent(agent: Agent) {
     agentMenuOpen = false;
     if (!agent.id) return;
-    // 已是当前会话来源 Agent：干净 no-op（不重复新建空会话）。
+    // Already the session's source agent: no-op.
     if (agent.id === session.agentDefinitionId) return;
     try {
-      // 当前会话「一句话都没说过」（无消息且无活跃 run）：就地把它重指到新
-      // Agent —— 复用现有会话，不新建（保留 id / URL，无需跳转）。否则从新定义
-      // 实例化一个新会话并跳转过去。不传 overrides：后端让新定义的 model/工作目录
-      // 策略优先，未定处再保留会话现值。
+      // Untouched session (no messages, no active run): repoint it in place,
+      // keeping id/URL; otherwise instantiate a new session and navigate.
+      // No overrides: the new definition's model/working-dir policy wins.
       if (session.messageCount === 0 && !agentRunStore.isRunning(session.id)) {
         await agentSessionActions.reinstantiateFromDefinition(
           session.id,
@@ -234,8 +230,8 @@
     }
   }
 
-  // 选择 / 更换会话工作目录：打开系统目录选择对话框，选中即持久化到 session.workingDir
-  // （后端校验为已存在的绝对目录）。用户取消（返回非字符串）为干净 no-op。
+  // Pick the session working dir via the system dialog; the backend validates
+  // it as an existing absolute directory. Cancel (non-string result) is a no-op.
   async function pickWorkingDir() {
     try {
       const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
@@ -252,30 +248,28 @@
     }
   }
 
-  // 该会话是否存在活跃 run —— 驱动 Send <-> Stop 切换（VAL-RUN-006）。
+  // Active run for this session drives the Send <-> Stop toggle.
   const running = $derived(agentRunStore.isRunning(session.id));
 
-  // 该会话是否有待审批的危险工具调用（write/edit/bash）。待决期间对话暂停：
-  // 输入框禁用、发送被拦截、提示「等待审批」，直到用户在弹窗里允许 / 拒绝
-  // （VAL-CAPERM-001）。审批本身在页面级 AgentApprovalModal 里完成。
+  // A pending approval for a dangerous tool call (write/edit/bash) pauses the
+  // conversation: input disabled, send blocked, until the user decides in the
+  // page-level AgentApprovalModal.
   const awaitingApproval = $derived(agentApprovalStore.hasPending(session.id));
 
-  // ── Slash skill 自动补全浮层 ──────────────────────────────────────────
-  // 触发条件：空输入框（整段 textarea 为空）首字符**键入** `/`（非粘贴、非词中、
-  // 非 Shift+Enter 后行首、非 IME 合成）→ 打开锚定 textarea 的 skill 浮层。
-  // 候选只含未禁用 skill；query 为 `/` 之后的文本，大小写不敏感子串匹配 name。
-  // 选中 → 把 `/<name> ` 写回输入文本的原位置（替换已键入的 /query），不再单独用
-  // chip 行展示。文本即唯一真源：发送时从行首 `/<name>` 解析出强制 skill 名传给后端，
-  // 由后端把 skill body 注入 system prompt（forcedSkills wire 机制保持不变）。
+  // Slash skill autocomplete: typing `/` into an empty textarea (not pasted,
+  // not during IME composition) opens a popover of enabled skills filtered
+  // case-insensitively by the text after `/`. Selecting writes `/<name> ` back
+  // into the input; the text is the single source of truth — on send the
+  // leading `/<name>` is parsed as the forced skill name and the backend
+  // injects the skill body into the system prompt.
 
   let slashOpen = $state(false);
   let slashQuery = $state("");
   let slashHighlight = $state(0);
   let availableSkills = $state<SkillInfo[]>([]);
-  // composing 标记：IME 合成期间不触发浮层、不选中、不发送（VAL-SLASH-014）。
+  // During IME composition the popover neither opens, selects, nor sends.
   let composing = $state(false);
 
-  // 候选：未禁用 skill 经大小写不敏感 name 子串过滤（query 为空 → 全部）。
   const slashCandidates = $derived.by(() => {
     const q = slashQuery.trim().toLowerCase();
     const enabled = availableSkills.filter((s) => !s.disabled);
@@ -283,7 +277,7 @@
     return enabled.filter((s) => s.name.toLowerCase().includes(q));
   });
 
-  // 高亮越界（过滤后列表缩短）时回钳到末项；空列表时无高亮（-1）。
+  // Clamp the highlight when filtering shrinks the list; -1 when empty.
   const effectiveHighlight = $derived(
     slashCandidates.length === 0
       ? -1
@@ -312,16 +306,16 @@
     slashHighlight = 0;
   }
 
-  // 清掉 textarea 里从触发用 `/` 起的 query 文本（选中 / Escape / 退格关闭后）。
+  // Clear the typed /query from the textarea.
   function clearSlashQuery() {
     input = "";
     adjustTextareaHeight();
   }
 
   async function selectSkill(skill: SkillInfo) {
-    // 把 `/<name> ` 写回输入文本的原位置（替换整段 /query），不再单独加 chip。
-    // 关浮层后把焦点与光标交还 textarea 末尾，便于直接接着输入正文。强制 skill
-    // 名在发送时从行首 `/<name>` 解析得到（见 leadingForcedSkillNames）。
+    // Replace the typed /query with `/<name> `, then return focus with the
+    // caret at the end. The forced skill name is re-parsed from the leading
+    // `/<name>` on send (see leadingForcedSkillNames).
     input = `/${skill.name} `;
     closeSlashPopover();
     await tick();
@@ -332,9 +326,9 @@
     adjustTextareaHeight();
   }
 
-  // 行首 `/<name>` → 强制 skill 名（仅匹配已知未禁用 skill；否则视为普通文本，
-  // 返回空）。slash 触发只在整段恰为单个 `/` 时发生，故选中后正文总以 `/<name> `
-  // 起头，至多一个前导强制 skill。
+  // Leading `/<name>` → forced skill name; only known enabled skills match,
+  // anything else is plain text. The slash trigger only fires on a lone `/`,
+  // so there is at most one leading forced skill.
   function leadingForcedSkillNames(text: string): string[] {
     const m = text.trimStart().match(/^\/(\S+)/);
     if (!m) return [];
@@ -353,16 +347,16 @@
     }
   }
 
-  // Enter 发送；Shift+Enter 换行（镜像 ChatInput）（VAL-RUN-011）。
-  // 浮层打开时优先消费键盘：↑/↓ 移高亮、Enter 选中、Escape 关闭——Enter 在浮层
-  // 打开时绝不发送（VAL-SLASH-016）。IME 合成期间 Enter 不选不发（VAL-SLASH-014）。
+  // Enter sends; Shift+Enter inserts a newline. While the popover is open the
+  // keyboard is consumed first: arrows move the highlight, Enter selects
+  // (never sends), Escape closes. IME composition swallows every key.
   function handleKeydown(event: KeyboardEvent) {
-    // IME 合成中：所有键交给输入法，不触发选中/发送（双保险：标记 + isComposing）。
+    // IME composing: leave all keys to the IME (belt and braces: flag + isComposing).
     if (composing || event.isComposing) return;
 
     if (slashOpen) {
-      // ↓ 或 Ctrl|Cmd+N 下移、↑ 或 Ctrl|Cmd+P 上移（emacs 风）；端点有界、
-      // 不动文本光标（preventDefault）。高亮变化由浮层 scrollIntoView 跟随。
+      // ArrowDown/Ctrl|Cmd+N and ArrowUp/Ctrl|Cmd+P move the highlight
+      // (clamped); preventDefault keeps the text caret still.
       const mod = event.metaKey || event.ctrlKey;
       const navDown =
         event.key === "ArrowDown" || (mod && event.key.toLowerCase() === "n");
@@ -386,14 +380,14 @@
         return;
       }
       if (event.key === "Enter" && !event.shiftKey) {
-        // 浮层打开时 Enter = 选中而非发送；无高亮时干净 no-op。
+        // Enter selects instead of sending; no highlight → no-op.
         event.preventDefault();
         const target = slashCandidates[effectiveHighlight];
         if (target) selectSkill(target);
         return;
       }
       if (event.key === "Escape") {
-        // 关闭并消费 /query。
+        // Close and consume the /query.
         event.preventDefault();
         clearSlashQuery();
         closeSlashPopover();
@@ -413,24 +407,22 @@
 
   function handleCompositionEnd() {
     composing = false;
-    // 合成提交后正常字符流参与触发/过滤（VAL-SLASH-014）。
+    // After composition commits, the text participates in trigger/filter as usual.
     syncSlashState(false);
   }
 
-  // textarea 输入变化驱动浮层触发与 query 同步。`fromPaste` 时不开浮层
-  // （粘贴的 `/` 不当触发，VAL-SLASH-012）。
+  // Sync popover trigger/query with textarea input; a pasted `/` must not trigger.
   function syncSlashState(fromPaste: boolean) {
-    // 合成中不触发（字符尚未提交）。
+    // Not during composition (text not committed yet).
     if (composing) return;
 
-    // 触发：整段输入恰为单个 `/` 且非粘贴 → 开浮层。
+    // Trigger: input is exactly "/" and not pasted.
     if (!slashOpen) {
       if (!fromPaste && input === "/") openSlashPopover();
       return;
     }
 
-    // 已打开：query = `/` 之后的文本。退格删掉触发用 `/`（input 不再以 `/` 开头
-    // 或已空）→ 关闭浮层（VAL-SLASH-011）。
+    // Open: query is the text after `/`; close once the leading `/` is gone.
     if (!input.startsWith("/")) {
       closeSlashPopover();
       return;
@@ -452,8 +444,8 @@
     fileInputRef?.click();
   }
 
-  // 选图：仅接受 image/*，超限图片静默跳过（不阻塞 UI）。读成原始字节用于发送，
-  // object URL 用于缩略图预览。
+  // Accept image/* only; oversized images are silently skipped. Raw bytes are
+  // kept for sending, an object URL for the thumbnail preview.
   async function handleAttachmentChange(event: Event) {
     const target = event.currentTarget as HTMLInputElement;
     const files = target.files;
@@ -484,7 +476,7 @@
       modelPrompt = t("agent.input.oversizeSkipped");
     }
 
-    // 复位，使重选同一文件也能再次触发 change。
+    // Reset so re-picking the same file fires change again.
     if (fileInputRef) {
       fileInputRef.value = "";
     }
@@ -515,17 +507,17 @@
   });
 
   async function sendAgentRun() {
-    // 待审批暂停：对话挂起在一次危险工具调用上，既不起新 run 也不入 steering 队列，
-    // 直到用户在审批弹窗里允许 / 拒绝（VAL-CAPERM-001）。干净 no-op，不清空输入。
+    // Approval pending: neither start a run nor enqueue steering until the
+    // user decides in the approval modal. No-op, input preserved.
     if (awaitingApproval) return;
 
-    // run 进行中：消息走 steering 队列，不起第二个 run。后端 agent_run_steer 把
-    // 文本压入活跃 run 的 steering 队列、在 turn 边界 drain；纯空白为干净 no-op。
-    // 注意：mid-run steer 仅支持纯文本，附件直接丢弃（不随 steer 发送）；正文里的
-    // 行首 `/<name>` 不做强制 skill 解析（steer 不注入 skill），原样作为文本入队。
-    // 活跃 run 必有模型，故此分支无需查 model 守卫；放在 model 守卫之前自洽。
+    // Run in progress: route the message into the active run's steering queue
+    // (drained at turn boundaries) instead of starting a second run. Steering
+    // is text-only: attachments are dropped and a leading `/<name>` is not
+    // parsed as a forced skill. An active run always has a model, so this
+    // branch safely precedes the model guard.
     if (running) {
-      // 纯空白输入：干净 no-op（不清空、不入队、不调用）。
+      // Whitespace-only input: no-op.
       if (!input.trim()) return;
       modelPrompt = null;
       const text = input;
@@ -535,7 +527,7 @@
       try {
         await steerAgentRun(session.id, text);
       } catch (error) {
-        // steer 失败：仅提示，不回填覆盖已清空的 input（保持简单）。
+        // On steer failure just surface the error; don't restore the cleared input.
         console.error("Failed to steer agent run:", error);
         modelPrompt =
           error instanceof Error
@@ -545,10 +537,10 @@
       return;
     }
 
-    // 空/纯空白输入且无附件为 no-op：不发起 run，不产生气泡（VAL-RUN-010）。
+    // Empty input with no attachments: no run, no bubble.
     if (!input.trim() && attachments.length === 0) return;
 
-    // 无模型则提示并阻断（防御性；创建会话通常已含模型）（VAL-RUN-010）。
+    // No model: prompt and block (defensive; created sessions normally have one).
     if (!session.modelId || !session.providerId) {
       modelPrompt = t("agent.input.selectModelFirst");
       return;
@@ -556,18 +548,18 @@
 
     modelPrompt = null;
     const text = input;
-    // 快照附件用于发送（Uint8Array -> number[] 以匹配后端 Vec<u8> 的 IPC 形态），
-    // 随即清空输入与附件；用户气泡由后端 emit 的 user message_end 经 agentRunStore
-    // reduce 出现，此处不做乐观插入以免重复。
+    // Snapshot attachments for sending (Uint8Array -> number[] to match the
+    // backend Vec<u8> IPC shape), then clear input. The user bubble comes from
+    // the backend's user message_end event; no optimistic insert to avoid dupes.
     const payloadAttachments: AgentRunAttachment[] = attachments.map((a) => ({
       name: a.name,
       mimeType: a.mimeType,
       data: Array.from(a.data),
     }));
     const sentAttachments = attachments;
-    // 强制 skill 名从正文行首 `/<name>` 解析：文本即唯一真源，故 catch 回填 input
-    // 即自动恢复强制 skill，无需单独快照。`/<name>` 随正文一并发给模型（与就地内联
-    // 展示一致），同时后端按此 list 把 skill body 注入 system prompt。
+    // Forced skill names come from the leading `/<name>`: the text is the
+    // single source of truth, so restoring input on failure also restores them.
+    // `/<name>` is sent to the model verbatim; the backend injects skill bodies.
     const forcedSkillNames = leadingForcedSkillNames(text);
     input = "";
     attachments = [];
@@ -579,15 +571,15 @@
         payloadAttachments,
         forcedSkillNames,
       );
-      // 发送成功后再 revoke 预览 URL（此时缩略图已从 DOM 移除）。
+      // Revoke preview URLs only after a successful send (thumbnails left the DOM).
       sentAttachments.forEach((a) => {
         if (a.previewUrl.startsWith("blob:")) {
           URL.revokeObjectURL(a.previewUrl);
         }
       });
     } catch (error) {
-      // 启动失败：回填输入与附件（input 含行首 `/<name>`，强制 skill 自动恢复），
-      // 提示错误，便于重试。
+      // Start failed: restore input and attachments (the leading `/<name>`
+      // restores the forced skill) and surface the error for retry.
       input = text;
       attachments = sentAttachments;
       adjustTextareaHeight();
@@ -638,15 +630,14 @@
   onchange={handleAttachmentChange}
 />
 
-<!-- 系统既有的模型选择 Modal（搜索/收藏/分组）。选中即成对写入 modelId+providerId。 -->
+<!-- Model select modal; selection writes modelId+providerId as a pair. -->
 <ModelSelectModal
   bind:open={modelModalOpen}
   {selectedModel}
   onModelSelect={handleModelSelect}
 />
 
-<!-- 工作目录选择：置于 composer 上方左侧，仅当来源 Agent 的 workingDirMode ≠ "none"
-     时出现。点击打开系统目录选择框，选中即持久化到 session.workingDir。 -->
+<!-- Working-dir picker above the composer; shown unless workingDirMode is "none". -->
 {#if showWorkingDir}
   <div class="mx-auto flex w-full max-w-[800px] pb-1">
     <button
@@ -671,10 +662,9 @@
 <div
   class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
 >
-  <!-- relative 容器锚定浮层；浮层向上弹（bottom-full）以免落屏外/被时间线裁切。 -->
+  <!-- Relative container anchors the popover, which opens upward (bottom-full) to stay on-screen. -->
   <div class="relative">
     {#if slashOpen}
-      <!-- fly 提供与 Agent 菜单一致的轻微位移 + 淡入淡出开合动画。 -->
       <div
         class="absolute bottom-full left-3 z-30 mb-1"
         transition:fly={{ y: -4, duration: 130 }}
@@ -728,8 +718,7 @@
   {/if}
 
   {#if awaitingApproval}
-    <!-- 待审批暂停指示：对话挂起在一次危险工具调用上，等待弹窗中的允许 / 拒绝
-         （VAL-CAPERM-001）。 -->
+    <!-- Approval-pending indicator: the conversation is paused on a dangerous tool call. -->
     <div class="px-4 pb-1 flex items-center gap-2 text-xs text-warning">
       <span
         class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
@@ -746,7 +735,6 @@
 
   <div class="flex flex-row items-center justify-between gap-3 px-4 pt-0 pb-2">
     <div class="flex flex-row flex-wrap items-center gap-2">
-      <!-- 附件（图片上传）：最左侧的附件图标，与其余触发器共用安静 hover。 -->
       <button
         type="button"
         class="flex h-7 w-7 items-center justify-center rounded-md text-base-content transition-colors hover:bg-base-300/60"
@@ -757,8 +745,7 @@
         <Paperclip size={16} />
       </button>
 
-      <!-- Agent 选择器：当前会话来源 Agent + 向上弹出的切换列表。选中他者即从该
-           AgentDefinition 实例化新会话并跳转（把 Agents 页的「使用」搬进输入框）。 -->
+      <!-- Agent picker: selecting another definition instantiates a new session and navigates there. -->
       <div class="relative">
         <button
           type="button"
@@ -779,9 +766,8 @@
         </button>
 
         {#if agentMenuOpen}
-          <!-- 向上展开（bottom-full）：输入框在底部，列表浮于按钮上方以免落屏外。
-               fly 提供轻微位移 + 淡入淡出的开合动画。
-               stopPropagation 防止菜单内点击冒泡到 window 触发外部关闭。 -->
+          <!-- Opens upward (bottom-full) to stay on-screen; stopPropagation
+               keeps inside clicks from triggering the outside-click close. -->
           <div
             transition:fly={{ y: -4, duration: 130 }}
             class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-52 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
@@ -823,8 +809,8 @@
       </div>
     </div>
     <div class="flex flex-row items-center gap-3">
-      <!-- 会话级模型选择器：打开系统既有的模型选择 Modal（搜索/收藏/分组）。选中即
-           成对写入 modelId+providerId（handleModelSelect）；解析不到显示「选择模型」。 -->
+      <!-- Session model trigger: opens the model modal; an unresolved model
+           shows the "select model" placeholder. -->
       <button
         type="button"
         class="flex h-7 items-center gap-1.5 rounded-md px-2 py-1 text-sm text-base-content/80 hover:bg-base-300/60 transition-colors"
@@ -849,9 +835,8 @@
         <ChevronsUpDown size={13} class="shrink-0 opacity-60" />
       </button>
 
-      <!-- 推理强度：自定义向上弹出菜单（原生 select 无法自定义选项样式与描述区）。
-           触发器与模型触发器同高、同 hover；弹层镜像 Agent 选择器（bottom-full、
-           fly、点击外部关闭），每项带图标与选中勾，底部描述区随 hover 项联动。 -->
+      <!-- Thinking-effort menu: custom popover because a native select cannot
+           style options or show a description footer. -->
       <div class="relative">
         <button
           type="button"
@@ -871,8 +856,8 @@
         </button>
 
         {#if thinkingMenuOpen}
-          <!-- 向上展开（bottom-full）+ 右对齐（right-0）：触发器贴近 composer 右缘，
-               左展以免弹层溢出窗口。stopPropagation 防止菜单内点击触发外部关闭。 -->
+          <!-- Opens upward, right-aligned so the popover stays inside the window;
+               stopPropagation keeps inside clicks from closing it. -->
           <div
             transition:fly={{ y: -4, duration: 130 }}
             class="absolute bottom-full right-0 z-40 mb-2 w-52 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"

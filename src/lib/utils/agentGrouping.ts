@@ -1,19 +1,19 @@
 /**
- * Agent 会话按 Agent → Project → Session 三级分组与排序 - 纯函数 selectors
+ * Pure selectors grouping agent sessions into Agent → Project → Session.
  *
- * 层级：顶层按来源 Agent（session.agentDefinitionId）分桶；桶内若 session
- * 挂了 Project 则再下沉一层（Project → Session），未挂 Project 的 session 直接
- * 作为桶的子节点。无来源 Agent（agentDefinitionId 为空或悬挂引用已删 Agent）
- * 的 session 归入固定垫底的「Chats」桶，桶内同样应用 Project 下沉规则。
+ * Hierarchy: sessions are bucketed by source agent (session.agentDefinitionId);
+ * inside a bucket, sessions attached to an existing project nest under a
+ * project subgroup while the rest stay direct children. Sessions with no or
+ * dangling agent go into a "Chats" bucket that always sorts last.
  *
- * 排序约束（沿用 M2 分组契约）：
- *  - session 活动键 = coalesce(lastMessageAt, createdAt) —— 绝不是 updatedAt。
- *    rename / 配置写入 bump updatedAt 但不构成「活动」，不得影响顺序。
- *  - 桶内子节点（Project 子组与散 session 混排）按活动键降序；Project 子组的
- *    活动键 = 组内最新 session 活动键。
- *  - Agent 桶按桶内最新活动键降序，并列按 Agent 名升序 tie-break；「Chats」桶
- *    恒定排在所有 Agent 桶之后。
- *  - 纯函数：不修改入参，输出顺序与入参数组顺序无关。
+ * Sort contract:
+ *  - Session activity key = coalesce(lastMessageAt, createdAt) — never
+ *    updatedAt (rename/config writes bump updatedAt but are not "activity").
+ *  - Bucket children (project subgroups interleaved with loose sessions) sort
+ *    by activity key desc; a project subgroup's key is its latest session's.
+ *  - Agent buckets sort by latest activity desc, ties broken by agent name
+ *    asc; the "Chats" bucket always comes last.
+ *  - Pure: inputs are not mutated; output order is independent of input order.
  */
 
 import type { Timestamp } from "../types";
@@ -21,42 +21,36 @@ import type { Agent } from "../types/agent";
 import type { AgentSession } from "../types/agentSession";
 import type { AgentProject } from "../types/agentProject";
 
-/** 无来源 Agent 会话的「Chats」桶保留 key（不会与 UUID 冲突）。 */
+/** Reserved key for the "Chats" bucket (never collides with a UUID). */
 export const CHATS_BUCKET_KEY = "__chats__";
 
-/** 一个 Project 子组：项目实体 + 组内（已排序）会话。 */
 export interface AgentProjectGroup {
   project: AgentProject;
   sessions: AgentSession[];
 }
 
-/** 桶内的一个子节点：Project 子组，或未挂项目的散 session。 */
 export type AgentBucketChild =
   | { kind: "project"; project: AgentProject; sessions: AgentSession[] }
   | { kind: "session"; session: AgentSession };
 
-/** 一个顶层桶：某 Agent（`agent` 非空）或「Chats」（`agent` 为 null）。 */
 export interface AgentSessionBucket {
-  /** 折叠 / keyed-each 用的稳定 key：agent.id 或 `CHATS_BUCKET_KEY`。 */
+  /** Stable key for collapse state / keyed each: agent.id or `CHATS_BUCKET_KEY`. */
   key: string;
-  /** 桶归属的 Agent；null 表示「Chats」桶（无来源 Agent）。 */
+  /** Owning agent; null means the "Chats" bucket. */
   agent: Agent | null;
-  /** 已按活动键降序排好的子节点（Project 子组与散 session 混排）。 */
+  /** Children sorted by activity key desc (project subgroups interleaved with loose sessions). */
   children: AgentBucketChild[];
 }
 
 /**
- * session 的活动键：coalesce(lastMessageAt, createdAt)。
- * 故意不使用 updatedAt（rename / 配置变更不构成活动，不得影响排序）。
+ * Activity key = coalesce(lastMessageAt, createdAt). Deliberately not
+ * updatedAt: rename/config writes are not "activity" and must not affect order.
  */
 export function sessionActivityKey(session: AgentSession): Timestamp {
   return session.lastMessageAt ?? session.createdAt;
 }
 
-/**
- * 组内会话比较器：活动键降序；并列时 createdAt 降序、再按 id 升序，
- * 保证输出全序确定（与输入顺序无关）。
- */
+/** Activity desc; ties by createdAt desc then id asc for a deterministic total order. */
 function compareSessionsByActivityDesc(
   a: AgentSession,
   b: AgentSession,
@@ -68,21 +62,20 @@ function compareSessionsByActivityDesc(
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-/** 子节点的活动键：session 取自身；Project 子组取组内最新（已排序，取首个）。 */
+/** Session: its own key; project subgroup: latest member (sessions pre-sorted desc). */
 function childActivityKey(child: AgentBucketChild): Timestamp {
   return child.kind === "session"
     ? sessionActivityKey(child.session)
     : sessionActivityKey(child.sessions[0]);
 }
 
-/** 子节点稳定 tie-break key：跨类型确定（project 前缀恒排在 session 前缀之前）。 */
+/** Stable cross-kind tie-break key (project prefix sorts before session prefix). */
 function childTiebreakKey(child: AgentBucketChild): string {
   return child.kind === "project"
     ? `0:${child.project.id}`
     : `1:${child.session.id}`;
 }
 
-/** 桶内子节点排序：活动键降序，并列按稳定 tie-break key 升序。 */
 function compareChildrenByActivityDesc(
   a: AgentBucketChild,
   b: AgentBucketChild,
@@ -95,8 +88,8 @@ function compareChildrenByActivityDesc(
 }
 
 /**
- * 把一桶 session 按 Project 下沉为子节点列表：挂了（存在的）Project 的进 Project
- * 子组，未挂或悬挂 Project 的作为散 session；子组内 / 整体均按活动键降序。
+ * Split a bucket's sessions into project subgroups and loose sessions; a
+ * dangling projectId falls back to loose. Everything sorts by activity desc.
  */
 function buildBucketChildren(
   bucketSessions: AgentSession[],
@@ -133,13 +126,14 @@ function buildBucketChildren(
 }
 
 /**
- * 将会话按 Agent → Project → Session 分桶并排序。
+ * Group sessions into sorted Agent → Project → Session buckets.
  *
- *  - 每个「至少有一个 session」的 Agent 生成一个桶（无 session 的 Agent 不渲染）。
- *  - session 的 agentDefinitionId 为空、或悬挂引用了不存在的 Agent，归入「Chats」桶。
- *  - 桶按桶内最新活动键降序；并列按 Agent 名升序。「Chats」桶恒定垫底。
+ *  - Only agents with at least one session get a bucket.
+ *  - Sessions with an empty or dangling agentDefinitionId go to "Chats".
+ *  - Buckets sort by latest activity desc, ties by agent name asc; the
+ *    "Chats" bucket always comes last.
  *
- * 纯函数：不修改入参，结果顺序与入参数组顺序无关。
+ * Pure: inputs are not mutated; output order is independent of input order.
  */
 export function groupSessionsByAgent(
   agents: Agent[],
@@ -147,14 +141,14 @@ export function groupSessionsByAgent(
   sessions: AgentSession[],
 ): AgentSessionBucket[] {
   const agentById = new Map<string, Agent>();
-  // 仅索引已持久化（有 id）的 Agent；未保存的 Agent 无法作为归属 key。
+  // Only persisted agents (with an id) can serve as an ownership key.
   for (const agent of agents) {
     if (agent.id) agentById.set(agent.id, agent);
   }
   const projectById = new Map<string, AgentProject>();
   for (const project of projects) projectById.set(project.id, project);
 
-  // 按解析后的 Agent 归属分桶：无 / 悬挂 Agent 落入 CHATS_BUCKET_KEY。
+  // Bucket by resolved agent; missing/dangling agents fall into CHATS_BUCKET_KEY.
   const sessionsByBucket = new Map<string, AgentSession[]>();
   for (const session of sessions) {
     const agentId =
@@ -178,7 +172,7 @@ export function groupSessionsByAgent(
     else agentBuckets.push(bucket);
   }
 
-  // 桶排序键 = 桶内首个子节点的活动键（children 已按活动键降序）。
+  // children are sorted desc, so the first child carries the bucket's latest activity.
   const bucketSortKey = (bucket: AgentSessionBucket): Timestamp =>
     bucket.children.length ? childActivityKey(bucket.children[0]) : 0;
 
@@ -191,6 +185,5 @@ export function groupSessionsByAgent(
     return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
 
-  // 「Chats」桶恒定垫底。
   return chatsBucket ? [...agentBuckets, chatsBucket] : agentBuckets;
 }

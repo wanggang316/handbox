@@ -3,10 +3,8 @@
   import { HelpCircle } from "@lucide/svelte";
   import { fly } from "svelte/transition";
 
-  // A help trigger: a HelpCircle icon that reveals `content` in a hover popover.
-  // `content` renders through Svelte text binding only (never @html). The popover
-  // is fixed-positioned at a high z-index so it escapes any clipping ancestor,
-  // mirroring the source ui/InfoTooltip.
+  // The popover is fixed-positioned at a high z-index so it escapes any clipping
+  // ancestor. `content` renders through Svelte text binding only (never @html).
   interface InfoTooltipProps {
     content: string;
   }

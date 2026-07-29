@@ -1,11 +1,11 @@
 /**
- * 通用文案（跨模块复用的 generic 词条）。
+ * Generic strings reused across modules.
  *
- * 维护约定：仅在此集中维护跨域复用的通用动作/状态词；
- * 域内特有文案请放各自命名空间，不要往这里堆。
+ * Keep only cross-domain action/state words here; domain-specific strings
+ * belong in their own namespace.
  */
 export const commonZh = {
-  // 动作
+  // actions
   "common.save": "保存",
   "common.cancel": "取消",
   "common.confirm": "确认",
@@ -41,7 +41,7 @@ export const commonZh = {
   "common.no": "否",
   "common.expand": "展开",
   "common.collapse": "收起",
-  // 状态
+  // states
   "common.loading": "加载中…",
   "common.saving": "保存中…",
   "common.search": "搜索",
@@ -58,10 +58,10 @@ export const commonZh = {
   "common.default": "默认",
   "common.untitled": "未命名",
   "common.unknown": "未知",
-  // 字段
+  // fields
   "common.name": "名称",
   "common.description": "描述",
-  // 已有词条
+  // existing
   "common.settings": "设置",
   "common.account": "账号",
   "common.login": "登录",

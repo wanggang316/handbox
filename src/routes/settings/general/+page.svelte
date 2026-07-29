@@ -5,25 +5,23 @@
   import { t } from "$lib/i18n";
   import type { Theme, Language } from "$lib/types/settings";
 
-  // 外观样式选项（随语言切换重算）
+  // Derived so labels recompute on language change
   const themeOptions = $derived([
     { value: "system", label: t("settings.general.theme.system") },
     { value: "light", label: t("settings.general.theme.light") },
     { value: "dark", label: t("settings.general.theme.dark") },
   ]);
 
-  // 语言选项：各语言以其自身名称（endonym）展示，不翻译
+  // Each language shows as its own endonym; never translated
   const languageOptions = [
     { value: "zh-CN", label: "简体中文" },
     { value: "en-US", label: "English" },
   ];
 
-  // 本地状态（本文件已进入 runes 模式，需用 $state 才能保持双向绑定响应式）
   let theme = $state<Theme>("system");
   let language = $state<Language>("zh-CN");
   let autoScroll = $state<boolean>(true);
 
-  // 从 settings 回填本地状态并应用主题/语言；store 未就绪时跳过
   function syncFromSettings(): void {
     if (!settingsState.settings?.general) return;
     theme = settingsState.settings.general.theme;
@@ -34,10 +32,11 @@
     uiState.setLanguage(language);
   }
 
-  // 根布局已预加载 settings：同步回填，首帧即真实值，避免默认值闪烁
+  // Root layout preloaded settings: sync backfill so the first frame shows real
+  // values (no default-value flicker).
   syncFromSettings();
 
-  // 兜底冷启动/深链：确保 settings 加载完成后再同步一次
+  // Cold-start/deep-link fallback: resync once settings finish loading
   onMount(() => {
     settingsState
       .loadSettings()
@@ -47,7 +46,6 @@
       });
   });
 
-  // 更新设置的通用函数
   async function updateGeneralSetting(key: string, value: any) {
     try {
       await settingsState.updateSettings({
@@ -59,21 +57,18 @@
     }
   }
 
-  // 处理主题变更
   function handleThemeChange(value: string) {
     theme = value as Theme;
     uiState.setTheme(theme);
     updateGeneralSetting("theme", theme);
   }
 
-  // 处理语言变更
   function handleLanguageChange(value: string) {
     language = value as Language;
     uiState.setLanguage(language);
     updateGeneralSetting("language", language);
   }
 
-  // 处理自动下滑变更
   function handleAutoScrollChange(checked: boolean) {
     autoScroll = checked;
     updateGeneralSetting("autoScroll", autoScroll);

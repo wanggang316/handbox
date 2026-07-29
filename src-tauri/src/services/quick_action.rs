@@ -1,17 +1,10 @@
-//! Quick Action 全局快捷键注册。
+//! Global shortcut for the Quick Action overlay, registered through
+//! `tauri-plugin-global-shortcut`. The handler runs only on key-DOWN
+//! (`ShortcutState::Pressed`) so a single keypress does not toggle twice.
 //!
-//! 把持久化的 `quickAction.shortcut` 加速键注册为系统级全局快捷键，按下即切换
-//! Quick Action 浮层（可见则隐藏、隐藏则显示）。注册经
-//! `tauri-plugin-global-shortcut`：解析加速键字符串 → `app.global_shortcut()
-//! .on_shortcut(...)`，handler 仅在 key-DOWN（`ShortcutState::Pressed`）触发以
-//! 避免一次按键被 down/up 触发两次。
-//!
-//! 注册的进程级单一事实来源是 [`CURRENT_ACCELERATOR`]：re-register 时先按它
-//! 反注册旧组合，再注册新组合，使被替换的旧组合彻底失活（设置页 live rebind
-//! 依赖此语义）。
-//!
-//! 所有失败路径返回项目统一的结构化错误 [`AppError`]，并经 `tracing` 以
-//! `[QuickActionShortcut::register]` 前缀记录（契约声明的证据）。
+//! [`CURRENT_ACCELERATOR`] is the process-wide source of truth: re-registering
+//! unregisters the recorded combination first, so a replaced accelerator stops
+//! firing (live rebind from the settings page relies on this).
 
 use crate::models::error::AppError;
 
@@ -22,16 +15,14 @@ use tauri::AppHandle;
 #[cfg(target_os = "macos")]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-/// `tracing` / 日志前缀；同时是 VAL-OVERLAY-016 声明的证据串。
 const LOG_PREFIX: &str = "[QuickActionShortcut::register]";
 
-/// 当前已注册的加速键字符串（进程级单一事实来源）。re-register 据此反注册旧
-/// 组合。`None` 表示尚未注册任何组合。
+/// Accelerator currently registered; `None` means nothing is registered.
 #[cfg(target_os = "macos")]
 static CURRENT_ACCELERATOR: Mutex<Option<String>> = Mutex::new(None);
 
-/// 把加速键字符串解析为插件的 [`Shortcut`]；解析失败返回结构化 [`AppError`]
-/// 而非 panic（VAL-OVERLAY-016）。这是纯解析步骤，便于对错误分支做单元测试。
+/// Parses an accelerator string, returning a structured [`AppError`] instead of
+/// panicking on malformed input.
 #[cfg(target_os = "macos")]
 fn parse_accelerator(accelerator: &str) -> Result<Shortcut, AppError> {
     use std::str::FromStr;
@@ -47,22 +38,16 @@ fn parse_accelerator(accelerator: &str) -> Result<Shortcut, AppError> {
     })
 }
 
-/// 注册（或重注册）Quick Action 全局快捷键。
-///
-/// 流程：解析新加速键 → 反注册先前记录的加速键（若有）→ 用切换 handler 注册新
-/// 加速键 → 更新进程级记录。任一步失败都返回结构化 [`AppError`] 并以
-/// `[QuickActionShortcut::register]` 前缀记录；调用方决定是否阻断（启动路径选择
-/// 仅记录并继续，VAL-OVERLAY-016）。
-///
-/// handler 仅在 key-DOWN 触发：按下时若面板可见则隐藏、否则按当前鼠标位置显示
-/// （VAL-OVERLAY-002 toggle 语义）。
+/// Registers (or re-registers) the Quick Action global shortcut. Failures come
+/// back as structured [`AppError`]s and the caller decides whether they are
+/// fatal; the startup path only logs and continues.
 #[cfg(target_os = "macos")]
 pub fn register_shortcut(app: &AppHandle, accelerator: &str) -> Result<(), AppError> {
     let shortcut = parse_accelerator(accelerator)?;
 
     let gs = app.global_shortcut();
 
-    // 先反注册上一个记录的加速键，使被替换的旧组合失活（设置页 live rebind 依赖）。
+    // Unregister the recorded accelerator so a replaced combination stops firing.
     let mut current = CURRENT_ACCELERATOR.lock().map_err(|_| {
         let message = "全局快捷键状态锁已损坏".to_string();
         tracing::error!("{LOG_PREFIX} {message}");
@@ -73,7 +58,7 @@ pub fn register_shortcut(app: &AppHandle, accelerator: &str) -> Result<(), AppEr
         if previous != accelerator {
             if let Ok(prev_shortcut) = parse_accelerator(&previous) {
                 if let Err(e) = gs.unregister(prev_shortcut) {
-                    // 旧组合反注册失败不阻断新组合注册，仅记录。
+                    // A failed unregister must not block the new registration.
                     tracing::warn!(
                         "{LOG_PREFIX} failed to unregister previous \"{previous}\": {e}"
                     );
@@ -84,7 +69,7 @@ pub fn register_shortcut(app: &AppHandle, accelerator: &str) -> Result<(), AppEr
 
     let handle = app.clone();
     gs.on_shortcut(shortcut, move |_app, _shortcut, event| {
-        // 仅响应 key-DOWN，避免 down/up 触发两次（VAL-OVERLAY-020）。
+        // Key-DOWN only, otherwise down/up would toggle twice per keypress.
         if event.state != ShortcutState::Pressed {
             return;
         }
@@ -105,10 +90,9 @@ pub fn register_shortcut(app: &AppHandle, accelerator: &str) -> Result<(), AppEr
     Ok(())
 }
 
-/// 反注册当前的 Quick Action 全局快捷键（设置页「启用 Quick Action」关闭时调用）。
-///
-/// 按进程级记录 [`CURRENT_ACCELERATOR`] 反注册并清空记录；无记录时是幂等 no-op。
-/// 反注册失败仅记录并返回 Ok——组合已失活或插件状态异常都不应阻断「禁用」语义。
+/// Unregisters the Quick Action global shortcut; an idempotent no-op when
+/// nothing is recorded. Unregister failures are logged and swallowed so
+/// disabling the feature always succeeds.
 #[cfg(target_os = "macos")]
 pub fn unregister_shortcut(app: &AppHandle) -> Result<(), AppError> {
     let mut current = CURRENT_ACCELERATOR.lock().map_err(|_| {
@@ -128,8 +112,8 @@ pub fn unregister_shortcut(app: &AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 切换 Quick Action 浮层：可见则隐藏、隐藏则按当前鼠标位置显示。复用面板模块的
-/// 进程级可见性标志与 show/hide，绝不在已可见时再次 show。
+/// Hides the overlay when visible, otherwise shows it at the current cursor
+/// position. Never re-shows an already visible panel.
 #[cfg(target_os = "macos")]
 fn toggle_overlay(app: &AppHandle) {
     use crate::services::selection::{
@@ -154,14 +138,12 @@ fn toggle_overlay(app: &AppHandle) {
     }
 }
 
-/// 非 macOS 平台的 no-op stub：全局快捷键能力仅在 macOS 接线（NSPanel 浮层
-/// 同样仅 macOS）。
+/// No-op off macOS: the overlay is an NSPanel, so the shortcut is macOS-only.
 #[cfg(not(target_os = "macos"))]
 pub fn register_shortcut(_app: &tauri::AppHandle, _accelerator: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 非 macOS 平台的 no-op stub。
 #[cfg(not(target_os = "macos"))]
 pub fn unregister_shortcut(_app: &tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
@@ -171,8 +153,6 @@ pub fn unregister_shortcut(_app: &tauri::AppHandle) -> Result<(), AppError> {
 mod tests {
     use super::*;
 
-    // VAL-OVERLAY-016：错误分支——无法解析的加速键串返回结构化 AppError 而非
-    // panic。
     #[test]
     fn parse_accelerator_rejects_malformed_string_with_structured_error() {
         let err = parse_accelerator("ThisIsNotAValidAccelerator!!").unwrap_err();

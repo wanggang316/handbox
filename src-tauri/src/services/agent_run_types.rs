@@ -1,20 +1,16 @@
 //! agent_run_types — wire types shared by the Agent-mode run path.
 //!
-//! These are the deserialization shapes for the `agent_run_stream` IPC command
-//! and its image attachments. They were extracted from the now-retired legacy
-//! `agent_runtime` driver so the coding-agent driver (`coding_agent_runtime`)
-//! and the command layer (`commands::agent_run`) can keep consuming the exact
-//! same `{ sessionId, input, attachments, forcedSkills }` payload the frontend
-//! already sends — the platform shift to the coding-agent engine does not change
-//! the wire contract.
+//! Deserialization shapes for the `agent_run_stream` IPC command and its image
+//! attachments. Kept in one place so the coding-agent driver
+//! (`coding_agent_runtime`) and the command layer (`commands::agent_run`) share
+//! a single `{ sessionId, input, attachments, forcedSkills }` wire contract.
 
 use crate::storage::types::UUID;
 
-/// 一个随本回合输入一并发送的图片附件（镜像 chat 的 `MessageRequestAttachment`）。
-///
-/// 前端已把文件读成原始字节并按 `image/*` 过滤；后端在装配 user 消息时把每个
-/// 图片字节做 base64 STANDARD 编码，emit 成一个 `model::ImageContent` 块。非图片
-/// mime 在装配处被防御性跳过（belt-and-suspenders）。
+/// An image attachment sent alongside the turn input (mirrors chat's
+/// `MessageRequestAttachment`). Bytes arrive raw and pre-filtered to `image/*`;
+/// assembly base64-encodes each into a `model::ImageContent` block and
+/// defensively skips non-image mimes.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunAttachment {
@@ -23,21 +19,21 @@ pub struct AgentRunAttachment {
     pub data: Vec<u8>,
 }
 
-/// `agent_run_stream` 的入参。
+/// Input payload of `agent_run_stream`.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunRequest {
     pub session_id: UUID,
     pub input: String,
-    /// 可选的图片附件。缺省（旧调用方 / 纯文本发送）时为空 Vec，走纯文本路径。
+    /// Optional image attachments; empty means the plain-text path.
     #[serde(default)]
     pub attachments: Vec<AgentRunAttachment>,
-    /// 本回合显式强制加载的 skill 名（wire 上 camelCase `forcedSkills`）。缺省
-    /// （旧的三字段 payload / 无强制注入）时为空 Vec。每个名针对**当前有效集**
-    /// （discovered-and-validated ∖ globally-disabled）解析；解析到的 skill body
-    /// 被逐字注入装配期的 system_prompt。unknown / 未发现 / 校验失败 / 全局禁用 /
-    /// 空串一律静默跳过（disabled 优先于 forced）；但强制一个 opt-in skill 仍注入
-    /// （显式用户意图覆盖 opt-in 抑制）。
+    /// Skill names force-loaded for this turn. Each is resolved against the
+    /// currently effective set (discovered-and-validated minus globally
+    /// disabled) and its body injected verbatim into the assembled
+    /// system_prompt. Unknown / invalid / globally-disabled / empty names are
+    /// skipped silently (disabled wins over forced), but forcing an opt-in
+    /// skill does inject it — explicit user intent overrides opt-in gating.
     #[serde(default)]
     pub forced_skills: Vec<String>,
 }
@@ -46,9 +42,8 @@ pub struct AgentRunRequest {
 mod tests {
     use super::*;
 
-    /// VAL-SLASH-019: an old `{ sessionId, input, attachments }` payload (no
-    /// `forcedSkills`) deserializes into `AgentRunRequest` with `forced_skills`
-    /// defaulting to an empty Vec.
+    /// A `{ sessionId, input, attachments }` payload without `forcedSkills`
+    /// still deserializes, with `forced_skills` defaulting to an empty Vec.
     #[test]
     fn legacy_payload_deserializes_with_empty_forced_skills() {
         // Three-field legacy payload.
@@ -77,9 +72,8 @@ mod tests {
         );
     }
 
-    /// An `image/*` attachment carrying raw bytes deserializes with its camelCase
-    /// `mimeType` and base64-decoded `data` intact (the boundary types must
-    /// faithfully reflect the frontend's `{ name, mimeType, data }` shape).
+    /// The boundary type must faithfully reflect the frontend's
+    /// `{ name, mimeType, data }` shape, camelCase included.
     #[test]
     fn attachment_deserializes_camel_case_fields() {
         let json = r#"{ "name": "shot.png", "mimeType": "image/png", "data": [1, 2, 3] }"#;

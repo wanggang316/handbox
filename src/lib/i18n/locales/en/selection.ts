@@ -1,5 +1,5 @@
 /**
- * selection namespace strings (filled by migration subagent).
+ * selection namespace strings.
  */
 import type { selectionZh } from "../zh/selection";
 

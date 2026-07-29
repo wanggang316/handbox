@@ -1,14 +1,14 @@
 /**
- * provider 命名空间文案（由迁移子代理填充；zh 为权威）。
+ * provider namespace strings (zh is canonical).
  */
 export const providerZh = {
-  // 供应商列表页
+  // Provider list page
   "provider.loadingProviders": "正在加载供应商...",
   "provider.emptyHint": "添加 AI 供应商开始使用各种模型",
   "provider.addProvider": "添加供应商",
   "provider.addOtherProvider": "添加其它供应商",
 
-  // 供应商详情页
+  // Provider detail page
   "provider.modelList": "模型列表",
   "provider.addModel": "添加模型",
   "provider.addModelPlaceholder": "输入 model id，例如 llama-3.1-8b",
@@ -24,7 +24,7 @@ export const providerZh = {
   "provider.emptyCustomModels": "该自定义供应商暂无模型，点击「添加模型」手动添加端点支持的 model id",
   "provider.emptyModels": "暂无模型数据，请检查供应商配置或网络连接",
 
-  // 删除/禁用确认弹窗
+  // Delete / disable confirmation dialogs
   "provider.deleteProviderTitle": "删除供应商",
   "provider.deleteProviderMessage": "确认要删除 <span class='font-medium'>{name}</span> 吗？",
   "provider.disableProviderTitle": "关闭供应商",
@@ -38,7 +38,7 @@ export const providerZh = {
   "provider.closeAction": "关闭",
   "provider.disableAction": "禁用",
 
-  // 添加/编辑供应商弹窗
+  // Add / edit provider dialog
   "provider.editProviderTitle": "编辑供应商",
   "provider.addProviderTitle": "添加供应商",
   "provider.providerType": "供应商类型",
@@ -52,7 +52,7 @@ export const providerZh = {
   "provider.updateSuccess": "供应商更新成功",
   "provider.createSuccess": "供应商创建成功",
 
-  // 模型信息弹窗
+  // Model info dialog
   "provider.modelInfo": "模型信息",
   "provider.emptyModelInfo": "暂无模型信息",
   "provider.viewModelDetail": "查看模型详情",
@@ -68,14 +68,14 @@ export const providerZh = {
   "provider.supportedMethods": "支持方法",
   "provider.supportedParameters": "支持参数",
 
-  // MCP 列表页
+  // MCP list page
   "provider.loadingMcpServers": "正在加载 MCP 服务器...",
   "provider.mcpEmptyHint": "添加 MCP 服务器来扩展 AI 能力",
   "provider.addMcpServer": "添加 MCP 服务器",
   "provider.mcpToolsSummary": "{total} 个工具，已启用 {enabled} 个",
   "provider.editAria": "编辑",
 
-  // MCP 关闭确认弹窗
+  // MCP disable confirmation dialog
   "provider.disableMcpTitle": "关闭 MCP 服务器",
   "provider.disableMcpWithChats":
     "检测到有 <span class='font-medium'>{count}</span> 个会话正在使用 <span class='font-medium'>{name}</span>。<br/><br/>请选择要执行的操作：",
@@ -83,7 +83,7 @@ export const providerZh = {
   "provider.disableAndRemove": "解除关联后关闭",
   "provider.disableMcpOnly": "仅关闭 MCP",
 
-  // MCP 详情页
+  // MCP detail page
   "provider.deleteMcpTitle": "删除 MCP 服务器",
   "provider.deleteMcpMessage":
     "确认要删除 <span class='font-medium'>{name}</span> 吗？<br/><br/>此操作无法撤销。",
@@ -98,7 +98,7 @@ export const providerZh = {
   "provider.paramsWithCount": "参数 ({count})",
   "provider.detail": "详情",
 
-  // MCP 表单弹窗
+  // MCP form dialog
   "provider.editMcpTitle": "编辑 MCP 服务器",
   "provider.addMcpTitle": "添加 MCP 服务器",
   "provider.mcpName": "名称",
@@ -132,7 +132,7 @@ export const providerZh = {
   "provider.validateTimeout": "超时时间必须是数字",
   "provider.saveFailed": "保存失败，请重试",
 
-  // MCP 文本编辑弹窗
+  // MCP text edit dialog
   "provider.editMcpJsonTitle": "编辑 MCP 服务器",
   "provider.mcpJsonPlaceholder": "请输入 MCP 服务器配置...",
   "provider.validateMcpJson": "请输入 MCP 服务器配置",

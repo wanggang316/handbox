@@ -3,7 +3,6 @@
   import { Settings } from "@lucide/svelte";
   import { t } from "$lib/i18n";
 
-  // 用户信息接口
   interface UserInfo {
     isLoggedIn: boolean;
     username?: string;
@@ -36,7 +35,6 @@
   role="button"
   tabindex="0"
 >
-  <!-- 头像 -->
   {#if user.isLoggedIn}
     <div class="flex flex-row gap-2 items-center">
       <Avatar
@@ -47,7 +45,6 @@
       />
     </div>
 
-    <!-- 用户信息 -->
     <div class="leading-[1.3] flex-1">
       <div class="text-[12px] font-normal text-base-content/80">{displayName}</div>
       <div class={`text-[11px] text-base-content/60`}>{planText}</div>

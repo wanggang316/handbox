@@ -1,13 +1,10 @@
-// Agent Project 服务实现
+// Business layer for Agent-mode projects (sessions grouped by working
+// directory), on top of `AgentProjectRepository`.
 //
-// Agent 模式项目（按工作目录分组会话）的业务逻辑层，建立在
-// `AgentProjectRepository` 之上，与 Chat 模式的 `SessionService` /
-// `/agents` 预设的 `AgentService` 完全独立。
-//
-// path 校验与 `AgentSessionService::validate_working_dir` 同等严格，但语义
-// 不同：session 的 working_dir 允许 None / 空串（归一为 null），而 project
-// 的 path 是身份标识，**必须**非空。两者因此各自独立实现，不共享 helper，
-// 避免「空值放行」被误复用。
+// Path validation is as strict as `AgentSessionService::validate_working_dir`
+// but not shared with it: a session's working_dir may be None/empty, whereas a
+// project's path is its identity and must be non-empty — a shared helper would
+// risk letting the empty-value case through here.
 
 use crate::models::AppError;
 use crate::services::agent_jsonl_store::{delete_session_file, session_cwd};
@@ -18,11 +15,10 @@ use sqlx::Row;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Agent Project 服务
 #[derive(Clone)]
 pub struct AgentProjectService {
-    /// 直接持有 db 以查询项目下的 session id 集合（delete 前逐个 abort 用）；
-    /// `AgentProjectRepository` / `AgentSessionRepository` 均未暴露该查询。
+    /// Held directly to query a project's session ids (needed to abort each one
+    /// before delete); neither repository exposes that query.
     db: Arc<Database>,
     repository: AgentProjectRepository,
 }
@@ -35,16 +31,11 @@ impl AgentProjectService {
         }
     }
 
-    /// 创建 Agent Project（get-or-create by canonical path）。
+    /// Get-or-create a project keyed by canonical path.
     ///
-    /// `path` 必须是 **非空** 的 **绝对路径**，且能 canonicalize 到一个
-    /// **已存在的目录**（symlink-to-dir 解析为其 canonical 目标）。存储
-    /// canonical 绝对路径；默认 name 取 canonical path 的 basename，
-    /// basename 为空（如根路径 `/`）时回退为完整 canonical path。
-    ///
-    /// 同 path（含 symlink 别名解析后）命中已有项目时原样返回，不改写其
-    /// name / created_at / updated_at。空串 / 相对路径 / 指向文件 / 磁盘不
-    /// 存在的路径一律 `VALIDATION_ERROR`，且不写入任何行。
+    /// An existing project (symlink aliases included) is returned untouched.
+    /// Empty / relative / file / missing paths yield `VALIDATION_ERROR` and
+    /// write no row.
     pub async fn create_project(&self, path: String) -> Result<AgentProject, AppError> {
         let canonical = Self::validate_project_path(&path)?;
         let name = default_project_name(&canonical);
@@ -56,12 +47,10 @@ impl AgentProjectService {
             .await
     }
 
-    /// 获取全部 Agent Project
     pub async fn list_projects(&self) -> Result<Vec<AgentProject>, AppError> {
         self.repository.list_projects().await
     }
 
-    /// 获取 Agent Project 详情
     pub async fn get_project(&self, project_id: UUID) -> Result<AgentProject, AppError> {
         match self.repository.get_project_by_id(&project_id).await? {
             Some(project) => Ok(project),
@@ -72,11 +61,11 @@ impl AgentProjectService {
         }
     }
 
-    /// 重命名 Agent Project。
+    /// Rename a project, storing the trimmed name.
     ///
-    /// trim 后为空白 -> `VALIDATION_ERROR`：项目名是分组侧栏的组头，空白名
-    /// 会产生不可辨识的分组，故 trim 后拒空（session rename 无此约束）；
-    /// 存储 trim 后的 name；项目不存在时透传仓储层的 `NOT_FOUND`。
+    /// A blank name is a `VALIDATION_ERROR` because the project name is the
+    /// sidebar group header (session rename has no such constraint). A missing
+    /// project passes the repository's `NOT_FOUND` through.
     pub async fn rename_project(
         &self,
         project_id: UUID,
@@ -92,17 +81,13 @@ impl AgentProjectService {
         self.get_project(project_id).await
     }
 
-    /// 删除 Agent Project（先 abort，再删每个会话的 JSONL 文件，最后 SQLite 级联）。
+    /// Delete a project: abort every session's run, best-effort delete each
+    /// session's `<id>.jsonl`, then cascade messages / sessions / project in a
+    /// single repository transaction. A missing project yields `NOT_FOUND`.
     ///
-    /// 先列出该项目全部会话（id + working_dir），逐个调用
-    /// `coding_agent_runtime::abort_run`（对无活跃 run 的 session 是干净的 no-op，
-    /// 对齐 `agent_session_delete` 先 abort 再删的写法），再 best-effort 删除每个
-    /// 会话的 `<id>.jsonl`（透传 `app_data_dir` 以解析 JSONL 的 cwd），最后调仓储层
-    /// 在单事务内级联删除 messages / sessions / project（VAL-CASESS-021）。项目不
-    /// 存在时透传 `NOT_FOUND`。
-    ///
-    /// `app_data_dir` 既是 JSONL base 也是无 working_dir 会话的 cwd 回退，必须与
-    /// 写入侧（`config_from_rows` / `session_cwd`）一致，否则会删错目录。
+    /// `app_data_dir` is both the JSONL base and the cwd fallback for sessions
+    /// without a working_dir; it must match the write side (`config_from_rows`
+    /// / `session_cwd`) or the wrong directory gets cleaned.
     pub async fn delete_project(
         &self,
         project_id: UUID,
@@ -114,11 +99,9 @@ impl AgentProjectService {
         .await
     }
 
-    /// `delete_project` 的实现体：abort 解耦为可注入闭包。
-    ///
-    /// 拆出这一层是为了在单测中无需真实启动 run（coding-agent 驱动的 run 注册表
-    /// 是进程级私有的），即可断言「每个 session 先被 abort、其 JSONL 文件被删、
-    /// 且这些都发生在级联删除之前」。
+    /// Body of `delete_project` with abort injected as a closure, so tests can
+    /// assert the abort-then-delete ordering without starting a real run (the
+    /// run registry is process-private).
     async fn delete_project_with_abort<F, Fut>(
         &self,
         project_id: UUID,
@@ -134,9 +117,9 @@ impl AgentProjectService {
             abort(session_id.clone()).await;
         }
 
-        // best-effort 删除每个会话的 JSONL transcript 文件：单个文件删失败只
-        // 记录、不阻断整体——权威的 SQLite 级联删除（下一步）才是把会话从列表
-        // 移除的操作；尽量全删以免留下孤儿 `<id>.jsonl`。
+        // Best-effort: a failed file delete is logged, never fatal. The SQLite
+        // cascade below is what actually removes the sessions; deleting here
+        // just avoids leaving orphan `<id>.jsonl` files behind.
         for (session_id, working_dir) in &sessions {
             let cwd = session_cwd(working_dir.as_deref(), app_data_dir);
             if let Err(e) = delete_session_file(app_data_dir, &cwd, session_id) {
@@ -151,8 +134,9 @@ impl AgentProjectService {
         self.repository.delete_project(&project_id).await
     }
 
-    /// 列出某项目下全部会话的 `(id, working_dir)`（项目不存在时为空集合，由后续
-    /// 仓储层 delete 报 `NOT_FOUND`）。working_dir 用于定位每个会话的 JSONL 文件。
+    /// `(id, working_dir)` of every session in a project; working_dir locates
+    /// each session's JSONL file. A missing project yields an empty set — the
+    /// repository delete that follows reports the `NOT_FOUND`.
     async fn list_sessions_for_delete(
         &self,
         project_id: &UUID,
@@ -168,22 +152,17 @@ impl AgentProjectService {
         rows.into_iter()
             .map(|row| {
                 let id = row.try_get::<String, _>("id")?;
-                // working_dir 可空：必须用 Option 显式解码（NULL → None），否则
-                // sqlx-sqlite 会把 NULL TEXT 静默解码成 Some("")（见
-                // agent_session_repository 的 NULL-decode footgun 探针）。
+                // working_dir is nullable and must be decoded as Option, or
+                // sqlx-sqlite silently turns a NULL TEXT into Some("").
                 let working_dir = row.try_get::<Option<String>, _>("working_dir")?;
                 Ok((id, working_dir))
             })
             .collect()
     }
 
-    /// 校验并规范化 project path。
-    ///
-    /// - 空字符串 -> `Err`（project path 是身份标识，不允许缺省）。
-    /// - 非绝对路径 -> `Err`（即使能相对于 cwd 解析，也必须拒绝）。
-    /// - canonicalize 失败（不存在）-> `Err`。
-    /// - canonical 目标不是目录（如指向文件）-> `Err`。
-    /// - 否则 -> `Ok(canonical_absolute_path)`。
+    /// Validate and canonicalize a project path. Empty, relative, missing, or
+    /// non-directory paths are rejected; otherwise the canonical absolute path
+    /// is returned.
     fn validate_project_path(raw: &str) -> Result<String, AppError> {
         if raw.is_empty() {
             return Err(AppError::with_hint(
@@ -195,7 +174,8 @@ impl AgentProjectService {
 
         let path = std::path::Path::new(raw);
 
-        // 必须是绝对路径：相对路径即便能相对 cwd canonicalize 也一律拒绝，保持确定性。
+        // Relative paths are rejected even when they resolve against cwd, so the
+        // stored identity stays deterministic.
         if !path.is_absolute() {
             return Err(AppError::with_hint(
                 "VALIDATION_ERROR",
@@ -204,7 +184,8 @@ impl AgentProjectService {
             ));
         }
 
-        // canonicalize 会解析 symlink 并要求路径存在；失败即视为不存在。
+        // canonicalize resolves symlinks and requires existence; a failure here
+        // means the path is not there.
         let canonical = std::fs::canonicalize(path).map_err(|_| {
             AppError::with_hint(
                 "VALIDATION_ERROR",
@@ -225,15 +206,13 @@ impl AgentProjectService {
     }
 }
 
-/// 默认项目名：canonical path 的 basename；basename 为空（如根路径 `/`）
-/// 时回退为完整 canonical path。
+/// Default project name: the canonical path's basename, falling back to the
+/// full path when the basename is empty (e.g. root `/`).
 ///
-/// Hoisted out of `AgentProjectService` to a free `pub fn` so the SQLite→JSONL
-/// migration can derive a JSONL session's project group name (from its
-/// `header.cwd`, canonicalized first) with the SAME algorithm `create_project`
-/// uses for `agent_projects.name` — guaranteeing a session keeps its project
-/// group across the new (JSONL) and legacy (SQLite) sources (VAL-CASESS-024).
-/// The algorithm is unchanged from the previous private method.
+/// A free `pub fn` so the SQLite/JSONL migration can derive a JSONL session's
+/// project group name from its canonicalized `header.cwd` with the exact
+/// algorithm `create_project` uses for `agent_projects.name`; that keeps a
+/// session in the same project group across both transcript sources.
 pub fn default_project_name(canonical: &str) -> String {
     std::path::Path::new(canonical)
         .file_name()
@@ -249,7 +228,7 @@ mod tests {
     use tempfile::TempDir;
     use tokio::sync::Mutex;
 
-    /// 测试用数据库（持有 TempDir 以保证文件存活）
+    /// Test database; the returned TempDir must outlive it.
     async fn create_test_database() -> (Arc<Database>, TempDir) {
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let db_path = temp_dir.path().join("test.db");
@@ -276,12 +255,11 @@ mod tests {
             .as_millis() as i64
     }
 
-    /// 直接插入一条 agent_sessions 行（可选挂到某个项目），返回 session id。
     async fn insert_session(db: &Database, project_id: Option<&str>, name: &str) -> String {
         insert_session_with_dir(db, project_id, name, None).await
     }
 
-    /// 同 `insert_session`，但可指定 `working_dir`（用于定位会话的 JSONL 文件）。
+    /// Like `insert_session`, but with an explicit `working_dir`.
     async fn insert_session_with_dir(
         db: &Database,
         project_id: Option<&str>,
@@ -308,7 +286,6 @@ mod tests {
         id
     }
 
-    /// 直接插入一条 transcript 行。
     async fn insert_message(db: &Database, session_id: &str, seq: i64) {
         sqlx::query(
             r#"
@@ -324,8 +301,6 @@ mod tests {
         .await
         .unwrap();
     }
-
-    // --- VAL-PROJ-010: invalid path rejected with VALIDATION_ERROR, no row ---
 
     #[tokio::test]
     async fn create_project_rejects_empty_path_and_writes_no_row() {
@@ -384,8 +359,6 @@ mod tests {
         assert_eq!(err.code, "VALIDATION_ERROR");
         assert_eq!(count_rows(&db, "agent_projects").await, 0);
     }
-
-    // --- get-or-create: same dir twice (incl. symlink alias) -> single row ---
 
     #[tokio::test]
     async fn create_project_stores_canonical_path_and_basename_name() {
@@ -480,8 +453,6 @@ mod tests {
         assert_eq!(created.name, "/");
     }
 
-    // --- list / get ---
-
     #[tokio::test]
     async fn list_and_get_project_roundtrip() {
         let (db, _guard) = create_test_database().await;
@@ -506,8 +477,6 @@ mod tests {
             .expect_err("expected error");
         assert_eq!(err.code, "NOT_FOUND");
     }
-
-    // --- rename: blank rejected, trimmed stored, NOT_FOUND passthrough ---
 
     #[tokio::test]
     async fn rename_project_rejects_blank_and_trims_valid_name() {
@@ -559,9 +528,6 @@ mod tests {
         assert!(path.exists(), "precondition: seeded JSONL exists");
         path
     }
-
-    // --- delete: abort each session BEFORE cascade, cascade JSONL files,
-    //     NOT_FOUND passthrough (VAL-CASESS-021) ---
 
     #[tokio::test]
     async fn delete_project_aborts_each_session_before_cascade() {
@@ -623,11 +589,9 @@ mod tests {
         assert_eq!(count_rows(&db, "agent_sessions").await, 1);
     }
 
-    /// VAL-CASESS-021: deleting a project with N sessions (each with a
-    /// `<id>.jsonl`) removes the project + its N sessions from SQLite AND deletes
-    /// every one of those sessions' JSONL files from disk — including a session
-    /// with no `working_dir` (rooted at the app-data dir). A session OUTSIDE the
-    /// project keeps both its SQLite row and its JSONL file.
+    /// Deleting a project removes its sessions from SQLite and their JSONL
+    /// files from disk, including a session with no `working_dir` (rooted at
+    /// the app-data dir). A session outside the project keeps both.
     #[tokio::test]
     async fn delete_project_cascades_jsonl_files_for_every_session() {
         let (db, _guard) = create_test_database().await;

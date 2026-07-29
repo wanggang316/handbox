@@ -1,10 +1,11 @@
 use super::common::{Timestamp, UUID};
 use serde::{Deserialize, Serialize};
 
-/// Agent Project 实体 - 按工作目录分组 Agent 模式会话
+/// Groups Agent-mode sessions by working directory.
 ///
-/// `path` 为 canonical 化后的工作目录（canonicalize 在 service 层完成，
-/// 仓库层按字符串全等去重），数据库层有 UNIQUE 约束。
+/// `path` is the canonicalized working directory (canonicalization happens in
+/// the service layer; the repository dedupes by exact string equality) and is
+/// UNIQUE at the database level.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentProject {
@@ -15,7 +16,7 @@ pub struct AgentProject {
     pub updated_at: Timestamp,
 }
 
-/// 创建 Agent Project 请求（get-or-create 语义：同 path 返回已有项目）
+/// Get-or-create semantics: the existing project is returned for a known path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentProjectRequest {

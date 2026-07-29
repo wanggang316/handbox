@@ -17,13 +17,13 @@
   import type { GenUi } from "$lib/types";
 
   interface Props {
-    // 编辑模式传入既有 GenUI；新建模式留空
+    // Existing GenUI for edit mode; null for create mode.
     genui?: GenUi | null;
   }
 
   let { genui = null }: Props = $props();
 
-  // 新建时的起始 spec：用 GenUI 的 catalog，编辑左侧 JSON 右侧实时预览。
+  // Seed spec for create mode, built from the shared catalog.
   const seedSpec: Spec = {
     root: "card",
     elements: {
@@ -51,10 +51,10 @@
 
   const isEdit = $derived(Boolean(genui?.id));
 
-  // 示例库：把内置模板渲染成可点击的卡片（新建模式，置于编辑器下方）。点击即把 spec
-  // 写入左侧文本域、空名称时顺带填名，并把该卡片高亮为「已载入」。每个示例预先过一遍
-  // explainSpec 做归一化（与右侧实时预览同一管线），非法示例只是缩略图不渲染，而不会
-  // 整页报错。explainSpec 改写的是 JSON.stringify 出来的副本，不会污染原始 example。
+  // Example gallery (create mode): clicking loads the spec into the editor and
+  // fills an empty name. Each example is pre-normalized through explainSpec
+  // (the same pipeline as the live preview) on a stringified copy, so an
+  // invalid example just loses its thumbnail instead of breaking the page.
   let loadedExampleId = $state<string | null>(null);
   const examplePreviews = genuiExamples.map((ex) => {
     const resolved = explainSpec(JSON.stringify(ex.spec));
@@ -69,7 +69,7 @@
     loadedExampleId = ex.id;
   }
 
-  // 走 GenUI 的 resolveSpec 校验管线；非法时报告失败阶段与原因。
+  // Validate through the resolveSpec pipeline; failures report stage + reason.
   const result = $derived(explainSpec(specInput));
   const spec = $derived(result.ok ? result.spec : null);
   const error = $derived(result.ok ? null : result);
@@ -127,7 +127,6 @@
 </script>
 
 <div class="h-full flex flex-col">
-  <!-- 顶部工具栏 -->
   <div class="flex-shrink-0 border-b border-base-300 px-6 pb-4 pt-12">
     <div class="mx-auto w-full max-w-5xl">
       <button
@@ -167,7 +166,6 @@
     </div>
   </div>
 
-  <!-- 编辑器主体：左 JSON / 右实时渲染 -->
   <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
     <div class="mx-auto w-full max-w-5xl {isEdit ? 'flex h-full flex-col' : ''}">
     <div class="grid gap-4 lg:grid-cols-2 min-h-0 {isEdit ? 'flex-1' : ''}">

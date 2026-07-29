@@ -266,7 +266,7 @@ function resolveImageSource(rawSrc: unknown): string {
   if (!trimmed) return "";
   const lower = trimmed.toLowerCase();
 
-  // 允许 HTTP(S) 和 data: URLs 直接通过
+  // Pass HTTP(S) and data: URLs through untouched.
   if (
     lower.startsWith("http://") ||
     lower.startsWith("https://") ||
@@ -275,13 +275,13 @@ function resolveImageSource(rawSrc: unknown): string {
     return trimmed;
   }
 
-  // 非 Tauri 环境直接返回
+  // Outside Tauri there is nothing to convert.
   if (!isTauriEnvironment()) {
     return trimmed;
   }
 
   try {
-    // 处理 file:// URL（旧格式，兼容性处理）
+    // Legacy file:// URLs, kept for compatibility.
     if (trimmed.startsWith(FILE_PROTOCOL)) {
       const localPath = decodeFileUrlPath(trimmed);
       if (typeof localPath !== "string" || !localPath) {
@@ -294,7 +294,7 @@ function resolveImageSource(rawSrc: unknown): string {
       return convertFileSrc(localPath);
     }
 
-    // 处理绝对路径（降级支持，不推荐）
+    // Bare absolute paths (fallback, discouraged).
     if (isLikelyAbsolutePath(trimmed)) {
       return convertFileSrc(trimmed);
     }
@@ -310,8 +310,6 @@ function resolveImageSource(rawSrc: unknown): string {
 
   return trimmed;
 }
-
-// ── Svelte Action: markdown 区域交互 ──────────────────────────────────────────
 
 function closestButton(target: EventTarget | null): HTMLButtonElement | null {
   if (!(target instanceof Element)) return null;
@@ -344,16 +342,8 @@ async function openMarkdownLink(link: HTMLAnchorElement) {
 }
 
 /**
- * Svelte action：为 markdown 渲染区域添加交互行为。
- * - 点击代码块复制按钮：复制代码内容
- * - 点击外链：在系统浏览器中打开
- *
- * @example
- * ```svelte
- * <div use:markdownInteractions>
- *   {@html renderMarkdown(content)}
- * </div>
- * ```
+ * Svelte action wiring interactions inside rendered markdown:
+ * code-block copy buttons, and external links opening in the system browser.
  */
 export function markdownInteractions(node: HTMLElement) {
   const handleClick = async (event: MouseEvent) => {

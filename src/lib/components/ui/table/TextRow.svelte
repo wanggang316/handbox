@@ -35,7 +35,7 @@
   const inputType = $derived(
     isPassword ? (showPassword ? "text" : "password") : "text"
   );
-  // 占位文案回退：未传入时用本地化默认值（保持语言切换响应式）
+  // Fall back to the localized placeholder; $derived keeps it reactive to language switches.
   const resolvedPlaceholder = $derived(placeholder ?? t("ui.inputPlaceholder"));
 
   function togglePassword() {
@@ -45,7 +45,6 @@
 
 {#if layout === "horizontal"}
   <TableBaseRow label={`${label}${required ? " *" : ""}`} {layout} py="2">
-    <!-- 输入框 -->
     <div class="flex flex-col items-end flex-1">
       <input
         {id}

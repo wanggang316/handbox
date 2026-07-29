@@ -1,13 +1,12 @@
 /**
- * Built-in agent tools — the single source of truth for the tools'
- * registration names, ordering and display labels: the 7 coding-agent
- * built-ins plus HandBox's extension tools. Consumed by both the
- * "Agent 工具" settings page (global default) and the per-session tool popover
- * in AgentInput, so the two views always list the same tools in the same order.
+ * Single source of truth for the built-in agent tools' registration names,
+ * ordering and display labels: the coding-agent built-ins plus HandBox's
+ * extension tools. Consumed by both the agent-tools settings page and the
+ * per-session tool popover in AgentInput, so the two views always list the
+ * same tools in the same order.
  *
- * `id` == the registration name the backend gates on; the order
- * here is the canonical display order. `labelKey` is an i18n key — consumers
- * render it via `t(tool.labelKey)` so labels follow the UI language.
+ * `id` is the registration name the backend gates on; array order is the
+ * display order. `labelKey` is an i18n key, rendered via `t()`.
  */
 import type { Icon as IconType } from "@lucide/svelte";
 import {
@@ -52,10 +51,8 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
 
 /**
  * All tool ids in canonical order — the default enabled set (everything on).
- *
  * Re-exported from the icon-free `builtinToolIds` module so pure modules can
- * import the id list without the Lucide `.svelte` imports this file carries.
- * `BUILTIN_TOOLS` above is a separate, hand-maintained list; the two are kept
- * in sync by convention (same ids, same order) — not derived from one another.
+ * import the ids without this file's Lucide `.svelte` imports. `BUILTIN_TOOLS`
+ * above is kept in sync by convention (same ids, same order), not derived.
  */
 export { BUILTIN_TOOL_IDS };

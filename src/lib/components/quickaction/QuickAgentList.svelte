@@ -1,11 +1,8 @@
 <!--
-  Quick Action 浮层「选择步」的 Agent 列表。
-
-  纯呈现:渲染父级已过滤好的 Agent 列表,高亮 `highlightIndex` 指向的项;键盘导航
-  (↑↓ / ↵)由父级经 QuickInput 的语义化回调驱动,本组件只负责:
-  - 点击某项 → onSelect(agent)
-  - 鼠标移到某项 → onHover(index)(让键盘高亮跟随鼠标,避免两套高亮打架)
-  - 高亮项变化时自动滚入可视区(键盘导航越过视口时)
+  Agent list for the Quick Action overlay's selection step. Purely presentational:
+  the parent filters agents and drives keyboard navigation via QuickInput's
+  callbacks; this only emits onSelect (click) and onHover (mouse moves the
+  keyboard highlight, so there's one highlight rather than two competing ones).
 -->
 <script lang="ts">
   import { Bot } from "@lucide/svelte";
@@ -23,7 +20,7 @@
 
   let rowRefs = $state<(HTMLButtonElement | null)[]>([]);
 
-  // 键盘高亮越过视口时,把高亮项滚进可视区。
+  // Keep the highlighted item visible when keyboard navigation moves past the viewport.
   $effect(() => {
     const el = rowRefs[highlightIndex];
     el?.scrollIntoView({ block: "nearest" });

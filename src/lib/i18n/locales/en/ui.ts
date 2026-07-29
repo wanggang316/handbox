@@ -1,5 +1,5 @@
 /**
- * ui namespace strings (filled by migration subagent).
+ * ui namespace strings.
  */
 import type { uiZh } from "../zh/ui";
 

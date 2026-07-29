@@ -1,4 +1,4 @@
-// Table组件集合 - 用于构建设置页面的表格布局
+// Table row components for building settings-page layouts.
 export { default as TableGroup } from './TableGroup.svelte';
 export { default as TableBaseRow } from './TableBaseRow.svelte';
 export { default as SwitchRow } from './SwitchRow.svelte';

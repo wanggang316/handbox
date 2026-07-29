@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use crate::models::AppError;
 
-/// MCP connection type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -54,7 +53,6 @@ impl From<&str> for McpConnectionType {
 }
 
 
-/// MCP server status enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum McpServerStatus {
@@ -146,9 +144,8 @@ fn default_execution_mode() -> String {
     "auto".to_string()
 }
 
-// Moved from `storage::types::session` so the agent stack can bind MCP servers
-// without depending on the chat-session module. serde repr is unchanged from
-// the original definition — DB/wire compatibility preserved.
+// Lives here rather than in the chat-session types so the agent stack can
+// bind MCP servers without depending on that module. serde repr is DB-bound.
 /// Per-binding MCP server config: which server, how its tools execute, and the
 /// optional allowlist of enabled tools. Embedded in agent definitions and
 /// agent sessions.

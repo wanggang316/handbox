@@ -23,7 +23,8 @@
     error = "",
   }: Props = $props();
 
-  // 在 FormField 内时，id / aria / error 态由容器统一提供，控件不再自渲染 label / error。
+  // Inside a FormField the container supplies id / aria / error state, so the
+  // control skips rendering its own label / error.
   const ff = getFormField();
   const autoId = `inp-${Math.random().toString(36).slice(2)}`;
   const ownErrorId = `${autoId}-error`;

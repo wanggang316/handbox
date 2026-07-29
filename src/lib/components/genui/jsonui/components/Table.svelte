@@ -1,11 +1,9 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A read-only table: a header row from `columns` plus one data row per `rows`
-  // entry. Every cell renders through Svelte text binding only (never @html).
-  // Cells are always laid out by column index, so a row with fewer cells than
-  // columns leaves the trailing cells blank rather than shifting alignment, and a
-  // zero-row table still renders its header without collapsing.
+  // Cells are laid out by column index, so a row with fewer cells than `columns`
+  // leaves the trailing cells blank rather than shifting alignment. Every cell
+  // renders through Svelte text binding only (never @html).
   interface TableProps {
     columns: string[];
     rows: string[][];

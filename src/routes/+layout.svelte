@@ -16,17 +16,17 @@
 
   let { children } = $props();
 
-  // 记录主界面路由：设置页的「返回应用」据此回跳。
+  // Remember the last main-area route so settings' "back to app" can return to it.
   afterNavigate((nav) => {
     const path = nav.to?.url.pathname;
     if (path) navigationState.remember(path);
   });
 
-  // WebView 自带的右键菜单是浏览器语义（Look Up / Translate / Search with
-  // Google / Inspect Element），出现在桌面应用里既突兀又暴露 web 外壳。全局压掉，
-  // 只在可编辑控件里放行——那里的剪切 / 拷贝 / 粘贴 / 拼写建议是真实需求。
-  // 应用自己的右键菜单（如 sidebar 会话行）在各自 handler 里已 preventDefault，
-  // 不经过这里。开发期查元素改用 ⌥⌘I。
+  // The WebView's own context menu is browser semantics (Look Up / Translate /
+  // Inspect Element) and gives away the web shell, so it is suppressed
+  // everywhere except editable controls, where cut/copy/paste is a real need.
+  // The app's own menus (sidebar session rows) preventDefault in their handlers
+  // and never reach this. Use ⌥⌘I to inspect during development.
   function handleContextMenu(event: MouseEvent) {
     const target = event.target as Element | null;
     if (target?.closest("input, textarea, [contenteditable='true']")) return;
@@ -40,8 +40,8 @@
       };
     }
 
-    // 设置在主窗口内渲染：原生菜单（⌘,）与其他 webview 窗口经
-    // open_settings_window 命令定向 emit 本事件，这里承接并导航。
+    // Settings render inside the main window: the native menu (⌘,) and other
+    // webview windows emit this event via open_settings_window; navigate here.
     let unlistenSettingsNavigate: (() => void) | undefined;
     if (isTauriEnvironment()) {
       listen<string>("settings:navigate", (event) => {
@@ -61,9 +61,10 @@
       uiState.setTheme("system");
     }
 
-    // 启动时仅把已从 localStorage 初始化的语言同步到 document.lang。
-    // 不要在此用启动快照回写 localStorage——后端权威回填（见下）才是唯一
-    // 应当写缓存的被动点，否则多窗口 reload 时两者会相互覆盖、反复闪动。
+    // Only sync the already-initialized language to document.lang here. Never
+    // write localStorage from this startup snapshot — the backend backfill below
+    // is the sole passive writer; otherwise multi-window reloads overwrite each
+    // other and flicker.
     const allowedLanguages = new Set<Language>(["zh-CN", "en-US"]);
     document.documentElement.lang = uiState.language;
 
@@ -83,8 +84,9 @@
           uiState.setTheme("system");
         }
       } else if (event.key === "language") {
-        // 跨窗口被动同步：发起方已写过共享 localStorage，这里只更新内存与
-        // document.lang，绝不回写，避免触发新一轮广播形成闪动。
+        // Passive cross-window sync: the initiator already wrote localStorage;
+        // update memory + document.lang only, never write back, to avoid a
+        // broadcast loop.
         if (event.newValue && allowedLanguages.has(event.newValue as Language)) {
           uiState.syncLanguageFromExternal(event.newValue as Language);
         }
@@ -92,9 +94,10 @@
     };
     window.addEventListener("storage", handleStorageChange);
 
-    // 重预加载只在主窗口跑：4 个隐藏辅助窗口（划词×3 / quick action）各 boot 一份
-    // 同一 SPA，若全都预载 providers/auth，冷启动期是 5 份重复 IPC 抢主窗口首屏资源。
-    // settings 仍全窗口加载（轻量本地读，主题/划词翻译依赖）。
+    // Heavy preloads run only in the main window: the hidden helper windows each
+    // boot the same SPA, and duplicate providers/auth IPC would contend with the
+    // main window's first paint. Settings load in every window (light local read;
+    // theme and selection translation depend on it).
     const isMainWindow =
       !isTauriEnvironment() || getCurrentWindow().label === "main";
 
@@ -103,14 +106,14 @@
         console.error("Failed to load provider configs:", error);
       });
 
-      // 预加载 providers with models，这样子页面就不需要重复加载
+      // Preload providers with models so child pages don't refetch
       providerActions.loadProvidersWithModels(false).catch((error) => {
         console.error("Failed to load providers:", error);
       });
     }
 
-    // 预加载 settings，这样子页面就不需要重复加载；
-    // 加载完成后用后端持久化的语言做权威回填。
+    // Preload settings for child pages; once loaded, backfill the authoritative
+    // language persisted by the backend.
     settingsState
       .loadSettings()
       .then(() => {
@@ -142,7 +145,6 @@
 
 {@render children()}
 
-<!-- 全局 Toast 组件 -->
 <Toast />
 
 <style></style>

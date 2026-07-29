@@ -1,7 +1,5 @@
-// Scheduled-job IPC commands.
-//
-// Hosts the schedule-preview command plus the job CRUD commands. Execution /
-// manual-trigger (`job_run_now`) commands belong to later features.
+// Scheduled-job IPC commands: schedule preview, job CRUD, execution history,
+// and manual trigger.
 
 use crate::models::AppError;
 use crate::services::{JobCreateRequest, JobExecutor, JobService, JobUpdateRequest};
@@ -191,8 +189,8 @@ mod tests {
 
     // The Tauri command is a thin wrapper over `cron::next_occurrences`; we
     // exercise the same logic the IPC layer runs (the command itself only adds
-    // the default-`n` and tracing). This covers VAL-SCHED-024: an invalid cron
-    // surfaces as a structured `{code, message, hint}` error.
+    // the default-`n` and tracing). An invalid cron must surface as a
+    // structured `{code, message, hint}` error.
 
     #[tokio::test]
     async fn preview_invalid_cron_returns_structured_error() {

@@ -1,24 +1,16 @@
-/**
- * 设置相关类型定义
- */
-
-// 主题类型
 export type Theme = "light" | "dark" | "system";
 
-// 语言
 export type Language = "zh-CN" | "en-US";
 
-// 翻译目标语言（支持 system 或任意语言标签）
+// "system" or any language tag.
 export type TranslationTargetLanguage = "system" | string;
 
-// 快捷键配置
 export interface ShortcutConfig {
   sendMessage: string;
   newLine: string;
   switchModel?: string;
 }
 
-// 通用设置
 export interface GeneralSettings {
   theme: Theme;
   language: Language;
@@ -26,13 +18,11 @@ export interface GeneralSettings {
   shortcuts: ShortcutConfig;
 }
 
-// 翻译设置
 export interface TranslationSettings {
-  sessionId?: string | null; // 翻译使用的 Session ID
-  agentId?: string | null; // 创建 sessionId 时使用的 Agent 定义 ID（null = 内置回落）
+  sessionId?: string | null;
+  agentId?: string | null; // Agent definition used to create sessionId; null = builtin fallback.
 }
 
-// MCP 服务器配置
 export interface MCPServer {
   name: string;
   command: string;
@@ -42,12 +32,10 @@ export interface MCPServer {
   env?: Record<string, string>;
 }
 
-// MCP 设置
 export interface MCPSettings {
   servers: MCPServer[];
 }
 
-// 用户信息
 export interface UserInfo {
   id?: string;
   name?: string;
@@ -56,13 +44,11 @@ export interface UserInfo {
   isPremium?: boolean;
 }
 
-// 账户设置
 export interface AccountSettings {
   user?: UserInfo;
   isLoggedIn: boolean;
 }
 
-// 快捷工具设置
 export interface SelectionBlacklist {
   pids: number[];
   bundleIds: string[];
@@ -70,32 +56,29 @@ export interface SelectionBlacklist {
 
 export interface QuickToolsSettings {
   showToolbarOnSelection: boolean;
-  translationAgentId?: string | null; // 划词「翻译」使用的 Agent 定义 ID（null = 内置回落）
+  translationAgentId?: string | null; // Agent definition for selection "translate"; null = builtin fallback.
   selectionBlacklist: SelectionBlacklist;
 }
 
-// Web 搜索设置（agent web_search 工具的搜索服务商配置）
+// Search-provider config for the agent web_search tool.
 export interface WebSearchSettings {
-  provider: string; // 搜索服务商标识（当前仅 "tavily"）
-  apiKey: string; // 搜索服务商 API Key（空串 = 未配置，工具不注册）
+  provider: string; // Search provider id (currently only "tavily").
+  apiKey: string; // Empty string = unconfigured; the tool is not registered.
 }
 
-// Agent 设置
 export interface AgentSettings {
-  defaultEnabledTools: string[]; // 新建 Agent 会话默认启用的工具(注册名，含扩展工具)
-  defaultEditorId?: string | null; // "Open in ..." 的默认应用 target id（见 api/openIn.ts）
-  webSearch?: WebSearchSettings; // web_search 工具的搜索服务商配置（缺省 = 未配置）
+  defaultEnabledTools: string[]; // Enabled by default for new sessions (registration names, incl. extension tools).
+  defaultEditorId?: string | null; // Default "Open in ..." target id (see api/openIn.ts).
+  webSearch?: WebSearchSettings; // Absent = unconfigured.
 }
 
-// 快捷动作设置
 export interface QuickActionSettings {
-  enabled?: boolean; // 是否启用 Quick Action（禁用时不注册全局快捷键；缺省视为 true）
-  shortcut?: string; // 唤起快捷动作面板的全局快捷键
-  modelId?: string | null; // 快捷动作默认使用的模型 ID（未设则由默认模型解析器回退）
-  providerId?: string | null; // 快捷动作默认使用的供应商 ID（未设则由默认模型解析器回退）
+  enabled?: boolean; // Absent = true; when disabled the global shortcut is not registered.
+  shortcut?: string; // Global shortcut that summons the quick-action panel.
+  modelId?: string | null; // Unset falls back to the default-model resolver.
+  providerId?: string | null; // Unset falls back to the default-model resolver.
 }
 
-// 应用设置
 export interface AppSettings {
   general: GeneralSettings;
   mcp: MCPSettings;
@@ -106,13 +89,11 @@ export interface AppSettings {
   quickAction?: QuickActionSettings;
 }
 
-// 设置更新请求
 export interface UpdateSettingsRequest {
   section: keyof AppSettings;
   data: Partial<AppSettings[keyof AppSettings]>;
 }
 
-// 导入导出设置
 export interface ExportSettingsOptions {
   includeProviders?: boolean;
   includeMCP?: boolean;

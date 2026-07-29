@@ -5,11 +5,10 @@
 //! `disable-model-invocation`); the body is the prose injected into the system
 //! prompt's "Skills" section when the skill is enabled.
 //!
-//! This module owns the skill data model, validation, and filesystem
-//! discovery. [`validate`] is filesystem-independent (it takes already-parsed
-//! inputs) so it can be unit-tested in isolation; [`discover_skills`] walks
-//! the on-disk scope roots, parses each `SKILL.md`, deduplicates by name, and
-//! feeds the survivors through `validate`.
+//! [`validate`] is filesystem-independent (it takes already-parsed inputs) so
+//! it can be unit-tested in isolation; [`discover_skills`] walks the scope
+//! roots, parses each `SKILL.md`, deduplicates by name, and feeds the
+//! survivors through it.
 
 use crate::utils::frontmatter::{parse_frontmatter, FrontmatterError};
 use serde::{Deserialize, Serialize};
@@ -25,9 +24,9 @@ const MAX_DESCRIPTION_LENGTH: usize = 1024;
 /// The scope a skill was discovered in. Higher-priority scopes shadow
 /// lower-priority scopes by canonical name during dedup.
 ///
-/// The `Ord` derivation makes `Project` the greatest variant so a simple
-/// `max`/sort picks the highest-priority source. The serde representation is
-/// the contract for downstream IPC/UI: `"project"` / `"user"` / `"appData"`.
+/// `Ord` makes `Project` the greatest variant so `max`/sort picks the
+/// highest-priority source. The serde form (`"project"` / `"user"` /
+/// `"appData"`) is a contract with downstream IPC/UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SourceScope {
@@ -39,10 +38,8 @@ pub enum SourceScope {
     Project,
 }
 
-/// Where a skill was loaded from.
-///
-/// `path` points at the `SKILL.md` file or its directory. This module only
-/// passes it through (for error location); the discovery module populates it.
+/// Where a skill was loaded from; `path` points at the `SKILL.md` file or its
+/// directory and is carried only for error location.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceInfo {
     pub scope: SourceScope,
@@ -51,9 +48,9 @@ pub struct SourceInfo {
 
 /// Parsed YAML frontmatter on a `SKILL.md`.
 ///
-/// Unknown fields are tolerated (no `deny_unknown_fields`) so skills can carry
-/// forward-compatible metadata without tripping the loader. All fields default,
-/// so an empty frontmatter block (`Value::Null`) deserializes into the default.
+/// Unknown fields are tolerated so skills can carry forward-compatible
+/// metadata. All fields default, so an empty frontmatter block (`Value::Null`)
+/// deserializes into the default.
 #[derive(Debug, Deserialize, Clone, Default, PartialEq)]
 pub struct SkillMetadata {
     #[serde(default)]
@@ -79,23 +76,18 @@ pub struct Skill {
     /// True when the model should NOT auto-invoke this skill (it can only be
     /// invoked explicitly, e.g., via `/skill:<name>`).
     pub disable_model_invocation: bool,
-    /// Where the skill was discovered.
     pub source: SourceInfo,
 }
 
-/// Errors raised while loading and validating a `SKILL.md`.
-///
-/// Wraps loader-level errors (`Loader`) plus skill-specific schema errors.
-/// Each variant carries the offending `path` for diagnostics.
+/// Errors raised while loading and validating a `SKILL.md`. Every variant
+/// carries the offending `path` for diagnostics.
 #[derive(Debug, Error)]
 pub enum SkillError {
-    /// IO error from the underlying loader (e.g., a scope root that is a
-    /// regular file, or a `SKILL.md` that cannot be read). Collected so a
-    /// single unreadable entry does not abort discovery.
-    ///
-    /// This is a separate variant from [`SkillError::Loader`] because
-    /// [`FrontmatterError`] — what `Loader` wraps — has no IO representation;
-    /// `std::io::Error` is also non-`Clone`, so it cannot be folded in there.
+    /// IO error (e.g. a scope root that is a regular file, or a `SKILL.md` that
+    /// cannot be read). Collected so one unreadable entry does not abort
+    /// discovery. Separate from [`SkillError::Loader`] because
+    /// [`FrontmatterError`] has no IO representation and `std::io::Error` is
+    /// not `Clone`.
     #[error("I/O error reading {path}: {source}")]
     Io {
         path: PathBuf,
@@ -111,17 +103,14 @@ pub enum SkillError {
         #[source]
         source: FrontmatterError,
     },
-    /// `SKILL.md` frontmatter is missing the required `description` field.
     #[error("missing required field `description` in {path}")]
     MissingDescription { path: PathBuf },
-    /// `description` exceeds the spec-mandated length cap.
     #[error("description exceeds {max} bytes ({actual}) in {path}")]
     DescriptionTooLong {
         path: PathBuf,
         actual: usize,
         max: usize,
     },
-    /// Frontmatter `name` doesn't match the directory name.
     #[error(
         "frontmatter `name` ({frontmatter_name:?}) doesn't match directory name ({dir_name:?}) at {path}"
     )]
@@ -142,11 +131,8 @@ pub enum SkillError {
 
 /// Validate parsed skill inputs and turn them into a [`Skill`].
 ///
-/// Inputs are already split from the `SKILL.md` envelope by the discovery
-/// module: `dir_name` is the skill's directory basename, `metadata` is the
-/// deserialized frontmatter (`None` when there was no frontmatter block; an
-/// empty block deserializes to `Some(SkillMetadata::default())`), `body` is the
-/// content after the frontmatter, and `source` records the origin.
+/// `metadata` is `None` when there was no frontmatter block at all; an empty
+/// block deserializes to `Some(SkillMetadata::default())`.
 ///
 /// Validation order is fixed: description-required → description-length →
 /// name-mismatch → name-valid. Only the first violation is reported.
@@ -174,8 +160,6 @@ pub fn validate(
         });
     }
 
-    // If frontmatter `name` is provided, it must match the directory name.
-    // Otherwise fall back to the directory name itself.
     let name = match metadata.name {
         Some(frontmatter_name) => {
             if frontmatter_name != dir_name {
@@ -207,10 +191,8 @@ pub fn validate(
     })
 }
 
-/// Validate a skill name per the Agent Skills spec.
-///
-/// Returns `Ok(())` if valid, `Err(reason)` otherwise. Length is measured in
-/// bytes (`str::len`).
+/// Validate a skill name per the Agent Skills spec. Length is measured in
+/// bytes (`str::len`), not chars.
 fn validate_name(name: &str) -> Result<(), &'static str> {
     if name.is_empty() {
         return Err("name must not be empty");
@@ -233,15 +215,14 @@ fn validate_name(name: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// A skill that loaded cleanly (file read + frontmatter parsed) but has not yet
-/// been validated. This is the unit deduplicated by name before validation.
+/// A skill that loaded cleanly (file read + frontmatter parsed) but is not yet
+/// validated. This is the unit deduplicated by name.
 ///
-/// Keeping load and validation as two passes is deliberate: an entry only
-/// claims a name slot once it has *loaded* successfully. A higher-priority
-/// entry that fails to load (e.g. broken frontmatter) never occupies the slot,
-/// so a lower-priority same-named good skill remains visible. A higher-priority
-/// entry that loads but later fails *validation* does occupy the slot, so it
-/// shadows the lower-priority skill — its diagnostic is reported in its place.
+/// Load and validation are two passes so a name slot is claimed only by an
+/// entry that LOADED: a higher-priority entry with broken frontmatter leaves a
+/// lower-priority same-named good skill visible, while one that loads but then
+/// fails validation does claim the slot and shadows it, reporting its
+/// diagnostic in its place.
 struct LoadedSkill {
     /// Canonical name, derived from the parent directory basename.
     name: String,
@@ -253,23 +234,14 @@ struct LoadedSkill {
 /// Discover `SKILL.md` files across the given scope roots and validate them.
 ///
 /// `roots` is ordered from **lowest to highest** priority — callers pass
-/// `[(appdata, AppData), (user, User), (project, Project)]`. For each root:
+/// `[(appdata, AppData), (user, User), (project, Project)]`. Only immediate
+/// subdirectories containing a `SKILL.md` are considered (non-recursive); a
+/// missing root is silently skipped, while any other IO error and every
+/// frontmatter parse error is collected rather than fatal.
 ///
-/// 1. `read_dir` the root. A missing root (`NotFound`) is silently skipped;
-///    any other IO error on the root is collected as [`SkillError::Io`].
-/// 2. Only immediate subdirectories are considered (non-recursive). Each must
-///    contain a `SKILL.md` file (`is_file()`); subdirectories without one, and
-///    non-directory entries directly under the root, are ignored.
-/// 3. The file is read and its frontmatter parsed. IO and frontmatter errors
-///    (the latter including a field whose YAML type is wrong, e.g. a non-bool
-///    `disable-model-invocation`) are collected, not fatal.
-///
-/// Deduplication happens **after a successful load but before validation**:
-/// each loaded skill is inserted into a `BTreeMap` keyed by name, so a later
-/// (higher-priority) root overwrites an earlier same-named entry. The
-/// `BTreeMap` yields both the dedup and an alphabetical name order. Each
-/// surviving entry is then validated; successes become [`Skill`]s and failures
-/// become [`SkillError`]s.
+/// Deduplication happens **after a successful load but before validation**,
+/// via a `BTreeMap` keyed by name: a later (higher-priority) root overwrites an
+/// earlier same-named entry, and the map also yields the alphabetical order.
 ///
 /// Returns `(skills, errors)`. Discovery is lenient: a single bad skill yields
 /// a diagnostic but never aborts the walk, and the function never panics.
@@ -308,7 +280,6 @@ pub fn discover_skills(roots: &[(PathBuf, SourceScope)]) -> (Vec<Skill>, Vec<Ski
             let dir_path = entry.path();
 
             // Non-recursive: only immediate subdirectories are skill candidates.
-            // Stray files directly under the root are ignored.
             match entry.file_type() {
                 Ok(ft) if ft.is_dir() => {}
                 Ok(_) => continue,
@@ -321,7 +292,6 @@ pub fn discover_skills(roots: &[(PathBuf, SourceScope)]) -> (Vec<Skill>, Vec<Ski
                 }
             }
 
-            // Each skill directory must contain a `SKILL.md` at its root.
             let candidate = dir_path.join("SKILL.md");
             if !candidate.is_file() {
                 continue;
@@ -350,8 +320,7 @@ pub fn discover_skills(roots: &[(PathBuf, SourceScope)]) -> (Vec<Skill>, Vec<Ski
 }
 
 /// Read and parse a single `SKILL.md`, deriving its canonical name from the
-/// parent directory. IO failures and frontmatter parse failures are mapped to
-/// [`SkillError::Io`] / [`SkillError::Loader`] respectively.
+/// parent directory.
 fn load_skill(path: &Path, scope: SourceScope) -> Result<LoadedSkill, SkillError> {
     let content = std::fs::read_to_string(path).map_err(|err| SkillError::Io {
         path: path.to_path_buf(),
@@ -395,13 +364,9 @@ fn parent_dir_name(path: &Path) -> Option<String> {
 /// `<available_skills>` XML block. Each skill becomes a `<skill>` element with
 /// `<name>` and `<description>` children only.
 ///
-/// This deliberately diverges from the upstream `format_skills_section`:
-///
-/// 1. **No `<location>` line.** The model is never handed a filesystem path; it
-///    invokes a skill by name through the skill tool, not by reading a file.
-/// 2. **Guidance prose points at the skill tool.** Where upstream said "Use the
-///    read tool to load a skill's file…", here the model is told to "call the
-///    skill tool" — there is intentionally no `read tool to load` substring.
+/// No `<location>` line and no filesystem path is ever emitted: the model
+/// invokes a skill by name through the skill tool, and the guidance prose says
+/// exactly that — it must not contain a `read tool to load` instruction.
 ///
 /// `disable_model_invocation` skills are still listed but tagged
 /// `<skill opt-in="true">` so the model knows not to auto-invoke them.
@@ -440,13 +405,11 @@ pub fn format_skills_section(skills: &[Skill]) -> Option<String> {
     Some(out)
 }
 
-/// Minimal XML entity escape for the skills section.
+/// Minimal XML entity escape for the skills section: `&`, `<`, `>`, `"`, `'`.
 ///
-/// Escapes the five XML metacharacters character-by-character: `&`→`&amp;`,
-/// `<`→`&lt;`, `>`→`&gt;`, `"`→`&quot;`, `'`→`&apos;`. Because each input `&`
-/// is matched as a literal character (not re-scanning the inserted entity),
-/// already-emitted entities are never double-escaped. Newlines are passed
-/// through verbatim so multi-line descriptions keep their line breaks.
+/// Each input `&` is matched as a literal character (the inserted entity is
+/// never re-scanned), so already-emitted entities are not double-escaped.
+/// Newlines pass through verbatim, keeping multi-line descriptions intact.
 fn escape_xml(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -486,7 +449,7 @@ mod tests {
         validate(dir_name.to_string(), metadata, "body".to_string(), source())
     }
 
-    // VAL-VALIDATION-001: a legal name passes (no frontmatter.name → dir fallback).
+    // A legal name passes; with no frontmatter.name the directory name is used.
     #[test]
     fn val_001_valid_name_passes() {
         let skill = run(
@@ -501,7 +464,7 @@ mod tests {
         assert_eq!(skill.body, "body");
     }
 
-    // VAL-VALIDATION-001: assorted legal names all pass through the dir-fallback.
+    // Assorted legal names all pass through the dir-name fallback.
     #[test]
     fn val_001_valid_name_variants_pass() {
         for name in ["valid-name", "valid", "v123", "a", "a-b-c", "0-9"] {
@@ -511,8 +474,8 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-002: each name violation, via the dir-fallback path (no
-    // frontmatter.name), yields InvalidName with a reason naming its category.
+    // Each name violation, via the dir-fallback path, yields InvalidName with a
+    // reason naming its category.
     #[test]
     fn val_002_dir_fallback_invalid_name_categories() {
         let cases: &[(&str, &str)] = &[
@@ -538,8 +501,8 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-002: oversized dir name (no frontmatter) → InvalidName with
-    // the length-category reason (distinct from the >64 NameMismatch path).
+    // An oversized dir name yields InvalidName with the length reason, not the
+    // NameMismatch that a >64-byte frontmatter name would take.
     #[test]
     fn val_002_dir_fallback_too_long_is_invalid_name() {
         let long = "a".repeat(MAX_NAME_LENGTH + 1);
@@ -551,7 +514,7 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-003: 64-byte name passes, 65-byte name fails (byte length).
+    // A 64-byte name passes, 65 bytes fails — the limit is bytes, not chars.
     #[test]
     fn val_003_name_length_byte_boundary() {
         let ok = "a".repeat(MAX_NAME_LENGTH);
@@ -566,21 +529,14 @@ mod tests {
         ));
     }
 
-    // VAL-VALIDATION-003 (byte semantics): unlike `description`, `name` has no
-    // pure byte-vs-char discriminator test, and this records WHY. The name cap
-    // is also measured in bytes (`validate_name` uses `str::len`), but the legal
-    // character set is ASCII (`a-z`, `0-9`, `-`), where bytes ≡ chars — so no
-    // *legal* string can have bytes > 64 while chars ≤ 64. Any multi-byte name
-    // is non-ASCII and trips the character-set check FIRST, before the length
-    // check is even relevant. This test pins that ordering: 32 two-byte chars
-    // (64 bytes, 32 chars — well within the 64-byte cap) is still rejected as
-    // InvalidName for invalid characters, not for length. frontmatter.name ==
-    // dir_name keeps us on the name-validation path (avoids NameMismatch).
+    // The name cap is bytes, but the legal charset is ASCII where bytes ≡ chars,
+    // so no *legal* name can exceed 64 bytes at ≤ 64 chars: any multi-byte name
+    // trips the charset check FIRST. This pins that ordering. frontmatter.name
+    // == dir_name keeps us on the name-validation path (avoids NameMismatch).
     #[test]
     fn val_003_multibyte_name_hits_charset_before_length() {
         let name = "é".repeat(32);
-        // Premise: 64 bytes (== MAX_NAME_LENGTH, so length alone would pass),
-        // 32 chars. The rejection below is therefore the charset rule, not length.
+        // 64 bytes (length alone would pass) but only 32 chars.
         assert_eq!(name.len(), 64);
         assert_eq!(name.chars().count(), 32);
         assert_eq!(name.len(), MAX_NAME_LENGTH);
@@ -598,7 +554,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-004: description missing → MissingDescription.
     #[test]
     fn val_004_missing_description() {
         match run("ok-skill", Some(meta(None, None))) {
@@ -607,7 +562,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-004: whitespace-only description → MissingDescription.
     #[test]
     fn val_004_whitespace_only_description() {
         match run("ok-skill", Some(meta(None, Some("   \n\t  ")))) {
@@ -616,9 +570,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-004: YAML null description (deserializes to None) →
-    // MissingDescription. Simulated via SkillMetadata with description: None,
-    // which is what `description: null` deserializes to.
     #[test]
     fn val_004_yaml_null_description() {
         let m: SkillMetadata = serde_yaml::from_str("name: ok-skill\ndescription: null\n").unwrap();
@@ -629,8 +580,8 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-005: 1024-byte description passes, 1025 fails. Name must be
-    // valid for the length check to be reached.
+    // A 1024-byte description passes, 1025 fails. The name must be valid for the
+    // length check to be reached at all.
     #[test]
     fn val_005_description_length_byte_boundary() {
         let ok = "x".repeat(MAX_DESCRIPTION_LENGTH);
@@ -649,16 +600,11 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-005 (byte discriminator): the description cap is measured
-    // in BYTES (`String::len`), not Unicode scalar values. A description of 513
-    // two-byte chars is 1026 bytes but only 513 chars; were the cap measured by
-    // `.chars().count()` it would (wrongly) pass at 513 < 1024. Asserting
-    // DescriptionTooLong { actual: 1026 } locks the byte contract and would
-    // fail if `.len()` were ever refactored to `.chars().count()`.
+    // The description cap is BYTES, not chars: 513 two-byte chars is 1026 bytes
+    // but only 513 chars, which a char-counting cap would wrongly accept.
     #[test]
     fn val_005_description_length_is_bytes_not_chars() {
         let desc = "é".repeat(513);
-        // Fix the premise: 1026 bytes, 513 chars (513 < MAX so char-counting passes).
         assert_eq!(desc.len(), 1026);
         assert_eq!(desc.chars().count(), 513);
         assert!(desc.chars().count() < MAX_DESCRIPTION_LENGTH);
@@ -671,7 +617,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-006: frontmatter.name != dir_name → NameMismatch.
     #[test]
     fn val_006_name_mismatch() {
         match run(
@@ -690,8 +635,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-007: fixed order — description-required runs before
-    // name checks. Missing description + name mismatch → MissingDescription.
     #[test]
     fn val_007_order_missing_description_beats_name_mismatch() {
         match run("dir-name", Some(meta(Some("other-name"), None))) {
@@ -700,8 +643,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-007: description-length runs before name-mismatch.
-    // 1025-byte description + name mismatch → DescriptionTooLong.
     #[test]
     fn val_007_order_too_long_beats_name_mismatch() {
         let too_long = "x".repeat(MAX_DESCRIPTION_LENGTH + 1);
@@ -713,20 +654,17 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-007: name-mismatch runs before name-valid. A frontmatter
-    // name that is *itself* invalid but differs from dir → NameMismatch, not
-    // InvalidName (InvalidName is only reachable via the two name==dir paths).
+    // InvalidName is only reachable when frontmatter.name == dir_name; a
+    // differing name that is itself invalid is still reported as NameMismatch.
     #[test]
     fn val_007_mismatch_beats_invalid_when_names_differ() {
-        // frontmatter "Bad_Name" is invalid AND != dir "good-dir" → NameMismatch.
         match run("good-dir", Some(meta(Some("Bad_Name"), Some("ok")))) {
             Err(SkillError::NameMismatch { .. }) => {}
             other => panic!("expected NameMismatch, got {other:?}"),
         }
     }
 
-    // VAL-VALIDATION-007: InvalidName path #2 — frontmatter.name == dir_name and
-    // both are invalid. The mismatch check passes (equal), then name-valid fails.
+    // Equal-but-invalid names pass the mismatch check, then fail name-valid.
     #[test]
     fn val_007_invalid_name_via_matching_invalid_frontmatter() {
         match run("Bad_Name", Some(meta(Some("Bad_Name"), Some("ok")))) {
@@ -737,7 +675,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-008: no frontmatter (metadata None) → MissingDescription.
     #[test]
     fn val_008_no_frontmatter_missing_description() {
         match run("ok-skill", None) {
@@ -746,13 +683,10 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-008: empty YAML block — Value::Null deserializes to a
-    // default SkillMetadata, which has no description → MissingDescription.
     #[test]
     fn val_008_empty_yaml_block_missing_description() {
-        // `serde_yaml::from_value(Value::Null)` round-trips to the default
-        // struct because all fields are #[serde(default)]. The discovery
-        // feature passes exactly this `Some(default)` for an empty block.
+        // An empty block round-trips to the default struct (all fields are
+        // #[serde(default)]); discovery passes exactly this `Some(default)`.
         let from_null: SkillMetadata = serde_yaml::from_value(serde_yaml::Value::Null).unwrap();
         assert_eq!(from_null, SkillMetadata::default());
         match run("ok-skill", Some(from_null)) {
@@ -761,8 +695,8 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-009: non-ASCII / dotted / slashed names via the
-    // consistent path (frontmatter.name == dir_name) → InvalidName.
+    // frontmatter.name == dir_name keeps these on the charset path rather than
+    // the NameMismatch one.
     #[test]
     fn val_009_non_ascii_and_punctuation_names_invalid() {
         for bad in ["café", "skill.name", "foo/bar", "naïve", "世界"] {
@@ -779,9 +713,8 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-010: description length uses the UNTRIMMED original. A
-    // 1024-non-whitespace-byte body plus one trailing space (1025 bytes) is
-    // TooLong even though its trimmed length is 1024.
+    // Length uses the UNTRIMMED original: 1024 bytes plus a trailing space is
+    // TooLong even though the trimmed value is exactly 1024.
     #[test]
     fn val_010_length_uses_untrimmed_value() {
         let mut desc = "x".repeat(MAX_DESCRIPTION_LENGTH);
@@ -796,8 +729,6 @@ mod tests {
         }
     }
 
-    // VAL-VALIDATION-011: a legal description is preserved VERBATIM (not
-    // trimmed) in the resulting Skill.
     #[test]
     fn val_011_description_preserved_verbatim() {
         let desc = "  surrounded by spaces  \nand a newline  ";
@@ -805,8 +736,7 @@ mod tests {
         assert_eq!(skill.description, desc);
     }
 
-    // SourceScope serde contract: variants serialize to the camelCase literals
-    // that downstream IPC/UI depend on.
+    // The camelCase literals are a contract with downstream IPC/UI.
     #[test]
     fn source_scope_serializes_to_camel_case() {
         assert_eq!(
@@ -821,13 +751,11 @@ mod tests {
             serde_json::to_string(&SourceScope::AppData).unwrap(),
             "\"appData\""
         );
-        // And round-trips back.
         let p: SourceScope = serde_json::from_str("\"project\"").unwrap();
         assert_eq!(p, SourceScope::Project);
     }
 
-    // SourceScope priority order: Project is the greatest variant so dedup can
-    // pick the highest-priority source with `max`/sort.
+    // Project is the greatest variant so dedup can pick the winner with `max`.
     #[test]
     fn source_scope_priority_order() {
         assert!(SourceScope::AppData < SourceScope::User);
@@ -844,7 +772,6 @@ mod tests {
         );
     }
 
-    // disable-model-invocation is parsed via its kebab-case serde rename.
     #[test]
     fn disable_model_invocation_kebab_rename_and_default() {
         let on: SkillMetadata =
@@ -853,12 +780,9 @@ mod tests {
         let skill = run("ok-skill", Some(on)).unwrap();
         assert!(skill.disable_model_invocation);
 
-        // Absent → defaults to false.
         let off: SkillMetadata = serde_yaml::from_str("description: x\n").unwrap();
         assert!(!off.disable_model_invocation);
     }
-
-    // ---- Discovery tests (VAL-DISCOVERY-001..010) ----------------------------
 
     use std::fs;
     use tempfile::TempDir;
@@ -886,8 +810,8 @@ mod tests {
         ]
     }
 
-    // VAL-DISCOVERY-001: a skill in each of the three scopes is discovered,
-    // name = parent directory name, scope correctly labelled.
+    // A skill's name comes from its parent directory and its scope from the root
+    // it was found under.
     #[test]
     fn val_discovery_001_three_scopes_discovered() {
         let app = TempDir::new().unwrap();
@@ -910,8 +834,8 @@ mod tests {
         assert_eq!(by["gamma"].body, "g body");
     }
 
-    // VAL-DISCOVERY-002: same-named skill across scopes — Project shadows User
-    // shadows AppData; winner's body/description/scope come from the highest.
+    // The winner's body, description and scope all come from the highest-priority
+    // root that supplied the name.
     #[test]
     fn val_discovery_002_same_name_project_shadows_user_shadows_appdata() {
         let app = TempDir::new().unwrap();
@@ -944,8 +868,7 @@ mod tests {
         assert_eq!(skills2[0].description, "from user");
     }
 
-    // VAL-DISCOVERY-003: missing scope directories are silently skipped (no
-    // error) and the result is sorted by name.
+    // A missing scope directory is not an error; results stay sorted by name.
     #[test]
     fn val_discovery_003_missing_scope_silently_skipped() {
         let app = TempDir::new().unwrap();
@@ -965,9 +888,7 @@ mod tests {
         assert_eq!(names, vec!["alpha", "zeta"]);
     }
 
-    // VAL-DISCOVERY-004: non-recursive — a SKILL.md one level deeper than the
-    // immediate subdirectory is NOT discovered when the immediate subdir has no
-    // SKILL.md of its own.
+    // A SKILL.md one level deeper than the immediate subdirectory is not found.
     #[test]
     fn val_discovery_004_non_recursive() {
         let root = TempDir::new().unwrap();
@@ -985,18 +906,13 @@ mod tests {
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
 
-    // VAL-DISCOVERY-005: a non-directory file directly under the scope root and
-    // a subdirectory lacking SKILL.md are both ignored.
     #[test]
     fn val_discovery_005_stray_file_and_dir_without_skill_md_ignored() {
         let root = TempDir::new().unwrap();
-        // Stray file directly under the root.
         fs::write(root.path().join("README.md"), "not a skill").unwrap();
-        // Subdir with no SKILL.md.
         fs::create_dir_all(root.path().join("empty-dir")).unwrap();
-        // Subdir holding a differently-named file (not SKILL.md). Note: the
-        // candidate match is case-insensitive on macOS/Windows, so the wrong
-        // name must differ by more than case to be portable across filesystems.
+        // The candidate match is case-insensitive on macOS/Windows, so this
+        // wrong name must differ by more than case to be portable.
         let wrong = root.path().join("wrong");
         fs::create_dir_all(&wrong).unwrap();
         fs::write(wrong.join("NOTES.md"), skill_md("x", "x")).unwrap();
@@ -1010,8 +926,7 @@ mod tests {
         assert_eq!(skills[0].name, "real");
     }
 
-    // VAL-DISCOVERY-006: results are sorted by name regardless of insertion or
-    // directory-iteration order.
+    // Sorting holds regardless of insertion or directory-iteration order.
     #[test]
     fn val_discovery_006_sorted_by_name() {
         let root = TempDir::new().unwrap();
@@ -1025,24 +940,21 @@ mod tests {
         assert_eq!(names, vec!["apple", "banana", "mango", "zebra"]);
     }
 
-    // VAL-DISCOVERY-007 (loader-bad branch): a higher-priority entry that fails
-    // to LOAD (broken frontmatter) never claims the name slot, so a
-    // lower-priority same-named GOOD skill still surfaces. The error is also
-    // reported.
+    // A higher-priority entry that fails to LOAD never claims the name slot, so
+    // the lower-priority same-named good skill still surfaces — and the load
+    // error is reported alongside it.
     #[test]
     fn val_discovery_007_loader_bad_does_not_shadow_lower_priority() {
         let app = TempDir::new().unwrap();
         let proj = TempDir::new().unwrap();
-        // Low-priority (AppData) good skill.
         write_skill(app.path(), "dup", &skill_md("good from app", "app body"));
-        // High-priority (Project) BROKEN frontmatter — load fails.
+        // Higher-priority but with broken frontmatter — the load fails.
         let bad_path = write_skill(proj.path(), "dup", "---\nname: : :\n---\nbody");
 
         let (skills, errors) = discover_skills(&[
             (app.path().to_path_buf(), SourceScope::AppData),
             (proj.path().to_path_buf(), SourceScope::Project),
         ]);
-        // The good low-priority skill is NOT shadowed.
         assert_eq!(
             skills.len(),
             1,
@@ -1051,7 +963,6 @@ mod tests {
         assert_eq!(skills[0].name, "dup");
         assert_eq!(skills[0].source.scope, SourceScope::AppData);
         assert_eq!(skills[0].description, "good from app");
-        // And the broken one is reported as a Loader error at its path.
         assert_eq!(errors.len(), 1, "expected one loader error: {errors:?}");
         match &errors[0] {
             SkillError::Loader { path, source } => {
@@ -1062,18 +973,15 @@ mod tests {
         }
     }
 
-    // VAL-DISCOVERY-008 (validate-bad branch): a higher-priority entry that
-    // LOADS but fails VALIDATION occupies the name slot, so it shadows a
-    // lower-priority same-named good skill (which therefore does NOT surface).
-    // The validation error is reported in its place.
+    // A higher-priority entry that LOADS but fails VALIDATION does occupy the
+    // name slot, shadowing the lower-priority good skill; its validation error
+    // is reported in that skill's place.
     #[test]
     fn val_discovery_008_validate_bad_shadows_lower_priority() {
         let app = TempDir::new().unwrap();
         let proj = TempDir::new().unwrap();
-        // Low-priority (AppData) good skill.
         write_skill(app.path(), "dup", &skill_md("good from app", "app body"));
-        // High-priority (Project) loads fine but fails validation: frontmatter
-        // `name` mismatches the directory name.
+        // Higher-priority, loads fine, but its `name` mismatches the directory.
         let bad_path = write_skill(
             proj.path(),
             "dup",
@@ -1084,7 +992,6 @@ mod tests {
             (app.path().to_path_buf(), SourceScope::AppData),
             (proj.path().to_path_buf(), SourceScope::Project),
         ]);
-        // The low-priority good skill is SHADOWED — it does not surface.
         assert!(
             skills.is_empty(),
             "validate-bad winner should shadow the lower skill: {skills:?}"
@@ -1104,9 +1011,8 @@ mod tests {
         }
     }
 
-    // VAL-DISCOVERY-009: disable-model-invocation parses true/false/absent
-    // normally; a non-boolean value is a Loader error (Frontmatter→InvalidYaml)
-    // and does not abort discovery of the other (valid) skills.
+    // A non-boolean `disable-model-invocation` is a Loader error and does not
+    // abort discovery of the other, valid skills.
     #[test]
     fn val_discovery_009_disable_model_invocation_parsing() {
         let root = TempDir::new().unwrap();
@@ -1121,7 +1027,6 @@ mod tests {
             "---\ndescription: d\ndisable-model-invocation: false\n---\nb",
         );
         write_skill(root.path(), "absent", &skill_md("d", "b"));
-        // Non-boolean value → deserialization of `bool` fails → InvalidYaml.
         let bad_path = write_skill(
             root.path(),
             "wrong-type",
@@ -1147,13 +1052,12 @@ mod tests {
         }
     }
 
-    // VAL-DISCOVERY-010 (a): a scope root that is a regular file (not a dir)
-    // surfaces an Io error and does not panic; other scopes still resolve.
+    // A scope root that is a regular file surfaces an Io error without panicking;
+    // the other scopes still resolve.
     #[test]
     fn val_discovery_010_root_is_a_file_yields_io_error() {
         let real_root = TempDir::new().unwrap();
         write_skill(real_root.path(), "ok", &skill_md("d", "b"));
-        // A path that points at a regular file rather than a directory.
         let file_root = TempDir::new().unwrap();
         let file_path = file_root.path().join("not-a-dir");
         fs::write(&file_path, "i am a file").unwrap();
@@ -1175,17 +1079,14 @@ mod tests {
         }
     }
 
-    // VAL-DISCOVERY-010 (b): a SKILL.md that cannot be read (no read
-    // permission) surfaces an Io error rather than panicking. Unix-only because
-    // permission bits are not portable; skipped when running as root (where the
-    // mode is ignored).
+    // An unreadable SKILL.md surfaces an Io error rather than panicking.
+    // Unix-only: permission bits are not portable.
     #[cfg(unix)]
     #[test]
     fn val_discovery_010_unreadable_skill_md_yields_io_error() {
         use std::os::unix::fs::PermissionsExt;
 
-        // Running as root bypasses permission checks, so this assertion is only
-        // meaningful for an unprivileged user.
+        // Root bypasses permission checks, so the assertion is meaningless there.
         if unsafe { libc_geteuid() } == 0 {
             return;
         }
@@ -1223,9 +1124,6 @@ mod tests {
         fn libc_geteuid() -> u32;
     }
 
-    // Lenient end-to-end: one broken skill produces a diagnostic but the rest
-    // of discovery still completes (VAL-DISCOVERY-007/008/009/010 share this
-    // property; this is the integrated assertion).
     #[test]
     fn discovery_is_lenient_one_bad_does_not_abort() {
         let root = TempDir::new().unwrap();
@@ -1242,8 +1140,6 @@ mod tests {
         assert_eq!(errors.len(), 2, "expected two diagnostics: {errors:?}");
     }
 
-    // ---- System-prompt section tests (VAL-PROMPT-001..008) -------------------
-
     /// Build a `Skill` directly (bypassing validation) for prompt-formatting
     /// tests. The path is set but must never appear in the formatted output.
     fn skill(name: &str, description: &str, disable: bool) -> Skill {
@@ -1259,14 +1155,11 @@ mod tests {
         }
     }
 
-    // VAL-PROMPT-002: an empty list emits no section at all.
     #[test]
     fn val_prompt_002_empty_list_is_none() {
         assert_eq!(format_skills_section(&[]), None);
     }
 
-    // VAL-PROMPT-001: a non-empty list emits an <available_skills> block with a
-    // <name> and <description> for the skill. (Minimal single-skill block.)
     #[test]
     fn val_prompt_001_non_empty_emits_name_and_description() {
         let out = format_skills_section(&[skill("alpha", "Alpha does things.", false)]).unwrap();
@@ -1287,8 +1180,7 @@ mod tests {
         );
     }
 
-    // VAL-PROMPT-003: skills are rendered in alphabetical order by name even
-    // when the input is in a different order.
+    // Alphabetical by name even when the input arrives in another order.
     #[test]
     fn val_prompt_003_sorted_by_name() {
         let out = format_skills_section(&[
@@ -1306,8 +1198,7 @@ mod tests {
         );
     }
 
-    // VAL-PROMPT-004: disable_model_invocation → <skill opt-in="true">; a
-    // normal skill → plain <skill>.
+    // disable_model_invocation → <skill opt-in="true">; otherwise a plain <skill>.
     #[test]
     fn val_prompt_004_opt_in_attribute() {
         let out = format_skills_section(&[
@@ -1315,29 +1206,24 @@ mod tests {
             skill("manual", "opt-in only", true),
         ])
         .unwrap();
-        // The opt-in block.
         assert!(
             out.contains("  <skill opt-in=\"true\">\n    <name>manual</name>"),
             "missing opt-in block:\n{out}"
         );
-        // The plain block.
         assert!(
             out.contains("  <skill>\n    <name>auto</name>"),
             "missing plain block:\n{out}"
         );
-        // The auto skill must NOT carry the opt-in attribute.
         assert!(
             !out.contains("<skill opt-in=\"true\">\n    <name>auto</name>"),
             "auto skill wrongly tagged opt-in:\n{out}"
         );
     }
 
-    // VAL-PROMPT-005: the five XML metacharacters are escaped in both <name>
-    // and <description>, and an `&` is not double-escaped.
+    // All five XML metacharacters are escaped in both <name> and <description>,
+    // and an `&` is never double-escaped.
     #[test]
     fn val_prompt_005_special_characters_escaped() {
-        // Name uses only legal-ish chars plus the metacharacters we can exercise
-        // there; description carries all five plus an existing entity.
         let s = skill(
             "a&b<c",
             "quotes \" and ' and < and > and & and &amp;",
@@ -1345,24 +1231,19 @@ mod tests {
         );
         let out = format_skills_section(&[s]).unwrap();
 
-        // Name escaping.
         assert!(out.contains("<name>a&amp;b&lt;c</name>"), "name:\n{out}");
 
-        // Description: every metacharacter escaped, and the literal "&amp;"
-        // input becomes "&amp;amp;" (the leading & is escaped, the rest is
-        // verbatim) — i.e. no double-escaping of an already-emitted entity.
+        // The literal "&amp;" input becomes "&amp;amp;": only the leading `&`
+        // is escaped, so an already-emitted entity is not escaped twice.
         assert!(
             out.contains(
                 "<description>quotes &quot; and &apos; and &lt; and &gt; and &amp; and &amp;amp;</description>"
             ),
             "description escaping:\n{out}"
         );
-        // Sanity: the raw metacharacters do not survive inside the values.
         assert!(!out.contains("a&b<c"), "raw name leaked:\n{out}");
     }
 
-    // VAL-PROMPT-005 (direct): escape_xml maps each metacharacter and does not
-    // re-escape inserted entities.
     #[test]
     fn val_prompt_005_escape_xml_unit() {
         assert_eq!(escape_xml("&"), "&amp;");
@@ -1372,12 +1253,10 @@ mod tests {
         assert_eq!(escape_xml("'"), "&apos;");
         // No double-escaping: an existing entity's `&` is escaped once.
         assert_eq!(escape_xml("&amp;"), "&amp;amp;");
-        // Mixed run.
         assert_eq!(escape_xml("a<b>c"), "a&lt;b&gt;c");
     }
 
-    // VAL-PROMPT-006: guidance prose tells the model to "call the skill tool"
-    // and never contains the upstream "read tool to load" substring.
+    // The prose must say "call the skill tool" and never "read tool to load".
     #[test]
     fn val_prompt_006_guidance_prose() {
         let out = format_skills_section(&[skill("alpha", "a", false)]).unwrap();
@@ -1391,8 +1270,6 @@ mod tests {
         );
     }
 
-    // VAL-PROMPT-007: a skill block contains no <location> element and no
-    // absolute path from the source.
     #[test]
     fn val_prompt_007_no_location_or_path() {
         let out = format_skills_section(&[skill("alpha", "a", false)]).unwrap();
@@ -1407,8 +1284,7 @@ mod tests {
         assert!(!out.contains("SKILL.md"), "SKILL.md path leaked:\n{out}");
     }
 
-    // VAL-PROMPT-008: a multi-line description keeps its newlines verbatim
-    // inside the <description> element (escape_xml does not touch '\n').
+    // escape_xml does not touch '\n', so newlines survive inside <description>.
     #[test]
     fn val_prompt_008_multiline_description_preserved() {
         let desc = "line one\nline two\nline three";
@@ -1417,7 +1293,6 @@ mod tests {
             out.contains("<description>line one\nline two\nline three</description>"),
             "newlines not preserved:\n{out}"
         );
-        // Newlines must not be turned into entities.
         assert!(
             !out.contains("&#"),
             "newline wrongly entity-encoded:\n{out}"

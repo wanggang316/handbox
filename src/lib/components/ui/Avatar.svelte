@@ -4,12 +4,12 @@
   import { t } from "$lib/i18n";
 
   interface Props {
-    src?: string; // 头像 URL
-    letter?: string; // 显示的字母
-    size?: "sm" | "md" | "lg"; // 尺寸
-    class?: string; // 额外的 CSS 类
-    editable?: boolean; // 是否可编辑
-    onImageChange?: (file: File) => void; // 图片变更回调
+    src?: string;
+    letter?: string;
+    size?: "sm" | "md" | "lg";
+    class?: string;
+    editable?: boolean;
+    onImageChange?: (file: File) => void;
   }
 
   let {
@@ -21,15 +21,12 @@
     onImageChange,
   }: Props = $props();
 
-  // 文件上传引用
   let fileInput = $state<HTMLInputElement>();
 
-  // 代理后的图片 URL
   let proxiedSrc = $state<string | null>(null);
   let isLoading = $state(false);
   let hasError = $state(false);
 
-  // 尺寸映射
   const sizeClasses = {
     sm: "w-8 h-8",
     md: "w-12 h-12",
@@ -47,7 +44,6 @@
   const iconSize = $derived(iconSizes[size]);
   const fallbackLetter = $derived(letter ? letter.charAt(0).toUpperCase() : "");
 
-  // 处理图片代理加载
   async function loadProxiedImage(url: string) {
     if (!shouldProxyImage(url)) {
       proxiedSrc = url;
@@ -69,7 +65,6 @@
     }
   }
 
-  // 监听 src 变化
   $effect(() => {
     if (src) {
       loadProxiedImage(src);
@@ -79,7 +74,6 @@
     }
   });
 
-  // 处理文件上传
   function handleFileUpload() {
     if (editable && fileInput) {
       fileInput.click();
@@ -96,7 +90,6 @@
 </script>
 
 <div class="relative {sizeClass} {className} group">
-  <!-- 头像容器 -->
   <button
     class="w-full h-full rounded-full overflow-hidden border-none p-0 bg-transparent"
     class:cursor-pointer={editable}
@@ -111,12 +104,10 @@
         alt={t("ui.avatarAlt")}
         class="w-full h-full rounded-full object-cover"
         onerror={() => {
-          // 如果图片加载失败，可以在这里处理回退逻辑
           console.warn("Avatar image failed to load");
         }}
       />
     {:else}
-      <!-- 默认头像图标 -->
       <div
         class="w-full h-full rounded-full bg-base-300 flex items-center justify-center text-base-content/80 font-semibold"
       >
@@ -128,7 +119,6 @@
       </div>
     {/if}
 
-    <!-- 编辑遮罩层 -->
     {#if editable}
       <div
         class="absolute inset-0 bg-base-content/0 group-hover:bg-base-content/30 transition-all duration-[var(--dur-base)] rounded-full flex items-center justify-center"
@@ -142,7 +132,6 @@
     {/if}
   </button>
 
-  <!-- 隐藏的文件上传输入框 -->
   {#if editable}
     <input
       bind:this={fileInput}

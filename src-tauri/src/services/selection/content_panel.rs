@@ -1,5 +1,6 @@
-// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
-// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+// The panel_event! DSL requires an explicit `-> ()` (Obj-C void delegate), which
+// trips clippy::unused_unit inside the macro expansion; only a module-level allow
+// reaches macro-generated code.
 #![allow(clippy::unused_unit)]
 
 use tauri::LogicalPosition;
@@ -10,13 +11,11 @@ use tauri_nspanel::{
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// 跟踪内容面板是否可见
 static CONTENT_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 
-/// 跟踪内容面板是否置顶（置顶时点击外部不会隐藏）
+/// While pinned, outside clicks and focus loss do not hide the panel.
 static CONTENT_PANEL_PINNED: AtomicBool = AtomicBool::new(false);
 
-/// 跟踪鼠标是否在面板内部
 static MOUSE_INSIDE_PANEL: AtomicBool = AtomicBool::new(false);
 
 const PANEL_LABEL: &str = "selection_content";
@@ -24,11 +23,10 @@ const PANEL_LABEL: &str = "selection_content";
 tauri_panel! {
     panel!(SelectionContentPanel {
         config: {
-            can_become_key_window: true,  // 允许接收键盘事件（复制快捷键等）
+            can_become_key_window: true,  // accepts keyboard events, e.g. copy shortcuts
             can_become_main_window: false,
         }
         with: {
-            // Enable mouse tracking for the panel
             tracking_area: {
                 options: TrackingAreaOptions::new()
                     .active_always()           // Track mouse even when app is not active
@@ -60,7 +58,6 @@ pub fn init_panel(app_handle: &AppHandle) {
     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
     panel.set_corner_radius(18.0);
 
-    // 设置事件处理器
     let handler = SelectionContentEventHandler::new();
 
     handler.on_mouse_entered(move |_event| {
@@ -80,12 +77,10 @@ pub fn init_panel(app_handle: &AppHandle) {
     let handle_for_resign = app_handle.clone();
     handler.window_did_resign_key(move |_| {
         tracing::debug!("Content panel resigned from key window");
-        // 非置顶状态下，失去焦点时隐藏面板（如用户切换程序）
+        // An unpinned panel hides on focus loss, e.g. when the user switches apps.
         if !CONTENT_PANEL_PINNED.load(Ordering::Relaxed) && CONTENT_PANEL_VISIBLE.load(Ordering::Relaxed) {
             tracing::info!("-----> hiding content panel (lost focus)");
-            // 更新标志
             CONTENT_PANEL_VISIBLE.store(false, Ordering::Relaxed);
-            // 隐藏窗口
             let h = handle_for_resign.clone();
             let h2 = h.clone();
             let _ = h.run_on_main_thread(move || {
@@ -103,7 +98,7 @@ pub fn init_panel(app_handle: &AppHandle) {
 }
 
 pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
-    // 立即更新标志
+    // Set before dispatching, so the mouse-hook thread sees it right away.
     CONTENT_PANEL_VISIBLE.store(true, Ordering::Relaxed);
 
     let handle_clone = handle.clone();
@@ -118,9 +113,7 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
 }
 
 pub fn hide_panel(handle: &AppHandle) {
-    // 立即更新标志
     CONTENT_PANEL_VISIBLE.store(false, Ordering::Relaxed);
-    // 隐藏时重置置顶状态
     CONTENT_PANEL_PINNED.store(false, Ordering::Relaxed);
 
     let handle_clone = handle.clone();
@@ -133,22 +126,18 @@ pub fn hide_panel(handle: &AppHandle) {
 }
 
 
-/// 检查内容面板是否可见
 pub fn is_panel_visible() -> bool {
     CONTENT_PANEL_VISIBLE.load(Ordering::Relaxed)
 }
 
-/// 检查内容面板是否置顶
 pub fn is_panel_pinned() -> bool {
     CONTENT_PANEL_PINNED.load(Ordering::Relaxed)
 }
 
-/// 检查鼠标是否在面板内部
 pub fn is_mouse_inside() -> bool {
     MOUSE_INSIDE_PANEL.load(Ordering::Relaxed)
 }
 
-/// 设置内容面板置顶状态
 pub fn set_panel_pinned(pinned: bool) {
     CONTENT_PANEL_PINNED.store(pinned, Ordering::Relaxed);
 }

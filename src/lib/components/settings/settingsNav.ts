@@ -1,6 +1,6 @@
 /**
- * 设置导航的共享数据源：SettingsSidebar（左栏）与 settings/+layout（页头标题）
- * 共用，保证条目/分组/文案一处维护。
+ * Single source of truth for settings navigation, shared by SettingsSidebar and
+ * the settings layout header.
  */
 import {
   User,
@@ -30,7 +30,7 @@ export interface SettingsNavGroup {
   items: SettingsNavItem[];
 }
 
-// 每次调用即时取 t()：调用方包在 $derived 里即可随语言切换重算。
+// Reads t() on every call, so callers wrapping this in $derived recompute on language switch.
 export function getSettingsNavGroups(): SettingsNavGroup[] {
   return [
     {
@@ -64,7 +64,7 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
   ];
 }
 
-/** 按路由前缀匹配当前导航项（子路由如 /settings/models/provider/x 归属 models）。 */
+/** Matches by route prefix, so sub-routes like /settings/models/provider/x resolve to models. */
 export function findSettingsNavItem(
   pathname: string,
 ): SettingsNavItem | undefined {

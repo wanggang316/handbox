@@ -1,9 +1,8 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A list of key/value rows. One row per `items` entry, rendered as
-  // "key — value". Both `key` and `value` render through Svelte text binding only
-  // (never @html). An empty `items` array is valid and renders nothing.
+  // `key`/`value` render through Svelte text binding only (never @html). An
+  // empty `items` array is valid and renders nothing.
   interface KeyValueProps {
     items: { key: string; value: string }[];
   }

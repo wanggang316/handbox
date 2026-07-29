@@ -1,4 +1,4 @@
-// Provider 数据访问层 - 使用普通查询避免 sqlx 宏问题
+// Uses plain runtime queries instead of sqlx macros.
 
 use crate::models::AppError;
 use crate::storage::types::Provider;
@@ -6,7 +6,6 @@ use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
-/// Provider 仓储层
 #[derive(Clone)]
 pub struct ProviderRepository {
     db: Arc<Database>,
@@ -17,7 +16,6 @@ impl ProviderRepository {
         Self { db }
     }
 
-    /// 创建供应商
     pub async fn create_provider(&self, provider: &Provider) -> Result<(), AppError> {
         let query = r#"
             INSERT INTO providers (id, name, provider_type, base_url, api_key, enabled,
@@ -47,7 +45,6 @@ impl ProviderRepository {
         Ok(())
     }
 
-    /// 更新供应商
     pub async fn update_provider(&self, provider: &Provider) -> Result<(), AppError> {
         tracing::debug!(
             "Updating provider in database: ID={}, Name={}",
@@ -87,7 +84,6 @@ impl ProviderRepository {
         Ok(())
     }
 
-    /// 根据 ID 获取供应商
     pub async fn get_provider_by_id(&self, id: &str) -> Result<Option<Provider>, AppError> {
         let query = r#"
             SELECT id, name, provider_type, base_url, api_key, enabled,
@@ -108,7 +104,6 @@ impl ProviderRepository {
         }
     }
 
-    /// 根据名称获取供应商
     pub async fn get_provider_by_name(&self, name: &str) -> Result<Option<Provider>, AppError> {
         let query = r#"
             SELECT id, name, provider_type, base_url, api_key, enabled,
@@ -131,7 +126,6 @@ impl ProviderRepository {
         }
     }
 
-    /// 获取所有供应商
     pub async fn list_providers(&self) -> Result<Vec<Provider>, AppError> {
         let query = r#"
             SELECT id, name, provider_type, base_url, api_key, enabled,
@@ -153,7 +147,6 @@ impl ProviderRepository {
         Ok(providers)
     }
 
-    /// 删除供应商
     pub async fn delete_provider(&self, id: &str) -> Result<(), AppError> {
         let result = sqlx::query("DELETE FROM providers WHERE id = $1")
             .bind(id)
@@ -168,7 +161,6 @@ impl ProviderRepository {
         Ok(())
     }
 
-    // 辅助方法：将数据库行转换为 Provider
     fn row_to_provider(&self, row: sqlx::sqlite::SqliteRow) -> Result<Provider, AppError> {
         Ok(Provider {
             id: row.try_get("id")?,

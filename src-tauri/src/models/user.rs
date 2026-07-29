@@ -1,61 +1,42 @@
 use serde::{Deserialize, Serialize};
 
-/// 用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
-    /// 用户唯一标识
     pub id: String,
-    /// 用户名
     pub username: String,
-    /// 邮箱
     pub email: String,
-    /// 头像 URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
-    /// 是否为 Pro 用户
     pub is_pro: bool,
-    /// 创建时间
     pub created_at: String,
-    /// 更新时间
     pub updated_at: String,
 }
 
-/// 认证响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthResponse {
-    /// 用户信息
     pub user: User,
-    /// 访问令牌
     pub access_token: String,
-    /// 刷新令牌
     pub refresh_token: String,
-    /// 令牌过期时间（秒）
+    /// Token lifetime in seconds.
     pub expires_in: u64,
 }
 
-/// Google 登录请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct GoogleLoginRequest {
-    /// Google OAuth 授权码
+    /// Google OAuth authorization code.
     pub code: String,
-    /// 重定向 URI
     pub redirect_uri: String,
 }
 
-/// 刷新令牌请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct RefreshTokenRequest {
-    /// 刷新令牌
     pub refresh_token: String,
 }
 
-/// 更新用户资料请求
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateUserProfileRequest {
-    /// 用户名（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
-    /// 头像 URL（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
 }
@@ -95,7 +76,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&user).unwrap();
-        // avatar 字段为 None 时应该被跳过
+        // avatar is skipped when None
         assert!(!json.contains("\"avatar\""));
     }
 

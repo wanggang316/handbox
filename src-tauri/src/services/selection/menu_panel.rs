@@ -1,5 +1,6 @@
-// panel_event! DSL 要求显式 `-> ()`（对应 Obj-C void delegate），其在宏展开内触发
-// clippy::unused_unit；模块级 allow 才能覆盖宏展开产物（invocation 上的 allow 不生效）。
+// The panel_event! DSL requires an explicit `-> ()` (Obj-C void delegate), which
+// trips clippy::unused_unit inside the macro expansion; only a module-level allow
+// reaches macro-generated code.
 #![allow(clippy::unused_unit)]
 
 use crate::services::selection::settings_panel::hide_panel as hide_settings_panel;
@@ -9,7 +10,7 @@ use tauri::LogicalPosition;
 use tauri::{AppHandle, Manager};
 use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelLevel, StyleMask, WebviewWindowExt};
 
-/// 跟踪菜单面板是否可见（用于在 mouse hook 线程中快速检查）
+/// Read from the mouse-hook thread, so it must stay lock-free.
 static MENU_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 
 const PANEL_LABEL: &str = "selection_menu";
@@ -43,14 +44,11 @@ pub fn init_panel(app_handle: &AppHandle) {
     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
     panel.set_corner_radius(18.0);
 
-    // panel.set_becomes_key_only_if_needed(true);
-
     let handler = SelectionMenuEventHandler::new();
     handler.window_did_become_key(move |_notification| {
         tracing::info!("Menu panel became key window");
     });
 
-    // let handle_clone = app_handle.clone();
     handler.window_did_resign_key(move |_| {
         tracing::info!("Menu panel resigned from key window!");
     });
@@ -60,7 +58,8 @@ pub fn init_panel(app_handle: &AppHandle) {
     panel.set_event_handler(Some(handler.as_ref()));
 }
 
-/// 计算面板位置，确保不超出屏幕边界
+/// Places the panel centered above the mouse, clamped to the screen the mouse
+/// is on so it never lands off-screen.
 fn calculate_panel_position(
     window: &tauri::WebviewWindow,
     mouse_x: f64,
@@ -69,11 +68,9 @@ fn calculate_panel_position(
     panel_height: f64,
     vertical_gap: f64,
 ) -> (f64, f64) {
-    // 计算初始位置（居中在鼠标上方，留出间隙）
     let mut target_x = mouse_x - panel_width / 2.0;
     let mut target_y = mouse_y - panel_height - vertical_gap;
 
-    // 获取所有屏幕，找到包含鼠标位置的屏幕
     if let Ok(monitors) = window.available_monitors() {
         for monitor in monitors.iter() {
             let scale_factor = monitor.scale_factor();
@@ -82,19 +79,16 @@ fn calculate_panel_position(
             let screen_width = monitor.size().width as f64 / scale_factor;
             let screen_height = monitor.size().height as f64 / scale_factor;
 
-            // 检查鼠标是否在这个屏幕范围内
             if mouse_x >= screen_x
                 && mouse_x < screen_x + screen_width
                 && mouse_y >= screen_y
                 && mouse_y < screen_y + screen_height
             {
-                // 计算该屏幕的边界
                 let min_x = screen_x;
                 let max_x = screen_x + screen_width - panel_width;
                 let min_y = screen_y;
                 let max_y = screen_y + screen_height - panel_height;
 
-                // 限制到屏幕范围内
                 target_x = target_x.max(min_x).min(max_x);
                 target_y = target_y.max(min_y).min(max_y);
                 break;
@@ -127,14 +121,14 @@ pub fn show_panel(handle: &AppHandle, x: f64, y: f64) {
 }
 
 pub fn hide_panel(handle: &AppHandle) {
-    // 立即更新标志，这样 mouse hook 线程可以快速感知
+    // Clear before dispatching, so the mouse-hook thread sees it right away.
     MENU_PANEL_VISIBLE.store(false, Ordering::Relaxed);
     hide_settings_panel(handle);
 
     let handle_clone = handle.clone();
     let _ = handle.run_on_main_thread(move || {
         if let Some(window) = handle_clone.get_webview_window(PANEL_LABEL) {
-            // 先移到屏幕外，避免下次显示时在旧位置闪烁
+            // Move off-screen first, so the next show cannot flash at the stale position.
             let _ = window.set_position(LogicalPosition::new(-9999.0, -9999.0));
             if window.is_visible().unwrap_or(true) {
                 let _ = window.hide();
@@ -144,7 +138,6 @@ pub fn hide_panel(handle: &AppHandle) {
     });
 }
 
-/// 检查菜单面板是否可见
 pub fn is_panel_visible() -> bool {
     MENU_PANEL_VISIBLE.load(Ordering::Relaxed)
 }

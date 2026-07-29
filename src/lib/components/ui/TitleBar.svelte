@@ -23,7 +23,6 @@
 </script>
 
 <div class="drag-region" data-tauri-drag-region>
-  <!-- 左侧：侧边栏切换按钮 -->
   {#if showToggleButton}
     <div class="sidebar-toggle-button">
       <Button
@@ -38,11 +37,10 @@
   {/if}
 
   {@render children?.()}
-  <!-- 如果未来还需要在标题栏放入其他控件，可通过 snippet 注入 -->
 </div>
 
 <style>
-  /* 拖拽区域 - 在 titleBarStyle: "Overlay" 模式下使用 */
+  /* Window drag region for titleBarStyle: "Overlay". */
   .drag-region {
     position: fixed;
     top: 0;
@@ -55,11 +53,10 @@
     pointer-events: auto;
   }
 
-  /* 侧边栏切换按钮 */
   .sidebar-toggle-button {
     position: absolute;
     top: 11px;
-    left: 100px; /* 位于系统按钮右边 */
+    left: 100px; /* clears the system window buttons */
     pointer-events: auto;
     z-index: 10000;
     transition: opacity var(--dur-base) ease-in-out;
@@ -68,19 +65,4 @@
   .sidebar-toggle-button:hover {
     opacity: 1;
   }
-
-  /* 响应式设计：调整标题栏按钮位置 */
-  /* @media (max-width: 500px) {
-    .sidebar-toggle-button {
-      left: 20px;
-      top: 12px;
-    }
-  } */
-
-  /* @media (max-width: 480px) {
-    .sidebar-toggle-button {
-      left: 15px;
-      top: 10px;
-    }
-  } */
 </style>

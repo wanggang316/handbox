@@ -1,6 +1,6 @@
 /**
  * Unit tests for the JSON-Render {@link uiCatalog} — focused on the six
- * presentational catalog components added by the catalog-expansion milestone
+ * expansion presentational components
  * (StatusLabel / Avatar / Divider / KeyValue / Table / InfoTooltip).
  *
  * Pure TypeScript — imports `catalog.ts` only (no `.svelte`), so the suite runs
@@ -30,7 +30,7 @@ function specOf(element: Record<string, unknown>) {
   return { root: "x", elements: { x: element } };
 }
 
-/** Minimal valid single-element specs for each new component type. */
+/** Minimal valid single-element specs for each expansion component type. */
 const minimalElements = {
   StatusLabel: {
     type: "StatusLabel",

@@ -1,10 +1,7 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A pill-shaped status label. `text` renders through Svelte text binding only
-  // (never @html). The four states map to mutually distinguishable, semantically
-  // clear tones: enabled→success (green), error→error (red), disabled→neutral
-  // (grey), idle→info (secondary blue).
+  // `text` renders through Svelte text binding only (never @html).
   interface StatusLabelProps {
     status: "enabled" | "disabled" | "idle" | "error";
     text: string;

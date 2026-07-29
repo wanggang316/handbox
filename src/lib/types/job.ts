@@ -1,32 +1,26 @@
 /**
- * 定时任务 (Scheduled Job) 相关类型定义。
- *
- * 镜像 Rust 端 `storage/types/job.rs` 的 serde 表示：字段 camelCase，
- * `JobTarget` 为按 `kind` 判别的 discriminated union（tag 值 snake_case）。
+ * Mirrors the Rust serde shapes in `storage/types/job.rs`: camelCase fields;
+ * `JobTarget` is a discriminated union on `kind` (snake_case tag values).
  */
 
 import type { BaseEntity, UUID, Timestamp } from "./index";
 
-// 单次运行的结果状态
 export type ExecutionStatus = "running" | "success" | "failed" | "timeout";
 
-// 触发来源
 export type Trigger = "schedule" | "manual";
 
-// Prompt 目标的会话策略（当前仅「每次新建会话」）
+// Currently the only strategy: a fresh session per run.
 export type SessionStrategy = "new_session";
 
-// 触发 Agent（可选限定 project）
 export interface AgentTarget {
   kind: "agent";
   agentId: UUID;
-  // 运行该 Agent 所用模型（Agent 定义不再携带模型，改为每个 Job 各自选定）。
+  // Agent definitions carry no model; each job selects its own.
   modelId: string;
   initialMessage: string;
   projectId?: UUID;
 }
 
-// 向 provider/model 发送一次性 prompt
 export interface PromptTarget {
   kind: "prompt";
   providerId: string;
@@ -35,17 +29,15 @@ export interface PromptTarget {
   sessionStrategy?: SessionStrategy;
 }
 
-// 任务目标：按 `kind` 判别的联合类型
 export type JobTarget = AgentTarget | PromptTarget;
 
-// 健壮性配置的具名默认值（与 Rust 端 storage/types/job.rs 常量保持一致）。
-// execTimeoutSecs=0 表示不限超时；maxRetries=0 表示不重试；retryDelaySecs 默认 60s。
-// 实际的超时中断 / 重试退避行为由后续 feature 实现，本处仅用于表单留空回填。
+// Named defaults for the robustness settings, kept in sync with the constants
+// in `storage/types/job.rs` (0 = unlimited timeout / no retries). Used to
+// backfill blank form fields.
 export const DEFAULT_EXEC_TIMEOUT_SECS = 0;
 export const DEFAULT_MAX_RETRIES = 0;
 export const DEFAULT_RETRY_DELAY_SECS = 60;
 
-// 定时任务定义（对应 jobs 表）
 export interface Job extends BaseEntity {
   name: string;
   description?: string;
@@ -58,15 +50,14 @@ export interface Job extends BaseEntity {
   lastStatus?: ExecutionStatus;
   runCount: number;
   failureCount: number;
-  // 每次运行超时（秒），0 表示不限；执行语义见后续 exec-timeout feature
+  // Per-run timeout in seconds; 0 = unlimited.
   execTimeoutSecs: number;
-  // 失败后最大重试次数，0 表示不重试；执行语义见后续 retry-backoff feature
+  // Max retries after failure; 0 = no retries.
   maxRetries: number;
-  // 重试间隔（秒）
+  // Retry delay in seconds.
   retryDelaySecs: number;
 }
 
-// 单次执行记录（对应 job_executions 表）
 export interface JobExecution {
   id: UUID;
   jobId: UUID;

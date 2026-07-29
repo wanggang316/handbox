@@ -1,16 +1,11 @@
 //! web_search — HandBox's web-search extension tool.
 //!
-//! Constructed HandBox-side (like the MCP tools) and injected into the
-//! coding-agent session via `build_agent_session`'s `extra_tools` — it is NOT
-//! one of the coding-agent built-ins `select_enabled_tools` filters on. The
-//! session opts in through `enabled_tools` containing [`WEB_SEARCH_TOOL_NAME`],
-//! and agent_run only registers the tool when a search-provider API key is
-//! configured (`settings.agent.webSearch`): no key → the model never sees the
-//! tool, instead of burning a turn on a runtime error.
-//!
-//! Provider abstraction: `provider` is a string tag from settings ("tavily"
-//! today). Unknown tags fall back to Tavily rather than erroring so a config
-//! written by a newer HandBox degrades gracefully.
+//! Constructed HandBox-side (like the MCP tools) and injected via
+//! `build_agent_session`'s `extra_tools`, not a coding-agent built-in. agent_run
+//! registers it only when a search-provider API key is configured, so with no
+//! key the model never sees the tool instead of burning a turn on a runtime
+//! error. Unknown `provider` tags fall back to Tavily rather than erroring, so a
+//! config written by a newer HandBox degrades gracefully.
 
 use hand_agent::{AgentTool, ToolResult};
 use serde_json::{json, Value};
@@ -23,13 +18,11 @@ const TAVILY_ENDPOINT: &str = "https://api.tavily.com/search";
 const DEFAULT_MAX_RESULTS: u8 = 5;
 const MAX_MAX_RESULTS: u8 = 10;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-/// Cap on the formatted result text handed back to the model, guarding the
-/// context window against unexpectedly long provider content.
+/// Guards the model's context window against unexpectedly long provider content.
 const MAX_RESULT_CHARS: usize = 20_000;
 
-/// Build the `web_search` [`AgentTool`]. `provider`/`api_key` come from
-/// `settings.agent.webSearch`; the closure owns them for the session's life,
-/// so a settings change applies from the next run (same as MCP bindings).
+/// The closure owns `provider`/`api_key` for the session's life, so a settings
+/// change applies only from the next run (same as MCP bindings).
 pub fn create_web_search_tool(provider: String, api_key: String) -> AgentTool {
     AgentTool::simple(
         WEB_SEARCH_TOOL_NAME,
@@ -62,8 +55,8 @@ pub fn create_web_search_tool(provider: String, api_key: String) -> AgentTool {
     )
 }
 
-/// Dispatch one search call. Argument validation errors and provider failures
-/// both surface as `ToolResult::error` so the model can correct itself.
+/// Argument validation errors and provider failures both surface as
+/// `ToolResult::error` so the model can correct itself.
 async fn run_search(provider: &str, api_key: &str, args: &Value) -> ToolResult {
     let Some(query) = args.get("query").and_then(Value::as_str) else {
         return ToolResult::error("web_search requires a `query` string argument");
@@ -74,7 +67,6 @@ async fn run_search(provider: &str, api_key: &str, args: &Value) -> ToolResult {
     }
     let max_results = clamp_max_results(args.get("max_results").and_then(Value::as_u64));
 
-    // Unknown provider tags degrade to Tavily (the only backend today).
     if !provider.is_empty() && provider != "tavily" {
         tracing::warn!("[web_search] unknown provider '{provider}', falling back to tavily");
     }
@@ -84,8 +76,6 @@ async fn run_search(provider: &str, api_key: &str, args: &Value) -> ToolResult {
     }
 }
 
-/// Clamp the model-supplied `max_results` into [1, MAX_MAX_RESULTS]; absent or
-/// non-integer values fall back to the default.
 fn clamp_max_results(raw: Option<u64>) -> u8 {
     match raw {
         Some(n) => (n.min(MAX_MAX_RESULTS as u64)).max(1) as u8,
@@ -93,8 +83,7 @@ fn clamp_max_results(raw: Option<u64>) -> u8 {
     }
 }
 
-/// One Tavily search round-trip. Returns the formatted result text, or a
-/// user-actionable error message (no key/response bodies leaked).
+/// Errors are user-actionable messages that never leak the key or response body.
 async fn tavily_search(api_key: &str, query: &str, max_results: u8) -> Result<String, String> {
     let client = reqwest::Client::new();
     let response = client
@@ -124,8 +113,8 @@ async fn tavily_search(api_key: &str, query: &str, max_results: u8) -> Result<St
     Ok(format_tavily_response(&body))
 }
 
-/// Map a non-200 Tavily status onto a message the model (and the user reading
-/// the transcript) can act on. Deliberately does not include the response body.
+/// Messages the model (and the user reading the transcript) can act on;
+/// deliberately excludes the response body.
 fn tavily_error_message(status: u16) -> String {
     match status {
         400 => "web search rejected the query as invalid".to_string(),
@@ -147,8 +136,8 @@ fn build_tavily_request(query: &str, max_results: u8) -> Value {
     })
 }
 
-/// Render a Tavily response body as numbered, model-friendly plain text.
-/// Tolerates missing fields (absent answer, empty results, partial items).
+/// Renders numbered, model-friendly plain text, tolerating missing fields
+/// (absent answer, empty results, partial items).
 fn format_tavily_response(body: &Value) -> String {
     let mut out = String::new();
 
@@ -202,8 +191,6 @@ fn format_tavily_response(body: &Value) -> String {
 mod tests {
     use super::*;
 
-    // The tool registers under the name sessions opt in with, and its schema
-    // requires `query`.
     #[test]
     fn tool_shape_matches_registration_contract() {
         let tool = create_web_search_tool("tavily".to_string(), "tvly-key".to_string());
@@ -213,7 +200,6 @@ mod tests {
         assert!(tool.parameters["properties"]["query"].is_object());
     }
 
-    // The request body carries the query and the Tavily knobs we rely on.
     #[test]
     fn tavily_request_carries_query_and_options() {
         let body = build_tavily_request("rust async", 3);
@@ -223,7 +209,6 @@ mod tests {
         assert_eq!(body["include_answer"], true);
     }
 
-    // max_results: absent → default, oversized → clamped to max, zero → 1.
     #[test]
     fn max_results_is_clamped_into_range() {
         assert_eq!(clamp_max_results(None), DEFAULT_MAX_RESULTS);
@@ -232,7 +217,6 @@ mod tests {
         assert_eq!(clamp_max_results(Some(0)), 1);
     }
 
-    // A full response renders answer + numbered results with url and snippet.
     #[test]
     fn format_renders_answer_and_numbered_results() {
         let body = json!({
@@ -248,8 +232,6 @@ mod tests {
         assert!(text.contains("2. Book\n   https://doc.rust-lang.org/book\n   Learn Rust."));
     }
 
-    // Missing answer / empty results / partial items never panic and degrade
-    // to readable text.
     #[test]
     fn format_tolerates_missing_fields() {
         assert_eq!(format_tavily_response(&json!({})), "No results found.");
@@ -262,8 +244,6 @@ mod tests {
         assert!(partial.contains("1. (untitled)"));
     }
 
-    // Overlong result sets are truncated with an explicit marker instead of
-    // flooding the model context.
     #[test]
     fn format_truncates_overlong_output() {
         let big = "x".repeat(9_000);
@@ -275,7 +255,6 @@ mod tests {
         assert!(text.len() < 10 * 9_000);
     }
 
-    // Status → message mapping stays user-actionable for the common failures.
     #[test]
     fn error_messages_cover_common_statuses() {
         assert!(tavily_error_message(401).contains("API key"));

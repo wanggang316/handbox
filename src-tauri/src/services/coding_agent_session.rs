@@ -1,25 +1,8 @@
-//! coding_agent_session — construct a coding-agent [`AgentSession`] from a
-//! HandBox agent-session configuration.
-//!
-//! This module owns *construction only*: given a HandBox provider / model /
-//! key / working-dir / app-data-dir bundle it returns a ready-to-drive
-//! `hand_coding_agent::AgentSession`. Driving the prompt loop, mapping agent
-//! events back onto HandBox's event surface, and the IPC wiring are separate
-//! M1 features that build on top of the session this returns.
-//!
-//! Reuse, not reinvention:
-//! - Model resolution goes through [`model_runtime::resolve_model`], so an agent
-//!   session sees exactly the same `model::Model` a chat request would for the
-//!   same provider/model/base_url triple (no divergent catalog logic).
-//! - Stream options (incl. the api key) come from
-//!   [`model_runtime::build_stream_options`]. The plaintext key rides inside
-//!   `SimpleStreamOptions.base.api_key`; this path deliberately does **not**
-//!   write an `auth.json`, set environment variables, or touch the keyring.
-//!
-//! Sandbox discipline: `base_dir` is wired to the caller-supplied
-//! `app_data_dir` (Tauri's per-app data directory). The coding-agent default
-//! would otherwise persist session state under the user's `~/.hand`; for a
-//! sandboxed desktop app that state must stay inside the app's own data root.
+//! Construct a coding-agent [`AgentSession`] from a HandBox agent-session
+//! configuration; driving the prompt loop and IPC wiring live elsewhere.
+//! Models and stream options resolve through `model_runtime`, and the plaintext
+//! api key rides inside `SimpleStreamOptions.base.api_key` only (no `auth.json`,
+//! env vars, or keyring). `base_dir` is the app data dir, never `~/.hand`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -36,22 +19,13 @@ use crate::services::extensions;
 use crate::services::model_runtime::{self, ChatOptions};
 use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
 
-/// HandBox-side inputs needed to construct a coding-agent session.
-///
-/// Field names mirror the HandBox agent-session storage row so callers can map
-/// directly. `provider_type` is the hand-ai provider tag (e.g. `"openai"`,
-/// `"anthropic"`, `"openai-compatible"`); `provider_id` is HandBox's own
-/// provider row id and is carried for diagnostics/traceability only — model
-/// resolution keys off `provider_type` to match `model_runtime`.
+/// HandBox-side inputs needed to construct a coding-agent session; field names
+/// mirror the HandBox agent-session storage row.
 #[derive(Debug, Clone)]
 pub struct HandBoxAgentSessionConfig {
-    /// HandBox DB session id (UUID). Threaded into the [`PermissionExtension`]
-    /// so the approval registry / always-allow set / emitted `sessionId` are all
-    /// keyed off the STABLE HandBox session id — the same id
-    /// `coding_agent_runtime::abort_run` is called with — rather than the
-    /// coding-agent's internal in-memory session id (which `no_session: true`
-    /// re-mints every turn). See the `PermissionExtension::session_id` doc for
-    /// why this matters (abort must be able to unblock a parked approval await).
+    /// HandBox DB session id (UUID). [`PermissionExtension`] keys approval state
+    /// off it — the same id `coding_agent_runtime::abort_run` uses, not the
+    /// coding-agent's in-memory id — so a parked approval await can be unblocked.
     pub session_id: String,
     /// HandBox provider row id (diagnostics only).
     pub provider_id: String,
@@ -66,50 +40,35 @@ pub struct HandBoxAgentSessionConfig {
     pub api_key: String,
     /// Working directory the agent's tools operate against (the `cwd`).
     pub working_dir: PathBuf,
-    /// Pure-dialog mode: the session selected NO working directory (its `cwd`
-    /// fell back to `app_data_dir`). A chat-class AgentDefinition
-    /// (`working_dir_mode: "none"`) degrades to this — and so does any session
-    /// with no workspace. When set, [`build_agent_session`] disables
-    /// workspace-scoped discovery (`no_context_files` / `no_skills`): there is no
-    /// project root to read `AGENTS.md` or `.hand/skills` from, so scanning the
-    /// app-sandbox fallback for them would be both pointless and surprising.
-    /// Derived from `session.working_dir.is_none()` in [`config_from_rows`].
+    /// Pure-dialog mode: no working directory selected (`cwd` fell back to
+    /// `app_data_dir`), so workspace-scoped discovery (`no_context_files` /
+    /// `no_skills`) is off — no project root for `AGENTS.md` or `.hand/skills`.
     pub pure_dialog: bool,
     /// Tauri per-app data directory. Becomes the session's `base_dir` so
     /// persistent state stays inside the app sandbox, not `~/.hand`.
     pub app_data_dir: PathBuf,
-    /// Session creation time (millis since epoch), straight off the SQLite
-    /// `agent_sessions.created_at` column. Stamped as the JSONL header
-    /// `timestamp` by [`agent_jsonl_store::ensure_session_file`] so the header's
-    /// reported creation time equals the session's real creation time (the
-    /// sidebar coalesces `lastMessageAt ?? createdAt` and `createdAt` comes from
-    /// this same SQLite value — VAL-CASESS-007). NOT the first-run wall clock.
+    /// Session creation time (millis), off the SQLite `agent_sessions.created_at`
+    /// column. Stamped as the JSONL header `timestamp` so the header reports the
+    /// session's real creation time, not the first-run wall clock.
     pub created_at: i64,
     /// Per-session custom system prompt. `None` falls back to the coding-agent
-    /// default prompt. Mirrors the legacy `agent_runtime` consumption of
-    /// `session.system_prompt`; written straight into
-    /// `AgentSessionConfig.custom_system_prompt` (also `Option<String>`).
+    /// default prompt.
     pub system_prompt: Option<String>,
     /// Per-session sampling temperature. `None` = model/provider default.
     /// Threads into `ChatOptions.temperature` → `stream_options.base.temperature`.
     pub temperature: Option<f32>,
     /// Per-session max output tokens. Stored as `i32` on the session row; this
-    /// carries the `u32` form `ChatOptions.max_tokens` expects (the legacy path
-    /// does the same `i32 → u32` conversion at `agent_runtime.rs:583`).
+    /// carries the `u32` form `ChatOptions.max_tokens` expects.
     pub max_tokens: Option<u32>,
     /// Per-session thinking level (e.g. `"low"`/`"medium"`/`"high"`), passed
-    /// through verbatim as `ChatOptions.reasoning_effort`; `build_stream_options`
-    /// parses it via `parse_thinking_level` (unknown values map to `None`, so a
-    /// non-reasoning model never breaks). Same contract as `agent_runtime.rs:586`.
+    /// through verbatim as `ChatOptions.reasoning_effort`; unknown values parse
+    /// to `None`, so a non-reasoning model never breaks.
     pub thinking_level: Option<String>,
-    /// HandBox's per-session enabled-tool list: coding-agent registered names
-    /// (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`) plus the extension-tool
-    /// ids ([`extensions::EXTENSION_TOOL_IDS`]). Only the named built-ins are registered
-    /// against the session (see [`select_enabled_tools`]); an empty list means
-    /// "no tool enabled" (not "all enabled"). Extension ids are resolved
-    /// elsewhere: `web_search`/`render_card`/`render_app` into `extra_tools` by
-    /// agent_run, `skill` into the skill-pipeline gate in
-    /// [`build_agent_session`].
+    /// Per-session enabled-tool list: coding-agent registered names plus the
+    /// extension-tool ids ([`extensions::EXTENSION_TOOL_IDS`]). Only the named
+    /// built-ins are registered against the session (see [`select_enabled_tools`]);
+    /// an empty list means "no tool enabled" (not "all enabled"). Extension ids
+    /// resolve elsewhere — into `extra_tools` by agent_run, or the skill gate.
     pub enabled_tools: Vec<String>,
     /// Tool names requiring approval this session: the `mcp__server__tool` names
     /// of manual-execution MCP servers. Populated by agent_run; empty default =
@@ -119,30 +78,13 @@ pub struct HandBoxAgentSessionConfig {
 
 /// Construct a coding-agent [`AgentSession`] from a HandBox configuration.
 ///
-/// Steps:
-/// 1. Resolve the model through `model_runtime` (no silent substitution — the
-///    returned `model.id` equals the requested `model_id`).
-/// 2. Build stream options carrying the plaintext api key plus the
-///    per-session sampling params (temperature / max_tokens / thinking_level);
-///    no auth.json, no env vars.
-/// 3. Register only the built-in tools named in `enabled_tools`, filtered by
-///    coding-agent registered name (see [`select_enabled_tools`]).
-/// 4. Hand all of that to `AgentSession::new_with_skill_dirs`, pinning
-///    skill-discovery roots to `None` so construction does not read the host's
-///    real `~/.hand/skills/` (keeps construction deterministic and hermetic;
-///    project-scope skills under `<cwd>/.hand/skills` are still discovered).
+/// Skill-discovery roots are pinned to `None` so construction never reads the
+/// host's real `~/.hand/skills/` (project-scope `<cwd>/.hand/skills` still
+/// applies), and `base_dir` is `app_data_dir` so persistence stays in the sandbox.
 ///
-/// `base_dir` is set to `app_data_dir` so session persistence lands inside the
-/// Tauri app sandbox.
-///
-/// `approval_emitter` wires the M2 [`PermissionExtension`]'s approval-request
-/// channel (the IPC layer passes a `window.emit("agent_approval_request", ..)`
-/// wrapper). `None` makes the permission extension fail CLOSED — every dangerous
-/// tool (write/edit/bash) is denied without prompting — which is the safe
-/// default for headless construction and unit tests (no approval UI to consult).
-///
-/// Returns `AppError` when model resolution fails (unknown provider/model) or
-/// the coding-agent session cannot be initialized.
+/// `approval_emitter` wires the [`PermissionExtension`]'s approval-request
+/// channel; `None` makes it fail CLOSED — every dangerous tool (write/edit/bash)
+/// is denied without prompting, the safe default for headless construction.
 pub fn build_agent_session(
     config: &HandBoxAgentSessionConfig,
     approval_emitter: Option<ApprovalEmitter>,
@@ -151,15 +93,9 @@ pub fn build_agent_session(
     let model =
         model_runtime::resolve_model(&config.provider_type, &config.model_id, &config.base_url)?;
 
-    // Per-session sampling params are baked into the stream options HERE, at
-    // construction time — not later by the drive feature. `drive_agent_run`
-    // only calls `send_message_with_images` and applies no per-turn options, so
-    // the session must already carry them. temperature / max_tokens flow onto
-    // `stream_options.base`; thinking_level rides as `reasoning_effort` and is
-    // parsed by `build_stream_options` into `stream_options.reasoning`. This
-    // matches the legacy `agent_runtime` consumption of
-    // `session.{temperature, max_tokens, thinking_level}` (agent_runtime.rs:582-586).
-    // The plaintext api key likewise flows in via stream options only.
+    // Sampling params must be baked in at construction: `drive_agent_run` applies
+    // no per-turn options. thinking_level rides as `reasoning_effort`, which
+    // `build_stream_options` parses into `stream_options.reasoning`.
     let chat_options = ChatOptions {
         temperature: config.temperature,
         max_tokens: config.max_tokens,
@@ -170,16 +106,14 @@ pub fn build_agent_session(
         model_runtime::build_stream_options(&chat_options, &config.api_key);
 
     let mut tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
-    // P1: append per-session MCP tools (namespaced `mcp__server__tool`) so the loop
-    // calls them alongside the built-ins. Empty for sessions with no MCP bindings.
+    // Per-session MCP tools (namespaced `mcp__server__tool`) run alongside the
+    // built-ins. Empty for sessions with no MCP bindings.
     tools.extend(extra_tools);
 
-    // M3: guarantee the JSONL file the `resume_session` branch will open exists,
-    // named after the HandBox session UUID (header id == UUID). Idempotent — a
-    // second turn finds the first turn's file and resumes it, so the transcript
-    // accretes across turns instead of being re-minted. This is the single place
-    // the persistence file is created, keeping "file exists before resume" an
-    // invariant of construction rather than a precondition callers must remember.
+    // Guarantee the JSONL file the `resume_session` branch opens exists, named
+    // after the HandBox session UUID. Idempotent — a second turn resumes the first
+    // turn's file, so the transcript accretes instead of being re-minted. Doing it
+    // here keeps "file exists before resume" an invariant of construction.
     crate::services::agent_jsonl_store::ensure_session_file(
         &config.app_data_dir,
         &config.working_dir,
@@ -191,25 +125,17 @@ pub fn build_agent_session(
         cwd: config.working_dir.clone(),
         model,
         stream_options,
-        // Per-session system prompt enters the model context here (legacy
-        // consumes `session.system_prompt` at agent_runtime.rs:556). `None`
-        // leaves the coding-agent default prompt in place.
+        // `None` leaves the coding-agent default prompt in place.
         custom_system_prompt: config.system_prompt.clone(),
         custom_guidelines: None,
-        // M3 JSONL persistence: resume the JSONL file named after the HandBox
-        // session UUID so the transcript persists to `<base>/sessions/
-        // <flattened-cwd>/<session_id>.jsonl` and every turn APPENDS to that one
-        // file (same HandBox session → same JSONL → multi-turn append, no id
-        // map). The coding-agent `create_in` path would mint its own `s_…` id
-        // and ignore ours, so the caller pre-seeds the header via
-        // `agent_jsonl_store::ensure_session_file` and we resume it here. With
-        // `resume_session` set, `no_session` is irrelevant (the resume branch is
-        // taken first); we leave it `false` to document the persisting intent.
+        // Resume the JSONL named after the HandBox session UUID (pre-seeded above)
+        // so every turn appends to `<base>/sessions/<flattened-cwd>/<id>.jsonl`;
+        // the `create_in` path would mint its own `s_…` id and ignore ours. With
+        // `resume_session` set, `no_session` is irrelevant.
         resume_session: Some(config.session_id.clone()),
         no_session: false,
-        // Chat-class / workspace-less sessions run as pure dialog: with no project
-        // root there is nothing to read AGENTS.md or .hand/skills from, so disable
-        // both discoveries. Workspace sessions (a real cwd) keep them on.
+        // Workspace-less sessions run as pure dialog: no project root to read
+        // AGENTS.md or .hand/skills from, so both discoveries are disabled.
         no_context_files: config.pure_dialog,
         session_dir: None,
         // The skill pipeline (discovery + `<available_skills>` index + the
@@ -222,9 +148,8 @@ pub fn build_agent_session(
                 .iter()
                 .any(|t| t == extensions::TOOL_SKILL),
         extra_skill_dirs: Vec::new(),
-        // Sandbox: persist under the Tauri app data dir, never ~/.hand. The
-        // resume path resolves `<base_dir>/sessions/<flattened-cwd>/<id>.jsonl`,
-        // matching the writer side (`agent_jsonl_store::session_path`).
+        // Persist under the Tauri app data dir, never ~/.hand; the resume path
+        // must match the writer side (`agent_jsonl_store::session_path`).
         base_dir: Some(config.app_data_dir.clone()),
     };
 
@@ -241,29 +166,18 @@ pub fn build_agent_session(
             AppError::internal_error(&format!("failed to construct agent session: {e}"))
         })?;
 
-    // Re-impose the working_dir sandbox boundary on the read-only file tools.
-    // The vendored coding agent does not confine `read`/`ls` to the cwd (it
-    // honors absolute paths and expands `~`); HandBox enforces containment from
-    // the outside via this before_tool_call extension, which Cancels any
-    // out-of-sandbox path so cwd-external content is never read out. Later
-    // milestones layer write/edit boundaries and approval gating onto the same
-    // extension chain (the host calls every registered extension in order).
+    // Re-impose the working_dir boundary on the read-only file tools: the vendored
+    // coding agent honors absolute paths and expands `~`, so HandBox Cancels any
+    // out-of-sandbox path from the outside via this before_tool_call extension.
     session.register_extension(Arc::new(SandboxExtension::new(config.working_dir.clone())));
 
-    // M2 approval gate: the dangerous, side-effecting tools (write/edit/bash)
-    // are gated behind an asynchronous user approval. This second
-    // before_tool_call extension emits an `agent_approval_request` and AWAITS the
-    // user's decision (allow → Continue, deny → Cancel); with no emitter it fails
-    // CLOSED (denies), preserving the M1 safety posture. It is registered AFTER
-    // the sandbox on purpose: the host calls each registered extension in order
-    // and the FIRST Cancel wins, so a sandbox escape (out-of-cwd
-    // read/ls/grep/find) is silently Cancelled by the sandbox FIRST and never
-    // reaches — never prompts — this approval gate.
-    // Key the permission extension off the HandBox session UUID (config.session_id),
-    // NOT the coding-agent's internal in-memory session id: that stable id is what
-    // `coding_agent_runtime::abort_run` / `deny_pending_for_session` use, so an
-    // aborted turn parked on an approval await can actually be unblocked, and the
-    // session's always-allow consent persists across turns.
+    // Approval gate for write/edit/bash: emits `agent_approval_request` and awaits
+    // the decision (allow → Continue, deny → Cancel); no emitter means fail CLOSED.
+    // Registered after the sandbox because extensions run in order and the first
+    // Cancel wins, so out-of-cwd paths never reach — never prompt — this gate.
+    // Keyed by the HandBox session UUID, not the coding-agent's in-memory id, so
+    // `abort_run` / `deny_pending_for_session` can unblock a parked approval await
+    // and always-allow consent persists across turns.
     session.register_extension(Arc::new(
         PermissionExtension::new(config.session_id.clone(), approval_emitter)
             .with_approval_tools(config.mcp_approval_tools.clone()),
@@ -272,61 +186,28 @@ pub fn build_agent_session(
     Ok(session)
 }
 
-/// Translate a single persisted `enabled_tools` entry to its coding-agent
-/// registered name, accounting for sessions MIGRATED from the pre-M4 SQLite
-/// store (M3 migration kept their `enabled_tools` verbatim, by the OLD native
-/// tool names).
+/// Map a persisted `enabled_tools` entry to its coding-agent registered name.
 ///
-/// The old read-only native tools map onto coding-agent built-ins:
-/// - `read_file`      → `read`
-/// - `list_directory` → `ls`
-///
-/// Old tools with no coding-agent counterpart (`web_fetch`, retired in M4) have
-/// NO mapping: they are returned unchanged so the downstream built-in filter
-/// drops them — never matching, never failing, never opening the full set. The
-/// old auto-injected `skill` tool name passes through unchanged too, and lands
-/// on the SAME id the skill-pipeline gate reads today, so a migrated session
-/// that had the old skill tool keeps skill access. A NEW name (already a
-/// coding-agent name like `read`/`ls`) or any unknown string passes through
-/// unchanged: new sessions are unaffected and genuinely unknown names still
-/// fall through to the existing `warn`.
-///
-/// Pure, non-destructive, applied at construction time only — the SQLite
-/// `enabled_tools` column is never rewritten, so the mapping is fully
-/// reversible and the migration path stays untouched.
+/// Legacy sessions store the old native names (`read_file` → `read`,
+/// `list_directory` → `ls`). Names with no counterpart (`web_fetch`) and unknown
+/// names pass through unchanged for the downstream filters to drop; `skill`
+/// passes through onto the same id the skill-pipeline gate reads, so a migrated
+/// session keeps skill access. Applied at construction time only; the SQLite
+/// column is never rewritten.
 fn remap_legacy_tool_name(name: &str) -> &str {
     match name {
-        // Old native read-only tools → coding-agent built-ins (VAL-CACLEAN-005).
         "read_file" => "read",
         "list_directory" => "ls",
-        // No mapping (`web_fetch` retired), an extension id (`skill` gates the
-        // skill pipeline), or already a coding-agent / unknown name — leave it
-        // for the downstream filters unchanged.
         other => other,
     }
 }
 
-/// Filter the full coding-agent built-in tool set down to the per-session
-/// `enabled` names, gating tool availability by registered name.
-///
-/// `create_default_tools(cwd)` builds all 7 built-ins
-/// (`read`/`write`/`edit`/`bash`/`grep`/`find`/`ls`); this keeps only the ones
-/// whose registered `name` appears in `enabled`. Each `enabled` entry is first
-/// passed through [`remap_legacy_tool_name`], so a session migrated from the
-/// pre-M4 SQLite store (whose `enabled_tools` carry OLD native names like
-/// `read_file` / `list_directory`) enables the expected coding-agent built-ins
-/// (`read` / `ls`) instead of silently losing all its tools. Extension-tool ids
-/// ([`extensions::EXTENSION_TOOL_IDS`]) are skipped silently — they are legitimate
-/// `enabled_tools` entries resolved outside this filter. Old names with no
-/// counterpart (`web_fetch`) and genuinely unknown names contribute no tool —
-/// they are ignored with a `warn` log rather than failing construction.
-///
-/// Empty-list semantics follow HandBox's legacy `agent_tools::build_tools`
-/// convention: an empty `enabled` registers NO tools ("not listed = not
-/// enabled"), never the full set.
-///
-/// Output order follows `create_default_tools` (the canonical built-in order),
-/// independent of the order names appear in `enabled`.
+/// Filter the coding-agent built-ins down to the per-session `enabled` names
+/// (each mapped through [`remap_legacy_tool_name`] first). Extension-tool ids
+/// ([`extensions::EXTENSION_TOOL_IDS`]) are skipped — they are resolved outside
+/// this filter. An empty `enabled` registers NO tools ("not listed = not
+/// enabled"), never the full set; unknown names only warn. Output follows the
+/// canonical `create_default_tools` order.
 pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
     let mut wanted: Vec<&str> = enabled
         .iter()
@@ -338,8 +219,7 @@ pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
         .into_iter()
         .filter(|tool| {
             if let Some(pos) = wanted.iter().position(|name| *name == tool.name) {
-                // Mark this requested name as matched so anything left in
-                // `wanted` afterwards is provably unknown.
+                // Mark as matched so whatever remains in `wanted` is unknown.
                 wanted.swap_remove(pos);
                 true
             } else {
@@ -358,20 +238,12 @@ pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
     selected
 }
 
-/// Assemble a [`HandBoxAgentSessionConfig`] from the persisted HandBox session
-/// and provider rows plus the app's data directory.
+/// Assemble a [`HandBoxAgentSessionConfig`] from the persisted session and
+/// provider rows. Pure row mapping — no network, no construction.
 ///
-/// This bridges HandBox's storage layer to [`build_agent_session`]: it reads the
-/// provider tag / base-url / plaintext key off the provider row and the model /
-/// working-dir / enabled-tools off the session row. It does NOT touch the
-/// network or construct anything — it only maps rows to the construction config,
-/// so the drive layer can build a session from a `session_id` it just loaded.
-///
-/// Sandbox discipline for `working_dir`: when the session has no working
-/// directory selected, the agent's cwd falls back to `app_data_dir`. The cwd
-/// must be an existing directory (the coding agent reads context files / skills
-/// and roots its tools there); `app_data_dir` always exists and stays inside the
-/// app sandbox, so the fallback never escapes it.
+/// When the session has no working directory the cwd falls back to
+/// `app_data_dir`: the coding agent needs an existing directory to root its
+/// tools in, and that keeps the fallback inside the app sandbox.
 ///
 /// Returns `VALIDATION_ERROR` when the session has not selected a model.
 pub fn config_from_rows(
@@ -384,10 +256,7 @@ pub fn config_from_rows(
         .clone()
         .ok_or_else(|| AppError::validation_error("agent session has no model_id selected"))?;
 
-    // No working dir selected → root the agent inside the app sandbox so the
-    // cwd is always an existing directory the agent can operate against, and run
-    // as pure dialog (no workspace-scoped context/skill discovery). Capture the
-    // "no workspace" bit BEFORE the fallback overwrites it.
+    // Capture the "no workspace" bit before the cwd fallback overwrites it.
     let pure_dialog = session.working_dir.is_none();
     let working_dir = session
         .working_dir
@@ -396,9 +265,8 @@ pub fn config_from_rows(
         .unwrap_or_else(|| app_data_dir.clone());
 
     Ok(HandBoxAgentSessionConfig {
-        // The session row's primary key IS the HandBox session UUID — the same
-        // id the IPC layer passes to abort_run / deny_pending_for_session. Thread
-        // it through so the permission extension keys its approval state off it.
+        // The row's primary key IS the session UUID the IPC layer passes to
+        // abort_run, so the permission extension keys approval state off it.
         session_id: session.id.clone(),
         provider_id: provider.id.clone(),
         provider_type: provider.provider_type.clone(),
@@ -408,13 +276,9 @@ pub fn config_from_rows(
         working_dir,
         pure_dialog,
         app_data_dir,
-        // The session's real creation time, lifted from the SQLite row so the
-        // JSONL header timestamp equals createdAt (VAL-CASESS-007).
+        // Lifted off the row so the JSONL header timestamp equals createdAt.
         created_at: session.created_at,
-        // Per-session config consumed identically to the legacy path
-        // (agent_runtime.rs:556,582-586): system_prompt verbatim, max_tokens
-        // i32 → u32 via try_from (out-of-range silently drops to None),
-        // thinking_level passed through for build_stream_options to parse.
+        // max_tokens converts i32 → u32; out-of-range silently drops to None.
         system_prompt: session.system_prompt.clone(),
         temperature: session.temperature,
         max_tokens: session.max_tokens.and_then(|t| u32::try_from(t).ok()),
@@ -430,9 +294,8 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// A fixed, recognizable `created_at` (millis) the construction tests stamp
-    /// so they can assert the seeded JSONL header timestamp equals it without
-    /// racing the wall clock. Obviously NOT a "now" value.
+    /// A fixed, recognizable `created_at` (millis) so tests can assert the seeded
+    /// JSONL header timestamp without racing the wall clock.
     const TEST_CREATED_AT: i64 = 1_700_000_000_000;
 
     fn sample_config(working_dir: PathBuf, app_data_dir: PathBuf) -> HandBoxAgentSessionConfig {
@@ -444,8 +307,8 @@ mod tests {
             base_url: String::new(),
             api_key: "sk-test-key".to_string(),
             working_dir,
-            // The helper always supplies a real working dir → workspace session.
-            // The pure-dialog degradation is exercised by dedicated tests below.
+            // Always a real working dir → workspace session; pure dialog has its
+            // own dedicated tests below.
             pure_dialog: false,
             app_data_dir,
             created_at: TEST_CREATED_AT,
@@ -467,18 +330,14 @@ mod tests {
         let session =
             build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
-        // cwd is the working_dir we passed.
         assert_eq!(session.cwd(), cwd.path());
-        // Model id is not silently substituted — what we asked for is what the
-        // session carries.
+        // Model id is not silently substituted.
         assert_eq!(session.model().id, config.model_id);
     }
 
-    /// M3 (VAL-CASESS-001 / VAL-CASESS-003 — construction seam): a built session
-    /// now PERSISTS to a JSONL named after the HandBox session id, under
-    /// `<app_data_dir>/sessions/<flattened-cwd>/<id>.jsonl`, and its on-disk
-    /// session id equals the HandBox session id (resume path, not in-memory). A
-    /// second build for the SAME id RESUMES that same file rather than minting a
+    /// A built session persists to `<app_data_dir>/sessions/<flattened-cwd>/
+    /// <id>.jsonl` with its on-disk session id equal to the HandBox session id,
+    /// and a second build for the same id resumes that file instead of minting a
     /// new one — the multi-turn append contract at the production seam.
     #[test]
     fn build_agent_session_persists_jsonl_keyed_by_handbox_id_and_resumes() {
@@ -519,13 +378,9 @@ mod tests {
         );
     }
 
-    /// VAL-CASESS-007 (end-to-end seed leg): a session built through the real
-    /// `build_agent_session` seam stamps its JSONL header `timestamp` with the
-    /// config's `created_at` (the session's SQLite creation time), NOT the
-    /// build/first-run moment. Read back through the upstream parser, the
-    /// header's `timestamp` (== the createdAt the sidebar surfaces) equals the
-    /// `created_at` we wired in — so an empty session's activity key coalesces
-    /// to its true creation time.
+    /// A session built through the real seam stamps its JSONL header `timestamp`
+    /// with the config's `created_at` (the SQLite creation time), not the build
+    /// moment — so an empty session's activity key is its true creation time.
     #[test]
     fn build_agent_session_seeds_jsonl_header_timestamp_from_created_at() {
         use hand_coding_agent::core::session_manager::build_session_info;
@@ -562,8 +417,6 @@ mod tests {
         names
     }
 
-    /// VAL-CATOOLS-006 — enabling all 7 registered names registers exactly the
-    /// 7 built-in tools, making each visible to the model.
     #[test]
     fn enabling_all_seven_names_registers_full_builtin_set() {
         let cwd = TempDir::new().unwrap();
@@ -586,8 +439,8 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-007 — a tool toggled OFF (absent from enabled_tools) is not
-    /// registered, so the model cannot call it. Here only read+grep are on.
+    /// A tool absent from enabled_tools is not registered, so the model cannot
+    /// call it.
     #[test]
     fn only_enabled_names_are_registered() {
         let cwd = TempDir::new().unwrap();
@@ -602,15 +455,14 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-008 — an enabled name that matches a registered tool is
-    /// present with no `unknown tool` drop; an unknown name is ignored without
-    /// failing construction or polluting the set.
+    /// An unknown name is ignored without failing construction or polluting the
+    /// registered set; a valid name alongside it still resolves.
     #[test]
     fn unknown_enabled_names_are_ignored() {
         let cwd = TempDir::new().unwrap();
         let data = TempDir::new().unwrap();
         let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
-        // `read` is valid; `read_file` (stale legacy id) and `nope` are not.
+        // `read` is valid and `nope` is not; `read_file` remaps onto `read`.
         config.enabled_tools = vec!["read".into(), "read_file".into(), "nope".into()];
 
         assert_eq!(
@@ -620,8 +472,8 @@ mod tests {
         );
     }
 
-    /// Empty enabled_tools registers NO tools (legacy "not listed = not
-    /// enabled" semantics), never the full set.
+    /// Empty enabled_tools registers NO tools ("not listed = not enabled"),
+    /// never the full set.
     #[test]
     fn empty_enabled_tools_registers_nothing() {
         let cwd = TempDir::new().unwrap();
@@ -637,9 +489,6 @@ mod tests {
         );
     }
 
-    /// `select_enabled_tools` is order-independent: it emits tools in the
-    /// canonical built-in order regardless of the order names appear in
-    /// `enabled`, and dedups gracefully.
     #[test]
     fn select_enabled_tools_uses_canonical_order() {
         let cwd = TempDir::new().unwrap();
@@ -652,8 +501,7 @@ mod tests {
         assert_eq!(names, vec!["read", "bash", "ls"]);
     }
 
-    /// Collect the registered names of the tools `select_enabled_tools` returns,
-    /// for order-independent membership assertions in the remap tests.
+    /// Registered names of the tools `select_enabled_tools` returns.
     fn tool_names(cwd: &Path, enabled: &[&str]) -> Vec<String> {
         let owned: Vec<String> = enabled.iter().map(|s| s.to_string()).collect();
         select_enabled_tools(cwd, &owned)
@@ -662,11 +510,9 @@ mod tests {
             .collect()
     }
 
-    // VAL-CACLEAN-005: a session migrated from the pre-M4 SQLite store carries
-    // its OLD native read-only tool names (`read_file` / `list_directory`).
-    // After the runtime remap they must enable the expected coding-agent
-    // built-ins (`read` / `ls`) — NOT silently lose all tools (the 005 root
-    // cause: old names matched no built-in and the session ran tool-less).
+    // A legacy session carries the old native read-only names; after the remap
+    // they must enable the `read` / `ls` built-ins rather than leaving the
+    // session tool-less.
     #[test]
     fn remap_old_read_only_names_enable_coding_agent_builtins() {
         let cwd = TempDir::new().unwrap();
@@ -678,11 +524,9 @@ mod tests {
         );
     }
 
-    // VAL-CACLEAN-005: old names with NO coding-agent counterpart are dropped
-    // SAFELY — `web_fetch` (retired in M4) contributes no tool, never errors,
-    // and never opens the full set; `skill` is an extension id (skipped here,
-    // it gates the skill pipeline instead). The mappable sibling still enables
-    // its built-in.
+    // Old names with no coding-agent counterpart (`web_fetch`) are dropped
+    // safely: no tool, no error, never the full set. `skill` is an extension id,
+    // skipped here. A mappable sibling still enables its built-in.
     #[test]
     fn remap_drops_unmapped_old_names_without_error() {
         let cwd = TempDir::new().unwrap();
@@ -711,9 +555,6 @@ mod tests {
         );
     }
 
-    // VAL-CACLEAN-005: NEW names (already coding-agent registered names) are
-    // unaffected by the remap — new sessions (M1 onward) keep enabling exactly
-    // their built-ins, in canonical order.
     #[test]
     fn remap_leaves_new_names_unchanged() {
         let cwd = TempDir::new().unwrap();
@@ -725,10 +566,8 @@ mod tests {
         );
     }
 
-    // VAL-CACLEAN-005: a genuinely unknown name (neither an old native name nor
-    // a coding-agent built-in) is still ignored — it contributes no tool, and a
-    // mappable sibling still resolves. The existing `warn` for unknown names is
-    // preserved (a warn is not an error; the call still succeeds).
+    // A genuinely unknown name only warns — it contributes no tool, never fails
+    // the call, and a mappable sibling still resolves.
     #[test]
     fn remap_ignores_genuinely_unknown_names() {
         let cwd = TempDir::new().unwrap();
@@ -740,9 +579,6 @@ mod tests {
         );
     }
 
-    // VAL-CACLEAN-005: the empty-list semantics are unchanged by the remap — an
-    // empty `enabled` still registers NO tools ("not listed = not enabled"),
-    // never the full set.
     #[test]
     fn remap_preserves_empty_list_semantics() {
         let cwd = TempDir::new().unwrap();
@@ -753,8 +589,7 @@ mod tests {
         );
     }
 
-    // Unit-level guard on the pure mapping itself, independent of the built-in
-    // filter: old read-only names map, unmapped/new/unknown names pass through.
+    // Guards the pure mapping itself, independent of the built-in filter.
     #[test]
     fn remap_legacy_tool_name_maps_only_known_old_names() {
         assert_eq!(remap_legacy_tool_name("read_file"), "read");
@@ -762,7 +597,6 @@ mod tests {
         // No mapping: returned unchanged for the filter to drop.
         assert_eq!(remap_legacy_tool_name("web_fetch"), "web_fetch");
         assert_eq!(remap_legacy_tool_name("skill"), "skill");
-        // New / unknown names pass through unchanged.
         assert_eq!(remap_legacy_tool_name("read"), "read");
         assert_eq!(remap_legacy_tool_name("ls"), "ls");
         assert_eq!(remap_legacy_tool_name("totally_unknown"), "totally_unknown");
@@ -777,19 +611,16 @@ mod tests {
         let session =
             build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
 
-        // The plaintext key rides inside stream options' base.api_key — the
-        // only place this construction path puts it.
+        // Stream options' base.api_key is the only place this path puts the key.
         assert_eq!(
             session.stream_options().base.api_key.as_deref(),
             Some("sk-test-key"),
         );
     }
 
-    /// Regression guard for the code-review finding: the coding-agent path
-    /// must consume the per-session sampling params exactly like legacy
-    /// `agent_runtime` (temperature / max_tokens / thinking_level), not silently
-    /// fall back to `ChatOptions::default()`. We assert they land on the
-    /// constructed session's `stream_options` as non-default values.
+    /// The per-session sampling params (temperature / max_tokens /
+    /// thinking_level) must land on the constructed session's `stream_options`
+    /// as non-default values, not fall back to `ChatOptions::default()`.
     #[test]
     fn session_sampling_params_thread_into_stream_options() {
         let cwd = TempDir::new().unwrap();
@@ -803,8 +634,7 @@ mod tests {
             build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
         let opts = session.stream_options();
 
-        // temperature / max_tokens ride on stream_options.base; the default is
-        // None, so a concrete value proves the per-session config threaded in.
+        // The default is None, so a concrete value proves the config threaded in.
         assert_eq!(
             opts.base.temperature,
             Some(0.3),
@@ -823,9 +653,8 @@ mod tests {
         );
     }
 
-    /// The default (no per-session sampling params) must NOT inject sampling
-    /// values — proving the threading above is genuinely driven by the config,
-    /// and that a session without overrides leaves provider defaults in place.
+    /// Without per-session sampling params nothing is injected, so provider
+    /// defaults stay in place.
     #[test]
     fn absent_sampling_params_leave_stream_options_default() {
         let cwd = TempDir::new().unwrap();
@@ -842,12 +671,9 @@ mod tests {
         assert_eq!(opts.reasoning, None);
     }
 
-    /// The per-session custom system prompt must be written into the
-    /// `AgentSessionConfig.custom_system_prompt` slot that the coding agent
-    /// feeds into the model context (legacy consumes `session.system_prompt` at
-    /// agent_runtime.rs:556). `AgentSession` exposes no getter for the prompt,
-    /// so we assert the end-to-end path config_from_rows → build_agent_session
-    /// preserves a non-`None` prompt and that construction succeeds with it.
+    /// The per-session custom system prompt must reach
+    /// `AgentSessionConfig.custom_system_prompt`. `AgentSession` exposes no
+    /// getter for it, so assert the slot is non-`None` and construction succeeds.
     #[test]
     fn session_system_prompt_is_carried_into_construction() {
         let cwd = TempDir::new().unwrap();
@@ -855,15 +681,12 @@ mod tests {
         let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
         config.system_prompt = Some("You are a HandBox coding agent.".to_string());
 
-        // The config slot wired into AgentSessionConfig.custom_system_prompt is
-        // non-None (the bug was hardcoding it to None).
         assert_eq!(
             config.system_prompt.as_deref(),
             Some("You are a HandBox coding agent."),
         );
 
-        // And construction with a custom prompt succeeds (the prompt feeds
-        // build_system_prompt inside AgentSession::new_with_skill_dirs).
+        // Construction with a custom prompt succeeds (it feeds build_system_prompt).
         build_agent_session(&config, None, Vec::new())
             .expect("construction with a custom system prompt succeeds");
     }
@@ -875,8 +698,8 @@ mod tests {
         let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
         config.model_id = "no-such-model-9999".to_string();
 
-        // `AgentSession` does not implement `Debug`, so `expect_err` (which
-        // requires `T: Debug`) is unavailable — match on the Result instead.
+        // `AgentSession` is not `Debug`, so `expect_err` (which needs `T: Debug`)
+        // is unavailable — match on the Result instead.
         match build_agent_session(&config, None, Vec::new()) {
             Ok(_) => panic!("unknown model under a fixed-catalog provider must error"),
             Err(err) => assert!(
@@ -889,8 +712,7 @@ mod tests {
     #[test]
     fn base_url_override_is_applied_for_custom_provider() {
         // A custom (openai-compatible) provider synthesizes a template; the
-        // caller-supplied base_url must override it, proving the override path
-        // threads through construction.
+        // caller-supplied base_url must override it.
         let cwd = TempDir::new().unwrap();
         let data = TempDir::new().unwrap();
         let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
@@ -925,8 +747,8 @@ mod tests {
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
-            // Distinctive non-zero creation time so the config-mapping test can
-            // prove created_at is lifted off the row (not defaulted).
+            // Distinctive non-zero value so the mapping test can prove created_at
+            // is lifted off the row rather than defaulted.
             created_at: 1_700_000_000_000,
             updated_at: 0,
         }
@@ -954,9 +776,8 @@ mod tests {
         let config = config_from_rows(&session, &provider, data.path().to_path_buf())
             .expect("rows assemble into a config");
 
-        // The HandBox session UUID is the session row's primary key — it must
-        // thread through so the permission extension keys approval state off the
-        // same id `abort_run` uses (the production-hang fix).
+        // The session UUID must thread through so the permission extension keys
+        // approval state off the same id `abort_run` uses.
         assert_eq!(config.session_id, "sess-1");
         assert_eq!(config.provider_id, "prov-1");
         assert_eq!(config.provider_type, "openai");
@@ -968,22 +789,19 @@ mod tests {
         assert!(!config.pure_dialog);
         assert_eq!(config.app_data_dir, data.path());
         assert_eq!(config.enabled_tools, vec!["read_file".to_string()]);
-        // created_at is lifted straight off the session row so the JSONL header
-        // timestamp later equals the session's real creation time (VAL-CASESS-007).
+        // created_at is lifted straight off the row so the JSONL header timestamp
+        // later equals the session's real creation time.
         assert_eq!(config.created_at, 1_700_000_000_000);
 
-        // Per-session config is read off the session row, equivalent to the
-        // legacy path (agent_runtime.rs:556,582-586). max_tokens converts
-        // i32 → u32 (1024 fits); thinking_level passes through verbatim.
+        // max_tokens converts i32 → u32 (1024 fits); thinking_level is verbatim.
         assert_eq!(config.system_prompt, Some("You are helpful.".to_string()));
         assert_eq!(config.temperature, Some(0.5));
         assert_eq!(config.max_tokens, Some(1024));
         assert_eq!(config.thinking_level, Some("high".to_string()));
     }
 
-    /// A negative `max_tokens` on the row cannot become a `u32`; `try_from`
-    /// drops it to `None` rather than panicking — exactly the legacy behavior
-    /// (`session.max_tokens.and_then(|t| u32::try_from(t).ok())`).
+    /// A negative `max_tokens` cannot become a `u32`; `try_from` drops it to
+    /// `None` rather than panicking.
     #[test]
     fn config_from_rows_drops_out_of_range_max_tokens() {
         let data = TempDir::new().unwrap();
@@ -1006,9 +824,8 @@ mod tests {
         let config = config_from_rows(&session, &provider, data.path().to_path_buf())
             .expect("rows assemble into a config");
 
-        // No working_dir selected → cwd falls back to the app data dir (an
-        // existing directory inside the sandbox), and the session runs as pure
-        // dialog: build_agent_session then disables context-file / skill discovery.
+        // No working_dir → cwd falls back to the app data dir and the session runs
+        // as pure dialog, so context-file / skill discovery is disabled.
         assert_eq!(config.working_dir, data.path());
         assert!(
             config.pure_dialog,
@@ -1027,34 +844,19 @@ mod tests {
         assert_eq!(err.code, "VALIDATION_ERROR");
     }
 
-    // -----------------------------------------------------------------
-    // Read-only tool execution (read / ls / grep / find)
-    //
-    // These tools are coding-agent built-ins; HandBox does NOT reimplement
-    // their logic. The tests below lock in that, once `create_default_tools`
-    // registers them against a HandBox working directory, the AgentTool's
-    // `execute` closure actually runs and returns the expected ToolResult
-    // content (and surfaces a recoverable error — not a panic — on a missing
-    // required parameter).
-    //
-    // Invoke pattern (reused by later sandbox / dangerous-deny features):
-    // build the tool set with `create_default_tools(cwd)`, find the tool by
-    // name, then drive its `execute` closure directly with a hand-built
-    // `ToolExecuteCtx`. The closure is async and returns
-    // `Result<ToolResult, ToolError>`; built-in tools report failures as a
-    // text `ToolResult` (via `ToolResult::error`) rather than `Err`, so the
-    // error rides back as the first text block instead of aborting the turn.
-    // -----------------------------------------------------------------
+    // Read-only tool execution (read / ls / grep / find). These are coding-agent
+    // built-ins HandBox does not reimplement; the tests pin that the registered
+    // `execute` closure runs and returns the expected content. Built-in tools
+    // report failures as a text `ToolResult`, not `Err`, so an error rides back
+    // as the first text block instead of aborting the turn.
 
     use base64::Engine;
     use hand_agent::{CancellationToken, ToolExecuteCtx, ToolResult};
     use serde_json::json;
     use std::sync::Arc;
 
-    /// Pull a built-in tool out of the default set by its registered name.
-    /// Panics with a clear message if the tool is not present, so a wiring
-    /// regression (tool dropped from `create_default_tools`) surfaces as a
-    /// test failure rather than a silent skip.
+    /// Pull a built-in tool out of the default set by its registered name;
+    /// panics if absent so a wiring regression surfaces instead of a silent skip.
     fn builtin_tool(cwd: &std::path::Path, name: &str) -> hand_agent::AgentTool {
         create_default_tools(cwd)
             .into_iter()
@@ -1084,8 +886,6 @@ mod tests {
         }
     }
 
-    /// VAL-CATOOLS-002 — `read` returns the verbatim content of a text file
-    /// inside the working directory and feeds it back.
     #[tokio::test]
     async fn read_tool_returns_text_file_content() {
         let cwd = TempDir::new().unwrap();
@@ -1102,14 +902,12 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-009 — reading an image file renders a thumbnail marker
-    /// (`Read image file [mime]`) plus an image content block, instead of
-    /// dumping raw bytes as text.
+    /// Reading an image renders a thumbnail marker (`Read image file [mime]`)
+    /// plus an image content block, instead of dumping raw bytes as text.
     #[tokio::test]
     async fn read_tool_renders_image_marker_and_image_block() {
         let cwd = TempDir::new().unwrap();
-        // 1×1 transparent PNG, the same fixture coding-agent uses to anchor
-        // image detection by file-magic.
+        // 1×1 transparent PNG — image detection keys off the file magic.
         let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==";
         let png_bytes = base64::engine::general_purpose::STANDARD
             .decode(png_b64)
@@ -1134,9 +932,8 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-010 — a large file is truncated and the footer carries a
-    /// continuation hint containing `offset=` so the model knows how to read
-    /// the rest.
+    /// A large file is truncated and the footer carries an `offset=`
+    /// continuation hint so the model knows how to read the rest.
     #[tokio::test]
     async fn read_tool_truncates_large_file_with_offset_hint() {
         let cwd = TempDir::new().unwrap();
@@ -1163,8 +960,7 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-003 — `ls` lists entries with directories first and file
-    /// sizes alongside file entries.
+    /// `ls` lists directories first and carries a size on file entries.
     #[tokio::test]
     async fn ls_tool_lists_entries_dirs_first_with_sizes() {
         let cwd = TempDir::new().unwrap();
@@ -1190,7 +986,7 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-004 — `grep` prefixes each hit with `path:linenum:`.
+    /// `grep` prefixes each hit with `path:linenum:`.
     #[tokio::test]
     async fn grep_tool_hit_shows_path_and_line_prefix() {
         let cwd = TempDir::new().unwrap();
@@ -1208,16 +1004,15 @@ mod tests {
             text.contains("NEEDLE"),
             "match content must surface: {text}"
         );
-        // The hit line carries a `…haystack.txt:2:` prefix (file path, then
-        // `:linenum:`). The needle sits on line 2 of the fixture.
+        // The needle sits on line 2 of the fixture.
         assert!(
             text.contains("haystack.txt:2:"),
             "grep hit must carry a `path:linenum:` prefix, got: {text}"
         );
     }
 
-    /// VAL-CATOOLS-012 — `grep` with no matches is a completed (not failed)
-    /// result whose text is exactly `No matches found.`.
+    /// `grep` with no matches is a completed (not failed) result whose text is
+    /// exactly `No matches found.`.
     #[tokio::test]
     async fn grep_tool_no_match_is_completed_no_matches_found() {
         let cwd = TempDir::new().unwrap();
@@ -1233,8 +1028,7 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-005 — `find` lists files matching a glob pattern (and only
-    /// the matching ones).
+    /// `find` lists the files matching a glob pattern, and only those.
     #[tokio::test]
     async fn find_tool_lists_glob_matches() {
         let cwd = TempDir::new().unwrap();
@@ -1261,28 +1055,14 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Approval EFFECTS (M2) — what an allow/deny decision actually causes
-    // at the tool boundary, proven by driving the tool body itself.
-    //
-    // The approval DECISION lives in `agent_permission` (the before_tool_call
-    // gate: allow → Continue, deny → Cancel, already unit-tested there). These
-    // tests lock the EFFECT side of that decision against the real coding-agent
-    // tool bodies HandBox registers:
-    //   * allow ⇒ the host proceeds past the gate and INVOKES the tool body;
-    //     for `write` that body must actually land bytes on disk (VAL-CAPERM-004).
-    //   * deny ⇒ the host Cancels and NEVER invokes the tool body; for `bash`
-    //     a skipped invocation produces NO subprocess and NO file side effect
-    //     (VAL-CAPERM-007).
-    // We drive the bodies through the same `builtin_tool` + `invoke_tool`
-    // pattern the read-only tool tests use, so "what runs on allow" and "what
-    // is skipped on deny" are pinned against the genuine executors.
-    // -----------------------------------------------------------------
+    // Approval EFFECTS at the tool boundary. The approval DECISION lives in
+    // `agent_permission` (allow → Continue, deny → Cancel, unit-tested there);
+    // these tests pin the effect against the genuine executors: an allowed
+    // `write` lands bytes on disk, a denied `bash` never reaches its body, so no
+    // subprocess and no side effect.
 
-    /// VAL-CAPERM-004 — once a `write` is APPROVED, the gate Continues and the
-    /// host invokes the write tool body, which actually writes the target file
-    /// to disk with the requested content. Invoking the body here models the
-    /// post-allow execution path: the bytes land and are verifiable on disk.
+    /// An approved `write` reaches the tool body, which lands the requested
+    /// content on disk.
     #[tokio::test]
     async fn approved_write_lands_bytes_on_disk() {
         let cwd = TempDir::new().unwrap();
@@ -1292,7 +1072,7 @@ mod tests {
         let tool = builtin_tool(cwd.path(), "write");
         let result = invoke_tool(&tool, json!({ "path": "approved.txt", "content": body })).await;
 
-        // The tool reports the write (Created, since the file was new) ...
+        // The file was new, so the tool reports `Created` ...
         assert!(
             result_text(&result).contains("Created"),
             "an approved write of a new file must report `Created`, got: {}",
@@ -1310,22 +1090,18 @@ mod tests {
         );
     }
 
-    /// VAL-CAPERM-007 — a DENIED `bash` is Cancelled at the gate and its tool
-    /// body is NEVER invoked: no subprocess runs and no file side effect appears.
-    /// We prove the side-effect link is real with a positive control (invoking
-    /// the body DOES create the sentinel), then assert that the deny path —
-    /// modeled by NOT invoking the body, which is exactly what `Cancel`
-    /// guarantees — leaves the sentinel absent.
+    /// A denied `bash` is Cancelled at the gate and its body is never invoked:
+    /// no subprocess, no side effect. A positive control first proves the
+    /// side-effect link is real, so the absent sentinel afterwards is meaningful.
     #[tokio::test]
     async fn denied_bash_runs_no_command_and_leaves_no_side_effect() {
         let cwd = TempDir::new().unwrap();
         let sentinel = cwd.path().join("sentinel.txt");
-        // A command whose ONLY observable effect is creating the sentinel file,
-        // so its presence/absence is a faithful proxy for "did bash run".
+        // The command's only observable effect is the sentinel file, so its
+        // presence is a faithful proxy for "did bash run".
         let command = format!("touch {}", sentinel.display());
 
-        // Positive control: the body genuinely has the side effect when run, so
-        // the assertion below is meaningful (the sentinel can appear).
+        // Positive control: the body genuinely has the side effect when run.
         let bash = builtin_tool(cwd.path(), "bash");
         let _ = invoke_tool(&bash, json!({ "command": command.clone() })).await;
         assert!(
@@ -1334,10 +1110,8 @@ mod tests {
         );
         std::fs::remove_file(&sentinel).unwrap();
 
-        // Deny path: the gate Cancels, so the host NEVER invokes the tool body.
-        // We model that by skipping the invocation entirely — the side-effecting
-        // executor is never reached — and assert no subprocess ran (no sentinel).
-        // (The Cancel decision itself is unit-tested in agent_permission.)
+        // Deny path: the gate Cancels, so the host never invokes the tool body —
+        // modeled by skipping the invocation entirely.
         assert!(
             !sentinel.exists(),
             "a denied bash must not run: with the tool body never invoked, the \
@@ -1345,10 +1119,9 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-011 — a missing required parameter fails the call but feeds
-    /// the error back as a `ToolResult` (`Missing required parameter: <name>`)
-    /// instead of returning `Err` and aborting the turn. Verified on both
-    /// `read` (missing `path`) and `grep` (missing `pattern`).
+    /// A missing required parameter feeds the error back as a `ToolResult`
+    /// (`Missing required parameter: <name>`) instead of returning `Err` and
+    /// aborting the turn.
     #[tokio::test]
     async fn missing_required_param_feeds_back_error_result() {
         let cwd = TempDir::new().unwrap();
@@ -1370,37 +1143,17 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Dangerous-tool OBSERVABLE behavior (M2, post-allow) — VAL-CATOOLS-018..024,
-    // 026.
+    // Observable behavior of the dangerous tools once the approval gate
+    // Continues: response text, on-disk effect, atomicity, truncation,
+    // sanitization and exit-code/timeout markers, pinned against the registered
+    // built-in bodies so an upstream bump that changes a contract fails here.
+    // bash tests use only harmless commands against a tempdir cwd.
     //
-    // Once the approval gate Continues a dangerous tool (write/edit/bash), the
-    // host invokes the genuine coding-agent tool body. These tests LOCK that
-    // observable behavior — the exact response text, on-disk effect, atomicity,
-    // truncation, sanitization, and exit-code/timeout markers — against the
-    // built-in tools `create_default_tools` registers, so a HandBox embedding
-    // (or an upstream bump) that quietly changed any of these contracts fails
-    // here. We never re-implement the tools; we pin what the registered body
-    // does. The invoke pattern is the same `builtin_tool` + `invoke_tool` used
-    // by the read-only and approval-effect tests above.
-    //
-    // bash tests use only harmless commands (echo / exit N / seq / printf /
-    // sleep+small timeout) against a tempdir cwd — never rm, never a system
-    // path, never the network.
-    //
-    // NOTE on "error vs completed" (VAL-CATOOLS-021): at THIS layer a tool body
-    // returns `hand_agent::types::ToolResult`, which carries NO `is_error`
-    // flag — `ToolResult::text` and `ToolResult::error` are shape-identical
-    // here, and the agent loop decides the error marker downstream. The bash
-    // body routes a non-zero EXIT into `ToolResult::text` (the success-shaped
-    // "completed" result) and only an executor FAILURE (spawn/wait error) into
-    // `ToolResult::error` ("Bash execution failed: .."). So we lock the
-    // completed state by asserting the result carries the `[Exit code: N]`
-    // marker AND is NOT the `Bash execution failed` error-shaped text.
+    // `ToolResult` carries no `is_error` flag at this layer — the bash body routes
+    // a non-zero EXIT into `ToolResult::text` and only an executor failure into
+    // `ToolResult::error` — so "completed" is asserted via `[Exit code: N]`.
 
-    /// VAL-CATOOLS-018 (single edit) — a single-edit `edit` returns a unified
-    /// diff (the `--- a/`, `+++ b/`, and `-old`/`+new` lines) and lands the
-    /// change on disk.
+    /// A single-edit `edit` returns a unified diff and lands the change on disk.
     #[tokio::test]
     async fn edit_single_edit_returns_unified_diff() {
         let cwd = TempDir::new().unwrap();
@@ -1419,7 +1172,7 @@ mod tests {
         .await;
         let text = result_text(&result);
 
-        // Unified-diff structure: file headers plus the -/+ hunk lines.
+        // File headers plus the -/+ hunk lines.
         assert!(
             text.contains("--- a/") && text.contains("+++ b/"),
             "single edit must return a unified diff with file headers, got: {text}"
@@ -1431,8 +1184,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello rust\n");
     }
 
-    /// VAL-CATOOLS-018 (multi edit) — a multi-edit `edits: [..]` batch returns
-    /// the unified diff PLUS a `Successfully replaced N block(s)` count summary.
+    /// A multi-edit `edits: [..]` batch returns the unified diff plus a
+    /// `Successfully replaced N block(s)` summary.
     #[tokio::test]
     async fn edit_multi_edit_returns_diff_and_block_count() {
         let cwd = TempDir::new().unwrap();
@@ -1470,9 +1223,8 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-019 — multi-edit is ATOMIC: when one entry's `oldText` is
-    /// absent, the whole batch fails and the file is byte-for-byte unchanged
-    /// (no partial application of the entries that WOULD have matched).
+    /// Multi-edit is ATOMIC: when one entry's `oldText` is absent the whole batch
+    /// fails and the file is byte-for-byte unchanged — no partial application.
     #[tokio::test]
     async fn edit_multi_edit_atomic_rolls_back_on_missing_entry() {
         let cwd = TempDir::new().unwrap();
@@ -1494,7 +1246,7 @@ mod tests {
         .await;
         let text = result_text(&result);
 
-        // The card fails: a per-entry miss error, NOT a success summary.
+        // A per-entry miss error, not a success summary.
         assert!(
             text.contains("Could not find the exact text"),
             "a missing entry must surface a per-edit miss error, got: {text}"
@@ -1503,8 +1255,7 @@ mod tests {
             !text.contains("Successfully replaced"),
             "a failed atomic batch must not report any replacement, got: {text}"
         );
-        // File byte-for-byte unchanged — the first (matching) entry must NOT
-        // have landed.
+        // The first (matching) entry must not have landed either.
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             original,
@@ -1512,9 +1263,9 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-020 — a single-edit `old_string` that matches MORE than once
-    /// without `replace_all` is ambiguous: the edit errors and the file is
-    /// unchanged (it never silently picks one occurrence).
+    /// A single-edit `old_string` matching more than once without `replace_all`
+    /// is ambiguous: the edit errors and the file is unchanged — it never
+    /// silently picks one occurrence.
     #[tokio::test]
     async fn edit_ambiguous_old_string_errors_without_changing_file() {
         let cwd = TempDir::new().unwrap();
@@ -1546,10 +1297,9 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-021 — `bash` with a non-zero exit code is a COMPLETED card,
-    /// not an errored one: the response carries the `[Exit code: N]` marker and
-    /// rides the success-shaped text result (NOT the `Bash execution failed`
-    /// executor-error path — see the module NOTE above).
+    /// `bash` with a non-zero exit code is a COMPLETED card, not an errored one:
+    /// it carries the `[Exit code: N]` marker on the success-shaped text result,
+    /// not the `Bash execution failed` executor-error path.
     #[tokio::test]
     async fn bash_nonzero_exit_marks_exit_code_and_completes() {
         let cwd = TempDir::new().unwrap();
@@ -1568,12 +1318,9 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-022 — `bash` output over the 64 KB cap is truncated in the
-    /// response (`[Output truncated]`) and the full pre-truncation payload is
-    /// persisted to a tempfile on disk (`hand-bash-output-<pid>-*.txt` in the
-    /// system tempdir) that holds BOTH the head and the tail (the complete
-    /// output). The truncated in-result text is strictly shorter than the
-    /// persisted full payload.
+    /// `bash` output over the 64 KB cap is truncated in the response
+    /// (`[Output truncated]`) while the full payload is persisted to
+    /// `hand-bash-output-<pid>-*.txt` in the system tempdir.
     #[tokio::test]
     async fn bash_large_output_truncates_and_persists_full_to_tempfile() {
         let cwd = TempDir::new().unwrap();
@@ -1591,13 +1338,10 @@ mod tests {
             &text[text.len().saturating_sub(120)..]
         );
 
-        // The executor persists the full (cleaned, untruncated) payload to a
-        // tempfile named `hand-bash-output-<pid>-<nanos>.txt` in the system
-        // tempdir before clipping the in-result string. Find the newest such
-        // file produced by THIS process and assert it holds the complete output
-        // — both the HEAD (which fell off the tail-first truncation window) and
-        // the TAIL. Locating by our own pid keeps the scan from colliding with
-        // any unrelated leftover file.
+        // Find the newest such file produced by THIS process — scoping by our own
+        // pid keeps the scan from colliding with unrelated leftovers — and assert
+        // it holds both the HEAD (which fell off the tail-first truncation window)
+        // and the TAIL.
         let prefix = format!("hand-bash-output-{}-", std::process::id());
         let persisted_path = std::fs::read_dir(std::env::temp_dir())
             .unwrap()
@@ -1626,14 +1370,13 @@ mod tests {
             "the persisted full output must be longer than the truncated in-result text"
         );
 
-        // The tempfile is never auto-deleted by the executor; clean up ours so
-        // the test leaves no residue in the shared system tempdir.
+        // The executor never auto-deletes the tempfile; clean up ours so the test
+        // leaves no residue in the shared system tempdir.
         let _ = std::fs::remove_file(&persisted_path);
     }
 
-    /// VAL-CATOOLS-023 — `bash` output containing ANSI escapes and C0 control
-    /// bytes is SANITIZED before it reaches the model: no escape residue
-    /// survives, only the visible characters remain.
+    /// `bash` output containing ANSI escapes and C0 control bytes is sanitized
+    /// before it reaches the model: only the visible characters remain.
     #[tokio::test]
     async fn bash_output_is_sanitized_of_ansi_and_control_chars() {
         let cwd = TempDir::new().unwrap();
@@ -1657,8 +1400,8 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-024 — a `bash` command that exceeds its timeout is reported
-    /// with the `[Timed out after Ns]` marker (and is not left hanging).
+    /// A `bash` command that exceeds its timeout is reported with the
+    /// `[Timed out after Ns]` marker and is not left hanging.
     #[tokio::test]
     async fn bash_timeout_reports_timed_out_marker() {
         let cwd = TempDir::new().unwrap();
@@ -1674,9 +1417,8 @@ mod tests {
         );
     }
 
-    /// VAL-CATOOLS-026 — `write` reports `Created <path> (N lines)` for a new
-    /// file and `Updated <path> (N lines)` when overwriting, and the file holds
-    /// exactly the requested content in both cases.
+    /// `write` reports `Created <path> (N lines)` for a new file and
+    /// `Updated <path> (N lines)` when overwriting, persisting the exact content.
     #[tokio::test]
     async fn write_reports_created_then_updated_and_persists_content() {
         let cwd = TempDir::new().unwrap();

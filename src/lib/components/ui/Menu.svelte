@@ -13,7 +13,6 @@
     }>;
     activeId?: string;
     onItemClick?: (item: any) => void;
-    // 自定义样式类
     containerClass?: string;
     itemClass?: string;
     activeItemClass?: string;
@@ -31,12 +30,10 @@
 </script>
 
 <div class="flex flex-col {containerClass}">
-  <!-- 固定标题 -->
   {#if title}
     <div class="text-sm text-base-content/70 pb-2 pl-4 flex-shrink-0">{title}</div>
   {/if}
   
-  <!-- 可滚动的菜单项 -->
   <div class="flex-1 overflow-y-auto space-y-1 px-2">
     {#each items as item}
       <MenuButton

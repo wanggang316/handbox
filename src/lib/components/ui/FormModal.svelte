@@ -4,27 +4,26 @@
   import { t } from "$lib/i18n";
   import type { Snippet } from "svelte";
 
-  // 创建/编辑类弹窗的统一壳：header（Modal 红灯 + 标题）、底部操作栏
-  // （左侧 hint/error，右侧 取消 + 主按钮）、宽度与间距，三个表单弹窗
-  // （Agent / Job / MCP）共用，保证观感一致。
+  // Shared shell for create/edit dialogs: header (Modal traffic light + title) and a
+  // footer action bar (hint/error left, cancel + primary right), so form modals stay
+  // visually consistent.
   interface Props {
     open?: boolean;
     title?: string;
     onClose?: () => void;
-    /** md = 560px 单栏；lg = 920px 主区 + 右侧配置栏（aside snippet） */
+    /** md = 560px single column; lg = 920px main area + right config pane (aside snippet). */
     size?: "md" | "lg";
     saving?: boolean;
     submitLabel?: string;
     cancelLabel?: string;
     submitDisabled?: boolean;
     onSubmit?: () => void;
-    /** 底部左侧常驻提示（如「保存后按计划自动运行」） */
+    /** Persistent hint at the footer's left side. */
     hint?: string;
-    /** 保存错误：优先于 hint 显示 */
+    /** Save error; shown instead of hint. */
     error?: string | null;
-    /** 主内容区 */
     children?: Snippet;
-    /** 右侧配置栏（仅 size="lg" 生效） */
+    /** Right config pane; rendered only when size="lg". */
     aside?: Snippet;
   }
 
@@ -48,15 +47,15 @@
 </script>
 
 <Modal bind:open {title} {onClose}>
-  <!-- lg 双栏取固定高：主区可用 flex-1 填满（如大 textarea），右栏独立滚动；
-       md 单栏随内容自适应。 -->
+  <!-- lg uses a fixed height so the main area can flex-fill (e.g. a large textarea)
+       and the aside scrolls independently; md sizes to content. -->
   <div
     class="{width} max-w-[92vw] {size === 'lg'
       ? 'h-[min(680px,86vh)]'
       : 'max-h-[86vh]'} flex flex-col"
   >
-    <!-- 主体：主内容区 + 可选右侧配置栏；pt 给 Modal 的红灯/标题行留足位
-         （标题行 py-4 + 行高 ≈56px，取 64px 避免首个控件顶进 header）。 -->
+    <!-- pt-16 clears Modal's traffic-light/title row (~56px) so the first control
+         doesn't slide under the header. -->
     <div class="flex flex-1 min-h-0 pt-16">
       <div class="flex-1 min-w-0 overflow-y-auto px-7 pb-6">
         {#if children}
@@ -72,7 +71,6 @@
       {/if}
     </div>
 
-    <!-- 底部操作栏：左 hint/error，右 取消 + 主按钮 -->
     <div
       class="flex items-center justify-between gap-4 border-t border-[var(--hairline)] px-5 py-3"
     >

@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>HandBox</title>
     <script>
-      // Pre-CSS 主题涂底：在任何样式/JS 就绪前按持久化主题设置底色与 data-theme，
-      // 消除「系统暗色 + 应用浅色」时启动黑屏/白屏闪（webview 默认底随系统、HTML 默认白）。
+      // Paint the persisted theme before any CSS loads: the webview background defaults to the
+      // system scheme and HTML to white, so a system-dark + app-light start would flash.
       (function () {
         try {
           var t = localStorage.getItem("theme") || "system";

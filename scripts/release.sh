@@ -1,18 +1,14 @@
 #!/bin/bash
 
-# handbox 发布脚本
-# 用法: ./scripts/release.sh <版本号> [发布说明]
-# 示例: ./scripts/release.sh 0.2.0 "添加新功能X"
+# Usage: ./scripts/release.sh <x.y.z> [release notes]
 
 set -e
 
-# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# 检查参数
 if [ $# -lt 1 ]; then
     echo -e "${RED}错误: 请提供版本号${NC}"
     echo "用法: ./scripts/release.sh <版本号> [发布说明]"
@@ -23,7 +19,6 @@ fi
 NEW_VERSION="$1"
 RELEASE_NOTES="${2:-"Release v${NEW_VERSION}"}"
 
-# 验证版本号格式 (semver)
 if [[ ! "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo -e "${RED}错误: 版本号格式不正确，应为 x.y.z${NC}"
     echo "示例: 0.2.0, 1.0.0"
@@ -33,13 +28,11 @@ fi
 echo -e "${GREEN}🚀 开始发布 handbox v${NEW_VERSION}${NC}"
 echo ""
 
-# 获取当前版本
 CURRENT_VERSION=$(grep -o '"version": "[^"]*"' package.json | head -1 | cut -d'"' -f4)
 echo -e "${YELLOW}当前版本: ${CURRENT_VERSION}${NC}"
 echo -e "${YELLOW}新版本: ${NEW_VERSION}${NC}"
 echo ""
 
-# 检查工作目录是否干净
 if [ -n "$(git status --porcelain)" ]; then
     echo -e "${RED}错误: 工作目录有未提交的更改${NC}"
     git status --short
@@ -48,7 +41,6 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-# 确认发布
 echo -e "${YELLOW}是否确认发布? (y/N)${NC}"
 read -r confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -59,17 +51,14 @@ fi
 echo ""
 echo -e "${GREEN}📦 步骤 1/6: 更新版本号...${NC}"
 
-# 更新 package.json
 sed -i.bak "s/\"version\": \"${CURRENT_VERSION}\"/\"version\": \"${NEW_VERSION}\"/" package.json
 rm -f package.json.bak
 echo "  ✓ package.json: ${CURRENT_VERSION} → ${NEW_VERSION}"
 
-# 更新 tauri.conf.json
 sed -i.bak "s/\"version\": \"${CURRENT_VERSION}\"/\"version\": \"${NEW_VERSION}\"/" src-tauri/tauri.conf.json
 rm -f src-tauri/tauri.conf.json.bak
 echo "  ✓ src-tauri/tauri.conf.json: ${CURRENT_VERSION} → ${NEW_VERSION}"
 
-# 更新 Cargo.toml
 sed -i.bak "s/^version = \"${CURRENT_VERSION}\"/version = \"${NEW_VERSION}\"/" src-tauri/Cargo.toml
 rm -f src-tauri/Cargo.toml.bak
 echo "  ✓ src-tauri/Cargo.toml: ${CURRENT_VERSION} → ${NEW_VERSION}"
@@ -77,15 +66,13 @@ echo "  ✓ src-tauri/Cargo.toml: ${CURRENT_VERSION} → ${NEW_VERSION}"
 echo ""
 echo -e "${GREEN}📝 步骤 2/6: 更新 CHANGELOG.md...${NC}"
 
-# 获取当前日期
 TODAY=$(date +%Y-%m-%d)
 
-# 函数：提取 Unreleased 部分中指定分类下的条目
+# Entries under a given "### <section>" heading, scoped to the [Unreleased] block.
 extract_section() {
     local section_name="$1"
     local changelog_file="$2"
 
-    # 先获取 Unreleased 部分的行号范围
     local unreleased_start=$(grep -n '^## \[Unreleased\]' "$changelog_file" | cut -d: -f1)
     local next_version_start=$(grep -n '^## \[' "$changelog_file" | grep -v "Unreleased" | head -1 | cut -d: -f1)
 
@@ -93,7 +80,6 @@ extract_section() {
         return
     fi
 
-    # 提取 Unreleased 部分的文本
     local unreleased_text
     if [ -n "$next_version_start" ]; then
         unreleased_text=$(sed -n "$((unreleased_start + 1)),$((next_version_start - 1))p" "$changelog_file")
@@ -101,7 +87,6 @@ extract_section() {
         unreleased_text=$(tail -n "+$((unreleased_start + 1))" "$changelog_file")
     fi
 
-    # 使用 awk 从 Unreleased 部分提取指定分类下的条目
     echo "$unreleased_text" | awk -v section="$section_name" '
         /^### / { current_section = $0; next }
         /^## / { current_section = ""; next }
@@ -110,7 +95,6 @@ extract_section() {
     '
 }
 
-# 函数：检查 Unreleased 部分是否有内容
 has_unreleased_content() {
     local changelog_file="$1"
     local unreleased_start=$(grep -n '^## \[Unreleased\]' "$changelog_file" | cut -d: -f1)
@@ -120,7 +104,6 @@ has_unreleased_content() {
         return 1
     fi
 
-    # 提取 Unreleased 部分的内容
     if [ -n "$next_version_start" ]; then
         local content=$(sed -n "$((unreleased_start + 1)),$((next_version_start - 1))p" "$changelog_file" | grep -c '^- ')
     else
@@ -130,7 +113,6 @@ has_unreleased_content() {
     [ "$content" -gt 0 ]
 }
 
-# 函数：构建新版本条目
 build_changelog_entry() {
     local version="$1"
     local date="$2"
@@ -145,7 +127,6 @@ build_changelog_entry() {
     local entry="## [${version}] - ${date}
 "
 
-    # Added 部分
     if [ -n "$added_items" ]; then
         entry+="
 ### Added
@@ -156,7 +137,6 @@ $added_items"
 - $notes"
     fi
 
-    # Changed 部分
     if [ -n "$changed_items" ]; then
         entry+="
 
@@ -164,7 +144,6 @@ $added_items"
 $changed_items"
     fi
 
-    # Fixed 部分
     if [ -n "$fixed_items" ]; then
         entry+="
 
@@ -172,7 +151,6 @@ $changed_items"
 $fixed_items"
     fi
 
-    # Removed 部分
     if [ -n "$removed_items" ]; then
         entry+="
 
@@ -180,25 +158,22 @@ $fixed_items"
 $removed_items"
     fi
 
-    # 输出条目，末尾添加两个换行符，确保版本之间有空行分隔
+    # Trailing blank line keeps consecutive version sections separated.
     printf "%s\n\n" "$entry"
 }
 
 if [ -f CHANGELOG.md ]; then
-    # 检查是否存在 Unreleased 部分
     unreleased_line=$(grep -n '^## \[Unreleased\]' CHANGELOG.md | cut -d: -f1)
 
     if [ -n "$unreleased_line" ] && has_unreleased_content CHANGELOG.md; then
         echo "  从 Unreleased 部分提取内容..."
 
-        # 构建新版本条目（使用 Unreleased 内容）
         NEW_ENTRY=$(build_changelog_entry "$NEW_VERSION" "$TODAY" "$RELEASE_NOTES" CHANGELOG.md)
 
-        # 找到下一个版本条目的行号
         next_version_line=$(grep -n '^## \[' CHANGELOG.md | grep -v "Unreleased" | head -1 | cut -d: -f1)
 
         if [ -n "$next_version_line" ]; then
-            # 创建新的 Unreleased 部分（清空内容）
+            # Reset [Unreleased] back to empty category headings.
             new_unreleased="## [Unreleased]
 
 ### Added
@@ -209,7 +184,7 @@ if [ -f CHANGELOG.md ]; then
 
 ### Removed
 "
-            # 组合新文件：头部 + 新 Unreleased + 新版本条目 + 剩余内容
+            # Reassemble: header + empty Unreleased + new version entry + older entries.
             head -n $((unreleased_line - 1)) CHANGELOG.md > CHANGELOG.md.tmp
             echo "$new_unreleased" >> CHANGELOG.md.tmp
             echo "" >> CHANGELOG.md.tmp
@@ -220,7 +195,7 @@ if [ -f CHANGELOG.md ]; then
         fi
         echo "  ✓ CHANGELOG.md 已更新（从 Unreleased 迁移内容）"
     else
-        # 没有 Unreleased 内容，使用传统方式
+        # No Unreleased content — fall back to a single entry from the release notes.
         NEW_ENTRY="## [${NEW_VERSION}] - ${TODAY}
 
 ### Added
@@ -228,11 +203,10 @@ if [ -f CHANGELOG.md ]; then
 
 "
 
-        # 插入到 Unreleased 部分之后（或第一个版本条目之前）
+        # Insert after [Unreleased], or before the first version entry.
         first_version=$(grep -n '^## \[' CHANGELOG.md | grep -v "Unreleased" | head -1 | cut -d: -f1)
 
         if [ -n "$unreleased_line" ]; then
-            # 在 Unreleased 后插入
             if [ -n "$first_version" ]; then
                 head -n $((first_version - 1)) CHANGELOG.md > CHANGELOG.md.tmp
                 echo "$NEW_ENTRY" >> CHANGELOG.md.tmp
@@ -241,7 +215,6 @@ if [ -f CHANGELOG.md ]; then
                 mv CHANGELOG.md.tmp CHANGELOG.md
             fi
         elif [ -n "$first_version" ]; then
-            # 在第一个版本条目前插入
             head -n $((first_version - 1)) CHANGELOG.md > CHANGELOG.md.tmp
             echo "$NEW_ENTRY" >> CHANGELOG.md.tmp
             echo "" >> CHANGELOG.md.tmp
@@ -253,7 +226,6 @@ if [ -f CHANGELOG.md ]; then
         echo "  ✓ CHANGELOG.md 已更新"
     fi
 else
-    # 创建新的 CHANGELOG.md
     cat > CHANGELOG.md << 'EOF'
 # Changelog
 
@@ -283,14 +255,12 @@ fi
 
 echo ""
 echo -e "${GREEN}🔨 步骤 3/6: 更新 Cargo.lock...${NC}"
-# 更新 Cargo.lock 以反映新版本
 cd src-tauri && cargo generate-lockfile && cd ..
 echo "  ✓ Cargo.lock 已更新"
 
 echo ""
 echo -e "${GREEN}📤 步骤 4/6: 提交版本更新...${NC}"
 
-# 添加所有修改的文件
 git add package.json
 git add src-tauri/tauri.conf.json
 git add src-tauri/Cargo.toml
@@ -306,12 +276,10 @@ echo "  ✓ 版本更新已提交"
 echo ""
 echo -e "${GREEN}🏷️ 步骤 5/6: 创建标签...${NC}"
 
-# 从 CHANGELOG.md 提取指定版本的内容（包含分类标题和变更条目）
 extract_version_changelog() {
     local version="$1"
     local changelog_file="$2"
 
-    # 找到版本条目的起始行和下一个版本条目的起始行
     local version_line=$(grep -n "^## \[$version\]" "$changelog_file" | cut -d: -f1)
     local next_version_line=$(grep -n "^## \[" "$changelog_file" | grep -v "$version" | grep -v "Unreleased" | sort -n | head -1 | cut -d: -f1)
 
@@ -319,7 +287,7 @@ extract_version_changelog() {
         return 1
     fi
 
-    # 提取版本完整内容（跳过标题行）
+    # Body only — skip the version heading itself.
     if [ -n "$next_version_line" ]; then
         sed -n "$((version_line + 1)),$((next_version_line - 1))p" "$changelog_file"
     else
@@ -327,10 +295,8 @@ extract_version_changelog() {
     fi
 }
 
-# 提取版本变更内容
 TAG_MESSAGE=$(extract_version_changelog "$NEW_VERSION" CHANGELOG.md)
 
-# 构建完整的 tag message
 TAG_MESSAGE="Release v${NEW_VERSION}
 
 ${TAG_MESSAGE}"

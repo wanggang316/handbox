@@ -78,7 +78,7 @@ pub async fn skill_list(
 const MAX_SKILL_NAME_BYTES: usize = 256;
 
 /// Validate a caller-supplied skill name at the IPC boundary and return the
-/// trimmed form that gets stored (security audit L-2).
+/// trimmed form that gets stored.
 ///
 /// Rejected with a structured `VALIDATION_ERROR`: empty or whitespace-only
 /// names, names longer than [`MAX_SKILL_NAME_BYTES`] bytes after trimming,
@@ -270,7 +270,7 @@ mod tests {
         items.iter().map(|s| s.to_string()).collect()
     }
 
-    // VAL-IPC-001: no workingDir → user + app-data skills, each with
+    // No workingDir → user + app-data skills, each with
     // name/description/scope/path/body present and empty diagnostics.
     #[test]
     fn val_ipc_001_lists_user_and_appdata_with_full_fields() {
@@ -297,7 +297,7 @@ mod tests {
         assert!(beta.diagnostics.is_empty());
     }
 
-    // VAL-IPC-002: a working dir brings the project scope into the result.
+    // A working dir brings the project scope into the result.
     #[test]
     fn val_ipc_002_working_dir_includes_project_scope() {
         let app = TempDir::new().unwrap();
@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(idx["gamma"].path, proj_skills.join("gamma"));
     }
 
-    // VAL-IPC-003: all three scopes empty → an empty list (success).
+    // All three scopes empty → an empty list (success).
     #[test]
     fn val_ipc_003_all_scopes_empty_returns_empty() {
         let app = TempDir::new().unwrap();
@@ -324,7 +324,7 @@ mod tests {
         assert!(infos.is_empty(), "expected empty result: {infos:?}");
     }
 
-    // VAL-IPC-004: a validation-failed skill appears with diagnostics, and the
+    // A validation-failed skill appears with diagnostics, and the
     // command (the fold) does not drop or fail on it. Valid siblings still
     // surface with empty diagnostics.
     #[test]
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(bad.path, app.path().join("no-desc"));
     }
 
-    // VAL-IPC-005: a same-named skill across scopes collapses to the shadow
+    // A same-named skill across scopes collapses to the shadow
     // winner only (highest scope), never duplicated.
     #[test]
     fn val_ipc_005_same_name_shows_only_shadow_winner() {
@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(infos[0].body.as_deref(), Some("proj body"));
     }
 
-    // VAL-IPC-006: SkillInfo.path is the skill DIRECTORY, not the SKILL.md file.
+    // SkillInfo.path is the skill DIRECTORY, not the SKILL.md file.
     #[test]
     fn val_ipc_006_path_points_at_skill_directory() {
         let app = TempDir::new().unwrap();
@@ -394,7 +394,7 @@ mod tests {
         );
     }
 
-    // VAL-IPC-007: scope serializes to the camelCase literals the wire expects.
+    // Scope serializes to the camelCase literals the wire expects.
     #[test]
     fn val_ipc_007_scope_serializes_to_literals() {
         let info = SkillInfo {
@@ -427,7 +427,7 @@ mod tests {
         assert!(json.get("diagnostics").is_some());
     }
 
-    // VAL-IPC-008: a non-existent / relative project working dir is non-fatal —
+    // A non-existent / relative project working dir is non-fatal —
     // the project scope is silently skipped and user/app-data skills remain.
     #[test]
     fn val_ipc_008_bad_working_dir_is_non_fatal() {
@@ -448,7 +448,7 @@ mod tests {
         assert_eq!(by_name(&infos2).len(), 1, "user skill survives: {infos2:?}");
     }
 
-    // VAL-IPC-009: command-level fault → structured AppError. Discovery is
+    // Command-level fault → structured AppError. Discovery is
     // lenient (per-skill errors become diagnostics, not command failures), so a
     // command-level `Err(AppError)` branch is unreachable from `to_skill_infos`.
     // This pins the only command-level fault surface: an `AppError` round-trips
@@ -527,7 +527,7 @@ mod tests {
         )
     }
 
-    // VAL-CONFIG-003 / VAL-CONFIG-004: `skill_set_disabled`'s pipeline —
+    // `skill_set_disabled`'s pipeline —
     // the service write followed by a `skill_list` read — flips exactly the
     // targeted skill's `disabled` flag, and flips it back on re-enable.
     #[test]
@@ -554,7 +554,7 @@ mod tests {
         assert!(!idx["beta"].disabled);
     }
 
-    // VAL-CONFIG-006: disabling two distinct skills shows both as disabled in
+    // Disabling two distinct skills shows both as disabled in
     // the skill_list view (read-modify-write keeps the earlier entry).
     #[test]
     fn val_config_006_disabling_two_skills_shows_both_disabled() {
@@ -574,7 +574,7 @@ mod tests {
         assert!(idx["beta"].disabled);
     }
 
-    // VAL-CONFIG-001: empty disabled list → every skill reports disabled=false.
+    // Empty disabled list → every skill reports disabled=false.
     #[test]
     fn val_config_001_default_all_enabled() {
         let app = TempDir::new().unwrap();
@@ -589,7 +589,7 @@ mod tests {
         }
     }
 
-    // VAL-CONFIG-002: `disabled` is a definite camelCase boolean wire key.
+    // `disabled` is a definite camelCase boolean wire key.
     #[test]
     fn val_config_002_disabled_is_camel_case_boolean_wire_key() {
         let app = TempDir::new().unwrap();
@@ -607,7 +607,7 @@ mod tests {
         }
     }
 
-    // VAL-CONFIG-008: an orphan name in the list (skill not discoverable)
+    // An orphan name in the list (skill not discoverable)
     // produces no phantom row and no error.
     #[test]
     fn val_config_008_orphan_name_produces_no_phantom_row() {
@@ -621,7 +621,7 @@ mod tests {
         assert!(!idx["alpha"].disabled);
     }
 
-    // VAL-CONFIG-009: a cross-scope shadowed name in the list → exactly one
+    // A cross-scope shadowed name in the list → exactly one
     // row (the winning scope) with disabled=true, no duplicates.
     #[test]
     fn val_config_009_shadowed_name_single_winner_disabled() {
@@ -644,7 +644,7 @@ mod tests {
         assert!(infos[0].disabled);
     }
 
-    // VAL-CONFIG-010: duplicate names in the list collapse onto the single
+    // Duplicate names in the list collapse onto the single
     // skill row, disabled=true, no crash.
     #[test]
     fn val_config_010_duplicate_list_entries_single_row() {
@@ -657,7 +657,7 @@ mod tests {
         assert!(infos[0].disabled);
     }
 
-    // VAL-CONFIG-012: the global list applies to project-scope (workingDir)
+    // The global list applies to project-scope (workingDir)
     // skills as well.
     #[test]
     fn val_config_012_disable_applies_to_project_scope() {
@@ -678,7 +678,7 @@ mod tests {
         assert!(infos[0].disabled);
     }
 
-    // VAL-CONFIG-014: matching is exact-string only — a case-mismatched entry
+    // Matching is exact-string only — a case-mismatched entry
     // never disables a skill (valid skill names are all-lowercase).
     #[test]
     fn val_config_014_case_mismatched_entry_does_not_disable() {
@@ -692,8 +692,8 @@ mod tests {
         assert!(!idx["myskill"].disabled, "exact match only: {infos:?}");
     }
 
-    // L-2 (security audit): the command layer rejects structurally invalid
-    // skill names with a structured VALIDATION_ERROR before any settings I/O.
+    // The command layer rejects structurally invalid skill names with a
+    // structured VALIDATION_ERROR before any settings I/O.
     #[test]
     fn validate_skill_name_rejects_empty_and_whitespace_only() {
         for bad in ["", " ", "  \t ", "\n", "\u{a0}"] {
@@ -705,7 +705,7 @@ mod tests {
         }
     }
 
-    // L-2: names longer than 256 bytes (measured after trim, on the value
+    // Names longer than 256 bytes (measured after trim, on the value
     // that would be stored) are rejected; exactly 256 bytes passes. The
     // multi-byte case checks the limit is bytes, not chars.
     #[test]
@@ -733,7 +733,7 @@ mod tests {
         assert_eq!(validate_skill_name(&padded).unwrap(), "a".repeat(256));
     }
 
-    // L-2: control characters (C0, DEL, C1) anywhere in the name are rejected.
+    // Control characters (C0, DEL, C1) anywhere in the name are rejected.
     #[test]
     fn validate_skill_name_rejects_control_characters() {
         for bad in ["a\nb", "a\tb", "a\u{0}b", "a\u{7f}b", "a\u{9b}b"] {
@@ -746,7 +746,7 @@ mod tests {
         }
     }
 
-    // L-2: valid names pass through trimmed, and the trimmed name is what the
+    // Valid names pass through trimmed, and the trimmed name is what the
     // settings write stores — mirroring `skill_set_disabled`'s body minus the
     // Tauri `State` unwrap. Discovery-produced names have no surrounding
     // whitespace, so exact-match semantics are unaffected.
@@ -766,7 +766,7 @@ mod tests {
         );
     }
 
-    // VAL-CONFIG-015: empty / whitespace-only entries are inert — nothing is
+    // Empty / whitespace-only entries are inert — nothing is
     // falsely disabled and the fold does not panic.
     #[test]
     fn val_config_015_empty_and_whitespace_entries_are_inert() {

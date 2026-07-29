@@ -1,5 +1,5 @@
 /**
- * 设置页文案。
+ * Settings page strings.
  */
 export const settingsZh = {
   "settings.general.appearance": "外观样式",
@@ -13,7 +13,7 @@ export const settingsZh = {
   "settings.general.languageDesc": "界面显示语言",
   "settings.general.autoScrollDesc": "有新消息时自动滚动到底部",
 
-  // 侧边栏
+  // Sidebar
   "settings.sidebar.backToApp": "返回应用",
   "settings.sidebar.search": "搜索设置…",
   "settings.sidebar.group.personal": "个人",
@@ -29,7 +29,7 @@ export const settingsZh = {
   "settings.sidebar.shortcuts": "快捷键",
   "settings.sidebar.about": "关于",
 
-  // 关于页
+  // About page
   "settings.about.softwareUpdate": "软件更新",
   "settings.about.autoCheck": "自动检查更新",
   "settings.about.autoCheckHint": "启动时自动检查",
@@ -41,7 +41,7 @@ export const settingsZh = {
   "settings.about.changelog": "更新日志",
   "settings.about.officialSite": "官方网站",
 
-  // 快捷工具页
+  // Quick Tools page
   "settings.quicktools.selectionToolbarGroup": "选中文本工具栏",
   "settings.quicktools.showToolbarOnSelection": "选中文本显示工具栏",
   "settings.quicktools.translationAgent": "划词翻译 Agent",
@@ -59,7 +59,7 @@ export const settingsZh = {
   "settings.quicktools.openSystemSettings": "打开系统设置",
   "settings.quicktools.refreshPermission": "刷新权限状态",
 
-  // Agent 工具页
+  // Agent Tools page
   "settings.agentTools.title": "Agent 工具",
   "settings.agentTools.description": "新建 Agent 会话默认启用的工具。已存在的会话不受影响。",
   "settings.agentTools.webSearch.title": "网络搜索",
@@ -73,7 +73,7 @@ export const settingsZh = {
   "settings.agentTools.renderAppDesc": "在侧边面板生成完整的 HTML 应用（预览 + 源码）",
   "settings.agentTools.skillDesc": "允许模型发现并按需加载 Skill",
 
-  // 技能页
+  // Skills page
   "settings.skills.title": "技能",
   "settings.skills.description": "将 SKILL.md 放入技能目录后会在此处展示，可启停有效的技能",
   "settings.skills.loading": "正在加载技能...",
@@ -86,7 +86,7 @@ export const settingsZh = {
   "settings.skills.empty": "暂无技能",
   "settings.skills.emptyHint": "在技能目录中放入 SKILL.md 文件，然后点击「刷新」即可在此处看到。",
 
-  // 账户页
+  // Account page
   "settings.account.editProfile": "编辑资料",
   "settings.account.loggingOut": "退出中...",
   "settings.account.logout": "退出登录",

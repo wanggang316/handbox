@@ -1,5 +1,3 @@
-// MCP service: manages Model Context Protocol server configurations
-
 use std::{collections::HashMap, sync::Arc};
 
 use crate::models::{
@@ -15,7 +13,6 @@ use handbox_mcp::{
 };
 use hand_agent::{AgentTool, ToolResult};
 
-/// Service orchestrating MCP server lifecycle and metadata
 #[derive(Clone)]
 pub struct McpService {
     repository: McpRepository,
@@ -28,12 +25,10 @@ impl McpService {
         }
     }
 
-    /// List all MCP servers
     pub async fn list_servers(&self) -> Result<Vec<McpServer>, AppError> {
         self.repository.list_servers().await
     }
 
-    /// Get a server by id
     pub async fn get_server(&self, id: &str) -> Result<McpServer, AppError> {
         self.repository
             .get_server(id)
@@ -46,7 +41,6 @@ impl McpService {
         self.repository.get_servers_by_ids(ids).await
     }
 
-    /// Create a new MCP server configuration
     pub async fn create_server(
         &self,
         mut request: CreateMcpServerRequest,
@@ -86,7 +80,7 @@ impl McpService {
         };
 
         if server.enabled {
-            // 如果启用，尝试连接。连接失败则返回错误，不保存
+            // An enabled server must connect successfully before its row is stored.
             self.update_server_status(&mut server)
                 .await
                 .map_err(AppError::from)?;
@@ -96,7 +90,6 @@ impl McpService {
         Ok(server)
     }
 
-    /// Update server attributes
     pub async fn update_server(
         &self,
         server_id: String,
@@ -119,7 +112,7 @@ impl McpService {
             existing.description = request.description.take();
         }
         if let Some(command) = request.command.take() {
-            // 只有 stdio 连接类型才需要验证 command 不为空
+            // Only stdio requires a non-empty command.
             if existing.connection_type == crate::storage::types::McpConnectionType::Stdio
                 && command.is_empty()
             {
@@ -149,7 +142,7 @@ impl McpService {
             existing.timeout_ms = Some(timeout_ms);
         }
 
-        // 更新完字段后，验证配置的完整性
+        // Re-validate the merged config against the (possibly new) connection type.
         match existing.connection_type {
             crate::storage::types::McpConnectionType::Stdio => {
                 if existing.command.trim().is_empty() {
@@ -170,7 +163,6 @@ impl McpService {
             }
         }
 
-        // 检查是否需要重新连接刷新元数据
         let connection_params_changed = request.command.is_some()
             || request.args.is_some()
             || request.working_dir.is_some()
@@ -194,7 +186,6 @@ impl McpService {
             }
         }
 
-        // 如果连接参数发生变化且服务器是启用状态，需要重新连接
         if connection_params_changed && existing.enabled {
             should_refresh = true;
         }
@@ -202,7 +193,7 @@ impl McpService {
         existing.updated_at = Self::current_timestamp();
 
         if should_refresh {
-            // 如果需要刷新且连接失败，返回错误，不保存更新
+            // A failed reconnect aborts the update instead of persisting it.
             self.update_server_status(&mut existing)
                 .await
                 .map_err(AppError::from)?;
@@ -212,7 +203,6 @@ impl McpService {
         Ok(existing)
     }
 
-    /// Toggle enabled state
     pub async fn toggle_server(
         &self,
         request: ToggleMcpServerRequest,
@@ -226,7 +216,7 @@ impl McpService {
         server.updated_at = Self::current_timestamp();
         if request.enabled {
             server.status = McpServerStatus::Ready;
-            // toggle 时即使连接失败也保存错误状态
+            // Persist the resulting state even when the connection fails.
             let _ = self.update_server_status(&mut server).await;
         } else {
             server.status = McpServerStatus::Inactive;
@@ -237,39 +227,33 @@ impl McpService {
         Ok(server)
     }
 
-    /// Refresh metadata (tools, status) for a server
     pub async fn refresh_server(
         &self,
         request: RefreshMcpServerRequest,
     ) -> Result<McpServer, AppError> {
         let mut server = self.get_server(&request.server_id).await?;
-        // refresh 时即使连接失败也保存错误状态
+        // Persist the resulting state even when the connection fails.
         let _ = self.update_server_status(&mut server).await;
         server.updated_at = Self::current_timestamp();
         self.repository.update_server(&server).await?;
         Ok(server)
     }
 
-    /// Delete a server definition
     pub async fn delete_server(&self, server_id: String) -> Result<(), AppError> {
         self.repository.delete_server(&server_id).await
     }
 
-    /// Update tool enabled status
     pub async fn update_tool_enabled(
         &self,
         request: UpdateToolEnabledRequest,
     ) -> Result<McpServer, AppError> {
         let mut server = self.get_server(&request.server_id).await?;
 
-        // Update enabled_tools list
         if request.enabled {
-            // Add tool if not already in list
             if !server.enabled_tools.contains(&request.tool_name) {
                 server.enabled_tools.push(request.tool_name.clone());
             }
         } else {
-            // Remove tool from list
             server
                 .enabled_tools
                 .retain(|name| name != &request.tool_name);
@@ -280,14 +264,11 @@ impl McpService {
         Ok(server)
     }
 
-    /// Update server status and metadata based on connection type
-    ///
-    /// Returns Ok if connection succeeds, Err if connection fails
+    /// Refreshes cached metadata and status; returns Err when the connection fails.
     async fn update_server_status(&self, server: &mut McpServer) -> Result<(), McpClientError> {
-        // All connection types now work the same way - try to connect and fetch metadata
         match self.fetch_server_metadata(server).await {
             Ok((tools, prompts, resources)) => {
-                // If enabled_tools is empty (new server), enable all tools by default
+                // A server with no explicit selection yet enables all of its tools.
                 if server.enabled_tools.is_empty() && !tools.is_empty() {
                     server.enabled_tools = tools.iter().map(|t| t.name.clone()).collect();
                 }
@@ -306,17 +287,14 @@ impl McpService {
                     server.name,
                     error
                 );
-                // 连接失败时清空工具、提示、资源数据
                 server.tools = Vec::new();
                 server.prompts = Vec::new();
                 server.resources = Vec::new();
                 server.enabled_tools = Vec::new();
                 server.status = McpServerStatus::Error;
 
-                // 创建详细的错误信息
                 use handbox_mcp::McpErrorDetail;
 
-                // 直接从 McpClientError 提取信息
                 server.last_error = Some(McpErrorDetail {
                     error_type: error.error_type(),
                     message: error.to_string(),
@@ -333,7 +311,6 @@ impl McpService {
             return Err(AppError::validation_error("MCP 服务器名称不能为空"));
         }
 
-        // 根据连接类型验证必填字段
         match request.connection_type {
             crate::storage::types::McpConnectionType::Stdio => {
                 if request.command.trim().is_empty() {
@@ -444,12 +421,10 @@ impl McpService {
     ) -> Result<(Vec<McpTool>, Vec<McpPrompt>, Vec<McpResource>), McpClientError> {
         let client = Self::connect_client(server).await?;
 
-        // Fetch all metadata concurrently
         let tools_result = client.list_tools().await;
         let prompts_result = client.list_prompts().await;
         let resources_result = client.list_resources().await;
 
-        // Gracefully shutdown the client
         if let Err(e) = client.shutdown().await {
             tracing::warn!(
                 "Failed to gracefully shutdown MCP client for {}: {}",
@@ -458,10 +433,9 @@ impl McpService {
             );
         }
 
-        // Convert results
         let tools = tools_result?;
 
-        // Handle prompts - ignore "Method not found" error (-32601)
+        // Servers may not implement list_prompts; -32601 (method not found) is tolerated.
         let prompts = match prompts_result {
             Ok(p) => Self::convert_prompts(p),
             Err(McpClientError::Service(rmcp::service::ServiceError::McpError(ref error)))
@@ -476,7 +450,7 @@ impl McpService {
             Err(e) => return Err(e),
         };
 
-        // Handle resources - ignore "Method not found" error (-32601)
+        // Same tolerance for servers without list_resources support.
         let resources = match resources_result {
             Ok(r) => Self::convert_resources(r),
             Err(McpClientError::Service(rmcp::service::ServiceError::McpError(ref error)))
@@ -518,9 +492,8 @@ impl McpService {
         resources
             .into_iter()
             .map(|r| {
-                // Convert annotations to HashMap if present
                 let annotations = if let Some(ref annot) = r.annotations {
-                    // Try to serialize and deserialize to convert to HashMap
+                    // Round-trip through JSON to reshape annotations into a HashMap.
                     serde_json::from_value(serde_json::to_value(annot).unwrap_or_default())
                         .unwrap_or_default()
                 } else {
@@ -552,7 +525,7 @@ impl McpService {
         McpClient::connect(config).await
     }
 
-    // McpClientError 来自外部 crate handbox-mcp，无法在此重构其体积。
+    // McpClientError comes from the external handbox-mcp crate; its size cannot be reduced here.
     #[allow(clippy::result_large_err)]
     fn validate_server_configuration(server: &McpServer) -> Result<(), McpClientError> {
         match server.connection_type {
@@ -692,9 +665,8 @@ impl McpService {
         tools
     }
 
-    /// 执行工具调用（通过工具名称和参数）
+    /// Runs `tool_name` on the first enabled server that exposes it.
     pub async fn execute_tool(&self, tool_name: &str, arguments: &str) -> Result<String, AppError> {
-        // 获取活跃的 MCP 服务器
         let servers = self
             .list_servers()
             .await?
@@ -702,7 +674,6 @@ impl McpService {
             .filter(|s| s.enabled)
             .collect::<Vec<_>>();
 
-        // 在所有服务器中查找工具
         for server in &servers {
             if let Some(tool) = server.tools.iter().find(|t| t.name == tool_name) {
                 let arguments = Self::parse_tool_arguments(arguments);
@@ -715,14 +686,12 @@ impl McpService {
                             tool_name,
                             error
                         );
-                        // McpClientError 会自动转换为 AppError
                         return Err(error.into());
                     }
                 }
             }
         }
 
-        // 如果没有找到工具
         tracing::warn!(
             "[McpService::execute_tool] Tool {} not found in any MCP server",
             tool_name
@@ -733,7 +702,6 @@ impl McpService {
         )))
     }
 
-    /// 调用特定服务器上的工具
     async fn invoke_tool(
         &self,
         server: &McpServer,
@@ -755,7 +723,7 @@ impl McpService {
         call_result
     }
 
-    /// 解析工具参数
+    /// Coerces raw argument text into a JSON object; non-objects are wrapped as `value`/`raw`.
     fn parse_tool_arguments(arguments: &str) -> Option<serde_json::Value> {
         if arguments.trim().is_empty() {
             return None;
@@ -779,7 +747,6 @@ impl McpService {
         }
     }
 
-    /// 格式化工具调用结果
     fn format_tool_result(result: &rmcp::model::CallToolResult) -> String {
         if let Some(structured) = &result.structured_content {
             return serde_json::to_string_pretty(structured)

@@ -1,12 +1,9 @@
-// GenUI 服务实现
-
 use crate::models::AppError;
 use crate::services::Database;
 use crate::storage::types::{GenUi, UUID};
 use crate::storage::GenUiRepository;
 use std::sync::Arc;
 
-/// GenUI 服务
 #[derive(Clone)]
 pub struct GenUiService {
     repository: GenUiRepository,
@@ -19,7 +16,6 @@ impl GenUiService {
         }
     }
 
-    /// 创建 GenUI
     pub async fn create_genui(&self, name: String, spec: String) -> Result<GenUi, AppError> {
         if name.trim().is_empty() {
             return Err(AppError::validation_error("GenUI name must not be empty"));
@@ -38,7 +34,6 @@ impl GenUiService {
         Ok(genui)
     }
 
-    /// 获取 GenUI 列表
     pub async fn list_genui(
         &self,
         limit: Option<i32>,
@@ -49,7 +44,6 @@ impl GenUiService {
             .await
     }
 
-    /// 获取 GenUI 详情
     pub async fn get_genui(&self, id: UUID) -> Result<GenUi, AppError> {
         match self.repository.get_genui_by_id(&id).await? {
             Some(genui) => Ok(genui),
@@ -57,7 +51,6 @@ impl GenUiService {
         }
     }
 
-    /// 更新 GenUI（名称 / spec 按需更新）
     pub async fn update_genui(
         &self,
         id: UUID,
@@ -81,7 +74,6 @@ impl GenUiService {
         Ok(genui)
     }
 
-    /// 删除 GenUI
     pub async fn delete_genui(&self, id: UUID) -> Result<(), AppError> {
         self.get_genui(id.clone()).await?;
         self.repository.delete_genui(&id).await

@@ -1,34 +1,20 @@
 /**
- * Curated GenUI starter templates.
- *
- * Each example is a valid JSON-Render {@link Spec} composed from the shared
- * presentational catalog (Card / Text / Badge / Stack / StatusLabel / Avatar /
- * Divider / KeyValue / Table / InfoTooltip). They render through the same
- * `resolveSpec → Renderer` pipeline as chat, so the editor's live preview and
- * diagnostics apply unchanged.
- *
- * Used by `GenUiEditor` as "load an example" starting points; kept as a plain
- * data module (no `.svelte`) so it can be reused elsewhere (gallery, agent
- * few-shot defaults) without pulling in component code.
+ * Curated GenUI starter templates, used by `GenUiEditor` as "load an example"
+ * starting point. Each is a catalog-valid {@link Spec} that renders through the
+ * same `resolveSpec → Renderer` pipeline as chat. Kept as a plain data module
+ * (no `.svelte`) so it can be reused without pulling in component code.
  */
 
 import type { Spec } from "@json-render/core";
 
 export interface GenUiExample {
-  /** Stable id used as the picker option value. */
   id: string;
-  /** Human-facing template name (also pre-fills the editor's name field). */
   name: string;
-  /** One-line description of what the template is for. */
   description: string;
-  /** The renderable spec. */
   spec: Spec;
 }
 
-/**
- * Common layout patterns, ordered roughly simplest → richest. Every required
- * prop is present and every `children` id resolves, so each passes resolveSpec.
- */
+/** Common layout patterns, ordered roughly simplest → richest. */
 export const genuiExamples: GenUiExample[] = [
   {
     id: "translation",

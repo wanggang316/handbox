@@ -1,10 +1,3 @@
-/**
- * 验证工具函数
- */
-
-/**
- * 验证 URL 格式
- */
 export function isValidUrl(url: string): boolean {
   try {
     new URL(url);
@@ -14,40 +7,26 @@ export function isValidUrl(url: string): boolean {
   }
 }
 
-/**
- * 验证 API Key 格式（基础检查）
- */
+/** Basic shape check only — not provider-specific key validation. */
 export function isValidApiKey(apiKey: string): boolean {
   return apiKey.length >= 8 && !apiKey.includes(' ');
 }
 
-/**
- * 验证邮箱格式
- */
 export function isValidEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 }
 
-/**
- * 验证文件类型
- */
 export function isValidImageFile(file: File): boolean {
   const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
   return allowedTypes.includes(file.type);
 }
 
-/**
- * 验证文件大小
- */
 export function isValidFileSize(file: File, maxSizeMB = 10): boolean {
   const maxSizeBytes = maxSizeMB * 1024 * 1024;
   return file.size <= maxSizeBytes;
 }
 
-/**
- * 验证模型参数
- */
 export function validateModelParameters(params: {
   temperature?: number;
   topP?: number;
@@ -86,9 +65,6 @@ export function validateModelParameters(params: {
   };
 }
 
-/**
- * 验证 MCP 服务器配置
- */
 export function validateMCPServer(server: {
   name: string;
   command: string;
@@ -114,9 +90,6 @@ export function validateMCPServer(server: {
   };
 }
 
-/**
- * 验证 JSON 格式
- */
 export function isValidJSON(jsonString: string): boolean {
   try {
     JSON.parse(jsonString);
@@ -126,9 +99,6 @@ export function isValidJSON(jsonString: string): boolean {
   }
 }
 
-/**
- * 验证搜索查询
- */
 export function validateSearchQuery(query: string): { valid: boolean; error?: string } {
   if (!query.trim()) {
     return { valid: false, error: '搜索查询不能为空' };
@@ -141,9 +111,6 @@ export function validateSearchQuery(query: string): { valid: boolean; error?: st
   return { valid: true };
 }
 
-/**
- * 验证 UUID 格式
- */
 export function isValidUUID(uuid: string): boolean {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   return uuidRegex.test(uuid);

@@ -1,5 +1,5 @@
 /**
- * UI 状态管理 - Svelte 5
+ * UI state - Svelte 5.
  */
 
 import type { Theme, Language } from "../types";
@@ -26,7 +26,6 @@ function loadPersistedLastAgentSessionId(): string | null {
   return localStorage.getItem(LAST_AGENT_SESSION_ID_KEY) || null;
 }
 
-// 通知消息接口
 export interface Notification {
   id: string;
   type: "info" | "success" | "warning" | "error";
@@ -98,13 +97,12 @@ class UIState {
     return this.state.lastAgentSessionId;
   }
 
-  // 派生状态：是否为暗色主题
   get isDarkMode(): boolean {
     const theme = this.state.theme;
     if (theme === "dark") return true;
     if (theme === "light") return false;
 
-    // 跟随系统 - 需要检查浏览器环境
+    // "system": follow the OS preference (browser environment only).
     if (typeof window !== "undefined") {
       return window.matchMedia("(prefers-color-scheme: dark)").matches;
     }
@@ -144,30 +142,18 @@ class UIState {
     this.state.globalLoading = loading;
   }
 
-  /**
-   * 切换侧边栏
-   */
   toggleSidebar(): void {
     this.state.sidebarOpen = !this.state.sidebarOpen;
   }
 
-  /**
-   * 打开模态框
-   */
   openModal(modalId: string): void {
     this.state.modals = { ...this.state.modals, [modalId]: true };
   }
 
-  /**
-   * 关闭模态框
-   */
   closeModal(modalId: string): void {
     this.state.modals = { ...this.state.modals, [modalId]: false };
   }
 
-  /**
-   * 切换模态框状态
-   */
   toggleModal(modalId: string): void {
     this.state.modals = {
       ...this.state.modals,
@@ -175,9 +161,6 @@ class UIState {
     };
   }
 
-  /**
-   * 显示通知
-   */
   showNotification(notification: Omit<Notification, "id">): string {
     const id = crypto.randomUUID();
     const newNotification: Notification = {
@@ -188,7 +171,7 @@ class UIState {
 
     this.state.notifications = [...this.state.notifications, newNotification];
 
-    // 自动移除通知
+    // Auto-dismiss.
     if (newNotification.duration && newNotification.duration > 0) {
       setTimeout(() => {
         this.removeNotification(id);
@@ -198,29 +181,19 @@ class UIState {
     return id;
   }
 
-  /**
-   * 移除通知
-   */
   removeNotification(id: string): void {
     this.state.notifications = this.state.notifications.filter(
       (n) => n.id !== id,
     );
   }
 
-  /**
-   * 清空所有通知
-   */
   clearNotifications(): void {
     this.state.notifications = [];
   }
 
-  /**
-   * 设置主题
-   */
   setTheme(newTheme: Theme): void {
     this.state.theme = newTheme;
 
-    // 保存到 localStorage
     if (typeof localStorage !== "undefined") {
       const current = localStorage.getItem("theme");
       if (current !== newTheme) {
@@ -228,10 +201,9 @@ class UIState {
       }
     }
 
-    // 更新 HTML data-theme 属性以匹配 CSS 选择器
+    // Update the HTML data-theme attribute to match the CSS selectors.
     if (typeof document !== "undefined") {
       if (newTheme === "system") {
-        // 跟随系统主题
         const systemIsDark = window.matchMedia(
           "(prefers-color-scheme: dark)",
         ).matches;
@@ -244,16 +216,18 @@ class UIState {
       }
     }
 
-    // 同步原生窗口 appearance：仅改 data-theme 只影响 webview 内容，NSWindow 仍跟随
-    // 系统外观，于是「应用 light + 系统 dark」时 macOS 会按 dark 画出窗口外边框与
-    // 标题栏 overlay。将窗口主题对齐到应用主题即可消除这条深色细边；system 传 null
-    // 表示交还系统跟随。
+    // Sync the native window appearance: data-theme only affects webview
+    // content, while the NSWindow still follows the OS appearance — with
+    // "app light + system dark" macOS draws the window border and title-bar
+    // overlay dark. Aligning the window theme with the app theme removes that
+    // dark edge; "system" passes null to hand control back to the OS.
     this.syncNativeWindowTheme(newTheme);
   }
 
   /**
-   * 将原生窗口外观对齐到应用主题（system → null，交还系统跟随）。
-   * 仅在 Tauri 环境执行，失败静默——纯样式同步不应影响主题切换本身。
+   * Align the native window appearance with the app theme (system → null,
+   * back to OS-following). Tauri environment only; failures are silent —
+   * a pure style sync must not break theme switching itself.
    */
   private syncNativeWindowTheme(theme: Theme): void {
     if (!isTauriEnvironment()) return;
@@ -266,13 +240,10 @@ class UIState {
       });
   }
 
-  /**
-   * 设置语言
-   */
   setLanguage(lang: Language): void {
     this.state.language = lang;
 
-    // 持久化到 localStorage（用于快速启动与跨窗口同步）
+    // Persist to localStorage (fast startup + cross-window sync).
     if (typeof localStorage !== "undefined") {
       const current = localStorage.getItem(LANGUAGE_KEY);
       if (current !== lang) {
@@ -280,20 +251,23 @@ class UIState {
       }
     }
 
-    // 更新 HTML lang 属性
     if (typeof document !== "undefined") {
       document.documentElement.lang = lang;
     }
   }
 
   /**
-   * 被动同步语言：仅更新内存状态与 document.lang，**绝不回写 localStorage**。
+   * Passive language sync: updates in-memory state and document.lang only,
+   * NEVER writing back to localStorage.
    *
-   * 专用于响应其他窗口的 `storage` 事件。发起方已把新语言写进了共享
-   * localStorage，跟随方若再经 `setLanguage` 回写，会触发新一轮跨窗口广播；
-   * 在多窗口（main / settings / 3 个划词面板）从后台恢复时整页 reload 的
-   * 时序下，这条回写与权威回填相互覆盖，正是中英文反复闪动的根源。
-   * 被动路径保持单向只读，从根上消除 ping-pong。
+   * Dedicated to handling `storage` events from other windows. The initiator
+   * already wrote the new language to shared localStorage; if the follower
+   * wrote back via `setLanguage`, it would trigger another round of
+   * cross-window broadcast. With multiple windows (main / settings / 3
+   * selection panels) full-page reloading on background-resume, that
+   * write-back and the authoritative backfill overwrite each other — the root
+   * cause of the zh/en flip-flop. Keeping the passive path one-way read-only
+   * eliminates the ping-pong at the source.
    */
   syncLanguageFromExternal(lang: Language): void {
     this.state.language = lang;
@@ -304,7 +278,8 @@ class UIState {
   }
 
   /**
-   * 记录最近打开的 Agent 会话 ID（用于切回 Agent 模式时恢复），并持久化。
+   * Remember the most recently opened agent session id (restored when
+   * switching back to Agent mode) and persist it.
    */
   setLastAgentSessionId(id: string | null): void {
     this.state.lastAgentSessionId = id;
@@ -319,5 +294,4 @@ class UIState {
   }
 }
 
-// 导出单例实例
 export const uiState = new UIState();

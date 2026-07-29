@@ -14,7 +14,6 @@
     });
   });
 
-  // 检查更新行的状态文案
   const checkValue = $derived(
     updateState.status === "checking"
       ? t("settings.about.checking")
@@ -63,7 +62,6 @@
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
-  <!-- 软件更新 -->
   <div class="rounded-xl overflow-hidden">
     <TableGroup title={t("settings.about.softwareUpdate")}>
       <SwitchRow
@@ -80,7 +78,6 @@
     </TableGroup>
   </div>
 
-  <!-- 关于 -->
   <div class="rounded-xl overflow-hidden">
     <TableGroup title={t("settings.about.title")}>
       <DefaultRow label={t("settings.about.changelog")} onclick={handleOpenChangelog} />

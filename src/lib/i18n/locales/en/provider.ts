@@ -1,5 +1,5 @@
 /**
- * provider namespace strings (filled by migration subagent).
+ * provider namespace strings.
  */
 import type { providerZh } from "../zh/provider";
 

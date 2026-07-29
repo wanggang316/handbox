@@ -7,13 +7,13 @@
  *
  * Three contracts are pinned here:
  *
- *  - **VAL-CATALOG-008** — the prompt names every catalog component (the six
+ *  - **Component coverage** — the prompt names every catalog component (the six
  *    expansion components included) AND carries each one's catalog description.
- *  - **VAL-CATALOG-009** — the prompt instructs *whole-spec* output (root +
+ *  - **Whole-spec contract** — the prompt instructs *whole-spec* output (root +
  *    elements), carries none of the patch/JSONL wording our resolver rejects,
  *    and its embedded example round-trips through `resolveSpec` to a non-null
  *    spec.
- *  - **VAL-INJECT-005 (drift)** — the committed
+ *  - **Drift guard** — the committed
  *    `src-tauri/resources/generative-ui-prompt.txt` is byte-identical to the
  *    builder's output, so a catalog change without regenerating the file fails CI.
  */
@@ -25,7 +25,7 @@ import { buildGenerativeUiPrompt } from "./prompt";
 import { uiCatalog } from "./catalog";
 import { resolveSpec } from "./resolveSpec";
 
-/** The six presentational components added by the catalog-expansion milestone. */
+/** The six expansion presentational components asserted individually below. */
 const EXPANSION_COMPONENTS = [
   "StatusLabel",
   "Avatar",
@@ -35,7 +35,7 @@ const EXPANSION_COMPONENTS = [
   "InfoTooltip",
 ] as const;
 
-describe("buildGenerativeUiPrompt — component coverage (VAL-CATALOG-008)", () => {
+describe("buildGenerativeUiPrompt — component coverage", () => {
   const prompt = buildGenerativeUiPrompt(uiCatalog);
   const descriptions = uiCatalog.data.components as Record<
     string,
@@ -60,7 +60,7 @@ describe("buildGenerativeUiPrompt — component coverage (VAL-CATALOG-008)", () 
   });
 });
 
-describe("buildGenerativeUiPrompt — whole-spec contract (VAL-CATALOG-009)", () => {
+describe("buildGenerativeUiPrompt — whole-spec contract", () => {
   const prompt = buildGenerativeUiPrompt(uiCatalog);
 
   it("instructs whole-spec output (root + elements)", () => {
@@ -86,7 +86,7 @@ describe("buildGenerativeUiPrompt — whole-spec contract (VAL-CATALOG-009)", ()
   });
 });
 
-describe("generative-ui-prompt.txt drift guard (VAL-INJECT-005)", () => {
+describe("generative-ui-prompt.txt drift guard", () => {
   it("the committed resource is byte-identical to the builder output", () => {
     // Path is relative to the repo root = the Vitest working directory.
     const committed = readFileSync(

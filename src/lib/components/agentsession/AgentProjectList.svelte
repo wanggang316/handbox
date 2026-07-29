@@ -44,8 +44,8 @@
 
   let { activeId = "" }: Props = $props();
 
-  // 分组与排序完全交给 foundation selector（Agent → Project → Session），
-  // 组件内不重新实现。
+  // Grouping and ordering (Agent → Project → Session) are fully delegated to
+  // the selector; the component does not re-implement them.
   const buckets = $derived(
     groupSessionsByAgent(
       agentState.agents,
@@ -55,27 +55,27 @@
   );
   const isEmpty = $derived(buckets.length === 0);
 
-  // 项目子组折叠 key：同一 Project 可能挂在多个 Agent 桶下，需按 桶+项目 复合
-  // 记忆折叠态，避免在 A 桶折叠 X 项目会连带折叠 B 桶下的 X。
+  // A project can appear under multiple agent buckets, so collapse state is
+  // keyed by bucket+project to keep each occurrence independent.
   function projectCollapseKey(bucketKey: string, projectId: string): string {
     return `${bucketKey}::${projectId}`;
   }
 
-  // 初次挂载且 store 无数据时显示加载占位，待三路数据都拉完再渲染，
-  // 避免闪现空态或「会话先到、Agent/项目未到」造成的误归桶；
-  // store 已有数据（模式切换重挂载）则立即渲染并在后台刷新。
+  // Show a loading placeholder until all three fetches settle, to avoid a
+  // flash of empty state or mis-bucketing when sessions arrive before agents/
+  // projects. A warm store renders immediately and refreshes in the background.
   let initialLoadDone = $state(
     agentProjectState.projects.length > 0 ||
       agentSessionState.sessions.length > 0,
   );
 
-  // 任一路加载失败即置位：Agent / projects 拉取失败而 sessions 成功时若照常渲染，
-  // 会话会被错误归入「Chats」桶（伪呈现），故失败时不进入分组渲染，改显示
-  // 错误条 + 重试。
+  // Set when any fetch fails: rendering with sessions but without agents/
+  // projects would mis-bucket them into "Chats", so show an error bar with
+  // retry instead of the grouped list.
   let loadError = $state(false);
 
-  // 每次挂载重拉 Agent / 项目 / 会话，保证侧栏数据新鲜（重试按钮复用同一逻辑）。
-  // 各 action 内部已记录错误，这里捕获 settled 结果用于失败可见化。
+  // Refetch agents/projects/sessions on every mount (retry reuses this).
+  // Actions log their own errors; settled results here drive failure visibility.
   async function loadSidebarData() {
     const results = await Promise.allSettled([
       agentActions.loadAgents(),
@@ -90,8 +90,8 @@
     loadSidebarData();
   });
 
-  // active session 所在位置（桶 key + 可选项目折叠 key）；无 active / 数据未就绪 /
-  // 未匹配时为 undefined。
+  // Location of the active session (bucket key + optional project collapse
+  // key); undefined when there is no active session or no match.
   const activeLocation = $derived.by(() => {
     if (!activeId) return undefined;
     for (const bucket of buckets) {
@@ -113,9 +113,9 @@
     return undefined;
   });
 
-  // 打开 / 切换到某 session 时自动展开其所属桶与项目子组。
-  // 折叠态的读取放进 untrack：本 effect 只跟踪 activeLocation 的变化，
-  // 手动折叠 active 组是合法操作，不会被这里立即弹回。
+  // Auto-expand the active session's bucket and project group. Collapse reads
+  // go through untrack: the effect only tracks activeLocation, so manually
+  // collapsing the active group is not immediately reverted.
   $effect(() => {
     const loc = activeLocation;
     if (loc) {
@@ -130,11 +130,9 @@
     goto(`/agent?id=${session.id}`);
   }
 
-  // ============================================
-  // 右键菜单（session 行 / 项目组头）
-  // ============================================
-  // 统一一个 contextMenu state、按 kind 区分目标：同屏天然只有一个菜单
-  // （再次右键直接覆盖旧菜单），项目菜单与 session 菜单天然互斥。
+  // One contextMenu state discriminated by kind: only one menu can be on
+  // screen (a new right-click overwrites the old), so session and project
+  // menus are mutually exclusive by construction.
   interface SessionContextMenu {
     kind: "session";
     session: AgentSession;
@@ -153,7 +151,7 @@
 
   function handleSessionContextMenu(event: MouseEvent, session: AgentSession) {
     event.preventDefault();
-    // 阻止冒泡到 window 的 oncontextmenu（那里会关掉菜单）。
+    // Don't bubble to the window oncontextmenu, which would close the menu.
     event.stopPropagation();
     contextMenu = {
       kind: "session",
@@ -174,7 +172,7 @@
     };
   }
 
-  // 点击 / 在菜单外右键时关闭菜单（行上的右键已 stopPropagation，不会误关）。
+  // Close the menu on click or right-click outside it (row right-clicks stopPropagation).
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as HTMLElement;
     if (!target.closest(".context-menu")) {
@@ -182,11 +180,8 @@
     }
   }
 
-  // ============================================
-  // 内联重命名（session）
-  // ============================================
-  // 输入态按 session id 存（renamingSessionId 定位目标行）：keyed each 重排时
-  // 输入框随行移动、内容保留，提交始终写回 renamingSessionId 指向的会话。
+  // Inline rename state is keyed by session id: the input follows its row
+  // through keyed-each reorders and commits always target renamingSessionId.
   let renamingSessionId = $state("");
   let renameValue = $state("");
 
@@ -197,7 +192,7 @@
     renameValue = session.name;
     contextMenu = null;
 
-    // 等输入框挂载后聚焦并全选（data-session-id 定位）。
+    // Focus and select once the input mounts (located via data-session-id).
     setTimeout(() => {
       const input = document.querySelector(
         `input[data-session-id="${session.id}"]`,
@@ -209,8 +204,8 @@
     }, 0);
   }
 
-  // 确认重命名：纯空白或未变更不写入。先收起输入框再提交，使 Enter 与 blur
-  // 的双触发在第二次进入时因 renamingSessionId 已清空而天然幂等。
+  // Whitespace-only or unchanged names are not written. Clearing the input
+  // state before committing makes the Enter + blur double-fire idempotent.
   async function confirmRename() {
     const id = renamingSessionId;
     const next = renameValue.trim();
@@ -238,10 +233,8 @@
     }
   }
 
-  // ============================================
-  // 生成标题（右键手动触发）
-  // ============================================
-  // 正在生成标题的 session id：该会话行以 spinner 替换相对时间做进行中反馈。
+  // Session id whose title is being generated; its row swaps the relative time
+  // for a spinner as progress feedback.
   let generatingTitleId = $state<string | null>(null);
 
   async function handleGenerateTitle() {
@@ -258,17 +251,14 @@
         error,
         t("agent.list.generateTitleFailed"),
       );
-      // 展示具体 message（真实原因），而非通用 hint —— 否则「应用内部错误，请
-      // 重新启动应用」这类兜底 hint 会遮盖掉实际失败原因。
+      // Show the concrete message, not the generic hint, which would mask the
+      // actual failure reason.
       createErrorMessage = `${t("agent.list.generateTitleFailed")}: ${normalized.message}`;
     } finally {
       generatingTitleId = null;
     }
   }
 
-  // ============================================
-  // 复制 ID / 删除（session）
-  // ============================================
   async function handleCopyId() {
     if (contextMenu?.kind !== "session") return;
     const id = contextMenu.session.id;
@@ -280,8 +270,9 @@
     }
   }
 
-  // 一键删除，无确认。后端 agent_session_delete 先 abort 再删；删除成功后
-  // 清理该会话的运行状态并立 tombstone，拦截 abort 收尾产生的迟到流事件。
+  // One-click delete, no confirmation. The backend aborts before deleting; on
+  // success the run state is cleared and a tombstone set to swallow late
+  // stream events from the abort teardown.
   async function handleDelete() {
     if (contextMenu?.kind !== "session") {
       contextMenu = null;
@@ -292,7 +283,7 @@
     try {
       await agentSessionActions.deleteSession(target.id);
       agentRunStore.removeSession(target.id);
-      // 删除的是当前打开的会话则回到 Agent 落地页。
+      // Deleting the open session returns to the Agent landing page.
       if (activeId === target.id) {
         goto("/agent");
       }
@@ -301,11 +292,8 @@
     }
   }
 
-  // ============================================
-  // 项目重命名（组头内联输入框）
-  // ============================================
-  // 与 session 重命名同构：按 project id 存输入态，keyed each 重排时输入框
-  // 随组头移动、提交始终写回 renamingProjectId 指向的项目。
+  // Project rename mirrors session rename: state keyed by project id so the
+  // input follows its header through reorders and commits target renamingProjectId.
   let renamingProjectId = $state("");
   let renameProjectValue = $state("");
 
@@ -327,8 +315,8 @@
     }, 0);
   }
 
-  // 语义对齐 session 重命名：Enter 提交 / 含变更失焦提交 / Esc 取消 /
-  // 纯空白或未变更不写入。先收起输入框再提交，Enter 与 blur 双触发幂等。
+  // Same semantics as session rename: whitespace-only or unchanged names are
+  // not written; clearing state first makes the Enter + blur double-fire idempotent.
   async function confirmProjectRename() {
     const id = renamingProjectId;
     const next = renameProjectValue.trim();
@@ -356,9 +344,6 @@
     }
   }
 
-  // ============================================
-  // 项目复制路径 / 删除
-  // ============================================
   async function handleCopyProjectPath() {
     if (contextMenu?.kind !== "project") return;
     const path = contextMenu.project.path;
@@ -370,7 +355,7 @@
     }
   }
 
-  // 原生 confirm（对齐 states/auth.svelte.ts 的动态 import + 浏览器兜底）。
+  // Native confirm via dynamic import, with a browser confirm fallback.
   async function confirmNative(message: string): Promise<boolean> {
     try {
       const { confirm } = await import("@tauri-apps/plugin-dialog");
@@ -381,10 +366,11 @@
     }
   }
 
-  // 删除项目：confirm 文案带该项目真实 session 数（confirm 前从 store 取快照，
-  // 跨所有 Agent 统计）；取消 = 全保留零副作用。确认后 store 联动移除该项目会话
-  // 并清 currentSession（后端先 abort 后级联），随后逐会话清运行状态 + 立
-  // tombstone；若 active session 属于该项目则回 Agent 落地页。
+  // Delete project: the confirm text carries the real member-session count
+  // (snapshotted across all agents before confirming); cancel has zero side
+  // effects. On confirm the backend aborts then cascades, the store removes
+  // member sessions, per-session run state is cleared with tombstones, and an
+  // active member session navigates back to the landing page.
   async function handleProjectDelete() {
     if (contextMenu?.kind !== "project") {
       contextMenu = null;
@@ -425,8 +411,8 @@
     }
   }
 
-  // 组头整行单击切换折叠；组头上的内嵌控件（hover「+」直建 session 等）
-  // 标记 data-group-control 即可豁免，不会误触 toggle。
+  // Clicking a group header toggles collapse; embedded controls marked with
+  // data-group-control are exempt from the toggle.
   function handleGroupHeaderClick(event: MouseEvent, groupId: string) {
     if (
       event.target instanceof Element &&
@@ -437,9 +423,9 @@
     agentProjectCollapse.toggle(groupId);
   }
 
-  // 组头是 role="button" 的 div（HTML 禁止 button 嵌套，而控件槽里的 hover「+」
-  // 是真按钮）：Enter / Space 保持折叠切换语义；焦点落在槽内控件上时交还控件
-  // 自身处理（豁免规则同 click）。
+  // The header is a role="button" div because HTML forbids nesting the real
+  // "+" button inside a <button>. Enter/Space toggle collapse; focus on slot
+  // controls defers to them (same exemption as click).
   function handleGroupHeaderKeydown(event: KeyboardEvent, groupId: string) {
     if (event.key !== "Enter" && event.key !== " ") return;
     if (
@@ -452,19 +438,19 @@
     agentProjectCollapse.toggle(groupId);
   }
 
-  // 直建会话失败 / 删除项目失败共用的非阻塞内联错误条（优先展示 AppError 的 hint，
-  // 下一次实际尝试时清除）。
+  // Non-blocking inline error bar shared by session-create and project-delete
+  // failures (prefers the AppError hint; cleared on the next attempt).
   let createErrorMessage = $state<string | null>(null);
 
-  // Agent 组头 hover「+」：以该 Agent 定义直建一个会话（无项目）。
-  // createSessionFromDefinition 由后端按 definition 裁决能力集 / 工作目录策略。
+  // Bucket-header "+": create a session (no project) from the agent definition;
+  // the backend resolves capabilities and working-dir policy from it.
   async function handleCreateSessionForAgent(
     event: MouseEvent,
     bucket: AgentSessionBucket,
   ) {
     event.stopPropagation();
     const agentId = bucket.agent?.id;
-    if (!agentId) return; // 「Chats」桶无来源 Agent，不提供直建入口。
+    if (!agentId) return; // The "Chats" bucket has no source agent, so no create entry.
     contextMenu = null;
     createErrorMessage = null;
     try {
@@ -482,8 +468,8 @@
     }
   }
 
-  // Agent > 项目子组 hover「+」：以该 Agent 定义直建一个挂到该项目的会话
-  // （agentDefinitionId + projectId 同时归属）。工作目录由后端以 project.path 覆盖。
+  // Project-header "+": create a session from the agent definition attached to
+  // the project; the backend overrides the working dir with project.path.
   async function handleCreateSessionInProject(
     event: MouseEvent,
     bucket: AgentSessionBucket,
@@ -519,7 +505,7 @@
   inputIndent: string,
 )}
   {#if renamingSessionId === session.id}
-    <!-- 重命名输入框：随 keyed each 行移动；Enter 提交 / blur 提交 / Esc 取消 -->
+    <!-- Rename input: Enter/blur commits, Escape cancels. -->
     <div class="{inputIndent} pr-2">
       <input
         data-session-id={session.id}
@@ -554,7 +540,7 @@
   {/if}
 {/snippet}
 
-<!-- 项目子组：组头（可折叠）+ 会话列表；宿主桶通过 bucket 传入以支持直建归属。 -->
+<!-- Project subgroup: collapsible header + session list; the host bucket is passed in for create attribution. -->
 {#snippet projectGroup(
   bucket: AgentSessionBucket,
   project: AgentProject,
@@ -563,7 +549,7 @@
   {@const key = projectCollapseKey(bucket.key, project.id)}
   {@const collapsed = agentProjectCollapse.isCollapsed(key)}
   {#if renamingProjectId === project.id}
-    <!-- 项目重命名输入行：替换组头按钮，输入框包在 data-group-control 豁免区内。 -->
+    <!-- Project rename row replaces the header; the input sits in a data-group-control exemption span. -->
     <div class="w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-[12px] leading-[18px]">
       {#if collapsed}
         <Folder size={14} class="flex-shrink-0 text-base-content/60" />
@@ -598,7 +584,7 @@
         <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
       {/if}
       <span class="truncate flex-1">{project.name}</span>
-      <!-- 右侧控件槽：hover「+」直建该 Agent + 项目的 session。 -->
+      <!-- Hover "+" creates a session for this agent + project. -->
       <span data-group-control class="flex items-center flex-shrink-0">
         <button
           class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
@@ -629,7 +615,6 @@
 {/snippet}
 
 <div class="flex flex-col h-full">
-  <!-- 直建会话 / 删除项目失败的非阻塞错误条（下一次实际尝试时自动清除） -->
   {#if createErrorMessage}
     <div
       class="mx-2 mt-2 mb-1 px-2 py-1 rounded-md bg-error/10 text-error text-[12px] leading-[18px] flex-shrink-0"
@@ -638,15 +623,15 @@
     </div>
   {/if}
 
-  <!-- Agent 分组列表（Agent → Project → Session；无来源 Agent 归入垫底的 Chats 桶）。
-       组间用 space-y-1.5 分隔、组内紧凑，形成清晰的分组节奏。 -->
+  <!-- Grouped list (Agent → Project → Session; sessions without a source agent
+       fall into the trailing Chats bucket). -->
   <div class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-2">
     {#if !initialLoadDone}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
         {t("common.loading")}
       </div>
     {:else if loadError}
-      <!-- 部分加载失败：不进入分组渲染（避免会话被伪归入「Chats」桶） -->
+      <!-- Partial load failure: skip grouped rendering to avoid mis-bucketing into Chats. -->
       <div class="px-2 py-1 text-[12px] leading-[18px] text-error">
         {t("agent.list.loadFailed")}
       </div>
@@ -663,9 +648,8 @@
     {:else}
       {#each buckets as bucket (bucket.key)}
         {@const collapsed = agentProjectCollapse.isCollapsed(bucket.key)}
-        <!-- 一个 Agent 分组（组头 + 子节点）作为一个整体，组内 space-y-0.5 紧凑排布。 -->
         <div class="space-y-0.5">
-          <!-- 桶组头：Agent（Bot 图标 + 名称 + hover「+」直建）或 Chats（MessagesSquare，无直建）。 -->
+          <!-- Bucket header: an Agent (icon + name + hover "+") or the Chats bucket (no create). -->
           <div
             class="group/bucket w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 cursor-default select-none"
             role="button"
@@ -719,7 +703,7 @@
   </div>
 </div>
 
-<!-- 右键菜单（单一 state 按 kind 分发：session 行 / 项目组头互斥） -->
+<!-- Context menu, dispatched by kind (session row / project header). -->
 {#if contextMenu?.kind === "project"}
   <div
     class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
@@ -741,7 +725,6 @@
       {t("agent.list.copyPath")}
     </button>
 
-    <!-- 分隔线 -->
     <div class="border-t border-base-300 my-1 mx-2"></div>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-error/10 text-error flex items-center gap-2 whitespace-nowrap"
@@ -756,7 +739,7 @@
     class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
   >
-    <!-- 生成标题：仅当会话已有消息（有内容可蒸馏）时提供 -->
+    <!-- Generate title: only offered when the session has messages to distill. -->
     {#if contextMenu.session.messageCount > 0}
       <button
         class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
@@ -783,7 +766,6 @@
       {t("agent.list.copyId")}
     </button>
 
-    <!-- 分隔线 -->
     <div class="border-t border-base-300 my-1 mx-2"></div>
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-error/10 text-error flex items-center gap-2 whitespace-nowrap"
@@ -795,5 +777,5 @@
   </div>
 {/if}
 
-<!-- 全局事件监听：点击菜单外 / 在菜单外右键关闭菜单（行上右键已 stopPropagation） -->
+<!-- Close the menu on outside click / right-click (row right-clicks stopPropagation). -->
 <svelte:window onclick={handleClickOutside} oncontextmenu={handleClickOutside} />

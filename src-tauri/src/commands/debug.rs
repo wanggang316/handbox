@@ -2,7 +2,7 @@ use crate::models::error::AppError;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager};
 
-/// 调试命令：检查文件是否存在及其权限
+/// Debug helper: reports a file's existence, metadata, and readability.
 #[tauri::command]
 pub async fn debug_check_file(file_path: String) -> Result<String, AppError> {
     use std::fs;
@@ -39,7 +39,7 @@ pub async fn debug_check_file(file_path: String) -> Result<String, AppError> {
     Ok(info)
 }
 
-/// 调试命令：强制显示系统划词浮层
+/// Debug helper: force-shows the selection overlay with a fake payload.
 #[tauri::command]
 pub async fn debug_show_selection_overlay(app: AppHandle) -> Result<(), AppError> {
     let Some(window) = app.get_webview_window("selection_overlay") else {

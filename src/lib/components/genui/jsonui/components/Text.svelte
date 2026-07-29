@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A text block. `text` renders through Svelte text binding only (never @html),
-  // so any HTML/script markup is escaped to literal characters.
+  // `text` renders through Svelte text binding only (never @html), so any
+  // HTML/script markup is escaped to literal characters.
   interface TextProps {
     text: string;
     variant?: "body" | "heading" | "muted";

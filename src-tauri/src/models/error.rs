@@ -1,8 +1,5 @@
-// 错误类型定义
-
 use serde::{Deserialize, Serialize};
 
-/// 应用错误类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppError {
     pub code: String,
@@ -27,7 +24,6 @@ impl AppError {
         }
     }
 
-    // 预定义的错误类型
     pub fn validation_error(message: &str) -> Self {
         Self::with_hint("VALIDATION_ERROR", message, "请检查输入参数")
     }
@@ -52,7 +48,6 @@ impl AppError {
         Self::with_hint("NOT_FOUND", message, "请求的资源未找到")
     }
 
-    // 供应商相关错误
     pub fn provider_name_exists() -> Self {
         Self::with_hint("PROVIDER_NAME_EXISTS", "供应商名称已存在", "请使用其他名称")
     }
@@ -98,14 +93,12 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
-// sqlx 错误转换
 impl From<sqlx::Error> for AppError {
     fn from(error: sqlx::Error) -> Self {
         Self::internal_error(&format!("Database error: {}", error))
     }
 }
 
-// MCP client 错误转换
 impl From<handbox_mcp::McpClientError> for AppError {
     fn from(error: handbox_mcp::McpClientError) -> Self {
         use handbox_mcp::McpClientError;
@@ -144,7 +137,7 @@ impl From<handbox_mcp::McpClientError> for AppError {
     }
 }
 
-/// API 响应包装类型
+/// Response envelope; the `success` tag serializes as the string "true"/"false".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "success")]
 pub enum ApiResponse<T> {

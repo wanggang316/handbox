@@ -1,10 +1,5 @@
-/**
- * 供应商相关类型定义
- */
-
 import type { BaseEntity } from "./index";
 
-// 供应商配置
 export interface Provider extends BaseEntity {
   name: string;
   provider_type: string;
@@ -13,12 +8,10 @@ export interface Provider extends BaseEntity {
   enabled: boolean;
 }
 
-// 带模型的供应商
 export interface ProviderWithModels extends Provider {
   models: Model[];
 }
 
-// 模型参数定义
 export interface ModelParameter {
   name: string;
   default?: unknown;
@@ -31,10 +24,8 @@ export type ChatMethodName =
   | "responses"
   | "google_generate_content";
 
-// 参数显示等级
 export type ParameterLevel = "base" | "advance";
 
-// 参数组件类型
 export type ParameterComponent =
   | "slider"
   | "switch"
@@ -43,7 +34,6 @@ export type ParameterComponent =
   | "thinking"
   | "openrouter_reasoning";
 
-// 滑块组件属性
 export interface SliderProps {
   default?: number | null;
   min?: number | null;
@@ -54,14 +44,12 @@ export interface SliderProps {
   tips?: string | null;
 }
 
-// 开关组件属性
 export interface SwitchProps {
   default?: boolean | null;
   name: string;
   tips?: string | null;
 }
 
-// Responses 方法推理配置属性
 export interface ResponsesReasoningProps {
   name?: string | null;
   effort_options?: Record<string, string[]> | null;
@@ -69,7 +57,6 @@ export interface ResponsesReasoningProps {
   tips?: string | null;
 }
 
-// Completions 方法推理配置属性
 export interface CompletionsReasoningProps {
   name?: string | null;
   include_reasoning?: boolean | null;
@@ -77,21 +64,19 @@ export interface CompletionsReasoningProps {
   tips?: string | null;
 }
 
-// 保持向后兼容的别名
+// Backward-compatible alias.
 export type ReasoningProps = ResponsesReasoningProps;
 
-// Thinking Budget 选项配置
 export interface BudgetOptions {
-  dynamic?: number | null; // -1 表示动态调整
-  disable?: number | null; // 0 表示禁用
-  range?: [number, number] | null; // [min, max] 滑杆范围
+  dynamic?: number | null; // -1 = dynamic.
+  disable?: number | null; // 0 = disabled.
+  range?: [number, number] | null; // [min, max] slider range.
 }
 
-// Thinking Budget 配置
 export interface BudgetConfig {
-  models: string[]; // 适用的模型列表，格式: "provider_type/model_id"
-  options: BudgetOptions; // 可选项
-  default: string; // 默认选项: "dynamic", "disable", "range"
+  models: string[]; // Format: "provider_type/model_id".
+  options: BudgetOptions;
+  default: string; // "dynamic" | "disable" | "range"
 }
 
 export interface ThinkingProps {
@@ -102,7 +87,6 @@ export interface ThinkingProps {
   budget_tip?: string | null;
 }
 
-// OpenRouter 推理配置属性
 export interface OpenrouterReasoningProps {
   name: string;
   tips?: string | null;
@@ -113,7 +97,6 @@ export interface OpenrouterReasoningProps {
   max_tokens?: [number, number] | null;
 }
 
-// 组件属性联合类型
 export type ComponentProps =
   | SliderProps
   | SwitchProps
@@ -122,7 +105,6 @@ export type ComponentProps =
   | ThinkingProps
   | OpenrouterReasoningProps;
 
-// 参数响应 (替换原 ChatMethodParameter)
 export interface ModelParameterResponse {
   name: string;
   support: boolean;
@@ -136,7 +118,6 @@ export interface ChatMethodResponse {
   parameters?: ModelParameterResponse[] | null;
 }
 
-// 模型信息
 export interface Model {
   id: string;
   provider_id: string;
@@ -164,13 +145,11 @@ export interface Model {
   updated_at: number;
 }
 
-// 带供应商信息的模型（用于前端显示）
 export interface ModelWithProvider extends Model {
   providerName: string;
   providerType: string;
 }
 
-// 模型特性
 export type ModelFeature = string;
 
 export type ModelModality =
@@ -187,7 +166,6 @@ export interface ModelPricing {
   output_text?: string | null;
 }
 
-// 添加供应商请求
 export interface AddProviderRequest {
   name: string;
   provider_type: string;
@@ -196,7 +174,6 @@ export interface AddProviderRequest {
   enabled?: boolean;
 }
 
-// 供应商配置选项（从后端获取）
 export interface ProviderConfig {
   provider_type: string;
   type_name: string;
@@ -206,19 +183,16 @@ export interface ProviderConfig {
   description?: string;
 }
 
-// 供应商配置响应
 export interface ProviderConfigsResponse {
   providers: ProviderConfig[];
   custom_providers: ProviderConfig[];
 }
 
-// 模型列表请求
 export interface ListModelsRequest {
   providerId: string;
   refreshFromRemote?: boolean;
 }
 
-// 模型收藏切换请求
 export interface ToggleModelFavoriteRequest {
   provider_id: string;
   model_id: string;

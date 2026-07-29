@@ -6,7 +6,6 @@ class MouseObserverManager {
     static let shared = MouseObserverManager()
     var monitor: Any?
     
-    // 修改回调定义：使用 UnsafePointer<Int8> 代替 SRString
     func start(callback: @escaping @convention(c) (Double, Double, UnsafePointer<Int8>, UnsafePointer<Int8>, Int32) -> Void) {
         if self.monitor != nil { return }
 
@@ -14,7 +13,6 @@ class MouseObserverManager {
             let mouseLocation = NSEvent.mouseLocation
             let frontApp = NSWorkspace.shared.frontmostApplication
             
-            // 准备数据
             let appName = frontApp?.localizedName ?? "Unknown"
             let bundleId = frontApp?.bundleIdentifier ?? "unknown.app"
             let pid = frontApp?.processIdentifier ?? 0
@@ -24,7 +22,7 @@ class MouseObserverManager {
                 let x = Double(mouseLocation.x)
                 let y = Double(screenHeight - mouseLocation.y)
                 
-                // 将 Swift String 转换为临时 C 字符串指针
+                // These C string pointers are only valid inside withCString; the callback must copy.
                 appName.withCString { namePtr in
                     bundleId.withCString { bidPtr in
                         callback(x, y, namePtr, bidPtr, Int32(pid))
@@ -37,7 +35,7 @@ class MouseObserverManager {
 
 @_cdecl("start_mouse_observer")
 public func start_mouse_observer(callbackPtr: UnsafeRawPointer) {
-    // 这里的签名必须与上面完全一致
+    // Must match MouseObserverManager.start's callback signature exactly — unsafeBitCast checks nothing.
     typealias CallbackType = @convention(c) (Double, Double, UnsafePointer<Int8>, UnsafePointer<Int8>, Int32) -> Void
     let callback = unsafeBitCast(callbackPtr, to: CallbackType.self)
     

@@ -1,9 +1,8 @@
 //! One-shot LLM session-title generation.
 //!
-//! Runs a single non-agent completion (no tools, not streamed to the UI)
-//! against the session's own model/provider to distill the first user message
-//! into a short session title. Used by the `agent_session_generate_title`
-//! command for both the auto-on-first-message and the manual right-click paths.
+//! A single non-agent completion (no tools, not streamed to the UI) against the
+//! session's own model/provider, distilling the first user message into a short
+//! session title.
 
 use hand_ai_model::{
     AssistantContentBlock, Client, Context, Message, StopReason, UserMessage,
@@ -12,30 +11,21 @@ use hand_ai_model::{
 use crate::models::AppError;
 use crate::services::model_runtime::{self, ChatOptions};
 
-/// System prompt: produce a bare, short title in the user's own language.
 const TITLE_SYSTEM_PROMPT: &str = "You write an extremely short title (at most 6 words, or 16 Chinese characters) that captures what the user wants, based on their first message. Reply with ONLY the title text: no surrounding quotes, no trailing punctuation, no prefix like \"Title:\", no explanation. Use the same language as the user's message.";
 
-/// Output token cap for the title call. Deliberately generous (not ~64): a
-/// reasoning model spends part of its output budget on thinking before it
-/// emits the title, so a tight cap truncates mid-thought and yields an empty
-/// title. 2048 leaves ample room for brief reasoning on a trivial title task
-/// plus the short title, while a non-reasoning model still stops early (the cap
-/// is never reached, so no extra cost). It also stays within providers that
-/// require max_tokens and bound it (e.g. Anthropic-compatible endpoints).
+/// Deliberately generous: a reasoning model spends part of its output budget
+/// thinking before emitting the title, so a tight cap truncates mid-thought into
+/// an empty title. A non-reasoning model stops early and never reaches the cap.
 const MAX_OUTPUT_TOKENS: u32 = 2048;
 
-/// Max characters of the source message fed to the model — a guard so a giant
-/// first message can't blow the context window or run up cost for a title.
+/// Guard so a giant first message can't blow the context window or run up cost
+/// for a title.
 const MAX_SOURCE_CHARS: usize = 2000;
 
-/// Max characters kept from the model's reply as the final title.
 const MAX_TITLE_CHARS: usize = 48;
 
-/// Generate a session title from `source_text` using the given provider/model.
-///
-/// Makes a single `complete_simple` call (tool-less, short output cap) and
-/// returns a sanitized one-line title. Errors on a model error or an empty
-/// result so the caller surfaces the failure instead of writing a junk name.
+/// Errors on a model error or an empty result, so the caller surfaces the
+/// failure instead of writing a junk name.
 pub async fn generate_title(
     provider_type: &str,
     model_id: &str,
@@ -98,8 +88,6 @@ pub async fn generate_title(
     Ok(title)
 }
 
-/// Reduce a raw model reply to a clean one-line title: first non-empty line,
-/// stripped of wrapping quotes, capped to a sane length.
 fn sanitize_title(raw: &str) -> String {
     let line = raw
         .lines()

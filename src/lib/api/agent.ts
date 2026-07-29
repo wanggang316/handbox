@@ -1,7 +1,3 @@
-/**
- * Agent 相关 API 封装
- */
-
 import { apiCall } from "./index";
 import type {
   Agent,
@@ -10,10 +6,6 @@ import type {
   AgentReasoningConfig,
 } from "../types";
 
-/**
- * 创建新的 Agent
- * 后端签名: agent_create(request: AgentCreateRequest)
- */
 export async function createAgent(
   name: string,
   temperature?: number,
@@ -44,9 +36,6 @@ export async function createAgent(
   return apiCall<Agent>("agent_create", { request });
 }
 
-/**
- * 获取 Agent 列表
- */
 export async function getAgents(
   limit?: number,
   offset?: number,
@@ -54,26 +43,15 @@ export async function getAgents(
   return apiCall<Agent[]>("agent_list", { limit, offset });
 }
 
-/**
- * 获取 Agent 详情
- */
 export async function getAgent(agentId: UUID): Promise<Agent> {
   return apiCall<Agent>("agent_get", { agentId: agentId });
 }
 
-/**
- * 删除 Agent
- */
 export async function deleteAgent(agentId: UUID): Promise<void> {
   return apiCall<void>("agent_delete", { agentId: agentId });
 }
 
-/**
- * 更新 Agent 单个字段
- * @param agentId Agent ID
- * @param fieldName 字段名
- * @param value 字段值，null 表示清空
- */
+/** Updates a single agent field; `value: null` clears it. */
 export async function updateAgentField(
   agentId: UUID,
   fieldName:
@@ -112,11 +90,6 @@ export async function updateAgentField(
   });
 }
 
-/**
- * 更新 Agent 名称
- * @param agentId Agent ID
- * @param name 新名称
- */
 export async function updateAgentName(
   agentId: UUID,
   name: string,

@@ -26,22 +26,22 @@
   import { BUILTIN_TOOL_IDS } from "$lib/constants/builtinToolIds";
 
   interface Props {
-    // 编辑模式传入既有 Agent；新建模式留空
+    // Existing agent for edit mode; null for create mode.
     agent?: Agent | null;
   }
 
   interface AgentFormData {
     name: string;
-    // Lucide kebab-case 图标名；空串表示用默认图标
+    // Lucide kebab-case icon name; empty string means the default icon.
     icon: string;
     temperature?: number;
     maxTokens?: number;
     systemPrompt: string;
-    // 关联的 skill 名单（按名引用已发现的 skill；运行时每轮固定注入）
+    // Linked skill names (referenced by name; injected every turn at runtime).
     skills: string[];
     mcpServers: McpServerConfig[];
     generativeUi: boolean;
-    // 关联的 GenUI id；空串表示未关联
+    // Linked GenUI id; empty string means none.
     genuiId: string;
     description: string;
     builtinTools: string[];
@@ -51,8 +51,8 @@
 
   let { agent = null }: Props = $props();
 
-  // ── 模型参数：会话/引擎实际消费的采样参数（label + toggle + slider）。
-  //    仅 temperature / maxTokens —— top_p / top_k 会话层与引擎均不消费，故不在此暴露。 ──
+  // Only temperature / maxTokens: top_p / top_k are consumed by neither the
+  // session layer nor the engine, so they are not exposed here.
   type ParamKey = "temperature" | "maxTokens";
   const PARAM_META: Array<{
     key: ParamKey;
@@ -76,8 +76,7 @@
     { value: "manual", label: t("agent.input.manualExecution") },
   ]);
 
-  // ── 能力（Capability）：内置工具 / 工作目录 / 工具执行 ──
-  // 内置工具名（canonical 源 constants/builtinToolIds，与后端 builtinTools 取值对齐）。
+  // Builtin tool names (canonical source constants/builtinToolIds, matching backend values).
   const BUILTIN_TOOLS = BUILTIN_TOOL_IDS;
   // $derived so labels track language switch.
   const workingDirModeOptions = $derived([
@@ -90,7 +89,7 @@
     { value: "manual", label: t("agent.input.manualExecution") },
   ]);
 
-  // 内置 Agent：名称只读、不可删除（由后端约束）。
+  // Builtin agents: the name is read-only (enforced by the backend).
   const isBuiltin = $derived(agent?.builtin ?? false);
 
   function isToolSelected(tool: string): boolean {
@@ -112,17 +111,17 @@
     )
   );
 
-  // 可关联的 skill 列表：定义级关联与具体项目无关，不传 workingDir（只发现
-  // user / appData 两档）；仅列校验通过的干净 skill。已关联但磁盘上已消失的
-  // 名字仍显示为附加行（可取消关联），运行时未知名静默跳过、不会报错。
+  // Definition-level linking is project-agnostic: no workingDir passed
+  // (user/appData tiers only), only valid skills listed. Linked names missing
+  // on disk stay visible for unlinking; unknown names are skipped at runtime.
   let availableSkills = $state<SkillInfo[]>([]);
 
-  // Skill / MCP 的选择在 Modal 弹窗中进行（行上仅显示已关联数量）。
+  // Skill / MCP selection happens in modals; the rows only show linked counts.
   let skillsModalOpen = $state(false);
   let mcpModalOpen = $state(false);
 
-  // 图标选择浮层：点标题前的图标按钮原地弹出；选择即替换并关闭，
-  // 点击当前选中项清除（回退默认 Bot）。点击浮层外关闭。
+  // Icon picker popover: picking replaces and closes; picking the current icon
+  // clears it (back to the default Bot). Outside click closes.
   let iconPickerOpen = $state(false);
 
   function handleIconPickerOutside(event: MouseEvent) {
@@ -138,7 +137,6 @@
     iconPickerOpen = false;
   }
 
-  // 技能 Modal 内搜索（按名称 / 描述过滤，大小写不敏感）。
   let skillSearch = $state("");
   const filteredSkills = $derived.by(() => {
     const q = skillSearch.trim().toLowerCase();
@@ -195,10 +193,9 @@
     toolExecutionMode: "auto",
   });
 
-  // 当前图标（未设置 / 未识别回退默认 Bot）。
   const CurrentIcon = $derived(resolveAgentIcon(formData.icon));
 
-  // 已关联但不在发现列表里的名字（skill 被删 / 改名）：保留成可取消的行。
+  // Linked names absent from discovery (skill deleted/renamed): kept as removable rows.
   const missingSelectedSkills = $derived(
     formData.skills.filter(
       (name) => !availableSkills.some((s) => s.name === name)
@@ -254,26 +251,25 @@
     goto("/agents");
   }
 
-  /** 把表单落库：编辑 = 逐字段比较下发；新建 = create 后对非默认能力字段补写。 */
+  /** Persist the form: edit diffs field-by-field; create writes non-default capability fields afterwards. */
   async function persist(data: AgentFormData) {
-    // 关联的 GenUI 仅在开启生成式 UI 时有效；关闭时清空关联。
+    // The linked GenUI only applies while generative UI is on; clear it otherwise.
     const effectiveGenuiId =
       data.generativeUi && data.genuiId ? data.genuiId : null;
 
     if (agent?.id) {
-      // 更新现有 Agent。仅在名称实际变化时才写：后端拒绝重命名内置 Agent
-      // （"Builtin agent cannot be renamed"），无条件下发会让「只改图标等其它
-      // 字段」的内置 Agent 编辑在第一步就失败。
+      // Only write the name when it actually changed: the backend rejects
+      // renaming builtin agents, so an unconditional write would fail edits
+      // that only touch other fields.
       if (data.name !== agent.name) {
         await agentActions.updateAgentName(agent.id, data.name);
       }
 
-      // 图标：空串归一为 null（清除自定义图标，回退默认）。
+      // Normalize an empty icon to null (clears the custom icon).
       if ((data.icon || null) !== (agent.icon ?? null)) {
         await agentActions.updateAgentField(agent.id, "icon", data.icon || null);
       }
 
-      // Helper function to compare optional values
       const hasChanged = <T,>(a: T | undefined, b: T | undefined) =>
         a !== b && !(a === undefined && b === undefined);
 
@@ -299,7 +295,6 @@
         );
       }
 
-      // MCP 服务器变更（序列化比较，避免无意义写入）
       if (
         JSON.stringify(data.mcpServers ?? []) !==
         JSON.stringify(agent.mcpServers ?? [])
@@ -311,7 +306,7 @@
         );
       }
 
-      // 生成式 UI: 显式比较布尔值，关闭时必须发送 false（不能被假值跳过）
+      // Compare booleans explicitly: turning it off must send false, not be skipped as falsy.
       if ((data.generativeUi ?? false) !== (agent.generativeUi ?? false)) {
         await agentActions.updateAgentField(
           agent.id,
@@ -320,19 +315,18 @@
         );
       }
 
-      // 关联 GenUI: 与既有值比较，变更时下发（null 表示解除关联）
+      // null unlinks the GenUI.
       if ((agent.genuiId ?? null) !== effectiveGenuiId) {
         await agentActions.updateAgentField(agent.id, "genuiId", effectiveGenuiId);
       }
 
-      // 关联 skill 变更（序列化比较，避免无意义写入）
       if (
         JSON.stringify(data.skills ?? []) !== JSON.stringify(agent.skills ?? [])
       ) {
         await agentActions.updateAgentField(agent.id, "skills", data.skills);
       }
 
-      // 能力字段：后端仅支持逐字段更新，变更时下发。
+      // Capability fields: the backend only supports per-field updates.
       if (data.description !== (agent.description ?? "")) {
         await agentActions.updateAgentField(
           agent.id,
@@ -365,7 +359,7 @@
         );
       }
     } else {
-      // 创建新 Agent（后端 create 不接受能力字段，需创建后逐项写入）
+      // Create does not accept capability fields; write them after creation.
       const newAgent = await agentActions.createAgent({
         name: data.name,
         temperature: data.temperature,
@@ -378,7 +372,7 @@
         genuiId: effectiveGenuiId ?? undefined,
       });
 
-      // 仅对非默认能力字段做 create-then-update。
+      // Create-then-update only for non-default capability fields.
       if (newAgent.id) {
         if (data.icon) {
           await agentActions.updateAgentField(newAgent.id, "icon", data.icon);
@@ -485,10 +479,9 @@
   });
 </script>
 
-<!-- Agent 编辑二级页：设置子页的样式语言——居中 max-w-3xl 阅读宽度（不撑满屏幕）、
-     TableGroup 分组卡 + 行组件；Skill / MCP 的选择经 Modal 弹窗。 -->
+<!-- Agent editor page in the settings style: centered max-w-3xl reading width,
+     TableGroup cards; Skill / MCP picked via modals. -->
 <div class="h-full flex flex-col">
-  <!-- 顶部工具栏 -->
   <div class="flex-shrink-0 px-6 pb-4 pt-12">
     <div class="mx-auto w-full max-w-3xl">
       <button
@@ -500,7 +493,7 @@
       </button>
 
       <div class="flex items-center gap-3">
-        <!-- 图标：标题前的当前图标按钮（默认 Bot），点击原地弹出选择浮层 -->
+        <!-- Current-icon button; click opens the in-place picker popover. -->
         <div class="icon-picker relative flex-shrink-0">
           <button
             type="button"
@@ -562,11 +555,9 @@
     </div>
   </div>
 
-  <!-- 表单主体：设置页式分组卡纵排 -->
   <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-y-4">
 
-      <!-- 系统提示词 -->
       <TableGroup title={t("agent.form.systemPromptTitle")}>
         <TableBaseRow>
           <textarea
@@ -580,7 +571,6 @@
         </TableBaseRow>
       </TableGroup>
 
-      <!-- 工具：内置工具 / 执行方式 / 技能 / MCP（技能与 MCP 经 Modal 选择） -->
       <TableGroup title={t("agent.form.sectionTools")}>
         <TableBaseRow label={t("agent.form.builtinTools")} layout="vertical">
           <div class="flex flex-wrap gap-1.5">
@@ -622,7 +612,6 @@
         />
       </TableGroup>
 
-      <!-- 运行：工作目录 / 生成式 UI -->
       <TableGroup title={t("agent.form.sectionRuntime")}>
         <SelectRow
           label={t("agent.form.workingDir")}
@@ -645,7 +634,6 @@
         {/if}
       </TableGroup>
 
-      <!-- 模型参数（可折叠分组卡） -->
       <TableGroup
         title={t("agent.form.modelParams")}
         collapsible
@@ -670,10 +658,9 @@
   </div>
 </div>
 
-<!-- 技能选择 Modal：搜索 + 双列卡片网格，整卡点击切换选中（Directory 式）。 -->
+<!-- Skill selection modal: search + two-column card grid; the whole card toggles selection. -->
 <Modal bind:open={skillsModalOpen} title={t("agent.form.skillsTitle")}>
   <div class="flex h-[65vh] w-[680px] max-w-[85vw] flex-col pt-14">
-    <!-- 搜索框 -->
     <div class="border-b border-[var(--hairline)] px-5 pb-4">
       <div class="relative">
         <Search
@@ -689,7 +676,6 @@
       </div>
     </div>
 
-    <!-- 卡片网格（滚动区） -->
     <div class="flex-1 overflow-y-auto p-5">
       {#if filteredSkills.length === 0 && missingSelectedSkills.length === 0}
         <div class="flex h-full items-center justify-center">
@@ -729,7 +715,7 @@
               {/if}
             </button>
           {/each}
-          <!-- 已关联但已不存在的 skill（被删 / 改名）：暗淡卡，点击取消关联 -->
+          <!-- Linked skills missing on disk: dimmed card, click to unlink. -->
           {#each missingSelectedSkills as name (name)}
             <button
               type="button"
@@ -753,7 +739,7 @@
   </div>
 </Modal>
 
-<!-- MCP 服务器选择 Modal：双列卡片网格，整卡点击切换；选中卡内配置执行方式。 -->
+<!-- MCP server selection modal: the whole card toggles; execution mode is configured inside selected cards. -->
 <Modal bind:open={mcpModalOpen} title={t("agent.form.mcpServers")}>
   <div class="flex max-h-[65vh] w-[680px] max-w-[85vw] flex-col pt-14">
     <div class="flex-1 overflow-y-auto p-5 pt-1">
@@ -770,8 +756,8 @@
         <div class="grid grid-cols-2 gap-3">
           {#each availableServers as server (server.id)}
             {@const selected = isMcpSelected(server.id)}
-            <!-- 宿主是 role="button" 的 div 而非 <button>：选中态卡内嵌执行方式
-                 Select（真按钮），HTML 禁止 button 嵌套。 -->
+            <!-- div with role="button" instead of <button>: selected cards embed
+                 a real Select button and HTML forbids nested buttons. -->
             <div
               role="button"
               tabindex="0"
@@ -801,7 +787,7 @@
                 })}
               </span>
               {#if selected}
-                <!-- 执行方式：选中后卡内配置；包一层拦截点击避免误触整卡切换 -->
+                <!-- Wrapper stops propagation so configuring the mode doesn't toggle the card. -->
                 <div
                   class="mt-2.5 flex items-center justify-between gap-2"
                   role="none"
@@ -829,5 +815,5 @@
   </div>
 </Modal>
 
-<!-- 点击浮层外关闭图标选择（浮层与触发按钮在 .icon-picker 内，点击其内不关闭） -->
+<!-- Close the icon picker on outside click; clicks inside .icon-picker keep it open. -->
 <svelte:window onclick={handleIconPickerOutside} />

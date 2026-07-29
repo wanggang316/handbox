@@ -1,5 +1,3 @@
-// 窗口管理相关 IPC 命令
-
 use crate::models::AppError;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -11,9 +9,10 @@ fn map_window_error(action: &'static str) -> impl FnOnce(tauri::Error) -> AppErr
     }
 }
 
-/// 打开设置：设置页在主窗口内渲染（不再是独立窗口）。
-/// 聚焦主窗口并通知其导航到 /settings[/path]；供原生菜单（⌘,）与
-/// 划词等其他 webview 窗口调用，主窗口内部直接 goto 即可、无需经此命令。
+/// Opens settings: the settings page renders inside the main window. Focuses
+/// the main window and tells it to navigate to /settings[/path]; for the native
+/// menu (⌘,) and other webview windows (e.g. the selection overlay) — code
+/// inside the main window can just goto directly.
 #[tauri::command]
 pub async fn open_settings_window(app: AppHandle, path: Option<String>) -> Result<(), AppError> {
     let url_path = if let Some(p) = path {
@@ -40,7 +39,7 @@ pub async fn open_settings_window(app: AppHandle, path: Option<String>) -> Resul
     window
         .set_focus()
         .map_err(map_window_error("聚焦主窗口失败"))?;
-    // 定向发给主窗口；根布局监听该事件并 goto。
+    // Targeted at the main window; the root layout listens and gotos.
     app.emit_to("main", "settings:navigate", url_path)
         .map_err(map_window_error("通知主窗口导航失败"))?;
     Ok(())

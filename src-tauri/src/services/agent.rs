@@ -1,12 +1,9 @@
-// Agent 服务实现
-
 use crate::models::AppError;
 use crate::services::Database;
 use crate::storage::types::{Agent, AgentReasoningConfig, McpServerConfig, UUID};
 use crate::storage::AgentRepository;
 use std::sync::Arc;
 
-/// Agent 参数类型
 pub enum AgentParameter {
     Name(String),
     Temperature(Option<f32>),
@@ -29,7 +26,6 @@ pub enum AgentParameter {
     Starters(Vec<String>),
 }
 
-/// Agent 服务
 #[derive(Clone)]
 pub struct AgentService {
     repository: AgentRepository,
@@ -42,8 +38,8 @@ impl AgentService {
         }
     }
 
-    /// 创建 Agent
-    // 参数逐一对应可编辑的 Agent 字段；聚合成 struct 只会平移参数表而非缩短它。
+    // Arguments map 1:1 onto the editable Agent fields; bundling them into a
+    // struct would move the parameter list, not shorten it.
     #[allow(clippy::too_many_arguments)]
     pub async fn create_agent(
         &self,
@@ -74,8 +70,8 @@ impl AgentService {
             skills: skills.unwrap_or_default(),
             generative_ui,
             genui_id,
-            // AgentDefinition 扩展字段：create 路径默认空，由表单创建后经
-            // `agent_update_field` 逐字段补齐（与编辑路径一致）。用户创建恒为非内置。
+            // Extended AgentDefinition fields start empty here and are filled in
+            // field by field via `agent_update_field`. User-created is never builtin.
             provider_id: None,
             icon: None,
             description: None,
@@ -93,7 +89,6 @@ impl AgentService {
         Ok(agent)
     }
 
-    /// 获取 Agent 列表
     pub async fn list_agents(
         &self,
         limit: Option<i32>,
@@ -105,7 +100,6 @@ impl AgentService {
         self.repository.list_agents(limit, offset).await
     }
 
-    /// 获取 Agent 详情
     pub async fn get_agent(&self, agent_id: UUID) -> Result<Agent, AppError> {
         match self.repository.get_agent_by_id(&agent_id).await? {
             Some(agent) => Ok(agent),
@@ -113,7 +107,7 @@ impl AgentService {
         }
     }
 
-    /// 统一的参数更新方法
+    /// Single entry point for updating one Agent field.
     pub async fn update_agent_parameter(
         &self,
         agent_id: UUID,
@@ -121,7 +115,7 @@ impl AgentService {
     ) -> Result<Agent, AppError> {
         let mut agent = self.get_agent(agent_id).await?;
 
-        // 内置 AgentDefinition 不可改名（id 稳定，保留固定显示名）；其余字段可调。
+        // Builtin definitions keep a fixed display name; other fields stay editable.
         if agent.builtin && matches!(parameter, AgentParameter::Name(_)) {
             return Err(AppError::validation_error("Builtin agent cannot be renamed"));
         }
@@ -153,11 +147,9 @@ impl AgentService {
         Ok(agent)
     }
 
-    /// 批量更新 Agent 设置
-    ///
-    /// 注意：本方法刻意不含 `generative_ui` 参数（与 `create_agent` 不同）。该字段
-    /// 通过 `update_agent_parameter(AgentParameter::GenerativeUi)`（对应前端
-    /// `agent_update_field` 的 "generativeUi" 路径）单独更新，不走批量更新——并非遗漏。
+    /// Batch update of Agent settings. `generative_ui` is deliberately absent:
+    /// it is updated only through
+    /// `update_agent_parameter(AgentParameter::GenerativeUi)`.
     #[allow(clippy::too_many_arguments)]
     pub async fn update_agent(
         &self,
@@ -207,17 +199,14 @@ impl AgentService {
         Ok(agent)
     }
 
-    /// 删除 Agent
     pub async fn delete_agent(&self, agent_id: UUID) -> Result<(), AppError> {
-        // 先检查 Agent 是否存在
         let agent = self.get_agent(agent_id.clone()).await?;
 
-        // 内置 AgentDefinition（builtin-chat / builtin-coding）受保护，不可删除。
+        // Builtin definitions (builtin-chat / builtin-coding) are protected.
         if agent.builtin {
             return Err(AppError::validation_error("Builtin agent cannot be deleted"));
         }
 
-        // 删除 Agent
         self.repository.delete_agent(&agent_id).await
     }
 
@@ -342,9 +331,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Exclude the builtin AgentDefinitions seeded by migration 058. They
-        // carry earlier (migration-time) updated_at, so they sort after the
-        // two agents created during this test.
+        // Exclude the seeded builtin definitions: their updated_at is older, so
+        // they sort after the two agents created here.
         let agents: Vec<_> = service
             .list_agents(Some(10), Some(0))
             .await
@@ -576,11 +564,11 @@ mod tests {
             .update_agent(
                 created.id.clone(),
                 None,
-                Some(None), // 清空 temperature
-                Some(None), // 清空 top_p
-                Some(None), // 清空 top_k
+                Some(None), // clear temperature
+                Some(None), // clear top_p
+                Some(None), // clear top_k
                 None,
-                Some(None), // 清空 max_tokens
+                Some(None), // clear max_tokens
                 None,
                 None,
                 None,
@@ -620,11 +608,11 @@ mod tests {
             .update_agent(
                 created.id.clone(),
                 Some("Updated Name".to_string()),
-                None, // 不修改 temperature，保持原值
-                None, // 不修改 top_p，保持原值
-                None, // 不修改 top_k，保持原值
+                None, // leave temperature untouched
+                None, // leave top_p untouched
+                None, // leave top_k untouched
                 None,
-                None, // 不修改 max_tokens，保持原值
+                None, // leave max_tokens untouched
                 None,
                 None,
                 None,
@@ -633,14 +621,14 @@ mod tests {
             .expect("update failed");
 
         assert_eq!(updated.name, "Updated Name");
-        assert_eq!(updated.temperature, Some(0.7)); // 保持原值
-        assert_eq!(updated.top_p, Some(0.9)); // 保持原值
-        assert_eq!(updated.top_k, Some(40)); // 保持原值
-        assert_eq!(updated.max_tokens, Some(2048)); // 保持原值
+        assert_eq!(updated.temperature, Some(0.7));
+        assert_eq!(updated.top_p, Some(0.9));
+        assert_eq!(updated.top_k, Some(40));
+        assert_eq!(updated.max_tokens, Some(2048));
     }
 
-    /// VAL-AGENT-005: creating an agent with generative_ui = Some(true)
-    /// persists `true` and reads back `true`.
+    /// Creating an agent with generative_ui = Some(true) persists and reads
+    /// back `true`.
     #[tokio::test]
     async fn creates_agent_with_generative_ui_true() {
         let db = create_test_database().await;
@@ -669,8 +657,8 @@ mod tests {
         assert_eq!(fetched.generative_ui, Some(true));
     }
 
-    /// VAL-AGENT-004: turning generative_ui OFF must persist `false`, not be
-    /// swallowed as a falsy value at the service layer.
+    /// Turning generative_ui OFF must persist `false`, not be swallowed as a
+    /// falsy value at the service layer.
     #[tokio::test]
     async fn update_generative_ui_false_persists() {
         let db = create_test_database().await;
@@ -707,8 +695,7 @@ mod tests {
         assert_eq!(fetched.generative_ui, Some(false));
     }
 
-    /// VAL-AGENT-006: editing an unrelated field (Name) must preserve
-    /// generative_ui and the other unrelated fields.
+    /// Editing one field (Name) must preserve every other field.
     #[tokio::test]
     async fn preserves_generative_ui_on_unrelated_edit() {
         let db = create_test_database().await;

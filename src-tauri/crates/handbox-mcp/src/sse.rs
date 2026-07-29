@@ -12,12 +12,10 @@ use rmcp::transport::SseClientTransport;
 
 use super::types::SseConfig;
 
-/// SSE transport for MCP servers powered by reqwest
 #[allow(clippy::module_name_repetitions)]
 pub struct SseTransport;
 
 impl SseTransport {
-    /// Create a new SSE transport connecting to the given endpoint
     pub async fn connect(config: &SseConfig) -> Result<SseClientTransport<reqwest::Client>> {
         tracing::info!("Creating MCP SSE transport");
         tracing::info!("> endpoint: {}", config.endpoint);
@@ -70,7 +68,6 @@ impl SseTransport {
         Ok(header_map)
     }
 
-    /// Validate that the endpoint URL is well-formed
     pub fn validate_endpoint(endpoint: &str) -> Result<()> {
         if endpoint.trim().is_empty() {
             return Err(anyhow::anyhow!("SSE endpoint cannot be empty"));

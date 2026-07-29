@@ -5,7 +5,6 @@ use crate::models::error::AppError;
 use crate::models::UpdateSettingsRequest;
 use crate::SettingsService;
 
-/// 内容面板模式
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentPanelMode {
@@ -14,7 +13,7 @@ pub enum ContentPanelMode {
     Ai,
 }
 
-/// 选中文本的应用信息
+/// Info about the app the text was selected in.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectionAppInfo {
     pub name: String,
@@ -22,7 +21,6 @@ pub struct SelectionAppInfo {
     pub pid: i32,
 }
 
-/// 显示内容面板的 payload
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectionPayload {
     pub text: String,
@@ -98,7 +96,6 @@ pub async fn selection_overlay_set_interactive(
     Ok(())
 }
 
-/// 显示 content panel
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_show_content_panel(
@@ -122,7 +119,6 @@ pub async fn selection_show_content_panel(
     Ok(())
 }
 
-/// 隐藏 content panel
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_hide_content_panel(app: tauri::AppHandle) -> Result<(), AppError> {
@@ -133,7 +129,6 @@ pub async fn selection_hide_content_panel(app: tauri::AppHandle) -> Result<(), A
     Ok(())
 }
 
-/// 隐藏 menu panel
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_hide_menu_panel(app: tauri::AppHandle) -> Result<(), AppError> {
@@ -144,7 +139,6 @@ pub async fn selection_hide_menu_panel(app: tauri::AppHandle) -> Result<(), AppE
     Ok(())
 }
 
-/// 设置 content panel 置顶状态
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_set_content_pinned(pinned: bool) -> Result<(), AppError> {
@@ -155,7 +149,6 @@ pub async fn selection_set_content_pinned(pinned: bool) -> Result<(), AppError> 
     Ok(())
 }
 
-/// 获取 content panel 置顶状态
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_get_content_pinned() -> Result<bool, AppError> {
@@ -227,7 +220,6 @@ pub async fn selection_disable_current_app_by_bundle_id(
         return Ok(());
     };
 
-    // 直接使用 FrontmostAppInfo 中已有的 name
     let disabled_app = DisabledAppInfo {
         bundle_id: info.bundle_id.clone(),
         name: info.name.clone(),
@@ -386,14 +378,12 @@ pub async fn selection_overlay_set_interactive(
     Ok(())
 }
 
-/// 禁用的应用信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisabledApp {
     pub bundle_id: String,
     pub name: String,
 }
 
-/// 获取禁用的应用列表
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_get_disabled_apps(
@@ -402,7 +392,6 @@ pub async fn selection_get_disabled_apps(
     let settings = settings_service.get_settings()?;
     let blacklist = &settings.quick_tools.selection_blacklist;
 
-    // 直接返回存储的应用信息
     let disabled_apps = blacklist
         .apps
         .iter()
@@ -415,7 +404,6 @@ pub async fn selection_get_disabled_apps(
     Ok(disabled_apps)
 }
 
-/// 从禁用列表中移除应用（通过 bundle_id）
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn selection_remove_disabled_app(
@@ -425,7 +413,6 @@ pub async fn selection_remove_disabled_app(
     let mut settings = settings_service.get_settings()?;
     let blacklist = &mut settings.quick_tools.selection_blacklist;
 
-    // 移除该 bundle_id 对应的应用
     blacklist.apps.retain(|app| app.bundle_id != bundle_id);
 
     settings_service.update_settings(UpdateSettingsRequest {

@@ -47,15 +47,15 @@
     explanation: string | null;
   };
 
-  // 内容状态
   let content = $state({
     mode: "" as "show" | "translate" | "ai" | "",
     text: "",
     app_info: { name: "", bundle_id: "", pid: 0 },
   });
 
-  // 翻译状态。spec 与 result 互斥：最终回复是合法 JSON-Render spec 时走 GenUI
-  // 卡片（spec），否则回落结构化/纯文本解析（result）。
+  // spec and result are mutually exclusive: a final reply that is a valid
+  // JSON-Render spec renders as a GenUI card (spec), otherwise fall back to
+  // structured/plain-text parsing (result).
   let translation = $state({
     isLoading: false,
     result: null as TranslationResult | null,
@@ -63,13 +63,10 @@
     error: null as string | null,
   });
 
-  // 置顶状态
   let isPinned = $state(false);
 
-  // 下拉框状态
   let showModeDropdown = $state(false);
 
-  // 模式配置
   const modeConfig = $derived({
     show: { icon: Eye, label: t("selection.modeShow"), color: "text-error" },
     translate: {
@@ -83,26 +80,19 @@
   onMount(() => {
     console.log("=====> [selection/content] onMount executed");
 
-    // 重置下拉框状态
     showModeDropdown = false;
 
-    // 监听 init-content 事件
     const unlisten = listen("init-content", async (event: any) => {
       const { mode, text, x, y, app_info } = event.payload;
       content = { mode, text, app_info };
-      // 新内容时重置置顶状态
+      // New content resets the pin state
       isPinned = false;
       await setContentPanelPinned(false);
       console.log("-----> content received: ", content);
 
-      // 如果是翻译模式，自动开始翻译
       if (mode === "translate" && text) {
         await handleTranslate();
       }
-
-      // // 设置位置：x 居中，y 在选中文字下方
-      // await appWindow.setPosition(new LogicalPosition(x - 160, y + 8));
-      // await appWindow.show();
     });
 
     return () => {
@@ -110,7 +100,6 @@
     };
   });
 
-  // 关闭面板
   async function handleClose() {
     content = {
       mode: "",
@@ -121,48 +110,40 @@
     await hideContentPanel();
   }
 
-  // 切换置顶状态
   async function togglePin() {
     isPinned = !isPinned;
     await setContentPanelPinned(isPinned);
   }
 
-  // 复制文本
   async function handleCopy() {
     await writeText(content.text);
   }
 
-  // 重新生成
   async function handleRegenerate() {
-    // TODO: 触发重新生成逻辑
+    // TODO: implement regeneration
     console.log("重新生成:", content.mode);
   }
 
-  // 继续问
   async function handleContinue() {
-    // TODO: 触发继续问逻辑
+    // TODO: implement follow-up ask
     console.log("继续问");
   }
 
-  // 切换模式
   async function handleModeChange(newMode: "show" | "translate" | "ai") {
     content.mode = newMode;
     showModeDropdown = false;
-    // TODO: 触发模式切换逻辑，重新生成内容
+    // TODO: regenerate content on mode switch
     console.log("模式切换为:", newMode);
 
-    // 如果切换到翻译模式且有文本，自动开始翻译
     if (newMode === "translate" && content.text) {
       await handleTranslate();
     }
   }
 
-  // 切换下拉框显示状态
   function toggleDropdown() {
     showModeDropdown = !showModeDropdown;
   }
 
-  // 点击外部关闭下拉框
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as HTMLElement;
     if (!target.closest(".mode-dropdown")) {
@@ -170,25 +151,26 @@
     }
   }
 
-  // 翻译会话的 system prompt：约束模型只回 JSON，与 parseTranslationResponse
-  // 的字段契约一致（解析失败时按纯文本回落，不会硬失败）。
+  // Constrains the model to JSON matching parseTranslationResponse's contract
+  // (parse failures fall back to plain text, never hard-fail).
   const TRANSLATION_PROMPT =
     'You are a translation assistant. Translate the user\'s input between Chinese and English (auto-detect the source and translate to the other language). Reply with ONLY a JSON object and no other text: {"translation": "<translated text>", "targetLanguage": "<zh|en>", "phonetic": "<pronunciation, or null>", "explanation": "<brief usage note in Chinese, or null>"}';
 
   /**
-   * 获取翻译 Session：优先使用设置里选定的翻译 Agent（quickTools.
-   * translationAgentId），未选定时回落 builtin-chat + 硬编码翻译 prompt。
+   * Get the translation session: prefer the agent picked in settings
+   * (quickTools.translationAgentId), falling back to builtin-chat plus the
+   * hardcoded translation prompt.
    *
-   * 缓存的 sessionId 仅在「创建它的 agent（translation.agentId）」与当前配置
-   * 一致时复用——用户在设置里切换翻译 Agent 后，这里自动按新 Agent 重建会话并
-   * 写回 settings（本处是唯一创建点）。模型统一取 quick-action 默认模型
-   * （Agent 定义已与模型解耦，实例化必须显式给 model）；无可用模型时返回
-   * null，上层提示去设置配置。
+   * The cached sessionId is reused only while its creating agent matches the
+   * current config — switching the translation agent rebuilds the session and
+   * writes it back to settings (this is the only creation point). The model is
+   * always the quick-action default (instantiation must pass a model
+   * explicitly); returns null when no model is available.
    */
   async function getOrCreateTranslationSession(): Promise<string | null> {
     try {
-      // 设置可能在主窗口被修改过（换了翻译 Agent / 默认模型）：强制刷新本窗口
-      // 的 settings 快照，再决定复用还是重建。
+      // Settings may have changed in the main window (different agent/model):
+      // force-refresh this window's snapshot before deciding reuse vs rebuild.
       await settingsState.loadSettings(true);
 
       const configuredAgentId =
@@ -217,8 +199,9 @@
         },
       );
       if (!configuredAgentId) {
-        // builtin 回落：JSON 输出契约挂在会话 system prompt 上；失败不阻塞
-        // （回落纯文本解析）。选定 Agent 时用其自带 system prompt / GenUI 配置。
+        // Builtin fallback: the JSON output contract rides on the session's
+        // system prompt; failure doesn't block (plain-text parse fallback). A
+        // picked agent uses its own system prompt / GenUI config.
         try {
           await updateAgentSessionField(
             session.id,
@@ -240,9 +223,6 @@
     }
   }
 
-  /**
-   * 解析翻译响应
-   */
   function parseTranslationResponse(
     content: string,
     term: string,
@@ -279,9 +259,6 @@
     }
   }
 
-  /**
-   * 执行翻译
-   */
   async function handleTranslate() {
     if (!content.text || translation.isLoading) return;
 
@@ -298,9 +275,9 @@
 
     const term = content.text;
     try {
-      // 一问一答：纯文本增量实时回灌预览；spec 形状的流不逐字符渲染原始
-      // JSON，保持加载态直到定稿。结束后先按 GenUI spec 解析，非 spec 回落
-      // 结构化译文解析。
+      // Single turn: plain-text deltas stream into the result preview; spec-
+      // shaped streams keep the loading state instead of rendering raw JSON.
+      // Afterwards try GenUI spec first, else structured translation parse.
       const finalContent = await runAgentTextTurn(sessionId, term, (partial) => {
         if (looksLikeStreamingSpec(partial)) return;
         translation.result = {
@@ -321,7 +298,8 @@
     } catch (error) {
       console.error("Translation error:", error);
       translation.error = t("selection.translationFailed");
-      // 缓存会话可能已失效（被删除等）：清掉绑定让「重新翻译」重建会话。
+      // The cached session may be stale (deleted, etc.): clear the binding so
+      // retranslate rebuilds it.
       try {
         await settingsState.updateSettings({
           section: "translation",
@@ -341,14 +319,12 @@
 <div
   class="flex flex-col w-full h-full bg-[var(--bg-card)] rounded-xl shadow-lg border border-[var(--hairline)] overflow-hidden"
 >
-  <!-- 标题栏 -->
   {#if content.mode && modeConfig[content.mode]}
     {@const config = modeConfig[content.mode]}
     <div
       class="flex items-center justify-between px-3 py-2 border-b border-base-300 cursor-move"
       data-tauri-drag-region
     >
-      <!-- 模式下拉框 -->
       <div class="mode-dropdown relative">
         <button
           class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-base-300 transition-colors {config.color}"
@@ -359,7 +335,6 @@
           <ChevronDown class="size-3.5 opacity-60" />
         </button>
 
-        <!-- 下拉菜单 -->
         {#if showModeDropdown}
           <div
             class="absolute top-full left-0 mt-1 bg-[var(--bg-card)] rounded-lg shadow-lg border border-[var(--hairline)] py-1 min-w-[120px] z-50"
@@ -407,11 +382,10 @@
     </div>
   {/if}
 
-  <!-- 内容区域 -->
-  <!-- 划词结果是正文：译文 / 原文要能选中拷贝。 -->
+  <!-- Selection results are content: translation and source must be selectable. -->
   <div class="flex-1 p-3 overflow-auto min-h-0 select-text">
     {#if content.mode === "translate"}
-      <!-- 翻译模式：流式期间纯文本增量走 result 预览，spec 形状的流保持加载态 -->
+      <!-- While streaming, plain-text deltas preview via result; spec-shaped streams keep the loading state -->
       {#if translation.isLoading && !translation.result}
         <div class="flex items-center justify-center py-8">
           <Spinner size={28} />
@@ -422,13 +396,12 @@
           {translation.error}
         </div>
       {:else if translation.spec}
-        <!-- 翻译 Agent 的 GenUI 输出：整条回复是合法 JSON-Render spec → 卡片渲染 -->
+        <!-- GenUI output: the whole reply is a valid JSON-Render spec, rendered as a card -->
         <JsonUIProvider initialState={{}}>
           <Renderer spec={translation.spec} registry={uiRegistry} />
         </JsonUIProvider>
       {:else if translation.result}
         <div class="space-y-3">
-          <!-- 译文 -->
           <div class="p-2 rounded-lg bg-base-300">
             <div class="flex items-center gap-2">
               <span
@@ -464,11 +437,9 @@
     {/if}
   </div>
 
-  <!-- 底部按钮区域 -->
   <div
     class="flex items-center justify-between px-3 py-1.5 border-t border-[var(--hairline)] bg-base-300/60"
   >
-    <!-- 左下角：复制、重新生成 -->
     <div class="flex items-center gap-1">
       <button
         class="flex items-center justify-center w-7 h-7 text-base-content/60 hover:text-base-content hover:bg-base-300/50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
@@ -499,7 +470,6 @@
       {/if}
     </div>
 
-    <!-- 右下角：继续问 -->
     <button
       class="flex items-center px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       onclick={handleContinue}

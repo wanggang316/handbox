@@ -26,6 +26,6 @@ pub use mcp::{
 };
 pub use model::{Model, ModelModality};
 pub use provider::Provider;
-// `SessionReasoningConfig` now lives in `models::llm_types`; re-exported here so
-// existing `storage::types::SessionReasoningConfig` consumers keep resolving.
+// `SessionReasoningConfig` is defined in `models::llm_types`; re-exported so
+// `storage::types::SessionReasoningConfig` consumers keep resolving.
 pub use crate::models::llm_types::SessionReasoningConfig;

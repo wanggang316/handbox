@@ -1,11 +1,11 @@
-// Agent Project 数据访问层
+// Persistence for Agent-mode projects (sessions grouped by working
+// directory), built on the `agent_projects` table and the
+// `agent_sessions.project_id` column. Independent of chat-mode storage and
+// of the `/agents` presets (`agents` table).
 //
-// Agent 模式项目（按工作目录分组会话）的持久化层，建立在 `agent_projects`
-// 表与 `agent_sessions.project_id` 列之上。与 Chat 模式的 `session_repository`
-// 以及 `/agents` 预设（`agents` 表）完全独立。
-//
-// path 的 canonicalize 在 service 层完成；仓库层信任传入 path 已 canonical，
-// get-or-create 的去重按字符串全等（数据库 UNIQUE 约束兜底）。
+// Path canonicalization happens in the service layer; this repository trusts
+// the incoming path and dedupes get-or-create by exact string equality (the
+// DB UNIQUE constraint is the backstop).
 
 use crate::models::AppError;
 use crate::storage::types::{AgentProject, CreateAgentProjectRequest, UUID};
@@ -13,7 +13,6 @@ use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
 
-/// Agent Project 仓储层
 #[derive(Clone)]
 pub struct AgentProjectRepository {
     db: Arc<Database>,
@@ -24,12 +23,13 @@ impl AgentProjectRepository {
         Self { db }
     }
 
-    /// 创建 Agent Project（get-or-create by path）。
+    /// Get-or-create by path.
     ///
-    /// 同 path 已存在时返回已有项目，绝不改写其 name / created_at /
-    /// updated_at。并发同 path 创建时（UNIQUE 竞态），落败方不会向调用方
-    /// 暴露约束冲突错误：`INSERT ... ON CONFLICT(path) DO NOTHING` 把冲突
-    /// 静默吞掉，随后的 SELECT 取回胜出方写入的行。
+    /// If the path already exists the existing project is returned; its
+    /// name / created_at / updated_at are never overwritten. Concurrent
+    /// creates on the same path (UNIQUE race) never surface a constraint
+    /// error: `INSERT ... ON CONFLICT(path) DO NOTHING` swallows the conflict
+    /// and the following SELECT returns the winner's row.
     pub async fn create_project(
         &self,
         request: &CreateAgentProjectRequest,
@@ -53,8 +53,9 @@ impl AgentProjectRepository {
         .await
         .map_err(|e| AppError::internal_error(&format!("Failed to create agent project: {}", e)))?;
 
-        // 无论 INSERT 是否生效，统一按 path 取回当前行：覆盖「本次新建」与
-        // 「已存在 / 并发胜出方写入」两种情况，调用方拿到的总是数据库中的真实行。
+        // Whether or not the INSERT took effect, re-read the row by path:
+        // covers both "created now" and "already existed / concurrent winner",
+        // so callers always get the real DB row.
         self.get_project_by_path(&request.path)
             .await?
             .ok_or_else(|| {
@@ -65,7 +66,6 @@ impl AgentProjectRepository {
             })
     }
 
-    /// 根据 ID 获取 Agent Project
     pub async fn get_project_by_id(
         &self,
         project_id: &UUID,
@@ -81,7 +81,7 @@ impl AgentProjectRepository {
         row.map(Self::row_to_project).transpose()
     }
 
-    /// 根据 path 获取 Agent Project（字符串全等匹配）
+    /// Exact string match on `path`.
     pub async fn get_project_by_path(&self, path: &str) -> Result<Option<AgentProject>, AppError> {
         let row = sqlx::query(
             "SELECT id, path, name, created_at, updated_at FROM agent_projects WHERE path = $1",
@@ -94,7 +94,8 @@ impl AgentProjectRepository {
         row.map(Self::row_to_project).transpose()
     }
 
-    /// 获取全部 Agent Project（created_at 降序、id 升序保证稳定；展示排序由前端做）
+    /// Ordered by created_at DESC then id ASC for stability; display ordering
+    /// is the frontend's job.
     pub async fn list_projects(&self) -> Result<Vec<AgentProject>, AppError> {
         let rows = sqlx::query(
             "SELECT id, path, name, created_at, updated_at FROM agent_projects ORDER BY created_at DESC, id ASC",
@@ -106,7 +107,7 @@ impl AgentProjectRepository {
         rows.into_iter().map(Self::row_to_project).collect()
     }
 
-    /// 重命名 Agent Project（同时刷新 updated_at）
+    /// Renaming also bumps `updated_at`.
     pub async fn rename_project(&self, project_id: &UUID, name: &str) -> Result<(), AppError> {
         let now = Self::now_ms();
 
@@ -131,33 +132,34 @@ impl AgentProjectRepository {
         Ok(())
     }
 
-    /// 删除 Agent Project（显式级联删除其会话及 transcript）
+    /// Deletes a project, explicitly cascading to its sessions and transcripts.
     ///
-    /// # 为什么显式删除而不依赖 `ON DELETE CASCADE`？
+    /// # Why explicit deletes instead of `ON DELETE CASCADE`?
     ///
-    /// 这里在同一个事务里依次删除该项目全部会话的 `agent_session_messages`、
-    /// 该项目的 `agent_sessions` 行、最后是 `agent_projects` 行本身。显式级联
-    /// 是一种防御性写法，与连接的 `PRAGMA foreign_keys` 状态无关：无论 FK
-    /// 强制开启与否，三层数据都会被原子地清除，不留孤儿行。
+    /// Within one transaction this deletes the project's sessions'
+    /// `agent_session_messages` rows, then its `agent_sessions` rows, then the
+    /// `agent_projects` row itself. The explicit cascade is defensive and
+    /// independent of the connection's `PRAGMA foreign_keys` state: all three
+    /// layers are cleared atomically, leaving no orphan rows.
     ///
-    /// 两条删除均以 `project_id = $1` 为界：`project_id IS NULL` 的未分组
-    /// 会话与兄弟项目的会话天然不在删除范围内。
+    /// Both deletes are bounded by `project_id = $1`: ungrouped sessions
+    /// (`project_id IS NULL`) and sibling projects' sessions are never touched.
     ///
-    /// # 为什么 transcript 删除要容忍表缺失？
+    /// # Why tolerate a missing transcript table?
     ///
-    /// `m3-project-delete-and-drop` 在迁移成功后会一次性 `DROP TABLE
-    /// agent_session_messages`（transcript 此后由 JSONL 权威保存，命令层另行逐会话
-    /// 删除 `<id>.jsonl`）。表被 drop 之后，这条遗留 transcript DELETE 已无目标，必须
-    /// 是安全 no-op——否则「no such table」会让整个项目级联删除以 INTERNAL_ERROR
-    /// 失败。这里先探测表是否存在（在事务内读以与后续 DELETE 看到一致的 schema），
-    /// 存在才发 DELETE；表缺失时直接跳过，绝不触发缺表错误。
+    /// Once transcripts are authoritative in JSONL, the legacy
+    /// `agent_session_messages` table is dropped (the command layer deletes the
+    /// per-session `<id>.jsonl` files separately). The transcript DELETE must
+    /// then be a safe no-op — otherwise "no such table" would fail the whole
+    /// cascade with INTERNAL_ERROR. The table's existence is probed inside the
+    /// transaction (so the DELETE sees the same schema); when absent, the
+    /// DELETE is skipped.
     pub async fn delete_project(&self, project_id: &UUID) -> Result<(), AppError> {
         let mut tx = self.db.pool().begin().await.map_err(|e| {
             AppError::internal_error(&format!("Failed to begin transaction: {}", e))
         })?;
 
-        // 1. 先删除该项目全部会话的 transcript 行（以项目的会话集合为界），但仅在
-        //    遗留 transcript 表仍存在时执行：迁移后该表被 drop，DELETE 应是安全 no-op。
+        // Transcript rows first — only while the legacy table still exists.
         let legacy_table_exists =
             crate::storage::agent_session_repository::legacy_transcript_table_exists(&mut tx)
                 .await?;
@@ -179,7 +181,6 @@ impl AgentProjectRepository {
             })?;
         }
 
-        // 2. 再删除该项目的全部会话行
         sqlx::query("DELETE FROM agent_sessions WHERE project_id = $1")
             .bind(project_id)
             .execute(&mut *tx)
@@ -188,7 +189,6 @@ impl AgentProjectRepository {
                 AppError::internal_error(&format!("Failed to delete agent project sessions: {}", e))
             })?;
 
-        // 3. 最后删除项目行本身
         let result = sqlx::query("DELETE FROM agent_projects WHERE id = $1")
             .bind(project_id)
             .execute(&mut *tx)
@@ -198,8 +198,9 @@ impl AgentProjectRepository {
             })?;
 
         if result.rows_affected() == 0 {
-            // 项目不存在：回滚（合法数据下步骤 1/2 不会命中任何行；即使存在
-            // 指向缺失项目的脏数据，回滚也保证零副作用），返回 NotFound。
+            // Project missing: roll back and return NotFound. With well-formed
+            // data the earlier deletes matched nothing; even with dirty rows
+            // pointing at a missing project, rollback guarantees no side effects.
             tx.rollback().await.map_err(|e| {
                 AppError::internal_error(&format!("Failed to rollback transaction: {}", e))
             })?;
@@ -216,7 +217,7 @@ impl AgentProjectRepository {
         Ok(())
     }
 
-    /// 统计某项目下的会话数（项目不存在时返回 0）
+    /// Counts a project's sessions; returns 0 for a missing project.
     pub async fn session_count(&self, project_id: &UUID) -> Result<i64, AppError> {
         let row = sqlx::query("SELECT COUNT(*) AS count FROM agent_sessions WHERE project_id = $1")
             .bind(project_id)
@@ -229,7 +230,6 @@ impl AgentProjectRepository {
         Ok(row.try_get("count")?)
     }
 
-    /// 当前时间（毫秒）
     fn now_ms() -> i64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -237,7 +237,6 @@ impl AgentProjectRepository {
             .as_millis() as i64
     }
 
-    // 辅助方法：将数据库行转换为 AgentProject
     fn row_to_project(row: sqlx::sqlite::SqliteRow) -> Result<AgentProject, AppError> {
         Ok(AgentProject {
             id: row.try_get("id")?,
@@ -276,8 +275,9 @@ mod tests {
         }
     }
 
-    /// 直接插入一条 agent_sessions 行（可选挂到某个项目），返回 session id。
-    /// 不走 AgentSessionRepository：本仓库的测试只关心 project_id 维度的行为。
+    /// Inserts an agent_sessions row directly (optionally linked to a project)
+    /// and returns the session id. Bypasses AgentSessionRepository: these
+    /// tests only care about project_id behaviour.
     async fn insert_session(db: &Database, project_id: Option<&str>, name: &str) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
@@ -298,7 +298,6 @@ mod tests {
         id
     }
 
-    /// 直接插入一条 transcript 行。
     async fn insert_message(db: &Database, session_id: &str, seq: i64) {
         sqlx::query(
             r#"
@@ -447,9 +446,9 @@ mod tests {
         assert!(repo.get_project_by_id(&created.id).await.unwrap().is_none());
     }
 
-    /// VAL-PROJ-016: cascade delete removes the project, its sessions and their
-    /// messages atomically — while ungrouped (project_id NULL) sessions and
-    /// sibling projects remain fully untouched, message layer included.
+    /// Cascade delete removes the project, its sessions and their messages
+    /// atomically — while ungrouped (project_id NULL) sessions and sibling projects
+    /// remain fully untouched, message layer included.
     #[tokio::test]
     async fn test_delete_project_cascade_with_isolation() {
         let (db, _temp_dir) = create_test_db().await;
@@ -515,12 +514,11 @@ mod tests {
         assert_eq!(count_messages(db_arc.as_ref(), &ungrouped_s).await, 1);
     }
 
-    /// Drop-then-delete regression (the gap 691292d missed): after the legacy
-    /// `agent_session_messages` table is dropped post-migration, `delete_project`
-    /// must still cascade successfully — removing its N sessions and the project
-    /// row, returning `Ok(())` rather than failing with "no such table" →
-    /// INTERNAL_ERROR. Transcripts live in JSONL by then; the stale table DELETE
-    /// must be a safe no-op.
+    /// On a database where the legacy `agent_session_messages` table has been
+    /// dropped, `delete_project` must still cascade successfully — removing its N
+    /// sessions and the project row — rather than failing with "no such table" →
+    /// INTERNAL_ERROR. Transcripts live in JSONL there, so the stale table DELETE
+    /// has to be a safe no-op.
     #[tokio::test]
     async fn test_delete_project_succeeds_after_legacy_table_dropped() {
         let (db, _temp_dir) = create_test_db().await;
@@ -552,7 +550,7 @@ mod tests {
             .unwrap();
         insert_session(db_arc.as_ref(), Some(&sibling.id), "sib").await;
 
-        // Model the post-migration state: drop the legacy transcript table.
+        // Model a JSONL-only database: drop the legacy transcript table.
         sqlx::query("DROP TABLE agent_session_messages")
             .execute(db_arc.pool())
             .await
@@ -579,8 +577,8 @@ mod tests {
         assert_eq!(err.code, "NOT_FOUND");
     }
 
-    /// VAL-PROJ-014: delete / rename on a missing id is a clean NOT_FOUND with
-    /// zero side effects — double delete included.
+    /// Delete / rename on a missing id is a clean NOT_FOUND with zero side effects —
+    /// double delete included.
     #[tokio::test]
     async fn test_delete_and_rename_missing_id_clean_not_found() {
         let (db, _temp_dir) = create_test_db().await;
@@ -626,10 +624,10 @@ mod tests {
         assert_eq!(count_messages(db_arc.as_ref(), &session).await, 1);
     }
 
-    /// VAL-PROJ-019: two concurrent creates with the same path yield exactly
-    /// one row; both callers get the same project and no constraint error
-    /// surfaces. A later create with the same path returns the existing row
-    /// unchanged (name / created_at / updated_at not overwritten).
+    /// Two concurrent creates with the same path yield exactly one row; both callers
+    /// get the same project and no constraint error surfaces. A later create with
+    /// that path returns the existing row unchanged (name / created_at / updated_at
+    /// not overwritten).
     #[tokio::test]
     async fn test_concurrent_create_same_path_single_row() {
         let (db, _temp_dir) = create_test_db().await;

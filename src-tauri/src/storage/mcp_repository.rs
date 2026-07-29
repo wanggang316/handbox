@@ -1,5 +1,3 @@
-// MCP repository - data access for MCP server configurations
-
 use crate::models::AppError;
 use crate::storage::types::{McpConnectionType, McpServer, McpServerStatus};
 use crate::storage::Database;
@@ -8,7 +6,6 @@ use sqlx::{sqlite::SqliteRow, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Repository for persisting MCP servers
 #[derive(Clone)]
 pub struct McpRepository {
     db: Arc<Database>,
@@ -19,7 +16,6 @@ impl McpRepository {
         Self { db }
     }
 
-    /// List all MCP servers ordered by creation time
     pub async fn list_servers(&self) -> Result<Vec<McpServer>, AppError> {
         let query = r#"
             SELECT id, name, display_name, description, connection_type, command, args, working_dir, env,
@@ -39,7 +35,7 @@ impl McpRepository {
             .collect()
     }
 
-    /// Retrieve servers by their identifiers, preserving the provided order
+    /// Fetches servers by id, preserving the order of `ids`.
     pub async fn get_servers_by_ids(&self, ids: &[String]) -> Result<Vec<McpServer>, AppError> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -80,7 +76,6 @@ impl McpRepository {
         Ok(servers)
     }
 
-    /// Fetch a server by id
     pub async fn get_server(&self, id: &str) -> Result<Option<McpServer>, AppError> {
         let query = r#"
             SELECT id, name, display_name, description, connection_type, command, args, working_dir, env,
@@ -102,7 +97,6 @@ impl McpRepository {
         }
     }
 
-    /// Create a new server record
     pub async fn create_server(&self, server: &McpServer) -> Result<(), AppError> {
         let query = r#"
             INSERT INTO mcps (
@@ -153,7 +147,6 @@ impl McpRepository {
         Ok(())
     }
 
-    /// Update an existing server
     pub async fn update_server(&self, server: &McpServer) -> Result<(), AppError> {
         let query = r#"
             UPDATE mcps SET
@@ -223,7 +216,6 @@ impl McpRepository {
         Ok(())
     }
 
-    /// Update enabled flag only
     pub async fn update_enabled(
         &self,
         id: &str,
@@ -252,7 +244,6 @@ impl McpRepository {
         Ok(())
     }
 
-    /// Update status information
     pub async fn update_status(
         &self,
         id: &str,
@@ -290,7 +281,6 @@ impl McpRepository {
         Ok(())
     }
 
-    /// Delete a server
     pub async fn delete_server(&self, id: &str) -> Result<(), AppError> {
         let result = sqlx::query("DELETE FROM mcps WHERE id = $1")
             .bind(id)

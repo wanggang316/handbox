@@ -22,25 +22,24 @@
 //     resolves OUTSIDE is still rejected while an equivalent one INSIDE is
 //     accepted.
 //
-// On a sandbox violation the error result is GENERIC (D14): it never echoes the
+// On a sandbox violation the error result is GENERIC: it never echoes the
 // out-of-sandbox absolute path nor any file contents — only
 // "path is outside the working directory".
 //
-// ACCEPTED RESIDUAL RISK (plan D11/D25): TOCTOU — a symlink swapped between the
-// containment check and the actual read — is NOT defended here. v1 is
-// single-user local; closing the race is out of scope and intentionally not
-// attempted.
+// ACCEPTED RESIDUAL RISK: TOCTOU — a symlink swapped between the containment
+// check and the actual read — is NOT defended here. HandBox is single-user and
+// local; closing the race is deliberately out of scope.
 
 use std::path::{Component, Path, PathBuf};
 
-/// Generic, leak-free message for any sandbox containment violation (D14).
+/// Generic, leak-free message for any sandbox containment violation.
 /// MUST NOT contain the offending absolute path or any file contents.
 const SANDBOX_VIOLATION_MSG: &str = "path is outside the working directory";
 
 /// Why a model-supplied path could not be resolved inside the sandbox.
 ///
 /// `display_message` is intentionally generic for every variant so error text
-/// never leaks an out-of-sandbox absolute path (D14).
+/// never leaks an out-of-sandbox absolute path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SandboxError {
     /// Empty / `.` / whitespace-only / NUL-containing / `~`-prefixed arg.
@@ -253,8 +252,8 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // VAL-TOOLS-009 — every escape vector is rejected, no leak.
-    // Each vector is its own test (the security value is in the enumeration).
+    // Every escape vector is rejected, with no leak. Each vector is its own
+    // test — the security value is in the enumeration.
     // -----------------------------------------------------------------------
 
     #[test]

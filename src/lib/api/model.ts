@@ -1,6 +1,3 @@
-/**
- * 模型相关 API 封装
- */
 
 import { apiCall } from './index';
 import type {
@@ -10,9 +7,6 @@ import type {
 	UUID
 } from '../types';
 
-/**
- * 获取供应商模型列表
- */
 export async function getProviderModels(
 	providerId: UUID,
 	refreshFromRemote: boolean
@@ -25,9 +19,6 @@ export async function getProviderModels(
 	});
 }
 
-/**
- * 启用/禁用模型
- */
 export async function toggleModel(
 	providerId: UUID,
 	modelId: string,
@@ -42,9 +33,6 @@ export async function toggleModel(
 	});
 }
 
-/**
- * 切换模型收藏状态
- */
 export async function toggleModelFavorite(
 	providerId: UUID,
 	modelId: string,
@@ -59,9 +47,6 @@ export async function toggleModelFavorite(
 	});
 }
 
-/**
- * 获取所有供应商及其模型（包含收藏状态）
- */
 export async function getAllModelsWithProviders(
 	refreshFromRemote: boolean = false
 ): Promise<ProviderWithModels[]> {
@@ -70,18 +55,15 @@ export async function getAllModelsWithProviders(
 	});
 }
 
-/**
- * 获取所有可用模型（所有启用供应商的启用模型）
- */
+/** Enabled models across all enabled providers. */
 export async function getAvailableModels(): Promise<Model[]> {
 	return apiCall<Model[]>('model_get_available');
 }
 
 /**
- * 为自定义供应商手动添加模型。
- *
- * 自定义端点（openai-compatible / anthropic-compatible）不在 hand-ai 目录中，
- * 无法自动同步，用户需手填 model id。仅自定义供应商可用。
+ * Custom endpoints (openai-/anthropic-compatible) are not in the hand-ai
+ * catalog and cannot auto-sync, so users add model ids by hand. Custom
+ * providers only.
  */
 export async function addModel(
 	providerId: UUID,

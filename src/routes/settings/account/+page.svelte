@@ -9,12 +9,10 @@
   import { AppError } from "$lib/api";
   import { t } from "$lib/i18n";
 
-  // Modal 状态控制
   let showEditModal = $state(false);
   let isLoading = $state(false);
   let errorMessage = $state<string | null>(null);
 
-  // 从 authState 获取用户状态
   const user = $derived({
     isLoggedIn: authState.isLoggedIn,
     username: authState.user?.username,
@@ -43,16 +41,13 @@
     errorMessage = null;
 
     try {
-      // 调用后端更新用户资料
       const updatedUser = await updateUserProfile({
         username: userData.username,
         avatar: userData.avatar,
       });
 
-      // 更新认证状态
       authState.user = updatedUser;
 
-      // 关闭弹窗
       showEditModal = false;
     } catch (error) {
       console.error("更新用户资料失败:", error);
@@ -88,14 +83,12 @@
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
-  <!-- 错误提示 -->
   {#if errorMessage}
     <div class="p-4 bg-error/10 border border-error/20 rounded-lg">
       <p class="text-sm text-error">{errorMessage}</p>
     </div>
   {/if}
 
-  <!-- 用户信息卡片 -->
   {#if user.isLoggedIn}
     <TableGroup>
       <div class="px-6 py-6 flex flex-row gap-y-4">
@@ -117,7 +110,6 @@
       </div>
     </TableGroup>
 
-    <!-- 退出登录按钮 -->
     <div>
       <Button
         variant="gray"
@@ -129,14 +121,12 @@
       </Button>
     </div>
   {:else}
-    <!-- Google 登录按钮 -->
     <div class="max-w-md">
       <GoogleLoginButton />
     </div>
   {/if}
 </div>
 
-<!-- 编辑资料弹窗 -->
 {#if user.isLoggedIn && authState.user}
   <AccountEdit
     open={showEditModal}

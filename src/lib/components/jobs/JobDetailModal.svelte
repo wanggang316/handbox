@@ -33,28 +33,25 @@
 
   let { open, job, onClose }: Props = $props();
 
-  // 执行历史拉取状态。每次打开（job 变化）重新加载。
   let executions = $state<JobExecution[]>([]);
   let loading = $state(false);
   let loadError = $state<string | null>(null);
-  // 展开行集合：行 id -> 是否展开 stdout/stderr/error。
   let expanded = $state<Set<string>>(new Set());
-  // 手动「立即运行」请求进行中（与后端共享的 in-flight 防重入对应：禁用按钮
-  // 是第一道防线，后端 CONFLICT 是第二道）。
+  // Manual "run now" in flight. Disabling the button is the first guard;
+  // the backend's in-flight CONFLICT check is the second.
   let triggering = $state(false);
   let runError = $state<string | null>(null);
 
   const schedule = $derived(job ? cronToHuman(job.cronExpr) : "");
 
-  // 该任务是否有执行进行中：历史里存在 running 行即视为在跑（历史已包含
-  // running 行，无需事件订阅）。运行中禁用「立即运行」以避免重复触发。
+  // A running row in history means an execution is in progress (no event
+  // subscription needed); "run now" is disabled then to avoid duplicate triggers.
   const hasRunningExecution = $derived(
     executions.some((e) => e.status === "running"),
   );
   const runDisabled = $derived(triggering || hasRunningExecution);
 
-  // 执行状态 -> StatusLabel 变体 + 文案。复用现有 StatusLabel 的 4 个语义变体，
-  // 不新造 widget：成功→enabled、失败/超时→error、运行中→idle、未知→idle。
+  // Map execution status onto the existing StatusLabel semantic variants.
   const STATUS_TO_LABEL: Record<
     ExecutionStatus,
     { variant: "enabled" | "disabled" | "idle" | "error"; text: string }
@@ -71,10 +68,9 @@
   });
 
   /**
-   * 行耗时文案：
-   * - 进行中（status running / ended_at 缺失）显示占位「运行中」，非 0；
-   * - 有 duration（毫秒）走 formatDuration，亚秒显示「Nms」不取整为 0；
-   * - 终态但缺 duration（异常数据）退回「—」。
+   * Running rows (or missing ended_at) show a "running" placeholder; sub-second
+   * durations render as "Nms" rather than rounding to 0; terminal rows missing
+   * duration (bad data) fall back to "—".
    */
   function durationText(exec: JobExecution): string {
     if (exec.status === "running" || exec.endedAt == null)
@@ -83,43 +79,41 @@
     return formatDuration(exec.duration);
   }
 
-  // 目标 kind 决定历史行展开后的跳转目标路由：
-  // - prompt → 「跳转到结果」入口，跳到生成的 chat（/chat?id=<chatId>）
-  // - agent  → 「跳转到结果」入口，跳到生成的 agent 会话（/agent?id=<sessionId>）
-  // 同一 job 的所有执行共享 target.kind；执行行不单独携带 kind，故据此判定。
+  // Target kind decides where "jump to result" goes (prompt → /chat?id=,
+  // agent → /agent?id=). All executions of a job share target.kind; execution
+  // rows don't carry their own kind.
   const targetKind = $derived(job?.target.kind ?? "prompt");
 
-  // result_ref 指向的会话当前是否可达。lazy 探测：行展开时对其 result_ref
-  // 调一次 getChat / getAgentSession，命中错误（如已删除）→ 标记 missing，
-  // 跳转入口禁用并提示「结果不可用」（VAL-TARGET-025）。以 execId 为键缓存，
-  // 避免重复探测；列表重载（loadHistory）时重置。
+  // Whether the session behind result_ref is still reachable. Probed lazily when
+  // a row is expanded; errors (e.g. deleted session) mark it missing so the jump
+  // entry is disabled. Cached per execId to avoid re-probing; reset on reload.
   type ResultState = "checking" | "ok" | "missing";
   let resultStates = $state<Record<string, ResultState>>({});
 
   async function probeResult(exec: JobExecution): Promise<void> {
     const ref = exec.resultRef;
     if (!ref) return;
-    if (resultStates[exec.id]) return; // 已探测 / 探测中
+    if (resultStates[exec.id]) return; // already probed or probing
     resultStates = { ...resultStates, [exec.id]: "checking" };
     try {
       if (targetKind === "prompt") {
-        // Chat sessions have been removed; mark as missing
+        // Chat sessions no longer exist; prompt result refs are unreachable
         resultStates = { ...resultStates, [exec.id]: "missing" };
       } else if (targetKind === "agent") {
         await getAgentSession(ref);
         resultStates = { ...resultStates, [exec.id]: "ok" };
       }
     } catch (e) {
-      // 会话已删除 / 不可达：标记缺失，禁用跳转。
+      // Session deleted or unreachable: mark missing to disable the jump entry.
       console.error("Result target unreachable:", e);
       resultStates = { ...resultStates, [exec.id]: "missing" };
     }
   }
 
-  // 对已展开的 prompt/agent 行补探测：行可能在 running 态（无 result_ref）被展开，
-  // 待 `job_executed` 静默刷新把它翻成终态、补上 result_ref 后，此 effect 让跳转
-  // 入口自动从「结果不可用」转为可探测，无需用户重新展开。已探测的 id 由
-  // probeResult 内部去重，不会重复请求。
+  // Re-probe expanded rows: a row may be expanded while running (no result_ref);
+  // once the silent refresh flips it to a terminal state with a result_ref, this
+  // probes it so the jump entry activates without re-expanding. probeResult
+  // dedupes by id, so no duplicate requests.
   $effect(() => {
     for (const exec of executions) {
       if (expanded.has(exec.id) && exec.resultRef && !resultStates[exec.id]) {
@@ -128,10 +122,6 @@
     }
   });
 
-  /**
-   * 跳转到该次执行生成的会话：prompt → /chat?id=，agent → /agent?id=。
-   * 仅在 result_ref 存在且探测为 ok 时可用；跳转后关闭详情 modal。
-   */
   function jumpToResult(exec: JobExecution): void {
     const ref = exec.resultRef;
     if (!ref) return;
@@ -144,8 +134,7 @@
     void goto(route);
   }
 
-  // 展开 prompt/agent 行后，由下方 `$effect` 对其 result_ref 探测可达性
-  // （effect 也覆盖 running→终态后才出现 result_ref 的补探测）。
+  // Reachability probing for newly expanded rows is handled by the $effect above.
   function toggleExpand(id: string): void {
     const next = new Set(expanded);
     if (next.has(id)) {
@@ -171,14 +160,11 @@
   }
 
   /**
-   * 实时静默刷新：`job_executed` 事件抵达时重新拉取历史，但**不**翻转 `loading`
-   * ——否则列表会被 spinner 替换，丢失滚动位置与已展开行的 DOM。
-   *
-   * `list` 命令是事实来源：整体重新赋值后，keyed `#each (exec.id)` 按 id diff，
-   * 已存在的行 DOM 被复用（运行中行原地翻转为终态并补耗时，VAL-HISTORY-014），
-   * 顺序稳定不重复（019）；`expanded` 以 id 为键，故展开态保留（017）；滚动容器
-   * DOM 未重建，滚动位置保留（018）。错过的事件不致错乱——下次事件或重开
-   * modal 都会以 list 重新对账（030）。失败仅记日志，保留当前时间线。
+   * Silent refresh on `job_executed`: re-fetch without flipping `loading`, or the
+   * spinner would replace the list and drop scroll position and expanded-row DOM.
+   * The keyed `#each (exec.id)` diffs by id, so running rows flip to terminal
+   * state in place and `expanded` survives. Failures only log, keeping the
+   * current timeline.
    */
   async function refreshHistoryQuietly(jobId: string): Promise<void> {
     try {
@@ -189,9 +175,8 @@
   }
 
   /**
-   * 手动「立即运行」：调用 `job_run_now`（trigger=manual），完成后重载历史，
-   * 时间线顶部即出现新的手动行。运行进行中（triggering 或已有 running 行）按钮
-   * 禁用，且 onclick 二次防御直接返回，杜绝并发触发。
+   * Manual run via `job_run_now`; reload history afterwards so the new manual row
+   * appears. The in-body runDisabled check guards against concurrent triggers.
    */
   async function handleRunNow(): Promise<void> {
     if (!job?.id || runDisabled) return;
@@ -208,7 +193,7 @@
     }
   }
 
-  // 每次打开（或目标 job 切换）重置展开态并重新拉取历史。
+  // Reset expansion state and reload history on each open (or job switch).
   $effect(() => {
     if (open && job?.id) {
       expanded = new Set();
@@ -221,10 +206,10 @@
     }
   });
 
-  // 打开期间订阅 `job_executed`：仅对当前 job 的事件静默刷新时间线（运行中行
-  // 原地翻转为终态、补耗时；展开/滚动保留）。关闭或切换 job 时取消订阅，组件
-  // 卸载时由 effect cleanup 兜底——避免泄漏监听器。modal 关闭期间不订阅，错过的
-  // 执行在重开时由 `loadHistory`（list 命令，事实来源）补齐终态（VAL-HISTORY-030）。
+  // While open, subscribe to `job_executed` and silently refresh the timeline
+  // for this job only. Cleanup on close/job switch/unmount avoids leaked
+  // listeners. Events missed while closed are reconciled on reopen by
+  // `loadHistory` (the list command is the source of truth).
   $effect(() => {
     if (!open || !job?.id) return;
     const jobId = job.id;
@@ -252,14 +237,13 @@
     };
   });
 
-  // 占位以避免 onMount 未使用 lint；当前无挂载副作用。
+  // Placeholder so the onMount import isn't flagged unused; no mount side effects.
   onMount(() => {});
 </script>
 
 <Modal {open} title={job?.name ?? t("jobs.detail.title")} showCloseButton {onClose}>
   {#if job}
     <div class="w-[44rem] max-w-[88vw] flex flex-col max-h-[80vh]">
-      <!-- 任务概览：调度 + 下次运行 + 运行统计 -->
       <div class="px-6 pt-14 pb-4 border-b border-base-300 space-y-2 text-sm">
         {#if job.description}
           <p class="text-base-content/70">{job.description}</p>
@@ -286,7 +270,6 @@
         </div>
       </div>
 
-      <!-- 顶部操作区：执行历史标题 + 立即运行（trigger=manual）。 -->
       <div
         class="px-6 py-3 border-b border-base-300 flex items-center justify-between"
       >
@@ -296,8 +279,8 @@
           <History size={15} class="text-base-content/50" />
           {t("jobs.detail.history")}
         </h4>
-        <!-- 立即运行：禁用任务也可手动运行（禁用仅停自动调度）；运行进行中
-             （triggering 或已有 running 行）按钮禁用，避免重复触发。 -->
+        <!-- Disabled jobs can still be run manually (disable only stops auto
+             scheduling); button disabled while a run is in flight. -->
         <button
           class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-content text-xs font-medium cursor-pointer hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={runDisabled}
@@ -317,7 +300,6 @@
         </div>
       {/if}
 
-      <!-- 历史时间线：最新在上，可滚动，避免撑破 Modal -->
       <div class="flex-1 min-h-0 overflow-y-auto px-6 py-3">
         {#if loading}
           <div class="flex items-center justify-center py-10">
@@ -349,7 +331,6 @@
               {@const isOpen = expanded.has(exec.id)}
               {@const labelMeta = STATUS_TO_LABEL[exec.status]}
               <li class="bg-base-200 rounded-lg overflow-hidden">
-                <!-- 行头：点击展开/收起 stdout/stderr/error -->
                 <button
                   class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-base-300 transition-colors"
                   onclick={() => toggleExpand(exec.id)}
@@ -387,8 +368,7 @@
                   </span>
                 </button>
 
-                <!-- 展开区（行级扩展点）：prompt/agent 的「跳转到结果」入口
-                     （跳到生成的 chat / agent 会话）。失败时仍可能有 error。 -->
+                <!-- Jump-to-result entry; failed runs may still carry an error to show -->
                 {#if isOpen}
                   {@const resultState = resultStates[exec.id]}
                   {@const unavailable =

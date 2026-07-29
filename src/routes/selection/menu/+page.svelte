@@ -14,7 +14,6 @@
 
   const appWindow = getCurrentWindow();
 
-  // Svelte 5 响应式状态
   let captured = $state({
     text: "",
     x: 0,
@@ -24,7 +23,7 @@
 
   onMount(() => {
     console.log("=====> [selection/menu] onMount executed");
-    // 监听后端发送的全局划词信号
+    // Global text-selection signal from the backend
     const unlisten = listen("global-selection", async (event: any) => {
       const { text, x, y, app_info } = event.payload;
 
@@ -32,18 +31,16 @@
       console.log("-----> captured: ", captured);
     });
 
-    // 组件销毁时取消监听
     return () => {
       unlisten.then((fn) => fn());
     };
   });
 
-  // 隐藏面板（通过后端命令，确保状态同步）
+  // Hide via a backend command so panel state stays in sync
   async function hidePanel() {
     await hideMenuPanel();
   }
 
-  // 显示内容面板的通用方法
   async function openContentPanel(mode: ContentPanelMode) {
     await showContentPanel(mode, {
       text: captured.text,
@@ -54,18 +51,15 @@
     await hidePanel();
   }
 
-  // 复制文本
   async function handleCopy() {
     await writeText(captured.text);
     await hidePanel();
   }
 
-  // 翻译
   async function handleTranslate() {
     await openContentPanel("translate");
   }
 
-  // 问 AI
   async function handleAi() {
     await openContentPanel("ai");
   }

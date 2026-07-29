@@ -66,7 +66,8 @@ class SkillState {
   async toggleSkill(name: string, disabled: boolean): Promise<void> {
     try {
       await skillApi.setSkillDisabled(name, disabled);
-      // 更新本地内存态，并清除上一次失败遗留的错误横幅
+      // Update local in-memory state and clear any error banner left by a
+      // previous failure.
       const skill = this.state.skills.find((s) => s.name === name);
       if (skill) {
         skill.disabled = disabled;

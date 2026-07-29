@@ -10,8 +10,8 @@
    * displayed value reverts to {@link Props.value} and nothing is emitted.
    *
    * Pure capture/validate logic lives in `$lib/quickaction/accelerator`; this
-   * component only owns the focus/recording UX. Keyboard-reachable (Tab → focus,
-   * Enter/Space → record, capture, Tab/Esc → leave) per VAL-SETTINGS-017.
+   * component only owns the focus/recording UX. Keyboard-reachable: Tab → focus,
+   * Enter/Space → record, capture, Tab/Esc → leave.
    */
   import { t } from "$lib/i18n";
   import {

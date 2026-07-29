@@ -21,7 +21,6 @@
     disabled = false
   }: Props = $props();
 
-  // 计算滑杆位置百分比
   let percentage = $derived(((value - min) / (max - min)) * 100);
 </script>
 

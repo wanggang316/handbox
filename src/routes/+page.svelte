@@ -7,18 +7,17 @@
   import { settingsState } from "$lib/states/settings.svelte";
   import { t } from "$lib/i18n";
 
-  // 启动页停留到「首屏必需数据就绪」为止，而非一个固定时长：
-  // 加载快 → 一闪而过；加载慢 → 多停一会。
-  // MIN_VISIBLE：最短展示，避免画面一闪而过显得突兀。
-  // MAX_WAIT：兜底超时，避免某个 IPC 卡死时永远停在启动页。
+  // Hold the splash until first-screen data is ready, not for a fixed duration.
+  // MIN_VISIBLE avoids a jarring flash; MAX_WAIT caps the wait if an IPC stalls.
   const MIN_VISIBLE = 400;
   const MAX_WAIT = 3000;
 
   onMount(() => {
     if (!browser) return;
 
-    // 主窗口以 visible:false 启动：等启动页首帧真正绘制（双 rAF）后再显示窗口，
-    // 消除「系统暗色黑屏 → HTML 白屏 → 启动页」的启动闪。Rust 侧有 4s 兜底 show。
+    // The main window starts visible:false: show it only after the splash's
+    // first frame has painted (double rAF) to avoid startup flashes. The Rust
+    // side has a 4s fallback show.
     if (isTauriEnvironment()) {
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
@@ -34,20 +33,19 @@
     const enter = () => {
       if (entered) return;
       entered = true;
-      // replaceState：启动页不进历史栈，返回时不会再回到这里
+      // replaceState: keep the splash out of history so back never returns here
       goto("/agent", { replaceState: true });
     };
 
     const delay = (ms: number) =>
       new Promise((resolve) => setTimeout(resolve, ms));
 
-    // 只等首屏必需的 settings（主题/语言，避免进入后闪一下主题）。
-    // providers / 模型目录由 root layout 在后台预加载（见 +layout.svelte），
-    // 不阻塞进入主界面——各页面自带兜底加载态。
-    // allSettled：加载失败也不阻塞进入主界面。
+    // Wait only for settings (theme/language — avoids a theme flash after entry).
+    // Providers/models preload in the root layout without blocking entry.
+    // allSettled: load failures must not block entry either.
     const ready = Promise.allSettled([settingsState.loadSettings()]);
 
-    // 就绪且至少展示 MIN_VISIBLE，或到达 MAX_WAIT 兜底，二者先到先进入。
+    // Enter when ready (after at least MIN_VISIBLE), or when MAX_WAIT elapses.
     Promise.race([Promise.all([ready, delay(MIN_VISIBLE)]), delay(MAX_WAIT)]).then(
       enter,
     );
@@ -72,7 +70,7 @@
     justify-content: center;
     height: 100vh;
     width: 100vw;
-    /* canvas 底色，随 data-theme 自动切换深/浅 */
+    /* canvas background; follows data-theme light/dark */
     background-color: var(--base-100);
     color: var(--base-content);
   }
@@ -146,7 +144,6 @@
     }
   }
 
-  /* 尊重系统「减少动态效果」偏好 */
   @media (prefers-reduced-motion: reduce) {
     .splash__content,
     .splash__loader span {

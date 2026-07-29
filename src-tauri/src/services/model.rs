@@ -1,5 +1,3 @@
-// 模型服务实现
-
 use crate::models::model::ModelResponse;
 use crate::models::AppError;
 use crate::services::model_runtime;
@@ -9,7 +7,6 @@ use crate::storage::{ModelRepository, ProviderRepository};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// 模型服务
 #[derive(Clone)]
 pub struct ModelService {
     model_repo: ModelRepository,
@@ -17,7 +14,6 @@ pub struct ModelService {
 }
 
 impl ModelService {
-    /// 创建新的模型服务实例
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             model_repo: ModelRepository::new(Arc::clone(&db)),
@@ -25,16 +21,9 @@ impl ModelService {
         }
     }
 
-    /// 从 hand-ai 静态目录获取模型并保存到数据库
-    ///
-    /// M2-T4 起，模型列表的真理源来自 hand-ai 的静态目录（`hand_ai_model::get_models`），
-    /// 经 `model_runtime::list_catalog_models` 适配为 `storage::types::Model`。
-    /// 不再向 `/v1/models` 发起在线请求；网络/认证错误路径随之消失。
-    /// 显式权衡：用户自定义的、不在 hand-ai 目录里的模型 id 将不再出现。
-    ///
-    /// # 参数
-    /// - `provider`: 供应商信息
-    /// - `sync`: true = 同步模型（保留用户状态），false = 创建新模型
+    /// Load models for `provider` from hand-ai's static catalog and persist them.
+    /// No network request is made, so model ids absent from the catalog won't appear.
+    /// `sync`: true = sync preserving user state, false = create new rows.
     pub(crate) async fn fetch_and_sync_models(
         &self,
         provider: &Provider,
@@ -45,11 +34,10 @@ impl ModelService {
             provider.name
         );
 
-        // hand-ai 目录读取：纯内存、同步、返回已映射好的 storage::types::Model
         let catalog_models = model_runtime::list_catalog_models(&provider.provider_type);
 
-        // 目录未命中（DB 中 provider_type 拼写错误、新供应商尚未进入 hand-ai 发布等）
-        // 单独走 WARN 路径，便于运维 grep；已落库的模型行保持不动。
+        // Catalog miss (misspelled provider_type, provider not yet in hand-ai, etc.):
+        // warn and keep existing DB rows untouched.
         if catalog_models.is_empty() {
             tracing::warn!(
                 provider_name = %provider.name,
@@ -59,7 +47,7 @@ impl ModelService {
             return Ok(());
         }
 
-        // 用应用层的 provider_id 覆盖 catalog 返回的占位 provider_id
+        // Override the catalog's placeholder provider_id with the app-level one.
         let models: Vec<Model> = catalog_models
             .into_iter()
             .map(|mut model| {
@@ -68,9 +56,7 @@ impl ModelService {
             })
             .collect();
 
-        // 保存或同步模型
         if sync {
-            // 同步模型，保留用户状态
             self.model_repo
                 .sync_provider_models(&provider.id, &models)
                 .await?;
@@ -80,7 +66,6 @@ impl ModelService {
                 provider.name
             );
         } else {
-            // 创建新模型
             self.model_repo.create_models(&models).await?;
             tracing::info!(
                 "Successfully created {} models for provider: {}",
@@ -92,13 +77,12 @@ impl ModelService {
         Ok(())
     }
 
-    /// 获取供应商的模型列表（转换为 ModelResponse 并过滤掉无效模型）
+    /// List a provider's models as `ModelResponse`, dropping models without a chat method.
     pub async fn get_provider_models(
         &self,
         provider_id: &UUID,
         refresh_from_remote: bool,
     ) -> Result<Vec<ModelResponse>, AppError> {
-        // 先获取供应商信息
         let provider = self
             .provider_repo
             .get_provider_by_id(provider_id)
@@ -111,19 +95,15 @@ impl ModelService {
             refresh_from_remote
         );
 
-        // 获取原始模型列表
         let models = if !refresh_from_remote {
-            // 从数据库获取缓存
             self.model_repo.get_models_by_provider(provider_id).await?
         } else {
-            // 远程刷新：从 API 获取最新模型列表并同步
             self.fetch_and_sync_models(&provider, true).await?;
-            // 返回数据库中的模型（包含用户设置的状态）
+            // Re-read from the DB so user state (enabled/favorite) survives the sync.
             self.model_repo.get_models_by_provider(&provider.id).await?
         };
 
-        // 转换为 ModelResponse 并过滤掉 chat_method 为空的模型
-        // 传递 provider_type 以支持供应商级别的参数覆盖
+        // provider_type carries provider-level parameter overrides.
         let provider_type = provider.provider_type.clone();
         Ok(models
             .into_iter()
@@ -132,7 +112,6 @@ impl ModelService {
             .collect())
     }
 
-    /// 获取单个模型
     pub async fn get_model(
         &self,
         provider_id: &str,
@@ -141,12 +120,12 @@ impl ModelService {
         self.model_repo.get_model(provider_id, model_id).await
     }
 
-    /// 为自定义供应商（openai-compatible / anthropic-compatible）手动添加模型。
+    /// Manually registers a model on a custom (openai-/anthropic-compatible) provider.
     ///
-    /// 自定义端点不在 hand-ai 目录中，因而无法通过 `fetch_and_sync_models`
-    /// 获得模型。此路径让用户手填 model id；`model_runtime` 在对话时按自定义
-    /// 类型的协议 + 供应商 base_url 合成 `Model` 模板（见 `resolve_model`）。
-    /// 仅对自定义供应商开放：目录供应商的模型来自 hand-ai，禁止手动注入幽灵模型。
+    /// Custom endpoints are absent from the hand-ai catalog, so `fetch_and_sync_models`
+    /// yields nothing for them; `model_runtime::resolve_model` synthesizes the `Model`
+    /// template from the protocol plus the provider base_url at request time. Restricted
+    /// to custom providers so catalog-backed providers cannot gain phantom models.
     pub async fn add_manual_model(
         &self,
         provider_id: &UUID,
@@ -159,7 +138,6 @@ impl ModelService {
             .await?
             .ok_or_else(|| AppError::validation_error("Provider not found"))?;
 
-        // 仅自定义供应商可手动添加模型。
         let supported_methods = model_runtime::custom_provider_supported_methods(
             &provider.provider_type,
         )
@@ -222,7 +200,6 @@ impl ModelService {
         ))
     }
 
-    /// 当前时间戳（毫秒）。
     fn current_timestamp() -> i64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -230,7 +207,6 @@ impl ModelService {
             .unwrap_or(0)
     }
 
-    /// 切换模型启用状态
     pub async fn toggle_model(
         &self,
         provider_id: &UUID,
@@ -242,7 +218,6 @@ impl ModelService {
             .await
     }
 
-    /// 切换模型收藏状态
     pub async fn toggle_favorite_model(
         &self,
         provider_id: &UUID,
@@ -254,7 +229,6 @@ impl ModelService {
             .await
     }
 
-    /// 批量获取多个供应商的模型列表
     pub async fn get_providers_models_batch(
         &self,
         provider_ids: &[UUID],
@@ -265,13 +239,11 @@ impl ModelService {
         }
 
         if !refresh_from_remote {
-            // 从数据库批量获取所有模型
             let all_models = self
                 .model_repo
                 .get_models_by_providers(provider_ids)
                 .await?;
 
-            // 按 provider_id 分组
             let mut result: HashMap<UUID, Vec<ModelResponse>> = HashMap::new();
             for provider_id in provider_ids {
                 let provider = self
@@ -299,7 +271,7 @@ impl ModelService {
 
             Ok(result)
         } else {
-            // 远程刷新：并行获取每个供应商的模型
+            // Refresh path: sync every provider concurrently.
             use futures::future::join_all;
 
             let fetch_futures: Vec<_> = provider_ids
@@ -365,7 +337,6 @@ mod tests {
     use super::*;
     use crate::storage::types::Model;
 
-    /// 创建一个测试用的 Model，包含 chat_methods
     fn create_test_model_with_chat_methods(id: &str, provider_id: &str) -> Model {
         Model {
             id: id.to_string(),
@@ -392,7 +363,6 @@ mod tests {
         }
     }
 
-    /// 创建一个测试用的 Model，不包含 chat_methods
     fn create_test_model_without_chat_methods(id: &str, provider_id: &str) -> Model {
         Model {
             id: id.to_string(),
@@ -410,7 +380,7 @@ mod tests {
             supported_parameters: None,
             default_parameters: None,
             max_parameters: None,
-            supported_methods: None, // 没有 supported_methods
+            supported_methods: None,
             model_created_at: None,
             enabled: true,
             favorite: false,
@@ -421,26 +391,20 @@ mod tests {
 
     #[test]
     fn test_model_response_conversion_filters_empty_chat_methods() {
-        // 测试场景：验证 ModelResponse::from_model 转换和过滤逻辑
-        // 1. 有 supported_methods 的模型应该有 chat_methods
-        // 2. 没有 supported_methods 但有全局配置支持的模型可能也有 chat_methods
-        // 3. 完全没有任何支持的模型应该被过滤掉
-
+        // Models that resolve to no chat method must be dropped by the conversion.
         let models = vec![
             create_test_model_with_chat_methods("model1", "provider1"),
             create_test_model_without_chat_methods("model2", "provider1"),
             create_test_model_with_chat_methods("model3", "provider1"),
         ];
 
-        // 转换为 ModelResponse 并过滤掉 chat_method 为 None 的模型
-        // （这是 get_provider_models 方法中使用的逻辑）
+        // Mirrors the conversion and filtering done by get_provider_models.
         let filtered_responses: Vec<ModelResponse> = models
             .into_iter()
             .map(ModelResponse::from_model)
             .filter(|model| model.chat_method.is_some())
             .collect();
 
-        // 验证所有返回的模型都有 chat_method
         for response in &filtered_responses {
             assert!(
                 response.chat_method.is_some(),
@@ -452,7 +416,6 @@ mod tests {
             );
         }
 
-        // 验证过滤逻辑正常工作（至少返回了一些模型）
         assert!(
             !filtered_responses.is_empty(),
             "Should have at least some models with chat_method"
@@ -463,7 +426,6 @@ mod tests {
     fn test_model_response_conversion_empty_input() {
         let models: Vec<Model> = vec![];
 
-        // 转换和过滤空列表
         let responses: Vec<ModelResponse> = models
             .into_iter()
             .map(ModelResponse::from_model)
