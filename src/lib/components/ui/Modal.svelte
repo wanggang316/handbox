@@ -54,8 +54,11 @@
 
     <!-- 居中与入场/退场动画统一用 transform：不用 Tailwind 的 -translate-x/y-1/2，
          因其在 Tailwind v4 下写的是独立的 translate 属性，会与 keyframe 的 transform 叠加。 -->
+    <!-- 打开时不 autofocus 首个可聚焦元素：无鼠标交互在前时（如启动即弹的升级框），
+         autofocus 会被判定为 :focus-visible，首个按钮凭空带上焦点环。 -->
     <Dialog.Content
       interactOutsideBehavior={closeOnBackdropClick ? "close" : "ignore"}
+      onOpenAutoFocus={(e) => e.preventDefault()}
       class="dlg-content fixed left-1/2 top-1/2 max-h-[90vh] max-w-[90vw] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] shadow-2xl outline-none"
       style="z-index: var(--z-modal); transform: translate(-50%, -50%);"
     >
