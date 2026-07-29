@@ -16,6 +16,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.4.4] - 2026-07-30
+
+### Added
+- The update dialog now shows what's new in the version it offers, with
+  formatted release notes and links that open in your browser.
+
+### Changed
+- Focus feels native again: clicking into a text field shows just the caret
+  instead of a colored border and glow, while keyboard navigation still rings
+  the control it lands on.
+- Text selection is limited to content — messages, code and release notes stay
+  selectable, while sidebar labels, buttons and other app chrome no longer
+  highlight as you drag across them.
+
+### Fixed
+- Right-clicking in the sidebar no longer opens the system menu with Look Up /
+  Translate / Inspect Element.
+- The update dialog no longer opens with a stray ring around one of its buttons.
+- The changelog link in Settings → About opened a missing page.
+
+
 ## [0.4.3] - 2026-07-29
 
 ### Added
