@@ -1,8 +1,6 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A thin separator line drawn with `var(--hairline)`. `orientation` selects a
-  // full-width horizontal rule (default) or a full-height vertical rule.
   interface DividerProps {
     orientation?: "horizontal" | "vertical";
   }

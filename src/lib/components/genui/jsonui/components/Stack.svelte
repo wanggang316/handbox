@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A flex layout container. Items are supplied through the children slot.
   interface StackProps {
     gap?: "sm" | "md" | "lg";
     direction?: "row" | "col";

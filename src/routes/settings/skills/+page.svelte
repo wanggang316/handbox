@@ -70,10 +70,11 @@
     }
   }
 
-  // 非乐观提交：把 IPC 写放进 onChangeBefore，返回 false 时 Toggle 自动把
-  // 可见态回退到点击前（成功路径上 store 改写后 checked={!skill.disabled}
-  // 已与新值一致；失败路径上 store 未被改写，无 prop 变化信号，必须靠返回
-  // false 触发 Toggle 自身的 target.checked / checked 回退）。
+  // Non-optimistic commit: the IPC write runs in onChangeBefore, and returning
+  // false makes the Toggle revert its visual state. On success the store update
+  // already matches checked={!skill.disabled}; on failure the store is untouched
+  // so there is no prop-change signal — only the false return triggers the
+  // Toggle's own revert.
   async function handleToggleSkillBefore(
     skill: SkillInfo,
     enabled: boolean
@@ -97,7 +98,6 @@
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
-  <!-- 头部：标题 + 刷新 -->
   <div class="flex items-center justify-between">
     <div>
       <p class="text-xs text-base-content/60 mt-0.5">
@@ -119,14 +119,12 @@
     </Button>
   </div>
 
-  <!-- 加载状态 -->
   {#if skillState.isLoading && skillState.skills.length === 0}
     <div class="flex items-center justify-center py-10">
       <Spinner size={28} />
     </div>
   {/if}
 
-  <!-- 加载错误 -->
   {#if skillState.error}
     <div class="rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
       {skillState.error}
@@ -181,7 +179,6 @@
             </div>
           </div>
 
-          <!-- 诊断信息（校验失败项） -->
           {#if hasError}
             <div class="mt-2 flex flex-col gap-1">
               {#each skill.diagnostics as diagnostic}
@@ -193,7 +190,6 @@
             </div>
           {/if}
 
-          <!-- body 预览展开/收起 -->
           {#if skill.body}
             <div class="mt-2">
               <button
@@ -213,7 +209,6 @@
         </div>
       {/each}
 
-      <!-- 空状态 -->
       {#if !skillState.isLoading && skillState.skills.length === 0 && !skillState.error}
         <div class="p-8 text-center">
           <Sparkles class="h-12 w-12 text-base-content/50 mx-auto mb-4" />

@@ -1,5 +1,5 @@
 /**
- * jobs namespace strings (filled by migration subagent).
+ * jobs namespace strings.
  */
 import type { jobsZh } from "../zh/jobs";
 

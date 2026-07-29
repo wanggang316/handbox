@@ -18,10 +18,8 @@
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateState } from "$lib/states/update.svelte";
 
-  // 当前路由（用于常驻入口的高亮）
   let currentRoute = $derived(browser && $page.url ? $page.url.pathname : "");
 
-  // 当前选中的 Agent 会话 ID（用于 AgentProjectList 高亮）
   let currentAgentSessionId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : ""
   );
@@ -34,7 +32,6 @@
     goto(`/jobs`);
   }
 
-  // 从 authState 获取用户状态
   const currentUser = $derived({
     isLoggedIn: authState.isLoggedIn,
     username: authState.user?.username,
@@ -49,7 +46,7 @@
   let userMenuWidth = $state(0);
   let userMenuTrigger: HTMLDivElement | null = null;
 
-  // 设置页在主窗口内渲染，直接路由跳转。
+  // Settings renders inside the main window, so plain routing is enough.
   function openSettings(path?: string) {
     goto(path ? `/settings${path}` : "/settings");
   }
@@ -63,7 +60,7 @@
       return;
     }
 
-    // 锚定到侧边栏用户区域：左对齐、宽度与内容区一致，从上方弹出
+    // Anchor to the sidebar user row: left-aligned, same width as the content area, opening upward.
     if (userMenuTrigger) {
       const rect = userMenuTrigger.getBoundingClientRect();
       userMenuX = rect.left + 8;
@@ -112,7 +109,6 @@
 <div
   class="h-full flex flex-col p-0 pt-12 overflow-hidden"
 >
-  <!-- 顶部固定区域：常驻入口（任务 / Agents / 单词本） -->
   <div class="flex-shrink-0 flex flex-col px-2 space-y-0.5 mb-3">
     <MenuButton
       title={t("sidebar.jobs")}
@@ -132,12 +128,10 @@
     />
   </div>
 
-  <!-- 中间可滚动区域：Agent 会话列表（按项目分组） -->
   <div class="flex-1 min-h-0">
     <AgentProjectList activeId={currentAgentSessionId} />
   </div>
 
-  <!-- 检测到更新：底部更新入口 -->
   {#if updateState.hasUpdate}
     <div class="flex-shrink-0 px-2 pt-1">
       <button
@@ -156,7 +150,6 @@
     </div>
   {/if}
 
-  <!-- 用户信息 -->
   <div
     class="flex-shrink-0 p-2 user-menu-trigger"
     bind:this={userMenuTrigger}

@@ -27,15 +27,12 @@
     onSave = () => {},
   }: Props = $props();
 
-  // 本地编辑状态
   let editedUsername = $state("");
   let editedEmail = $state("");
   let editedAvatar = $state("");
 
-  // Modal 引用
   let modalRef: Modal;
 
-  // 重置表单数据
   $effect(() => {
     if (open && user) {
       console.log("EditProfileModal 打开，用户数据:", user);
@@ -45,7 +42,6 @@
     }
   });
 
-  // 调试 open 状态变化
   $effect(() => {
     console.log("EditProfileModal open 状态:", open);
   });
@@ -60,7 +56,6 @@
   }
 
   function handleCancel() {
-    // 重置表单数据
     editedUsername = user.username;
     editedEmail = user.email;
     editedAvatar = user.avatar;
@@ -69,8 +64,7 @@
 
   function handleAvatarChange(file: File) {
     console.log("头像文件选择:", file);
-    // 这里可以添加上传头像的逻辑
-    // 例如：转换为 base64 或上传到服务器
+    // Avatar is kept locally as a data URL; no server upload.
     const reader = new FileReader();
     reader.onload = (e) => {
       editedAvatar = e.target?.result as string;
@@ -81,7 +75,6 @@
 
 <Modal bind:this={modalRef} {open} {onClose} showCloseButton={false}>
   <div class="relative flex flex-col p-8">
-    <!-- 用户头像 -->
     <div class="flex justify-center py-4">
       <Avatar 
         src={editedAvatar || user.avatar} 
@@ -92,14 +85,12 @@
       />
     </div>
 
-    <!-- 邮箱显示 -->
     <div class="text-center mb-8">
       <p class="text-base text-base-content">
         {user.email}
       </p>
     </div>
 
-    <!-- 用户名输入框 -->
     <div class="mb-8">
       <TableGroup>
         <TextRow

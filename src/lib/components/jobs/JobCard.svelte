@@ -7,21 +7,18 @@
 
   interface Props {
     job: Job;
-    /**
-     * 启用/禁用前置回调：返回 true 提交切换、false 回滚开关视觉。
-     * 由父级桥接到 jobStore.setEnabled，写失败时返回 false 触发回滚。
-     */
+    /** Pre-toggle callback: return true to commit, false to roll back the toggle visual (e.g. backend write failed). */
     onToggleEnabled: (next: boolean) => boolean | Promise<boolean>;
     onEdit: (job: Job) => void;
     onDelete: (job: Job) => void;
-    /** 查看任务详情（打开执行历史 Modal）。点卡片主体区触发。 */
+    /** Opens the execution-history modal; triggered by clicking the card body. */
     onView: (job: Job) => void;
   }
 
   let { job, onToggleEnabled, onEdit, onDelete, onView }: Props = $props();
 
-  // 目标类型 -> 展示标签 + 语义配色 chip 类（agent→info / prompt→success）。
-  // 类名写成完整字面量，确保 Tailwind 4 JIT 能静态扫描到（动态拼接 `bg-{x}` 会被 purge）。
+  // Chip classes are full literals so Tailwind 4 JIT can statically scan them
+  // (dynamically composed `bg-{x}` would be purged).
   const TARGET_META: Record<Job["target"]["kind"], { label: string; chip: string }> = $derived({
     agent: { label: t("jobs.target.agent"), chip: "bg-info/20 text-info" },
     prompt: { label: t("jobs.target.prompt"), chip: "bg-success/20 text-success" },
@@ -31,14 +28,14 @@
 
   const schedule = $derived(cronToHuman(job.cronExpr));
 
-  // 下次运行：禁用任务显示「已禁用」语义而非误导性时间
+  // Disabled jobs show a "disabled" label instead of a misleading next-run time.
   const nextRunText = $derived.by(() => {
     if (!job.enabled) return t("jobs.status.disabled");
     if (job.nextRunAt == null) return "—";
     return new Date(job.nextRunAt).toLocaleString("zh-CN");
   });
 
-  // 上次状态：未运行（无 lastStatus）显示「从未运行」。chip 类同样写成完整字面量。
+  // Chip classes are full literals for the same Tailwind JIT reason.
   const STATUS_META: Record<ExecutionStatus, { label: string; chip: string }> = $derived({
     running: { label: t("jobs.status.running"), chip: "bg-info/20 text-info" },
     success: { label: t("jobs.status.success"), chip: "bg-success/20 text-success" },
@@ -69,7 +66,7 @@
         {targetMeta.label}
       </span>
     </div>
-    <!-- 操作区：阻止冒泡，避免点开关/编辑/删除时也触发查看详情 -->
+    <!-- Stop propagation so toggle/edit/delete clicks don't also trigger the view action -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="flex items-center gap-1 flex-shrink-0"

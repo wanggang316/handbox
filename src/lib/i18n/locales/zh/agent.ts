@@ -1,5 +1,5 @@
 /**
- * agent 命名空间文案（由迁移子代理填充；zh 为权威）。
+ * agent namespace strings (zh is canonical).
  */
 export const agentZh = {
   // System Prompt popover (AgentSessionHeader)

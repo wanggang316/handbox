@@ -33,7 +33,6 @@
     disabled = false
   }: Props = $props();
 
-  // 格式化显示值
   function formatValue(val: number): string {
     return val.toFixed(1);
   }

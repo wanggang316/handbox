@@ -1,18 +1,12 @@
 <!--
-  Quick Action 浮层的 Raycast 式统一面板（输入壳）。
+  Raycast-style panel shell for the Quick Action overlay: input row (sparkle icon
+  + optional agent scope chip + textarea) → divider → content area (injected via
+  `children`) → footer with step-dependent key hints.
 
-  一张面板,自上而下:输入行(前导 sparkle 图标 + 可选 Agent scope chip + 大号输入)
-  → 分隔线 → 内容区(Agent 列表 / transcript / 空态,经 `children` snippet 由父级注入)
-  → footer(随模式切换的键位提示)。无模型选择、无 New(+)、无附件、无工具菜单。
-
-  本组件只负责输入与键盘交互的**呈现与语义化**,不接 chat / 不建会话 / 不发消息——
-  所有行为通过语义化回调交给父级(/quick/+page.svelte):
-  - onSubmit   ↵(非空、非 IME 合成)→ 选择高亮 Agent(选择步)或发送消息(消息步)
-  - onContinue ⌘↵ → 在对话中继续(answered 步)
-  - onArrowUp / onArrowDown → 在 Agent 列表中上下移动高亮(选择步)
-  - onDeselect Backspace(空输入)→ 取消已选 Agent,回到选择步
-
-  键盘:IME 合成期间所有键交给输入法,不触发任何回调;Shift+Enter → 换行。
+  Presentation only — no chat, sessions, or sending. Behavior is delegated to the
+  parent through semantic callbacks: onSubmit (↵), onContinue (⌘↵), onArrowUp/
+  Down (list highlight), onDeselect (Backspace on empty input). During IME
+  composition every key goes to the input method; Shift+Enter inserts a newline.
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
@@ -22,16 +16,16 @@
   interface Props {
     value: string;
     placeholder?: string;
-    /** 已选 Agent 名;非空 → 显示 scope chip 并切到消息模式 footer。 */
+    /** Selected agent name; non-null shows the scope chip and the message-step footer. */
     selectedAgentName?: string | null;
-    /** 输入禁用(answered:一回合已发送,不再可输入)。 */
+    /** Disabled once the single allowed turn has been sent (answered step). */
     disabled?: boolean;
-    /** ⌘↵「在对话中继续」是否可用(已发送、有会话)。 */
+    /** Whether ⌘↵ "continue in chat" is available (message sent, session exists). */
     canContinue?: boolean;
     runError?: string | null;
-    /** 是否有内容区(Agent 列表 / transcript / 空态);false 时面板仅输入行 + footer。 */
+    /** When false the panel renders only the input row + footer. */
     hasContent?: boolean;
-    /** 内容区,渲染在输入行与 footer 之间。 */
+    /** Content area rendered between the input row and the footer. */
     children?: Snippet;
     onSubmit?: () => void;
     onContinue?: () => void;
@@ -77,19 +71,19 @@
   function handleKeydown(event: KeyboardEvent): void {
     if (composing || event.isComposing) return;
 
-    // ⌘↵ / Ctrl+↵ → 在对话中继续。
+    // ⌘↵ / Ctrl+↵ → continue in chat.
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       if (canContinue) onContinue();
       return;
     }
-    // ↵(非 Shift)→ 选择 / 发送(具体语义由父级按当前步骤决定)。
+    // Plain ↵ → select / send (semantics decided by the parent per step).
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       onSubmit();
       return;
     }
-    // ↑↓ → 在 Agent 列表中移动高亮(选择步)。
+    // ↑↓ → move the agent-list highlight (selection step).
     if (event.key === "ArrowDown") {
       event.preventDefault();
       onArrowDown();
@@ -100,7 +94,7 @@
       onArrowUp();
       return;
     }
-    // Backspace(空输入且已选 Agent)→ 取消选择,回到选择步。
+    // Backspace on empty input with an agent selected → deselect, back to selection step.
     if (event.key === "Backspace" && value.length === 0 && selectedAgentName) {
       event.preventDefault();
       onDeselect();
@@ -112,7 +106,6 @@
 <div
   class="quick-panel flex h-fit max-h-full w-full flex-col self-start overflow-hidden rounded-[14px] border border-white/10 text-[var(--base-content)] shadow-2xl ring-1 ring-black/5"
 >
-  <!-- 输入行 -->
   <div class="flex shrink-0 items-center gap-2.5 px-4">
     <Sparkles size={20} class="shrink-0 text-[var(--base-content)]/35" />
     {#if selectedAgentName}
@@ -144,7 +137,6 @@
     ></textarea>
   </div>
 
-  <!-- 内容区(Agent 列表 / transcript / 空态) -->
   {#if hasContent}
     <div class="h-px w-full shrink-0 bg-[var(--hairline)]"></div>
     <div class="min-h-0 flex-1 overflow-y-auto">
@@ -156,12 +148,11 @@
     <div class="shrink-0 px-4 pb-1.5 text-xs text-warning">{runError}</div>
   {/if}
 
-  <!-- footer:键位提示随当前步骤切换。 -->
   <div
     class="flex h-11 shrink-0 items-center justify-end gap-1 border-t border-[var(--hairline)] bg-[var(--base-200)]/40 px-2.5"
   >
     {#if selectedAgentName}
-      <!-- 消息步 / answered 步 -->
+      <!-- message / answered step -->
       {#if canContinue}
         <button type="button" onclick={() => onContinue()} class="qa-action">
           <kbd class="qa-key">⌘↵</kbd>
@@ -178,7 +169,7 @@
         </button>
       {/if}
     {:else}
-      <!-- 选择步 -->
+      <!-- selection step -->
       <span class="qa-action">
         <kbd class="qa-key">↑↓</kbd>
         <span>{t("quickaction.navigate")}</span>
@@ -192,15 +183,15 @@
 </div>
 
 <style>
-  /* Raycast 式磨砂背景:透明窗口下用半透明 + backdrop blur 营造层次(原生 vibrancy
-     若由窗口 effects 提供则叠加更佳)。 */
+  /* Raycast-style frosted background: translucency + backdrop blur over the
+     transparent window (native vibrancy from window effects stacks on top). */
   .quick-panel {
     background: color-mix(in srgb, var(--bg-card) 60%, transparent);
     backdrop-filter: saturate(180%);
     -webkit-backdrop-filter: saturate(180%);
   }
 
-  /* 已选 Agent 的 scope chip(Raycast 式作用域令牌)。 */
+  /* Scope chip for the selected agent (Raycast-style scope token). */
   .qa-chip {
     display: inline-flex;
     align-items: center;

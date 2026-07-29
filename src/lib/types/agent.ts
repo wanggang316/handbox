@@ -1,6 +1,4 @@
-/**
- * Agent 相关类型定义 - 匹配后端 Rust 架构
- */
+/** Mirrors the backend Rust agent types. */
 
 import type { BaseEntity, UUID, Timestamp } from "./index";
 import type {
@@ -11,7 +9,6 @@ import type {
   OpenrouterReasoningConfig,
 } from "./llm";
 
-// Agent 推理配置
 export interface AgentReasoningConfig {
   responses?: ResponsesReasoningConfig;
   reasoningEffort?: ReasoningEffortConfig;
@@ -19,7 +16,7 @@ export interface AgentReasoningConfig {
   openrouter?: OpenrouterReasoningConfig;
 }
 
-// Agent 实体 - 可复用的 AI 助手配置
+/** A reusable AI assistant configuration. */
 export interface Agent extends BaseEntity {
   name: string;
   temperature?: number;
@@ -31,29 +28,25 @@ export interface Agent extends BaseEntity {
   mcpServers: McpServerConfig[];
   skills: string[];
   generativeUi?: boolean;
-  // 关联的 GenUI（具名 JSON-Render spec）id；未关联时为 undefined
+  // Linked GenUI (named JSON-Render spec) id.
   genuiId?: string;
-  // ── 能力扩展字段（P2）：后端 agents 表新增列 ──
-  // 选定的供应商；未设置时为 null
   providerId?: string | null;
-  // Lucide 图标名
+  // Lucide icon name.
   icon?: string | null;
-  // 一行简介
   description?: string | null;
-  // 系统内建标记（只读）：两个内置 Agent 为 true；创建/更新时不可下发
+  // Read-only: true for the built-in agents; not accepted on create/update.
   builtin: boolean;
-  // coding-agent 内置工具名："read"/"write"/"edit"/"bash"/"grep"/"find"/"ls"
+  // Builtin tool registration names.
   builtinTools: string[];
-  // 工作目录模式："required" | "optional" | "none"
+  // "required" | "optional" | "none"
   workingDirMode?: string | null;
-  // 工具执行模式："auto" | "manual"
+  // "auto" | "manual"
   toolExecutionMode?: string | null;
   thinkingLevel?: string | null;
-  // 对话开场白
+  // Conversation starter prompts.
   starters: string[];
 }
 
-// 创建 Agent 请求
 export interface CreateAgentRequest {
   name: string;
   temperature?: number;
@@ -66,8 +59,8 @@ export interface CreateAgentRequest {
   skills?: string[];
   generativeUi?: boolean;
   genuiId?: string;
-  // ── 能力扩展字段（P2，可选）。注意：后端 agent_create 不接受这些字段，
-  // 需在创建后通过 agent_update_field 逐项写入。──
+  // The backend's agent_create does not accept the fields below; write them
+  // via agent_update_field after creation.
   providerId?: string | null;
   icon?: string | null;
   description?: string | null;
@@ -78,7 +71,6 @@ export interface CreateAgentRequest {
   starters?: string[];
 }
 
-// 更新 Agent 请求
 export interface UpdateAgentRequest {
   name?: string;
   temperature?: number | null;
@@ -91,7 +83,7 @@ export interface UpdateAgentRequest {
   skills?: string[];
   generativeUi?: boolean;
   genuiId?: string | null;
-  // ── 能力扩展字段（P2，可选）。builtin 为只读，不在此列。──
+  // builtin is read-only and intentionally absent here.
   providerId?: string | null;
   icon?: string | null;
   description?: string | null;

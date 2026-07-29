@@ -20,15 +20,14 @@
   import type { ProviderWithModels } from "$lib/types/provider";
 
   interface Props {
-    /** 编辑模式传入现有任务；创建模式传 null。 */
+    /** Existing job in edit mode; null in create mode. */
     job?: Job | null;
   }
 
   let { job = null }: Props = $props();
 
-  // ──────────────────────────────────────────────────────────────────────
-  // 表单状态。本地浅拷贝，离开页面丢弃，不影响外部 job。
-  // ──────────────────────────────────────────────────────────────────────
+  // Form state is a local copy, discarded on leaving the page; the outer job is
+  // never mutated.
   const DEFAULT_CRON = "0 9 * * *";
   const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -49,7 +48,8 @@
     timezone: string;
     enabled: boolean;
     target: JobTarget;
-    // 健壮性字段以字符串持有，空串表示「留空」→ 保存时映射为 undefined（用后端默认）。
+    // Robustness fields held as strings; empty means "unset" and saves as
+    // undefined so the backend default applies.
     execTimeoutSecs: string;
     maxRetries: string;
     retryDelaySecs: string;
@@ -63,9 +63,10 @@
         cronExpr: job.cronExpr,
         timezone: job.timezone || localTimezone,
         enabled: job.enabled,
-        // 深拷贝目标（$state.snapshot 返回非代理深拷贝），避免修改外部 job 引用。
+        // Deep-copy via $state.snapshot (non-proxy copy) so the outer job's
+        // target reference is never mutated.
         target: $state.snapshot(job.target) as JobTarget,
-        // 编辑模式回填已存值（包括 0，因为 0 是有意义的「不限/不重试」）。
+        // Backfill stored values including 0, which means "unlimited / no retry".
         execTimeoutSecs: String(job.execTimeoutSecs),
         maxRetries: String(job.maxRetries),
         retryDelaySecs: String(job.retryDelaySecs),
@@ -84,18 +85,16 @@
     };
   }
 
-  // 页面级组件按 job.id `{#key}` 重挂载，挂载时初始化一次即可（无 Modal 的
-  // 开合/切换目标复用问题）。
+  // The page remounts this component via `{#key job.id}`, so a single init on
+  // mount suffices.
   let form = $state<FormState>(initialForm());
   let saving = $state(false);
   let saveError = $state<string | null>(null);
   let showValidation = $state(false);
 
-  // ──────────────────────────────────────────────────────────────────────
-  // Prompt / Agent 候选：加载已启用供应商（含模型）与 Agent 模板列表。
-  // providersWithModels 用于把目标里存的 (providerId, modelId) 解析为展示名；
-  // agents 用于 agent 目标的模板下拉。读自共享状态，TargetPicker 不直接触状态。
-  // ──────────────────────────────────────────────────────────────────────
+  // providersWithModels resolves the target's (providerId, modelId) into display
+  // names; agents feeds the agent-target dropdown. Both read shared state here
+  // so TargetPicker never touches stores directly.
   let providersWithModels = $state<ProviderWithModels[]>([]);
   let agents = $state<Agent[]>([]);
   let agentsLoading = $state(false);
@@ -125,31 +124,27 @@
       });
   });
 
-  // providersWithModels 只取已启用供应商 + 其已启用模型，与 chat 模型选择口径一致。
+  // Only enabled providers and their enabled models, matching the chat model picker.
   $effect(() => {
     providersWithModels = providerState.providersWithModels
       .filter((p) => p.enabled)
       .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled) }));
   });
 
-  // ──────────────────────────────────────────────────────────────────────
-  // 校验。目标按 kind 分支校验（与 TargetPicker 的高亮提示同源）：
-  // - prompt：必须同时选中 provider 与 model（VAL-TARGET-013），且 prompt
-  //   文本非空白（VAL-TARGET-012）
-  // - agent：必须选中 agent 模板（VAL-TARGET-014）
-  // 任一不满足都不落库。
-  // ──────────────────────────────────────────────────────────────────────
+  // Validation mirrors TargetPicker's inline highlighting: prompt targets need
+  // provider + model and a non-blank prompt; agent targets need an agent
+  // template. Any failure blocks saving.
   const nameError = $derived(
     showValidation && form.name.trim().length === 0
       ? t("jobs.form.nameRequired")
       : null,
   );
 
-  // 健壮性字段：留空合法（保存映射为 undefined，由后端回填具名默认）；
-  // 非空必须是非负整数，否则即时报错（VAL-ROBUST-003 前端侧）。
+  // Empty is valid (saved as undefined, backend default applies); otherwise the
+  // value must be a non-negative integer.
   function robustnessError(raw: string, label: string): string | null {
     const trimmed = raw.trim();
-    if (trimmed.length === 0) return null; // 留空 → 用默认
+    if (trimmed.length === 0) return null; // empty → use default
     const n = Number(trimmed);
     if (!Number.isInteger(n)) return t("jobs.form.mustBeInteger", { label });
     if (n < 0) return t("jobs.form.mustNotBeNegative", { label });
@@ -172,7 +167,7 @@
       : null,
   );
 
-  /** 把健壮性输入解析为保存值：空串 → undefined（用默认），否则解析为整数。 */
+  /** Empty string → undefined (backend default); otherwise the parsed integer. */
   function parseRobustness(raw: string): number | undefined {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return undefined;
@@ -210,10 +205,8 @@
     goto("/jobs");
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-  // 保存：先校验，再落库（store 自动 upsert 列表）；失败保留表单 + 显示错误
-  // （不乐观更新，避免 ghost 卡片）。成功回列表页。
-  // ──────────────────────────────────────────────────────────────────────
+  // Save is not optimistic: failures keep the form and show the error (no ghost
+  // cards in the list); success returns to the list page.
   async function handleSave(): Promise<void> {
     if (saving || !validate()) return;
     saving = true;
@@ -249,10 +242,8 @@
   }
 </script>
 
-<!-- Job 编辑二级页：与 Agent 编辑页同构——居中 max-w-3xl 阅读宽度、
-     TableGroup 分组卡纵排（不撑满屏幕、不用左右结构）。 -->
+<!-- Mirrors the Agent editor layout: centered max-w-3xl column of TableGroup cards. -->
 <div class="h-full flex flex-col">
-  <!-- 顶部工具栏 -->
   <div class="flex-shrink-0 px-6 pb-4 pt-12">
     <div class="mx-auto w-full max-w-3xl">
       <button
@@ -301,10 +292,8 @@
     </div>
   </div>
 
-  <!-- 表单主体：设置页式分组卡纵排 -->
   <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-y-4">
-      <!-- 任务目标（要跑什么） -->
       <TableGroup title={t("jobs.form.sectionTarget")}>
         <TableBaseRow>
           <TargetPicker
@@ -317,14 +306,12 @@
         </TableBaseRow>
       </TableGroup>
 
-      <!-- 调度 -->
       <TableGroup title={t("jobs.form.sectionSchedule")}>
         <TableBaseRow>
           <ScheduleEditor bind:cron={form.cronExpr} />
         </TableBaseRow>
       </TableGroup>
 
-      <!-- 高级：超时 / 重试 -->
       <TableGroup title={t("jobs.form.sectionAdvanced")}>
         <TableBaseRow
           label={t("jobs.form.execTimeout")}
@@ -386,7 +373,6 @@
         </TableBaseRow>
       </TableGroup>
 
-      <!-- 应用关闭即不运行的提醒 -->
       <p class="px-1 text-xs text-base-content/45">
         {t("jobs.form.appClosedNotice")}
       </p>

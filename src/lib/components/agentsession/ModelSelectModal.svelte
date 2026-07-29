@@ -38,7 +38,7 @@
   let selectedProviderFilter = $state<string>("all");
   let hoveredModel = $state<ModelWithProvider | null>(null);
   let tooltipPosition = $state({ x: 0, y: 0 });
-  // 从 provider 状态派生可用模型，仅关注已启用的供应商与模型
+  // Available models: enabled providers and enabled models only.
   const allModels = $derived(
     providerState.providersWithModels
       .filter((provider) => provider.enabled)
@@ -57,7 +57,7 @@
   const selectedModelId = $derived(selectedModel?.id || "");
   const isLoadingModels = $derived(providerState.isLoadingWithModels);
 
-  // 获取所有可用的供应商列表（用于筛选下拉框）
+  // Provider names for the filter dropdown.
   let availableProvidersResult: string[] = $state([]);
 
   $effect(() => {
@@ -70,13 +70,11 @@
     availableProvidersResult = Array.from(providers).sort();
   });
 
-  // 过滤后的模型
   let filteredModelsResult: ModelWithProvider[] = $state([]);
 
   $effect(() => {
     let models = showFavoritesOnly ? favoriteModels : allModels;
 
-    // 按供应商筛选
     if (selectedProviderFilter !== "all") {
       models = models.filter((model: ModelWithProvider) => {
         return model.providerName === selectedProviderFilter;
@@ -96,7 +94,7 @@
     filteredModelsResult = models;
   });
 
-  // 按供应商分组
+  // Models grouped by provider.
   let groupedModelsResult: Record<string, ModelWithProvider[]> = $state({});
 
   $effect(() => {
@@ -113,20 +111,18 @@
     groupedModelsResult = groups;
   });
 
-  // 当 Modal 打开时检查是否需要刷新数据
+  // Refresh data when the modal opens if needed.
   $effect(() => {
     if (!open) {
       return;
     }
 
-    // 移除了对 isLoadingWithModels 的检查
-    // 这样即使正在加载，Modal 也会立即显示
+    // Not gated on isLoadingWithModels: the modal shows immediately even while loading.
     if (
       providerState.providersWithModelsNeedRefresh ||
       providerState.providersWithModels.length === 0
     ) {
       console.log("ChatModelSelectModal: Loading providers with models");
-      // 使用 .catch() 避免未处理的 Promise rejection
       providerActions.loadProvidersWithModels().catch((err) => {
         console.error("Failed to load models:", err);
       });
@@ -140,7 +136,7 @@
 
   async function handleToggleFavorite(model: ModelWithProvider) {
     try {
-      // 直接使用 providerActions，避免 chatState 透传
+      // Use providerActions directly instead of routing through chatState.
       await providerActions.toggleModelFavorite(
         model.provider_id,
         model.id,
@@ -182,9 +178,7 @@
   closeOnBackdropClick={true}
 >
   <div class="w-[500px] h-[70vh] max-h-[70vh] flex flex-col">
-    <!-- 搜索和过滤器区域 -->
     <div class="px-6 py-4 border-b border-base-300 space-y-3">
-      <!-- 搜索框 -->
       <div class="relative">
         <Search
           class="absolute left-3 top-1/2 -translate-y-1/2 text-base-content/80"
@@ -206,7 +200,6 @@
         {/if}
       </div>
 
-      <!-- 过滤器按钮 -->
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs text-base-content/70">
           {#if isLoadingModels}
@@ -217,7 +210,6 @@
         </div>
 
         <div class="flex items-center gap-2">
-          <!-- 供应商筛选 -->
           <Select
             bind:value={selectedProviderFilter}
             options={[
@@ -228,7 +220,6 @@
             size="sm"
           />
 
-          <!-- 收藏筛选 -->
           <button
             onclick={() => (showFavoritesOnly = !showFavoritesOnly)}
             class="flex items-center gap-1 px-2 py-1 rounded-md text-xs {showFavoritesOnly
@@ -247,7 +238,6 @@
       </div>
     </div>
 
-    <!-- 模型列表 -->
     <div class="flex-1 overflow-y-auto">
       {#if filteredModelsResult.length === 0}
         <div
@@ -258,7 +248,6 @@
           <p class="text-sm">{t("agent.modelSelect.adjustSearchHint")}</p>
         </div>
       {:else}
-        <!-- 分组模型列表 -->
         <div class="px-4 py-4 space-y-2">
           {#each Object.entries(groupedModelsResult) as [providerName, models]}
             <TableGroup
@@ -317,10 +306,10 @@
     </div>
   </div>
 
-  <!-- 模型详情浮窗：必须 Portal 到 <body>。它用 fixed + 视口坐标（getBoundingClientRect）
-       定位，而 Modal 的 Dialog.Content 带 transform 居中会成为 fixed 后代的 containing
-       block，留在 Content 内会让视口坐标被当作相对 Content 计算而错位。z 取 --z-popover
-       盖在 modal 内容之上。 -->
+  <!-- The detail tooltip must Portal to <body>: it uses fixed positioning with
+       viewport coords, but Dialog.Content's centering transform makes it the
+       containing block for fixed descendants, which would misplace the tooltip.
+       z-index --z-popover keeps it above the modal content. -->
   {#if hoveredModel}
     {@const providerIcon = getProviderIconById(hoveredModel.provider_id)}
     <Portal>
@@ -329,7 +318,6 @@
         style="left: {tooltipPosition.x}px; top: {tooltipPosition.y}px; z-index: var(--z-popover);"
       >
         <div class="space-y-1">
-          <!-- 模型名称 - 大字体，带供应商图标 -->
           <div class="flex items-center gap-2">
             {#if providerIcon}
               <img
@@ -346,7 +334,6 @@
             </div>
           </div>
 
-          <!-- 模型 ID - tag 样式 -->
           <div class="flex mb-2">
             <span
               class="inline-block px-2 py-1 text-xs bg-base-300 text-base-content/70 rounded-md break-all"
@@ -355,7 +342,6 @@
             </span>
           </div>
 
-          <!-- 其他信息 -->
           <div class="space-y-2 mb-4 text-xs">
             {#if hoveredModel.display_context_length}
               <div class="flex justify-between items-center">

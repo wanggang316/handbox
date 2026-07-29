@@ -2,7 +2,6 @@
   import Avatar from "../ui/Avatar.svelte";
   import { t } from "$lib/i18n";
 
-  // 用户信息接口
   interface UserInfo {
     isLoggedIn: boolean;
     username?: string;
@@ -28,7 +27,6 @@
 </script>
 
 {#if user.isLoggedIn}
-  <!-- 已登录状态的用户信息显示 -->
   <div class="flex flex-row gap-2 items-center">
     <Avatar src={user.avatar} letter={user.username} size="md" />
     <div class="flex-1 flex flex-col">
@@ -49,7 +47,6 @@
     </div>
   </div>
 {:else}
-  <!-- 未登录状态的用户信息显示 -->
   <div class="flex flex-row gap-2 items-center">
     <Avatar size="lg" />
     <div class="flex-1">

@@ -64,7 +64,7 @@
     model?.url && model.url.trim().length > 0 ? model.url : null,
   );
 
-  // 价格已由后端格式化，直接返回
+  // Prices arrive already formatted from the backend.
   function formatPricePerMillion(value: string | null): string {
     return value || "";
   }
@@ -94,7 +94,6 @@
         });
       }
 
-      // 使用后端格式化的字段
       if (current.display_context_length) {
         rows.push({
           label: t("provider.contextLength"),
@@ -259,11 +258,6 @@
 </Modal>
 
 <style>
-  /* .scrollbar-padding {
-    padding-bottom: 1.5rem;
-    scrollbar-gutter: stable both-edges;
-  } */
-
   :global(.scrollbar-padding::-webkit-scrollbar) {
     width: 6px;
   }

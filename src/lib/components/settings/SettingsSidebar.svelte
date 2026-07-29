@@ -25,7 +25,7 @@
 </script>
 
 <div class="h-full flex flex-col p-0 pt-10 overflow-hidden">
-  <!-- 返回应用：设置在主窗口内渲染，回到进入设置前的主界面路由 -->
+  <!-- Settings renders inside the main window, so "back" returns to the route the user came from -->
   <div class="px-2 pb-1">
     <button
       type="button"
@@ -37,7 +37,6 @@
     </button>
   </div>
 
-  <!-- 分组导航 -->
   <div class="flex-1 overflow-y-auto pb-2">
     {#each groups as group (group.id)}
       <div class="pt-3 first:pt-1">

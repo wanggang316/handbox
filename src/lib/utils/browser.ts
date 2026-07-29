@@ -1,13 +1,7 @@
-/**
- * 浏览器相关工具函数
- */
-
 import { browser } from "$app/environment";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-/**
- * 复制文本到剪贴板，自动降级兼容旧环境
- */
+/** Copy text to the clipboard, falling back to execCommand for older environments. */
 export async function copyToClipboard(content: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(content);
@@ -28,10 +22,6 @@ export async function copyToClipboard(content: string): Promise<void> {
   }
 }
 
-/**
- * 在系统默认浏览器中打开URL
- * @param url 要打开的URL
- */
 export async function openInBrowser(url: string): Promise<void> {
   try {
     await openUrl(url);

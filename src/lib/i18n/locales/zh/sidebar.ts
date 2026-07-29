@@ -1,5 +1,5 @@
 /**
- * 主侧边栏文案。
+ * Main sidebar strings.
  */
 export const sidebarZh = {
   "sidebar.jobs": "任务",

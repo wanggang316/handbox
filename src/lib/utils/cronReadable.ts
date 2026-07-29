@@ -1,12 +1,12 @@
 /**
- * 把常见 5 段 cron 表达式翻译为人类可读的中文调度文案。
+ * Translate common 5-field cron expressions into human-readable Chinese labels.
  *
- * 覆盖 jobs UI 里常用的预设：每分钟 / 每 N 分钟 / 每小时 / 每 N 小时 /
- * 每天 HH:MM / 每周某天 HH:MM / 每月某日 HH:MM。无法匹配预设时回退到
- * 原始 cron 字符串，保证永远有可展示文案。
+ * Covers the presets used by the jobs UI: every minute / every N minutes /
+ * hourly / every N hours / daily, weekly, monthly at HH:MM. Anything else
+ * falls back to the raw cron string so there is always displayable text.
  *
- * 仅依赖标准 5 段格式 `minute hour day-of-month month day-of-week`。
- * schedule-editor feature 复用此函数为编辑器提供实时预览。
+ * Only the standard 5-field format `minute hour day-of-month month day-of-week`
+ * is supported.
  */
 
 const WEEKDAY_NAMES = [
@@ -19,12 +19,10 @@ const WEEKDAY_NAMES = [
   "周六",
 ];
 
-/** 把 0-23 / 0-59 数值补零成两位字符串。 */
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-/** 把 `minute` `hour` 两字段格式化为 `HH:MM`；非纯数字返回 null。 */
 function formatTime(minute: string, hour: string): string | null {
   const m = Number(minute);
   const h = Number(hour);
@@ -33,7 +31,6 @@ function formatTime(minute: string, hour: string): string | null {
   return `${pad2(h)}:${pad2(m)}`;
 }
 
-/** 解析 `*​/N` 步进字段，返回 N（要求 N >= 1 的整数），否则 null。 */
 function parseStep(field: string): number | null {
   const match = /^\*\/(\d+)$/.exec(field);
   if (!match) return null;
@@ -42,8 +39,8 @@ function parseStep(field: string): number | null {
 }
 
 /**
- * 解析 day-of-week 字段为有序去重的 0-6 列表（支持逗号多选，如 `1,3,5`）。
- * 任一段非 0-6 纯数字则返回 null（交由调用方回退原始表达式）。
+ * Parse day-of-week into a sorted, deduped 0-6 list (comma multi-select).
+ * Any non 0-6 numeric part yields null so the caller falls back to the raw expression.
  */
 function parseWeekdays(field: string): number[] | null {
   const parts = field.split(",");
@@ -58,11 +55,7 @@ function parseWeekdays(field: string): number[] | null {
   return [...set].sort((a, b) => a - b);
 }
 
-/**
- * 将 cron 表达式转为可读中文文案。无法识别的表达式原样返回。
- *
- * @param cron 标准 5 段 cron 表达式
- */
+/** Convert a cron expression into a readable Chinese label; unrecognized expressions are returned as-is. */
 export function cronToHuman(cron: string): string {
   const expr = cron.trim();
   if (!expr) return expr;
@@ -72,7 +65,7 @@ export function cronToHuman(cron: string): string {
 
   const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
 
-  // 每分钟：* * * * *
+  // Every minute: * * * * *
   if (
     minute === "*" &&
     hour === "*" &&
@@ -83,7 +76,7 @@ export function cronToHuman(cron: string): string {
     return "每分钟";
   }
 
-  // 每 N 分钟：*/N * * * *
+  // Every N minutes: */N * * * *
   const minuteStep = parseStep(minute);
   if (
     minuteStep !== null &&
@@ -95,7 +88,7 @@ export function cronToHuman(cron: string): string {
     return `每 ${minuteStep} 分钟`;
   }
 
-  // 每小时（整点）：0 * * * *
+  // Hourly (on the hour): 0 * * * *
   if (
     minute === "0" &&
     hour === "*" &&
@@ -106,7 +99,7 @@ export function cronToHuman(cron: string): string {
     return "每小时";
   }
 
-  // 每 N 小时（整点）：0 */N * * *
+  // Every N hours (on the hour): 0 */N * * *
   const hourStep = parseStep(hour);
   if (
     minute === "0" &&
@@ -118,15 +111,15 @@ export function cronToHuman(cron: string): string {
     return `每 ${hourStep} 小时`;
   }
 
-  // 固定到分钟的时间点（minute/hour 为纯数字）
+  // Fixed time of day (minute/hour are plain numbers)
   const time = formatTime(minute, hour);
   if (time !== null && month === "*") {
-    // 每天 HH:MM：m h * * *
+    // Daily at HH:MM: m h * * *
     if (dayOfMonth === "*" && dayOfWeek === "*") {
       return `每天 ${time}`;
     }
 
-    // 每周某天[可多选] HH:MM：m h * * W[,W...]
+    // Weekly (multi-select) at HH:MM: m h * * W[,W...]
     if (dayOfMonth === "*" && dayOfWeek !== "*") {
       const weekdays = parseWeekdays(dayOfWeek);
       if (weekdays !== null) {
@@ -135,7 +128,7 @@ export function cronToHuman(cron: string): string {
       }
     }
 
-    // 每月某日 HH:MM：m h D * *
+    // Monthly at HH:MM: m h D * *
     if (dayOfMonth !== "*" && dayOfWeek === "*") {
       const d = Number(dayOfMonth);
       if (Number.isInteger(d) && d >= 1 && d <= 31) {
@@ -144,6 +137,6 @@ export function cronToHuman(cron: string): string {
     }
   }
 
-  // 非预设：回退到原始表达式
+  // Not a preset: fall back to the raw expression.
   return expr;
 }

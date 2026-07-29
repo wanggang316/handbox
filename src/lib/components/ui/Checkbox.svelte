@@ -12,7 +12,7 @@
     name?: string;
     value?: string;
     onCheckedChange?: (checked: boolean) => void;
-    // 复选框右侧的文本标签。
+    // Label text rendered to the right of the box.
     children?: Snippet;
   }
 
@@ -27,8 +27,8 @@
     children,
   }: Props = $props();
 
-  // 在 FormField 内时借用其 aria-describedby（error / hint）；id 不接管——一个字段可含多个
-  // 复选框，各自用行内 label 承接点击。
+  // Inside a FormField, borrow its aria-describedby (error/hint) but not its id:
+  // a field may hold several checkboxes, each labeled by its own inline <label>.
   const ff = getFormField();
 </script>
 

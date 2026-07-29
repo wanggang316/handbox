@@ -19,7 +19,7 @@
     modalRef?.handleClose();
   }
 
-  // Modal 关闭动画结束后回调：保留侧边栏入口，仅关闭弹框
+  // Runs after the close animation: dismiss only the dialog, keeping the sidebar entry.
   function handleClosed() {
     updateState.remindLater();
   }
@@ -32,7 +32,6 @@
   onClose={handleClosed}
 >
   <div class="w-[380px] max-w-[90vw] flex flex-col px-6 pt-6 pb-5">
-    <!-- 头部：版本对比 -->
     <div class="mb-3 flex items-center gap-3">
       <div
         class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"
@@ -47,7 +46,6 @@
       </div>
     </div>
 
-    <!-- 更新说明 -->
     {#if updateState.info?.body}
       <div
         class="mb-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-base-300/50 p-3 text-[12px] leading-relaxed text-base-content/80 select-text"
@@ -56,7 +54,6 @@
       </div>
     {/if}
 
-    <!-- 下载进度 -->
     {#if downloading}
       <div class="mb-4">
         <div
@@ -78,7 +75,6 @@
       </div>
     {/if}
 
-    <!-- 操作按钮 -->
     <div class="flex items-center justify-end gap-3">
       <Button
         size="md"

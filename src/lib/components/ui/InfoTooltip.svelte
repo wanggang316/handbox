@@ -30,7 +30,7 @@
 
     const rect = buttonElement.getBoundingClientRect();
     const top = rect.top - 12; // 12px margin for slight upward offset
-    const left = rect.left + rect.width / 2; // 水平居中对齐到按钮中心
+    const left = rect.left + rect.width / 2; // horizontal center of the button
 
     tooltipStyle = `top: ${top}px; left: ${left}px;`;
   }

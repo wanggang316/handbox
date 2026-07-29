@@ -92,7 +92,6 @@
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
-  <!-- 加载状态 -->
   {#if mcpState.isLoading}
     <div class="flex items-center justify-center py-8">
       <Spinner size={28} />
@@ -103,7 +102,6 @@
   {/if}
 
   <div class="rounded-xl overflow-hidden">
-    <!-- MCP 服务器列表 -->
     <TableGroup>
       {#each mcpState.servers as server (server.id)}
         <div class="w-full px-6 py-4">
@@ -135,7 +133,6 @@
             </div>
           </div>
           <div>
-            <!-- 工具统计信息或错误信息 -->
             {#if server.status === "error" && server.lastError}
               <div class="text-xs text-error">
                 {server.lastError.message}
@@ -172,7 +169,6 @@
                 {/if}
               </div>
             {/if}
-            <!-- 工具列表 -->
             {#if expandedTools[server.id] && server.tools.length > 0}
               <div class="flex flex-wrap gap-1 mt-2">
                 {#each server.tools as tool}
@@ -192,7 +188,6 @@
         </div>
       {/each}
 
-      <!-- 空状态 -->
       {#if !mcpState.isLoading && mcpState.servers.length === 0}
         <div class="p-8 text-center">
           <Puzzle class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
@@ -207,7 +202,6 @@
     </TableGroup>
   </div>
 
-  <!-- 添加按钮 -->
   {#if mcpState.servers.length > 0}
     <div>
       <Button variant="gray" size="sm" onclick={handleAddServer}>
@@ -217,7 +211,6 @@
   {/if}
 </div>
 
-<!-- 添加/编辑弹窗 -->
 <McpServerFormModal
   open={showFormModal}
   server={editingServer}

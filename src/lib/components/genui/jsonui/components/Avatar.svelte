@@ -1,11 +1,9 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A purely presentational circular avatar placeholder. Displays the uppercased
-  // first character of `letter` only — no image src, no network proxy, no upload
-  // path (those are intentionally stripped from the source ui/Avatar component, so
-  // AI-generated specs cannot trigger any fetch/upload). The letter renders through
-  // Svelte text binding only (never @html). `size` controls the diameter.
+  // Display-only: no image src, network proxy, or upload path, so an
+  // AI-generated spec cannot trigger a fetch or upload. `letter` renders through
+  // Svelte text binding only (never @html).
   interface AvatarProps {
     letter: string;
     size?: "sm" | "md" | "lg";

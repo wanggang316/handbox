@@ -9,13 +9,13 @@
 
   interface Props {
     /**
-     * 受控出口：编辑器对外输出的标准 5 段 cron 表达式。父组件（job-form-modal）
-     * 用 `bind:cron` 双向绑定；保存所用 cron 即此值，与预览所用 cron 一致。
+     * Controlled output: the standard 5-field cron expression, bound by the
+     * parent via `bind:cron`. The saved cron and the previewed cron are always
+     * this same value.
      */
     cron?: string;
-    /** cron 变更回调（与 `bind:cron` 等价，二选一即可）。 */
+    /** Change callback (equivalent to `bind:cron`; use either). */
     onChange?: (cron: string) => void;
-    /** 预览返回的未来执行点条数，默认 5。 */
     previewCount?: number;
   }
 
@@ -25,9 +25,6 @@
     previewCount = 5,
   }: Props = $props();
 
-  // ──────────────────────────────────────────────────────────────────────
-  // Tab 状态
-  // ──────────────────────────────────────────────────────────────────────
   type Tab = "quick" | "advanced";
   let activeTab = $state<Tab>("quick");
 
@@ -36,17 +33,15 @@
     { value: "advanced", label: t("jobs.schedule.tabAdvanced") },
   ]);
 
-  // ──────────────────────────────────────────────────────────────────────
-  // 快捷预设参数（仅在快捷面板内编辑，交互时编译写回单一 cron 出口）
-  // ──────────────────────────────────────────────────────────────────────
+  // Quick-preset params; each interaction compiles them into the single cron outlet.
   type PresetKind = "minutes" | "hours" | "daily" | "weekly" | "monthly";
 
   let presetKind = $state<PresetKind>("daily");
-  let minuteN = $state(15); // 每 N 分钟
-  let hourN = $state(3); // 每 N 小时
-  let timeStr = $state("09:00"); // 每天 / 每周 / 每月 的 HH:MM
-  let weekdays = $state<number[]>([1]); // 每周：0=周日 .. 6=周六，可多选
-  let monthDay = $state(15); // 每月第几日
+  let minuteN = $state(15); // every N minutes
+  let hourN = $state(3); // every N hours
+  let timeStr = $state("09:00"); // HH:MM for daily / weekly / monthly
+  let weekdays = $state<number[]>([1]); // weekly: 0=Sun .. 6=Sat, multi-select
+  let monthDay = $state(15); // day of month
 
   const PRESET_ITEMS = $derived([
     { value: "minutes", label: t("jobs.schedule.presetMinutes") },
@@ -66,7 +61,7 @@
     t("jobs.schedule.weekday.sat"),
   ]);
 
-  /** 把 `HH:MM` 拆成 cron 的 minute / hour 字段；非法时回退 0 0。 */
+  /** Split "HH:MM" into cron minute/hour fields; falls back to 0 0 when invalid. */
   function timeFields(value: string): { minute: number; hour: number } {
     const match = /^(\d{1,2}):(\d{1,2})$/.exec(value.trim());
     if (!match) return { minute: 0, hour: 0 };
@@ -75,7 +70,6 @@
     return { minute, hour };
   }
 
-  /** 从当前快捷参数编译标准 5 段 cron。 */
   function compileQuick(): string {
     switch (presetKind) {
       case "minutes": {
@@ -104,12 +98,11 @@
     }
   }
 
-  /** 用户在快捷面板交互后：编译 cron 并通过单一出口写回。 */
   function applyQuick(): void {
     setCron(compileQuick());
   }
 
-  /** 单一 cron 出口：写回 bindable 并触发 onChange。 */
+  /** Single write path for cron: updates the bindable and fires onChange. */
   function setCron(next: string): void {
     if (next === cron) return;
     cron = next;
@@ -132,14 +125,10 @@
     applyQuick();
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-  // 可读化文案（非预设回退原始字符串，由 cronToHuman 保证）
-  // ──────────────────────────────────────────────────────────────────────
+  // Non-preset crons fall back to the raw string (guaranteed by cronToHuman).
   const humanText = $derived(cronToHuman(cron));
 
-  // ──────────────────────────────────────────────────────────────────────
-  // 防抖预览：cron 变化 → 300ms 后调 job_preview_schedule
-  // ──────────────────────────────────────────────────────────────────────
+  // Debounced preview: on cron change, call job_preview_schedule after 300ms.
   let occurrences = $state<number[]>([]);
   let previewError = $state<string | null>(null);
   let loading = $state(false);
@@ -147,12 +136,12 @@
   const DEBOUNCE_MS = 300;
 
   $effect(() => {
-    // 显式订阅依赖：cron 与条数。
+    // Read deps synchronously so the effect subscribes to them.
     const current = cron;
     const count = previewCount;
 
     const trimmed = current.trim();
-    // 空 cron 直接清空预览并提示，不打后端。
+    // Empty cron clears the preview with a hint, without hitting the backend.
     if (!trimmed) {
       occurrences = [];
       previewError = t("jobs.schedule.cronRequired");
@@ -201,7 +190,6 @@
   }
 </script>
 
-<!-- 左右结构：左列编辑（快捷/Cron），右列 = 可读化调度摘要 + Next N 次执行预览。 -->
 <div class="grid grid-cols-2 gap-5">
   <div class="flex flex-col gap-4">
   <Tabs value={activeTab} items={TAB_ITEMS} onChange={handleTabChange} />
@@ -319,7 +307,6 @@
 
   </div>
 
-  <!-- 右列：可读化调度摘要 + Next N 次执行预览（与左列等高的独立卡） -->
   <div
     class="flex flex-col rounded-md border border-[var(--hairline)] bg-base-200 p-3"
   >

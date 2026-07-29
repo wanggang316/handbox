@@ -1,5 +1,5 @@
 /**
- * agent namespace strings (filled by migration subagent).
+ * agent namespace strings.
  */
 import type { agentZh } from "../zh/agent";
 

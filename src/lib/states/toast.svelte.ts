@@ -1,4 +1,4 @@
-// 全局 Toast 状态管理
+// Global toast state.
 
 export interface ToastMessage {
   id: string;
@@ -73,41 +73,26 @@ export const toastStore = {
 };
 
 export const toastActions = {
-  /**
-   * 显示错误提示
-   */
   error(message: string, options?: ToastOptions) {
     this.add(createToast('error', message, options));
   },
 
-  /**
-   * 显示成功提示
-   */
   success(message: string, options?: ToastOptions) {
     this.add(createToast('success', message, options));
   },
 
-  /**
-   * 显示警告提示
-   */
   warning(message: string, options?: ToastOptions) {
     this.add(createToast('warning', message, options));
   },
 
-  /**
-   * 显示信息提示
-   */
   info(message: string, options?: ToastOptions) {
     this.add(createToast('info', message, options));
   },
 
-  /**
-   * 添加提示消息
-   */
   add(toast: ToastMessage) {
     toastState.messages.push(toast);
-    
-    // 自动移除
+
+    // Auto-dismiss.
     if (toast.duration && toast.duration > 0) {
       setTimeout(() => {
         this.remove(toast.id);
@@ -115,9 +100,6 @@ export const toastActions = {
     }
   },
 
-  /**
-   * 移除提示消息
-   */
   remove(id: string) {
     const index = toastState.messages.findIndex(t => t.id === id);
     if (index > -1) {
@@ -125,9 +107,6 @@ export const toastActions = {
     }
   },
 
-  /**
-   * 清除所有提示
-   */
   clear() {
     toastState.messages = [];
   }

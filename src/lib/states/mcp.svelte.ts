@@ -9,9 +9,7 @@ import * as mcpApi from "../api/mcp";
 import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriEnvironment, getTauriEnvironmentInfo } from "../utils/tauri";
 
-/**
- * 使用 Tauri 2 的 emit() API 向所有窗口广播 MCP 更新事件
- */
+/** Broadcast the MCP-updated event to all windows via Tauri 2's emit() API. */
 async function emitMcpServersUpdated(
   payload: Record<string, unknown>,
 ): Promise<void> {
@@ -33,7 +31,7 @@ async function emitMcpServersUpdated(
       "[emitMcpServersUpdated] Emitting mcp-servers:updated event with payload:",
       payload,
     );
-    // Tauri 2: emit() 自动广播到所有窗口
+    // Tauri 2: emit() broadcasts to all windows automatically.
     await emit("mcp-servers:updated", payload);
     console.log(
       "[emitMcpServersUpdated] Event emitted successfully to all windows",
@@ -46,9 +44,7 @@ async function emitMcpServersUpdated(
   }
 }
 
-/**
- * 标记 MCP 服务器已更新，并广播事件
- */
+/** Mark MCP servers as updated and broadcast the event. */
 function markMcpServersDirty(
   reason: string,
   data?: Record<string, unknown>,
@@ -250,15 +246,15 @@ export const mcpActions = {
     mcpState.toggleServer(request),
   refreshServer: (request: RefreshMcpServerRequest) =>
     mcpState.refreshServer(request),
-  // 手动触发 MCP 更新通知（用于不通过 mcpActions 的操作）
+  // Manually trigger the MCP-updated notification (for operations that bypass mcpActions).
   notifyMcpServersUpdated: (reason: string, data?: Record<string, unknown>) => {
     markMcpServersDirty(reason, data);
   },
 };
 
 /**
- * 注册 mcp-servers:updated 事件监听器
- * 应该在组件 onMount 时调用，确保 Tauri 环境已准备好
+ * Register the mcp-servers:updated listener. Call from a component's onMount
+ * so the Tauri environment is ready.
  */
 export async function setupMcpServersUpdatedListener(): Promise<void> {
   console.log("[setupMcpServersUpdatedListener] Setting up listener...");
@@ -296,7 +292,7 @@ export async function setupMcpServersUpdatedListener(): Promise<void> {
         "[mcpServersUpdatedListener] mcp-servers:updated event received",
         event,
       );
-      // 标记需要刷新，让组件响应式地检测并加载
+      // Mark for refresh so components reactively detect and reload.
       mcpState.markNeedsRefresh();
       console.log("[mcpServersUpdatedListener] Set needsRefresh to true");
     });
@@ -311,9 +307,6 @@ export async function setupMcpServersUpdatedListener(): Promise<void> {
   }
 }
 
-/**
- * 清理事件监听器
- */
 export function cleanupMcpServersUpdatedListener(): void {
   if (mcpServersUpdatedUnlisten) {
     console.log("[cleanupMcpServersUpdatedListener] Cleaning up listener");

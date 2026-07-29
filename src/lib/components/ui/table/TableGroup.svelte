@@ -20,8 +20,9 @@
 
   let isCollapsed = $state(defaultCollapsed);
   let isHovering = $state(false);
-  // 折叠动画仅在用户实际点击后启用：组件挂载也会播放 intro transition，
-  // 若一开始就带时长，切换设置页时所有分组卡都会滑入一遍（观感拖沓卡顿）。
+  // Enable the collapse animation only after a real toggle: mount also plays the
+  // intro transition, so a nonzero duration would make every group card slide in
+  // when switching settings pages (sluggish feel).
   let hasToggled = $state(false);
 
   function toggleCollapse() {
@@ -46,7 +47,7 @@
     >
       <span>{title}</span>
       {#if collapsible}
-        <!-- 常驻单 chevron：hover 淡入、展开时旋转指上（替代双 icon 切换） -->
+        <!-- Single persistent chevron: fades in on hover, rotates to point up when expanded. -->
         <ChevronDown
           size={16}
           class="transition duration-[var(--dur-fast)] {isHovering

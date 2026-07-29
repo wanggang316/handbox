@@ -1,8 +1,7 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A small status badge. `label` renders through Svelte text binding only
-  // (never @html).
+  // `label` renders through Svelte text binding only (never @html).
   interface BadgeProps {
     label: string;
     tone?: "info" | "success" | "warning" | "error";

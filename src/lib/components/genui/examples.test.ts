@@ -1,11 +1,7 @@
 /**
- * Guards the curated GenUI starter templates: every example must round-trip
- * through the same `explainSpec` pipeline the editor uses, so a typo in
- * a spec (bad enum, missing required prop, dangling child id) fails CI rather
- * than silently shipping a template that won't render.
- *
- * Pure TypeScript — `examples.ts` imports only a type from `@json-render/core`,
- * and `resolveSpec.ts` is `.svelte`-free, so this runs under plain-Node Vitest.
+ * Every curated template must round-trip through the same `explainSpec` pipeline
+ * the editor uses, so a typo in a spec (bad enum, missing required prop, dangling
+ * child id) fails CI instead of shipping a template that will not render.
  */
 
 import { describe, it, expect } from "vitest";

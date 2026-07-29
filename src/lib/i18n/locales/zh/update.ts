@@ -1,5 +1,5 @@
 /**
- * update 命名空间文案（由迁移子代理填充；zh 为权威）。
+ * update namespace strings (zh is canonical).
  */
 export const updateZh = {
   "update.newVersionFound": "发现新版本",

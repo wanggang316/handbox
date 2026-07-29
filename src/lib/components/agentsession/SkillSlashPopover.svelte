@@ -3,20 +3,20 @@
   import type { SkillInfo } from "$lib/types";
 
   interface Props {
-    /** 已过滤的候选 skill（仅未禁用、已按 query 匹配）。 */
+    /** Pre-filtered candidates (enabled skills matching the query). */
     items: SkillInfo[];
-    /** 当前高亮项索引；items 非空时为 [0, items.length)，空时为 -1。 */
+    /** Highlighted index; [0, items.length) when non-empty, -1 when empty. */
     highlightedIndex: number;
-    /** 点击某项时回调（同 Enter 选中）。 */
+    /** Click callback (same as selecting with Enter). */
     onSelect: (skill: SkillInfo) => void;
-    /** hover 某项时同步高亮索引，使键盘/鼠标高亮统一。 */
+    /** Syncs the highlight on hover so keyboard and mouse stay unified. */
     onHover: (index: number) => void;
   }
 
   let { items, highlightedIndex, onSelect, onHover }: Props = $props();
 
-  // 列表容器引用：高亮变化时把当前项滚入可视区，使键盘（↑/↓、Ctrl|Cmd+N/P）
-  // 移动高亮越过 max-h 边界时列表跟随滚动。`nearest` 只在必要时滚动，已可见则不动。
+  // Scroll the highlighted item into view so keyboard navigation follows past
+  // the max-h boundary; `nearest` only scrolls when the item is not visible.
   let listRef = $state<HTMLDivElement>();
   $effect(() => {
     const idx = highlightedIndex;
@@ -29,10 +29,10 @@
 </script>
 
 <!--
-  锚定 textarea 的 skill 自动补全浮层。父组件用 absolute 定位容器把本组件钉在
-  输入框上方（bottom-full），故此处只负责列表内容与高亮渲染。键盘行为
-  （↑/↓/Enter/Escape）由父组件在 textarea 的 keydown 上统一路由。
-  a11y：listbox/option role + aria-selected，高亮态可程序读取（VAL-SLASH-026）。
+  Skill autocomplete popover anchored to the textarea. The parent positions it
+  (absolute, bottom-full) and routes all keyboard behavior from the textarea's
+  keydown; this component only renders the list and highlight.
+  a11y: listbox/option roles + aria-selected make the highlight readable.
 -->
 <div
   bind:this={listRef}
@@ -55,7 +55,7 @@
           active ? "bg-info/15 text-info" : "text-base-content/80 hover:bg-base-300"
         }`}
         onmousedown={(event) => {
-          // mousedown（非 click）以免 textarea 先失焦丢掉选区/触发关闭。
+          // mousedown (not click) so the textarea doesn't blur first and close the popover.
           event.preventDefault();
           onSelect(skill);
         }}

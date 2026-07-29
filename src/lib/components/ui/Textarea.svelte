@@ -32,7 +32,7 @@
     showCharCount = false,
   }: Props = $props();
 
-  // FormField 内时接管 id / aria / error 态；独立使用时行为不变。
+  // Inside a FormField the field supplies id / aria / error state; standalone use is unchanged.
   const ff = getFormField();
   const controlId = $derived(ff ? ff.id : id);
   const invalid = $derived(ff ? ff.invalid : false);

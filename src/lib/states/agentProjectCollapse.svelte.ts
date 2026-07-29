@@ -1,11 +1,13 @@
 /**
- * 侧栏分组折叠态 - Svelte 5 runes + localStorage 持久化
+ * Sidebar group collapse state - Svelte 5 runes + localStorage persistence.
  *
- * 按不透明字符串 key 记忆折叠状态，key 由调用方给定：Agent 桶用 agent.id、
- * 「Chats」桶用 `CHATS_BUCKET_KEY`、项目子组用 `桶key::projectId` 复合键
- * （同一项目挂多个 Agent 下时各自独立折叠）。持久化形态为 `{ [key]: true }`
- * （只记录折叠项；展开为默认态不落盘）。损坏 / 缺失 / 非法值一律 fallback
- * 到展开（空 map）。
+ * Collapse state is remembered per opaque string key supplied by the caller:
+ * agent buckets use agent.id, the "Chats" bucket uses `CHATS_BUCKET_KEY`, and
+ * project subgroups use the composite `bucketKey::projectId` (the same project
+ * under multiple agents collapses independently). Persisted shape is
+ * `{ [key]: true }` (only collapsed entries are stored; expanded is the
+ * default and never written). Corrupt / missing / invalid values all fall back
+ * to expanded (empty map).
  */
 
 const COLLAPSE_STORAGE_KEY = "agentProjectCollapse";
@@ -23,7 +25,8 @@ function loadPersistedCollapse(): Record<string, boolean> {
     ) {
       return {};
     }
-    // 仅保留严格为 true 的条目，其余视为损坏并 fallback 到展开。
+    // Keep only entries that are strictly true; anything else is treated as
+    // corrupt and falls back to expanded.
     const result: Record<string, boolean> = {};
     for (const [key, value] of Object.entries(parsed)) {
       if (value === true) {
@@ -43,18 +46,18 @@ function persistCollapse(): void {
   try {
     localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify(collapsed));
   } catch (error) {
-    // 持久化失败（如配额）不影响内存内状态。
+    // Persistence failures (e.g. quota) do not affect in-memory state.
     console.error("Failed to persist agent project collapse state:", error);
   }
 }
 
 export const agentProjectCollapse = {
-  /** 某分组是否处于折叠态（缺失即展开）。 */
+  /** Whether a group is collapsed (missing means expanded). */
   isCollapsed(id: string): boolean {
     return collapsed[id] === true;
   },
 
-  /** 切换某分组折叠态并持久化。 */
+  /** Toggle a group's collapse state and persist. */
   toggle(id: string): void {
     const next = { ...collapsed };
     if (next[id] === true) {
@@ -66,7 +69,7 @@ export const agentProjectCollapse = {
     persistCollapse();
   },
 
-  /** 强制展开某分组（供「打开 session 自动展开所属分组」使用）。 */
+  /** Force-expand a group (used when opening a session auto-expands its group). */
   expand(id: string): void {
     if (collapsed[id] !== true) return;
     const next = { ...collapsed };

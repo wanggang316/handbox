@@ -71,7 +71,6 @@
   }
 </script>
 
-<!-- 全局 Toast 容器 -->
 <div class="fixed top-4 left-1/2 transform -translate-x-1/2 z-[var(--z-toast)] flex flex-col gap-2">
   {#each toastStore.messages as toast (toast.id)}
     {@const Icon = getIcon(toast.type)}

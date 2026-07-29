@@ -1,9 +1,10 @@
 /**
- * Agent Project 状态管理 - Svelte 5 runes
+ * Agent project state - Svelte 5 runes.
  *
- * 镜像 `states/agentSession.svelte.ts` 的约定：模块级 `$state` 变量 +
- * getter/setter 暴露的状态对象 + 一个动作对象。列表本身不维护展示顺序 ——
- * 分组与排序由 `utils/agentGrouping.ts` 的纯函数 selectors 负责。
+ * Mirrors the conventions of `states/agentSession.svelte.ts`: module-level
+ * `$state` variables + a getter/setter state object + one actions object. The
+ * list itself keeps no display order — grouping and sorting are pure-function
+ * selectors in `utils/agentGrouping.ts`.
  */
 
 import type { UUID } from "../types";
@@ -11,9 +12,6 @@ import type { AgentProject } from "../types/agentProject";
 import * as agentProjectApi from "../api/agentProject";
 import { agentSessionState } from "./agentSession.svelte";
 
-// ============================================
-// Agent Project 状态 - 使用 Svelte 5 runes
-// ============================================
 let projects = $state<AgentProject[]>([]);
 let isLoading = $state(false);
 
@@ -34,9 +32,7 @@ export const agentProjectState = {
 };
 
 export const agentProjectActions = {
-  /**
-   * 加载 Agent Project 列表（整体替换，展示顺序由 selectors 决定）。
-   */
+  /** Load the project list (wholesale replace; display order is up to selectors). */
   async loadProjects(): Promise<void> {
     try {
       isLoading = true;
@@ -50,10 +46,11 @@ export const agentProjectActions = {
   },
 
   /**
-   * 创建 Agent Project（后端为 get-or-create by canonical path）。
+   * Create an agent project (backend is get-or-create by canonical path).
    *
-   * 去重按 id 判断：若返回的项目已在列表内（同 path 命中既有项目），
-   * 原位替换而不重复插入；否则插入列表顶部。
+   * Dedupe by id: if the returned project is already in the list (same path
+   * hit an existing project), replace it in place instead of inserting a
+   * duplicate; otherwise insert at the top.
    */
   async createProject(path: string): Promise<AgentProject> {
     try {
@@ -74,9 +71,6 @@ export const agentProjectActions = {
     }
   },
 
-  /**
-   * 重命名 Agent Project（原位替换列表项）。
-   */
   async renameProject(id: UUID, name: string): Promise<void> {
     const updated = await agentProjectApi.renameAgentProject(id, name);
     const index = projects.findIndex((project) => project.id === id);
@@ -86,8 +80,9 @@ export const agentProjectActions = {
   },
 
   /**
-   * 删除 Agent Project：从列表移除，并联动 agentSession store 移除该
-   * 项目下的全部会话（镜像后端级联删除）；若当前会话属于该项目则清空。
+   * Delete an agent project: remove it from the list and also remove all of
+   * its sessions from the agentSession store (mirrors the backend cascade
+   * delete); clear the current session if it belongs to the project.
    */
   async deleteProject(id: UUID): Promise<void> {
     try {

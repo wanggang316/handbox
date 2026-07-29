@@ -1,17 +1,19 @@
 /**
- * 主窗口路由记忆。
+ * Main-window route memory.
  *
- * 设置页在主窗口内渲染（非独立窗口），设置侧栏的「返回应用」需要知道
- * 进入设置前停在哪个主界面路由。根布局在每次导航后调用 remember()。
+ * The settings page renders inside the main window (not a separate window),
+ * so the settings sidebar's "back to app" needs the main-view route that was
+ * active before entering settings. The root layout calls remember() after
+ * every navigation.
  */
 let lastMainRoute = $state("/agent");
 
 export const navigationState = {
-  /** 「返回应用」目标：最近一次主界面路由，默认 /agent。 */
+  /** "Back to app" target: the most recent main-view route, default /agent. */
   get backTarget(): string {
     return lastMainRoute;
   },
-  /** 记录最近一次非设置、非启动页的路由。 */
+  /** Record the most recent route that is neither settings nor the launch page. */
   remember(path: string): void {
     if (path === "/" || path.startsWith("/settings")) return;
     lastMainRoute = path;

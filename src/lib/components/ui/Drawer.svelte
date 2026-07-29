@@ -51,7 +51,6 @@
   >
     <TitleBar showToggleButton={false} />
 
-    <!-- 背景遮罩 -->
     <div
       role="button"
       tabindex="0"
@@ -63,7 +62,6 @@
       }}
     ></div>
 
-    <!-- 抽屉容器 -->
     <div
       role="presentation"
       class="ml-auto relative bg-base-100 max-w-lg flex flex-col animate-drawer border-l-1 border-base-300"
@@ -71,7 +69,6 @@
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}
     >
-      <!-- 头部 -->
       <div
         class="h-[50px] flex items-center justify-between px-4 border-b border-base-content/10"
       >
@@ -89,7 +86,6 @@
         {/if}
       </div>
 
-      <!-- 内容区域 -->
       <div class="flex-1 overflow-y-auto">
         {@render children?.()}
       </div>

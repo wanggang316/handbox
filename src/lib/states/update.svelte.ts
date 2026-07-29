@@ -1,9 +1,11 @@
 /**
- * 应用更新状态管理 - Svelte 5
+ * App-update state - Svelte 5.
  *
- * 基于 @tauri-apps/plugin-updater 实现自动 / 手动检查更新、下载安装并重启。
- * 「发现更新」通过 Tauri 事件在多窗口间广播，使设置窗口的手动检查也能点亮
- * 主窗口侧边栏的更新入口。自动检查偏好用 localStorage 持久化（与 theme 一致）。
+ * Auto / manual update check, download-install, and relaunch, built on
+ * @tauri-apps/plugin-updater. "Update available" is broadcast across windows
+ * via a Tauri event, so a manual check in the settings window also lights up
+ * the main window's sidebar entry. The auto-check preference persists in
+ * localStorage (same as theme).
  */
 
 import {
@@ -17,11 +19,11 @@ import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { toastActions } from './toast.svelte';
 
 export type UpdateStatus =
-  | 'idle' // 未检查 / 已是最新
-  | 'checking' // 正在检查
-  | 'available' // 发现新版本
-  | 'downloading' // 正在下载安装
-  | 'error'; // 检查或下载失败
+  | 'idle' // not checked / up to date
+  | 'checking'
+  | 'available' // new version found
+  | 'downloading' // downloading and installing
+  | 'error'; // check or download failed
 
 export interface UpdateInfo {
   version: string;
@@ -56,7 +58,7 @@ class UpdateState {
     error: null,
   });
 
-  // check() 返回的 Update 句柄；非响应式，仅在当前窗口有效
+  // Update handle returned by check(); non-reactive, valid in this window only.
   private handle: Update | null = null;
   private loaded = false;
 
@@ -82,17 +84,17 @@ class UpdateState {
   get contentLength() {
     return this.state.contentLength;
   }
-  /** 是否存在可更新版本（含下载中），用于侧边栏入口显隐 */
+  /** Whether an update exists (including while downloading); drives the sidebar entry. */
   get hasUpdate() {
     return this.state.status === 'available' || this.state.status === 'downloading';
   }
-  /** 下载进度 0..1（contentLength 未知时恒为 0） */
+  /** Download progress 0..1 (always 0 when contentLength is unknown). */
   get progress() {
     if (this.state.contentLength <= 0) return 0;
     return Math.min(1, this.state.downloaded / this.state.contentLength);
   }
 
-  /** 读取当前版本与 autoCheck 偏好；两个窗口都会调用，幂等 */
+  /** Read the current version and autoCheck preference; called by both windows, idempotent. */
   async load(): Promise<void> {
     if (this.loaded) return;
     this.loaded = true;
@@ -122,18 +124,20 @@ class UpdateState {
     this.state.dialogOpen = false;
   }
 
-  /** 稍后提醒：关闭弹框，保留侧边栏入口 */
+  /** Remind later: close the dialog but keep the sidebar entry. */
   remindLater(): void {
     this.state.dialogOpen = false;
   }
 
   /**
-   * 主窗口启动时调用：监听跨窗口的「发现更新」事件；若开启自动检查则静默检查一次。
-   * 返回取消监听的清理函数。
+   * Called at main-window startup: listen for the cross-window
+   * "update available" event and, if auto-check is on, check once silently.
+   * Returns the unlisten cleanup function.
    */
   async startAutoCheck(): Promise<UnlistenFn> {
     const unlisten = await listen<UpdateInfo>(UPDATE_AVAILABLE_EVENT, (event) => {
-      // 来自其它窗口（如设置窗口手动检查）的更新通知：点亮入口，但不自动弹框
+      // Update notice from another window (e.g. manual check in settings):
+      // light up the entry but do not auto-open the dialog.
       if (this.state.status === 'downloading') return;
       this.state.info = event.payload;
       this.state.status = 'available';
@@ -149,11 +153,11 @@ class UpdateState {
   }
 
   /**
-   * 检查更新。
-   * @param notifyNoUpdate 无更新 / 出错时是否 toast 提示（手动检查为 true）
-   * @param openOnFound 发现更新时是否自动打开弹框（默认 true）
-   * @param broadcast 发现更新时是否向其它窗口广播（默认 true）
-   * @returns 是否发现可更新版本
+   * Check for an update.
+   * @param notifyNoUpdate toast when up to date / on error (true for manual checks)
+   * @param openOnFound auto-open the dialog when an update is found (default true)
+   * @param broadcast broadcast to other windows when found (default true)
+   * @returns whether an update was found
    */
   async checkForUpdate(opts?: {
     notifyNoUpdate?: boolean;
@@ -207,11 +211,12 @@ class UpdateState {
     }
   }
 
-  /** 下载并安装更新，完成后重启应用 */
+  /** Download and install the update, then relaunch the app. */
   async startUpdate(): Promise<void> {
     if (this.state.status === 'downloading') return;
 
-    // 当前窗口没有句柄（如仅通过跨窗口事件得知更新），重新检查以获取
+    // No handle in this window (e.g. the update was learned via the
+    // cross-window event): re-check to obtain one.
     if (!this.handle) {
       const ok = await this.checkForUpdate({
         notifyNoUpdate: false,
@@ -245,7 +250,7 @@ class UpdateState {
             break;
         }
       });
-      // 安装完成，重启进入新版本
+      // Installed; relaunch into the new version.
       await relaunch();
     } catch (error) {
       this.state.status = 'available';
@@ -256,5 +261,4 @@ class UpdateState {
   }
 }
 
-// 导出单例实例
 export const updateState = new UpdateState();

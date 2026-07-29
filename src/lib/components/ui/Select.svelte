@@ -14,24 +14,25 @@
   interface Props {
     label?: string;
     value?: string;
-    selectedValue?: string; // DropDown 兼容别名
+    selectedValue?: string; // legacy alias for DropDown-style call sites
     options?: Option[];
     placeholder?: string;
     autoWidth?: boolean;
     /**
-     * popover 相对触发器的水平对齐。缺省按 autoWidth 推导：紧凑触发器（autoWidth）
-     * 在本设计系统里恒靠行右侧，故右边缘对齐（end）、向左生长，避免贴窗右缘被挤偏；
-     * 全宽触发器则左对齐（start，左右边缘本就与触发器重合）。
+     * Horizontal popover alignment relative to the trigger. Default derives from
+     * autoWidth: compact triggers always sit at the row's right edge here, so align
+     * "end" and grow leftward to avoid being nudged at the window edge; full-width
+     * triggers align "start" (their edges already match the trigger).
      */
     align?: "start" | "center" | "end";
     disabled?: boolean;
-    /** standalone 错误态；在 FormField 内则由 FormField 接管。 */
+    /** Standalone error state; inside a FormField the field takes over. */
     invalid?: boolean;
     size?: "sm" | "md" | "lg";
     class?: string;
     onChange?: (value: string) => void;
-    onSelect?: (value: string, option: Option) => void; // DropDown 兼容
-    /** 自定义 trailing 图标（默认 ChevronsUpDown）。 */
+    onSelect?: (value: string, option: Option) => void; // DropDown compat
+    /** Custom trailing icon (defaults to ChevronsUpDown). */
     icon?: Snippet;
   }
 
@@ -52,7 +53,7 @@
     icon,
   }: Props = $props();
 
-  // selectedValue 优先（DropDown 兼容），否则用 value。
+  // selectedValue (DropDown compat) wins over value.
   const current = $derived(
     (selectedValue !== undefined ? selectedValue : value) ?? "",
   );
@@ -70,7 +71,7 @@
     }
   }
 
-  // FormField 内时接管 id / aria-invalid / describedby。
+  // Inside a FormField it supplies id / aria-invalid / describedby.
   const ff = getFormField();
   const fallbackId = `select-${Math.random().toString(36).slice(2, 11)}`;
   const controlId = $derived(ff ? ff.id : fallbackId);

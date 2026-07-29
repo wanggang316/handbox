@@ -1,5 +1,5 @@
 /**
- * 设置相关状态管理 - Svelte 5
+ * Settings state - Svelte 5.
  */
 
 import type { AppSettings, UpdateSettingsRequest } from '../types';
@@ -44,11 +44,8 @@ class SettingsState {
     this.state.settings = settings;
   }
 
-  /**
-   * 加载设置（如果已加载则跳过）
-   */
+  /** Load settings (skipped if already loaded, unless forced). */
   async loadSettings(forceReload = false): Promise<void> {
-    // 如果已经加载过且不强制重新加载，直接返回
     if (!forceReload && this.state.settings) {
       return;
     }
@@ -67,9 +64,6 @@ class SettingsState {
     }
   }
 
-  /**
-   * 更新设置
-   */
   async updateSettings(request: UpdateSettingsRequest): Promise<void> {
     try {
       this.setLoading(true);
@@ -85,25 +79,17 @@ class SettingsState {
     }
   }
 
-  /**
-   * 部分更新设置
-   */
+  /** Partially update settings in memory only (no persistence). */
   updateLocalSettings(updates: Partial<AppSettings>): void {
     if (this.state.settings) {
       this.state.settings = { ...this.state.settings, ...updates };
     }
   }
 
-  /**
-   * 清除错误状态
-   */
   clearError(): void {
     this.setError(null);
   }
 
-  /**
-   * 重置状态
-   */
   reset(): void {
     this.state.settings = null;
     this.state.isLoading = false;
@@ -111,5 +97,4 @@ class SettingsState {
   }
 }
 
-// 导出单例实例
 export const settingsState = new SettingsState();

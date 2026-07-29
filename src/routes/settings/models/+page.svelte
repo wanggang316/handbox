@@ -21,7 +21,6 @@
 
   onMount(async () => {
     try {
-      // 并行加载供应商配置和供应商列表
       await Promise.all([
         providerActions.loadProviderConfigs(),
         providerActions.loadProviders()
@@ -32,7 +31,6 @@
   });
 
   function handleProviderClick(provider: Provider) {
-    // 跳转到供应商配置页面
     goto(`/settings/models/provider/${provider.id}`);
   }
 
@@ -40,10 +38,9 @@
     showAddProviderModal = true;
   }
 
-  // 监听模态框状态变化
   $effect(() => {
     if (!showAddProviderModal) {
-      // 模态框关闭时，确保清理编辑状态
+      // Closing the modal must clear any in-progress edit state
       providerStateActions.endEditProvider();
     }
   });
@@ -61,8 +58,8 @@
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
 
-  <!-- 加载状态：仅真正的首次加载显示（store 已有数据时直接渲染列表，
-       后台刷新静默完成，避免「列表→spinner→列表」的闪动）。 -->
+  <!-- Spinner only on a true first load; with store data, render the list and
+       refresh silently to avoid a list-spinner-list flash. -->
   {#if providerState.isLoading && providerState.providers.length === 0}
     <div class="flex items-center justify-center py-10">
       <Spinner size={28} />
@@ -70,9 +67,7 @@
   {/if}
 
   <div class="rounded-xl overflow-hidden">
-    <!-- 供应商列表 -->
     <TableGroup>
-      <!-- 实际供应商 -->
       {#each providerState.providers as provider (provider.id)}
         <StatusLabelRow
           label={provider.name}
@@ -89,7 +84,6 @@
         />
       {/each}
 
-      <!-- 空状态 -->
       {#if !providerState.isLoading && providerState.providers.length === 0}
         <div class="p-8 text-center">
           <Cpu class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
@@ -104,7 +98,6 @@
     </TableGroup>
   </div>
 
-  <!-- 添加供应商按钮 -->
   {#if providerState.providers.length > 0}
     <div>
       <Button variant="gray" size="sm" onclick={handleAddProvider}>
@@ -114,7 +107,6 @@
   {/if}
 </div>
 
-<!-- 添加供应商弹窗 -->
 <AddProviderModal
   open={showAddProviderModal}
   onClose={() => showAddProviderModal = false}

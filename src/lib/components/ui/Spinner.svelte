@@ -1,5 +1,5 @@
 <script lang="ts">
-  // 统一的 loading spinner：中性灰圈 + 深色转角，尺寸经 size 控制。
+  // Shared loading spinner: neutral gray ring with a darker rotating arc.
   interface Props {
     size?: number;
     class?: string;

@@ -4,9 +4,8 @@
  * Pure TypeScript — the builder takes the resolver result + default-tools
  * setting as arguments and imports no `.svelte` module, so this suite runs
  * under the plain-Node Vitest environment. It is the strongest non-GUI
- * verification of the model = pick-or-default (VAL-COMMS-007/020),
- * enabledTools = defaultEnabledTools (VAL-COMMS-019) and the no-model
- * empty-state (VAL-COMMS-006) behaviors.
+ * verification of the model = pick-or-default, enabledTools =
+ * defaultEnabledTools, and no-model empty-state behaviors.
  */
 
 import { describe, it, expect } from "vitest";

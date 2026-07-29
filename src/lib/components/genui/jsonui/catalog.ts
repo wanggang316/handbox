@@ -1,26 +1,15 @@
 /**
- * JSON-Render catalog for the generative-UI PoC.
+ * JSON-Render catalog: the presentational components an AI may compose into a
+ * flat {@link Spec}. It drives `uiCatalog.validate(spec)` (used by
+ * {@link resolveSpec}), `uiCatalog.prompt()` (the LLM system-prompt fragment),
+ * and the typed component set `registry.ts` binds to `.svelte` files.
  *
- * Declares the ten presentational components (Card, Text, Badge, Stack,
- * StatusLabel, Avatar, Divider, KeyValue, Table, InfoTooltip) that an AI may
- * compose into a flat {@link Spec}. The catalog drives
- * three things:
- *
- *  - `uiCatalog.validate(spec)` — structural + per-component prop validation,
- *    used by {@link resolveSpec} to decide whether a message is a renderable spec.
- *  - `uiCatalog.prompt()` — the system-prompt fragment handed to the LLM so it
- *    knows the available components and their props.
- *  - the typed component set consumed by `registry.ts` (which binds `.svelte`).
- *
- * This module imports only the schema + Zod (no `.svelte`), so it is safe to
- * pull into the Node-environment unit tests.
+ * Imports no `.svelte`, so it is safe to pull into the Node-environment tests.
  */
 
 import { defineCatalog } from "@json-render/core";
-// Import the Svelte schema from its dedicated subpath rather than the package
-// root: the root entry (`@json-render/svelte`) re-exports `.svelte` modules,
-// which the plain-Node Vitest environment (no SvelteKit plugin) cannot load.
-// `@json-render/svelte/schema` is pure JS and exports the identical `schema`.
+// Import from the `/schema` subpath: the package root re-exports `.svelte`
+// modules, which the plain-Node Vitest environment cannot load.
 import { schema } from "@json-render/svelte/schema";
 import { z } from "zod";
 
@@ -100,7 +89,6 @@ export const uiCatalog = defineCatalog(schema, {
         "A help icon that reveals 'content' in a hover popover. Use for inline explanatory hints.",
     },
   },
-  // The schema's catalog shape types `actions` as required; this PoC exposes no
-  // actions, so an empty map satisfies the type without adding behaviour.
+  // Required by the catalog shape; no actions are exposed.
   actions: {},
 });

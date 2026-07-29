@@ -9,11 +9,10 @@
     iconPosition?: "left" | "right";
     iconSize?: number;
     onclick?: () => void;
-    // 自定义样式类
     buttonClass?: string;
     activeClass?: string;
     iconClass?: string;
-    // 图标插槽（无 icon prop 时回退）
+    // Fallback icon snippet, used when no icon prop is given.
     icon_slot?: Snippet;
   }
 
@@ -30,13 +29,11 @@
     icon_slot,
   }: Props = $props();
 
-  // 默认样式
   const defaultButtonClass =
     "w-full p-2 text-left rounded-lg text-[14px] leading-[22px] text-base-content hover:bg-base-300 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] truncate";
   const defaultActiveClass = "bg-base-300";
   const defaultIconClass = "flex-shrink-0";
 
-  // 优化样式计算，避免频繁字符串拼接
   const finalButtonClass = $derived(
     [
       defaultButtonClass,
@@ -50,7 +47,6 @@
     [defaultIconClass, iconClass].filter(Boolean).join(" "),
   );
 
-  // 检查是否有图标
   const hasIcon = $derived(Boolean(icon || icon_slot));
 </script>
 

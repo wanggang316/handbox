@@ -1,8 +1,9 @@
 <script lang="ts" module>
   import type { DisabledApp as DisabledAppCache } from "$lib/api/selection";
 
-  // 跨挂载缓存：权限探测与禁用应用列表都是异步的，缓存上次结果让重访首帧直出，
-  // 异步刷新静默纠偏。null 表示从未探测过（本会话首次）。
+  // Cross-mount cache: permission probe and disabled-app list are async; cache
+  // the last results so revisits paint immediately and refresh silently.
+  // null = never probed this session.
   let cachedPermission: boolean | null = null;
   let cachedApps: DisabledAppCache[] | null = null;
 </script>
@@ -28,19 +29,19 @@
     import Button from "$lib/components/ui/Button.svelte";
 
   let showToolbarOnSelection = $state(false);
-  // 划词「翻译」使用的 Agent 定义 ID；"" = 内置翻译回落
+  // Agent definition id for selection "translate"; "" = builtin translation fallback
   let translationAgentId = $state("");
-  // Quick Action（全局快捷键唤起浮层）是否启用；缺省视为 true
+  // Quick Action (global-shortcut overlay); a missing setting defaults to true
   let quickActionEnabled = $state(true);
-  // 权限/禁用应用是异步探测的：用模块级缓存让重访首帧直出上次结果，避免
-  // 「警告条闪现又消失」「列表先空后填」。首次访问乐观按已授权画（警告延迟出现
-  // 好过对多数已授权用户闪一下警告）。
+  // Permission / disabled apps are probed async: the module-level cache lets
+  // revisits paint the last result immediately (no warning flash, no empty-then-
+  // filled list). First visit optimistically assumes granted — a late warning
+  // beats flashing one at every already-granted user.
   let permissionGranted = $state(cachedPermission ?? true);
   let isCheckingPermission = $state(false);
   let disabledApps = $state<DisabledApp[]>(cachedApps ?? []);
   let isLoadingApps = $state(false);
 
-  // 从 settings 回填本地状态；store 未就绪时跳过
   function syncFromSettings(): void {
     if (!settingsState.settings) return;
     if (settingsState.settings.quickTools) {
@@ -52,27 +53,26 @@
     quickActionEnabled = settingsState.settings.quickAction?.enabled ?? true;
   }
 
-  // 根布局已预加载 settings：同步回填，首帧即真实值，避免开关闪烁
+  // Root layout preloaded settings: sync backfill so the first frame shows real
+  // values (no toggle flicker).
   syncFromSettings();
 
   onMount(async () => {
     try {
-      // 兜底冷启动/深链：确保 settings 加载完成后再同步一次
+      // Cold-start/deep-link fallback: resync once settings finish loading
       await settingsState.loadSettings();
       syncFromSettings();
 
-      // 检查当前权限状态
       permissionGranted = await checkAccessibilityPermission();
       cachedPermission = permissionGranted;
       console.log("[QuickTools] 初始化: permissionGranted =", permissionGranted);
 
-      // 加载禁用的应用列表
       await loadDisabledApps();
     } catch (error) {
       console.error("加载快捷工具设置失败:", error);
     }
 
-    // 翻译 Agent 选择器的候选列表；失败不阻塞页面其余部分
+    // Candidates for the translation-agent picker; failure doesn't block the rest
     try {
       await agentActions.loadAgents();
     } catch (error) {
@@ -80,7 +80,7 @@
     }
   });
 
-  // 翻译 Agent 下拉候选："" = 内置翻译回落，其余为全部 Agent 定义
+  // "" = builtin translation fallback; the rest are all agent definitions
   const translationAgentOptions = $derived([
     { value: "", label: t("settings.quicktools.translationAgentDefault") },
     ...agentState.agents.flatMap((a) =>
@@ -100,8 +100,9 @@
   }
 
   /**
-   * 切换 Quick Action：先持久化 enabled，再注册/反注册全局快捷键，保持
-   * 「开关状态 = 热键是否生效」的不变量；注册失败则回滚开关与持久化值。
+   * Toggle Quick Action: persist enabled first, then (un)register the global
+   * shortcut so "switch state = hotkey active" holds; on registration failure
+   * roll back both the switch and the persisted value.
    */
   async function handleQuickActionToggle(checked: boolean) {
     quickActionEnabled = checked;
@@ -132,7 +133,7 @@
   }
 
   async function loadDisabledApps() {
-    // 有缓存时静默刷新（不闪 spinner），仅冷启动首次显示加载态。
+    // Silent refresh when cached (no spinner); only the first cold load shows loading
     isLoadingApps = cachedApps === null;
     try {
       disabledApps = await getDisabledApps();
@@ -149,10 +150,9 @@
   async function handleToggleChange(checked: boolean) {
     console.log("[QuickTools] handleToggleChange:", checked);
     if (checked) {
-      // 用户尝试开启功能
       isCheckingPermission = true;
       try {
-        // 请求权限，会自动弹出系统授权提示
+        // Requesting permission also pops the system authorization prompt
         console.log("[QuickTools] 调用 requestAccessibilityPermission...");
         const granted = await requestAccessibilityPermission();
         console.log("[QuickTools] requestAccessibilityPermission 返回:", granted);
@@ -160,16 +160,14 @@
         cachedPermission = granted;
 
         if (granted) {
-          // 权限已授予，保存设置
           showToolbarOnSelection = true;
           await settingsState.updateSettings({
             section: "quickTools",
             data: { showToolbarOnSelection: true },
           });
         } else {
-          // 权限未授予，保持关闭状态，并打开系统设置
           showToolbarOnSelection = false;
-          // 如果系统弹窗没有出现，主动打开设置页面
+          // If the system prompt didn't appear, open the settings pane directly
           await openAccessibilitySettings();
         }
       } catch (error) {
@@ -179,7 +177,7 @@
         isCheckingPermission = false;
       }
     } else {
-      // 用户关闭功能 - 无需检查权限
+      // Turning off needs no permission check
       showToolbarOnSelection = false;
       await settingsState.updateSettings({
         section: "quickTools",
@@ -195,7 +193,7 @@
   async function handleRefreshPermission() {
     permissionGranted = await checkAccessibilityPermission();
     cachedPermission = permissionGranted;
-    // 如果权限已授予且之前尝试开启过，自动开启功能
+    // If permission is now granted, auto-enable the previously attempted switch
     if (permissionGranted && !showToolbarOnSelection) {
       showToolbarOnSelection = true;
       await settingsState.updateSettings({
@@ -208,7 +206,6 @@
   async function handleRemoveApp(bundleId: string) {
     try {
       await removeDisabledApp(bundleId);
-      // 重新加载列表
       await loadDisabledApps();
     } catch (error) {
       console.error("移除禁用应用失败:", error);
@@ -217,7 +214,6 @@
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-6">
-  <!-- 划词工具栏：显示开关 + 翻译 Agent + 禁用的应用列表 -->
   <TableGroup title={t("settings.quicktools.selectionToolbarGroup")}>
     <SwitchRow
       label={t("settings.quicktools.showToolbarOnSelection")}
@@ -234,7 +230,7 @@
       onSelect={handleTranslationAgentSelect}
     />
 
-    <!-- 禁用的应用列表（包成单个子元素，避免组内分隔线切开标题与列表） -->
+    <!-- Wrapped in a single child so the group divider doesn't split heading and list -->
     <div>
       <div class="flex items-center justify-between px-6 py-4">
         <h3 class="text-sm text-base-content">{t("settings.quicktools.disabledApps")}</h3>
@@ -279,7 +275,6 @@
     </div>
   </TableGroup>
 
-  <!-- Quick Action（全局快捷键唤起浮层） -->
   <TableGroup title={t("settings.quicktools.quickActionGroup")}>
     <SwitchRow
       label={t("settings.quicktools.enableQuickAction")}

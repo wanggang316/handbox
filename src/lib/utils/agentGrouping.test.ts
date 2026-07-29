@@ -45,7 +45,7 @@ function session(
   };
 }
 
-/** 桶内子节点的紧凑签名，便于断言顺序与形态。 */
+/** Compact signature of a bucket's children for order/shape assertions. */
 function childKeys(bucket: AgentSessionBucket): string[] {
   return bucket.children.map((c) =>
     c.kind === "project"
@@ -71,7 +71,7 @@ describe("groupSessionsByAgent", () => {
     expect(buckets).toHaveLength(1);
     expect(buckets[0].key).toBe("A");
     expect(buckets[0].agent?.id).toBe("A");
-    // 子节点按活动键降序：loose(200) 在 project(100) 之前。
+    // Activity desc: loose(200) precedes project(100).
     expect(childKeys(buckets[0])).toEqual([
       "session:s-loose",
       "project:P[s-proj]",
@@ -84,11 +84,11 @@ describe("groupSessionsByAgent", () => {
       [],
       [
         session("a1", 100, { agentId: "A" }),
-        session("noagent", 200), // 无来源 Agent
-        session("dangling", 300, { agentId: "ghost" }), // 悬挂引用
+        session("noagent", 200), // no source agent
+        session("dangling", 300, { agentId: "ghost" }), // dangling reference
       ],
     );
-    // Chats 桶活动更新（300）也恒定垫底。
+    // Chats stays last even with newer activity (300).
     expect(buckets.map((b) => b.key)).toEqual(["A", CHATS_BUCKET_KEY]);
     const chats = buckets[1];
     expect(chats.agent).toBeNull();
@@ -120,7 +120,7 @@ describe("groupSessionsByAgent", () => {
     );
     expect(childKeys(buckets[0])).toEqual([
       "session:loose-hi", // 350
-      "project:P[p-new,p-old]", // latest 300, 组内降序
+      "project:P[p-new,p-old]", // latest 300, members desc
       "session:loose-mid", // 250
     ]);
   });

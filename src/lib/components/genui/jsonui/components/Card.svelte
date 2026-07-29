@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { BaseComponentProps } from "@json-render/svelte";
 
-  // A bordered card container. `title` (when present) renders text-bound (never
-  // @html) above the children slot — the XSS-safe boundary for AI-generated specs.
+  // `title` renders through Svelte text binding only (never @html) — the
+  // XSS-safe boundary for AI-generated specs.
   interface CardProps {
     title?: string;
   }

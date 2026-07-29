@@ -16,7 +16,6 @@
 	let isLoading = false;
 	let errors: Record<string, string> = {};
 	
-	// Modal 引用
 	let modalRef: Modal;
 
 	function handleClose() {
@@ -73,7 +72,6 @@
 			></textarea>
 		</div>
 
-		<!-- 底部按钮 -->
 		<div class="flex items-center justify-end gap-3 px-6 py-3">
 			<Button
 				class="w-18"

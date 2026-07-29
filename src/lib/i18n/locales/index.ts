@@ -1,12 +1,12 @@
 /**
- * 语言词典装配（仅在此文件集中维护命名空间接线）。
+ * Dictionary assembly — namespace wiring lives only in this file.
  *
- * 约定：
- * - `zh-CN` 为权威词典，决定全部 key（`MessageKey`）。
- * - 各命名空间的 en 文件在自身内通过 `Record<keyof typeof <ns>Zh, string>`
- *   做**本地**完整性校验——漏译会在对应 en 文件就地报错，互不耦合，
- *   因此多个迁移代理可并行工作、各自独立 `npm run check`。
- * - 新增命名空间时，仅需在此文件 import + spread 两处。
+ * Conventions:
+ * - `zh-CN` is the canonical dictionary and defines every key (`MessageKey`).
+ * - Each en namespace file checks its own completeness locally via
+ *   `Record<keyof typeof <ns>Zh, string>`, so a missing translation errors
+ *   in that file without cross-namespace coupling.
+ * - Adding a namespace only requires an import + spread here.
  */
 import { commonZh } from "./zh/common";
 import { sidebarZh } from "./zh/sidebar";
@@ -30,7 +30,7 @@ import { uiEn } from "./en/ui";
 import { providerEn } from "./en/provider";
 import { quickactionEn } from "./en/quickaction";
 
-// 权威词典：key 的唯一来源。
+// Canonical dictionary: the single source of keys.
 const zh = {
   ...commonZh,
   ...sidebarZh,
@@ -60,8 +60,8 @@ const en = {
 export type Locale = "zh-CN" | "en-US";
 export type MessageKey = keyof typeof zh;
 
-// 值类型放宽，避免在此处引入跨命名空间的全局耦合；
-// 完整性由各 en 命名空间文件本地保证。
+// Value types are widened to avoid cross-namespace coupling here;
+// completeness is enforced locally by each en namespace file.
 export const dictionaries: Record<Locale, Record<string, string>> = {
   "zh-CN": zh,
   "en-US": en,

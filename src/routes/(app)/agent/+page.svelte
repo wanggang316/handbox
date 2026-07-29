@@ -26,33 +26,32 @@
     ApprovalDecision,
   } from "$lib/types/agentSession";
 
-  // 当前选中的 Agent 会话 ID（来自 ?id= 查询参数）
   let sessionId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : "",
   );
 
-  // 侧栏 AgentProjectList 挂载时已拉取项目列表，这里只读以区分引导文案分支。
+  // Sidebar's AgentProjectList already fetched projects; read-only here to pick landing copy.
   const hasProjects = $derived(agentProjectState.projects.length > 0);
 
-  // 记录最近打开的会话，供切换回 Agent 模式时恢复（VAL-MODE-005）
+  // Remember the last opened session so switching back to Agent mode can restore it
   $effect(() => {
     if (sessionId) {
       uiState.setLastAgentSessionId(sessionId);
     }
   });
 
-  // 列表拉取的在途去重标记：列表确为空时 `loadSessions` 对 `sessions` 的
-  // 赋值（新数组引用）会重触发下方 effect，不去重会无限重拉。完成（.then/
-  // .catch）即重置，去重只约束在途窗口，同一 id 之后仍可再次发起拉取。
+  // In-flight dedup for list fetches: when the list is truly empty, loadSessions'
+  // new `sessions` array ref re-triggers the effect below and would refetch
+  // forever. Reset on completion; only the in-flight window is deduped.
   let probedSessionId = "";
 
-  // 恢复指针失效（id 指向已删 session 等）：清当前会话、清掉失效的
-  // lastAgentSessionId，并回 Agent 落地页（VAL-CROSS-013 / 009）。
-  // replaceState 避免返回键回到死 id 再次触发重定向。
+  // Stale restore pointer (id points at a deleted session, etc.): clear the
+  // current session and lastAgentSessionId, then return to the landing page.
+  // replaceState so back doesn't revisit the dead id and redirect again.
   function handleMissingSession(id: string) {
     agentSessionState.currentSession = null;
-    // untrack：本函数会在下方 effect 内同步调用，指针的读-写不进依赖
-    // （对齐 AgentProjectList 折叠展开的 untrack 惯例），避免冗余重跑。
+    // untrack: called synchronously inside the effect below; keep the pointer
+    // read-write out of its dependencies to avoid redundant reruns.
     untrack(() => {
       if (uiState.lastAgentSessionId === id) {
         uiState.setLastAgentSessionId(null);
@@ -61,15 +60,14 @@
     goto("/agent", { replaceState: true });
   }
 
-  // 将 store 当前会话与 ?id= 同步。
-  // 列表可能尚未加载（直接打开 /agent?id= 时），此时先拉取列表再定位。
-  // 工作目录是否仍存在于磁盘只在 M2 工具调用阶段才有意义，此处仅渲染、绝不崩溃。
+  // Sync the store's current session with ?id=. The list may not be loaded yet
+  // (direct open of /agent?id=): fetch it first, then locate. Render even if the
+  // session's working directory no longer exists on disk — never crash here.
   $effect(() => {
     if (!browser) {
       return;
     }
     if (!sessionId) {
-      // 回到落地页：清空当前会话。
       agentSessionState.currentSession = null;
       return;
     }
@@ -77,13 +75,13 @@
     if (agentSessionActions.setCurrentById(id)) {
       return;
     }
-    // 内存列表未命中：可能列表从未加载（直接打开 /agent?id=），也可能列表是过期快照
-    // ——quick-action continue-in-chat 交接来的一次性会话刚落盘，但晚于本窗口上次
-    // loadSessions，故不在内存列表里（VAL-CONTINUE-010/012）。两种情形都先从磁盘重拉
-    // 一次（loadSessions 读 SQLite 全量），命中即定位；唯有重拉后磁盘上仍无此 id，才
-    // 判为失效指针、回落地态——绝不 bounce 一个可加载的有效 id。
+    // Not in the in-memory list: the list was never loaded (direct open) or is a
+    // stale snapshot (e.g. a quick-action handoff session persisted after this
+    // window's last loadSessions). Refetch from disk once and locate; only if
+    // the id is still missing afterwards treat it as a stale pointer — never
+    // bounce a loadable valid id.
     if (probedSessionId === id) {
-      // 本 id 拉取在途：失效判定交由下方 .then，避免重拉循环。
+      // Fetch for this id is in flight; .then below decides staleness — avoids a refetch loop
       return;
     }
     probedSessionId = id;
@@ -91,8 +89,8 @@
       .loadSessions()
       .then(() => {
         probedSessionId = "";
-        // 用户可能已离开该 id（guard 后仅在仍停留时处理失效指针）；
-        // 拉取失败走 catch 只记录，不误判为指针失效。
+        // Only treat as stale if the user is still on this id; fetch failures
+        // go to catch and are never misread as staleness.
         if (sessionId === id && !agentSessionActions.setCurrentById(id)) {
           handleMissingSession(id);
         }
@@ -105,7 +103,7 @@
 
   const currentSession = $derived(agentSessionState.currentSession);
 
-  // 打开会话时 seed 已提交 transcript（按 sessionId 分键，互不干扰）。
+  // Seed the committed transcript on open (keyed per sessionId)
   $effect(() => {
     if (!browser || !sessionId) {
       return;
@@ -115,15 +113,15 @@
     });
   });
 
-  // 切换会话时先 paint 页面外壳（Header + Input），下一帧再挂载可能很重的
-  // AgentTimeline（逐条 markdown / 代码高亮 / katex 同步解析）。否则 Svelte 一次性
-  // 把整页渲染完才 paint，切换会话有明显延迟。
+  // On session switch, paint the shell (Header + Input) first and mount the heavy
+  // AgentTimeline (markdown / highlight / katex parsing) a frame later; otherwise
+  // Svelte paints only after rendering the whole page and switching feels slow.
   //
-  // gate 必须是 **derived**（readySessionId === sessionId）而非 effect 里重置的
-  // boolean：effect 在 DOM 更新之后才跑，若靠它置 false，切换那一刻的首次渲染仍会
-  // 按新会话同步重渲染整条 timeline（重活白干一遍），随后才卸载再挂回。derived 让
-  // timeline 在 sessionId 变化的同一次 flush 里就卸载，外壳即时 paint、重渲染只发生
-  // 一次。双 rAF 保证外壳先 paint 再挂 timeline。
+  // The gate must be derived (readySessionId === sessionId), not a boolean reset
+  // in an effect: effects run after DOM update, so the switch-time render would
+  // still re-render the full timeline once before unmounting it. Derived unmounts
+  // the timeline in the same flush sessionId changes; double rAF lets the shell
+  // paint before the timeline mounts.
   let readySessionId = $state("");
   const timelineReady = $derived(
     readySessionId !== "" && readySessionId === sessionId,
@@ -145,12 +143,11 @@
     };
   });
 
-  // 当前会话的运行 view-model（响应式 getter；用于空态判定，渲染由 AgentTimeline 消费）。
+  // Run view-model (reactive getter); used here only for empty-state checks
   const runState = $derived(
     sessionId ? agentRunStore.runStateFor(sessionId) : null,
   );
 
-  // 是否处于空态（无任何已提交消息、无流式内容、无错误、未运行）。
   const isEmpty = $derived(
     !runState ||
       (runState.messages.length === 0 &&
@@ -160,27 +157,28 @@
         !runState.isRunning),
   );
 
-  // 当前会话的待审批请求（危险工具调用 → 弹审批弹窗、对话暂停，VAL-CAPERM-001）。
+  // Pending approval for the current session (a dangerous tool call pauses the run)
   const pendingApproval = $derived(
     sessionId ? agentApprovalStore.pendingFor(sessionId) : null,
   );
 
-  // render_app artifact：由 transcript 重放推导（create/update 折叠），live 与
-  // restored 两路共用（toolcall 块 run 期间即入 messages，live toolCalls 提供
-  // 实时 status/args 调和）。无 render_app 调用则为 null，面板不可见。
+  // render_app artifact, derived by replaying the transcript (create/update
+  // collapse into one). Shared by the live and restored paths. Null when the
+  // session made no render_app call, which keeps the panel hidden.
   const appArtifact = $derived(
     runState ? reconstructAppArtifact(runState.messages, runState.toolCalls) : null,
   );
 
-  // 面板可见：属于当前会话且确有 artifact（切会话即自然隐藏）。
+  // Visible only for the current session, so switching sessions hides it.
   const showAppPanel = $derived(
     appArtifact !== null && agentAppPanel.openSessionId === sessionId,
   );
 
-  // run 期间新的 render_app 内容抵达 → 自动打开面板，live 跟手。流式事件高频
-  // 重算 artifact（新对象引用）使本 effect 反复重跑，故用内容 key（toolCallId +
-  // 长度）显式去重：同一份内容只触发一次 open——用户中途关闭面板后不会被同一
-  // 内容反复顶开，只有**新的** create/update 才再次打开。key 不进响应式（纯簿记）。
+  // New render_app content arriving mid-run opens the panel. Streaming events
+  // recompute the artifact into a fresh object constantly, so dedupe on a
+  // content key (toolCallId + length): one open per distinct content, meaning a
+  // panel the user closed is not reopened until a *new* create/update lands.
+  // The key stays out of reactive state — it is bookkeeping only.
   let autoOpenedKey = "";
   $effect(() => {
     const contentKey = appArtifact
@@ -202,10 +200,10 @@
     agentAppPanel.open(sessionId);
   });
 
-  // 用户决策（含作用域）：allow_once 本次允许 / allow_always 本会话始终允许该工具
-  // → 工具执行、对话继续（VAL-CAPERM-003/008）；deny → 工具被 Cancel、模型收被拒
-  // 结果、对话继续不中断（VAL-CAPERM-005）。透传**弹窗当前展示的 request**，store 据
-  // 其 requestId 精确回灌（展示==回灌，无 sessionId 重取竞态）后清键关弹窗。
+  // allow_once permits this call, allow_always permits the tool for the session,
+  // deny cancels the tool and the run continues with a denied result. Pass the
+  // request the modal is showing so the store responds to that exact requestId
+  // (no refetch-by-sessionId race).
   function handleApprovalRespond(
     request: AgentApprovalRequest,
     decision: ApprovalDecision,
@@ -214,23 +212,16 @@
   }
 </script>
 
-<!-- Agent 模式落地页（将被 (app) 分组布局包裹） -->
 <div class="flex-1 flex flex-col h-full">
   {#if sessionId}
-    <!-- 已选中会话：Header（顶部）+ 内容区（完整 timeline 渲染）+ input 槽。 -->
     <AgentSessionHeader />
 
-    <!-- 会话主体：左列（timeline + input）+ 可选右侧应用面板（render_app）。 -->
+    <!-- Left column (timeline + input) plus the optional render_app panel. -->
     <div class="flex-1 flex min-h-0">
       <div class="flex-1 flex flex-col min-w-0">
-        <!--
-          内容区：完整 timeline 渲染 —— 用户气泡 / 助手 markdown / 思考块 / 用量 / 多轮 / 错误态。
-          AgentTimeline 消费 `agentRunStore.runStateFor(sessionId)` 这一稳定 getter；
-          工具卡片留给 M2（toolResult / toolcall 块当前仅占位）。
-        -->
         {#if isEmpty && !runState?.hydrated}
-          <!-- 无缓存首开：transcript 还原在途。容器结构保持稳定，仅居中 Spinner；
-               重访会话由 store 内按 sessionId 常驻的缓存直出，不再经过此分支。 -->
+          <!-- First open with no cache: transcript restore in flight. Revisits are
+               served from the per-session cache and skip this branch. -->
           <div class="flex-1 flex items-center justify-center">
             <Spinner size={28} />
           </div>
@@ -248,17 +239,15 @@
         {:else if timelineReady}
           <AgentTimeline {sessionId} appTitle={appArtifact?.title} />
         {:else}
-          <!-- 外壳先 paint 的占位：保持内容区 flex 结构稳定（Input 仍贴底），
-               下一帧再挂载重的 AgentTimeline，使会话切换即时。 -->
+          <!-- Placeholder so the shell paints first with a stable flex structure
+               (Input stays bottom-anchored) until AgentTimeline mounts next frame. -->
           <div class="flex-1"></div>
         {/if}
 
-        <!-- Input 槽：纯文本 composer（textarea + 模型/思考选择 + 发送/停止）。 -->
         <!--
-          `{#key currentSession.id}` 强制 per-session 重新挂载 AgentInput：切换会话时
-          销毁旧实例、重建新实例，使所有瞬时 composer 态（input / attachments /
-          forced chip / slash 浮层）全部回到初值，绝不在会话 A 与 B 间串台
-          （VAL-SLASH-023）。组件实例被复用是底层 bug；重新挂载即正确语义。
+          `{#key currentSession.id}` remounts AgentInput per session: all transient
+          composer state (input / attachments / forced chip / slash overlay) resets
+          and never leaks between sessions. A fresh mount is the correct semantics.
         -->
         <div class="shrink-0 px-4 pb-3">
           {#if currentSession}
@@ -269,14 +258,13 @@
         </div>
       </div>
 
-      <!-- render_app 应用面板：预览 + 源码切换；artifact 由 transcript 重放推导。 -->
       {#if showAppPanel && appArtifact}
         <AppPanel artifact={appArtifact} onClose={() => agentAppPanel.close()} />
       {/if}
     </div>
 
-    <!-- 工具审批弹窗：危险工具调用待决期间弹出、对话暂停；允许 / 拒绝后关闭、
-         决策经 store 回灌后端（VAL-CAPERM-001/003/005）。按当前会话分键。 -->
+    <!-- Approval modal: shown while a dangerous tool call is pending; the
+         decision flows back to the backend via the store. Keyed per session. -->
     {#if pendingApproval}
       <AgentApprovalModal
         request={pendingApproval}
@@ -284,7 +272,7 @@
       />
     {/if}
   {:else}
-    <!-- 空落地页：无任何新建动作，引导走侧栏常驻入口（VAL-CREATE-005） -->
+    <!-- Empty landing page: deliberately no create action here; users go through the sidebar entry -->
     <div class="flex-1 flex flex-col items-center justify-center text-base-content/50">
       <Bot size={48} class="mb-4 opacity-20" />
       {#if hasProjects}

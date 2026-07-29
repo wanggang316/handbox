@@ -10,13 +10,14 @@
   } from "$lib/types/agentSession";
 
   interface Props {
-    // 当前待审批请求（非空即弹窗打开、对话暂停）。args 即将执行的参数，须完整呈现。
+    // Pending approval request; args are the exact parameters about to run and
+    // must be shown in full.
     request: AgentApprovalRequest;
-    // 用户决策回调（含作用域）：回调透传**本弹窗当前展示的 request**，使调用方据其
-    // requestId 精确回灌（展示==回灌，无 sessionId 重取竞态）：
-    //  - "allow_once"   本次允许（工具执行、对话继续；同工具下次仍弹窗）；
-    //  - "allow_always" 始终允许该工具（本会话）—— 同会话同工具后续不再弹窗、直接执行；
-    //  - "deny"         拒绝（工具被 Cancel、模型收被拒结果、对话继续不中断）。
+    // Decision callback. It passes back the request THIS modal displays, so the
+    // caller responds to that exact requestId (shown == answered, no re-fetch
+    // race). "allow_once" runs the tool this time only; "allow_always" also
+    // skips future prompts for the same tool in this session; "deny" cancels
+    // the tool and the conversation continues.
     onRespond: (
       request: AgentApprovalRequest,
       decision: ApprovalDecision,
@@ -25,8 +26,8 @@
 
   let { request, onRespond }: Props = $props();
 
-  // 工具名 → 本地化 label + 图标。危险工具（write/edit/bash）已知集；未知名兜底回显
-  // 原始 toolName（绝不静默隐藏调用本体）。$derived so labels track language switch.
+  // Tool name → localized label + icon. Unknown names fall back to the raw
+  // toolName (never silently hide the call). $derived so labels track language switch.
   const TOOL_META = $derived<
     Record<string, { label: string; icon: typeof Terminal }>
   >({
@@ -43,28 +44,27 @@
   );
   const ToolIcon = $derived(meta.icon);
 
-  // 从 args 中安全取字符串字段（args 形状由后端工具 schema 决定，此处防御性读取）。
+  // Defensive string read from args (shape is dictated by the backend tool schema).
   function argString(key: string): string | null {
     if (!request.args || typeof request.args !== "object") return null;
     const value = (request.args as Record<string, unknown>)[key];
     return typeof value === "string" ? value : null;
   }
 
-  // bash 的完整 command（安全关键：必须完整可见，不截断到看不出危险性）。
+  // Full bash command (security-critical: never truncated into harmlessness).
   const command = $derived(
     request.toolName === "bash" ? argString("command") : null,
   );
-  // write/edit 的目标路径（安全关键：必须完整可见）。后端 schema 键各异：
-  // write → `path`，edit → `file_path`（见 coding-agent tools/{write,edit}.rs）。
+  // Target path for write/edit (security-critical: shown in full). Schema keys
+  // differ: write → `path`, edit → `file_path` (coding-agent tools/{write,edit}.rs).
   const targetPath = $derived.by(() => {
     if (request.toolName === "write") return argString("path");
     if (request.toolName === "edit") return argString("file_path");
     return null;
   });
-  // write/edit 的内容预览（长内容可滚动）。各工具真实键：
-  //  - write → `content`；
-  //  - edit 单编辑 → `new_string`；
-  //  - edit 多编辑 → `edits: [{oldText, newText}]`，拼接各 `newText`（顺序即应用序）。
+  // Content preview for write/edit. Keys: write → `content`; single edit →
+  // `new_string`; multi-edit → `edits: [{oldText, newText}]`, newText values
+  // joined in application order.
   const contentPreview = $derived.by(() => {
     if (request.toolName === "write") return argString("content");
     if (request.toolName === "edit") {
@@ -75,8 +75,8 @@
     return null;
   });
 
-  // edit 多编辑 shape：从 `args.edits[].newText` 拼出待写入内容（无 edits 数组返回
-  // null，回落到单编辑 new_string）。防御性读取：仅取字符串 newText，跳过畸形项。
+  // Join `args.edits[].newText` for the multi-edit shape; null when there is no
+  // edits array (falls back to new_string). Only string newText values are taken.
   function editNewTextJoined(): string | null {
     if (!request.args || typeof request.args !== "object") return null;
     const edits = (request.args as Record<string, unknown>).edits;
@@ -91,9 +91,8 @@
     return parts.length > 0 ? parts.join("\n") : null;
   }
 
-  // 把完整 args（任意结构）渲染为格式化 JSON 代码块，作为「展示值==执行值」的兜底
-  // 全量视图——即便上面的结构化字段未覆盖某工具的某参数，完整参数仍在此可见
-  // （VAL-CAPERM-002）。镜像 AgentToolCallCard 的 renderArgs 风格。
+  // Render the full args as formatted JSON: the shown-equals-executed fallback
+  // view, so parameters not covered by the structured fields above stay visible.
   const argsJson = $derived.by(() => {
     if (request.args === undefined || request.args === null) return "";
     let formatted: string;
@@ -109,40 +108,37 @@
     return renderCodeBlock(formatted, { language: "json", variant: "compact" });
   });
 
-  // 安全前提（VAL-CAPERM-002 知情同意）：args 是 LLM 控制的不可信文本，经 `{@html}`
-  // 注入 DOM。`renderCodeBlock`/`renderText` 经 highlight.js（`highlightAuto` 或显式
-  // 语言）对源文本做 HTML 转义后再返回 token 标记，highlight 异常时也走 `escapeHtml`
-  // 兜底（见 $lib/utils/code）——故模型在 args 注入的 `<img onerror=...>` 等被渲染为
-  // 可见文本而非可执行节点，弹窗不会执行注入脚本。切勿改为未经转义的 innerHTML 拼接。
+  // Security invariant: args are LLM-controlled untrusted text injected via
+  // `{@html}`. `renderCodeBlock` HTML-escapes the source before emitting token
+  // markup, with an `escapeHtml` fallback on highlight failure ($lib/utils/code),
+  // so injected `<img onerror=...>` renders as visible text, not live nodes.
+  // Never replace this with unescaped innerHTML concatenation.
   function renderText(text: string): string {
     return renderCodeBlock(text, { variant: "compact" });
   }
 
-  // 关闭路径 == 拒绝（fail-closed，VAL-CAPERM-015）：`Modal` 把 Escape 键接到
-  // `onClose`。审批弹窗绝不能被「无决策地关掉」——那样后端 oneshot 仍在 await、对话
-  // 卡在暂停态。任何关闭路径（这里是 Escape）都按 `deny` 处理：工具被 Cancel、模型
-  // 收被拒结果、对话继续不中断（与点「拒绝」按钮同义）。store 对重复/未知 requestId
-  // 幂等，故即便和按钮点击竞合也只首处置生效。
+  // Closing means deny (fail-closed): `Modal` routes Escape to `onClose`.
+  // The modal must never close without a decision — the backend oneshot would
+  // keep awaiting and the conversation would stay paused. So every close path
+  // is treated as "deny". The store is idempotent per requestId, so racing
+  // with a button click only lets the first decision win.
   function handleClose(): void {
     onRespond(request, "deny");
   }
 
-  // 焦点陷阱（VAL-CAPERM-021）由底层 `Modal`（bits-ui `Dialog.Content` 的 FocusScope）提供：
-  // 待决期间 Tab/Shift+Tab 在弹窗内循环、绝不跳到背后已禁用的输入区。打开时焦点落在
-  // 弹窗容器上（Modal 统一抑制了首元素 autofocus），Tab 一下即达拒绝按钮；Enter 不会
-  // 误触任何按钮，Escape 恒为 deny——fail-closed 语义不变。
+  // Focus trapping comes from `Modal` (bits-ui Dialog FocusScope): while a request
+  // is pending, Tab cycles inside the dialog and never reaches the disabled input
+  // behind it. Focus opens on the dialog container (Modal suppresses first-element
+  // autofocus), so Enter cannot hit a button by accident and Escape always denies.
 </script>
 
 <Modal open={true} showCloseButton={false} onClose={handleClose}>
-  <!--
-    审批内容根。`aria-labelledby` 把内容关联到标题，配合 Dialog 的 role="dialog"/aria-modal
-    让屏幕阅读器把它读作一个有名字的模态对话框。
-  -->
+  <!-- aria-labelledby ties the content to the title so screen readers announce
+       a named modal dialog. -->
   <div
     aria-labelledby="agent-approval-title"
     class="w-[560px] max-w-[90vw] flex flex-col"
   >
-    <!-- 头部：危险图标 + 标题。 -->
     <div
       class="flex items-center gap-2 px-6 pt-5 pb-3 border-b border-[var(--hairline)]"
     >
@@ -154,7 +150,6 @@
       </h2>
     </div>
 
-    <!-- 内容：工具名 + 完整参数（路径 / 命令完整可见，长内容可滚动）。 -->
     <div class="px-6 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
       <div class="flex items-center gap-2 text-base-content">
         <ToolIcon size={16} class="shrink-0 text-warning" />
@@ -167,7 +162,7 @@
         {t("agent.approval.intro")}
       </p>
 
-      <!-- bash：完整 command（不截断）。 -->
+      <!-- Full bash command, untruncated. -->
       {#if command !== null}
         <div>
           <div class="mb-1 text-[10px] text-base-content/60">
@@ -179,7 +174,7 @@
         </div>
       {/if}
 
-      <!-- write/edit：目标路径（完整可见）。 -->
+      <!-- write/edit target path, shown in full. -->
       {#if targetPath !== null}
         <div>
           <div class="mb-1 text-[10px] text-base-content/60">
@@ -191,7 +186,7 @@
         </div>
       {/if}
 
-      <!-- write/edit：内容预览（长内容可滚动）。 -->
+      <!-- write/edit content preview, scrollable when long. -->
       {#if contentPreview !== null}
         <div>
           <div class="mb-1 text-[10px] text-base-content/60">
@@ -205,7 +200,7 @@
         </div>
       {/if}
 
-      <!-- 完整参数（JSON）：展示值==执行值的兜底全量视图。 -->
+      <!-- Full args JSON: the shown-equals-executed fallback view. -->
       {#if argsJson}
         <div>
           <div class="mb-1 text-[10px] text-base-content/60">
@@ -218,11 +213,8 @@
       {/if}
     </div>
 
-    <!--
-      底部：拒绝 / 本次允许 / 始终允许（本会话）。允许拆成两个可见选项——「本次允许」
-      一次性（同工具下次仍弹窗）、「始终允许」本会话记住该工具（同会话同工具后续不再
-      弹窗、直接执行；后端进程内存集、不跨会话/重启）。
-    -->
+    <!-- Deny / allow-once / allow-always. "Always" is remembered per tool per
+         session in backend process memory only — not across sessions/restarts. -->
     <div
       class="flex items-center justify-end gap-3 px-6 pt-3 pb-4 border-t border-[var(--hairline)]"
     >

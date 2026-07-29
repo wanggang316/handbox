@@ -1,8 +1,9 @@
 /**
- * 定时任务状态管理 Store。
+ * Scheduled-job store.
  *
- * 使用 Svelte 5 的 `$state` 维护任务列表与加载/错误状态，单例导出。
- * 经 `api/job` 调用后端 IPC 命令；CRUD 后就地同步内存列表，避免每次都全量重拉。
+ * Svelte 5 `$state` for the job list plus loading/error state, exported as a
+ * singleton. Calls backend IPC commands via `api/job`; CRUD syncs the
+ * in-memory list in place to avoid a full refetch every time.
  */
 
 import {
@@ -23,12 +24,12 @@ function createJobStore() {
   let isLoading = $state(false);
   let error = $state<string | null>(null);
 
-  /** 统一把错误归一化为可展示的字符串，并存入 `error`。 */
+  /** Normalize an error into a displayable string and store it in `error`. */
   function setError(e: unknown): void {
     error = e instanceof AppError ? e.message : String(e);
   }
 
-  /** 把单个任务 upsert 进内存列表（按 id 替换或插入到队首）。 */
+  /** Upsert a job into the in-memory list (replace by id or insert at the head). */
   function upsert(job: Job): void {
     const idx = jobs.findIndex((j) => j.id === job.id);
     if (idx >= 0) {
@@ -49,7 +50,7 @@ function createJobStore() {
       return error;
     },
 
-    /** 加载任务列表（最新优先）。 */
+    /** Load the job list (newest first). */
     async load(limit?: number, offset?: number): Promise<void> {
       isLoading = true;
       error = null;
@@ -63,14 +64,14 @@ function createJobStore() {
       }
     },
 
-    /** 拉取单个任务并 upsert 进列表，返回最新值。 */
+    /** Fetch one job, upsert it into the list, and return the latest value. */
     async refresh(jobId: UUID): Promise<Job> {
       const job = await getJob(jobId);
       upsert(job);
       return job;
     },
 
-    /** 创建任务并插入列表队首。 */
+    /** Create a job and insert it at the head of the list. */
     async create(input: JobCreateInput): Promise<Job> {
       error = null;
       try {
@@ -83,7 +84,7 @@ function createJobStore() {
       }
     },
 
-    /** 更新任务定义并同步列表。 */
+    /** Update a job definition and sync the list. */
     async update(jobId: UUID, input: JobUpdateInput): Promise<Job> {
       error = null;
       try {
@@ -96,7 +97,7 @@ function createJobStore() {
       }
     },
 
-    /** 删除任务并从列表移除。 */
+    /** Delete a job and remove it from the list. */
     async delete(jobId: UUID): Promise<void> {
       error = null;
       try {
@@ -108,7 +109,7 @@ function createJobStore() {
       }
     },
 
-    /** 启用/禁用任务并同步列表。 */
+    /** Enable/disable a job and sync the list. */
     async setEnabled(jobId: UUID, enabled: boolean): Promise<Job> {
       error = null;
       try {
@@ -121,12 +122,10 @@ function createJobStore() {
       }
     },
 
-    /** 清空错误状态。 */
     clearError(): void {
       error = null;
     },
   };
 }
 
-// 导出单例实例
 export const jobStore = createJobStore();

@@ -11,18 +11,17 @@
 
   interface Props {
     /**
-     * 受控出口：当前任务目标配置。父组件（JobEditor）用 `bind:target` 双向绑定。
-     * 两类 kind（prompt / agent）共用此出口；切换 kind 时整体替换为对应 kind 的
-     * 干净目标，故提交时绝无跨 kind 残留字段（VAL-TARGET-010）。
+     * Controlled output bound by the parent via `bind:target`. Both kinds share
+     * this outlet; switching kind replaces the whole object with a clean target
+     * of that kind, so submissions never carry stale cross-kind fields.
      */
     target: JobTarget;
-    /** 已启用的供应商（含其已启用模型），用于 prompt 目标解析所选模型展示名。 */
+    /** Enabled providers (with their enabled models), used to resolve model display names. */
     providersWithModels?: ProviderWithModels[];
-    /** Agent 模板候选列表（由父组件加载后传入），用于 agent 目标。 */
+    /** Agent template candidates, loaded by the parent. */
     agents?: Agent[];
-    /** agent 列表是否仍在加载（影响占位提示）。 */
     agentsLoading?: boolean;
-    /** 校验失败标记（如未选 agent），由父组件在提交时打开以高亮。 */
+    /** Set by the parent on submit to highlight validation failures. */
     showError?: boolean;
   }
 
@@ -34,11 +33,6 @@
     showError = false,
   }: Props = $props();
 
-  // ──────────────────────────────────────────────────────────────────────
-  // kind 选择器：两类目标均可选并各有配置面板。切换 kind 时整体替换 target
-  // 为目标 kind 的空目标——这是字段隔离的单一实现点（VAL-TARGET-010）：旧 kind
-  // 的字段随旧对象一起被丢弃，新对象只含新 kind 的字段，无需逐字段清理。
-  // ──────────────────────────────────────────────────────────────────────
   type TargetKind = JobTarget["kind"];
 
   const KIND_ITEMS: { value: TargetKind; label: string }[] = [
@@ -46,7 +40,7 @@
     { value: "agent", label: "Agent" },
   ];
 
-  // 各 kind 类型收窄的派生视图，供模板使用。
+  // Kind-narrowed views for the template.
   const promptTarget = $derived(target.kind === "prompt" ? target : null);
   const agentTarget = $derived(target.kind === "agent" ? target : null);
 
@@ -68,20 +62,19 @@
   function handleKindChange(value: string): void {
     const kind = value as TargetKind;
     if (kind === target.kind) return;
-    // 字段隔离：整体替换为目标 kind 的空目标，旧 kind 字段不会残留。
+    // Field isolation: replacing the whole object drops old-kind fields, so no
+    // per-field cleanup is needed.
     target = emptyTargetOf(kind);
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-  // Prompt 目标：provider/model 级联（复用 chat 的模型选择弹窗）+ prompt 文本。
-  // 内部以 (providerId, modelId) 存储；展示名从 providersWithModels 解析。
-  // ──────────────────────────────────────────────────────────────────────
+  // Prompt targets store (providerId, modelId); display names resolve from
+  // providersWithModels.
   function setPromptTarget(next: PromptTarget): void {
     target = next;
   }
 
-  // 把当前 (providerId, modelId) 解析为 ModelWithProvider（供展示名与弹窗回显）；
-  // 解析不到（模型已删/未加载）返回 null → 显示「选择模型」。
+  // Resolves to null when the model is deleted or not yet loaded, which shows
+  // the "select model" placeholder.
   const selectedPromptModel = $derived.by((): ModelWithProvider | null => {
     const t = promptTarget;
     if (!t || !t.providerId || !t.modelId) return null;
@@ -110,9 +103,6 @@
     setPromptTarget({ ...promptTarget, prompt: value });
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-  // Agent 目标：选择 agent 模板 + 初始指令。
-  // ──────────────────────────────────────────────────────────────────────
   function setAgentTarget(next: AgentTarget): void {
     target = next;
   }
@@ -122,9 +112,9 @@
     setAgentTarget({ ...agentTarget, agentId: value });
   }
 
-  // 该 Job 运行 agent 所用模型（agent 定义不再携带模型）。选中即成对写入
-  // modelId（provider 在后端执行时按 model id 从目录解析）。展示名从
-  // providersWithModels 解析，解析不到 → 显示「选择模型」。
+  // Model used to run the agent — agent definitions carry no model, so each job
+  // picks its own. Only modelId is stored; the backend resolves the provider
+  // from the model catalog at execution time. Unresolvable → "select model".
   const selectedAgentModel = $derived.by((): ModelWithProvider | null => {
     const tgt = agentTarget;
     if (!tgt || !tgt.modelId) return null;
@@ -146,7 +136,7 @@
     setAgentTarget({ ...agentTarget, modelId: model.id });
   }
 
-  // 模型选择 Modal（系统既有的搜索/收藏/分组选择器）开合，两种目标各一。
+  // One model-picker modal per target kind.
   let promptModelModalOpen = $state(false);
   let agentModelModalOpen = $state(false);
 
@@ -155,11 +145,7 @@
     setAgentTarget({ ...agentTarget, initialMessage: value });
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-  // 校验（与父组件 JobEditor 的提交校验同源；这里仅负责高亮提示）：
-  // - prompt：未选模型（缺 provider/model）或 prompt 文本空白无效（012 / 013）
-  // - agent：未选 agent 模板无效（014）
-  // ──────────────────────────────────────────────────────────────────────
+  // Highlight-only validation, mirroring JobEditor's submit-time checks.
   const promptModelInvalid = $derived(
     showError &&
       target.kind === "prompt" &&
@@ -184,7 +170,6 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  <!-- 目标类型 -->
   <Select
     label={t("jobs.target.kindLabel")}
     value={target.kind}
@@ -194,10 +179,9 @@
   />
 
   {#if promptTarget}
-    <!-- Prompt：模型（弹窗选择，成对写入 provider/model）+ prompt 文本 -->
     <div class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.modelLabel")}</span>
-      <!-- 触发器样式对齐 Select（field--soft 浅底 + 右侧上下箭头），与 Target type 一致 -->
+      <!-- Trigger styled to match Select (field--soft base + trailing chevrons) -->
       <button
         type="button"
         onclick={() => (promptModelModalOpen = true)}
@@ -240,7 +224,6 @@
       {/if}
     </label>
   {:else if agentTarget}
-    <!-- Agent：选择 agent 模板 + 初始指令 -->
     <label class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80">{t("jobs.target.agentLabel")}</span>
       {#if agentsLoading}
@@ -267,13 +250,12 @@
       {/if}
     </label>
 
-    <!-- 运行该 Agent 所用模型（Agent 定义已不含模型，改为每个 Job 各自选定）。
-         点击打开系统既有的模型选择 Modal。 -->
+    <!-- Model to run the agent with (agent definitions carry no model; each job picks its own) -->
     <div class="flex flex-col gap-1 text-sm">
       <span class="font-medium text-base-content/80"
         >{t("jobs.target.modelLabel")}</span
       >
-      <!-- 触发器样式对齐 Select（field--soft 浅底 + 右侧上下箭头），与 Target type 一致 -->
+      <!-- Trigger styled to match Select (field--soft base + trailing chevrons) -->
       <button
         type="button"
         onclick={() => (agentModelModalOpen = true)}

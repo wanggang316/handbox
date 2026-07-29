@@ -36,7 +36,6 @@
     </p>
   </header>
 
-  <!-- 表单字段：FormField 统一 label / required / error / hint，控件共用 .field 皮肤 -->
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">表单字段</h2>
     <div class="space-y-4">
@@ -69,7 +68,6 @@
     </div>
   </section>
 
-  <!-- 选择控件：Checkbox / RadioGroup（bits-ui 行为 + token 皮肤） -->
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">选择控件</h2>
     <div class="space-y-4">
@@ -93,7 +91,6 @@
     </div>
   </section>
 
-  <!-- 按钮：单组件 Button 的 variant × size × shape × state 矩阵 -->
   <section class="space-y-4">
     <h2 class="text-base font-medium text-base-content">按钮</h2>
 

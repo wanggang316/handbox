@@ -1,25 +1,31 @@
 /**
- * Agent 工具审批状态管理 - Svelte 5 runes
+ * Agent tool-approval state - Svelte 5 runes.
  *
- * 危险工具（write/edit/bash）调用时后端 `PermissionExtension` emit
- * `agent_approval_request` 并 await 用户决策；本 store 持有「待审批请求」并**按
- * sessionId 分键**，使审批弹窗弹出、对应会话的对话暂停（VAL-CAPERM-001），决策
- * 经 `respondAgentApproval(requestId, allow)` 回灌：allow → 工具执行、对话继续
- * （VAL-CAPERM-003）；deny → 工具被 Cancel、模型收被拒结果、对话继续不中断
- * （VAL-CAPERM-005）。
+ * When a dangerous tool (write/edit/bash) is invoked, the backend
+ * `PermissionExtension` emits `agent_approval_request` and awaits the user's
+ * decision; this store holds pending requests keyed by sessionId, so the
+ * approval dialog opens and that session's conversation pauses. Decisions flow
+ * back via `respondAgentApproval(requestId, allow)`: allow → the tool executes
+ * and the conversation continues; deny → the tool is cancelled, the model
+ * receives the denied result, and the conversation continues uninterrupted.
  *
- * 设计对齐 `agentRun.svelte.ts`：
- *  - 单例构造即建立**一次性** navigation-resilient 监听器（跨路由 / 模式切换不卸载）。
- *  - 监听器只订阅 `agent_approval_request` 通道，与 run 三通道及 chat 流互不相干。
- *  - 写路径（事件抵达 / 决策回灌）经响应式 map 更新，读路径用引用稳定的 getter。
+ * Design mirrors `agentRun.svelte.ts`:
+ *  - a one-time navigation-resilient listener is established at singleton
+ *    construction (never unmounts on route / mode switches);
+ *  - the listener subscribes only to the `agent_approval_request` channel,
+ *    independent of the run channels and the chat stream;
+ *  - write paths (event arrival / decision) update a reactive map, read paths
+ *    use reference-stable getters.
  *
- * 与 run 状态独立：审批不进 run reducer、不影响 closed-once；run state 反映工具
- * 执行进度，审批 state 只反映「是否有待决策的危险调用」。AgentInput / 页面据
- * `pendingFor(sessionId)` 暂停输入并挂载弹窗。
+ * Independent of run state: approvals never enter the run reducer and do not
+ * affect the closed-once contract; run state reflects tool execution progress,
+ * approval state only reflects "is a dangerous call awaiting a decision".
+ * AgentInput / pages use `pendingFor(sessionId)` to pause input and mount the
+ * dialog.
  *
- * 作用域（本次允许 / 始终允许本会话）经 `decision` 三态回灌（m2-approval-scope）：
- * `allow_once` 一次性、`allow_always` 本会话记住该工具（后端进程内存集、不跨会话/
- * 重启）、`deny` 拒绝。边界 / 可达性 / 隔离留给后续 feature（m2-approval-edge-cases）。
+ * Scope flows back via the three-way `decision`: `allow_once` is one-shot,
+ * `allow_always` remembers the tool for this session (backend in-process
+ * memory set, not across sessions/restarts), `deny` rejects.
  */
 
 import type {
@@ -32,21 +38,25 @@ import {
 } from "$lib/api/agentSession";
 
 class AgentApprovalStore {
-  // 按 sessionId 分键的待审批请求。每个会话最多一个在途请求：后端在 await 决策
-  // 期间不会为同一会话的同一 run 并发发起第二个危险调用（钩子链串行 await），故
-  // 单值即可表达「该会话对话暂停于此请求」。新请求覆盖旧键是防御性兜底。
+  // Pending requests keyed by sessionId, at most one in-flight per session:
+  // while awaiting a decision, the backend never issues a second concurrent
+  // dangerous call for the same session's run (the hook chain awaits
+  // serially), so a single value expresses "this session is paused on this
+  // request". A new request overwriting the old key is a defensive fallback.
   private pending = $state<Record<string, AgentApprovalRequest>>({});
 
-  // 一次性流式监听器的清理函数（store 生命周期内通常不调用）。
+  // Cleanup for the one-time stream listener (rarely called in the store's lifetime).
   private unlisten: (() => void) | null = null;
 
   constructor() {
-    // 单例构造即建立监听器：navigation-resilient，跨路由与模式切换持续接收。
+    // Listener established at singleton construction: navigation-resilient,
+    // keeps receiving across route and mode switches.
     void this.initListener();
   }
 
   /**
-   * 建立全局 Agent 审批监听器（仅一次）。请求按 payload 的 sessionId 分键存入。
+   * Set up the global agent approval listener (once). Requests are stored
+   * keyed by the payload's sessionId.
    */
   private async initListener(): Promise<void> {
     if (this.unlisten) {
@@ -62,50 +72,55 @@ class AgentApprovalStore {
   }
 
   /**
-   * 分发 `agent_approval_request`：把请求按 sessionId 记入待审批 map，使弹窗弹出
-   * 且该会话对话暂停。展示的 `args` 即将执行的参数（VAL-CAPERM-002）。
+   * Dispatch `agent_approval_request`: record the request by sessionId so the
+   * dialog opens and that session's conversation pauses. The displayed `args`
+   * are the exact arguments about to execute.
    */
   private handleApprovalRequest(payload: AgentApprovalRequest): void {
     this.pending = { ...this.pending, [payload.sessionId]: payload };
   }
 
-  // ============================================
-  // Public API
-  // ============================================
-
   /**
-   * 响应式 getter：返回某会话当前待审批的请求（无则 `null`）。AgentInput 据此非空
-   * 即暂停输入；页面据此挂载审批弹窗。**只读**：不在此写 `$state`（getter 被
-   * `$derived` / 模板消费，写入会触发 Svelte 的 state_unsafe_mutation）。
+   * Reactive getter: the session's currently pending request (`null` if none).
+   * AgentInput pauses input when non-null; pages mount the approval dialog on
+   * it. READ-ONLY: never write `$state` here (the getter is consumed by
+   * `$derived` / templates; writing would throw Svelte's
+   * state_unsafe_mutation).
    */
   pendingFor(sessionId: string): AgentApprovalRequest | null {
     return this.pending[sessionId] ?? null;
   }
 
-  /**
-   * 该会话是否有待审批请求（对话是否因此暂停）。
-   */
   hasPending(sessionId: string): boolean {
     return !!this.pending[sessionId];
   }
 
   /**
-   * 回应**弹窗当前展示的那个请求**（含作用域）：以 `request.requestId` 回灌后端，
-   * 故展示的请求 == 回灌的目标，绝不因 sessionId 重取而误中一个已覆盖旧键的新请求。
+   * Respond to THE request the dialog is showing (scope included): the
+   * response targets `request.requestId`, so the displayed request == the
+   * responded target, never mis-hitting a newer request that overwrote the
+   * key.
    *
-   * 入参取**弹窗持有的 request 引用**（而非 sessionId 重查 store）：本 store 按
-   * sessionId 单值存储，若在用户决策窗口内同会话又来一个新请求覆盖了该键，按
-   * sessionId 重取会读到新请求的 requestId —— 弹窗仍显示旧请求，却把决策回灌到新
-   * 请求上（展示≠回灌）。直接用弹窗持有的 request 消除这一结构竞态；后端按
-   * requestId 精确路由 + first-wins 仍是兜底，但前端不应主动选错目标。
+   * Takes the dialog's own request reference (rather than re-querying the
+   * store by sessionId): this store keeps one value per sessionId, so if a new
+   * request for the same session overwrites the key during the user's
+   * decision window, a sessionId lookup would read the new requestId — the
+   * dialog still shows the old request but the decision would land on the new
+   * one. Using the dialog's reference eliminates this structural race; the
+   * backend's exact requestId routing + first-wins remains the fallback, but
+   * the frontend must not pick the wrong target in the first place.
    *
-   * `decision` 三态：`allow_once` 本次允许（不记忆）、`allow_always` 本会话始终允许
-   * 该工具（后端按 sessionId 键控的进程内存集，同会话同工具后续不再弹窗）、`deny`
-   * 拒绝。`allow_always` 的作用域记忆在后端，前端只透传 decision。
+   * `decision` is three-way: `allow_once` allows this call only (no memory),
+   * `allow_always` always allows this tool for this session (backend
+   * in-process set keyed by sessionId; no further dialogs for the same
+   * session+tool), `deny` rejects. The `allow_always` scope memory lives in
+   * the backend; the frontend just passes the decision through.
    *
-   * 先清键再回灌：UI 反馈即时；回灌失败仅记录，不回滚清键——后端对未知 / 重复
-   * `requestId` 幂等 no-op，重新弹出反而会让用户对着一个后端可能已放弃的请求二次
-   * 决策。
+   * Clear the key before responding: instant UI feedback; a failed response is
+   * only logged and the clear is not rolled back — the backend is an
+   * idempotent no-op for unknown / duplicate `requestId`s, and re-showing the
+   * dialog would make the user re-decide a request the backend may have
+   * already abandoned.
    */
   async respondTo(
     request: AgentApprovalRequest,
@@ -120,10 +135,12 @@ class AgentApprovalStore {
   }
 
   /**
-   * 清除某个具体请求（关闭弹窗 / 解除暂停）。**仅当该 sessionId 当前键持有的正是这个
-   * 请求时才清**（按 requestId 比对）：若决策窗口内同会话已来新请求覆盖该键，清键会
-   * 误关一个尚未决策的新请求 —— 此处的相等守卫避免该误清。非响应式安全：仅在写路径
-   * 调用。
+   * Clear a specific request (close the dialog / unpause). Clears ONLY when
+   * the sessionId's current key holds exactly this request (compared by
+   * requestId): if a newer request for the same session overwrote the key
+   * during the decision window, clearing would wrongly dismiss an undecided
+   * request — the equality guard prevents that. Write-path only, so no
+   * reactive-read hazard.
    */
   private clearRequest(request: AgentApprovalRequest): void {
     if (this.pending[request.sessionId]?.requestId !== request.requestId) {
@@ -135,5 +152,5 @@ class AgentApprovalStore {
   }
 }
 
-// Export singleton instance（单例构造即建立 navigation-resilient 监听器）。
+// Singleton; construction sets up the navigation-resilient listener.
 export const agentApprovalStore = new AgentApprovalStore();

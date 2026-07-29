@@ -5,10 +5,10 @@
  * a string/boolean, importing no `.svelte` module, so this suite runs under the
  * plain-Node Vitest environment.
  *
- * Covers the validation assertions the milestone gate cannot exercise headlessly:
- * - VAL-SETTINGS-005: a modifier-only chord (just Cmd) is rejected.
- * - VAL-SETTINGS-018: a bare key with no modifier (just K) is rejected.
- * Plus the happy path (modifier+key → valid, correct accelerator string format).
+ * Covers the validation rules that cannot be exercised through the GUI:
+ * - a modifier-only chord (just Cmd) is rejected;
+ * - a bare key with no modifier (just K) is rejected;
+ * plus the happy path (modifier+key → valid, correct accelerator string format).
  */
 
 import { describe, it, expect } from "vitest";

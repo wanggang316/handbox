@@ -1,5 +1,5 @@
 /**
- * update namespace strings (filled by migration subagent).
+ * update namespace strings.
  */
 import type { updateZh } from "../zh/update";
 

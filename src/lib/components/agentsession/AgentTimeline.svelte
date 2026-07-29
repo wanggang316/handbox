@@ -27,10 +27,9 @@
 
   let { sessionId, appTitle }: Props = $props();
 
-  // 会话运行 view-model（响应式 getter；按 sessionId 分键）。
   const runState = $derived(agentRunStore.runStateFor(sessionId));
 
-  // 从用户消息提取纯文本（content 为字符串或内容块数组）。
+  // Extract plain text from a user message (content is a string or block array).
   function userText(message: Extract<AgentMessage, { role: "user" }>): string {
     if (typeof message.content === "string") {
       return message.content;
@@ -40,7 +39,7 @@
       .join("");
   }
 
-  // 拼接助手消息中所有 text 块（thinking / toolcall 块单独渲染）。
+  // Join all text blocks (thinking / toolcall blocks render separately).
   function assistantText(
     message: Extract<AgentMessage, { role: "assistant" }>,
   ): string {
@@ -49,7 +48,7 @@
       .join("");
   }
 
-  // 提取助手消息中所有 thinking 块文本（present-only：无内容则为空）。
+  // Join all thinking block text (empty when absent).
   function assistantThinking(
     message: Extract<AgentMessage, { role: "assistant" }>,
   ): string {
@@ -58,15 +57,10 @@
       .join("");
   }
 
-  // 该回合是否应显示 token 用量。
-  //
-  // hand-agent 在中止 / 出错时合成一条 `usage: Usage::default()`（全零）、
-  // `stopReason = aborted | error` 的助手消息（agent_loop.rs::synthesize_aborted_message
-  // 与 agent.rs 的失败路径），故被中止 / 出错的那一轮其 `usage` 已是结构性的零、
-  // 绝不携带上一轮数值（VAL-CARUN-008 的「不串上轮」由数据层保证）。
-  // 此处在 view 层再加一道闸：中止 / 出错轮，或一个 token 都没产生的空轮，一律
-  // 不渲染用量行——避免在错误信息旁出现误导性的「输入 0 · 输出 0」。正常定稿轮
-  // （有真实 token）照常显示。
+  // Whether the turn shows token usage. Aborted/errored turns get a synthetic
+  // all-zero usage from hand-agent (never the previous turn's numbers); this
+  // view-layer gate also hides usage for turns that produced no tokens, so a
+  // misleading "input 0 · output 0" never sits next to an error message.
   function hasUsage(
     message: Extract<AgentMessage, { role: "assistant" }>,
   ): boolean {
@@ -77,17 +71,17 @@
     return !!u && (u.input > 0 || u.output > 0 || u.totalTokens > 0);
   }
 
-  // 助手消息中的工具调用块，按助手内容的**源顺序**保留（多个并行工具调用据此
-  // 渲染为顺序排列的卡片，而非按完成顺序——VAL-TOOLS-004）。
+  // Tool-call blocks keep the assistant content's source order, so parallel
+  // calls render as cards in issue order, not completion order.
   function assistantToolCalls(
     message: Extract<AgentMessage, { role: "assistant" }>,
   ) {
     return message.content.filter((block) => block.type === "toolcall");
   }
 
-  // 已提交 transcript 里的 toolResult 消息，按 toolCallId 建索引，供 restored
-  // 路径（reload 后无 live 状态）把 toolcall 块调和成终态卡片。run 期间 live 状态
-  // 优先，此索引仅在 live 缺失时兜底（reconcile：同一 toolCallId 一张卡）。
+  // Committed toolResult messages indexed by toolCallId, so the restored path
+  // (no live state after reload) can reconcile toolcall blocks into final-state
+  // cards. Live state wins during a run; this index is the fallback.
   const committedToolResults = $derived.by(() => {
     const map = new Map<
       string,
@@ -104,7 +98,7 @@
     return map;
   });
 
-  // 把一个助手 toolcall 块归一化为卡片消费的 view-model：live 优先，restored 兜底。
+  // Normalize a toolcall block into the card view-model: live first, restored fallback.
   function toolCallView(block: Extract<AgentMessage, { role: "assistant" }>["content"][number]) {
     if (block.type !== "toolcall") {
       throw new Error("toolCallView expects a toolcall block");
@@ -118,14 +112,15 @@
     );
   }
 
-  // 运行中追加的「进行中助手骨架」索引：reducer 在 message_start 时即把助手消息
-  // 追加到 messages（内容尚空、usage 为零），其增量走 streamingText/thinkingText。
-  // 该骨架由下方 LIVE 视图负责呈现，故此处需抑制其空内容/零用量的重复渲染。
-  //
-  // 仅当「最后一条助手消息尚无已提交内容」时才抑制它（交由 LIVE 视图）。一旦
-  // message_end 把真实内容写入该助手消息，就返回 -1（不抑制），使已完成消息
-  // 立即从已提交序列渲染——避免 message_end 与 agent_stream_closed 之间出现
-  // 答案→pulse-dot→答案的闪烁（此区间 isRunning 仍为 true 而 streamingText 已清空）。
+  // Index of the in-progress assistant skeleton: the reducer appends the
+  // assistant message at message_start (empty content, zero usage) while
+  // deltas flow through streamingText/thinkingText, so the committed loop must
+  // suppress the skeleton and leave it to the LIVE view.
+  // Suppress only while the last assistant message has no committed content.
+  // Once message_end writes real content, return -1 so the finished message
+  // renders from the committed sequence at once — otherwise the gap between
+  // message_end and agent_stream_closed (isRunning still true, streamingText
+  // cleared) flashes answer → pulse-dot → answer.
   const liveAssistantIndex = $derived.by(() => {
     if (!runState.isRunning) {
       return -1;
@@ -138,9 +133,10 @@
       AgentMessage,
       { role: "assistant" }
     >;
-    // 含工具调用块的助手消息也算「有内容」：其工具卡片在已提交分支渲染（卡片
-      // 据 toolCallId 调和 live 状态而就地翻转），不能当作空骨架交给 LIVE 视图，
-      // 否则工具执行期间卡片会被 pulse-dot 顶掉（VAL-TOOLS-004）。
+    // A message with toolcall blocks counts as "has content": its cards render
+    // in the committed branch (reconciling live state by toolCallId in place);
+    // treating it as an empty skeleton would let the pulse-dot displace the
+    // cards while tools execute.
     const hasContent =
       assistantText(lastMsg).length > 0 ||
       assistantThinking(lastMsg).length > 0 ||
@@ -148,10 +144,10 @@
     return hasContent ? -1 : last;
   });
 
-  // LIVE 流式视图仅在「运行中且尚无可显示的已完成内容」时呈现：
-  // 要么有正在流式累积的文本/思考，要么最后一条助手骨架仍为空（liveAssistantIndex>=0）。
-  // 一旦助手消息已完成（liveAssistantIndex===-1）且流式已清空，便不再显示 LIVE 视图，
-  // 从而消除 message_end 与 agent_stream_closed 之间的 pulse-dot 闪烁。
+  // The LIVE view shows only while running with no displayable finished
+  // content: streaming text/thinking exists, or the last skeleton is still
+  // empty. Once the message is finished and streaming has cleared, hiding it
+  // removes the pulse-dot flash between message_end and agent_stream_closed.
   const showLiveView = $derived(
     runState.isRunning &&
       (!!runState.streamingText ||
@@ -159,7 +155,6 @@
         liveAssistantIndex >= 0),
   );
 
-  // 自动滚动到底部（镜像 ChatContent 行为）。
   let messagesContainer: HTMLDivElement;
 
   function scrollToBottom() {
@@ -168,23 +163,25 @@
     }
   }
 
-  // 会话切换 / transcript 就位：DOM 更新后（绘制前）同步贴底。组件实例跨会话
-  // 复用，滚动容器保留上一会话的滚动位；若只靠下方延时滚动，会先以旧滚动位
-  // 露出一帧、约 100ms 后才跳底（二段跳）。
+  // Session switch / transcript arrival: pin to bottom synchronously after DOM
+  // update. The component instance is reused across sessions and keeps the old
+  // scroll position; relying on the delayed scroll alone would show one frame
+  // at the old position and jump ~100ms later.
   $effect(() => {
     void sessionId;
     void runState.messages.length;
     scrollToBottom();
   });
 
-  // 已提交消息数量变化时滚动（延时兜底晚到布局：markdown/图片撑高后再贴一次底）。
+  // Scroll on message-count change; the delay re-pins after late layout
+  // (markdown/images growing the content).
   $effect(() => {
     if (runState.messages.length > 0) {
       setTimeout(scrollToBottom, 100);
     }
   });
 
-  // 流式文本/思考增长时滚动。
+  // Scroll as streaming text/thinking grows.
   $effect(() => {
     if (runState.streamingText || runState.thinkingText) {
       setTimeout(scrollToBottom, 50);
@@ -196,12 +193,11 @@
      （其中的按钮由全局规则保持不可选）。 -->
 <div bind:this={messagesContainer} class="flex-1 overflow-y-auto select-text">
   <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
-    <!-- 已提交消息（按顺序；多轮历史保留在上方）。messages 为 append-only 序列
-         （reducer 仅追加 / 就地 finalize 同 index，不重排），故 index key 的 DOM
-         复用稳定；卡片自身按 toolCallId 分键，in-place 状态不随消息 index 错位。 -->
+    <!-- Committed messages. messages is append-only (the reducer only appends
+         or finalizes in place, never reorders), so index keys reuse DOM safely;
+         cards key by toolCallId so their state never shifts with the index. -->
     {#each runState.messages as message, i (i)}
       {#if message.role === "user"}
-        <!-- 用户气泡（纯文本）。 -->
         <div class="flex justify-end">
           <div class="flex flex-col items-end">
             <div
@@ -216,8 +212,8 @@
           </div>
         </div>
       {:else if message.role === "assistant" && i !== liveAssistantIndex}
-        <!-- 助手消息（已完成）：思考块（present-only）+ markdown 文本 + 工具调用卡片 + 用量。 -->
-        <!-- 运行中的进行中助手骨架由下方 LIVE 视图呈现，此处跳过以免重复渲染。 -->
+        <!-- Finished assistant message; the in-progress skeleton renders in the
+             LIVE view below and is skipped here. -->
         <div class="flex flex-col gap-2">
           <div class="flex-1 min-w-0">
             {#if assistantThinking(message)}
@@ -227,9 +223,9 @@
             {#if assistantText(message)}
               {@const genuiSpec = resolveSpec(assistantText(message))}
               {#if genuiSpec}
-                <!-- GenUI 卡片：整条回复是一份合法的 JSON-Render spec（generative_ui
-                     会话由后端注入 catalog prompt 引导）→ 经 json-render 渲染为
-                     交互卡片；未命中（普通回复）走下方 markdown。 -->
+                <!-- GenUI card: the whole reply is a valid JSON-Render spec →
+                     rendered as an interactive card; non-spec replies fall
+                     through to markdown. -->
                 <JsonUIProvider initialState={{}}>
                   <Renderer spec={genuiSpec} registry={uiRegistry} />
                 </JsonUIProvider>
@@ -243,9 +239,9 @@
               {/if}
             {/if}
 
-            <!-- 工具调用卡片：按助手内容源顺序渲染；同一 toolCallId 一张卡，
-                 就地从 executing 翻转到终态（live），reload 后由 committed
-                 toolResult 调和（restored）。stable key = toolCallId。 -->
+            <!-- Tool-call cards in source order; one card per toolCallId flips
+                 from executing to final in place (live), reconciled from the
+                 committed toolResult after reload (restored). -->
             {#if assistantToolCalls(message).length}
               <div class="mt-2 space-y-2">
                 {#each assistantToolCalls(message) as block (block.id)}
@@ -268,7 +264,6 @@
               </div>
             {/if}
 
-            <!-- 错误态消息（stopReason=error 携带 errorMessage）。 -->
             {#if message.stopReason === "error" && message.errorMessage}
               <div
                 class="mt-2 px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
@@ -277,8 +272,7 @@
               </div>
             {/if}
 
-            <!-- Token 用量（输入/输出）：仅正常定稿轮显示；中止 / 出错 / 空轮不显示
-                 （避免误导性的零用量、绝不串上一轮数值——VAL-CARUN-008）。 -->
+            <!-- Token usage: shown only for normally finished turns (see hasUsage). -->
             {#if hasUsage(message)}
               <div class="mt-2 flex flex-row gap-2 text-xs text-base-content/50">
                 <span>{t("agent.timeline.usageInput", {
@@ -293,13 +287,12 @@
           </div>
         </div>
       {/if}
-      <!-- toolResult 消息不单独渲染：其内容由配对的 toolcall 卡片（按 toolCallId
-           调和）在助手回合内就地呈现，避免「答案 + 游离的工具结果块」割裂。 -->
-
-      <!-- 运行中的进行中助手骨架（i === liveAssistantIndex）有意不在此渲染，由下方 LIVE 视图呈现。 -->
+      <!-- toolResult messages are not rendered standalone: the paired toolcall
+           card presents them inside the assistant turn, avoiding a detached
+           tool-result block. -->
     {/each}
 
-    <!-- LIVE 流式视图：运行中展示增长的思考块 + 流式文本。 -->
+    <!-- LIVE streaming view: growing thinking block + streaming text. -->
     {#if showLiveView}
       <div class="flex flex-col gap-2">
         <div class="flex-1 min-w-0">
@@ -309,8 +302,9 @@
 
           {#if runState.streamingText}
             {#if looksLikeStreamingSpec(runState.streamingText)}
-              <!-- spec 形状的流：未闭合的 JSON 不逐字符渲染（会闪一屏原始 JSON），
-                   显示占位；message_end 定稿后由上方已提交分支渲染成 GenUI 卡片。 -->
+              <!-- Spec-shaped stream: unclosed JSON is not rendered char-by-char
+                   (it would flash raw JSON); show a placeholder until the
+                   committed branch renders the GenUI card at message_end. -->
               <div
                 class="py-2 flex items-center gap-2 text-sm text-base-content/50"
               >
@@ -328,7 +322,7 @@
               </div>
             {/if}
           {:else if !runState.thinkingText}
-            <!-- 流式启动但尚无内容：进行中指示。 -->
+            <!-- Stream started but no content yet: progress indicator. -->
             <div class="py-2 text-base-content flex items-center">
               <div
                 class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
@@ -339,9 +333,9 @@
       </div>
     {/if}
 
-    <!-- 自动压缩指示（VAL-CARUN-019）：长会话触发上下文整理时展示可分辨的
-         「整理上下文中」指示。压缩发生在一轮内、不额外发终结信号，故与流式视图
-         并存；compaction_end 抵达即隐藏，对话续行。summary 有意不渲染（去向稳定）。 -->
+    <!-- Compaction indicator. Compaction happens within a turn without a
+         terminal signal, so it coexists with the streaming view; hidden when
+         compaction_end arrives. The summary is intentionally not rendered. -->
     {#if runState.isCompacting}
       <div
         class="flex items-center gap-2 px-3 py-2 text-xs text-base-content/60"
@@ -353,7 +347,7 @@
       </div>
     {/if}
 
-    <!-- 错误态：run-level 错误可见，而非静默停止。 -->
+    <!-- Run-level errors are visible, never a silent stop. -->
     {#if runState.error}
       <div
         class="px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
@@ -365,7 +359,6 @@
 </div>
 
 <style>
-  /* 自定义滚动条（镜像 ChatContent）。 */
   .overflow-y-auto::-webkit-scrollbar {
     width: 6px;
   }

@@ -1,17 +1,20 @@
 import { tv, type VariantProps } from 'tailwind-variants';
 
 /**
- * 原子组件变体表：集中定义 variant / size → 语义色 utility 的映射，
- * 作为跨组件复用的样式真源，替代各组件散落的 scoped `<style>` 皮肤。
+ * Atomic component variant tables: the central variant / size -> semantic-color
+ * utility mapping, serving as the single style source shared across components
+ * (no per-component scoped `<style>` skins).
  *
- * 约定：颜色一律走 daisyUI 语义 token（`bg-primary` / `text-base-content` …），
- * 严禁裸色值（`bg-red-500` 之类）。`enabled:hover:*` 精确对应旧的
- * `:hover:not(:disabled)`，避免 disabled 态被 hover 覆盖。
+ * Conventions: colors use daisyUI semantic tokens only (`bg-primary` /
+ * `text-base-content` ...), never raw palette values (`bg-red-500`).
+ * `enabled:hover:*` matches `:hover:not(:disabled)` exactly, so the disabled
+ * state is never restyled by hover.
  */
 /**
- * 单一按钮变体表（吸收原 IconButton / CircleButton / RoundButton / ArrowButton）：
- * `variant × size × shape` 三轴。图标按钮 = `size: 'icon*'`；圆形 = `size:'icon' shape:'pill'`；
- * 药丸 = `shape:'pill'`。`border border-transparent` 基线让有边框变体与无边框变体等高。
+ * Single button variant table on three axes: `variant x size x shape`.
+ * Icon buttons = `size: 'icon*'`; circular = `size:'icon' shape:'pill'`;
+ * pill = `shape:'pill'`. The `border border-transparent` baseline keeps
+ * bordered and borderless variants the same height.
  */
 export const button = tv({
   base: 'inline-flex shrink-0 items-center justify-center gap-1.5 border border-transparent font-medium whitespace-nowrap cursor-pointer select-none outline-none transition-[color,background-color,border-color,opacity] duration-[var(--dur-fast)] ease-[var(--ease-out)] focus-visible:ring-2 focus-visible:ring-primary/50 disabled:pointer-events-none disabled:opacity-60 aria-invalid:border-error',

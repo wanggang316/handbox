@@ -9,7 +9,7 @@
     maxWidth?: number;
     storageKey?: string | null;
     containerClass?: string;
-    /** 受控宽度；未传时回退到 initialWidth */
+    /** Controlled width; falls back to initialWidth when omitted. */
     width?: number;
     onResizeStart?: () => void;
     onResizing?: (width: number) => void;
@@ -58,7 +58,7 @@
     (event.currentTarget as Element).setPointerCapture(event.pointerId);
     dragging = true;
 
-    // 禁用全局文本选择并显示调整光标
+    // Disable global text selection and show the resize cursor while dragging.
     const bodyStyle = document.body.style as CSSStyleDeclaration;
     originalUserSelect = bodyStyle.userSelect;
     // @ts-ignore - webkit prefixed property for Safari
@@ -103,7 +103,7 @@
     if (storageKey) {
       localStorage.setItem(storageKey, String(width));
     }
-    // 恢复全局文本选择和光标
+    // Restore global text selection and cursor.
     const bodyStyle = document.body.style as CSSStyleDeclaration;
     bodyStyle.userSelect = originalUserSelect;
     // @ts-ignore

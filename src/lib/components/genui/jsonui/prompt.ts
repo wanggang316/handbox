@@ -1,40 +1,27 @@
 /**
- * Frozen "generative-UI" system-prompt builder.
+ * Frozen "generative-UI" system-prompt builder: turns {@link uiCatalog} into the
+ * instruction block that teaches an LLM to emit one complete `{ root, elements }`
+ * spec.
  *
- * {@link buildGenerativeUiPrompt} turns the {@link uiCatalog} into a single,
- * deterministic instruction block that teaches an LLM to emit a *whole* spec —
- * one complete JSON object `{ root, elements }` — using only the catalog's
- * presentational components.
+ * It deliberately departs from json-render's stock `uiCatalog.prompt()`, which is
+ * JSONL / JSON-Patch oriented: {@link resolveSpec} accepts only a whole spec
+ * object, so only the per-component signature lines are reused and all framing,
+ * the worked example, and the output contract are authored here.
  *
- * Two deliberate departures from json-render's stock `uiCatalog.prompt()`:
+ * The output is DETERMINISTIC — fixed `componentNames` order, constant example —
+ * which is what lets the committed `generative-ui-prompt.txt` be drift-checked
+ * byte-for-byte against this builder.
  *
- *  1. **Whole-spec, not streaming-patch.** The stock prompt is JSONL / RFC 6902
- *     JSON-Patch oriented (`{"op":"add",...}` per line). Our {@link resolveSpec}
- *     accepts only one complete spec object, so this prompt instructs the model
- *     to output exactly that and never mentions `op`/JSONL/patch wording.
- *  2. **Self-contained.** Only the per-component signature lines (type name,
- *     prop shape, description) are reused from `uiCatalog.prompt()`; all framing,
- *     the worked example, and the output contract are authored here.
- *
- * The output is DETERMINISTIC: components are emitted in `uiCatalog.componentNames`
- * order (a fixed array), and the embedded example is a constant. This stability
- * is what lets the committed `generative-ui-prompt.txt` be drift-checked
- * byte-for-byte against this builder's output.
- *
- * Pure TypeScript — imports only `catalog.ts` (no `.svelte`), so it is safe to
- * pull into the Node-environment unit tests and the Node generator script.
+ * Imports no `.svelte`, so Node tests and the Node generator script can use it.
  */
 
 import { uiCatalog } from "./catalog";
 
 /**
- * The worked example handed to the model, also embedded verbatim in the prompt.
- *
- * It is a clean, catalog-valid whole spec (Card → Stack → Text/StatusLabel/Badge)
- * that {@link resolveSpec} accepts. The drift/content test extracts this exact
- * object from the prompt and asserts `resolveSpec(example)` is non-null, so the
- * shape here must stay valid: every element carries `children` and `visible`,
- * and every component's required props are present.
+ * The worked example embedded verbatim in the prompt. The drift test extracts it
+ * back out and asserts {@link resolveSpec} accepts it, so it must stay
+ * catalog-valid: every element carries `children` and `visible`, and every
+ * component's required props are present.
  */
 const EXAMPLE_SPEC = {
   root: "card",
@@ -73,14 +60,11 @@ const EXAMPLE_SPEC = {
 };
 
 /**
- * Extract the per-component signature lines from `uiCatalog.prompt()`. Each line
- * has the json-render-maintained shape
- * `- Name: { prop?: type, ... } - description [accepts children]`, carrying the
- * component's type name, prop names/types/enums, and its catalog description.
- *
- * Returned keyed by type name so the caller can re-emit them in a fixed order
- * (the parse order of `prompt()` is not contractually stable; the caller's
- * `componentNames` order is).
+ * Extract the per-component signature lines from `uiCatalog.prompt()`, each of
+ * the json-render-maintained shape
+ * `- Name: { prop?: type, ... } - description [accepts children]`. Keyed by type
+ * name because `prompt()`'s parse order is not contractually stable, whereas the
+ * caller's `componentNames` order is.
  */
 function componentSignatureLines(
   catalog: typeof uiCatalog,
@@ -97,15 +81,8 @@ function componentSignatureLines(
 }
 
 /**
- * Build the frozen generative-UI system prompt from the catalog.
- *
- * The output literally contains, for every catalog component, its type name and
- * its `description` text; instructs whole-spec JSON output (`root` + `elements`)
- * with no patch/JSONL wording; and embeds {@link EXAMPLE_SPEC} as a fenced
- * ```json block that {@link resolveSpec} accepts.
- *
- * @param catalog The UI catalog (defaults to the shared {@link uiCatalog}); the
- *   parameter exists so the drift test can pass the same instance explicitly.
+ * Build the frozen generative-UI system prompt from the catalog. `catalog` is
+ * injectable only so the drift test can pass the instance explicitly.
  */
 export function buildGenerativeUiPrompt(
   catalog: typeof uiCatalog = uiCatalog,
@@ -122,8 +99,7 @@ export function buildGenerativeUiPrompt(
       if (signature !== undefined) {
         return signature;
       }
-      // Fallback (should not happen for catalog components): synthesise a line
-      // from the description alone so the type name + description still appear.
+      // Unreachable for catalog components; keep type name + description anyway.
       const description = components[name]?.description ?? "";
       return `- ${name}: {} - ${description}`;
     })

@@ -38,28 +38,25 @@
 
   let confirmModalRef: any;
 
-  // 使用统一的当前供应商状态
   const currentProvider = $derived(providerState.currentProvider);
 
-  // 自定义供应商（openai-compatible / anthropic-compatible）：端点不在 hand-ai
-  // 目录中，模型需手动添加。
+  // Custom providers (openai-compatible / anthropic-compatible): the endpoint is
+  // not in the hand-ai catalog, so models must be added manually.
   const isCustom = $derived(
     !!currentProvider && isCustomProviderType(currentProvider.provider_type)
   );
 
-  // 手动添加模型的内联表单状态
+  // Inline add-model form state
   let showAddModel = $state(false);
   let newModelId = $state("");
   let addingModel = $state(false);
   let addModelError = $state("");
 
-  // 配置表单
   let formData = $state({
     name: "",
     enabled: false,
   });
 
-  // 获取预定义供应商信息
   let providerIcon = $derived(
     currentProvider ? getProviderIcon(currentProvider) : null
   );
@@ -80,16 +77,15 @@
     if (!providerId) return;
 
     try {
-      // 确保供应商配置模板已加载（isCustom 依赖 custom_providers）。
+      // Provider config templates must be loaded first (isCustom depends on custom_providers)
       if (providerConfigs.custom_providers.length === 0) {
         await providerActions.loadProviderConfigs();
       }
 
-      // 尝试从全局状态中设置当前供应商
       let provider = providerStateActions.setCurrentProviderById(providerId);
 
       if (!provider) {
-        // 如果本地没有，先加载供应商配置和列表
+        // Not in the in-memory list yet: load configs and providers first
         await Promise.all([
           providerActions.loadProviderConfigs(),
           providerActions.loadProviders(),
@@ -98,13 +94,11 @@
       }
 
       if (provider) {
-        // 填充表单数据
         formData = {
           name: provider.name,
           enabled: provider.enabled,
         };
 
-        // 自动获取模型列表
         if (provider.id) {
           try {
             await providerActions.fetchProviderModels(provider.id, false);
@@ -114,7 +108,6 @@
         }
       } else {
         console.error("Provider not found:", providerId);
-        // 跳转到供应商列表页
         goto("/settings/models");
       }
     } catch (error) {
@@ -128,7 +121,6 @@
     showEditModal = true;
   }
 
-  // 监听当前供应商变化，更新表单数据
   $effect(() => {
     if (currentProvider) {
       formData = {
@@ -141,7 +133,7 @@
   async function handleToggleProvider(enabled: boolean) {
     if (!currentProvider || !currentProvider.id) return;
 
-    // 乐观更新UI
+    // Optimistic update; roll back on failure
     const previousState = formData.enabled;
     formData.enabled = enabled;
 
@@ -151,7 +143,6 @@
       }
       console.log("handleToggleProvider", currentProvider.id, enabled);
       await providerActions.toggleProvider(currentProvider.id, enabled);
-      // 更新当前供应商状态
       providerStateActions.updateCurrentProvider({
         ...currentProvider,
         enabled,
@@ -159,7 +150,6 @@
       console.log(`Provider ${enabled ? "enabled" : "disabled"} successfully`);
     } catch (error) {
       console.error("Failed to toggle provider:", error);
-      // 发生错误时回滚UI状态
       formData.enabled = previousState;
     }
   }
@@ -233,7 +223,7 @@
       goto("/settings/models");
     } catch (error) {
       console.error("Delete failed:", error);
-      // 删除失败时触发关闭动画
+      // Delete failed: close the dialog with its animation
       confirmModalRef?.modalRef?.handleClose();
     }
   }
@@ -259,7 +249,6 @@
   {/if}
 {/snippet}
 
-<!-- 粘性导航栏 - 在右侧主体区域内固定 -->
 <div class="flex flex-col h-screen">
   <header class="text-base-content py-2 px-4 flex-shrink-0">
     <Button
@@ -274,7 +263,6 @@
     </Button>
   </header>
 
-  <!-- 主要内容区域 -->
   <main class="flex-grow overflow-y-auto p-6 pr-8">
     {#if currentProvider}
       <TableGroup>
@@ -461,13 +449,11 @@
   onClose={closeModelInfo}
 />
 
-<!-- 编辑供应商弹窗 -->
 <AddProviderModal
   open={showEditModal}
   onClose={() => (showEditModal = false)}
 />
 
-<!-- 删除确认弹窗 -->
 <ConfirmModal
   bind:this={confirmModalRef}
   open={showDeleteConfirm}

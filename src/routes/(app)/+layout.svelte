@@ -12,44 +12,37 @@
   import UpdateDialog from "$lib/components/update/UpdateDialog.svelte";
   import ResizableSidebar from "$lib/components/ui/ResizableSidebar.svelte";
 
-  // 侧边栏配置常量
-  const SIDEBAR_AUTO_HIDE_WIDTH = 600; // 自动隐藏侧边栏的最小窗口宽度阈值
-  const SIDEBAR_INITIAL_WIDTH = 240; // 侧边栏初始宽度
-  const SIDEBAR_MIN_WIDTH = 200; // 侧边栏最小宽度
-  const SIDEBAR_MAX_WIDTH = 300; // 侧边栏最大宽度
+  const SIDEBAR_AUTO_HIDE_WIDTH = 600; // auto-hide sidebar below this window width
+  const SIDEBAR_INITIAL_WIDTH = 240;
+  const SIDEBAR_MIN_WIDTH = 200;
+  const SIDEBAR_MAX_WIDTH = 300;
 
   let sidebarWidth = $state(SIDEBAR_INITIAL_WIDTH);
   let isDragging = $state(false);
   let windowWidth = $state(0);
-  let autoHidden = $state(false); // 标记是否是自动隐藏
-  let userOverrideInNarrowMode = $state(false); // 标记用户在窄屏模式下手动打开了侧边栏
+  let autoHidden = $state(false); // hidden by auto-hide, not by the user
+  let userOverrideInNarrowMode = $state(false); // user manually opened the sidebar while narrow
 
-  // 同步 sidebarWidth 到 uiState
   $effect(() => {
     uiState.setSidebarWidth(sidebarWidth);
   });
 
-  // 切换侧边栏显示状态
   function toggleSidebar() {
     uiState.toggleSidebar();
-    autoHidden = false; // 手动操作时清除自动隐藏标记
+    autoHidden = false; // manual toggle overrides auto-hide
 
-    // 如果在窄屏模式下手动打开侧边栏，标记用户覆盖行为
     if (windowWidth < SIDEBAR_AUTO_HIDE_WIDTH && uiState.sidebarOpen) {
       userOverrideInNarrowMode = true;
     }
-    // 如果在宽屏模式下或手动关闭，清除覆盖标记
     else if (windowWidth >= SIDEBAR_AUTO_HIDE_WIDTH || !uiState.sidebarOpen) {
       userOverrideInNarrowMode = false;
     }
 
-    // 保存状态到 localStorage
     if (browser) {
       localStorage.setItem("sidebar.open", JSON.stringify(uiState.sidebarOpen));
     }
   }
 
-  // 监听窗口大小变化
   function handleResize() {
     if (browser) {
       const prevWindowWidth = windowWidth;
@@ -70,7 +63,6 @@
     }
   }
 
-  // 键盘快捷键支持
   function handleKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key === "b") {
       event.preventDefault();
@@ -78,7 +70,6 @@
     }
   }
 
-  // 从 localStorage 恢复侧边栏状态
   function restoreSidebarState() {
     if (browser) {
       const saved = localStorage.getItem("sidebar.open");
@@ -89,16 +80,14 @@
   }
 
   onMount(() => {
-    // 恢复侧边栏状态
     restoreSidebarState();
 
-    // 从 localStorage 恢复侧边栏宽度
     const savedWidth = localStorage.getItem("main.sidebar.width");
     if (savedWidth) {
       sidebarWidth = parseInt(savedWidth);
     }
 
-    // 应用更新：加载当前版本与偏好，建立跨窗口监听并按需自动检查（仅主窗口）
+    // App updates: load version + prefs, then start cross-window auto-check (main window only)
     let updateUnlisten: (() => void) | null = null;
     updateState
       .load()
@@ -110,13 +99,12 @@
         console.error("Failed to init update checker:", error);
       });
 
-    // Quick Action continue-in-agent 交接：浮层 ⌘↵ 调用后端，后端把本（主）窗口前置
-    // 并广播 `quick-action-open-agent`（payload = 裸 session-id 字符串）。无论主窗口当前
-    // 停在哪个路由，都导航到该会话 `/agent?id=<sessionId>`（浮层创建的是真实持久化的
-    // agent 会话）。在 onMount 即注册，使冷启动（窗口刚被前置首挂）时抵达的 navigate
-    // 事件也能被接住。
+    // Quick Action handoff: the backend fronts this window and broadcasts
+    // `quick-action-open-agent` (payload = session id); navigate to that session
+    // whatever the current route. Registered in onMount so events arriving
+    // during cold start are not missed.
     let openAgentUnlisten: (() => void) | null = null;
-    let openAgentStale = false; // 卸载早于 listen 解析时，丢弃迟到的 unlisten。
+    let openAgentStale = false; // discard a late unlisten if unmount beats listen()
     if (isTauriEnvironment()) {
       listen<string>("quick-action-open-agent", (event) => {
         void goto(`/agent?id=${event.payload}`);
@@ -194,7 +182,6 @@
     {@render children()}
   </main>
 
-  <!-- 应用更新弹框（由侧边栏入口或自动检查触发） -->
   <UpdateDialog />
 </div>
 
@@ -217,8 +204,8 @@
     overflow: hidden;
   }
 
-  /* 仅在 sidebar 打开时给 top / bottom 8px 间距；左右不留 margin —— 右侧贴主体
-     border，左侧贴窗口，使侧栏内容左右间距对称（内容自身 px 已对称）。 */
+  /* Top/bottom margin only while open; no left/right margin so the sidebar's
+     own horizontal padding stays symmetric against window and content border. */
   .sidebar-wrapper.open {
     margin: 0.5rem 0 0.5rem 0;
   }
@@ -233,14 +220,13 @@
     display: flex;
     flex-direction: column;
     transition: width var(--dur-base) ease-in-out;
-    /* Linear 主布局：内容卡贴 top/right/bottom 三边窗口，左侧 hairline 边 + 两角圆角 */
+    /* Content card hugs top/right/bottom window edges; hairline + rounded corners on the left */
     background-color: var(--bg-card);
     border-left: 1px solid var(--hairline);
     border-top-left-radius: 0.75rem;
     border-bottom-left-radius: 0.75rem;
   }
 
-  /* sidebar 关闭：主体撑满整个窗口，去掉左侧 border 和圆角 */
   .main-content.sidebar-hidden {
     border-left: 0;
     border-top-left-radius: 0;

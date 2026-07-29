@@ -12,9 +12,9 @@
   import type { ToolResultContent } from "$lib/types/agentSession";
 
   interface Props {
-    // 归一化的工具调用 view-model：live（tool_execution 事件）与 restored
-    // （committed toolcall + toolResult）两条来源统一到此形状，故同一调用
-    // 无论实时还是还原都由本组件渲染同一张卡（VAL-TOOLS-004）。
+    // Normalized tool-call view-model: live (tool_execution events) and
+    // restored (committed toolcall + toolResult) sources share this shape, so
+    // the same call renders as the same card either way.
     toolCall: ToolCallView;
   }
 
@@ -26,7 +26,6 @@
     expanded = !expanded;
   }
 
-  // 状态指示（执行中 spinner / 完成 check / 失败 mark），中文标签。
   const statusDisplay = $derived.by(() => {
     switch (toolCall.status) {
       case "executing":
@@ -56,7 +55,7 @@
   const StatusIcon = $derived(statusDisplay.icon);
   const isError = $derived(toolCall.status === "error");
 
-  // 把 args（任意结构）渲染为格式化 JSON 代码块。
+  // Render args (any shape) as a formatted JSON code block.
   function renderArgs(args: unknown): string {
     if (args === undefined || args === null) return "";
     let formatted: string;
@@ -72,7 +71,7 @@
     return renderCodeBlock(formatted, { language: "json", variant: "compact" });
   }
 
-  // 结果文本块拼接（image 块单独按图片渲染）。
+  // Joined text blocks; image blocks render separately.
   const textResult = $derived.by(() =>
     (toolCall.result ?? [])
       .filter((block): block is Extract<ToolResultContent, { type: "text" }> =>
@@ -82,7 +81,7 @@
       .join("\n"),
   );
 
-  // 结果中的 image 块：read_file 等返回的图片按 <img> 渲染，而非原始 base64 文本。
+  // Image result blocks render as <img>, not raw base64 text.
   const imageResults = $derived.by(() =>
     (toolCall.result ?? []).filter(
       (block): block is Extract<ToolResultContent, { type: "image" }> =>
@@ -110,7 +109,6 @@
       : "border-[var(--hairline)] hover:bg-base-300/80"
   }`}
 >
-  <!-- header：展开/收起 + 工具名 + 状态。 -->
   <div class="flex items-center justify-between gap-2">
     <button
       type="button"

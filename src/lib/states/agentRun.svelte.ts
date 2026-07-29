@@ -1,19 +1,20 @@
 /**
- * Agent 运行状态管理 - Svelte 5 runes
+ * Agent run state - Svelte 5 runes.
  *
- * reducer/listener 约定，**按 sessionId 分键**：
- * 每个会话拥有独立的「已提交消息（transcript）」与「流式 view-model」，因此一个
- * 在后台流式的会话可以持续更新自身状态，而前台正在查看的是另一个会话（VAL-RUN-016）。
+ * Reducer/listener contract, keyed by sessionId: each session owns its own
+ * committed transcript and streaming view-model, so a session streaming in the
+ * background keeps updating while a different session is in the foreground.
  *
- * 流式监听器在 store 单例构造时**一次性**建立（navigation-resilient）：store 单例在
- * 整个 app 生命周期只构造一次，监听器不随路由切换而卸载（VAL-MODE-006），只订阅
- * `agent_stream_*` 事件。
+ * The stream listener is established once at store-singleton construction
+ * (navigation-resilient): the singleton lives for the whole app lifetime, the
+ * listener never unmounts on route changes, and it only subscribes to
+ * `agent_stream_*` events.
  *
- * 工具调用（toolcall）在 M2 消费：`tool_execution_start/update/end` 事件按 `toolCallId`
- * 分键 reduce 成 live tool-call view-model（VAL-TOOLS-001/002/003/004），由 timeline
- * 渲染为工具卡片。已提交 transcript 里的 `toolcall` 内容块 + `toolResult` 消息（由
- * 持久化还原）与 live 状态调和：同一个 `toolCallId` 无论 live 还是 restored 都只呈现
- * 一张卡片。
+ * Tool calls: `tool_execution_start/update/end` events reduce into a live
+ * tool-call view-model keyed by `toolCallId`, rendered by the timeline as tool
+ * cards. Committed `toolcall` content blocks + `toolResult` messages (restored
+ * from persistence) reconcile with live state: one `toolCallId` yields exactly
+ * one card, whether live or restored.
  */
 
 import type { UUID } from "$lib/types";
@@ -36,15 +37,17 @@ import {
 import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
 /**
- * 工具调用的归一化 view-model（卡片消费的统一形状）。
+ * Normalized tool-call view-model (the single shape tool cards consume).
  *
- * live 路径（run 期间）由 `tool_execution_*` 事件 reduce 产生；restored 路径
- * （reload 后）由已提交的 `toolcall` 内容块 + 配对的 `toolResult` 消息归一化产生。
- * 两条路径都映射到此形状，使 `AgentToolCallCard` 无需区分来源即可渲染同一张卡片。
+ * The live path (during a run) is reduced from `tool_execution_*` events; the
+ * restored path (after reload) is normalized from committed `toolcall` content
+ * blocks + paired `toolResult` messages. Both map to this shape so
+ * `AgentToolCallCard` renders the same card regardless of source.
  *
- * `status`：`executing`（已 start、result 未到）/ `completed`（end 且非 error）/
- * `error`（end 且 isError，或 restored 的 `toolResult.isError`）。
- * `result` 为终态的工具结果内容块（text / image）；`executing` 时为 undefined。
+ * `status`: `executing` (started, result pending) / `completed` (ended, not an
+ * error) / `error` (ended with isError, or restored `toolResult.isError`).
+ * `result` holds the final tool-result content blocks (text / image);
+ * undefined while `executing`.
  */
 export type ToolCallStatus = "executing" | "completed" | "error";
 
@@ -57,13 +60,15 @@ export interface ToolCallView {
 }
 
 /**
- * 单个会话的运行 view-model。
+ * Per-session run view-model.
  *
- * `messages` 为已提交（finalized）消息序列；`streamingText` / `thinkingText` 为
- * 当前正在流式累积的助手文本/思考文本；`isRunning` 表示该会话存在活跃 run；
- * `error` 为该会话最近一次 run-level 错误（在 `agent_stream_closed` 之前抵达）。
- * `toolCalls` 为 live tool-call view-model，**按 `toolCallId` 分键**：同一调用
- * 的 start/update/end 落到同一条目，使卡片就地从 executing 翻转到终态（VAL-TOOLS-004）。
+ * `messages` is the committed (finalized) message sequence; `streamingText` /
+ * `thinkingText` accumulate the currently streaming assistant text/thinking;
+ * `isRunning` marks an active run; `error` is the session's latest run-level
+ * error (arrives before `agent_stream_closed`). `toolCalls` is the live
+ * tool-call view-model keyed by `toolCallId`: start/update/end for the same
+ * call land on the same entry, so the card flips in place from executing to
+ * its final state.
  */
 export interface AgentRunState {
   messages: AgentMessage[];
@@ -73,17 +78,20 @@ export interface AgentRunState {
   error: string | null;
   toolCalls: Record<string, ToolCallView>;
   /**
-   * 自动压缩进行中（长会话触发上下文整理）。`compaction_start` 置 true、
-   * `compaction_end` 置 false；timeline 据此展示可分辨的「整理上下文中」指示。
-   * 压缩发生在一轮内、不额外发 closed，故本标志独立于 `isRunning`：压缩结束后
-   * 本轮对话续行、仍恰好一次终结（VAL-CARUN-019）。
+   * Auto-compaction in progress (long sessions trigger context compaction).
+   * Set true on `compaction_start`, false on `compaction_end`; the timeline
+   * shows a distinct "compacting" indicator. Compaction happens within a turn
+   * and emits no extra closed event, so this flag is independent of
+   * `isRunning`: the turn resumes afterwards and still closes exactly once.
    */
   isCompacting: boolean;
   /**
-   * 该会话的已提交 transcript 是否至少成功还原过一次（`loadTranscript`）。
-   * 会话页据此区分「尚未加载（居中 Spinner）」与「确为空会话（引导空态）」，
-   * 避免首开有历史的会话时先闪一帧引导空态再换成 timeline。
-   * 状态按 sessionId 常驻本 store 单例，重访会话首帧直出缓存、不再回到 Spinner。
+   * Whether this session's committed transcript has been restored at least
+   * once (`loadTranscript`). The session page uses it to tell "not yet loaded
+   * (centered spinner)" from "genuinely empty session (onboarding empty
+   * state)", avoiding a one-frame empty-state flash when first opening a
+   * session with history. Persists per sessionId in this store singleton, so
+   * revisits render from cache without returning to the spinner.
    */
   hydrated: boolean;
 }
@@ -101,46 +109,53 @@ function createEmptyRunState(): AgentRunState {
   };
 }
 
-// 共享的只读空状态：供 `runStateFor` 在某会话状态尚未创建时返回一个引用稳定的占位，
-// 避免在 `$derived` / 模板表达式里触发 `$state` 写入（Svelte 5 的 state_unsafe_mutation）。
-// 仅供读取；真正的 per-session 状态由写入路径（loadTranscript / 事件 reduce）惰性创建。
+// Shared read-only empty state: lets `runStateFor` return a reference-stable
+// placeholder before a session's state exists, so `$derived` / template reads
+// never write `$state` (Svelte 5 state_unsafe_mutation). Read-only; real
+// per-session state is lazily created by write paths (loadTranscript / event reduce).
 const EMPTY_RUN_STATE: AgentRunState = Object.freeze(createEmptyRunState());
 
 class AgentRunStore {
-  // 按 sessionId 分键的运行状态。每个会话独立，互不干扰。
+  // Run state keyed by sessionId; sessions are independent.
   private states = $state<Record<string, AgentRunState>>({});
 
-  // 已删除会话的 tombstone（GROUP-018）：`removeSession` 之后，该会话在途 run 的
-  // 迟到流事件（后端删除前 abort 产生的 tool_execution_end / agent_stream_closed
-  // 等）不得经 `ensureState` 重建已删条目。守卫只对显式删除过的 id 生效，
-  // 正常流式路径完全不受影响。`agent_stream_closed` 是 run 的终结信号，抵达时
-  // 顺带回收 tombstone（该 run 不再有后续事件；已删 session 也不会有新 run）。
-  // 删除时无在途 run 的 tombstone 不会被 closed 回收而常驻——条目是 UUID 字符串，
-  // 量级可忽略，且 session id 不复用，无误拦截风险。非响应式内部簿记，不进 $state。
+  // Tombstones for deleted sessions: after `removeSession`, late stream events
+  // from an in-flight run (tool_execution_end / agent_stream_closed emitted by
+  // the pre-delete abort) must not recreate the deleted entry via `ensureState`.
+  // The guard only applies to explicitly deleted ids; normal streaming is
+  // unaffected. `agent_stream_closed` is the run's terminal signal and reclaims
+  // the tombstone on arrival (no further events for that run; a deleted session
+  // gets no new runs). A tombstone with no in-flight run at delete time is
+  // never reclaimed and simply persists — entries are UUID strings, negligible
+  // in size, and session ids are not reused, so nothing is mis-intercepted.
+  // Non-reactive internal bookkeeping, not `$state`.
   private deletedSessions = new Set<string>();
 
-  // 一次性流式监听器的清理函数（store 生命周期内通常不调用）。
+  // Cleanup for the one-time stream listener (rarely called in the store's lifetime).
   private unlisten: (() => void) | null = null;
 
-  // run 终结回调（VAL-PERSIST-011）：`agent_stream_closed` 抵达时触发。
-  // 由侧栏状态层注册，用于刷新该会话的元数据 / 排序，而不让本 store 反向依赖
-  // session 状态（保持单向：agentSession 不 import agentRun）。
+  // Run-termination callback, fired when `agent_stream_closed` arrives.
+  // Registered by the sidebar state layer to refresh that session's metadata /
+  // ordering without this store depending on session state (one-way:
+  // agentSession does not import agentRun).
   private onRunClosed: ((sessionId: string) => void) | null = null;
 
-  // 会话名变更回调（VAL-CARUN-020）：`session_info_changed` 生命周期信号抵达时
-  // 触发。由侧栏状态层注册，用于即时更新该会话的标题，而不让本 store 反向依赖
-  // session 状态（与 `onRunClosed` 同一单向接线约定）。
+  // Session-name-change callback, fired on the `session_info_changed`
+  // lifecycle signal. Registered by the sidebar state layer to update the
+  // session title immediately; same one-way wiring as `onRunClosed`.
   private onSessionInfoChanged:
     | ((sessionId: string, name: string | null) => void)
     | null = null;
 
   constructor() {
-    // 单例构造即建立监听器：navigation-resilient，跨路由与模式切换持续 reduce。
+    // Listener established at singleton construction: navigation-resilient,
+    // keeps reducing across route and mode switches.
     void this.initListener();
   }
 
   /**
-   * 建立全局 Agent 流式监听器（仅一次）。所有事件按 payload 的 sessionId 分发。
+   * Set up the global agent stream listener (once). Every event is dispatched
+   * by its payload's sessionId.
    */
   private async initListener(): Promise<void> {
     if (this.unlisten) {
@@ -158,9 +173,7 @@ class AgentRunStore {
     }
   }
 
-  /**
-   * 取得（必要时初始化）某会话的可变运行状态。
-   */
+  /** Get (lazily creating) a session's mutable run state. */
   private ensureState(sessionId: string): AgentRunState {
     if (!this.states[sessionId]) {
       this.states[sessionId] = createEmptyRunState();
@@ -169,8 +182,9 @@ class AgentRunStore {
   }
 
   /**
-   * 分发 `agent_stream_event`：按 sessionId 定位状态并 reduce 该会话的 AgentEvent。
-   * 已删除会话的迟到事件直接丢弃，不重建条目。
+   * Dispatch `agent_stream_event`: locate the session's state by sessionId and
+   * reduce its AgentEvent. Late events for deleted sessions are dropped
+   * without recreating entries.
    */
   private handleStreamEvent(payload: AgentStreamEventPayload): void {
     const { sessionId, event } = payload;
@@ -181,14 +195,15 @@ class AgentRunStore {
   }
 
   /**
-   * 核心 reducer：镜像 message.svelte.ts 的流式约定，但以 sessionId 分键。
+   * Core reducer: mirrors the streaming contract of message.svelte.ts, but
+   * keyed by sessionId.
    */
   private reduceEvent(sessionId: string, event: AgentEvent): void {
     const state = this.ensureState(sessionId);
 
     switch (event.type) {
       case "agent_start":
-        // 新 run 开始：标记运行中并清理上一轮的流式残留。
+        // New run: mark running and clear leftover streaming state.
         state.isRunning = true;
         state.streamingText = "";
         state.thinkingText = "";
@@ -196,9 +211,11 @@ class AgentRunStore {
         break;
 
       case "message_start":
-        // 一条消息开始（user / assistant / toolResult）：追加到已提交序列。
+        // A message begins (user / assistant / toolResult): append to the
+        // committed sequence.
         this.appendMessage(sessionId, event.message);
-        // 助手消息开始时清空流式累积，避免与上一条混叠。
+        // Clear streaming accumulators so a new assistant message does not
+        // blend with the previous one.
         if (event.message.role === "assistant") {
           state.streamingText = "";
           state.thinkingText = "";
@@ -206,30 +223,33 @@ class AgentRunStore {
         break;
 
       case "message_update":
-        // 流式增量：仅更新文本/思考；工具事件留给 M2（此处不消费）。
+        // Streaming deltas update text/thinking only; tool events are handled
+        // by the tool_execution_* handlers.
         this.applyAssistantDelta(sessionId, event.assistantMessageEvent);
         break;
 
       case "message_end":
-        // 一条消息结束：以终结 payload 覆盖已提交序列中的对应项，并清空流式累积。
+        // A message ends: overwrite its committed entry with the final payload
+        // and clear streaming accumulators.
         this.finalizeMessage(sessionId, event.message);
         state.streamingText = "";
         state.thinkingText = "";
         break;
 
       case "agent_end":
-        // 整轮结束：**绝不**用 event.messages 覆盖已提交序列。
-        // hand-agent 的 AgentEnd.messages 只含「本轮新增」消息（本回合的 user +
-        // assistant），不含 seed 进来的历史 transcript。已提交序列已由
-        // message_start/message_end 增量维护为 [history + 本轮]，若在此覆盖会把
-        // 多轮历史抹成仅本轮两条，直到 reload 才恢复（违反 VAL-RUN-005）。
-        // 故 agent_end 仅做流式残留清理，不触碰 state.messages。
+        // NEVER overwrite the committed sequence with event.messages:
+        // hand-agent's AgentEnd.messages carries only this turn's new messages
+        // (user + assistant), not the seeded history transcript. The committed
+        // sequence is already maintained incrementally by
+        // message_start/message_end as [history + this turn]; overwriting here
+        // would collapse multi-turn history to just this turn's two messages
+        // until reload. So agent_end only clears streaming leftovers and never
+        // touches state.messages.
         state.streamingText = "";
         state.thinkingText = "";
         break;
 
       case "tool_execution_start":
-        // 工具开始执行：创建/追踪一条 tool-call 条目（args 已知、result 待定）。
         this.startToolCall(
           sessionId,
           event.toolCallId,
@@ -239,7 +259,6 @@ class AgentRunStore {
         break;
 
       case "tool_execution_update":
-        // 流式部分结果：就地更新同一条目（不创建新卡）。
         this.updateToolCall(
           sessionId,
           event.toolCallId,
@@ -250,7 +269,6 @@ class AgentRunStore {
         break;
 
       case "tool_execution_end":
-        // 工具执行结束：把同一条目翻转到终态（completed / error）并写入 result。
         this.endToolCall(
           sessionId,
           event.toolCallId,
@@ -260,15 +278,18 @@ class AgentRunStore {
         );
         break;
 
-      // turn_start / turn_end 在 M2 不消费（卡片由 message + tool_execution 事件驱动）。
+      // turn_start / turn_end are not consumed; cards are driven by message +
+      // tool_execution events.
       default:
         break;
     }
   }
 
   /**
-   * `tool_execution_start`：按 `toolCallId` 建条目（已存在则保留终态/result，仅刷新
-   * 已知字段——防御重复 start）。新条目进入 `executing`，result 待定。
+   * `tool_execution_start`: create the entry keyed by `toolCallId` (if it
+   * already exists, keep its final status/result and only refresh known
+   * fields — defends against duplicate starts). New entries begin as
+   * `executing` with the result pending.
    */
   private startToolCall(
     sessionId: string,
@@ -291,9 +312,10 @@ class AgentRunStore {
   }
 
   /**
-   * `tool_execution_update`：就地更新同一 `toolCallId` 条目的部分结果，保持
-   * `executing` 状态（同一张卡，不新建——VAL-TOOLS-004）。条目缺失（update 早于
-   * start 的极端时序）则按 start 语义建条目。
+   * `tool_execution_update`: update the same `toolCallId` entry's partial
+   * result in place, staying `executing` (same card, never a new one). If the
+   * entry is missing (update raced ahead of start), create it with start
+   * semantics.
    */
   private updateToolCall(
     sessionId: string,
@@ -317,8 +339,9 @@ class AgentRunStore {
   }
 
   /**
-   * `tool_execution_end`：把同一 `toolCallId` 条目翻转到终态（`isError` → `error`，
-   * 否则 `completed`）并写入最终 result——卡片就地从 executing 转为终态（不新建卡）。
+   * `tool_execution_end`: flip the same `toolCallId` entry to its final state
+   * (`isError` → `error`, else `completed`) and store the final result — the
+   * card flips in place from executing (no new card).
    */
   private endToolCall(
     sessionId: string,
@@ -342,8 +365,8 @@ class AgentRunStore {
   }
 
   /**
-   * 应用助手流式增量。仅处理 text_delta / thinking_delta；其余增量（toolcall_* 等）
-   * 在 M1 忽略，留作 M2 seam。
+   * Apply an assistant streaming delta. Only text_delta / thinking_delta are
+   * handled; other deltas (toolcall_* etc.) are ignored.
    */
   private applyAssistantDelta(
     sessionId: string,
@@ -362,19 +385,18 @@ class AgentRunStore {
     }
   }
 
-  /**
-   * 追加一条消息到会话的已提交序列。
-   */
   private appendMessage(sessionId: string, message: AgentMessage): void {
     const state = this.ensureState(sessionId);
     state.messages = [...state.messages, message];
   }
 
   /**
-   * 以终结 payload 覆盖已提交序列中的「最后一条同角色消息」。
+   * Overwrite the last same-role message in the committed sequence with the
+   * final payload.
    *
-   * 后端按 message_start -> message_update* -> message_end 顺序发送，故终结的
-   * 消息应对应序列中最后一条同 role 的项；若找不到则追加（防御性）。
+   * The backend emits message_start -> message_update* -> message_end in
+   * order, so the finalized message corresponds to the last entry with the
+   * same role; append defensively if none is found.
    */
   private finalizeMessage(sessionId: string, message: AgentMessage): void {
     const state = this.ensureState(sessionId);
@@ -390,16 +412,18 @@ class AgentRunStore {
   }
 
   /**
-   * 安全网（VAL-CROSS-003）：把该会话所有仍处于非终态（`executing`）的 live
-   * tool-call 条目翻转到终态 `error`，使一张「执行中」卡片绝不会在 run 结束后
-   * 仍卡在 spinner 上。
+   * Safety net: flip every live tool-call entry still `executing` to `error`,
+   * so an "executing" card can never stay stuck on a spinner after the run
+   * ends.
    *
-   * 正常路径下后端的 abort 会为在途工具发出一个 `tool_execution_end`（携带
-   * `ToolResult::error("...aborted by caller")`，is_error=true），`endToolCall`
-   * 已据此就地翻转到终态——本兜底不替代它，而是覆盖任何缺口：若那条 end 事件
-   * 因 abort 时序 / 流提前关闭而未抵达，dangling 卡片在此被收口。已是终态
-   * （`completed`/`error`）的条目保持不变。无非终态条目时为 no-op（不触发无谓的
-   * 引用替换）。每个 run 恰好在终结时（`agent_stream_closed` / 错误路径）调用。
+   * On the normal path the backend abort emits a `tool_execution_end` for
+   * in-flight tools (`ToolResult::error("...aborted by caller")`,
+   * is_error=true) and `endToolCall` flips them in place — this fallback does
+   * not replace that, it covers gaps: if that end event never arrives (abort
+   * timing / stream closed early), the dangling card is settled here. Entries
+   * already final (`completed`/`error`) stay untouched. With no non-final
+   * entries this is a no-op (no gratuitous reference swap). Called exactly at
+   * run termination (`agent_stream_closed` / error path).
    */
   private settleDanglingToolCalls(sessionId: string): void {
     const state = this.ensureState(sessionId);
@@ -419,13 +443,14 @@ class AgentRunStore {
   }
 
   /**
-   * 分发 `agent_stream_error`：为该会话设置错误 view-state（不清 isRunning，
-   * closed 紧随其后才是回合终结信号），并把任何在途工具卡片收口到终态——
-   * 错误路径下也绝不留下卡死的 spinner（VAL-CROSS-003）。
+   * Dispatch `agent_stream_error`: set the session's error view-state (do not
+   * clear isRunning — the closed event that follows is the terminal signal)
+   * and settle any in-flight tool cards, so even the error path never leaves
+   * a stuck spinner.
    */
   private handleStreamError(payload: AgentStreamErrorPayload): void {
     if (this.deletedSessions.has(payload.sessionId)) {
-      // 已删会话的迟到错误：不重建条目。
+      // Late error for a deleted session: do not recreate the entry.
       return;
     }
     const state = this.ensureState(payload.sessionId);
@@ -434,22 +459,22 @@ class AgentRunStore {
   }
 
   /**
-   * 分发 `agent_stream_closed`：清 isRunning（每个 run 恰好一次），把任何仍在
-   * 执行中的 live tool-call 卡片收口到终态（abort-mid-tool 兜底，VAL-CROSS-003），
-   * 并通知已注册的 run-终结回调以刷新侧栏元数据（VAL-PERSIST-011）。回调抛错
-   * 不影响本 store 的终结收尾。
+   * Dispatch `agent_stream_closed`: clear isRunning (exactly once per run),
+   * settle any still-executing live tool-call cards (abort-mid-tool fallback),
+   * and notify the registered run-closed callback to refresh sidebar metadata.
+   * A throwing callback does not affect this store's termination cleanup.
    */
   private handleStreamClosed(payload: AgentStreamClosedPayload): void {
     if (this.deletedSessions.has(payload.sessionId)) {
-      // 已删会话的 run 终结：回收 tombstone（closed 后该 run 不再有事件），
-      // 不重建状态、不触发侧栏刷新回调。
+      // Run termination for a deleted session: reclaim the tombstone (no more
+      // events after closed) without recreating state or triggering the
+      // sidebar refresh callback.
       this.deletedSessions.delete(payload.sessionId);
       return;
     }
     const state = this.ensureState(payload.sessionId);
     state.isRunning = false;
-    // run 结束（任何成因）即收口在途工具卡片：dangling 的 executing 条目翻转到
-    // 终态，使卡片绝不会在 run 终结后仍停留在 spinner 上。
+    // Settle in-flight tool cards on run end (whatever the cause).
     this.settleDanglingToolCalls(payload.sessionId);
     if (this.onRunClosed) {
       try {
@@ -461,18 +486,22 @@ class AgentRunStore {
   }
 
   /**
-   * 分发 `agent_session_lifecycle`：会话生命周期信号（compaction / session-info）。
+   * Dispatch `agent_session_lifecycle` (compaction / session-info signals).
    *
-   *  - `compaction_start` / `compaction_end`：翻转该会话的 `isCompacting` 标志，
-   *    timeline 据此展示 / 隐藏「整理上下文中」指示。压缩发生在一轮内、不额外发
-   *    closed，故此处不触碰 `isRunning`、不发终结信号（closed-once 不受影响——
-   *    VAL-CARUN-019）。`summary` **有意不消费**：不渲染进时间线、不入 transcript，
-   *    去向稳定。
-   *  - `session_info_changed`：通知已注册的会话名变更回调即时更新侧栏标题
-   *    （VAL-CARUN-020），不让本 store 反向依赖 session 状态（单向接线）。
+   *  - `compaction_start` / `compaction_end`: toggle the session's
+   *    `isCompacting` flag; the timeline shows/hides the "compacting"
+   *    indicator. Compaction happens within a turn and emits no extra closed
+   *    event, so neither `isRunning` nor the closed-once contract is touched
+   *    here. `summary` is intentionally not consumed: never rendered into the
+   *    timeline, never added to the transcript.
+   *  - `session_info_changed`: notify the registered session-name callback so
+   *    the sidebar title updates immediately, without this store depending on
+   *    session state (one-way wiring).
    *
-   * 已删会话的迟到信号直接丢弃，不重建条目（与 run 事件同样的 tombstone 守卫）。
-   * compaction 信号经 `ensureState`；session-info 不创建运行状态（它只驱动侧栏）。
+   * Late signals for deleted sessions are dropped without recreating entries
+   * (same tombstone guard as run events). Compaction goes through
+   * `ensureState`; session-info creates no run state (it only drives the
+   * sidebar).
    */
   private handleLifecycle(payload: AgentSessionLifecyclePayload): void {
     if (this.deletedSessions.has(payload.sessionId)) {
@@ -487,7 +516,8 @@ class AgentRunStore {
       case "compaction_end": {
         const state = this.ensureState(payload.sessionId);
         state.isCompacting = false;
-        // summary 有意不消费——只关闭指示，对话续行（去向稳定）。
+        // summary intentionally not consumed — just clear the indicator; the
+        // turn resumes.
         break;
       }
       case "session_info_changed": {
@@ -505,32 +535,31 @@ class AgentRunStore {
     }
   }
 
-  // ============================================
-  // Public API
-  // ============================================
-
   /**
-   * 响应式 getter：返回某会话的运行 view-model（不存在则返回共享只读空状态）。
-   * **只读**：绝不在此创建状态——它会被 `$derived` / 模板表达式消费，写入 `$state`
-   * 会触发 Svelte 的 state_unsafe_mutation 而使整页渲染崩溃。真正的 per-session
-   * 状态由写入路径（`loadTranscript` / 事件 reduce）在非响应式上下文中惰性创建；
-   * 对缺失键的读取仍会建立依赖，状态创建后本 getter 会自动重算。
-   * timeline feature 直接消费此 getter；`toolCalls` 为 live tool-call view-model
-   * （按 toolCallId 分键）。
+   * Reactive getter: the session's run view-model (the shared read-only empty
+   * state when absent). READ-ONLY: never create state here — it is consumed by
+   * `$derived` / template expressions, and writing `$state` there throws
+   * Svelte's state_unsafe_mutation and crashes the whole render. Real
+   * per-session state is lazily created by write paths (`loadTranscript` /
+   * event reduce) in non-reactive contexts; reading a missing key still
+   * registers the dependency, so this getter recomputes once the state exists.
    */
   runStateFor(sessionId: string): AgentRunState {
     return this.states[sessionId] ?? EMPTY_RUN_STATE;
   }
 
   /**
-   * 把一个助手 `toolcall` 内容块归一化为卡片消费的 `ToolCallView`，调和 live 与
-   * restored 两条来源：
-   *  - run 期间：以 live `state.toolCalls[id]` 为准（携带 executing→终态的实时状态）。
-   *  - reload 后：live 缺失，则用配对的已提交 `toolResult` 内容归一化（restored 路径）。
-   *  - 都缺失：仅有 `toolcall` 块（结果尚未抵达 / 未持久化），呈现为 executing。
+   * Normalize an assistant `toolcall` content block into the `ToolCallView`
+   * cards consume, reconciling the live and restored sources:
+   *  - during a run: the live `state.toolCalls[id]` wins (carries the
+   *    real-time executing → final status);
+   *  - after reload: live is absent, normalize from the paired committed
+   *    `toolResult` content (restored path);
+   *  - both absent: only the `toolcall` block exists (result not yet arrived /
+   *    persisted) — present as executing.
    *
-   * 同一个 `toolCallId` 无论 live 还是 restored 都映射到同一张卡（VAL-TOOLS-004）。
-   * `committedResult` 由 timeline 从已提交 transcript 里按 toolCallId 配对后传入。
+   * One `toolCallId` maps to one card, live or restored. `committedResult` is
+   * paired by toolCallId from the committed transcript by the timeline.
    */
   toolCallViewFor(
     sessionId: string,
@@ -541,8 +570,8 @@ class AgentRunStore {
   ): ToolCallView {
     const live = this.states[sessionId]?.toolCalls[toolCallId];
     if (live) {
-      // live 已有该调用：以其实时状态/结果为准，但回填 name/args（live end 事件
-      // 可能未携带 args；toolcall 块始终有）。
+      // Live entry wins for status/result, but backfill name/args (a live end
+      // event may lack args; the toolcall block always has them).
       return {
         toolCallId,
         toolName: live.toolName || toolName,
@@ -552,7 +581,7 @@ class AgentRunStore {
       };
     }
     if (committedResult) {
-      // restored：用配对的 toolResult 归一化为终态。
+      // Restored: normalize the paired toolResult into a final state.
       return {
         toolCallId,
         toolName,
@@ -561,7 +590,8 @@ class AgentRunStore {
         result: committedResult.content,
       };
     }
-    // 仅有 toolcall 块、无结果：执行中（尚未结束或结果未持久化）。
+    // Only the toolcall block, no result: still executing (not ended, or the
+    // result was not persisted).
     return {
       toolCallId,
       toolName,
@@ -571,26 +601,25 @@ class AgentRunStore {
     };
   }
 
-  /**
-   * 该会话是否存在活跃 run。
-   */
   isRunning(sessionId: string): boolean {
     return this.states[sessionId]?.isRunning ?? false;
   }
 
   /**
-   * 注册 run-终结回调（VAL-PERSIST-011）。每次 `agent_stream_closed` 抵达后以
-   * 该会话 id 调用一次，供侧栏状态层刷新 messageCount / lastMessageAt / 排序。
-   * 单例语义：仅保留最后一次注册（store 全生命周期只需一个 reactor）。
+   * Register the run-closed callback, invoked with the session id each time
+   * `agent_stream_closed` arrives so the sidebar layer can refresh
+   * messageCount / lastMessageAt / ordering. Singleton semantics: only the
+   * last registration is kept.
    */
   setOnRunClosed(callback: (sessionId: string) => void): void {
     this.onRunClosed = callback;
   }
 
   /**
-   * 注册会话名变更回调（VAL-CARUN-020）。每次 `session_info_changed` 生命周期信号
-   * 抵达后以该会话 id 与新名（可为 null）调用一次，供侧栏状态层即时更新该会话标题。
-   * 单例语义：仅保留最后一次注册。
+   * Register the session-name-change callback, invoked with the session id
+   * and new name (possibly null) each time a `session_info_changed` lifecycle
+   * signal arrives, so the sidebar can update the title immediately.
+   * Singleton semantics: only the last registration is kept.
    */
   setOnSessionInfoChanged(
     callback: (sessionId: string, name: string | null) => void,
@@ -599,29 +628,37 @@ class AgentRunStore {
   }
 
   /**
-   * 加载并 seed 某会话的已提交 transcript（打开会话时调用），按 seq 升序
-   * （后端 `list_messages` 以 `ORDER BY seq ASC` 全量返回，无 LIMIT / 分页，故
-   * 长 transcript 完整还原、不静默截断 —— VAL-PERSIST-004/005/007/008）。
+   * Load and seed a session's committed transcript (called when opening a
+   * session), in ascending seq order. The backend `list_messages` returns the
+   * full transcript (`ORDER BY seq ASC`, no LIMIT / paging), so long
+   * transcripts restore completely without silent truncation.
    *
-   * 不覆盖正在运行中的流式累积；仅写入已提交消息序列。
+   * Never overwrites in-flight streaming accumulation; only writes the
+   * committed message sequence.
    *
-   * 还原即「从存储重建」（VAL-PERSIST-006）：reopen 时除写入已提交序列外，还在
-   * **无活跃 run** 时丢弃残留的 live `toolCalls`。store 单例 navigation-resilient、
-   * 跨会话开合不卸载，上一轮 run 写入的 live tool-call 条目会存活；若不清，
-   * `toolCallViewFor` 的 live 分支会优先于配对的已提交 `toolResult`，使卡片读取
-   * 陈旧的 live 结果而非持久化结果（二者一致时侥幸正确，但违反「纯从存储重建」）。
-   * 故无活跃 run 时清空 `toolCalls`，让 restored 路径据配对的 `toolResult` 重建终态卡。
-   * run 进行中（reload 落在活跃会话上）则保留 live 条目，避免顶掉就地翻转的实时卡。
+   * Restore means "rebuild from storage": besides writing the committed
+   * sequence, stale live `toolCalls` are dropped when there is no active run.
+   * The store singleton is navigation-resilient and survives opening/closing
+   * sessions, so live tool-call entries from a previous run persist; if kept,
+   * the live branch of `toolCallViewFor` would take precedence over the
+   * paired committed `toolResult`, making cards read stale live results
+   * instead of persisted ones. So with no active run, `toolCalls` is cleared
+   * and the restored path rebuilds final-state cards from paired
+   * `toolResult`s. With a run in progress (reload landing on an active
+   * session), live entries are kept so real-time cards are not clobbered.
    *
-   * 健壮性（VAL-PERSIST-012）：逐行隔离 payload 解析 —— 单条 payload 形状不可
-   * 识别（非 user / assistant / toolResult，或缺失判别字段）时记录并跳过该行，
-   * 绝不让一条坏行抛错而白屏整条 timeline；其余行照常渲染。
+   * Robustness: payload parsing is isolated per row — a payload with an
+   * unrecognizable shape (not user / assistant / toolResult, or missing the
+   * discriminator) is logged and skipped, so one bad row never blanks the
+   * whole timeline; the rest render normally.
    */
   async loadTranscript(sessionId: UUID): Promise<void> {
-    // 已还原过则直接返回：store 单例按 sessionId 常驻消息、run 事件增量维护，
-    // 重访无需再 IPC 拉取。此前每次开会话都重拉并整体替换 `messages`（新数组 +
-    // 新对象），迫使 AgentTimeline 把所有消息连同 markdown/高亮/katex 全量重渲染，
-    // 造成切换会话明显卡顿。冷启动（未 hydrated）仍照常还原。
+    // Already restored: the store keeps messages per sessionId and run events
+    // maintain them incrementally, so revisits need no IPC refetch. Refetching
+    // and wholesale-replacing `messages` (new array + new objects) would force
+    // AgentTimeline to fully re-render every message (markdown/highlight/
+    // katex), making session switches visibly janky. Cold start (not yet
+    // hydrated) still restores normally.
     if (this.states[sessionId]?.hydrated) {
       return;
     }
@@ -637,9 +674,11 @@ class AgentRunStore {
       }
       const state = this.ensureState(sessionId);
       state.messages = messages;
-      // 首次还原完成：会话页据此从 Spinner 切到真实内容（空会话则切引导空态）。
+      // First restore complete: the session page switches from the spinner to
+      // real content (or the empty state for an empty session).
       state.hydrated = true;
-      // 无活跃 run 时丢弃残留 live tool-call，使卡片纯从配对的已提交 toolResult 重建。
+      // With no active run, drop stale live tool-calls so cards rebuild purely
+      // from paired committed toolResults.
       if (!state.isRunning) {
         state.toolCalls = {};
       }
@@ -651,8 +690,9 @@ class AgentRunStore {
   }
 
   /**
-   * 校验并归一化单条 transcript 行的 payload。返回合法的 `AgentMessage`，
-   * 或在 payload 缺失 / 形状不可识别 / 解析抛错时返回 `null`（调用方跳过该行）。
+   * Validate and normalize one transcript row's payload. Returns a valid
+   * `AgentMessage`, or `null` (caller skips the row) when the payload is
+   * missing / unrecognizable / throws during parsing.
    */
   private parseTranscriptRow(row: AgentSessionMessage): AgentMessage | null {
     try {
@@ -681,7 +721,8 @@ class AgentRunStore {
   }
 
   /**
-   * 中止某会话的活跃 run（透传到后端；对无活跃 run 为干净 no-op）。
+   * Abort the session's active run (passes through to the backend; a clean
+   * no-op when there is no active run).
    */
   async abort(sessionId: UUID): Promise<void> {
     try {
@@ -693,14 +734,16 @@ class AgentRunStore {
   }
 
   /**
-   * 会话被删除后的清理（GROUP-018）：移除该会话的运行状态，并立 tombstone
-   * 拦截在途 run 的迟到流事件。
+   * Cleanup after a session is deleted: drop its run state and add a
+   * tombstone to intercept late stream events from an in-flight run.
    *
-   * 后端 `agent_session_delete` 先 abort 再删，abort 的收尾事件
-   * （tool_execution_end / agent_stream_closed 等）可能在删除完成后才抵达前端；
-   * 若不拦截，它们会经 `ensureState` 重建已删条目，并由 run-终结回调触发对已删
-   * 会话的侧栏重拉（NOT_FOUND console 噪音）。调用方应在删除成功后调用本方法。
-   * tombstone 由该会话的 `agent_stream_closed` 自然回收。
+   * The backend `agent_session_delete` aborts before deleting; the abort's
+   * trailing events (tool_execution_end / agent_stream_closed, …) may reach
+   * the frontend after the delete completes. Unintercepted, they would
+   * recreate the deleted entry via `ensureState` and the run-closed callback
+   * would refetch a deleted session (NOT_FOUND console noise). Callers invoke
+   * this after a successful delete. The tombstone is reclaimed naturally by
+   * the session's `agent_stream_closed`.
    */
   removeSession(sessionId: string): void {
     delete this.states[sessionId];
@@ -708,18 +751,20 @@ class AgentRunStore {
   }
 }
 
-// Export singleton instance（单例构造即建立 navigation-resilient 监听器）。
+// Singleton; construction sets up the navigation-resilient listener.
 export const agentRunStore = new AgentRunStore();
 
-// 一次性 wiring（与监听器同属 navigation-resilient 的 app 级接线）：每次 run 终结
-// （`agent_stream_closed`）刷新侧栏该会话的元数据 / 排序（VAL-PERSIST-011）。
-// 依赖方向单向（agentRun -> agentSession），agentSession 不反向 import 本模块。
+// One-time app-level wiring (navigation-resilient, like the listener): each
+// run termination (`agent_stream_closed`) refreshes that session's sidebar
+// metadata / ordering. Dependency is one-way (agentRun -> agentSession);
+// agentSession never imports this module.
 agentRunStore.setOnRunClosed((sessionId) => {
   void agentSessionActions.refreshAfterRun(sessionId);
 });
 
-// 一次性 wiring：会话名经 `session_info_changed` 生命周期信号变更时，即时更新
-// 侧栏该会话标题（VAL-CARUN-020）。纯本地状态更新，不发网络请求；同样单向接线。
+// One-time wiring: when the session name changes via the `session_info_changed`
+// lifecycle signal, update the sidebar title immediately. Local state only, no
+// network request; same one-way wiring.
 agentRunStore.setOnSessionInfoChanged((sessionId, name) => {
   agentSessionActions.applySessionName(sessionId, name);
 });

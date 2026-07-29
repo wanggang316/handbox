@@ -24,7 +24,7 @@
     disabled = false
   }: Props = $props();
 
-  // 当当前值等于默认值时，显示 placeholder 而不是实际值
+  // Show the placeholder instead of the value when it equals the default.
   const shouldShowPlaceholder = $derived(defaultValue !== undefined && value === defaultValue);
   const displayValue = $derived(shouldShowPlaceholder ? '' : value);
 
@@ -94,7 +94,7 @@
 </div>
 
 <style>
-  /* 隐藏默认的数字输入框步进按钮 */
+  /* Hide the native number-input spin buttons. */
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;

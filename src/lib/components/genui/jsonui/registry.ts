@@ -1,13 +1,8 @@
 /**
- * Runtime registry for the JSON-Render generative-UI PoC.
- *
- * Binds the ten catalog component names (Card, Text, Badge, Stack, StatusLabel,
- * Avatar, Divider, KeyValue, Table, InfoTooltip) to their `.svelte` implementations and
- * exports the registry consumed by `<Renderer spec registry={uiRegistry} />`.
- *
- * This is the only module in the directory that imports a `.svelte` file, so it
- * deliberately stays out of the Node-environment unit-test import graph (tests
- * target `resolveSpec.ts` + `catalog.ts`, which are pure TS).
+ * Binds the catalog component names to their `.svelte` implementations for
+ * `<Renderer spec registry={uiRegistry} />`. The only module in this directory
+ * that imports a `.svelte` file, so it deliberately stays out of the
+ * Node-environment unit-test import graph.
  */
 
 import { defineRegistry } from "@json-render/svelte";

@@ -8,7 +8,7 @@
   let { value = '', items = [], onChange = () => {} }: Props = $props();
 </script>
 
-<!-- Codex 式分段 tab：选中为灰底胶囊，无下划线/底部边框 -->
+<!-- Codex-style segmented tabs: selected item is a gray pill, no underline or bottom border. -->
 <div class="flex items-center gap-1" role="tablist">
   {#each items as item (item.value)}
     <button

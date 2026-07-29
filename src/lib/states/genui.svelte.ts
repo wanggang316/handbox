@@ -1,29 +1,19 @@
 /**
- * GenUI 相关状态管理 - 使用 Svelte 5 runes
+ * GenUI state - Svelte 5 runes.
  */
 
 import type { GenUi, UUID } from "../types";
 import * as genuiApi from "../api/genui";
 
-// 全局状态对象
 export const genuiState = $state({
-  // GenUI 列表
   genuis: [] as GenUi[],
 
-  // 加载状态
   isLoading: false,
 
-  // 错误状态
   error: null as string | null,
 });
 
-/**
- * GenUI 操作
- */
 export const genuiActions = {
-  /**
-   * 加载 GenUI 列表
-   */
   async loadGenuis(): Promise<void> {
     try {
       genuiState.isLoading = true;
@@ -38,16 +28,10 @@ export const genuiActions = {
     }
   },
 
-  /**
-   * 获取单个 GenUI
-   */
   async getGenui(genuiId: UUID): Promise<GenUi> {
     return genuiApi.getGenui(genuiId);
   },
 
-  /**
-   * 创建 GenUI
-   */
   async createGenui(name: string, spec: string): Promise<GenUi> {
     try {
       genuiState.error = null;
@@ -61,9 +45,6 @@ export const genuiActions = {
     }
   },
 
-  /**
-   * 更新 GenUI（名称 / spec）
-   */
   async updateGenui(
     genuiId: UUID,
     name?: string,
@@ -86,9 +67,6 @@ export const genuiActions = {
     }
   },
 
-  /**
-   * 删除 GenUI
-   */
   async deleteGenui(genuiId: UUID): Promise<void> {
     try {
       genuiState.error = null;
@@ -101,9 +79,6 @@ export const genuiActions = {
     }
   },
 
-  /**
-   * 清除错误状态
-   */
   clearError(): void {
     genuiState.error = null;
   },

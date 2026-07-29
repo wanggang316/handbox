@@ -1,10 +1,3 @@
-/**
- * 日期时间工具函数
- */
-
-/**
- * 格式化时间戳为相对时间
- */
 export function formatRelativeTime(timestamp: number, locale = 'zh-CN'): string {
   const now = Date.now();
   const diff = now - timestamp;
@@ -36,9 +29,6 @@ export function formatRelativeTime(timestamp: number, locale = 'zh-CN'): string 
   }
 }
 
-/**
- * 格式化时间戳为日期时间字符串
- */
 export function formatDateTime(
   timestamp: number, 
   options: Intl.DateTimeFormatOptions = {},
@@ -56,9 +46,6 @@ export function formatDateTime(
   return new Date(timestamp).toLocaleString(locale, defaultOptions);
 }
 
-/**
- * 格式化时间戳为日期字符串
- */
 export function formatDate(timestamp: number, locale = 'zh-CN'): string {
   return new Date(timestamp).toLocaleDateString(locale, {
     year: 'numeric',
@@ -67,9 +54,6 @@ export function formatDate(timestamp: number, locale = 'zh-CN'): string {
   });
 }
 
-/**
- * 格式化时间戳为时间字符串
- */
 export function formatTime(timestamp: number, locale = 'zh-CN'): string {
   return new Date(timestamp).toLocaleTimeString(locale, {
     hour: '2-digit',
@@ -77,9 +61,6 @@ export function formatTime(timestamp: number, locale = 'zh-CN'): string {
   });
 }
 
-/**
- * 判断是否为今天
- */
 export function isToday(timestamp: number): boolean {
   const today = new Date();
   const date = new Date(timestamp);
@@ -89,9 +70,6 @@ export function isToday(timestamp: number): boolean {
          date.getFullYear() === today.getFullYear();
 }
 
-/**
- * 判断是否为昨天
- */
 export function isYesterday(timestamp: number): boolean {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -102,9 +80,6 @@ export function isYesterday(timestamp: number): boolean {
          date.getFullYear() === yesterday.getFullYear();
 }
 
-/**
- * 判断是否为本周
- */
 export function isThisWeek(timestamp: number): boolean {
   const now = new Date();
   const date = new Date(timestamp);
@@ -120,9 +95,6 @@ export function isThisWeek(timestamp: number): boolean {
   return date >= startOfWeek && date <= endOfWeek;
 }
 
-/**
- * 获取友好的时间描述
- */
 export function getFriendlyTimeLabel(timestamp: number, locale = 'zh-CN'): string {
   if (isToday(timestamp)) {
     return locale === 'zh-CN' ? '今天' : 'Today';
@@ -143,16 +115,10 @@ export function getFriendlyTimeLabel(timestamp: number, locale = 'zh-CN'): strin
   return formatDate(timestamp, locale);
 }
 
-/**
- * 计算时间差（毫秒）
- */
 export function getTimeDiff(start: number, end: number): number {
   return Math.abs(end - start);
 }
 
-/**
- * 获取当前时间戳
- */
 export function getCurrentTimestamp(): number {
   return Date.now();
 }
