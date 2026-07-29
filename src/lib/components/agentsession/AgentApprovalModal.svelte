@@ -128,8 +128,9 @@
   }
 
   // 焦点陷阱（VAL-CAPERM-021）由底层 `Modal`（bits-ui `Dialog.Content` 的 FocusScope）提供：
-  // 待决期间 Tab/Shift+Tab 在弹窗内循环、绝不跳到背后已禁用的输入区，打开时焦点自动落到
-  // 第一个可聚焦控件（拒绝按钮，最安全的默认）。
+  // 待决期间 Tab/Shift+Tab 在弹窗内循环、绝不跳到背后已禁用的输入区。打开时焦点落在
+  // 弹窗容器上（Modal 统一抑制了首元素 autofocus），Tab 一下即达拒绝按钮；Enter 不会
+  // 误触任何按钮，Escape 恒为 deny——fail-closed 语义不变。
 </script>
 
 <Modal open={true} showCloseButton={false} onClose={handleClose}>

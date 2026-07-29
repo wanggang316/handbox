@@ -408,7 +408,8 @@
   {/if}
 
   <!-- 内容区域 -->
-  <div class="flex-1 p-3 overflow-auto min-h-0">
+  <!-- 划词结果是正文：译文 / 原文要能选中拷贝。 -->
+  <div class="flex-1 p-3 overflow-auto min-h-0 select-text">
     {#if content.mode === "translate"}
       <!-- 翻译模式：流式期间纯文本增量走 result 预览，spec 形状的流保持加载态 -->
       {#if translation.isLoading && !translation.result}

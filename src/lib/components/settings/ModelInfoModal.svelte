@@ -190,7 +190,7 @@
 
 <Modal {open} {onClose} title={model?.name ?? t("provider.modelInfo")}>
   <div
-    class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 pb-6 space-y-6 text-sm text-base-content/90 scrollbar-padding relative"
+    class="mt-12 max-h-[70vh] max-w-xl w-full overflow-y-auto px-6 pb-6 space-y-6 text-sm text-base-content/90 scrollbar-padding relative select-text"
   >
     {#if modelUrl}
       <button

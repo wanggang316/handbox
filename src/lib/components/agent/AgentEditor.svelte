@@ -684,7 +684,7 @@
           type="text"
           bind:value={skillSearch}
           placeholder={t("agent.form.searchSkills")}
-          class="w-full rounded-lg border border-[var(--hairline)] bg-base-200 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-base-content/35 focus:border-primary"
+          class="w-full rounded-lg border border-[var(--hairline)] bg-base-200 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-base-content/35 focus:border-[var(--field-border-hover)]"
         />
       </div>
     </div>

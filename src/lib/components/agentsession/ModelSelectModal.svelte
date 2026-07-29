@@ -194,7 +194,7 @@
           type="text"
           bind:value={searchQuery}
           placeholder={t("agent.modelSelect.searchModelPlaceholder")}
-          class="w-full pl-10 pr-4 py-2 border border-[var(--hairline)] bg-base-300 rounded-md focus:border-primary"
+          class="w-full pl-10 pr-4 py-2 border border-[var(--hairline)] bg-base-300 rounded-md focus:border-[var(--field-border-hover)]"
         />
         {#if searchQuery}
           <button

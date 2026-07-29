@@ -50,7 +50,7 @@
     <!-- 更新说明 -->
     {#if updateState.info?.body}
       <div
-        class="mb-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-base-300/50 p-3 text-[12px] leading-relaxed text-base-content/80"
+        class="mb-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-base-300/50 p-3 text-[12px] leading-relaxed text-base-content/80 select-text"
       >
         {updateState.info.body}
       </div>

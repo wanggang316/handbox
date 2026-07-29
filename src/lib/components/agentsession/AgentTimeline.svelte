@@ -192,7 +192,9 @@
   });
 </script>
 
-<div bind:this={messagesContainer} class="flex-1 overflow-y-auto">
+<!-- 消息流是正文：用户气泡、markdown 回复、工具卡片正文、错误文案都要能选中拷贝
+     （其中的按钮由全局规则保持不可选）。 -->
+<div bind:this={messagesContainer} class="flex-1 overflow-y-auto select-text">
   <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
     <!-- 已提交消息（按顺序；多轮历史保留在上方）。messages 为 append-only 序列
          （reducer 仅追加 / 就地 finalize 同 index，不重排），故 index key 的 DOM

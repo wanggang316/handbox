@@ -110,30 +110,43 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 统一的键盘 :focus-visible 焦点环。
-   用 outline（而非 box-shadow）：layout-neutral 且不被 overflow 容器裁剪；
-   仅键盘聚焦显示（:focus-visible，鼠标点击不触发）；
-   var(--primary) 主题感知，自动适配 light/dark。 */
-button:focus-visible,
-[role="button"]:focus-visible,
-[role="tab"]:focus-visible,
-a[href]:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-summary:focus-visible,
-[tabindex]:not([tabindex="-1"]):focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-  border-radius: 0.375rem;
+/* 全局压掉 UA 默认焦点 outline：可编辑控件（input/textarea）被鼠标点击聚焦时
+   也匹配 :focus-visible，任何全局 outline 都会在 .field 自身的 focus ring 外
+   再套一层「框中框」。焦点指示统一由各组件的 box-shadow ring 承担
+   （.field / .checkbox-box / .radio-dot / Button 与 Select 触发器的
+   focus-visible:ring）。低特异性（0,1,0），组件可按需覆盖。 */
+:focus-visible {
+  outline: none;
 }
 
-/* 聊天 / Agent 消息输入框：外层容器已有边框，再叠加键盘焦点环会显得是「框中框」。
-   故对带 .composer-input 标记的 textarea 抑制焦点环；与上面的全局规则同为 unlayered，
-   且 type+class 特异性更高，稳定覆盖。仅作用于消息输入域，不影响其它表单控件的
-   a11y 焦点环。 */
-textarea.composer-input:focus-visible {
-  outline: none;
+/* 桌面应用的选中语义：界面 chrome（导航项、列表行、组头）默认不可选中。
+   浏览器「万物皆可选」的默认在原生外壳里是负担——右键或双击控件会把标签
+   文字高亮起来，暴露出这是个 web 视图。正文内容与可编辑控件按需 opt-in。 */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 控件标签永不可选。规则直接命中元素，因此能压过正文容器（.select-text 等）
+   传下来的继承值——内容区里的按钮（工具卡片头、折叠开关）保持原生控件手感。 */
+button,
+[role="button"],
+summary {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 正文内容可选：可编辑控件、逐字文本（pre / code：日志、技能正文、模型 ID
+   这类存在的意义就是被拷走）、以及 markdown 正文，在哪出现都能选中。
+   成片的正文区域（消息流、划词结果面板）在容器上标 select-text 即可。 */
+input,
+textarea,
+[contenteditable="true"],
+pre,
+code,
+.markdown-content {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* 浅色主题（默认） */
@@ -712,18 +725,18 @@ pre.code-block--compact {
 .field:hover:not(:disabled):not(:focus):not(:focus-visible) {
   border-color: var(--field-border-hover);
 }
+/* focus 不改主色、不打 ring：可编辑控件被鼠标点击也算 :focus-visible，主色描边会在
+   正常输入的全程亮着，观感上就是一圈「多出来的边框」。文本控件的焦点指示交给光标，
+   这里只把边框提到 hover 强度。没有光标的控件（Button / Select 触发器 / Checkbox /
+   Radio）保留各自的键盘焦点环——那只在 Tab 导航时出现。 */
 .field:focus,
 .field:focus-visible {
   outline: none;
-  border-color: var(--field-focus);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-focus) 30%, transparent);
+  border-color: var(--field-border-hover);
 }
+/* 错误态排在 focus 之后：同特异性、后来居上，聚焦时红色描边不被 hover 灰盖掉。 */
 .field.is-error {
   border-color: var(--field-error);
-}
-.field.is-error:focus,
-.field.is-error:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--field-error) 30%, transparent);
 }
 .field:disabled {
   opacity: 0.5;
@@ -737,6 +750,11 @@ pre.code-block--compact {
 .field--soft:hover:not(:disabled):not(:focus):not(:focus-visible) {
   border-color: transparent;
   background: var(--base-300);
+}
+/* 无边框变体聚焦时也不描边——否则一圈边框会凭空冒出来，破坏「结构靠底色」的观感。 */
+.field--soft:focus,
+.field--soft:focus-visible {
+  border-color: transparent;
 }
 
 /* Checkbox / Radio 皮肤：bits-ui 的 Checkbox.Root / RadioGroup.Item 会带
@@ -807,11 +825,6 @@ pre.code-block--compact {
 }
 .modal-title-input::placeholder {
   color: color-mix(in oklch, var(--base-content) 30%, transparent);
-}
-/* 标题式输入不要全局键盘焦点环（光标即指示，环会破坏无边框观感）。
-   type+class 特异性高于上方 input:focus-visible 全局规则，稳定覆盖。 */
-input.modal-title-input:focus-visible {
-  outline: none;
 }
 .modal-title-input:disabled {
   opacity: 0.6;
