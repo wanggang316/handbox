@@ -61,6 +61,8 @@ export const agentZh = {
   "agent.timeline.usageInput": "输入 {count}",
   "agent.timeline.usageOutput": "输出 {count}",
   "agent.timeline.genuiStreaming": "生成界面中…",
+  "agent.timeline.copy": "复制",
+  "agent.timeline.copied": "已复制",
 
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "思考中...",

@@ -1,6 +1,12 @@
 <script lang="ts">
-  import { renderMarkdown, markdownInteractions } from "$lib/utils";
+  import { ChartNoAxesColumn, Check, Copy } from "@lucide/svelte";
+  import {
+    renderMarkdown,
+    markdownInteractions,
+    copyToClipboard,
+  } from "$lib/utils";
   import { t } from "$lib/i18n";
+  import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import type {
     AgentMessage,
@@ -70,6 +76,31 @@
     const u = message.usage;
     return !!u && (u.input > 0 || u.output > 0 || u.totalTokens > 0);
   }
+
+  // Input/output tokens, spelled out for the usage tooltip and its aria-label.
+  function usageLabel(
+    message: Extract<AgentMessage, { role: "assistant" }>,
+  ): string {
+    const input = t("agent.timeline.usageInput", { count: message.usage.input });
+    const output = t("agent.timeline.usageOutput", {
+      count: message.usage.output,
+    });
+    return `${input} · ${output}`;
+  }
+
+  // Index of the message whose copy button is showing its confirmation tick;
+  // one at a time, so a second copy moves the tick rather than stacking ticks.
+  let copiedIndex = $state<number | null>(null);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function copyMessage(index: number, text: string) {
+    await copyToClipboard(text);
+    copiedIndex = index;
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => (copiedIndex = null), 1500);
+  }
+
+  $effect(() => () => clearTimeout(copiedTimer));
 
   // Tool-call blocks keep the assistant content's source order, so parallel
   // calls render as cards in issue order, not completion order.
@@ -276,16 +307,43 @@
               </div>
             {/if}
 
-            <!-- Token usage: shown only for normally finished turns (see hasUsage). -->
-            {#if hasUsage(message)}
-              <div class="mt-2 flex flex-row gap-2 text-xs text-base-content/50">
-                <span>{t("agent.timeline.usageInput", {
-                    count: message.usage.input,
-                  })}</span>
-                <span>·</span>
-                <span>{t("agent.timeline.usageOutput", {
-                    count: message.usage.output,
-                  })}</span>
+            <!-- Message actions. Usage is an icon rather than a running total:
+                 the numbers matter when asked for, not on every turn. -->
+            {#if assistantText(message) || hasUsage(message)}
+              <div class="mt-2 flex items-center gap-0.5 text-base-content/40">
+                {#if assistantText(message)}
+                  <Tooltip
+                    content={copiedIndex === i
+                      ? t("agent.timeline.copied")
+                      : t("agent.timeline.copy")}
+                  >
+                    <button
+                      class="p-1 rounded-md transition-colors hover:bg-base-200 hover:text-base-content/70"
+                      aria-label={t("agent.timeline.copy")}
+                      onclick={() => copyMessage(i, assistantText(message))}
+                    >
+                      {#if copiedIndex === i}
+                        <Check size={14} />
+                      {:else}
+                        <Copy size={14} />
+                      {/if}
+                    </button>
+                  </Tooltip>
+                {/if}
+
+                {#if hasUsage(message)}
+                  <Tooltip content={usageLabel(message)}>
+                    <!-- Not focusable: one tab stop per message would bury the
+                         real controls; the label carries the numbers for AT. -->
+                    <span
+                      class="flex p-1 transition-colors hover:text-base-content/70"
+                      role="img"
+                      aria-label={usageLabel(message)}
+                    >
+                      <ChartNoAxesColumn size={14} />
+                    </span>
+                  </Tooltip>
+                {/if}
               </div>
             {/if}
           </div>
