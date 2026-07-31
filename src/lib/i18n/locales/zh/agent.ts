@@ -65,6 +65,8 @@ export const agentZh = {
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "思考中...",
   "agent.thinkingBlock.title": "思考",
+  "agent.thinkingBlock.showMore": "展开",
+  "agent.thinkingBlock.showLess": "收起",
 
   // Built-in tool labels (constants/agentTools.ts; shared by settings + AgentInput).
   // Kept identical to the coding-agent registration id so the UI reads the same
