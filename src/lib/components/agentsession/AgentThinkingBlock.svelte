@@ -58,11 +58,12 @@
       : "text-base-content/50 group-hover:text-base-content/75",
   );
 
-  // The chevron is the hover affordance; expanding pins it open and flips it.
+  // The chevron is the hover affordance; it points right while collapsed and
+  // swings down as the body opens, so the rotation reads as the disclosure.
   const chevronClass = $derived(
     expanded
-      ? "rotate-180 opacity-100"
-      : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
+      ? "rotate-0 opacity-100"
+      : "-rotate-90 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
   );
 </script>
 
