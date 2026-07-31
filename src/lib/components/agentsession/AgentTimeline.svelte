@@ -6,6 +6,7 @@
     copyToClipboard,
   } from "$lib/utils";
   import { t } from "$lib/i18n";
+  import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import type {
@@ -317,9 +318,11 @@
                       ? t("agent.timeline.copied")
                       : t("agent.timeline.copy")}
                   >
-                    <button
-                      class="p-1 rounded-md transition-colors hover:bg-base-200 hover:text-base-content/70"
-                      aria-label={t("agent.timeline.copy")}
+                    <Button
+                      variant="clear"
+                      size="icon-sm"
+                      class="text-base-content/40 enabled:hover:text-base-content"
+                      ariaLabel={t("agent.timeline.copy")}
                       onclick={() => copyMessage(i, assistantText(message))}
                     >
                       {#if copiedIndex === i}
@@ -327,16 +330,18 @@
                       {:else}
                         <Copy size={14} />
                       {/if}
-                    </button>
+                    </Button>
                   </Tooltip>
                 {/if}
 
                 {#if hasUsage(message)}
                   <Tooltip content={usageLabel(message)}>
-                    <!-- Not focusable: one tab stop per message would bury the
-                         real controls; the label carries the numbers for AT. -->
+                    <!-- Static, so it takes the icon-sm box but neither the
+                         hover lift nor a tab stop: a surface change would
+                         promise a click that isn't there, and one stop per
+                         message would bury the row's real control. -->
                     <span
-                      class="flex p-1 transition-colors hover:text-base-content/70"
+                      class="flex size-7 items-center justify-center transition-colors hover:text-base-content/70"
                       role="img"
                       aria-label={usageLabel(message)}
                     >
