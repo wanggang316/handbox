@@ -336,12 +336,13 @@
 
                 {#if hasUsage(message)}
                   <Tooltip content={usageLabel(message)}>
-                    <!-- Static, so it takes the icon-sm box but neither the
-                         hover lift nor a tab stop: a surface change would
-                         promise a click that isn't there, and one stop per
-                         message would bury the row's real control. -->
+                    <!-- Mirrors the icon-sm clear button: it is a hover target
+                         like its neighbour, so it answers hover the same way.
+                         It stays out of the tab order though — one stop per
+                         message would bury the row's real control, and the
+                         label already carries the numbers for AT. -->
                     <span
-                      class="flex size-7 items-center justify-center transition-colors hover:text-base-content/70"
+                      class="flex size-7 items-center justify-center rounded-md transition-[color,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300 hover:text-base-content"
                       role="img"
                       aria-label={usageLabel(message)}
                     >
