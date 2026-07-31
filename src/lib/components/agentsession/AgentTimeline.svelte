@@ -191,8 +191,11 @@
 
 <!-- The message stream is content: bubbles, markdown replies, tool-card bodies
      and error text must all be selectable (buttons stay unselectable globally). -->
-<div bind:this={messagesContainer} class="flex-1 overflow-y-auto select-text">
-  <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
+<div
+  bind:this={messagesContainer}
+  class="flex-1 overflow-y-auto select-text scroll-column"
+>
+  <div class="chat-column py-4 space-y-6">
     <!-- Committed messages. messages is append-only (the reducer only appends
          or finalizes in place, never reorders), so index keys reuse DOM safely;
          cards key by toolCallId so their state never shifts with the index. -->
@@ -360,6 +363,13 @@
 </div>
 
 <style>
+  /* Classic (space-taking) scrollbars would otherwise eat width on the right
+     only, shifting the centred column off the composer's axis; a stable gutter
+     on both edges keeps the two aligned. No-op under overlay scrollbars. */
+  .scroll-column {
+    scrollbar-gutter: stable both-edges;
+  }
+
   .overflow-y-auto::-webkit-scrollbar {
     width: 6px;
   }
